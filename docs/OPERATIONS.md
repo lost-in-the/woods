@@ -987,3 +987,741 @@ For teams with existing dashboards (Grafana, Datadog, etc.), these are the metri
 - Embedding API latency and rate limit frequency
 - Circuit breaker state changes
 - Database connection pool utilization (if using app database)
+
+---
+
+## Concurrent Indexing Safety
+
+When CodebaseIndex runs in a shared environment — multiple developers, CI pipelines, and agents all potentially triggering operations — understanding which operations are safe for concurrent access is critical.
+
+### Operation Safety Matrix
+
+| Operation | Concurrent Reads | Concurrent with Writes | Multiple Concurrent Writes |
+|-----------|-----------------|----------------------|---------------------------|
+| **Extraction: read source files** | Safe | Safe (source files are external) | N/A |
+| **Extraction: write JSON output** | Safe to read stale | Unsafe — partial writes visible | Unsafe — interleaved writes corrupt output |
+| **Extraction: write manifest.json** | Safe to read stale | Unsafe — manifest may not match units | Unsafe |
+| **Extraction: write dependency_graph.json** | Safe to read stale | Unsafe — graph may be incomplete | Unsafe |
+| **Embedding: read extracted JSON** | Safe | Safe — reads from completed extraction | N/A |
+| **Embedding: write to Qdrant** | Safe | Safe — Qdrant handles concurrent upserts | Safe — Qdrant is designed for concurrent writes |
+| **Embedding: write to pgvector** | Safe | Safe — PostgreSQL transactions isolate writes | Safe — row-level locking handles conflicts |
+| **Embedding: write to FAISS** | Safe (if index not being rebuilt) | Unsafe — FAISS is not thread-safe for writes | Unsafe — must serialize |
+| **Embedding: write to SQLite** | Safe | Unsafe — SQLite allows only one writer | Unsafe — WAL mode helps but still serialized |
+| **Retrieval: vector search** | Safe | Safe — searches committed data | N/A |
+| **Retrieval: metadata query** | Safe | Safe — standard database reads | N/A |
+| **Retrieval: graph traversal** | Safe — in-memory copy | Safe — each process loads its own copy | N/A |
+| **Validation: index integrity check** | Safe | May report false issues during writes | N/A |
+
+### Safety Tiers
+
+**Tier 1: Always safe (no coordination needed)**
+
+All read-only retrieval operations. Multiple agents can query the index simultaneously without any locking or coordination. This is the common case.
+
+**Tier 2: Safe with standard database guarantees**
+
+Writing embeddings to Qdrant, PostgreSQL (pgvector), or MySQL. These backends handle concurrent writes through their own concurrency control (Qdrant's segment locks, PostgreSQL's MVCC, MySQL's row-level InnoDB locks). No application-level coordination needed.
+
+**Tier 3: Requires serialization**
+
+Extraction (writes JSON files to disk) and FAISS/SQLite writes. These operations must be serialized — only one writer at a time. Use the `PipelineLock` mechanism described in the Multi-Agent Coordination section of AGENTIC_STRATEGY.md.
+
+### Recommended Patterns by Environment
+
+**Development (single developer):**
+
+No coordination needed. Extraction runs on-demand via rake task. Retrieval reads whatever is on disk. If extraction is running, retrieval may return slightly stale results — acceptable.
+
+**Development (multiple developers, shared database):**
+
+Each developer runs extraction against their own checkout. Extracted JSON lives in `tmp/codebase_index/` (gitignored). No shared write conflicts. If using a shared vector store (e.g., shared Qdrant), namespace embeddings by developer or branch:
+
+```ruby
+CodebaseIndex.configure do |config|
+  config.vector_store_collection = "codebase_#{ENV['USER']}"
+end
+```
+
+**CI pipeline:**
+
+Extraction and embedding run sequentially in a CI step. No concurrent writes — the pipeline is the only writer. Multiple agents may read from the production index while CI updates it; they see pre-update data until CI completes, which is acceptable.
+
+```yaml
+# .buildkite/pipeline.yml
+steps:
+  - label: "Update Index"
+    command:
+      - bundle exec rake codebase_index:extract
+      - bundle exec rake codebase_index:index
+    concurrency: 1
+    concurrency_group: "codebase-index-update"
+```
+
+**Production (agents + CI):**
+
+Use advisory locks (PostgreSQL `pg_advisory_lock` or MySQL `GET_LOCK`) to prevent concurrent extraction/embedding. Retrieval is always safe. See the locking implementations in AGENTIC_STRATEGY.md.
+
+### File-System Write Safety
+
+Extraction writes JSON files atomically by writing to a temp file and renaming:
+
+```ruby
+module CodebaseIndex
+  module IO
+    def self.atomic_write(path, content)
+      temp_path = "#{path}.#{Process.pid}.tmp"
+      File.write(temp_path, content)
+      File.rename(temp_path, path)  # Atomic on POSIX
+    rescue StandardError => e
+      File.delete(temp_path) if File.exist?(temp_path)
+      raise
+    end
+  end
+end
+```
+
+This ensures readers never see a partially-written JSON file. They either see the old version or the new version, never a corrupt intermediate state.
+
+### SQLite Concurrent Access
+
+SQLite is used for the lightweight development backend. Its concurrency model is limited:
+
+- **WAL mode** (Write-Ahead Logging) allows concurrent reads while a write is in progress
+- Only one writer at a time — additional writers block (with a configurable `busy_timeout`)
+- For multi-process scenarios (multiple agents in separate processes), WAL mode is required
+
+```ruby
+module CodebaseIndex
+  module Storage
+    class SqliteAdapter
+      def initialize(db_path:)
+        @db = SQLite3::Database.new(db_path)
+        @db.execute("PRAGMA journal_mode=WAL")
+        @db.execute("PRAGMA busy_timeout=5000")  # 5 second wait on lock contention
+      end
+    end
+  end
+end
+```
+
+For environments where multiple agents need concurrent write access, upgrade to PostgreSQL or MySQL for the metadata store. SQLite remains suitable for single-agent development use.
+
+---
+
+## Transitive Invalidation
+
+When extraction produces new or updated units, the embedding layer must be notified so it can re-embed the affected content. This section designs the bridge between the extraction and embedding layers.
+
+### The Invalidation Problem
+
+Extraction and embedding are separate pipeline stages with different lifecycles:
+
+```
+Source code → [Extraction] → JSON units → [Embedding] → Vector store
+```
+
+When source code changes, extraction produces updated JSON. But the embedding layer doesn't know which units changed, which are new, and which were deleted. Without a bridge, the only option is a full re-embedding — expensive and unnecessary for incremental updates.
+
+### Change Manifest
+
+After each extraction run, the extractor writes a change manifest alongside the extracted units:
+
+```ruby
+module CodebaseIndex
+  class ChangeManifest
+    MANIFEST_FILE = "_change_manifest.json"
+
+    def initialize(output_dir:)
+      @output_dir = Pathname.new(output_dir)
+      @changes = { added: [], modified: [], deleted: [], unchanged: [] }
+    end
+
+    def record_added(identifier, type:, content_hash:)
+      @changes[:added] << { identifier: identifier, type: type, content_hash: content_hash }
+    end
+
+    def record_modified(identifier, type:, content_hash:, previous_hash:)
+      @changes[:modified] << {
+        identifier: identifier,
+        type: type,
+        content_hash: content_hash,
+        previous_hash: previous_hash
+      }
+    end
+
+    def record_deleted(identifier, type:)
+      @changes[:deleted] << { identifier: identifier, type: type }
+    end
+
+    def record_unchanged(identifier, type:, content_hash:)
+      @changes[:unchanged] << { identifier: identifier, type: type, content_hash: content_hash }
+    end
+
+    def write!
+      CodebaseIndex::IO.atomic_write(
+        @output_dir.join(MANIFEST_FILE).to_s,
+        {
+          generated_at: Time.now.iso8601,
+          git_sha: current_git_sha,
+          previous_git_sha: previous_manifest&.dig(:git_sha),
+          summary: {
+            added: @changes[:added].size,
+            modified: @changes[:modified].size,
+            deleted: @changes[:deleted].size,
+            unchanged: @changes[:unchanged].size,
+            total: @changes.values.sum(&:size)
+          },
+          changes: @changes
+        }.to_json
+      )
+    end
+
+    def units_needing_embedding
+      @changes[:added] + @changes[:modified]
+    end
+
+    def units_needing_deletion
+      @changes[:deleted]
+    end
+
+    private
+
+    def current_git_sha
+      stdout, _status = Open3.capture2("git", "rev-parse", "HEAD", chdir: Rails.root.to_s)
+      stdout.strip
+    rescue StandardError
+      "unknown"
+    end
+
+    def previous_manifest
+      path = @output_dir.join(MANIFEST_FILE)
+      return nil unless path.exist?
+
+      JSON.parse(File.read(path), symbolize_names: true)
+    rescue JSON::ParserError
+      nil
+    end
+  end
+end
+```
+
+### Content Hashing
+
+The manifest uses content hashes to detect actual changes (not just timestamp changes). A unit is "modified" only if its extracted content actually differs:
+
+```ruby
+module CodebaseIndex
+  class ContentHasher
+    def hash_unit(unit)
+      # Hash the fields that affect embedding: source code, metadata, dependencies
+      content = [
+        unit.identifier,
+        unit.source_code,
+        unit.metadata.to_json,
+        unit.dependencies.sort.to_json
+      ].join("\n")
+
+      Digest::SHA256.hexdigest(content)
+    end
+  end
+end
+```
+
+This prevents unnecessary re-embedding when extraction produces identical output (e.g., running full extraction without any code changes).
+
+### Embedding Layer Integration
+
+The embedding pipeline reads the change manifest to determine what work is needed:
+
+```ruby
+module CodebaseIndex
+  module Embedding
+    class IncrementalIndexer
+      def initialize(pipeline:, output_dir:)
+        @pipeline = pipeline
+        @manifest = ChangeManifest.load(output_dir)
+      end
+
+      def index_changes!
+        return full_reindex! if @manifest.nil?
+
+        # Embed new and modified units
+        to_embed = @manifest.units_needing_embedding
+        if to_embed.any?
+          identifiers = to_embed.map { |u| u[:identifier] }
+          @pipeline.index_incremental(identifiers)
+          CodebaseIndex.logger.info(
+            "Embedded #{identifiers.size} units (#{@manifest.changes[:added].size} added, #{@manifest.changes[:modified].size} modified)"
+          )
+        end
+
+        # Delete removed units from vector store
+        to_delete = @manifest.units_needing_deletion
+        if to_delete.any?
+          identifiers = to_delete.map { |u| u[:identifier] }
+          @pipeline.delete_embeddings(identifiers)
+          CodebaseIndex.logger.info("Deleted embeddings for #{identifiers.size} removed units")
+        end
+
+        # Also delete chunk embeddings for modified units (they'll be re-created)
+        modified_ids = @manifest.changes[:modified].map { |u| u[:identifier] }
+        if modified_ids.any?
+          @pipeline.delete_chunk_embeddings(modified_ids)
+        end
+
+        EmbeddingResult.new(
+          embedded: to_embed.size,
+          deleted: to_delete.size,
+          skipped: @manifest.changes[:unchanged].size
+        )
+      end
+
+      private
+
+      def full_reindex!
+        CodebaseIndex.logger.warn("No change manifest found — performing full re-index")
+        @pipeline.index_all
+      end
+    end
+  end
+end
+```
+
+### Invalidation Scope
+
+Changes can cascade. When a concern is modified, every model that includes it has effectively changed, even though the model file itself is untouched. The change manifest must account for this:
+
+| Change Type | Direct Invalidation | Transitive Invalidation |
+|-------------|-------------------|------------------------|
+| Model source changed | The model itself | None (dependents read from the model's extracted output) |
+| Concern source changed | The concern | All models that include the concern (concerns are inlined) |
+| Schema changed (migration) | All models on affected tables | None |
+| Route changes | Affected controllers | None |
+| Association added/removed | Both models in the association | None |
+
+```ruby
+module CodebaseIndex
+  class TransitiveInvalidator
+    def initialize(dependency_graph:, concern_map:)
+      @graph = dependency_graph
+      @concern_map = concern_map  # { concern_name => [including_model_1, ...] }
+    end
+
+    def expand_invalidation(changed_files)
+      invalidated = Set.new
+
+      changed_files.each do |file|
+        unit = identify_unit(file)
+        next unless unit
+
+        invalidated << unit[:identifier]
+
+        # Concern change → invalidate all including models
+        if unit[:type] == :concern
+          includers = @concern_map[unit[:identifier]] || []
+          invalidated.merge(includers)
+        end
+
+        # Schema change → invalidate all models on affected tables
+        if file.match?(%r{db/migrate/})
+          affected_tables = detect_affected_tables(file)
+          affected_tables.each do |table|
+            models = models_for_table(table)
+            invalidated.merge(models)
+          end
+        end
+      end
+
+      invalidated.to_a
+    end
+  end
+end
+```
+
+### Deleted Unit Handling
+
+When a model or service is removed from the codebase, three things must happen:
+
+1. **Extracted JSON deleted** — extraction no longer produces the unit file
+2. **Vector embedding deleted** — stale embedding would produce false retrieval hits
+3. **Graph edges cleaned** — dependency graph entries for the deleted unit must be removed
+
+The change manifest's `deleted` list drives all three cleanups:
+
+```ruby
+# In the embedding pipeline
+def delete_embeddings(identifiers)
+  # Delete unit-level embeddings
+  @vector_store.delete(identifiers)
+
+  # Delete chunk-level embeddings
+  identifiers.each do |id|
+    @vector_store.delete_by_filter({ parent: id, type: "chunk" })
+  end
+
+  # Delete from metadata store
+  @metadata_store.delete(identifiers)
+end
+```
+
+### Event-Driven Alternative
+
+For real-time development workflows, a file-watcher approach complements the manifest-based approach:
+
+```ruby
+module CodebaseIndex
+  class FileWatcher
+    WATCH_PATTERNS = %w[
+      app/models/**/*.rb
+      app/controllers/**/*.rb
+      app/services/**/*.rb
+      app/jobs/**/*.rb
+      app/mailers/**/*.rb
+      app/components/**/*.rb
+      app/graphql/**/*.rb
+    ].freeze
+
+    def start!
+      listener = Listen.to(Rails.root.to_s, only: /\.rb$/) do |modified, added, removed|
+        changed = modified + added
+        relevant = changed.select { |f| WATCH_PATTERNS.any? { |p| File.fnmatch?(p, f, File::FNM_PATHNAME) } }
+        next if relevant.empty?
+
+        CodebaseIndex.extract_incremental(relevant)
+        # Embedding follows automatically via change manifest
+        CodebaseIndex.embed_incremental
+      end
+
+      listener.start
+    end
+  end
+end
+```
+
+This is useful in development but not recommended for production. In production, extraction should be triggered by CI (post-merge) or by agents via the operator tools described in AGENTIC_STRATEGY.md.
+
+---
+
+## Agent-Driven Operations
+
+This section defines how agents trigger and monitor pipeline tasks — extraction, embedding, and validation — through the MCP tool interface. See AGENTIC_STRATEGY.md for the tool definitions; this section covers the operational implementation behind those tools.
+
+### Agent API Surface
+
+Agents interact with the pipeline through five operations, each mapped to an MCP tool:
+
+| MCP Tool | Pipeline Operation | Blocking? | Typical Duration |
+|----------|-------------------|-----------|-----------------|
+| `extract` | Run extraction (full or incremental) | Yes (returns when complete) | 5-30s incremental, 30-120s full |
+| `embed` | Run embedding pipeline | Yes (returns when complete) | 2-10s incremental, 30-300s full |
+| `pipeline_status` | Read pipeline state | No | <10ms |
+| `diagnose` | Run validation checks | No | 100-500ms |
+| `repair` | Fix specific issues | Yes (returns when complete) | 1-30s depending on scope |
+
+### Task Lifecycle
+
+Every agent-triggered pipeline operation follows this lifecycle:
+
+```
+Requested → Validating → Running → Completed
+                ↓                       ↓
+             Rejected              Failed
+```
+
+```ruby
+module CodebaseIndex
+  module Operator
+    class TaskRunner
+      def run_extraction(mode:, extractors: nil, dry_run: false)
+        # 1. Validate
+        validate_extraction_request!(mode, extractors)
+
+        # 2. Acquire lock
+        lock = Coordination::PipelineLock.new
+        lock.acquire!(operation: "extraction_#{mode}")
+
+        begin
+          # 3. Run
+          result = if mode == "full"
+            run_full_extraction(extractors: extractors, dry_run: dry_run)
+          else
+            run_incremental_extraction(dry_run: dry_run)
+          end
+
+          # 4. Write change manifest
+          result.change_manifest.write! unless dry_run
+
+          # 5. Return structured result
+          {
+            status: "completed",
+            mode: mode,
+            units_extracted: result.units.size,
+            units_changed: result.changed_count,
+            duration_seconds: result.duration,
+            git_sha: result.git_sha,
+            dry_run: dry_run,
+            change_summary: result.change_manifest&.summary
+          }
+        rescue StandardError => e
+          {
+            status: "failed",
+            mode: mode,
+            error: e.message,
+            error_class: e.class.name,
+            duration_seconds: elapsed_time
+          }
+        ensure
+          lock.release!
+        end
+      end
+
+      def run_embedding(mode:, identifiers: nil)
+        validate_embedding_request!(mode, identifiers)
+
+        lock = Coordination::PipelineLock.new
+        lock.acquire!(operation: "embedding_#{mode}")
+
+        begin
+          result = if mode == "full"
+            @embedding_pipeline.index_all
+          else
+            indexer = Embedding::IncrementalIndexer.new(
+              pipeline: @embedding_pipeline,
+              output_dir: @config.output_dir
+            )
+            indexer.index_changes!
+          end
+
+          {
+            status: "completed",
+            mode: mode,
+            units_embedded: result.embedded,
+            units_deleted: result.deleted,
+            units_skipped: result.skipped,
+            duration_seconds: result.duration,
+            retry_queue_size: @embedding_pipeline.retry_queue_size
+          }
+        rescue StandardError => e
+          {
+            status: "failed",
+            mode: mode,
+            error: e.message,
+            error_class: e.class.name
+          }
+        ensure
+          lock.release!
+        end
+      end
+
+      private
+
+      def validate_extraction_request!(mode, extractors)
+        PipelineGuard.new.allow_extraction?(mode)
+
+        if extractors
+          unknown = extractors - CodebaseIndex.configuration.available_extractors.map(&:to_s)
+          raise ArgumentError, "Unknown extractors: #{unknown.join(', ')}" if unknown.any?
+        end
+      end
+
+      def validate_embedding_request!(mode, identifiers)
+        if mode == "incremental" && identifiers.nil?
+          # Incremental without identifiers uses change manifest — valid
+        end
+
+        if mode == "full"
+          PipelineGuard.new.allow_extraction?("full")  # Same cooldown applies
+        end
+      end
+    end
+  end
+end
+```
+
+### Status Reporting
+
+The `pipeline_status` tool returns a snapshot of the current pipeline state without triggering any operations. It reads from the manifest and component health checks:
+
+```ruby
+module CodebaseIndex
+  module Operator
+    class StatusReporter
+      def report
+        manifest = load_manifest
+        health = HealthCheck.new(@config).check
+
+        {
+          extraction: extraction_status(manifest),
+          embedding: embedding_status,
+          index: index_status(manifest),
+          health: health[:components].transform_values { |c| c[:status] }
+        }
+      end
+
+      private
+
+      def extraction_status(manifest)
+        return { status: "never_run" } unless manifest
+
+        {
+          last_run: manifest[:generated_at],
+          mode: manifest[:mode] || "unknown",
+          git_sha: manifest[:git_sha],
+          units_total: manifest.dig(:summary, :total) || 0,
+          units_changed: (manifest.dig(:summary, :added) || 0) +
+                         (manifest.dig(:summary, :modified) || 0),
+          status: "completed"
+        }
+      end
+
+      def embedding_status
+        {
+          units_embedded: @config.build_vector_store.count,
+          retry_queue_size: retry_queue_size,
+          status: retry_queue_size > 0 ? "has_pending_retries" : "completed"
+        }
+      rescue StandardError => e
+        { status: "error", error: e.message }
+      end
+
+      def index_status(manifest)
+        current_sha = current_git_sha
+        manifest_sha = manifest&.dig(:git_sha)
+
+        staleness = if manifest_sha.nil?
+          "never_indexed"
+        elsif manifest_sha == current_sha
+          "current"
+        else
+          commits_behind = count_commits_between(manifest_sha, current_sha)
+          "#{commits_behind}_commits_behind"
+        end
+
+        {
+          total_units: count_extracted_units,
+          manifest_git_sha: manifest_sha,
+          current_git_sha: current_sha,
+          staleness: staleness,
+          schema_version: SchemaVersion.current
+        }
+      end
+
+      def count_commits_between(from_sha, to_sha)
+        stdout, _status = Open3.capture2(
+          "git", "rev-list", "--count", "#{from_sha}..#{to_sha}",
+          chdir: Rails.root.to_s
+        )
+        stdout.strip.to_i
+      rescue StandardError
+        -1  # Unknown
+      end
+    end
+  end
+end
+```
+
+### Error Escalation
+
+Not all errors can be resolved by an agent. The escalation model defines when an agent should retry, when it should try a different approach, and when it should alert a human:
+
+| Error Type | Agent Action | Escalation |
+|------------|-------------|------------|
+| Lock contention | Wait and retry (up to 3 times with backoff) | After 3 retries, report to human |
+| Extraction error (single unit) | Skip unit, continue extraction | Log warning, include in result |
+| Extraction error (eager_load! fails) | Fall back to per-directory loading | Log warning, may miss some classes |
+| Embedding rate limit | Backoff and retry (built-in via RetryableProvider) | After exhausting retries, queue for later |
+| Embedding API unreachable | Skip embedding, extraction still valid | Report to human, retrieval degrades to Tier 2 |
+| Vector store unreachable | Cannot embed — report status | Report to human, suggest checking infrastructure |
+| Schema mismatch | Cannot proceed — requires migration | Report to human with exact migration command |
+| Dimension mismatch | Cannot embed — requires full re-index | Report to human with rake task command |
+
+```ruby
+module CodebaseIndex
+  module Operator
+    class ErrorEscalator
+      RETRYABLE_ERRORS = [
+        LockContention,
+        RateLimitError,
+        Timeout::Error
+      ].freeze
+
+      HUMAN_ESCALATION_ERRORS = [
+        DimensionMismatch,
+        SchemaVersionMismatch,
+        CircuitOpenError
+      ].freeze
+
+      def classify(error)
+        case error
+        when *RETRYABLE_ERRORS
+          {
+            action: :retry,
+            message: "Temporary error (#{error.class.name}): #{error.message}",
+            max_retries: 3,
+            backoff: :exponential
+          }
+        when *HUMAN_ESCALATION_ERRORS
+          {
+            action: :escalate,
+            message: "Requires human intervention: #{error.message}",
+            severity: :high,
+            suggested_action: suggest_human_action(error)
+          }
+        when ExtractionError
+          {
+            action: :skip_and_continue,
+            message: "Extraction error for single unit: #{error.message}",
+            severity: :low
+          }
+        else
+          {
+            action: :escalate,
+            message: "Unexpected error: #{error.class.name}: #{error.message}",
+            severity: :medium,
+            suggested_action: "Check logs and retry manually"
+          }
+        end
+      end
+
+      private
+
+      def suggest_human_action(error)
+        case error
+        when DimensionMismatch
+          "Embedding dimensions changed. Run: bundle exec rake codebase_index:reindex"
+        when SchemaVersionMismatch
+          "Schema needs migration. Run: bundle exec rake codebase_index:db:migrate"
+        when CircuitOpenError
+          "Backend service (#{error.service_name}) is down. Check infrastructure and retry."
+        end
+      end
+    end
+  end
+end
+```
+
+### Agent Operational Workflow
+
+A complete agent workflow for maintaining an up-to-date index:
+
+```
+1. Agent starts a coding task
+2. codebase_pipeline_status()
+   → staleness: "5_commits_behind"
+3. Agent decides to update the index first:
+   codebase_extract(mode: "incremental")
+   → Result: 12 units changed, 3 added, 1 deleted
+4. codebase_embed(mode: "incremental")
+   → Result: 15 units embedded, 1 deleted, 1232 skipped
+5. Now proceed with retrieval:
+   codebase_retrieve("checkout flow")
+   → Returns current, accurate context
+6. After making code changes:
+   codebase_extract(mode: "incremental")
+   → Updates index to reflect the agent's own changes
+7. Verify:
+   codebase_diagnose()
+   → All checks pass
+```
+
+This self-service loop means the agent never works with stale context and can maintain the index as part of its normal workflow.

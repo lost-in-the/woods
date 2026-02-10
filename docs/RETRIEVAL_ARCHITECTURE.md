@@ -844,6 +844,8 @@ module CodebaseIndex
           @conn.exec("CREATE INDEX IF NOT EXISTS #{@table}_embedding_idx ON #{@table} USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)")
         end
         
+        ALLOWED_FILTER_KEYS = %w[type namespace file_path change_frequency importance].freeze
+
         def build_where(filters)
           return ["", []] if filters.empty?
 
@@ -853,11 +855,18 @@ module CodebaseIndex
           param_idx = 3
 
           filters.each do |key, value|
+            key_s = key.to_s
+            unless ALLOWED_FILTER_KEYS.include?(key_s)
+              raise ArgumentError, "Unknown filter key: #{key_s}. Allowed: #{ALLOWED_FILTER_KEYS.join(', ')}"
+            end
+
+            quoted_key = PG::Connection.quote_ident(key_s)
+
             if value.is_a?(Array)
               placeholders = value.map { params << _1.to_s; "$#{param_idx}".tap { param_idx += 1 } }
-              conditions << "metadata->>'#{key}' IN (#{placeholders.join(',')})"
+              conditions << "metadata->>#{quoted_key} IN (#{placeholders.join(',')})"
             else
-              conditions << "metadata->>'#{key}' = $#{param_idx}"
+              conditions << "metadata->>#{quoted_key} = $#{param_idx}"
               params << value.to_s
               param_idx += 1
             end

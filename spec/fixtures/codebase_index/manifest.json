@@ -12,9 +12,9 @@
     "jobs": 0,
     "mailers": 0,
     "serializers": 0,
-    "rails_source": 0
+    "rails_source": 2
   },
-  "total_units": 3,
+  "total_units": 5,
   "total_chunks": 0,
   "git_sha": "abc1234",
   "git_branch": "main"

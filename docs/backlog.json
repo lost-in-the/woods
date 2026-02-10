@@ -87,7 +87,7 @@
     "layer": "retrieval",
     "files": ["docs/RETRIEVAL_ARCHITECTURE.md"],
     "description": "merge_candidates uses ad-hoc weighted score fusion. Should use Reciprocal Rank Fusion (RRF): score(d) = sum(1/(k + rank_i(d))) where k=60.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-010",
@@ -97,7 +97,7 @@
     "layer": "retrieval",
     "files": ["docs/RETRIEVAL_ARCHITECTURE.md"],
     "description": "Pgvector build_where interpolates filter values directly into SQL. Should use parameterized queries.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-011",
@@ -107,7 +107,7 @@
     "layer": "retrieval",
     "files": ["docs/RETRIEVAL_ARCHITECTURE.md"],
     "description": "Pipeline goes from initial ranking to context assembly with no reranking. Cross-encoder reranking would improve precision for code search.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-012",
@@ -137,7 +137,7 @@
     "layer": "agentic",
     "files": ["docs/AGENTIC_STRATEGY.md"],
     "description": "No design for agents running extraction, managing the embedding pipeline, or diagnosing failures. Agents can only consume, not operate.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-015",
@@ -147,7 +147,7 @@
     "layer": "agentic",
     "files": ["docs/AGENTIC_STRATEGY.md"],
     "description": "No design for multiple agents working with the same index concurrently. Missing: shared state model, locking, handoff patterns, token budget coordination.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-016",
@@ -157,7 +157,7 @@
     "layer": "agentic",
     "files": ["docs/AGENTIC_STRATEGY.md"],
     "description": "No design for agents assessing retrieval quality, reporting gaps, or requesting improvements.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-017",
@@ -167,7 +167,7 @@
     "layer": "docs",
     "files": ["docs/OPERATIONS.md"],
     "description": "No documentation of which operations are safe for concurrent access and which require serialization.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-018",
@@ -177,7 +177,7 @@
     "layer": "docs",
     "files": ["docs/OPERATIONS.md"],
     "description": "When extraction produces new units, the embedding layer needs notification. No design for this bridge.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-019",
@@ -187,6 +187,6 @@
     "layer": "docs",
     "files": ["docs/OPERATIONS.md"],
     "description": "No design for how agents trigger and monitor pipeline tasks (extraction, embedding, validation).",
-    "status": "open"
+    "status": "resolved"
   }
 ]

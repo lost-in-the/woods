@@ -6,7 +6,7 @@ require_relative 'index_reader'
 
 module CodebaseIndex
   module MCP
-    # Builds an MCP::Server with 7 tools and 2 resources for querying
+    # Builds an MCP::Server with 10 tools, 2 resources, and 2 resource templates for querying
     # CodebaseIndex extraction output.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -26,6 +26,7 @@ module CodebaseIndex
         def build(index_dir:)
           reader = IndexReader.new(index_dir)
           resources = build_resources
+          resource_templates = build_resource_templates
 
           # Lambda captured by all tool blocks for building responses.
           respond = method(:text_response)
@@ -33,7 +34,8 @@ module CodebaseIndex
           server = ::MCP::Server.new(
             name: 'codebase-index',
             version: CodebaseIndex::VERSION,
-            resources: resources
+            resources: resources,
+            resource_templates: resource_templates
           )
 
           define_lookup_tool(server, reader, respond)
@@ -43,6 +45,9 @@ module CodebaseIndex
           define_structure_tool(server, reader, respond)
           define_graph_analysis_tool(server, reader, respond)
           define_pagerank_tool(server, reader, respond)
+          define_framework_tool(server, reader, respond)
+          define_recent_changes_tool(server, reader, respond)
+          define_reload_tool(server, reader, respond)
           register_resource_handler(server, reader)
 
           server
@@ -305,6 +310,86 @@ module CodebaseIndex
           end
         end
 
+        def define_framework_tool(server, reader, respond)
+          server.define_tool(
+            name: 'framework',
+            description: 'Search Rails framework source units by concept keyword. Matches against identifier, ' \
+                         'source_code, and metadata of rails_source type units extracted from installed gems.',
+            input_schema: {
+              properties: {
+                keyword: { type: 'string', description: 'Concept keyword to search for (e.g. "ActiveRecord", "routing", "callbacks")' },
+                limit: { type: 'integer', description: 'Maximum results (default: 20)' }
+              },
+              required: ['keyword']
+            }
+          ) do |keyword:, limit: nil, server_context:|
+            results = reader.framework_sources(keyword, limit: limit || 20)
+            respond.call(JSON.pretty_generate({
+              keyword: keyword,
+              result_count: results.size,
+              results: results
+            }))
+          end
+        end
+
+        def define_recent_changes_tool(server, reader, respond)
+          server.define_tool(
+            name: 'recent_changes',
+            description: 'List recently modified code units sorted by git last_modified timestamp. ' \
+                         'Returns the most recently changed units first.',
+            input_schema: {
+              properties: {
+                limit: { type: 'integer', description: 'Maximum results (default: 10)' },
+                types: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Filter to these types: model, controller, service, job, mailer, etc.'
+                }
+              }
+            }
+          ) do |limit: nil, types: nil, server_context:|
+            results = reader.recent_changes(limit: limit || 10, types: types)
+            respond.call(JSON.pretty_generate({
+              result_count: results.size,
+              results: results
+            }))
+          end
+        end
+
+        def define_reload_tool(server, reader, respond)
+          server.define_tool(
+            name: 'reload',
+            description: 'Reload extraction data from disk. Use after re-running extraction to pick up changes ' \
+                         'without restarting the server.',
+            input_schema: { type: 'object', properties: {} }
+          ) do |server_context:|
+            reader.reload!
+            manifest = reader.manifest
+            respond.call(JSON.pretty_generate({
+              reloaded: true,
+              extracted_at: manifest['extracted_at'],
+              total_units: manifest['total_units'],
+              counts: manifest['counts']
+            }))
+          end
+        end
+
+        def build_resource_templates
+          [
+            ::MCP::ResourceTemplate.new(
+              uri_template: 'codebase://unit/{identifier}',
+              name: 'unit',
+              description: 'Look up a single code unit by identifier',
+              mime_type: 'application/json'
+            ),
+            ::MCP::ResourceTemplate.new(
+              uri_template: 'codebase://type/{type}',
+              name: 'units-by-type',
+              description: 'List all code units of a given type (e.g. model, controller, service)',
+              mime_type: 'application/json'
+            )
+          ]
+        end
+
         def build_resources
           [
             ::MCP::Resource.new(
@@ -330,6 +415,18 @@ module CodebaseIndex
               [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.manifest) }]
             when 'codebase://graph'
               [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.raw_graph_data) }]
+            when %r{\Acodebase://unit/(.+)\z}
+              identifier = Regexp.last_match(1)
+              unit = reader.find_unit(identifier)
+              if unit
+                [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(unit) }]
+              else
+                [{ uri: uri, mimeType: 'text/plain', text: "Unit not found: #{identifier}" }]
+              end
+            when %r{\Acodebase://type/(.+)\z}
+              type = Regexp.last_match(1)
+              units = reader.list_units(type: type)
+              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(units) }]
             else
               [{ uri: uri, mimeType: 'text/plain', text: "Unknown resource: #{uri}" }]
             end

@@ -19,6 +19,9 @@ require_relative 'extractors/graphql_extractor'
 require_relative 'extractors/serializer_extractor'
 require_relative 'extractors/rails_source_extractor'
 require_relative 'extractors/view_component_extractor'
+require_relative 'extractors/manager_extractor'
+require_relative 'extractors/policy_extractor'
+require_relative 'extractors/validator_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 
@@ -54,6 +57,9 @@ module CodebaseIndex
       serializers
       decorators
       blueprinters
+      managers
+      policies
+      validators
     ].freeze
 
     EXTRACTORS = {
@@ -66,6 +72,9 @@ module CodebaseIndex
       jobs: Extractors::JobExtractor,
       mailers: Extractors::MailerExtractor,
       serializers: Extractors::SerializerExtractor,
+      managers: Extractors::ManagerExtractor,
+      policies: Extractors::PolicyExtractor,
+      validators: Extractors::ValidatorExtractor,
       rails_source: Extractors::RailsSourceExtractor
     }.freeze
 
@@ -86,6 +95,9 @@ module CodebaseIndex
       graphql_resolver: :graphql,
       graphql_query: :graphql,
       serializer: :serializers,
+      manager: :managers,
+      policy: :policies,
+      validator: :validators,
       rails_source: :rails_source
     }.freeze
 
@@ -692,6 +704,12 @@ module CodebaseIndex
                extractor.extract_mailer(klass) if klass
              when :serializer
                extractor.extract_serializer_file(file_path)
+             when :manager
+               extractor.extract_manager_file(file_path)
+             when :policy
+               extractor.extract_policy_file(file_path)
+             when :validator
+               extractor.extract_validator_file(file_path)
              when :graphql_type, :graphql_mutation, :graphql_resolver, :graphql_query
                extractor.extract_graphql_file(file_path)
              end

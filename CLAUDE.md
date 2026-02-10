@@ -62,7 +62,7 @@ docs/                              # Planning & design documents (see docs/READM
 - All extractors return `Array<ExtractedUnit>`
 - Use `Rails.root.join()` for paths, never string concatenation
 - JSON output uses string keys, snake_case
-- Token estimation: `(string.length / 4.0).ceil` — rough but consistent
+- Token estimation: `(string.length / 3.5).ceil` — Ruby code averages ~3.2-3.5 chars/token (symbols, do/end, underscored_names). Uses 3.5 as a compromise.
 - Error handling: raise `CodebaseIndex::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
 
 ## Testing

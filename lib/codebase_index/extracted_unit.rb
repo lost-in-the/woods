@@ -60,15 +60,17 @@ module CodebaseIndex
       }
     end
 
-    # Estimate token count for chunking decisions
-    # Rough estimate: 1 token ≈ 4 characters for code
-    # Includes both source code and metadata weight
+    # Estimate token count for chunking decisions.
+    # Ruby code averages ~3.2-3.5 chars per token (vs ~4 for English prose)
+    # due to syntax density: symbols (:name), do/end blocks, underscored_names,
+    # and operators. Uses 3.5 as a compromise between source code (~3.2) and
+    # metadata JSON (~4.0).
     #
     # @return [Integer] Estimated token count
     def estimated_tokens
       @estimated_tokens ||= begin
-        source_tokens = source_code ? (source_code.length / 4.0).ceil : 0
-        metadata_tokens = metadata.any? ? (metadata.to_json.length / 4.0).ceil : 0
+        source_tokens = source_code ? (source_code.length / 3.5).ceil : 0
+        metadata_tokens = metadata.any? ? (metadata.to_json.length / 3.5).ceil : 0
         source_tokens + metadata_tokens
       end
     end
@@ -95,10 +97,10 @@ module CodebaseIndex
 
       # Always include a header with unit context
       header = build_chunk_header
-      header_tokens = (header.length / 4.0).ceil
+      header_tokens = (header.length / 3.5).ceil
 
       source_code.lines.each do |line|
-        line_tokens = (line.length / 4.0).ceil
+        line_tokens = (line.length / 3.5).ceil
 
         if current_tokens + line_tokens > max_tokens && current_chunk.any?
           content = header + current_chunk.join

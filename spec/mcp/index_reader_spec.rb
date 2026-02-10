@@ -29,7 +29,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
       expect(reader.manifest).to include(
         'rails_version' => '8.1.2',
         'ruby_version' => '4.0.1',
-        'total_units' => 3
+        'total_units' => 5
       )
     end
 
@@ -98,7 +98,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     it 'returns all units when no type filter' do
       units = reader.list_units
       identifiers = units.map { |u| u['identifier'] }
-      expect(identifiers).to contain_exactly('Post', 'Comment', 'PostsController')
+      expect(identifiers).to contain_exactly('Post', 'Comment', 'PostsController', 'ActiveRecord::Base', 'ActionController::Base')
     end
 
     it 'filters by type' do
@@ -213,12 +213,133 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     end
   end
 
+  describe '#framework_sources' do
+    it 'returns rails_source units matching identifier keyword' do
+      results = reader.framework_sources('ActiveRecord')
+      identifiers = results.map { |r| r[:identifier] }
+      expect(identifiers).to include('ActiveRecord::Base')
+    end
+
+    it 'matches against source_code' do
+      results = reader.framework_sources('Persistence')
+      identifiers = results.map { |r| r[:identifier] }
+      expect(identifiers).to include('ActiveRecord::Base')
+    end
+
+    it 'matches against metadata' do
+      results = reader.framework_sources('controller')
+      identifiers = results.map { |r| r[:identifier] }
+      expect(identifiers).to include('ActionController::Base')
+    end
+
+    it 'returns empty for no match' do
+      results = reader.framework_sources('zzz_no_match')
+      expect(results).to be_empty
+    end
+
+    it 'respects limit' do
+      results = reader.framework_sources('.*', limit: 1)
+      expect(results.size).to eq(1)
+    end
+
+    it 'includes file_path and metadata in results' do
+      results = reader.framework_sources('ActiveRecord')
+      result = results.find { |r| r[:identifier] == 'ActiveRecord::Base' }
+      expect(result[:file_path]).to include('activerecord')
+      expect(result[:metadata]).to include('gem_name' => 'activerecord')
+    end
+  end
+
+  describe '#recent_changes' do
+    it 'returns units sorted by last_modified descending' do
+      results = reader.recent_changes
+      dates = results.map { |r| r[:last_modified] }
+      expect(dates).to eq(dates.sort.reverse)
+    end
+
+    it 'returns the most recently modified unit first' do
+      results = reader.recent_changes
+      expect(results.first[:identifier]).to eq('Comment')
+    end
+
+    it 'excludes units without git metadata' do
+      results = reader.recent_changes
+      identifiers = results.map { |r| r[:identifier] }
+      # rails_source fixtures have no git metadata
+      expect(identifiers).not_to include('ActiveRecord::Base')
+    end
+
+    it 'respects limit' do
+      results = reader.recent_changes(limit: 1)
+      expect(results.size).to eq(1)
+    end
+
+    it 'filters by type' do
+      results = reader.recent_changes(types: ['model'])
+      results.each do |r|
+        expect(r[:type]).to eq('model')
+      end
+    end
+
+    it 'includes expected fields in results' do
+      results = reader.recent_changes(limit: 1)
+      result = results.first
+      expect(result).to include(:identifier, :type, :file_path, :last_modified)
+    end
+  end
+
   describe 'unit cache' do
     it 'caches loaded units' do
       reader.find_unit('Post')
       reader.find_unit('Post')
       # No error and same object returned
       expect(reader.find_unit('Post')).to eq(reader.find_unit('Post'))
+    end
+  end
+
+  describe '#reload!' do
+    it 'clears cached manifest so next access re-reads from disk' do
+      original = reader.manifest
+      expect(original['total_units']).to eq(5)
+
+      # Swap manifest on disk, reload, and verify fresh data is returned
+      manifest_path = File.join(fixture_dir, 'manifest.json')
+      original_content = File.read(manifest_path)
+      modified = JSON.parse(original_content).merge('total_units' => 999)
+
+      begin
+        File.write(manifest_path, JSON.generate(modified))
+        reader.reload!
+        expect(reader.manifest['total_units']).to eq(999)
+      ensure
+        File.write(manifest_path, original_content)
+      end
+    end
+
+    it 'clears unit cache so units are re-read from disk' do
+      reader.find_unit('Post')
+      reader.reload!
+      # After reload, find_unit still works (re-reads from disk)
+      unit = reader.find_unit('Post')
+      expect(unit['identifier']).to eq('Post')
+    end
+
+    it 'clears summary cache' do
+      reader.summary
+      reader.reload!
+      # After reload, summary still works (re-reads from disk)
+      expect(reader.summary).to include('Codebase Index Summary')
+    end
+
+    it 'clears graph caches' do
+      reader.dependency_graph
+      reader.graph_analysis
+      reader.raw_graph_data
+      reader.reload!
+      # After reload, all graph accessors still work
+      expect(reader.dependency_graph).to be_a(CodebaseIndex::DependencyGraph)
+      expect(reader.graph_analysis).to include('orphans')
+      expect(reader.raw_graph_data).to include('nodes')
     end
   end
 end

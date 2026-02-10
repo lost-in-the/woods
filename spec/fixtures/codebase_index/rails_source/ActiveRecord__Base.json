@@ -1,0 +1,17 @@
+{
+  "type": "rails_source",
+  "identifier": "ActiveRecord::Base",
+  "file_path": "activerecord-8.1.2/lib/active_record/base.rb",
+  "namespace": "ActiveRecord",
+  "source_code": "module ActiveRecord\n  class Base\n    extend ConnectionHandling\n    include Core\n    include Persistence\n    include Querying\n    include Validations\n    include Callbacks\n  end\nend\n",
+  "metadata": {
+    "gem_name": "activerecord",
+    "gem_version": "8.1.2",
+    "concept": "persistence"
+  },
+  "dependencies": [],
+  "dependents": [],
+  "chunks": [],
+  "extracted_at": "2026-01-15T12:00:00Z",
+  "source_hash": "rs_abc123"
+}

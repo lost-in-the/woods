@@ -54,6 +54,21 @@ module CodebaseIndex
         @identifier_map = nil
       end
 
+      # Clear all cached state so the next access re-reads from disk.
+      #
+      # @return [void]
+      def reload!
+        @unit_cache = {}
+        @unit_cache_order = []
+        @identifier_map = nil
+        @index_cache = {}
+        @manifest = nil
+        @summary = nil
+        @dependency_graph = nil
+        @graph_analysis = nil
+        @raw_graph_data = nil
+      end
+
       # @return [Hash] Parsed manifest.json
       def manifest
         @manifest ||= parse_json('manifest.json')
@@ -176,6 +191,85 @@ module CodebaseIndex
       # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
       def traverse_dependents(identifier, depth: 2, types: nil)
         traverse(identifier, depth: depth, types: types, direction: :reverse)
+      end
+
+      # Search rails_source units by concept keyword.
+      #
+      # Matches the keyword (case-insensitive) against identifier, source_code,
+      # and metadata fields of rails_source type units.
+      #
+      # @param keyword [String] Concept keyword to match (e.g. "ActiveRecord", "routing", "persistence")
+      # @param limit [Integer] Maximum results to return
+      # @return [Array<Hash>] Matching rails_source unit summaries
+      def framework_sources(keyword, limit: 20)
+        pattern = Regexp.new(keyword, Regexp::IGNORECASE)
+        results = []
+
+        entries = read_index('rails_source')
+        entries.each do |entry|
+          break if results.size >= limit
+
+          id = entry['identifier']
+          unit = find_unit(id)
+          next unless unit
+
+          matched = pattern.match?(id) ||
+                    (unit['source_code'] && pattern.match?(unit['source_code'])) ||
+                    (unit['metadata'] && pattern.match?(unit['metadata'].to_json))
+
+          next unless matched
+
+          results << {
+            identifier: id,
+            type: 'rails_source',
+            file_path: unit['file_path'],
+            metadata: unit['metadata']
+          }
+        end
+
+        results
+      end
+
+      # Return units sorted by most recent git modification.
+      #
+      # Reads all units that have metadata.git.last_modified and returns
+      # them sorted descending by that timestamp.
+      #
+      # @param limit [Integer] Maximum results to return
+      # @param types [Array<String>, nil] Filter to these singular type names
+      # @return [Array<Hash>] Units sorted by last_modified descending
+      def recent_changes(limit: 10, types: nil)
+        dirs = if types
+                 types.filter_map { |t| TYPE_TO_DIR[t] }
+               else
+                 TYPE_DIRS
+               end
+
+        units_with_dates = []
+
+        dirs.each do |dir|
+          entries = read_index(dir)
+          entries.each do |entry|
+            id = entry['identifier']
+            unit = find_unit(id)
+            next unless unit
+
+            last_modified = unit.dig('metadata', 'git', 'last_modified')
+            next unless last_modified
+
+            units_with_dates << {
+              identifier: id,
+              type: DIR_TO_TYPE[dir],
+              file_path: unit['file_path'],
+              last_modified: last_modified
+            }
+          end
+        end
+
+        units_with_dates
+          .sort_by { |u| u[:last_modified] }
+          .reverse
+          .first(limit)
       end
 
       # @return [Hash] Raw dependency graph data from JSON

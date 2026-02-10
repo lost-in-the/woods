@@ -392,7 +392,13 @@ module CodebaseIndex
         end.compact
       end
 
-      # Extract scopes with their source if available
+      # Extract scopes with their source if available.
+      # Uses a two-pass approach: find scope declarations, then track
+      # nesting depth to determine multi-line scope boundaries.
+      #
+      # @param model [Class]
+      # @param source [String, nil]
+      # @return [Array<Hash>]
       def extract_scopes(model, source = nil)
         if source.nil?
           source_path = source_file_for(model)
@@ -402,13 +408,102 @@ module CodebaseIndex
         end
 
         scopes = []
+        lines = source.lines
+        i = 0
 
-        # Match scope definitions
-        source.scan(/scope\s+:(\w+)(?:,\s*->.*?(?:do|{).*?(?:end|})|,\s*->.*$)/m) do |match|
-          scopes << { name: match[0], source: ::Regexp.last_match(0) }
+        while i < lines.length
+          if lines[i] =~ /\A\s*scope\s+:(\w+)/
+            scope_name = ::Regexp.last_match(1)
+            scope_source, line_count = extract_scope_source(lines, i)
+            scopes << { name: scope_name, source: scope_source }
+            i += line_count
+          else
+            i += 1
+          end
         end
 
         scopes
+      end
+
+      # Extract a complete scope definition by tracking brace or keyword depth.
+      # Handles multi-line lambda bodies with { } or do/end style.
+      #
+      # @param lines [Array<String>] All source lines
+      # @param start [Integer] Index of the scope declaration line
+      # @return [Array(String, Integer)] Scope source and number of lines consumed
+      def extract_scope_source(lines, start)
+        brace_depth = 0
+        keyword_depth = 0
+        found_brace = false
+        found_do = false
+
+        i = start
+        while i < lines.length
+          code = neutralize_strings_and_comments(lines[i])
+
+          open_b = code.count('{')
+          close_b = code.count('}')
+          brace_depth += open_b - close_b
+          found_brace = true if open_b > 0
+
+          keyword_depth += scope_keyword_delta(code)
+          found_do = true if code =~ /\bdo\b/
+
+          # Brace-style scope complete
+          if found_brace && brace_depth <= 0
+            return [lines[start..i].join, i - start + 1]
+          end
+
+          # do/end-style scope complete (only when not using braces)
+          if found_do && !found_brace && keyword_depth <= 0 && i > start
+            return [lines[start..i].join, i - start + 1]
+          end
+
+          # Safety: no body opener found after looking ahead
+          if i >= start + 2 && !found_brace && !found_do
+            return [lines[start], 1]
+          end
+
+          i += 1
+        end
+
+        [lines[start..].join, lines.length - start]
+      end
+
+      # Calculate keyword nesting delta for scope body tracking.
+      #
+      # @param code [String] Line with strings/comments already neutralized
+      # @return [Integer]
+      def scope_keyword_delta(code)
+        return 0 if code.strip.empty?
+
+        delta = 0
+        delta += code.scan(/\b(?:def|begin|class|module|case|for|do)\b/).size
+
+        code.scan(/\b(if|unless|while|until)\b/) do
+          prefix = code[0...Regexp.last_match.begin(0)]
+          delta += 1 if prefix.strip.empty? || prefix.rstrip.end_with?('=')
+        end
+
+        if code =~ /\A\s*(?:while|until|for)\b/ && code =~ /\bdo\b/
+          delta -= 1
+        end
+
+        delta -= code.scan(/\bend\b/).size
+        delta
+      end
+
+      # Replace string literals and comments with neutral content to prevent
+      # false keyword/brace matches inside strings or comments.
+      #
+      # @param line [String]
+      # @return [String]
+      def neutralize_strings_and_comments(line)
+        result = line.dup
+        result.gsub!(/"(?:[^"\\]|\\.)*"/m, '""')
+        result.gsub!(/'(?:[^'\\]|\\.)*'/m, "''")
+        result.sub!(/#.*$/, '')
+        result
       end
 
       # Extract enum definitions

@@ -28,6 +28,117 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
   end
 
+  # ── extract_scopes ────────────────────────────────────────────────
+
+  describe '#extract_scopes' do
+    it 'extracts single-line brace scope' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :active, -> { where(active: true) }
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('active')
+      expect(scopes[0][:source]).to include('where(active: true)')
+    end
+
+    it 'extracts multi-line brace scope' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :complex, -> {
+            joins(:comments)
+              .where(comments: { approved: true })
+              .group(:id)
+          }
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('complex')
+      expect(scopes[0][:source]).to include('joins(:comments)')
+      expect(scopes[0][:source]).to include('}')
+    end
+
+    it 'extracts scope with do/end style' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :block_style, -> do
+            where(active: true)
+          end
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('block_style')
+      expect(scopes[0][:source]).to include('where(active: true)')
+      expect(scopes[0][:source]).to include('end')
+    end
+
+    it 'extracts scope with nested blocks inside do/end' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :conditional, -> do
+            if Rails.env.production?
+              where(active: true)
+            end
+          end
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('conditional')
+      expect(scopes[0][:source]).to include('if Rails.env.production?')
+      expect(scopes[0][:source].scan(/end/).size).to eq(2) # inner if + outer do
+    end
+
+    it 'extracts scope with parameterized lambda' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :by_status, ->(status) { where(status: status) }
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('by_status')
+    end
+
+    it 'extracts multiple scopes' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :active, -> { where(active: true) }
+          scope :recent, -> { where("created_at > ?", 1.week.ago) }
+          scope :featured, -> { where(featured: true) }
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(3)
+      expect(scopes.map { |s| s[:name] }).to eq(%w[active recent featured])
+    end
+
+    it 'handles scopes with strings containing braces' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :with_json, -> { where("data::jsonb @> '{}'::jsonb") }
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('with_json')
+    end
+
+    it 'handles scope with inline comment' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          scope :active, -> { where(active: true) } # only active posts
+        end
+      RUBY
+      scopes = extractor.send(:extract_scopes, nil, source)
+      expect(scopes.size).to eq(1)
+      expect(scopes[0][:name]).to eq('active')
+    end
+  end
+
   # ── source_file_for ────────────────────────────────────────────────
 
   describe '#source_file_for' do

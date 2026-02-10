@@ -66,13 +66,28 @@ module CodebaseIndex
 
       private
 
-      # Find the base component class used in the application
+      # Find the base component class used in the application.
+      # Skips ApplicationComponent if it's actually a ViewComponent subclass
+      # to avoid extracting ViewComponent classes with Phlex-specific metadata.
+      #
+      # @return [Class, nil]
       def find_component_base
         PHLEX_BASES.each do |base_name|
           klass = base_name.safe_constantize
-          return klass if klass
+          next unless klass
+          next if base_name == 'ApplicationComponent' && view_component_subclass?(klass)
+
+          return klass
         end
         nil
+      end
+
+      # Check if a class descends from ViewComponent::Base.
+      #
+      # @param klass [Class]
+      # @return [Boolean]
+      def view_component_subclass?(klass)
+        defined?(ViewComponent::Base) && klass < ViewComponent::Base
       end
 
       def source_file_for(component)

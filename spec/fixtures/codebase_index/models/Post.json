@@ -15,7 +15,11 @@
     ],
     "callbacks": [],
     "scopes": [],
-    "parent_class": "ApplicationRecord"
+    "parent_class": "ApplicationRecord",
+    "git": {
+      "last_modified": "2026-01-10T08:30:00Z",
+      "author": "dev@example.com"
+    }
   },
   "dependencies": [],
   "dependents": ["Comment", "PostsController"],

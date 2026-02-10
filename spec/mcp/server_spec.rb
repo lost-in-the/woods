@@ -14,16 +14,17 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(server).to be_a(::MCP::Server)
     end
 
-    it 'registers 7 tools' do
+    it 'registers 10 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(7)
+      expect(tools.size).to eq(10)
     end
 
     it 'registers expected tool names' do
       tools = server.instance_variable_get(:@tools)
       expect(tools.keys).to contain_exactly(
         'lookup', 'search', 'dependencies', 'dependents',
-        'structure', 'graph_analysis', 'pagerank'
+        'structure', 'graph_analysis', 'pagerank', 'framework',
+        'recent_changes', 'reload'
       )
     end
 
@@ -36,6 +37,17 @@ RSpec.describe CodebaseIndex::MCP::Server do
       resources = server.instance_variable_get(:@resources)
       uris = resources.map(&:uri)
       expect(uris).to contain_exactly('codebase://manifest', 'codebase://graph')
+    end
+
+    it 'registers 2 resource templates' do
+      templates = server.instance_variable_get(:@resource_templates)
+      expect(templates.size).to eq(2)
+    end
+
+    it 'registers expected resource template URIs' do
+      templates = server.instance_variable_get(:@resource_templates)
+      uris = templates.map(&:uri_template)
+      expect(uris).to contain_exactly('codebase://unit/{identifier}', 'codebase://type/{type}')
     end
   end
 
@@ -234,6 +246,137 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
   end
 
+  describe 'tool: reload' do
+    it 'returns reloaded confirmation with manifest fields' do
+      response = call_tool(server, 'reload')
+      data = parse_response(response)
+      expect(data['reloaded']).to be true
+      expect(data).to have_key('extracted_at')
+      expect(data).to have_key('total_units')
+      expect(data).to have_key('counts')
+    end
+
+    it 'picks up changed data after reload' do
+      # Read structure before reload
+      pre = parse_response(call_tool(server, 'structure'))
+      expect(pre['manifest']['total_units']).to eq(5)
+
+      # Modify manifest on disk
+      manifest_path = File.join(fixture_dir, 'manifest.json')
+      original_content = File.read(manifest_path)
+      modified = JSON.parse(original_content).merge('total_units' => 42)
+
+      begin
+        File.write(manifest_path, JSON.generate(modified))
+        call_tool(server, 'reload')
+
+        # Structure should now reflect the new value
+        post = parse_response(call_tool(server, 'structure'))
+        expect(post['manifest']['total_units']).to eq(42)
+      ensure
+        File.write(manifest_path, original_content)
+      end
+    end
+  end
+
+  describe 'tool: framework' do
+    it 'returns matching rails_source units by identifier keyword' do
+      response = call_tool(server, 'framework', keyword: 'ActiveRecord')
+      data = parse_response(response)
+      expect(data['keyword']).to eq('ActiveRecord')
+      expect(data['result_count']).to be >= 1
+      identifiers = data['results'].map { |r| r['identifier'] }
+      expect(identifiers).to include('ActiveRecord::Base')
+    end
+
+    it 'matches against source_code' do
+      response = call_tool(server, 'framework', keyword: 'Persistence')
+      data = parse_response(response)
+      expect(data['result_count']).to be >= 1
+      identifiers = data['results'].map { |r| r['identifier'] }
+      expect(identifiers).to include('ActiveRecord::Base')
+    end
+
+    it 'matches against metadata' do
+      response = call_tool(server, 'framework', keyword: 'controller')
+      data = parse_response(response)
+      identifiers = data['results'].map { |r| r['identifier'] }
+      expect(identifiers).to include('ActionController::Base')
+    end
+
+    it 'returns empty results for no match' do
+      response = call_tool(server, 'framework', keyword: 'zzz_no_match')
+      data = parse_response(response)
+      expect(data['result_count']).to eq(0)
+      expect(data['results']).to be_empty
+    end
+
+    it 'respects limit' do
+      response = call_tool(server, 'framework', keyword: '.*', limit: 1)
+      data = parse_response(response)
+      expect(data['results'].size).to eq(1)
+    end
+  end
+
+  describe 'tool: recent_changes' do
+    it 'returns units sorted by last_modified descending' do
+      response = call_tool(server, 'recent_changes')
+      data = parse_response(response)
+      expect(data['result_count']).to be >= 1
+      dates = data['results'].map { |r| r['last_modified'] }
+      expect(dates).to eq(dates.sort.reverse)
+    end
+
+    it 'returns the most recently modified unit first' do
+      response = call_tool(server, 'recent_changes')
+      data = parse_response(response)
+      expect(data['results'].first['identifier']).to eq('Comment')
+    end
+
+    it 'respects limit' do
+      response = call_tool(server, 'recent_changes', limit: 1)
+      data = parse_response(response)
+      expect(data['results'].size).to eq(1)
+    end
+
+    it 'filters by type' do
+      response = call_tool(server, 'recent_changes', types: ['controller'])
+      data = parse_response(response)
+      data['results'].each do |r|
+        expect(r['type']).to eq('controller')
+      end
+    end
+  end
+
+  describe 'resource template: codebase://unit/{identifier}' do
+    it 'returns unit data for a valid identifier' do
+      contents = read_resource(server, 'codebase://unit/Post')
+      data = JSON.parse(contents.first[:text])
+      expect(data['identifier']).to eq('Post')
+      expect(data['type']).to eq('model')
+    end
+
+    it 'returns not found for an invalid identifier' do
+      contents = read_resource(server, 'codebase://unit/NonExistent')
+      expect(contents.first[:text]).to include('not found')
+    end
+  end
+
+  describe 'resource template: codebase://type/{type}' do
+    it 'returns all units of the given type' do
+      contents = read_resource(server, 'codebase://type/model')
+      data = JSON.parse(contents.first[:text])
+      identifiers = data.map { |u| u['identifier'] }
+      expect(identifiers).to contain_exactly('Post', 'Comment')
+    end
+
+    it 'returns empty array for unknown type' do
+      contents = read_resource(server, 'codebase://type/nonexistent')
+      data = JSON.parse(contents.first[:text])
+      expect(data).to eq([])
+    end
+  end
+
   # ────────────────────────────────────────────────────────────────────
   # Helpers
   # ────────────────────────────────────────────────────────────────────
@@ -256,5 +399,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
   # Parse JSON from a tool response.
   def parse_response(response)
     JSON.parse(response_text(response))
+  end
+
+  # Call the resources_read_handler on the server.
+  def read_resource(server, uri)
+    handler = server.instance_variable_get(:@handlers)
+    read_handler = handler[::MCP::Methods::RESOURCES_READ]
+    read_handler.call(uri: uri)
   end
 end

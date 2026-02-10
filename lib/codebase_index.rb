@@ -45,7 +45,7 @@ module CodebaseIndex
       @include_framework_sources = true
       @gem_configs = {}
       @extractors = %i[models controllers services components view_components jobs mailers graphql serializers
-                       rails_source]
+                       managers policies validators rails_source]
       @pretty_json = true
     end
 

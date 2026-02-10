@@ -478,6 +478,15 @@ module CodebaseIndex
         true
       end
 
+      # Extract the source code of a single method using nesting depth tracking.
+      #
+      # Counts block-opening keywords and `end` closers. The method boundary
+      # is found when depth returns to 0 after the opening `def`. Handles
+      # rescue/ensure blocks, multi-line signatures, and heredocs.
+      #
+      # @param controller [Class] The controller class
+      # @param action [String, Symbol] The action method name
+      # @return [String, nil] The method source, or nil if not extractable
       def extract_action_source(controller, action)
         method = controller.instance_method(action)
         source_location = method.source_location
@@ -487,37 +496,95 @@ module CodebaseIndex
         return nil unless File.exist?(file)
 
         lines = File.readlines(file)
-
-        # Find method boundaries
         start_line = line - 1
         return nil if start_line < 0 || start_line >= lines.length
 
-        # Determine indentation of def line
-        def_line = lines[start_line]
-        indent = def_line[/^\s*/].length
+        depth = 0
+        heredoc_terminator = nil
+        end_line = start_line
 
-        # Find end of method
-        end_line = start_line + 1
         while end_line < lines.length
-          current_line = lines[end_line]
-          current_indent = current_line[/^\s*/]&.length || 0
+          current = lines[end_line]
 
-          # Empty lines or lines with deeper indent continue the method
-          if current_line.strip.empty?
+          # Inside a heredoc — skip keyword counting until terminator
+          if heredoc_terminator
+            heredoc_terminator = nil if current.strip == heredoc_terminator
             end_line += 1
             next
           end
 
-          # Line at same or lesser indent that isn't a continuation
-          break if current_indent <= indent && current_line.strip != ''
+          heredoc_terminator = detect_heredoc_start(current)
+          depth += nesting_delta(current)
+
+          break if depth <= 0 && end_line >= start_line
 
           end_line += 1
         end
 
-        lines[start_line...end_line].join
+        lines[start_line..end_line].join
       rescue StandardError => e
         Rails.logger.debug("Could not extract action source for #{controller}##{action}: #{e.message}")
         nil
+      end
+
+      # Calculate nesting depth change for a single line of Ruby code.
+      # Counts block-opening keywords (+1) and `end` closers (-1).
+      # Postfix if/unless/while/until are not counted as openers.
+      #
+      # @param line [String] A single line of Ruby source
+      # @return [Integer] Nesting depth delta
+      def nesting_delta(line)
+        code = neutralize_strings_and_comments(line)
+        return 0 if code.strip.empty?
+
+        delta = 0
+
+        # Keywords that always open a block
+        delta += code.scan(/\b(?:def|begin|class|module|case|for)\b/).size
+        delta += code.scan(/\bdo\b/).size
+
+        # if/unless/while/until open blocks only at statement start or after =
+        code.scan(/\b(if|unless|while|until)\b/) do
+          prefix = code[0...Regexp.last_match.begin(0)]
+          delta += 1 if prefix.strip.empty? || prefix.rstrip.end_with?('=')
+        end
+
+        # Don't double-count: while/until/for + do on the same line
+        if code =~ /\A\s*(?:while|until|for)\b/ && code =~ /\bdo\b/
+          delta -= 1
+        end
+
+        # end closes a block
+        delta -= code.scan(/\bend\b/).size
+
+        delta
+      end
+
+      # Replace string literals and comments with neutral content to prevent
+      # false keyword matches inside strings or comments.
+      #
+      # @param line [String]
+      # @return [String]
+      def neutralize_strings_and_comments(line)
+        result = line.dup
+        result.gsub!(/"(?:[^"\\]|\\.)*"/m, '""')
+        result.gsub!(/'(?:[^'\\]|\\.)*'/m, "''")
+        result.sub!(/#.*$/, '')
+        result
+      end
+
+      # Detect if a line starts a heredoc and return the terminator word.
+      # Only neutralizes double-quoted strings (not single-quoted, since
+      # heredoc delimiters may use single quotes: <<~'SQL').
+      #
+      # @param line [String]
+      # @return [String, nil] The heredoc terminator, or nil
+      def detect_heredoc_start(line)
+        code = line.dup
+        code.gsub!(/"(?:[^"\\]|\\.)*"/m, '""')
+        code.sub!(/#.*$/, '')
+        match = code.match(/<<[~-]?['"]?([A-Za-z_]\w*)['"]?/)
+        match&.[](1)
       end
     end
   end
