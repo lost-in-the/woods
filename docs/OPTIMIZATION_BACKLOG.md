@@ -271,6 +271,136 @@ Extractors run sequentially but are independent.
 
 ---
 
+## New: MCP Index Server
+
+Items identified from the initial MCP server implementation (commits `baa5b85`..`6e4de8f`) and real-world testing against a production Rails app.
+
+### 30. MCP Index Server — Semantic Search Tool
+
+The index server currently has keyword regex search only (`search` tool). The AGENTIC_STRATEGY.md defines a `codebase_retrieve` tool for semantic search with auto-classification, token budgeting, and relevance scoring. This requires the embedding pipeline (Phase 1 of PROPOSAL.md) to be built first.
+
+**Depends on:** Retrieval pipeline (PROPOSAL.md Phase 2)
+
+### 31. MCP Index Server — Framework Source Tool
+
+The `codebase_framework` tool from AGENTIC_STRATEGY.md (retrieve version-pinned Rails/gem source by concept) is not yet implemented. The `rails_source_extractor` already extracts this data — the tool just needs to query it.
+
+**Fix:** Add a `framework` tool to the MCP server that filters `rails_source` type units by concept keyword.
+
+### 32. MCP Index Server — Recent Changes Tool
+
+The `codebase_recent_changes` tool from AGENTIC_STRATEGY.md is not implemented. Git metadata (change frequency, last modified) is already in extracted unit metadata.
+
+**Fix:** Add a `recent_changes` tool that sorts units by `metadata.git.last_modified` and returns the most recently changed.
+
+### 33. MCP Index Server — HTTP Transport
+
+The server only supports stdio transport. AGENTIC_STRATEGY.md mentions HTTP/Rack mode for network-accessible retrieval. Useful for shared team access or CI integration.
+
+**Depends on:** Evaluation of whether `mcp` gem supports HTTP transport, or if a Rack wrapper is needed.
+
+### 34. MCP Index Server — Resource Templates for Unit Lookup
+
+MCP supports resource templates (e.g., `codebase://unit/{identifier}`). Currently only two static resources exist (manifest, graph). Parameterized resources would let clients browse units through the resource interface, not just tools.
+
+**Fix:** Add `codebase://unit/{identifier}` and `codebase://type/{type}` resource templates.
+
+---
+
+## New: Console MCP Server
+
+Implementation items from the CONSOLE_SERVER.md design document, organized by phase.
+
+### 35. Console Server — Phase 0: Bridge Protocol
+
+Build the JSON-lines bridge script (`lib/codebase_index/console/bridge.rb`) that boots Rails, validates models/columns against `ActiveRecord::Base.descendants`, and dispatches structured requests. Implement connection manager with Docker exec, direct, and SSH modes.
+
+**Deliverables:** Bridge script, connection manager, heartbeat/reconnect, model validation allowlist.
+
+### 36. Console Server — Phase 1: MVP Tools
+
+Implement Tier 1 tools: `count`, `sample`, `find`, `pluck`, `aggregate`, `association_count`, `schema`, `recent`, `console_status`. Wire up safety layers 1-4 (read-only connection, transaction rollback, statement timeout, structured validation). Add column redaction and result size caps.
+
+**Deliverables:** `exe/codebase-console-mcp`, 9 Tier 1 tools, safety layers.
+**Depends on:** #35
+
+### 37. Console Server — Phase 2: Domain-Aware Tools + Controlled Writes
+
+Implement Tier 2 tools: `diagnose_model`, `data_snapshot`, `validate_record`, `check_setting`, `update_setting`, `check_policy`, `validate_with`, `check_eligibility`, `decorate`. Add registered write actions with human confirmation (safety layer 5). Add auto-detection for managers, policies, validators, decorators from conventional directories.
+
+**Deliverables:** 9 Tier 2 tools, write action registry, class discovery, preset configurations.
+**Depends on:** #36
+
+### 38. Console Server — Phase 3: Job Queue, Cache, and Analytics Tools
+
+Implement Tier 3 tools: `job_queues`, `job_failures`, `job_find`, `job_schedule`, `redis_info`, `cache_stats`, `slow_endpoints`, `error_rates`, `throughput`, `channel_status`. Build adapters for Sidekiq (Redis API), Solid Queue (DB tables), GoodJob (DB tables). Build cache adapters for Redis, Solid Cache, memory/file stores.
+
+**Deliverables:** 10 Tier 3 tools, job backend adapters, cache backend adapters.
+**Depends on:** #36
+
+### 39. Console Server — Phase 4: Guarded Eval + Advanced Queries
+
+Implement Tier 4 tools: `console_eval` (human-approved), `console_sql` (read-only validated), `console_query` (structured builder). Add SQL statement validation (reject DML/DDL), human confirmation flow, audit logging.
+
+**Deliverables:** 3 Tier 4 tools, statement validator, audit log.
+**Depends on:** #36
+
+### 40. Console Server — Amplitude Analytics Integration
+
+Requested: add Amplitude as an analytics provider for Tier 3 tools. Amplitude's event and cohort data maps to `throughput` and `data_snapshot` tool patterns. Requires a provider adapter interface and Amplitude API client.
+
+**Depends on:** #38, Amplitude API key and event schema from client app.
+
+### 41. Extraction — Manager/Delegator Extractor
+
+The admin app uses SimpleDelegator subclasses in `app/managers/` for account-scoped domain logic (e.g., `AccountManagingProducts`). These are not covered by any existing extractor. An extractor would capture the wrapped model, public methods, and delegation chain.
+
+**Pattern:** Similar to service extractor but scans `app/managers/` and detects `SimpleDelegator` ancestors.
+
+### 42. Extraction — Policy Class Extractor
+
+Domain policy classes in `app/policies/` encapsulate business eligibility rules (not Pundit-style authorization). An extractor would capture policy names, the models they evaluate, and their decision methods (`allowed?`, `eligible?`, `valid?`).
+
+**Pattern:** Similar to service extractor, scans `app/policies/`.
+
+### 43. Extraction — Standalone Validator Extractor
+
+Custom validator classes in `app/validators/` contain domain-specific validation logic that spans multiple models. An extractor would capture validator names, the models they operate on, and their validation rules.
+
+**Pattern:** Similar to service extractor, scans `app/validators/`.
+
+---
+
+## Recommended Implementation Order (New Items)
+
+**Batch 8 — MCP index server gaps (low effort):**
+- Add framework source tool (#31)
+- Add recent changes tool (#32)
+- Add resource templates (#34)
+
+**Batch 9 — Console server foundation:**
+- Bridge protocol (#35)
+- MVP tools (#36)
+
+**Batch 10 — Console server domain tools:**
+- Domain-aware tools (#37)
+- Job queue + cache + analytics (#38)
+
+**Batch 11 — Extraction coverage for domain classes:**
+- Manager/delegator extractor (#41)
+- Policy class extractor (#42)
+- Standalone validator extractor (#43)
+
+**Batch 12 — Advanced console + analytics:**
+- Guarded eval (#39)
+- Amplitude integration (#40)
+
+**Deferred:**
+- Semantic search tool (#30) — blocked on retrieval pipeline
+- HTTP transport (#33) — blocked on transport library evaluation
+
+---
+
 ## Verification
 
 After each batch:
