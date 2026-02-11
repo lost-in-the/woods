@@ -76,6 +76,25 @@ docs/                              # Planning & design documents (see docs/READM
 - Test `DependencyGraph` for cycle detection, bidirectional edge resolution, and PageRank computation
 - Test `GraphAnalyzer` for structural detection: orphans, dead ends, hubs, cycles, bridges
 
+## Testing Workflow
+
+The approach depends on the task:
+
+- **New extractors/features:** Strict TDD — write a failing spec in `spec/` first, implement to pass, refactor. No implementation without a failing test.
+- **Bug fixes:** Fix first, then add a regression test that would have caught it.
+- **Refactors:** Lean on existing specs. Run the full suite before and after. If coverage gaps exist, add specs before refactoring, not after.
+
+```bash
+# Gem unit specs (run from gem root)
+bundle exec rake spec                                              # Full suite
+bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb # Single file
+
+# Lint
+bundle exec rubocop -a
+```
+
+After gem-level specs pass, validate in a host app if the change affects extraction output. See `.claude/rules/integration-testing.md` for host app validation workflow.
+
 ## Planning Documents
 
 The `docs/` directory contains the full design for unbuilt layers. Read `docs/README.md` for the index and reading order. These documents are the source of truth for architectural decisions, backend selection, and implementation sequencing. When implementing retrieval or storage features, read the relevant doc first — don't invent patterns that conflict with the established design.
@@ -88,6 +107,20 @@ Key references by topic:
 - Agent/MCP integration → `docs/AGENTIC_STRATEGY.md`
 - Cost analysis → `docs/BACKEND_MATRIX.md` (bottom section)
 - Optimization backlog → `docs/OPTIMIZATION_BACKLOG.md` — prioritized list of performance, correctness, and coverage improvements. Check resolved status before starting work on an item.
+
+## Backlog Workflow
+
+See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking items, implementing with TDD, marking resolved, and adding new work.
+
+## Session Continuity
+
+At the end of a session, update `.claude/context/session-state.md` with breadcrumbs:
+
+- Which backlog items were touched (resolved or in-progress)
+- Which files were modified
+- Any gotchas discovered during the session
+
+At the start of a session, read `.claude/context/session-state.md` for context from the previous session.
 
 ## Gotchas
 

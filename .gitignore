@@ -20,3 +20,9 @@ tmp/
 # IDE
 .idea/
 .vscode/
+
+# Claude config with local project references
+.claude/rules/integration-testing.md
+.claude/agents/host-app-validator.md
+.claude/context/session-state.md
+.claude/settings.local.json
