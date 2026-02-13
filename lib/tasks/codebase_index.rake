@@ -12,6 +12,8 @@
 #   bundle exec rake codebase_index:validate          # Validate index integrity
 #   bundle exec rake codebase_index:stats             # Show index statistics
 #   bundle exec rake codebase_index:clean             # Remove index
+#   bundle exec rake codebase_index:self_analyze      # Analyze gem's own source
+#   bundle exec rake codebase_index:flow[EntryPoint]  # Generate execution flow
 
 namespace :codebase_index do
   desc 'Full extraction of codebase for indexing'
@@ -299,6 +301,144 @@ namespace :codebase_index do
       puts 'Done.'
     else
       puts 'Index directory does not exist.'
+    end
+  end
+
+  desc "Analyze the gem's own source code and generate self-analysis output"
+  task :self_analyze do
+    require 'digest'
+    require 'json'
+    require 'fileutils'
+    require 'codebase_index/ruby_analyzer'
+    require 'codebase_index/dependency_graph'
+    require 'codebase_index/graph_analyzer'
+    require 'codebase_index/ruby_analyzer/mermaid_renderer'
+
+    gem_root = File.expand_path('../..', __dir__)
+    json_dir = File.join(gem_root, 'tmp', 'codebase_index_self')
+    docs_dir = File.join(gem_root, 'docs', 'self-analysis')
+    manifest_path = File.join(json_dir, 'manifest.json')
+
+    # 1. Check staleness via source_checksum
+    lib_files = Dir.glob(File.join(gem_root, 'lib', '**', '*.rb')).sort
+    source_content = lib_files.map { |f| File.read(f) }.join
+    source_checksum = Digest::SHA256.hexdigest(source_content)
+
+    if File.exist?(manifest_path)
+      existing = JSON.parse(File.read(manifest_path))
+      if existing['source_checksum'] == source_checksum
+        puts 'Source unchanged — skipping self-analysis.'
+        next
+      end
+    end
+
+    puts 'Running self-analysis on gem source...'
+
+    # 2. Run RubyAnalyzer
+    units = CodebaseIndex::RubyAnalyzer.analyze(paths: [File.join(gem_root, 'lib', 'codebase_index')])
+    puts "  Analyzed #{units.size} units"
+
+    # 3. Build DependencyGraph + GraphAnalyzer
+    graph = CodebaseIndex::DependencyGraph.new
+    units.each { |unit| graph.register(unit) }
+    analyzer = CodebaseIndex::GraphAnalyzer.new(graph)
+    analysis = analyzer.analyze
+    graph_data = graph.to_h
+
+    # 4. Write JSON to tmp/codebase_index_self/
+    FileUtils.mkdir_p(json_dir)
+
+    units.each do |unit|
+      file_name = unit.identifier.gsub(/[^a-zA-Z0-9_]/, '_') + '.json'
+      File.write(
+        File.join(json_dir, file_name),
+        JSON.pretty_generate(unit.to_h)
+      )
+    end
+
+    File.write(
+      File.join(json_dir, 'dependency_graph.json'),
+      JSON.pretty_generate(graph_data)
+    )
+
+    File.write(
+      File.join(json_dir, 'analysis.json'),
+      JSON.pretty_generate(analysis)
+    )
+
+    manifest = {
+      'source_checksum' => source_checksum,
+      'generated_at' => Time.now.iso8601,
+      'unit_count' => units.size,
+      'node_count' => graph_data[:stats][:node_count],
+      'edge_count' => graph_data[:stats][:edge_count]
+    }
+    File.write(manifest_path, JSON.pretty_generate(manifest))
+
+    # 5. Render Mermaid to docs/self-analysis/
+    FileUtils.mkdir_p(docs_dir)
+    renderer = CodebaseIndex::RubyAnalyzer::MermaidRenderer.new
+
+    File.write(
+      File.join(docs_dir, 'architecture.md'),
+      renderer.render_architecture(units, graph_data, analysis)
+    )
+
+    File.write(
+      File.join(docs_dir, 'call-graph.md'),
+      "# Call Graph\n\n```mermaid\n#{renderer.render_call_graph(units)}\n```\n"
+    )
+
+    File.write(
+      File.join(docs_dir, 'dependency-map.md'),
+      "# Dependency Map\n\n```mermaid\n#{renderer.render_dependency_map(graph_data)}\n```\n"
+    )
+
+    File.write(
+      File.join(docs_dir, 'dataflow.md'),
+      "# Data Flow\n\n```mermaid\n#{renderer.render_dataflow(units)}\n```\n"
+    )
+
+    puts "  JSON output: #{json_dir}"
+    puts "  Mermaid docs: #{docs_dir}"
+    puts 'Self-analysis complete.'
+  end
+
+  desc 'Generate execution flow document for a Rails entry point'
+  task :flow, [:entry_point] => :environment do |_t, args|
+    require 'json'
+    require 'codebase_index/flow_assembler'
+    require 'codebase_index/dependency_graph'
+
+    entry_point = args[:entry_point]
+    unless entry_point
+      puts 'Usage: rake codebase_index:flow[EntryPoint#method]'
+      exit 1
+    end
+
+    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index'))
+    graph_path = File.join(output_dir, 'dependency_graph.json')
+
+    unless File.exist?(graph_path)
+      puts "ERROR: Dependency graph not found at #{graph_path}"
+      puts 'Run codebase_index:extract first.'
+      exit 1
+    end
+
+    graph_data = JSON.parse(File.read(graph_path))
+    graph = CodebaseIndex::DependencyGraph.from_h(graph_data)
+
+    max_depth = ENV.fetch('MAX_DEPTH', 5).to_i
+    assembler = CodebaseIndex::FlowAssembler.new(graph: graph, extracted_dir: output_dir)
+    flow = assembler.assemble(entry_point, max_depth: max_depth)
+
+    format = ENV.fetch('FORMAT', 'markdown').downcase
+
+    case format
+    when 'json'
+      puts JSON.pretty_generate(flow.to_h)
+    else
+      puts flow.to_markdown
     end
   end
 end
