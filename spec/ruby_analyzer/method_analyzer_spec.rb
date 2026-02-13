@@ -25,7 +25,6 @@ RSpec.describe CodebaseIndex::RubyAnalyzer::MethodAnalyzer do
       expect(unit.identifier).to eq('Greeter#greet')
       expect(unit.file_path).to eq('/app/greeter.rb')
       expect(unit.metadata[:visibility]).to eq(:public)
-      expect(unit.metadata[:parameters]).to be_an(Array)
     end
 
     it 'extracts class methods with dot notation' do

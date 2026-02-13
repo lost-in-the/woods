@@ -4,6 +4,7 @@ require_relative '../ast/parser'
 require_relative '../ast/method_extractor'
 require_relative '../ast/call_site_extractor'
 require_relative '../extracted_unit'
+require_relative 'fqn_builder'
 
 module CodebaseIndex
   module RubyAnalyzer
@@ -18,6 +19,8 @@ module CodebaseIndex
     #   units.first.identifier #=> "MyClass#my_method"
     #
     class MethodAnalyzer
+      include FqnBuilder
+
       # @param parser [Ast::Parser, nil] Parser instance (creates default if nil)
       def initialize(parser: nil)
         @parser = parser || Ast::Parser.new
@@ -43,9 +46,9 @@ module CodebaseIndex
 
         case node.type
         when :class
-          process_class_methods(node, source, file_path, namespace_stack, units)
+          process_container_methods(node, :class, source, file_path, namespace_stack, units)
         when :module
-          process_module_methods(node, source, file_path, namespace_stack, units)
+          process_container_methods(node, :module, source, file_path, namespace_stack, units)
         else
           (node.children || []).each do |child|
             extract_methods_from_tree(child, source, file_path, namespace_stack, units)
@@ -53,37 +56,14 @@ module CodebaseIndex
         end
       end
 
-      def process_class_methods(node, source, file_path, namespace_stack, units)
-        class_name = node.method_name
-        fqn = build_fqn(class_name, namespace_stack)
-        body_children = (node.children || [])[2..] || []
+      def process_container_methods(node, type, source, file_path, namespace_stack, units)
+        name = node.method_name
+        fqn = build_fqn(name, namespace_stack)
+        body_offset = type == :class ? 2 : 1
+        body_children = (node.children || [])[body_offset..] || []
 
         visibility_tracker = VisibilityTracker.new
-        inner_ns = namespace_stack + [class_name]
-
-        body_children.each do |child|
-          next unless child.is_a?(Ast::Node)
-
-          case child.type
-          when :send
-            visibility_tracker.process_send(child)
-          when :def
-            units << build_method_unit(child, fqn, '#', visibility_tracker.current, file_path)
-          when :defs
-            units << build_method_unit(child, fqn, '.', :public, file_path)
-          when :class, :module
-            extract_methods_from_tree(child, source, file_path, inner_ns, units)
-          end
-        end
-      end
-
-      def process_module_methods(node, source, file_path, namespace_stack, units)
-        mod_name = node.method_name
-        fqn = build_fqn(mod_name, namespace_stack)
-        body_children = (node.children || [])[1..] || []
-
-        visibility_tracker = VisibilityTracker.new
-        inner_ns = namespace_stack + [mod_name]
+        inner_ns = namespace_stack + [name]
 
         body_children.each do |child|
           next unless child.is_a?(Ast::Node)
@@ -105,14 +85,11 @@ module CodebaseIndex
         identifier = "#{class_fqn}#{separator}#{method_node.method_name}"
         call_graph = extract_call_graph(method_node)
         dependencies = build_dependencies(call_graph)
-        parameters = extract_parameters(method_node)
-
         unit = ExtractedUnit.new(type: :ruby_method, identifier: identifier, file_path: file_path)
         unit.namespace = class_fqn
-        unit.source_code = method_node.source || extract_source_from_lines(method_node)
+        unit.source_code = method_node.source
         unit.metadata = {
           visibility: visibility,
-          parameters: parameters,
           call_graph: call_graph
         }
         unit.dependencies = dependencies
@@ -137,24 +114,6 @@ module CodebaseIndex
       def build_dependencies(call_graph)
         call_graph.map { |c| c[:target] }.uniq.map do |target|
           { type: :ruby_class, target: target, via: :method_call }
-        end
-      end
-
-      def extract_parameters(method_node)
-        # Parameters aren't directly in our normalized AST, return empty for now.
-        # The node source contains the full signature if needed.
-        []
-      end
-
-      def extract_source_from_lines(node)
-        node.source
-      end
-
-      def build_fqn(name, namespace_stack)
-        if namespace_stack.empty?
-          name
-        else
-          "#{namespace_stack.join('::')}::#{name}"
         end
       end
 

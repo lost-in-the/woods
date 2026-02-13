@@ -50,11 +50,11 @@ module CodebaseIndex
             next if edges.include?(edge_key)
 
             edges << edge_key
-            if via
-              lines << "  #{node_id} -->|#{via}| #{target_id}"
-            else
-              lines << "  #{node_id} --> #{target_id}"
-            end
+            lines << if via
+                       "  #{node_id} -->|#{via}| #{target_id}"
+                     else
+                       "  #{node_id} --> #{target_id}"
+                     end
           end
         end
 
@@ -250,7 +250,7 @@ module CodebaseIndex
       # @param label [String] Raw label text
       # @return [String] Escaped label
       def escape_label(label)
-        label.to_s.gsub('"', '#quot;')
+        label.to_s.gsub('"', '&quot;')
       end
 
       # Determine Mermaid node shape based on dominant transformation category.
@@ -263,11 +263,11 @@ module CodebaseIndex
         if categories.include?(:construction)
           "([\"#{escape_label(transformations.first[:method] || 'new')}\"])"
         elsif categories.include?(:serialization)
-          "[/\"serialization\"/]"
+          '[/"serialization"/]'
         elsif categories.include?(:deserialization)
-          "[\\\"deserialization\"\\]"
+          '[\"deserialization"\\]'
         else
-          "[\"data\"]"
+          '["data"]'
         end
       end
     end

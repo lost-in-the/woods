@@ -86,12 +86,12 @@ module CodebaseIndex
       unit_data = load_unit(unit_id)
       return unless unit_data
 
-      source_code = unit_data['source_code'] || unit_data[:source_code]
+      source_code = unit_data[:source_code]
       return unless source_code && !source_code.empty?
 
-      metadata = unit_data['metadata'] || unit_data[:metadata] || {}
-      unit_type = (unit_data['type'] || unit_data[:type])&.to_s
-      file_path = unit_data['file_path'] || unit_data[:file_path]
+      metadata = unit_data[:metadata] || {}
+      unit_type = unit_data[:type]&.to_s
+      file_path = unit_data[:file_path]
 
       # Extract operations from the relevant method
       operations = extract_operations(source_code, method_name, metadata, unit_type)
@@ -116,9 +116,7 @@ module CodebaseIndex
       operations = []
 
       # For controllers, prepend before_action callbacks
-      if unit_type == 'controller'
-        prepend_callbacks(operations, metadata, method_name)
-      end
+      prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
       if method_name
         # Extract specific method
@@ -139,27 +137,23 @@ module CodebaseIndex
 
     # Prepend before_action callbacks from controller metadata.
     def prepend_callbacks(operations, metadata, method_name)
-      callbacks = metadata['callbacks'] || metadata[:callbacks]
+      callbacks = metadata[:callbacks]
       return unless callbacks.is_a?(Array)
 
       callbacks.each do |cb|
-        cb_kind = (cb['kind'] || cb[:kind])&.to_s
+        cb_kind = cb[:kind]&.to_s
         next unless cb_kind == 'before'
 
-        cb_name = cb['name'] || cb[:name]
+        cb_name = cb[:name]
         next unless cb_name
 
         # Check if callback applies to this action (via :only/:except)
-        only = cb['only'] || cb[:only]
-        except = cb['except'] || cb[:except]
+        only = cb[:only]
+        except = cb[:except]
 
-        if only.is_a?(Array) && method_name
-          next unless only.map(&:to_s).include?(method_name.to_s)
-        end
+        next if only.is_a?(Array) && method_name && !only.map(&:to_s).include?(method_name.to_s)
 
-        if except.is_a?(Array) && method_name
-          next if except.map(&:to_s).include?(method_name.to_s)
-        end
+        next if except.is_a?(Array) && method_name && except.map(&:to_s).include?(method_name.to_s)
 
         operations << {
           type: :call,
@@ -234,7 +228,7 @@ module CodebaseIndex
       candidates.each do |path|
         next unless File.exist?(path)
 
-        return JSON.parse(File.read(path))
+        return JSON.parse(File.read(path), symbolize_names: true)
       rescue JSON::ParserError
         next
       end
@@ -248,13 +242,13 @@ module CodebaseIndex
       unit_data = load_unit(unit_id)
       return nil unless unit_data
 
-      metadata = unit_data['metadata'] || unit_data[:metadata] || {}
-      routes = metadata['routes'] || metadata[:routes]
+      metadata = unit_data[:metadata] || {}
+      routes = metadata[:routes]
       return nil unless routes.is_a?(Array)
 
       # Find route matching the method name
       route = if method_name
-                routes.find { |r| (r['action'] || r[:action])&.to_s == method_name }
+                routes.find { |r| r[:action]&.to_s == method_name }
               else
                 routes.first
               end
@@ -262,8 +256,8 @@ module CodebaseIndex
       return nil unless route
 
       {
-        verb: route['verb'] || route[:verb],
-        path: route['path'] || route[:path]
+        verb: route[:verb],
+        path: route[:path]
       }
     end
   end

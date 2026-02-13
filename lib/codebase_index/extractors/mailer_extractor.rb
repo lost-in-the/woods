@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
-require_relative '../ast/method_extractor'
+require_relative 'ast_source_extraction'
 
 module CodebaseIndex
   module Extractors
@@ -18,6 +18,8 @@ module CodebaseIndex
     #   user_mailer = units.find { |u| u.identifier == "UserMailer" }
     #
     class MailerExtractor
+      include AstSourceExtraction
+
       def initialize
         @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
       end
@@ -277,26 +279,6 @@ module CodebaseIndex
             }
           }
         end
-      end
-
-      # Extract the source code of a single action method using the AST layer.
-      #
-      # @param mailer [Class] The mailer class
-      # @param action [String, Symbol] The action method name
-      # @return [String, nil] The method source, or nil if not extractable
-      def extract_action_source(mailer, action)
-        method = mailer.instance_method(action)
-        source_location = method.source_location
-        return nil unless source_location
-
-        file, _line = source_location
-        return nil unless File.exist?(file)
-
-        source = File.read(file)
-        Ast::MethodExtractor.new.extract_method_source(source, action.to_s)
-      rescue StandardError => e
-        Rails.logger.debug("Could not extract action source for #{mailer}##{action}: #{e.message}")
-        nil
       end
     end
   end

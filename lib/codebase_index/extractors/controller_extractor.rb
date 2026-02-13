@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
-require_relative '../ast/method_extractor'
+require_relative 'ast_source_extraction'
 
 module CodebaseIndex
   module Extractors
@@ -20,6 +20,8 @@ module CodebaseIndex
     #   registrations = units.find { |u| u.identifier == "Users::RegistrationsController" }
     #
     class ControllerExtractor
+      include AstSourceExtraction
+
       def initialize
         @routes_map = build_routes_map
       end
@@ -477,26 +479,6 @@ module CodebaseIndex
         end
 
         true
-      end
-
-      # Extract the source code of a single action method using the AST layer.
-      #
-      # @param controller [Class] The controller class
-      # @param action [String, Symbol] The action method name
-      # @return [String, nil] The method source, or nil if not extractable
-      def extract_action_source(controller, action)
-        method = controller.instance_method(action)
-        source_location = method.source_location
-        return nil unless source_location
-
-        file, _line = source_location
-        return nil unless File.exist?(file)
-
-        source = File.read(file)
-        Ast::MethodExtractor.new.extract_method_source(source, action.to_s)
-      rescue StandardError => e
-        Rails.logger.debug("Could not extract action source for #{controller}##{action}: #{e.message}")
-        nil
       end
     end
   end

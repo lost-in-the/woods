@@ -2,6 +2,7 @@
 
 require_relative '../ast/parser'
 require_relative '../extracted_unit'
+require_relative 'fqn_builder'
 
 module CodebaseIndex
   module RubyAnalyzer
@@ -16,6 +17,8 @@ module CodebaseIndex
     #   units.first.type #=> :ruby_class
     #
     class ClassAnalyzer
+      include FqnBuilder
+
       # @param parser [Ast::Parser, nil] Parser instance (creates default if nil)
       def initialize(parser: nil)
         @parser = parser || Ast::Parser.new
@@ -51,18 +54,26 @@ module CodebaseIndex
       end
 
       def process_class(node, source, file_path, namespace_stack, units)
-        class_name = node.method_name
-        fqn = build_fqn(class_name, namespace_stack)
-        namespace = build_namespace(class_name, namespace_stack)
+        process_definition(node, :ruby_class, source, file_path, namespace_stack, units)
+      end
 
-        superclass = extract_superclass(node)
-        body_children = class_body_children(node)
-        includes = extract_mixins(body_children, 'include')
-        extends = extract_mixins(body_children, 'extend')
-        constants = extract_constants(body_children)
-        method_count = count_methods(body_children)
+      def process_module(node, source, file_path, namespace_stack, units)
+        process_definition(node, :ruby_module, source, file_path, namespace_stack, units)
+      end
 
-        unit = ExtractedUnit.new(type: :ruby_class, identifier: fqn, file_path: file_path)
+      def process_definition(node, type, source, file_path, namespace_stack, units)
+        name = node.method_name
+        fqn = build_fqn(name, namespace_stack)
+        namespace = build_namespace(name, namespace_stack)
+
+        superclass = type == :ruby_class ? extract_superclass(node) : nil
+        children = body_children(node, type)
+        includes = extract_mixins(children, 'include')
+        extends = extract_mixins(children, 'extend')
+        constants = extract_constants(children)
+        method_count = count_methods(children)
+
+        unit = ExtractedUnit.new(type: type, identifier: fqn, file_path: file_path)
         unit.namespace = namespace
         unit.source_code = extract_source(node, source)
         unit.metadata = {
@@ -76,50 +87,9 @@ module CodebaseIndex
         units << unit
 
         # Recurse into body for nested definitions
-        inner_ns = namespace_stack + fqn_parts(class_name)
-        body_children.each do |child|
+        inner_ns = namespace_stack + fqn_parts(name)
+        children.each do |child|
           extract_definitions(child, source, file_path, inner_ns, units)
-        end
-      end
-
-      def process_module(node, source, file_path, namespace_stack, units)
-        mod_name = node.method_name
-        fqn = build_fqn(mod_name, namespace_stack)
-        namespace = build_namespace(mod_name, namespace_stack)
-
-        body_children = module_body_children(node)
-        includes = extract_mixins(body_children, 'include')
-        extends = extract_mixins(body_children, 'extend')
-        constants = extract_constants(body_children)
-        method_count = count_methods(body_children)
-
-        unit = ExtractedUnit.new(type: :ruby_module, identifier: fqn, file_path: file_path)
-        unit.namespace = namespace
-        unit.source_code = extract_source(node, source)
-        unit.metadata = {
-          superclass: nil,
-          includes: includes,
-          extends: extends,
-          constants: constants,
-          method_count: method_count
-        }
-        unit.dependencies = build_dependencies(nil, includes, extends)
-        units << unit
-
-        # Recurse into body for nested definitions
-        inner_ns = namespace_stack + fqn_parts(mod_name)
-        body_children.each do |child|
-          extract_definitions(child, source, file_path, inner_ns, units)
-        end
-      end
-
-      # Build fully qualified name from class/module name and namespace stack.
-      # Handles both simple names ("Foo") and inline paths ("Foo::Bar").
-      def build_fqn(name, namespace_stack)
-        if namespace_stack.empty?
-          name
-        else
-          "#{namespace_stack.join('::')}::#{name}"
         end
       end
 
@@ -144,16 +114,12 @@ module CodebaseIndex
         build_const_name(superclass_node)
       end
 
-      # Get body children of a class node (children after name and superclass).
-      def class_body_children(node)
-        # children[0] = name node, children[1] = superclass (or nil), rest = body
-        (node.children || [])[2..] || []
-      end
-
-      # Get body children of a module node (children after name).
-      def module_body_children(node)
-        # children[0] = name node, rest = body
-        (node.children || [])[1..] || []
+      # Get body children of a class or module node.
+      # Class: children[0] = name, children[1] = superclass, rest = body
+      # Module: children[0] = name, rest = body
+      def body_children(node, type)
+        offset = type == :ruby_class ? 2 : 1
+        (node.children || [])[offset..] || []
       end
 
       # Extract include/extend module names from body send nodes.
@@ -182,7 +148,7 @@ module CodebaseIndex
         body_children.each do |child|
           next unless child.is_a?(Ast::Node)
 
-          count += 1 if child.type == :def || child.type == :defs
+          count += 1 if %i[def defs].include?(child.type)
         end
         count
       end

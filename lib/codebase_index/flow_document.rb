@@ -54,14 +54,30 @@ module CodebaseIndex
     # @param data [Hash] Previously serialized flow document data
     # @return [FlowDocument]
     def self.from_h(data)
+      data = deep_symbolize_keys(data)
+
       new(
-        entry_point: data[:entry_point] || data['entry_point'],
-        route: data[:route] || data['route'],
-        max_depth: data[:max_depth] || data['max_depth'] || 5,
-        steps: data[:steps] || data['steps'] || [],
-        generated_at: data[:generated_at] || data['generated_at']
+        entry_point: data[:entry_point],
+        route: data[:route],
+        max_depth: data[:max_depth] || 5,
+        steps: data[:steps] || [],
+        generated_at: data[:generated_at]
       )
     end
+
+    def self.deep_symbolize_keys(obj)
+      case obj
+      when Hash
+        obj.each_with_object({}) do |(key, value), result|
+          result[key.to_sym] = deep_symbolize_keys(value)
+        end
+      when Array
+        obj.map { |item| deep_symbolize_keys(item) }
+      else
+        obj
+      end
+    end
+    private_class_method :deep_symbolize_keys
 
     # Render as human-readable Markdown.
     #
@@ -87,8 +103,8 @@ module CodebaseIndex
     # Format the document header with route and entry point info.
     def format_header
       if @route
-        verb = @route[:verb] || @route['verb'] || '?'
-        path = @route[:path] || @route['path'] || '?'
+        verb = @route[:verb] || '?'
+        path = @route[:path] || '?'
         "## #{verb} #{path} → #{@entry_point}"
       else
         "## #{@entry_point}"
@@ -97,9 +113,9 @@ module CodebaseIndex
 
     # Format a single step as a Markdown section with operations table.
     def format_step(step, number)
-      unit = step[:unit] || step['unit']
-      file_path = step[:file_path] || step['file_path']
-      operations = step[:operations] || step['operations'] || []
+      unit = step[:unit]
+      file_path = step[:file_path]
+      operations = step[:operations] || []
 
       lines = []
       lines << "### #{number}. #{unit}"
@@ -121,51 +137,51 @@ module CodebaseIndex
     def format_operations(operations, lines, prefix: '')
       operations.each_with_index do |op, idx|
         num = "#{prefix}#{idx + 1}"
-        op_type = op[:type] || op['type']
+        op_type = op[:type]
         op_type_str = op_type.to_s
 
         case op_type_str
         when 'transaction'
-          receiver = op[:receiver] || op['receiver']
-          line = op[:line] || op['line']
+          receiver = op[:receiver]
+          line = op[:line]
           lines << "| #{num} | transaction | #{receiver}.transaction | #{line} |"
-          nested = op[:nested] || op['nested'] || []
+          nested = op[:nested] || []
           format_operations(nested, lines, prefix: "#{num}.")
         when 'conditional'
-          condition = op[:condition] || op['condition']
-          kind = op[:kind] || op['kind'] || 'if'
-          line = op[:line] || op['line']
+          condition = op[:condition]
+          kind = op[:kind] || 'if'
+          line = op[:line]
           lines << "| #{num} | #{kind} #{condition} | | #{line} |"
-          then_ops = op[:then_ops] || op['then_ops'] || []
-          else_ops = op[:else_ops] || op['else_ops'] || []
+          then_ops = op[:then_ops] || []
+          else_ops = op[:else_ops] || []
           format_operations(then_ops, lines, prefix: "#{num}a.")
           format_operations(else_ops, lines, prefix: "#{num}b.")
         when 'response'
-          status = op[:status_code] || op['status_code']
-          method = op[:render_method] || op['render_method']
-          line = op[:line] || op['line']
+          status = op[:status_code]
+          method = op[:render_method]
+          line = op[:line]
           status_text = status ? "#{status}" : '?'
           lines << "| #{num} | response | #{status_text} (via #{method}) | #{line} |"
         when 'async'
-          target = op[:target] || op['target']
-          method = op[:method] || op['method']
-          args = op[:args_hint] || op['args_hint']
-          line = op[:line] || op['line']
+          target = op[:target]
+          method = op[:method]
+          args = op[:args_hint]
+          line = op[:line]
           args_text = args&.any? ? "(#{args.join(', ')})" : ''
           lines << "| #{num} | async | #{target}.#{method}#{args_text} | #{line} |"
         when 'cycle'
-          target = op[:target] || op['target']
-          line = op[:line] || op['line']
+          target = op[:target]
+          line = op[:line]
           lines << "| #{num} | cycle | #{target} (revisit) | #{line} |"
         when 'dynamic_dispatch'
-          target = op[:target] || op['target']
-          method = op[:method] || op['method']
-          line = op[:line] || op['line']
+          target = op[:target]
+          method = op[:method]
+          line = op[:line]
           lines << "| #{num} | dynamic_dispatch | #{target}.#{method} | #{line} |"
         else
-          target = op[:target] || op['target']
-          method = op[:method] || op['method']
-          line = op[:line] || op['line']
+          target = op[:target]
+          method = op[:method]
+          line = op[:line]
           target_text = [target, method].compact.join('.')
           lines << "| #{num} | #{op_type_str} | #{target_text} | #{line} |"
         end
