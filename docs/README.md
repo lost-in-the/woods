@@ -12,6 +12,7 @@
 | [AGENTIC_STRATEGY.md](AGENTIC_STRATEGY.md) | How AI agents should consume the system — tool-use interface, task-to-strategy mapping, multi-turn patterns, MCP server design, anti-patterns, evaluation queries |
 | [MODEL_EXTRACTION_FIXES.md](MODEL_EXTRACTION_FIXES.md) | Six model extraction fixes (chunking gate, Proc serialization, STI detection, method filtering, callback conditions, token estimation) and their impact on downstream AI consumption |
 | [CONSOLE_SERVER.md](CONSOLE_SERVER.md) | Console MCP server design — architecture, bridge protocol, safety model (5 layers), tool interface (4 tiers), deployment modes (Docker/direct/SSH), phased implementation |
+| [FLOW_EXTRACTION.md](FLOW_EXTRACTION.md) | Flow extraction design — AST-based execution order analysis, FlowAssembler architecture, operation extraction (calls, transactions, responses, async), Prism/parser adapter, rake task interface |
 
 ## Reading Order
 
@@ -22,6 +23,7 @@
 5. **OPERATIONS.md** — Reference when deploying to production.
 6. **AGENTIC_STRATEGY.md** — Reference when designing agent integrations.
 7. **CONSOLE_SERVER.md** — Reference when implementing live data access alongside extraction.
+8. **FLOW_EXTRACTION.md** — Reference when implementing execution flow tracing from entry points.
 
 ## Status
 
@@ -39,5 +41,6 @@
 | Observability | 📋 Designed (see OPERATIONS.md) |
 | Agentic Integration | 📋 Planned (see AGENTIC_STRATEGY.md) |
 | Console MCP Server | 📋 Designed (see CONSOLE_SERVER.md) |
+| Flow Extraction | 📋 Designed (see FLOW_EXTRACTION.md) |
 | Evaluation Harness | 📋 Planned (see PROPOSAL.md) |
 | Cost Modeling | 📋 Documented (see BACKEND_MATRIX.md) |
