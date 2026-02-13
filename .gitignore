@@ -21,6 +21,9 @@ tmp/
 .idea/
 .vscode/
 
+# Worktrees
+.worktrees/
+
 # Claude config with local project references
 .claude/rules/integration-testing.md
 .claude/agents/host-app-validator.md
