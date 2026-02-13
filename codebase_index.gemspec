@@ -39,6 +39,9 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'mcp', '~> 0.6'
   spec.add_dependency 'rails', '>= 6.1'
 
+  spec.add_dependency 'parser', '~> 3.3'
+  spec.add_dependency 'prism', '>= 0.24'
+
   # Development dependencies
   spec.add_development_dependency 'bundler', '>= 2.0'
   spec.add_development_dependency 'rake', '~> 13.0'
