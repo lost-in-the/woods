@@ -126,7 +126,8 @@ RSpec.describe CodebaseIndex::Ast::Node do
     end
 
     it 'reconstructs const nodes' do
-      node = described_class.new(type: :const, children: [], line: 1, receiver: 'CodebaseIndex', method_name: 'Extractor')
+      node = described_class.new(type: :const, children: [], line: 1, receiver: 'CodebaseIndex',
+                                 method_name: 'Extractor')
 
       expect(node.to_source).to eq('CodebaseIndex::Extractor')
     end

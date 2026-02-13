@@ -160,7 +160,7 @@ module CodebaseIndex
           status = op[:status_code]
           method = op[:render_method]
           line = op[:line]
-          status_text = status ? "#{status}" : '?'
+          status_text = status ? status.to_s : '?'
           lines << "| #{num} | response | #{status_text} (via #{method}) | #{line} |"
         when 'async'
           target = op[:target]

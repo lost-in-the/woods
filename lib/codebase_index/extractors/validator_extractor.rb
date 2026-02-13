@@ -86,7 +86,7 @@ module CodebaseIndex
         return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
 
         file_path
-          .sub(Rails.root.to_s + '/', '')
+          .sub("#{Rails.root}/", '')
           .sub(%r{^app/validators/}, '')
           .sub('.rb', '')
           .camelize
@@ -151,9 +151,7 @@ module CodebaseIndex
         attrs = []
 
         # EachValidator: the attribute param in validate_each
-        if source =~ /def\s+validate_each\s*\(\s*\w+\s*,\s*(\w+)/
-          attrs << ::Regexp.last_match(1)
-        end
+        attrs << ::Regexp.last_match(1) if source =~ /def\s+validate_each\s*\(\s*\w+\s*,\s*(\w+)/
 
         # From error.add calls: record.errors.add(:attribute, ...)
         source.scan(/errors\.add\s*\(\s*:(\w+)/).flatten.each { |a| attrs << a }
@@ -172,8 +170,8 @@ module CodebaseIndex
         source.scan(/if\s+(.+?)(?:\s*$|\s*then)/).flatten.each { |r| rules << r.strip }
 
         # Regex validations
-        source.scan(/=~\s*(\/[^\/]+\/)/).flatten.each { |r| rules << "matches #{r}" }
-        source.scan(/match\?\s*\((\/[^\/]+\/)\)/).flatten.each { |r| rules << "matches #{r}" }
+        source.scan(%r{=~\s*(/[^/]+/)}).flatten.each { |r| rules << "matches #{r}" }
+        source.scan(%r{match\?\s*\((/[^/]+/)\)}).flatten.each { |r| rules << "matches #{r}" }
 
         rules.first(10) # Cap at 10 to avoid noise
       end

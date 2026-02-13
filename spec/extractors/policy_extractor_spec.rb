@@ -197,7 +197,8 @@ RSpec.describe CodebaseIndex::Extractors::PolicyExtractor do
       RUBY
 
       unit = described_class.new.extract_policy_file(path)
-      expect(unit.metadata[:decision_methods]).to include('can_access?', 'qualifies?', 'meets_requirements?', 'should_show?')
+      expect(unit.metadata[:decision_methods]).to include('can_access?', 'qualifies?', 'meets_requirements?',
+                                                          'should_show?')
     end
   end
 

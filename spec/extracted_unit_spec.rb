@@ -124,7 +124,7 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
     end
 
     it 'creates chunks with content_hash' do
-      unit.source_code = (['x' * 80 + "\n"] * 200).join
+      unit.source_code = (["#{'x' * 80}\n"] * 200).join
       chunks = unit.build_default_chunks(max_tokens: 500)
 
       expect(chunks).not_to be_empty
@@ -137,7 +137,7 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
     end
 
     it 'includes unit header in each chunk' do
-      unit.source_code = (['x' * 80 + "\n"] * 200).join
+      unit.source_code = (["#{'x' * 80}\n"] * 200).join
       chunks = unit.build_default_chunks(max_tokens: 500)
 
       chunks.each do |chunk|

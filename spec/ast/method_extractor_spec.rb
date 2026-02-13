@@ -77,7 +77,7 @@ RSpec.describe CodebaseIndex::Ast::MethodExtractor do
     end
 
     it 'returns empty array for source with no methods' do
-      source = "class Foo; end"
+      source = 'class Foo; end'
 
       expect(extractor.extract_all_methods(source)).to eq([])
     end
@@ -101,7 +101,7 @@ RSpec.describe CodebaseIndex::Ast::MethodExtractor do
     end
 
     it 'returns nil for a missing method' do
-      source = "class Foo; end"
+      source = 'class Foo; end'
 
       expect(extractor.extract_method_source(source, 'missing')).to be_nil
     end

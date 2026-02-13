@@ -346,7 +346,7 @@ module CodebaseIndex
 
         return { root: identifier, found: false, nodes: {} } unless nodes_data.key?(identifier)
 
-        type_set = types ? types.to_set : nil
+        type_set = types&.to_set
         visited = Set.new([identifier])
         queue = [[identifier, 0]]
         result_nodes = {}

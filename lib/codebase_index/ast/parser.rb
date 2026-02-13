@@ -134,9 +134,9 @@ module CodebaseIndex
         when Prism::NilNode
           nil
         when Prism::TrueNode
-          Node.new(type: :true, children: [], line: line_for_prism(prism_node))
+          Node.new(type: true, children: [], line: line_for_prism(prism_node))
         when Prism::FalseNode
-          Node.new(type: :false, children: [], line: line_for_prism(prism_node))
+          Node.new(type: false, children: [], line: line_for_prism(prism_node))
         when Prism::SelfNode
           Node.new(type: :self, children: [], line: line_for_prism(prism_node), source: 'self')
         when Prism::LocalVariableReadNode
@@ -315,7 +315,7 @@ module CodebaseIndex
         children = [receiver_node].compact
 
         # If there's a block, create a :block node wrapping this send
-        if prism_node.block && prism_node.block.is_a?(Prism::BlockNode)
+        if prism_node.block.is_a?(Prism::BlockNode)
           send_node = Node.new(
             type: :send,
             children: children,
@@ -432,7 +432,7 @@ module CodebaseIndex
         lines = source.lines
         start_idx = node.location.start_line - 1
         end_idx = node.location.end_line - 1
-        return nil if start_idx < 0 || end_idx >= lines.length
+        return nil if start_idx.negative? || end_idx >= lines.length
 
         lines[start_idx..end_idx].join
       end
@@ -597,10 +597,10 @@ module CodebaseIndex
           parser_node.children[0]
         when :nil
           nil
-        when :true
-          Node.new(type: :true, children: [], line: parser_node.loc.line)
-        when :false
-          Node.new(type: :false, children: [], line: parser_node.loc.line)
+        when true
+          Node.new(type: true, children: [], line: parser_node.loc.line)
+        when false
+          Node.new(type: false, children: [], line: parser_node.loc.line)
         when :self
           Node.new(type: :self, children: [], line: parser_node.loc.line, source: 'self')
         else
@@ -619,7 +619,7 @@ module CodebaseIndex
         lines = source.lines
         start_idx = node.loc.line - 1
         end_idx = node.loc.expression.last_line - 1
-        return nil if start_idx < 0 || end_idx >= lines.length
+        return nil if start_idx.negative? || end_idx >= lines.length
 
         lines[start_idx..end_idx].join
       end

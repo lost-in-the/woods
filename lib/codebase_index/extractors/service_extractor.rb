@@ -37,7 +37,7 @@ module CodebaseIndex
 
       def initialize
         @directories = SERVICE_DIRECTORIES.map { |d| Rails.root.join(d) }
-                                          .select { |d| d.directory? }
+                                          .select(&:directory?)
       end
 
       # Extract all service objects
@@ -90,7 +90,7 @@ module CodebaseIndex
         return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
 
         # Fall back to convention
-        relative_path = file_path.sub(Rails.root.to_s + '/', '')
+        relative_path = file_path.sub("#{Rails.root}/", '')
 
         # app/services/payments/stripe_service.rb -> Payments::StripeService
         relative_path

@@ -277,7 +277,7 @@ module CodebaseIndex
           ]
 
           found = view_paths.select { |p| File.exist?(p) }
-                            .map { |p| p.to_s.sub(Rails.root.to_s + '/', '') }
+                            .map { |p| p.to_s.sub("#{Rails.root}/", '') }
 
           templates[action] = found if found.any?
         end

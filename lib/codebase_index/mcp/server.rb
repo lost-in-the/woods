@@ -82,7 +82,8 @@ module CodebaseIndex
                          'Use sections to select specific keys (type, identifier, file_path, namespace are always included).',
             input_schema: {
               properties: {
-                identifier: { type: 'string', description: 'Exact unit identifier (e.g. "Post", "PostsController", "Api::V1::HealthController")' },
+                identifier: { type: 'string',
+                              description: 'Exact unit identifier (e.g. "Post", "PostsController", "Api::V1::HealthController")' },
                 include_source: { type: 'boolean', description: 'Include source_code in response (default: true)' },
                 sections: {
                   type: 'array', items: { type: 'string' },
@@ -91,7 +92,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, include_source: nil, sections: nil, server_context:|
+          ) do |identifier:, server_context:, include_source: nil, sections: nil|
             unit = reader.find_unit(identifier)
             if unit
               always_include = %w[type identifier file_path namespace]
@@ -127,7 +128,7 @@ module CodebaseIndex
               },
               required: ['query']
             }
-          ) do |query:, types: nil, fields: nil, limit: nil, server_context:|
+          ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
             results = reader.search(
               query,
               types: types,
@@ -135,10 +136,10 @@ module CodebaseIndex
               limit: limit || 20
             )
             respond.call(JSON.pretty_generate({
-              query: query,
-              result_count: results.size,
-              results: results
-            }))
+                                                query: query,
+                                                result_count: results.size,
+                                                results: results
+                                              }))
           end
         end
 
@@ -157,14 +158,15 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, depth: nil, types: nil, server_context:|
+          ) do |identifier:, server_context:, depth: nil, types: nil|
             result = reader.traverse_dependencies(
               identifier,
               depth: depth || 2,
               types: types
             )
             if result[:found] == false
-              result[:message] = "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+              result[:message] =
+                "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
             respond.call(JSON.pretty_generate(result))
           end
@@ -185,14 +187,15 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, depth: nil, types: nil, server_context:|
+          ) do |identifier:, server_context:, depth: nil, types: nil|
             result = reader.traverse_dependents(
               identifier,
               depth: depth || 2,
               types: types
             )
             if result[:found] == false
-              result[:message] = "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+              result[:message] =
+                "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
             respond.call(JSON.pretty_generate(result))
           end
@@ -210,11 +213,9 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |detail: nil, server_context:|
+          ) do |server_context:, detail: nil|
             result = { manifest: reader.manifest }
-            if (detail || 'summary') == 'full'
-              result[:summary] = reader.summary
-            end
+            result[:summary] = reader.summary if (detail || 'summary') == 'full'
             respond.call(JSON.pretty_generate(result))
           end
         end
@@ -234,7 +235,7 @@ module CodebaseIndex
                 limit: { type: 'integer', description: 'Limit results per section (default: 20)' }
               }
             }
-          ) do |analysis: nil, limit: nil, server_context:|
+          ) do |server_context:, analysis: nil, limit: nil|
             data = reader.graph_analysis
             section = analysis || 'all'
 
@@ -285,7 +286,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |limit: nil, types: nil, server_context:|
+          ) do |server_context:, limit: nil, types: nil|
             scores = reader.dependency_graph.pagerank
             graph_data = reader.raw_graph_data
             nodes = graph_data['nodes'] || {}
@@ -317,18 +318,19 @@ module CodebaseIndex
                          'source_code, and metadata of rails_source type units extracted from installed gems.',
             input_schema: {
               properties: {
-                keyword: { type: 'string', description: 'Concept keyword to search for (e.g. "ActiveRecord", "routing", "callbacks")' },
+                keyword: { type: 'string',
+                           description: 'Concept keyword to search for (e.g. "ActiveRecord", "routing", "callbacks")' },
                 limit: { type: 'integer', description: 'Maximum results (default: 20)' }
               },
               required: ['keyword']
             }
-          ) do |keyword:, limit: nil, server_context:|
+          ) do |keyword:, server_context:, limit: nil|
             results = reader.framework_sources(keyword, limit: limit || 20)
             respond.call(JSON.pretty_generate({
-              keyword: keyword,
-              result_count: results.size,
-              results: results
-            }))
+                                                keyword: keyword,
+                                                result_count: results.size,
+                                                results: results
+                                              }))
           end
         end
 
@@ -346,12 +348,12 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |limit: nil, types: nil, server_context:|
+          ) do |server_context:, limit: nil, types: nil|
             results = reader.recent_changes(limit: limit || 10, types: types)
             respond.call(JSON.pretty_generate({
-              result_count: results.size,
-              results: results
-            }))
+                                                result_count: results.size,
+                                                results: results
+                                              }))
           end
         end
 
@@ -365,11 +367,11 @@ module CodebaseIndex
             reader.reload!
             manifest = reader.manifest
             respond.call(JSON.pretty_generate({
-              reloaded: true,
-              extracted_at: manifest['extracted_at'],
-              total_units: manifest['total_units'],
-              counts: manifest['counts']
-            }))
+                                                reloaded: true,
+                                                extracted_at: manifest['extracted_at'],
+                                                total_units: manifest['total_units'],
+                                                counts: manifest['counts']
+                                              }))
           end
         end
 

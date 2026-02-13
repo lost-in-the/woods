@@ -223,7 +223,7 @@ module CodebaseIndex
     # Searches across type subdirectories since the extractor writes to
     # `<output_dir>/<type>/<safe_filename>.json`.
     def load_unit(unit_id)
-      filename = unit_id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
+      filename = "#{unit_id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
 
       Dir[File.join(@extracted_dir, '*', filename)].each do |path|
         return JSON.parse(File.read(path), symbolize_names: true)

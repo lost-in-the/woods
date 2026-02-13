@@ -137,7 +137,7 @@ module CodebaseIndex
 
         # Fall back to convention
         file_path
-          .sub(Rails.root.to_s + '/', '')
+          .sub("#{Rails.root}/", '')
           .sub(%r{^app/(jobs|workers|sidekiq)/}, '')
           .sub('.rb', '')
           .camelize

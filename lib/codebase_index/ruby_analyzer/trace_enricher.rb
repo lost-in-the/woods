@@ -120,7 +120,7 @@ module CodebaseIndex
           nil
         end
 
-        def extract_caller_method(tp)
+        def extract_caller_method(_tp)
           # TracePoint doesn't directly expose caller method,
           # but we can get it from the call stack
           caller_locations(3, 1)&.first&.label

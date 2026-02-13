@@ -103,9 +103,7 @@ module CodebaseIndex
         end
 
         # Case 3: head :status
-        if method_name == 'head' && arguments.first
-          return resolve_status(arguments.first)
-        end
+        return resolve_status(arguments.first) if method_name == 'head' && arguments.first
 
         # Case 4: redirect_to defaults to 302
         return 302 if method_name == 'redirect_to'
@@ -133,8 +131,6 @@ module CodebaseIndex
           # Try as integer string
           return cleaned.to_i if cleaned.match?(/\A\d+\z/)
 
-          nil
-        else
           nil
         end
       end

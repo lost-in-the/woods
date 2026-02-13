@@ -8,13 +8,13 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
   describe '#parse' do
     it 'parses valid Ruby source' do
-      root = parser.parse("x = 1")
+      root = parser.parse('x = 1')
 
       expect(root).to be_a(CodebaseIndex::Ast::Node)
     end
 
     it 'raises ExtractionError for invalid syntax' do
-      expect { parser.parse("def foo(") }.to raise_error(CodebaseIndex::ExtractionError)
+      expect { parser.parse('def foo(') }.to raise_error(CodebaseIndex::ExtractionError)
     end
 
     it 'parses multi-class files' do
@@ -46,7 +46,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
   describe 'structural contracts' do
     describe 'send nodes' do
       it 'has receiver and method_name populated' do
-        root = parser.parse("User.find(1)")
+        root = parser.parse('User.find(1)')
         send_node = root.find_first(:send)
 
         expect(send_node).not_to be_nil
@@ -63,7 +63,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
       end
 
       it 'captures arguments as strings' do
-        root = parser.parse("render json: data, status: :ok")
+        root = parser.parse('render json: data, status: :ok')
         send_node = root.find_first(:send)
 
         expect(send_node.arguments).to be_an(Array)
@@ -73,7 +73,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
     describe 'def nodes' do
       it 'has method_name populated' do
-        root = parser.parse("def create; end")
+        root = parser.parse('def create; end')
         def_node = root.find_first(:def)
 
         expect(def_node).not_to be_nil
@@ -110,7 +110,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
     describe 'defs nodes (class methods)' do
       it 'has method_name and receiver populated' do
-        root = parser.parse("def self.build; end")
+        root = parser.parse('def self.build; end')
         defs_node = root.find_first(:defs)
 
         expect(defs_node).not_to be_nil
@@ -121,7 +121,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
     describe 'class nodes' do
       it 'has method_name for constant name' do
-        root = parser.parse("class Foo; end")
+        root = parser.parse('class Foo; end')
         class_node = root.find_first(:class)
 
         expect(class_node).not_to be_nil
@@ -129,7 +129,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
       end
 
       it 'handles namespaced classes' do
-        root = parser.parse("class A::B::C; end")
+        root = parser.parse('class A::B::C; end')
         class_node = root.find_first(:class)
 
         expect(class_node.method_name).to eq('A::B::C')
@@ -151,7 +151,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
     describe 'module nodes' do
       it 'has method_name for module name' do
-        root = parser.parse("module MyModule; end")
+        root = parser.parse('module MyModule; end')
         mod_node = root.find_first(:module)
 
         expect(mod_node).not_to be_nil
@@ -161,7 +161,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
     describe 'const nodes' do
       it 'uses method_name for constant name and receiver for parent' do
-        root = parser.parse("CodebaseIndex::Extractor")
+        root = parser.parse('CodebaseIndex::Extractor')
         const_nodes = root.find_all(:const)
 
         # The top-level const path node
@@ -173,7 +173,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
       end
 
       it 'handles simple constants' do
-        root = parser.parse("Foo")
+        root = parser.parse('Foo')
         const_node = root.find_first(:const)
 
         expect(const_node.method_name).to eq('Foo')
@@ -201,7 +201,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
       end
 
       it 'handles blocks with brace syntax' do
-        root = parser.parse("items.map { |i| i.name }")
+        root = parser.parse('items.map { |i| i.name }')
         block_node = root.find_first(:block)
 
         expect(block_node).not_to be_nil

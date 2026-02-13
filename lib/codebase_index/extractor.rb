@@ -281,7 +281,7 @@ module CodebaseIndex
 
     def setup_output_directory
       FileUtils.mkdir_p(@output_dir)
-      EXTRACTORS.keys.each do |type|
+      EXTRACTORS.each_key do |type|
         FileUtils.mkdir_p(@output_dir.join(type.to_s))
       end
     end
@@ -327,7 +327,7 @@ module CodebaseIndex
 
       # Batch-fetch all git data in minimal subprocess calls
       git_data = batch_git_data(file_paths)
-      root = Rails.root.to_s + '/'
+      root = "#{Rails.root}/"
 
       # Assign results to units
       @results.each do |type, units|
@@ -371,7 +371,7 @@ module CodebaseIndex
     def batch_git_data(file_paths)
       return {} if file_paths.empty?
 
-      root = Rails.root.to_s + '/'
+      root = "#{Rails.root}/"
       relative_paths = file_paths.map { |f| f.sub(root, '') }
       result = {}
       relative_paths.each { |rp| result[rp] = {} }
@@ -630,7 +630,7 @@ module CodebaseIndex
     # @param identifier [String] Unit identifier (e.g., "Admin::UsersController")
     # @return [String] Safe filename (e.g., "Admin__UsersController.json")
     def safe_filename(identifier)
-      identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
+      "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
     end
 
     def json_serialize(data)
@@ -685,17 +685,17 @@ module CodebaseIndex
       return unless extractor
 
       unit = if (method = CLASS_BASED[type])
-                klass = begin
-                  unit_id.constantize
-                rescue StandardError
-                  nil
-                end
-                extractor.public_send(method, klass) if klass
-              elsif (method = FILE_BASED[type])
-                extractor.public_send(method, file_path)
-              elsif GRAPHQL_TYPES.include?(type)
-                extractor.extract_graphql_file(file_path)
-              end
+               klass = begin
+                 unit_id.constantize
+               rescue StandardError
+                 nil
+               end
+               extractor.public_send(method, klass) if klass
+             elsif (method = FILE_BASED[type])
+               extractor.public_send(method, file_path)
+             elsif GRAPHQL_TYPES.include?(type)
+               extractor.extract_graphql_file(file_path)
+             end
 
       return unless unit
 

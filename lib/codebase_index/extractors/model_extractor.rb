@@ -455,9 +455,7 @@ module CodebaseIndex
       def extract_scopes_by_regex(lines)
         scopes = []
         lines.each do |line|
-          if line =~ /\A\s*scope\s+:(\w+)/
-            scopes << { name: ::Regexp.last_match(1), source: line }
-          end
+          scopes << { name: ::Regexp.last_match(1), source: line } if line =~ /\A\s*scope\s+:(\w+)/
         end
         scopes
       end
@@ -657,7 +655,11 @@ module CodebaseIndex
       def format_validation_conditions(validator)
         conditions = {}
         conditions[:if] = Array(validator.options[:if]).map { |c| condition_label(c) } if validator.options[:if]
-        conditions[:unless] = Array(validator.options[:unless]).map { |c| condition_label(c) } if validator.options[:unless]
+        if validator.options[:unless]
+          conditions[:unless] = Array(validator.options[:unless]).map do |c|
+            condition_label(c)
+          end
+        end
         conditions[:on] = validator.options[:on] if validator.options[:on]
         conditions
       end
@@ -687,8 +689,8 @@ module CodebaseIndex
       # @param validator [ActiveModel::Validator]
       # @return [Boolean]
       def implicit_belongs_to_validator?(validator)
-        if defined?(ActiveRecord::Validations::PresenceValidator)
-          return false unless validator.is_a?(ActiveRecord::Validations::PresenceValidator)
+        if defined?(ActiveRecord::Validations::PresenceValidator) && !validator.is_a?(ActiveRecord::Validations::PresenceValidator)
+          return false
         end
 
         loc = validator.class.instance_method(:validate).source_location&.first

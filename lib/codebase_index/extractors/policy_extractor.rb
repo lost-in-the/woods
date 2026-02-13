@@ -88,7 +88,7 @@ module CodebaseIndex
         return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
 
         file_path
-          .sub(Rails.root.to_s + '/', '')
+          .sub("#{Rails.root}/", '')
           .sub(%r{^app/policies/}, '')
           .sub('.rb', '')
           .camelize

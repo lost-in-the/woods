@@ -24,7 +24,6 @@
 require_relative 'codebase_index/version'
 
 module CodebaseIndex
-
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class ExtractionError < Error; end

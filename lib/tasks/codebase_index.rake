@@ -132,7 +132,7 @@ namespace :codebase_index do
     FileUtils.mkdir_p(framework_dir)
 
     units.each do |unit|
-      file_name = unit.identifier.gsub('/', '__').gsub('::', '__') + '.json'
+      file_name = "#{unit.identifier.gsub('/', '__').gsub('::', '__')}.json"
       File.write(
         framework_dir.join(file_name),
         JSON.pretty_generate(unit.to_h)
@@ -349,7 +349,7 @@ namespace :codebase_index do
     FileUtils.mkdir_p(json_dir)
 
     units.each do |unit|
-      file_name = unit.identifier.gsub(/[^a-zA-Z0-9_]/, '_') + '.json'
+      file_name = "#{unit.identifier.gsub(/[^a-zA-Z0-9_]/, '_')}.json"
       File.write(
         File.join(json_dir, file_name),
         JSON.pretty_generate(unit.to_h)

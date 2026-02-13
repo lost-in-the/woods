@@ -251,7 +251,7 @@ module CodebaseIndex
           :graphql_type
         elsif defined?(GraphQL::Schema::Object) && type_class < GraphQL::Schema::Object
           # Check if this is the Query root type
-          if @schema_class && @schema_class.respond_to?(:query) && @schema_class.query == type_class
+          if @schema_class.respond_to?(:query) && @schema_class.query == type_class
             :graphql_query
           else
             :graphql_type
@@ -316,7 +316,7 @@ module CodebaseIndex
         return nil unless defined?(Rails)
 
         file_path
-          .sub(Rails.root.join(GRAPHQL_DIRECTORY).to_s + '/', '')
+          .sub("#{Rails.root.join(GRAPHQL_DIRECTORY)}/", '')
           .sub('.rb', '')
           .camelize
       end
@@ -404,7 +404,7 @@ module CodebaseIndex
           # Metrics
           field_count: count_fields(source, runtime_class),
           argument_count: count_arguments(source, runtime_class),
-          loc: source.lines.count { |l| l.strip.length > 0 && !l.strip.start_with?('#') }
+          loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
         }
       end
 

@@ -133,7 +133,7 @@ module CodebaseIndex
           content_areas: extract_content_areas(source),
           renders_many: extract_renders_many(source),
           renders_one: extract_renders_one(source),
-          loc: source.lines.count { |l| l.strip.length > 0 && !l.strip.start_with?('#') }
+          loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
         }
       end
 

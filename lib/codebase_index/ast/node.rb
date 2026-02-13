@@ -83,7 +83,6 @@ module CodebaseIndex
           type.to_s
         end
       end
-
     end
   end
 end

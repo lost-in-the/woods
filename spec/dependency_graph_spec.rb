@@ -147,5 +147,4 @@ RSpec.describe CodebaseIndex::DependencyGraph do
       expect(restored.units_of_type(:service)).to include('UserService')
     end
   end
-
 end

@@ -168,7 +168,7 @@ module CodebaseIndex
         lines = source.lines
         start_idx = node.line - 1
         end_idx = node.end_line - 1
-        return nil if start_idx < 0 || end_idx >= lines.length
+        return nil if start_idx.negative? || end_idx >= lines.length
 
         lines[start_idx..end_idx].join
       end

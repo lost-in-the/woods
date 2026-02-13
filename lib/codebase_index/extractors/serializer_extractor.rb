@@ -151,7 +151,7 @@ module CodebaseIndex
 
         # Fall back to convention
         file_path
-          .sub(Rails.root.to_s + '/', '')
+          .sub("#{Rails.root}/", '')
           .sub(%r{^app/(serializers|blueprinters|decorators)/}, '')
           .sub('.rb', '')
           .camelize
@@ -237,7 +237,7 @@ module CodebaseIndex
           associations: extract_associations(source),
           custom_methods: extract_custom_methods(source),
           views: extract_views(source),
-          loc: source.lines.count { |l| l.strip.length > 0 && !l.strip.start_with?('#') }
+          loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
         }
       end
 

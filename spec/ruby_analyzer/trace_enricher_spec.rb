@@ -38,7 +38,7 @@ RSpec.describe CodebaseIndex::RubyAnalyzer::TraceEnricher do
       trace_data = described_class.record do
         obj = Object.new
         def obj.traced_call
-          "result"
+          'result'
         end
         obj.traced_call
       end

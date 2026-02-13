@@ -7,28 +7,28 @@ module CodebaseIndex
   module Ast
     # Method names that are too common to be useful in call graphs.
     INSIGNIFICANT_METHODS = Set.new(%w[
-      to_s to_i to_f to_a to_h to_sym to_r to_c to_str to_proc
-      nil? present? blank? empty? any? none? frozen? is_a? kind_of?
-      respond_to? respond_to_missing? instance_of? equal?
-      == != eql? <=> === =~ !~ >= <= > <
-      ! & | ^ ~ + - * / % **
-      freeze dup clone inspect hash object_id class
-      send __send__ method tap then yield_self itself
-      new allocate
-      [] []=
-      length size count
-      first last
-      map each select reject flat_map collect detect find_index
-      merge merge! update
-      keys values
-      push pop shift unshift
-      strip chomp chop downcase upcase
-      puts print p pp warn raise fail
-      require require_relative load autoload
-      attr_reader attr_writer attr_accessor
-      private protected public
-      include extend prepend
-    ]).freeze
+                                      to_s to_i to_f to_a to_h to_sym to_r to_c to_str to_proc
+                                      nil? present? blank? empty? any? none? frozen? is_a? kind_of?
+                                      respond_to? respond_to_missing? instance_of? equal?
+                                      == != eql? <=> === =~ !~ >= <= > <
+                                      ! & | ^ ~ + - * / % **
+                                      freeze dup clone inspect hash object_id class
+                                      send __send__ method tap then yield_self itself
+                                      new allocate
+                                      [] []=
+                                      length size count
+                                      first last
+                                      map each select reject flat_map collect detect find_index
+                                      merge merge! update
+                                      keys values
+                                      push pop shift unshift
+                                      strip chomp chop downcase upcase
+                                      puts print p pp warn raise fail
+                                      require require_relative load autoload
+                                      attr_reader attr_writer attr_accessor
+                                      private protected public
+                                      include extend prepend
+                                    ]).freeze
 
     # Extracts call sites from an AST node tree.
     #

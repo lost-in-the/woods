@@ -27,7 +27,7 @@ RSpec.describe CodebaseIndex::Ast::CallSiteExtractor do
     end
 
     it 'extracts receiver information' do
-      root = parser.parse("User.find(1)")
+      root = parser.parse('User.find(1)')
       calls = extractor.extract(root)
 
       call = calls.find { |c| c[:method_name] == 'find' }
@@ -35,7 +35,7 @@ RSpec.describe CodebaseIndex::Ast::CallSiteExtractor do
     end
 
     it 'returns nil receiver for bare method calls' do
-      root = parser.parse("do_something()")
+      root = parser.parse('do_something()')
       calls = extractor.extract(root)
 
       call = calls.find { |c| c[:method_name] == 'do_something' }
@@ -60,7 +60,7 @@ RSpec.describe CodebaseIndex::Ast::CallSiteExtractor do
     end
 
     it 'extracts chained calls' do
-      root = parser.parse("User.where(active: true).order(:name)")
+      root = parser.parse('User.where(active: true).order(:name)')
       calls = extractor.extract(root)
 
       method_names = calls.map { |c| c[:method_name] }
@@ -103,7 +103,7 @@ RSpec.describe CodebaseIndex::Ast::CallSiteExtractor do
     end
 
     it 'returns call hashes with required keys' do
-      root = parser.parse("User.find(1)")
+      root = parser.parse('User.find(1)')
       calls = extractor.extract(root)
 
       expect(calls.first).to include(
@@ -140,7 +140,7 @@ RSpec.describe CodebaseIndex::Ast::CallSiteExtractor do
     end
 
     it 'keeps insignificant methods when receiver is a known unit' do
-      source = "MyService.new"
+      source = 'MyService.new'
 
       root = parser.parse(source)
       calls = extractor.extract_significant(root, known_units: ['MyService'])
