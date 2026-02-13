@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
+
 module CodebaseIndex
   module Extractors
     # ValidatorExtractor handles custom validator class extraction.
@@ -21,6 +24,9 @@ module CodebaseIndex
     #   email = units.find { |u| u.identifier == "EmailFormatValidator" }
     #
     class ValidatorExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       # Directories to scan for custom validators
       VALIDATOR_DIRECTORIES = %w[
         app/validators
@@ -91,11 +97,6 @@ module CodebaseIndex
           source.match?(/< ActiveModel::EachValidator/) ||
           source.match?(/def\s+validate_each\b/) ||
           source.match?(/def\s+validate\(/)
-      end
-
-      def extract_namespace(class_name)
-        parts = class_name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -207,32 +208,6 @@ module CodebaseIndex
         inferred.empty? ? [] : [inferred]
       end
 
-      def extract_public_methods(source)
-        methods = []
-        in_private = false
-        in_protected = false
-
-        source.each_line do |line|
-          stripped = line.strip
-
-          in_private = true if stripped == 'private'
-          in_protected = true if stripped == 'protected'
-          in_private = false if stripped == 'public'
-          in_protected = false if stripped == 'public'
-
-          if !in_private && !in_protected && stripped =~ /def\s+((?:self\.)?\w+[?!=]?)/
-            method_name = ::Regexp.last_match(1)
-            methods << method_name unless method_name.start_with?('_')
-          end
-        end
-
-        methods
-      end
-
-      def extract_class_methods(source)
-        source.scan(/def\s+self\.(\w+[?!=]?)/).flatten
-      end
-
       def extract_custom_errors(source)
         source.scan(/class\s+(\w+(?:Error|Exception))\s*</).flatten
       end
@@ -243,16 +218,8 @@ module CodebaseIndex
 
       def extract_dependencies(source)
         deps = []
-
-        # Model references (using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :validation }
-        end
-
-        # Service references
-        source.scan(/(\w+Service)(?:\.|::new|\.call|\.perform)/).flatten.uniq.each do |service|
-          deps << { type: :service, target: service, via: :code_reference }
-        end
+        deps.concat(scan_model_dependencies(source, via: :validation))
+        deps.concat(scan_service_dependencies(source))
 
         # Other validators referenced
         source.scan(/(\w+Validator)(?:\.|::new)/).flatten.uniq.each do |validator|

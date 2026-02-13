@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
+
 module CodebaseIndex
   module Extractors
     # PhlexExtractor handles Phlex component extraction.
@@ -18,6 +21,9 @@ module CodebaseIndex
     #   card = units.find { |u| u.identifier == "Components::CardComponent" }
     #
     class PhlexExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       # Common Phlex base classes to look for
       PHLEX_BASES = %w[
         Phlex::HTML
@@ -108,11 +114,6 @@ module CodebaseIndex
         end
       rescue StandardError
         nil
-      end
-
-      def extract_namespace(component)
-        parts = component.name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       def read_source(file_path)
@@ -222,10 +223,8 @@ module CodebaseIndex
           deps << { type: :component, target: comp, via: :render }
         end
 
-        # Model references (often passed as props, using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :data_dependency }
-        end
+        # Model references (often passed as props)
+        deps.concat(scan_model_dependencies(source, via: :data_dependency))
 
         # Helper modules
         source.scan(/include\s+(\w+Helper)/).flatten.uniq.each do |helper|

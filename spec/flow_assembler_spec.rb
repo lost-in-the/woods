@@ -22,7 +22,11 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       'metadata' => metadata,
       'dependencies' => dependencies
     }
-    File.write(File.join(extracted_dir, "#{identifier}.json"), JSON.generate(data))
+    # Mirror the extractor's output layout: <type>s/<safe_filename>.json
+    type_dir = File.join(extracted_dir, "#{type}s")
+    FileUtils.mkdir_p(type_dir)
+    filename = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
+    File.write(File.join(type_dir, filename), JSON.generate(data))
   end
 
   describe '#assemble' do

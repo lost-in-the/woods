@@ -187,20 +187,25 @@ module CodebaseIndex
     # Graph Accessors
     # ──────────────────────────────────────────────────────────────────────
 
-    # Access graph nodes. Prefers the public to_h interface but caches the
-    # result to avoid repeated hash construction.
+    # Cache the full graph serialization once, avoiding repeated to_h calls.
+    #
+    # @return [Hash] Full graph data
+    def graph_data
+      @graph_data ||= @graph.to_h
+    end
+
+    # Access graph nodes from cached graph data.
     #
     # @return [Hash] identifier => { type:, file_path:, namespace: }
     def graph_nodes
-      @graph_nodes ||= @graph.to_h[:nodes]
+      @graph_nodes ||= graph_data[:nodes]
     end
 
-    # Access graph forward edges. Prefers internal state for performance
-    # in tight loops.
+    # Access graph forward edges from cached graph data.
     #
     # @return [Hash] identifier => [dependency identifiers]
     def graph_edges
-      @graph_edges ||= @graph.to_h[:edges]
+      @graph_edges ||= graph_data[:edges]
     end
 
     # ──────────────────────────────────────────────────────────────────────

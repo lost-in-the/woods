@@ -7,33 +7,12 @@ require 'fileutils'
 require 'codebase_index/extractors/manager_extractor'
 
 RSpec.describe CodebaseIndex::Extractors::ManagerExtractor do
-  let(:tmp_dir) { Dir.mktmpdir }
-  let(:rails_root) { Pathname.new(tmp_dir) }
-  let(:logger) { double('Logger', error: nil, warn: nil, debug: nil, info: nil) }
-
-  before do
-    stub_const('Rails', double('Rails', root: rails_root, logger: logger))
-    stub_const('CodebaseIndex::ModelNameCache', double('ModelNameCache', model_names_regex: /(?!)/))
-  end
-
-  after do
-    FileUtils.rm_rf(tmp_dir)
-  end
-
-  def create_file(relative_path, content)
-    full_path = File.join(tmp_dir, relative_path)
-    FileUtils.mkdir_p(File.dirname(full_path))
-    File.write(full_path, content)
-    full_path
-  end
+  include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
-    it 'handles missing directories gracefully' do
-      extractor = described_class.new
-      expect(extractor.extract_all).to eq([])
-    end
+    it_behaves_like 'handles missing directories'
   end
 
   # ── extract_all ──────────────────────────────────────────────────────
@@ -201,20 +180,16 @@ RSpec.describe CodebaseIndex::Extractors::ManagerExtractor do
   # ── Dependencies ─────────────────────────────────────────────────────
 
   describe 'dependency extraction' do
-    it 'includes :via key on all dependencies' do
-      path = create_file('app/managers/order_manager.rb', <<~RUBY)
-        class OrderManager < SimpleDelegator
-          def process
-            PaymentService.call(self)
-          end
-        end
-      RUBY
-
-      unit = described_class.new.extract_manager_file(path)
-      unit.dependencies.each do |dep|
-        expect(dep).to have_key(:via), "Dependency #{dep.inspect} missing :via key"
-      end
-    end
+    it_behaves_like 'all dependencies have :via key',
+                    :extract_manager_file,
+                    'app/managers/order_manager.rb',
+                    <<~RUBY
+                      class OrderManager < SimpleDelegator
+                        def process
+                          PaymentService.call(self)
+                        end
+                      end
+                    RUBY
 
     it 'detects wrapped model as a delegation dependency' do
       path = create_file('app/managers/order_manager.rb', <<~RUBY)

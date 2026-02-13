@@ -113,15 +113,9 @@ module CodebaseIndex
           convert_prism_case(prism_node, source)
         when Prism::BeginNode
           children = []
-          if prism_node.statements
-            children += prism_node.statements.body.map { |c| convert_prism_node(c, source) }
-          end
-          if prism_node.rescue_clause
-            children << convert_prism_node(prism_node.rescue_clause, source)
-          end
-          if prism_node.ensure_clause
-            children << convert_prism_node(prism_node.ensure_clause, source)
-          end
+          children += prism_node.statements.body.map { |c| convert_prism_node(c, source) } if prism_node.statements
+          children << convert_prism_node(prism_node.rescue_clause, source) if prism_node.rescue_clause
+          children << convert_prism_node(prism_node.ensure_clause, source) if prism_node.ensure_clause
           Node.new(type: :begin, children: children, line: line_for_prism(prism_node))
         when Prism::RescueNode
           children = prism_node.statements ? prism_node.statements.body.map { |c| convert_prism_node(c, source) } : []
@@ -186,7 +180,13 @@ module CodebaseIndex
           children = prism_node.body ? [convert_prism_node(prism_node.body, source)] : []
           Node.new(type: :lambda, children: children, line: line_for_prism(prism_node))
         when Prism::ReturnNode
-          children = prism_node.arguments ? prism_node.arguments.arguments.map { |a| convert_prism_node(a, source) } : []
+          children = if prism_node.arguments
+                       prism_node.arguments.arguments.map do |a|
+                         convert_prism_node(a, source)
+                       end
+                     else
+                       []
+                     end
           Node.new(type: :return, children: children, line: line_for_prism(prism_node))
         when Prism::YieldNode
           Node.new(type: :yield, children: [], line: line_for_prism(prism_node))
@@ -214,7 +214,8 @@ module CodebaseIndex
           # Generic fallback: convert children we can find
           children = extract_prism_generic_children(prism_node, source)
           Node.new(
-            type: prism_node.class.name.split('::').last.sub(/Node$/, '').gsub(/([a-z])([A-Z])/, '\1_\2').downcase.to_sym,
+            type: prism_node.class.name.split('::').last.sub(/Node$/, '').gsub(/([a-z])([A-Z])/,
+                                                                               '\1_\2').downcase.to_sym,
             children: children,
             line: line_for_prism(prism_node)
           )
@@ -225,7 +226,13 @@ module CodebaseIndex
         name_node = convert_prism_node(prism_node.constant_path, source)
         superclass = prism_node.superclass ? convert_prism_node(prism_node.superclass, source) : nil
         body_children = if prism_node.body
-                          prism_node.body.is_a?(Prism::StatementsNode) ? prism_node.body.body.map { |c| convert_prism_node(c, source) } : [convert_prism_node(prism_node.body, source)]
+                          if prism_node.body.is_a?(Prism::StatementsNode)
+                            prism_node.body.body.map do |c|
+                              convert_prism_node(c, source)
+                            end
+                          else
+                            [convert_prism_node(prism_node.body, source)]
+                          end
                         else
                           []
                         end
@@ -244,7 +251,13 @@ module CodebaseIndex
       def convert_prism_module(prism_node, source)
         name_node = convert_prism_node(prism_node.constant_path, source)
         body_children = if prism_node.body
-                          prism_node.body.is_a?(Prism::StatementsNode) ? prism_node.body.body.map { |c| convert_prism_node(c, source) } : [convert_prism_node(prism_node.body, source)]
+                          if prism_node.body.is_a?(Prism::StatementsNode)
+                            prism_node.body.body.map do |c|
+                              convert_prism_node(c, source)
+                            end
+                          else
+                            [convert_prism_node(prism_node.body, source)]
+                          end
                         else
                           []
                         end
@@ -289,9 +302,7 @@ module CodebaseIndex
       end
 
       def convert_prism_call(prism_node, source)
-        receiver_text = if prism_node.receiver
-                          extract_prism_receiver_text(prism_node.receiver, source)
-                        end
+        receiver_text = (extract_prism_receiver_text(prism_node.receiver, source) if prism_node.receiver)
 
         args = if prism_node.arguments
                  prism_node.arguments.arguments.map { |a| extract_prism_source_text(a, source) }
@@ -314,9 +325,7 @@ module CodebaseIndex
             arguments: args
           )
 
-          block_body = if prism_node.block.body
-                         convert_prism_node(prism_node.block.body, source)
-                       end
+          block_body = (convert_prism_node(prism_node.block.body, source) if prism_node.block.body)
 
           return Node.new(
             type: :block,
@@ -337,10 +346,8 @@ module CodebaseIndex
         )
       end
 
-      def convert_prism_constant_path(prism_node, source)
-        parent_text = if prism_node.parent
-                        extract_const_path_text(prism_node.parent)
-                      end
+      def convert_prism_constant_path(prism_node, _source)
+        parent_text = (extract_const_path_text(prism_node.parent) if prism_node.parent)
 
         Node.new(
           type: :const,
@@ -390,9 +397,7 @@ module CodebaseIndex
         children = []
         children << convert_prism_node(prism_node.predicate, source) if prism_node.predicate
         prism_node.conditions.each { |c| children << convert_prism_node(c, source) }
-        if prism_node.else_clause
-          children << convert_prism_node(prism_node.else_clause, source)
-        end
+        children << convert_prism_node(prism_node.else_clause, source) if prism_node.else_clause
         Node.new(type: :case, children: children, line: line_for_prism(prism_node))
       end
 
@@ -465,8 +470,6 @@ module CodebaseIndex
         when Prism::ConstantPathNode
           parent = node.parent ? extract_const_path_text(node.parent) : nil
           [parent, node.name.to_s].compact.join('::')
-        else
-          nil
         end
       end
 
@@ -476,8 +479,6 @@ module CodebaseIndex
           node.name.to_s
         when Prism::ConstantPathNode
           extract_const_path_text(node)
-        else
-          nil
         end
       end
 
@@ -655,8 +656,6 @@ module CodebaseIndex
         when :const
           parent = node.children[0] ? extract_parser_const_name(node.children[0]) : nil
           [parent, node.children[1].to_s].compact.join('::')
-        else
-          nil
         end
       end
     end

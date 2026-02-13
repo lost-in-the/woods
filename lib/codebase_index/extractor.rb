@@ -101,6 +101,23 @@ module CodebaseIndex
       rails_source: :rails_source
     }.freeze
 
+    # Maps unit types to class-based extractor methods (constantize + call).
+    CLASS_BASED = {
+      model: :extract_model, controller: :extract_controller,
+      component: :extract_component, view_component: :extract_component,
+      mailer: :extract_mailer
+    }.freeze
+
+    # Maps unit types to file-based extractor methods (pass file_path).
+    FILE_BASED = {
+      service: :extract_service_file, job: :extract_job_file,
+      serializer: :extract_serializer_file, manager: :extract_manager_file,
+      policy: :extract_policy_file, validator: :extract_validator_file
+    }.freeze
+
+    # GraphQL types all use the same extractor method.
+    GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
+
     attr_reader :output_dir, :dependency_graph
 
     def initialize(output_dir: nil)
@@ -452,11 +469,8 @@ module CodebaseIndex
         type_dir = @output_dir.join(type.to_s)
 
         units.each do |unit|
-          # Create safe filename from identifier
-          file_name = unit.identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
-
           File.write(
-            type_dir.join(file_name),
+            type_dir.join(safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
@@ -611,6 +625,14 @@ module CodebaseIndex
       Digest::SHA256.file(schema_path).hexdigest
     end
 
+    # Generate a safe JSON filename from a unit identifier.
+    #
+    # @param identifier [String] Unit identifier (e.g., "Admin::UsersController")
+    # @return [String] Safe filename (e.g., "Admin__UsersController.json")
+    def safe_filename(identifier)
+      identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
+    end
+
     def json_serialize(data)
       if CodebaseIndex.configuration.pretty_json
         JSON.pretty_generate(data)
@@ -662,57 +684,18 @@ module CodebaseIndex
       extractor = EXTRACTORS[extractor_key]&.new
       return unless extractor
 
-      unit = case type
-             when :model
-               klass = begin
-                 unit_id.constantize
-               rescue StandardError
-                 nil
-               end
-               extractor.extract_model(klass) if klass
-             when :controller
-               klass = begin
-                 unit_id.constantize
-               rescue StandardError
-                 nil
-               end
-               extractor.extract_controller(klass) if klass
-             when :service
-               extractor.extract_service_file(file_path)
-             when :component
-               klass = begin
-                 unit_id.constantize
-               rescue StandardError
-                 nil
-               end
-               extractor.extract_component(klass) if klass
-             when :view_component
-               klass = begin
-                 unit_id.constantize
-               rescue StandardError
-                 nil
-               end
-               extractor.extract_component(klass) if klass
-             when :job
-               extractor.extract_job_file(file_path)
-             when :mailer
-               klass = begin
-                 unit_id.constantize
-               rescue StandardError
-                 nil
-               end
-               extractor.extract_mailer(klass) if klass
-             when :serializer
-               extractor.extract_serializer_file(file_path)
-             when :manager
-               extractor.extract_manager_file(file_path)
-             when :policy
-               extractor.extract_policy_file(file_path)
-             when :validator
-               extractor.extract_validator_file(file_path)
-             when :graphql_type, :graphql_mutation, :graphql_resolver, :graphql_query
-               extractor.extract_graphql_file(file_path)
-             end
+      unit = if (method = CLASS_BASED[type])
+                klass = begin
+                  unit_id.constantize
+                rescue StandardError
+                  nil
+                end
+                extractor.public_send(method, klass) if klass
+              elsif (method = FILE_BASED[type])
+                extractor.public_send(method, file_path)
+              elsif GRAPHQL_TYPES.include?(type)
+                extractor.extract_graphql_file(file_path)
+              end
 
       return unless unit
 
@@ -724,10 +707,9 @@ module CodebaseIndex
 
       # Write updated unit
       type_dir = @output_dir.join(extractor_key.to_s)
-      file_name = unit.identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
 
       File.write(
-        type_dir.join(file_name),
+        type_dir.join(safe_filename(unit.identifier)),
         json_serialize(unit.to_h)
       )
 

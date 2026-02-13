@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../model_name_cache'
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
 
 module CodebaseIndex
   module Extractors
@@ -22,6 +23,9 @@ module CodebaseIndex
     #   user_serializer = units.find { |u| u.identifier == "UserSerializer" }
     #
     class SerializerExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       # Directories to scan for serializer-like files
       SERIALIZER_DIRECTORIES = %w[
         app/serializers
@@ -176,11 +180,6 @@ module CodebaseIndex
         nil
       end
 
-      def extract_namespace(class_name)
-        parts = class_name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
-      end
-
       # ──────────────────────────────────────────────────────────────────────
       # Source Annotation
       # ──────────────────────────────────────────────────────────────────────
@@ -323,21 +322,14 @@ module CodebaseIndex
 
       def extract_dependencies(source)
         deps = []
-
-        # Model references (using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :serialization }
-        end
+        deps.concat(scan_model_dependencies(source, via: :serialization))
 
         # Other serializers referenced (e.g., `serializer: CommentSerializer`)
         source.scan(/(?:serializer|blueprint):\s*([\w:]+)/).flatten.uniq.each do |serializer|
           deps << { type: :serializer, target: serializer, via: :serialization }
         end
 
-        # Service references
-        source.scan(/(\w+Service)(?:\.|::)/).flatten.uniq.each do |service|
-          deps << { type: :service, target: service, via: :code_reference }
-        end
+        deps.concat(scan_service_dependencies(source))
 
         deps.uniq { |d| [d[:type], d[:target]] }
       end

@@ -217,17 +217,15 @@ module CodebaseIndex
     end
 
     # Load an ExtractedUnit's data from its JSON file on disk.
+    #
+    # Uses the same filename convention as {Extractor#safe_filename}: colons
+    # become double underscores, non-alphanumeric chars become underscores.
+    # Searches across type subdirectories since the extractor writes to
+    # `<output_dir>/<type>/<safe_filename>.json`.
     def load_unit(unit_id)
-      # Try common filename patterns
-      candidates = [
-        File.join(@extracted_dir, "#{unit_id}.json"),
-        File.join(@extracted_dir, "#{unit_id.gsub('::', '_')}.json"),
-        File.join(@extracted_dir, "#{unit_id.gsub('::', '/').downcase}.json")
-      ]
+      filename = unit_id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_') + '.json'
 
-      candidates.each do |path|
-        next unless File.exist?(path)
-
+      Dir[File.join(@extracted_dir, '*', filename)].each do |path|
         return JSON.parse(File.read(path), symbolize_names: true)
       rescue JSON::ParserError
         next

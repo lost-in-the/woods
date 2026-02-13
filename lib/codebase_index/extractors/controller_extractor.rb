@@ -2,6 +2,8 @@
 
 require 'digest'
 require_relative 'ast_source_extraction'
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
 
 module CodebaseIndex
   module Extractors
@@ -21,6 +23,8 @@ module CodebaseIndex
     #
     class ControllerExtractor
       include AstSourceExtraction
+      include SharedUtilityMethods
+      include SharedDependencyScanner
 
       def initialize
         @routes_map = build_routes_map
@@ -117,11 +121,6 @@ module CodebaseIndex
         end || Rails.root.join("app/controllers/#{controller.name.underscore}.rb").to_s
       rescue StandardError
         Rails.root.join("app/controllers/#{controller.name.underscore}.rb").to_s
-      end
-
-      def extract_namespace(controller)
-        parts = controller.name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # Build composite source with routes and filters as headers
@@ -363,15 +362,7 @@ module CodebaseIndex
         end
 
         if source
-          # Model references (using precomputed regex)
-          source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-            deps << { type: :model, target: model_name, via: :code_reference }
-          end
-
-          # Service references
-          source.scan(/(\w+Service)(?:\.|::new)/).flatten.uniq.each do |service|
-            deps << { type: :service, target: service, via: :code_reference }
-          end
+          deps.concat(scan_common_dependencies(source))
 
           # Phlex component references
           source.scan(/render\s+(\w+(?:::\w+)*Component)/).flatten.uniq.each do |component|
@@ -381,16 +372,6 @@ module CodebaseIndex
           # Other view renders
           source.scan(%r{render\s+["'](\w+/\w+)["']}).flatten.uniq.each do |template|
             deps << { type: :view, target: template, via: :render }
-          end
-
-          # Mailers
-          source.scan(/(\w+Mailer)\./).flatten.uniq.each do |mailer|
-            deps << { type: :mailer, target: mailer, via: :code_reference }
-          end
-
-          # Jobs
-          source.scan(/(\w+Job)\.perform/).flatten.uniq.each do |job|
-            deps << { type: :job, target: job, via: :code_reference }
           end
         end
 

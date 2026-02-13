@@ -79,30 +79,6 @@ RSpec.describe CodebaseIndex::DependencyGraph do
     end
   end
 
-  describe '#path_between' do
-    before do
-      graph.register(make_unit(type: :model, identifier: 'A',
-                               dependencies: [{ type: :model, target: 'B' }]))
-      graph.register(make_unit(type: :model, identifier: 'B',
-                               dependencies: [{ type: :model, target: 'C' }]))
-      graph.register(make_unit(type: :model, identifier: 'C'))
-      graph.register(make_unit(type: :model, identifier: 'D'))
-    end
-
-    it 'finds a path when one exists' do
-      path = graph.path_between('A', 'C')
-      expect(path).to eq(%w[A B C])
-    end
-
-    it 'returns nil when no path exists' do
-      expect(graph.path_between('A', 'D')).to be_nil
-    end
-
-    it 'returns single-element path for same node' do
-      expect(graph.path_between('A', 'A')).to eq(['A'])
-    end
-  end
-
   describe '#pagerank' do
     it 'returns empty hash for empty graph' do
       expect(graph.pagerank).to eq({})
@@ -172,19 +148,4 @@ RSpec.describe CodebaseIndex::DependencyGraph do
     end
   end
 
-  describe '#subgraph_for_types' do
-    before do
-      graph.register(make_unit(type: :model, identifier: 'User'))
-      graph.register(make_unit(type: :service, identifier: 'UserService',
-                               dependencies: [{ type: :model, target: 'User' }]))
-      graph.register(make_unit(type: :controller, identifier: 'UsersController',
-                               dependencies: [{ type: :service, target: 'UserService' }]))
-    end
-
-    it 'filters to only specified types' do
-      sub = graph.subgraph_for_types(%i[model service])
-      expect(sub[:nodes].keys).to contain_exactly('User', 'UserService')
-      expect(sub[:edges]['UserService']).to include('User')
-    end
-  end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../model_name_cache'
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
 
 module CodebaseIndex
   module Extractors
@@ -23,6 +24,9 @@ module CodebaseIndex
     #   card = units.find { |u| u.identifier == "CardComponent" }
     #
     class ViewComponentExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       def initialize
         @component_base = find_component_base
       end
@@ -102,13 +106,6 @@ module CodebaseIndex
         end
       rescue StandardError
         nil
-      end
-
-      # @param component [Class]
-      # @return [String, nil]
-      def extract_namespace(component)
-        parts = component.name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # @param file_path [String, nil]
@@ -288,10 +285,8 @@ module CodebaseIndex
           deps << { type: :component, target: comp, via: :slot }
         end
 
-        # Model references (using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :data_dependency }
-        end
+        # Model references
+        deps.concat(scan_model_dependencies(source, via: :data_dependency))
 
         # Helper modules
         source.scan(/include\s+(\w+Helper)/).flatten.uniq.each do |helper|

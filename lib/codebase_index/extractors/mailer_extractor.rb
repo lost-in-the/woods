@@ -2,6 +2,8 @@
 
 require 'digest'
 require_relative 'ast_source_extraction'
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
 
 module CodebaseIndex
   module Extractors
@@ -19,6 +21,8 @@ module CodebaseIndex
     #
     class MailerExtractor
       include AstSourceExtraction
+      include SharedUtilityMethods
+      include SharedDependencyScanner
 
       def initialize
         @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
@@ -74,11 +78,6 @@ module CodebaseIndex
         end || Rails.root.join("app/mailers/#{mailer.name.underscore}.rb").to_s
       rescue StandardError
         Rails.root.join("app/mailers/#{mailer.name.underscore}.rb").to_s
-      end
-
-      def extract_namespace(mailer)
-        parts = mailer.name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -156,24 +155,87 @@ module CodebaseIndex
       end
 
       def extract_callbacks(mailer)
-        callbacks = []
+        mailer._process_action_callbacks.map do |cb|
+          only, except, if_conds, unless_conds = extract_callback_conditions(cb)
 
-        %i[before_action after_action around_action].each do |type|
-          mailer.send("_#{type}_callbacks").each do |cb|
-            callbacks << {
-              type: type,
-              filter: cb.filter.to_s,
-              options: {
-                only: cb.options[:only],
-                except: cb.options[:except]
-              }.compact
-            }
+          result = {
+            type: :"#{cb.kind}_action",
+            filter: cb.filter.to_s
+          }
+          result[:only] = only if only.any?
+          result[:except] = except if except.any?
+          result[:if] = if_conds.join(', ') if if_conds.any?
+          result[:unless] = unless_conds.join(', ') if unless_conds.any?
+          result
+        end
+      rescue StandardError
+        []
+      end
+
+      # Extract :only/:except action lists and :if/:unless conditions from a callback.
+      #
+      # Modern Rails (4.2+) stores conditions in @if/@unless ivar arrays.
+      # ActionFilter objects hold action Sets; other conditions are procs/symbols.
+      #
+      # @param callback [ActiveSupport::Callbacks::Callback]
+      # @return [Array(Array<String>, Array<String>, Array<String>, Array<String>)]
+      #   [only_actions, except_actions, if_labels, unless_labels]
+      def extract_callback_conditions(callback)
+        if_conditions = callback.instance_variable_get(:@if) || []
+        unless_conditions = callback.instance_variable_get(:@unless) || []
+
+        only = []
+        except = []
+        if_labels = []
+        unless_labels = []
+
+        if_conditions.each do |cond|
+          actions = extract_action_filter_actions(cond)
+          if actions
+            only.concat(actions)
+          else
+            if_labels << condition_label(cond)
           end
-        rescue StandardError
-          # Callbacks not accessible
         end
 
-        callbacks
+        unless_conditions.each do |cond|
+          actions = extract_action_filter_actions(cond)
+          if actions
+            except.concat(actions)
+          else
+            unless_labels << condition_label(cond)
+          end
+        end
+
+        [only, except, if_labels, unless_labels]
+      end
+
+      # Extract action names from an ActionFilter-like condition object.
+      # Duck-types on the @actions ivar being a Set, avoiding dependence
+      # on private class names across Rails versions.
+      #
+      # @param condition [Object] A condition from the callback's @if/@unless array
+      # @return [Array<String>, nil] Action names, or nil if not an ActionFilter
+      def extract_action_filter_actions(condition)
+        return nil unless condition.instance_variable_defined?(:@actions)
+
+        actions = condition.instance_variable_get(:@actions)
+        return nil unless actions.is_a?(Set)
+
+        actions.to_a
+      end
+
+      # Human-readable label for a non-ActionFilter condition.
+      #
+      # @param condition [Object] A proc, symbol, or other condition
+      # @return [String]
+      def condition_label(condition)
+        case condition
+        when Symbol then ":#{condition}"
+        when Proc then 'Proc'
+        when String then condition
+        else condition.class.name
+        end
       end
 
       def extract_layout(mailer, source)
@@ -229,16 +291,8 @@ module CodebaseIndex
 
       def extract_dependencies(source)
         deps = []
-
-        # Model references (using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :code_reference }
-        end
-
-        # Service references (mailers often call services for data)
-        source.scan(/(\w+Service)(?:\.|::)/).flatten.uniq.each do |service|
-          deps << { type: :service, target: service, via: :code_reference }
-        end
+        deps.concat(scan_model_dependencies(source))
+        deps.concat(scan_service_dependencies(source))
 
         # URL helpers (indicates what resources emails link to)
         source.scan(/(\w+)_(?:url|path)/).flatten.uniq.each do |route|

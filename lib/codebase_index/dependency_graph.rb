@@ -106,49 +106,6 @@ module CodebaseIndex
       @type_index[type] || []
     end
 
-    # Find path between two units (if one exists)
-    # Uses BFS for shortest path
-    #
-    # @param from [String] Starting unit identifier
-    # @param to [String] Target unit identifier
-    # @return [Array<String>, nil] Path of identifiers or nil if no path
-    def path_between(from, to)
-      return [from] if from == to
-
-      visited = Set.new([from])
-      queue = [[from, [from]]]
-
-      while queue.any?
-        current, path = queue.shift
-
-        (@edges[current] || []).each do |neighbor|
-          next if visited.include?(neighbor)
-
-          new_path = path + [neighbor]
-          return new_path if neighbor == to
-
-          visited.add(neighbor)
-          queue.push([neighbor, new_path])
-        end
-      end
-
-      nil
-    end
-
-    # Get subgraph containing only specified types
-    #
-    # @param types [Array<Symbol>] Types to include
-    # @return [Hash] Filtered graph data
-    def subgraph_for_types(types)
-      included_ids = types.flat_map { |t| @type_index[t] || [] }.to_set
-
-      {
-        nodes: @nodes.select { |id, _| included_ids.include?(id) },
-        edges: @edges.select { |id, _| included_ids.include?(id) }
-               .transform_values { |deps| deps.select { |d| included_ids.include?(d) } }
-      }
-    end
-
     # Compute PageRank scores for all nodes
     #
     # Uses the reverse edges (dependents) as the link structure: a node

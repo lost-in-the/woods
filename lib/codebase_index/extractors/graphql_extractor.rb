@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
+
 module CodebaseIndex
   module Extractors
     # GraphQLExtractor handles graphql-ruby type and mutation extraction.
@@ -25,6 +28,9 @@ module CodebaseIndex
     #   user_type = units.find { |u| u.identifier == "Types::UserType" }
     #
     class GraphQLExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       # Standard directory for graphql-ruby applications
       GRAPHQL_DIRECTORY = 'app/graphql'
 
@@ -313,15 +319,6 @@ module CodebaseIndex
           .sub(Rails.root.join(GRAPHQL_DIRECTORY).to_s + '/', '')
           .sub('.rb', '')
           .camelize
-      end
-
-      # Extract namespace from a fully-qualified class name
-      #
-      # @param class_name [String]
-      # @return [String, nil]
-      def extract_namespace(class_name)
-        parts = class_name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -764,41 +761,25 @@ module CodebaseIndex
         end
 
         # Model references: scan for capitalized constants that look like model names.
-        # We match patterns like `Model.find`, `Model.where`, `Model.new`, `Model.create`,
-        # or `object.model_name` style references. This avoids iterating AR descendants.
+        # GraphQL uses its own pattern (not ModelNameCache) to avoid O(n^2).
         source.scan(/\b([A-Z][a-z]\w*)\.(?:find|where|find_by|create|new|first|last|all|count|exists\?|destroy|update|pluck|select|order|limit|includes|joins|preload|eager_load)\b/).flatten.uniq.each do |model_ref|
           deps << { type: :model, target: model_ref, via: :code_reference }
         end
 
-        # Also catch direct constant references that look like models (e.g., User, Order)
-        # used in resolver method bodies — pattern: constant on its own or with method chain
         source.scan(/\b([A-Z][a-z][a-zA-Z]*)\b/).flatten.uniq.each do |const_ref|
-          # Skip known non-model constants
           if const_ref.match?(/\A(Types|Mutations|Resolvers|GraphQL|Base|String|Integer|Float|Boolean|Array|Hash|Set|Struct|Module|Class|Object|ID|Int|ISO8601)\z/)
             next
           end
           next if deps.any? { |d| d[:target] == const_ref }
 
-          # Only include if used in a way that suggests model access
           if source.match?(/\b#{Regexp.escape(const_ref)}\.(?:find|where|find_by|create|new|first|last|all)\b/)
             deps << { type: :model, target: const_ref, via: :code_reference }
           end
         end
 
-        # Service references
-        source.scan(/(\w+Service)(?:\.|::new|\.call|\.perform)/).flatten.uniq.each do |service|
-          deps << { type: :service, target: service, via: :code_reference }
-        end
-
-        # Job references
-        source.scan(/(\w+Job)\.perform/).flatten.uniq.each do |job|
-          deps << { type: :job, target: job, via: :code_reference }
-        end
-
-        # Mailer references
-        source.scan(/(\w+Mailer)\./).flatten.uniq.each do |mailer|
-          deps << { type: :mailer, target: mailer, via: :code_reference }
-        end
+        deps.concat(scan_service_dependencies(source))
+        deps.concat(scan_job_dependencies(source))
+        deps.concat(scan_mailer_dependencies(source))
 
         # Resolver dependencies (standalone resolver classes referenced in fields)
         source.scan(/resolver:\s*([\w:]+)/).flatten.uniq.each do |resolver|

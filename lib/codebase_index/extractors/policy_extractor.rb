@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
+
 module CodebaseIndex
   module Extractors
     # PolicyExtractor handles domain policy class extraction.
@@ -20,6 +23,9 @@ module CodebaseIndex
     #   refund = units.find { |u| u.identifier == "RefundPolicy" }
     #
     class PolicyExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       # Directories to scan for policy classes
       POLICY_DIRECTORIES = %w[
         app/policies
@@ -91,11 +97,6 @@ module CodebaseIndex
       def skip_file?(source)
         # Skip module-only files (concerns, base modules)
         source.match?(/^\s*module\s+\w+\s*$/) && !source.match?(/^\s*class\s+/)
-      end
-
-      def extract_namespace(class_name)
-        parts = class_name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -188,50 +189,6 @@ module CodebaseIndex
           source.match?(/attr_reader\s+:user\s*,\s*:record/)
       end
 
-      def extract_public_methods(source)
-        methods = []
-        in_private = false
-        in_protected = false
-
-        source.each_line do |line|
-          stripped = line.strip
-
-          in_private = true if stripped == 'private'
-          in_protected = true if stripped == 'protected'
-          in_private = false if stripped == 'public'
-          in_protected = false if stripped == 'public'
-
-          if !in_private && !in_protected && stripped =~ /def\s+((?:self\.)?\w+[?!=]?)/
-            method_name = ::Regexp.last_match(1)
-            methods << method_name unless method_name.start_with?('_')
-          end
-        end
-
-        methods
-      end
-
-      def extract_class_methods(source)
-        source.scan(/def\s+self\.(\w+[?!=]?)/).flatten
-      end
-
-      def extract_initialize_params(source)
-        init_match = source.match(/def\s+initialize\s*\((.*?)\)/m)
-        return [] unless init_match
-
-        params_str = init_match[1]
-        params = []
-
-        params_str.scan(/(\w+)(?::\s*([^,\n]+))?/) do |name, default|
-          params << {
-            name: name,
-            has_default: !default.nil?,
-            keyword: params_str.include?("#{name}:")
-          }
-        end
-
-        params
-      end
-
       def extract_custom_errors(source)
         source.scan(/class\s+(\w+(?:Error|Exception))\s*</).flatten
       end
@@ -243,25 +200,14 @@ module CodebaseIndex
       def extract_dependencies(source, class_name)
         deps = []
 
-        # Evaluated model dependencies
+        # Evaluated model dependencies (specific :via)
         detect_evaluated_models(source, class_name).each do |model|
           deps << { type: :model, target: model, via: :policy_evaluation }
         end
 
-        # Model references (using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :code_reference }
-        end
-
-        # Service references
-        source.scan(/(\w+Service)(?:\.|::new|\.call|\.perform)/).flatten.uniq.each do |service|
-          deps << { type: :service, target: service, via: :code_reference }
-        end
-
-        # Job references
-        source.scan(/(\w+Job)\.perform/).flatten.uniq.each do |job|
-          deps << { type: :job, target: job, via: :code_reference }
-        end
+        deps.concat(scan_model_dependencies(source))
+        deps.concat(scan_service_dependencies(source))
+        deps.concat(scan_job_dependencies(source))
 
         deps.uniq { |d| [d[:type], d[:target]] }
       end

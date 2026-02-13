@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'shared_utility_methods'
+require_relative 'shared_dependency_scanner'
+
 module CodebaseIndex
   module Extractors
     # JobExtractor handles ActiveJob and Sidekiq job extraction.
@@ -21,6 +24,9 @@ module CodebaseIndex
     #   order_job = units.find { |u| u.identifier == "ProcessOrderJob" }
     #
     class JobExtractor
+      include SharedUtilityMethods
+      include SharedDependencyScanner
+
       # Directories to scan for jobs
       JOB_DIRECTORIES = %w[
         app/jobs
@@ -153,11 +159,6 @@ module CodebaseIndex
         end || Rails.root.join("app/jobs/#{job_class.name.underscore}.rb").to_s
       rescue StandardError
         nil
-      end
-
-      def extract_namespace(class_name)
-        parts = class_name.split('::')
-        parts.size > 1 ? parts[0..-2].join('::') : nil
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -329,27 +330,7 @@ module CodebaseIndex
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_dependencies(source)
-        deps = []
-
-        # Model references (using precomputed regex)
-        source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-          deps << { type: :model, target: model_name, via: :code_reference }
-        end
-
-        # Service references
-        source.scan(/(\w+Service)(?:\.|::new|\.call)/).flatten.uniq.each do |service|
-          deps << { type: :service, target: service, via: :code_reference }
-        end
-
-        # Other jobs
-        source.scan(/(\w+Job)\.perform/).flatten.uniq.each do |job|
-          deps << { type: :job, target: job, via: :code_reference }
-        end
-
-        # Mailers
-        source.scan(/(\w+Mailer)\./).flatten.uniq.each do |mailer|
-          deps << { type: :mailer, target: mailer, via: :code_reference }
-        end
+        deps = scan_common_dependencies(source)
 
         # External services
         if source.match?(/HTTParty|Faraday|RestClient|Net::HTTP/)

@@ -2,6 +2,7 @@
 
 require 'digest'
 require_relative '../ast/parser'
+require_relative 'shared_dependency_scanner'
 
 module CodebaseIndex
   module Extractors
@@ -21,6 +22,8 @@ module CodebaseIndex
     #   user_unit = units.find { |u| u.identifier == "User" }
     #
     class ModelExtractor
+      include SharedDependencyScanner
+
       AR_INTERNAL_METHOD_PATTERNS = [
         /\A_/,                                    # _run_save_callbacks, _validators, etc.
         /\Aautosave_associated_records_for_/,     # autosave_associated_records_for_comments
@@ -486,28 +489,15 @@ module CodebaseIndex
         end
 
         if source
-          # Service objects
-          source.scan(/(\w+Service)(?:\.|::)/).flatten.uniq.each do |service|
-            deps << { type: :service, target: service, via: :code_reference }
-          end
-
-          # Mailers
-          source.scan(/(\w+Mailer)\./).flatten.uniq.each do |mailer|
-            deps << { type: :mailer, target: mailer, via: :code_reference }
-          end
-
-          # Background jobs
-          source.scan(/(\w+Job)\.perform/).flatten.uniq.each do |job|
-            deps << { type: :job, target: job, via: :code_reference }
-          end
+          deps.concat(scan_service_dependencies(source))
+          deps.concat(scan_mailer_dependencies(source))
+          deps.concat(scan_job_dependencies(source))
 
           # Other models (direct references in code, not already captured via association)
-          source.scan(ModelNameCache.model_names_regex).uniq.each do |model_name|
-            next if model_name == model.name
+          scan_model_dependencies(source).each do |dep|
+            next if dep[:target] == model.name
 
-            unless deps.any? { |d| d[:target] == model_name }
-              deps << { type: :model, target: model_name, via: :code_reference }
-            end
+            deps << dep
           end
         end
 
