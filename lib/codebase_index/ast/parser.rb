@@ -202,6 +202,14 @@ module CodebaseIndex
         when Prism::SingletonClassNode
           children = prism_node.body ? [convert_prism_node(prism_node.body, source)] : []
           Node.new(type: :sclass, children: children, line: line_for_prism(prism_node))
+        when Prism::ConstantWriteNode
+          value = prism_node.value ? convert_prism_node(prism_node.value, source) : nil
+          Node.new(
+            type: :casgn,
+            children: [value].compact,
+            line: line_for_prism(prism_node),
+            method_name: prism_node.name.to_s
+          )
         else
           # Generic fallback: convert children we can find
           children = extract_prism_generic_children(prism_node, source)

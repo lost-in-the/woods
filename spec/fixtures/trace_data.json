@@ -1,0 +1,44 @@
+{
+  "traces": [
+    {
+      "class_name": "Greeter",
+      "method_name": "greet",
+      "event": "call",
+      "path": "/app/greeter.rb",
+      "line": 3,
+      "caller_class": "Main",
+      "caller_method": "run",
+      "timestamp": "2026-01-15T10:00:00Z"
+    },
+    {
+      "class_name": "Greeter",
+      "method_name": "greet",
+      "event": "return",
+      "path": "/app/greeter.rb",
+      "line": 3,
+      "return_class": "String",
+      "timestamp": "2026-01-15T10:00:01Z"
+    },
+    {
+      "class_name": "Greeter",
+      "method_name": "format",
+      "event": "call",
+      "path": "/app/greeter.rb",
+      "line": 7,
+      "caller_class": "Greeter",
+      "caller_method": "greet",
+      "timestamp": "2026-01-15T10:00:00.5Z"
+    },
+    {
+      "class_name": "Greeter",
+      "method_name": "format",
+      "event": "return",
+      "path": "/app/greeter.rb",
+      "line": 7,
+      "return_class": "String",
+      "timestamp": "2026-01-15T10:00:00.8Z"
+    }
+  ],
+  "recorded_at": "2026-01-15T10:00:00Z",
+  "ruby_version": "3.3.0"
+}
