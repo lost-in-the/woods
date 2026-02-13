@@ -322,6 +322,7 @@ module CodebaseIndex
           type: :send,
           children: children,
           line: line_for_prism(prism_node),
+          end_line: end_line_for_prism(prism_node),
           receiver: receiver_text,
           method_name: prism_node.name.to_s,
           arguments: args
@@ -539,6 +540,7 @@ module CodebaseIndex
             type: :send,
             children: [],
             line: parser_node.loc.line,
+            end_line: parser_node.loc.expression&.last_line,
             receiver: receiver_text,
             method_name: method_name,
             arguments: args
