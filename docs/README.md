@@ -41,6 +41,8 @@
 | Observability | 📋 Designed (see OPERATIONS.md) |
 | Agentic Integration | 📋 Planned (see AGENTIC_STRATEGY.md) |
 | Console MCP Server | 📋 Designed (see CONSOLE_SERVER.md) |
-| Flow Extraction | 📋 Designed (see FLOW_EXTRACTION.md) |
+| AST Layer | ✅ Complete (Prism adapter, normalized Node, MethodExtractor, CallSiteExtractor, ConstantResolver) |
+| RubyAnalyzer | ✅ Complete (ClassAnalyzer, MethodAnalyzer, DataFlowAnalyzer, TraceEnricher) |
+| Flow Extraction | ✅ Complete (FlowAssembler, OperationExtractor, ResponseCodeMapper, FlowDocument) |
 | Evaluation Harness | 📋 Planned (see PROPOSAL.md) |
 | Cost Modeling | 📋 Documented (see BACKEND_MATRIX.md) |

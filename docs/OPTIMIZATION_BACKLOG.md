@@ -2,7 +2,7 @@
 
 ## Context
 
-CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines across 7 extractors). The extraction layer is complete and well-designed. This review identifies **29 items** across performance, security, correctness, coverage, and best practices — prioritized by impact. **Batches 1-4 fully resolved** (items #1-5, #7-11, #15-17) in commit `cab9061`. Item #6 is partially resolved (86 gem specs + 87 integration specs; extractor-level fixture specs still needed).
+CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines across 7 extractors). The extraction layer is complete and well-designed. This review identifies **29 items** across performance, security, correctness, coverage, and best practices — prioritized by impact. **Batches 1-4 fully resolved** (items #1-5, #7-11, #15-17) in commit `cab9061`. **Items #12-13 resolved** via shared AST layer (Prism-based `Ast::MethodExtractor` and `Ast::Parser`) in commit `30b6563`. Item #6 is partially resolved (86 gem specs + 87 integration specs; extractor-level fixture specs still needed).
 
 ---
 
@@ -94,26 +94,17 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 
 ## Medium: Code Quality
 
-### 12. Fragile Method Boundary Detection
-**Files:** `controller_extractor.rb:370-412`, `mailer_extractor.rb:283-319`
+### 12. ✅ Fragile Method Boundary Detection — RESOLVED
+**Files:** `controller_extractor.rb`, `mailer_extractor.rb`
+**Resolution:** Replaced `extract_action_source` indentation heuristics (`nesting_delta`, `neutralize_strings_and_comments`, `detect_heredoc_start`) with `Ast::MethodExtractor#extract_method_source` — Prism-based AST parsing with exact line spans. Deleted ~190 lines of heuristic code across both files. Commit `30b6563`.
 
-Uses indentation heuristics to find method `end`. Fails for:
-- Multi-line method signatures
-- `rescue`/`ensure` blocks (same indent as `def`)
-- Heredocs containing `end` at method indent level
+~~Uses indentation heuristics to find method `end`. Fails for multi-line signatures, `rescue`/`ensure` blocks, heredocs containing `end`.~~
 
-**Fix:** Use `method_source` gem (already available via `pry`) or `RubyVM::AbstractSyntaxTree.of(method)` for robust method boundary detection.
+### 13. ✅ Fragile Scope Extraction Regex — RESOLVED
+**File:** `model_extractor.rb`
+**Resolution:** Replaced `extract_scope_source` regex with `Ast::Parser`-based scope extraction. Parses full source, finds `:send` nodes with `method_name == 'scope'`, uses `line`/`end_line` spans for boundaries. Regex fallback retained for parse failures. Deleted `scope_keyword_delta` and `neutralize_strings_and_comments`. Commit `30b6563`.
 
-### 13. Fragile Scope Extraction Regex
-**File:** `model_extractor.rb:346`
-
-```ruby
-source.scan(/scope\s+:(\w+)(?:,\s*->.*?(?:do|{).*?(?:end|})|,\s*->.*$)/m)
-```
-
-Breaks on multi-line lambda bodies, nested blocks, scopes with comments inside, and `Proc.new` syntax.
-
-**Fix:** Use `model.defined_scopes` (if available in target Rails versions) or parse with AST.
+~~Regex breaks on multi-line lambda bodies, nested blocks, scopes with comments inside, and `Proc.new` syntax.~~
 
 ### 14. ✅ Concern Detection Heuristic — RESOLVED
 **File:** `model_extractor.rb:176-197`
