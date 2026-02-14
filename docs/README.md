@@ -13,6 +13,8 @@
 | [MODEL_EXTRACTION_FIXES.md](MODEL_EXTRACTION_FIXES.md) | Six model extraction fixes (chunking gate, Proc serialization, STI detection, method filtering, callback conditions, token estimation) and their impact on downstream AI consumption |
 | [CONSOLE_SERVER.md](CONSOLE_SERVER.md) | Console MCP server design — architecture, bridge protocol, safety model (5 layers), tool interface (4 tiers), deployment modes (Docker/direct/SSH), phased implementation |
 | [FLOW_EXTRACTION.md](FLOW_EXTRACTION.md) | Flow extraction design — AST-based execution order analysis, FlowAssembler architecture, operation extraction (calls, transactions, responses, async), Prism/parser adapter, rake task interface |
+| [REVIEW_FINDINGS.md](REVIEW_FINDINGS.md) | Three-specialist review results — critical bugs, doc accuracy issues, cross-doc contradictions, design gaps, prioritized recommendations |
+| [OPTIMIZATION_BACKLOG.md](OPTIMIZATION_BACKLOG.md) | Historical optimization review — 43 items across performance, security, correctness, coverage, and MCP/console server work (resolved items archive) |
 
 ## Reading Order
 
@@ -29,7 +31,7 @@
 
 | Layer | Status |
 |-------|--------|
-| Extraction | ✅ Complete (8 extractors, dependency graph with PageRank, GraphAnalyzer, rake tasks) |
+| Extraction | ✅ Complete (13 extractors, dependency graph with PageRank, GraphAnalyzer, rake tasks) |
 | Storage Interfaces | 📋 Designed (see RETRIEVAL_ARCHITECTURE.md) |
 | Embedding Pipeline | 📋 Designed (see RETRIEVAL_ARCHITECTURE.md) |
 | Chunking Strategy | 📋 Designed (see CONTEXT_AND_CHUNKING.md) |
@@ -40,6 +42,7 @@
 | Error Handling | 📋 Designed (see OPERATIONS.md) |
 | Observability | 📋 Designed (see OPERATIONS.md) |
 | Agentic Integration | 📋 Planned (see AGENTIC_STRATEGY.md) |
+| MCP Index Server | ✅ Complete (10 tools, 2 resources, 2 resource templates, standalone executable) |
 | Console MCP Server | 📋 Designed (see CONSOLE_SERVER.md) |
 | AST Layer | ✅ Complete (Prism adapter, normalized Node, MethodExtractor, CallSiteExtractor, ConstantResolver) |
 | RubyAnalyzer | ✅ Complete (ClassAnalyzer, MethodAnalyzer, DataFlowAnalyzer, TraceEnricher) |

@@ -1653,8 +1653,8 @@ module CodebaseIndex
     # Simple token counter (can be swapped for tiktoken for accuracy)
     class TokenCounter
       def count(text)
-        # Rough estimate: 1 token ≈ 4 characters for code
-        (text.length / 4.0).ceil
+        # Rough estimate: 1 token ≈ 3.5 characters for Ruby code
+        (text.length / 3.5).ceil
       end
     end
     

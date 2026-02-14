@@ -67,7 +67,7 @@
     "layer": "extraction",
     "files": ["lib/codebase_index/extracted_unit.rb"],
     "description": "The (length / 4.0).ceil heuristic underestimates tokens for Ruby code. Ruby syntax (symbols, do/end, underscored_names) produces more tokens per character than natural language.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-008",
@@ -77,7 +77,7 @@
     "layer": "extraction",
     "files": ["lib/codebase_index/extractors/phlex_extractor.rb"],
     "description": "Phlex extractor metadata structure is Phlex-specific. A future ViewComponent extractor needs different metadata patterns.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-009",
@@ -117,7 +117,7 @@
     "layer": "extraction",
     "files": ["docs/CONTEXT_AND_CHUNKING.md"],
     "description": "Scopes and per-concern chunks are specified in chunking strategy but not yet implemented in extraction.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-013",
@@ -127,7 +127,7 @@
     "layer": "embedding",
     "files": ["docs/OPERATIONS.md"],
     "description": "No checkpoint mechanism for embedding pipeline. Mid-batch failures require starting over.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-014",
@@ -188,5 +188,189 @@
     "files": ["docs/OPERATIONS.md"],
     "description": "No design for how agents trigger and monitor pipeline tasks (extraction, embedding, validation).",
     "status": "resolved"
+  },
+  {
+    "id": "B-020",
+    "title": "Fix token estimation inconsistency across docs",
+    "severity": "low",
+    "category": "doc-fix",
+    "layer": "docs",
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md", "docs/MODEL_EXTRACTION_FIXES.md"],
+    "description": "Code uses / 3.5 (CLAUDE.md). RETRIEVAL_ARCHITECTURE.md pseudocode uses / 4.0 in TokenCounter class. MODEL_EXTRACTION_FIXES.md says / 4. Should all reference 3.5.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-021",
+    "title": "Resolve remaining cross-doc contradictions from REVIEW_FINDINGS.md",
+    "severity": "low",
+    "category": "doc-fix",
+    "layer": "docs",
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md", "docs/PROPOSAL.md", "docs/REVIEW_FINDINGS.md"],
+    "description": "REVIEW_FINDINGS.md CC-001 through CC-011 identified contradictions. Many resolved, some remain (tool count mismatch PROPOSAL vs AGENTIC_STRATEGY, default vector store, default embedding provider). Systematic pass needed.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-022",
+    "title": "Update stale plan doc status line",
+    "severity": "low",
+    "category": "doc-fix",
+    "layer": "docs",
+    "files": ["docs/plans/2026-02-13-ruby-analyzer-design.md"],
+    "description": "Says 'Status: Design approved, ready for implementation planning' but AST/RubyAnalyzer/Flow are all complete. Update to reflect implemented state.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-023",
+    "title": "Add gem-level specs for service_extractor",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": ["spec/extractors/service_extractor_spec.rb"],
+    "description": "ServiceExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-024",
+    "title": "Add gem-level specs for job_extractor",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": ["spec/extractors/job_extractor_spec.rb"],
+    "description": "JobExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-025",
+    "title": "Add gem-level specs for mailer_extractor",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": ["spec/extractors/mailer_extractor_spec.rb"],
+    "description": "MailerExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-026",
+    "title": "Add gem-level specs for graphql_extractor",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": ["spec/extractors/graphql_extractor_spec.rb"],
+    "description": "GraphqlExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-027",
+    "title": "Add gem-level specs for rails_source_extractor",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": ["spec/extractors/rails_source_extractor_spec.rb"],
+    "description": "RailsSourceExtractor has no gem-level unit specs. Needs tests for: happy path extraction, importance rating, public API detection.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-028",
+    "title": "Implement VectorStore interface and in-memory adapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "storage",
+    "files": ["lib/codebase_index/storage/vector_store.rb"],
+    "description": "Define interface: #store, #search, #delete, #count. In-memory adapter uses hash + cosine similarity. Zero-dependency baseline.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-029",
+    "title": "Implement MetadataStore interface and SQLite adapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "storage",
+    "files": ["lib/codebase_index/storage/metadata_store.rb"],
+    "description": "Unit metadata, type indexes, file paths, git data. SQLite for zero-dependency local usage.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-030",
+    "title": "Implement GraphStore interface wrapping DependencyGraph",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "storage",
+    "files": ["lib/codebase_index/storage/graph_store.rb"],
+    "description": "Existing DependencyGraph is the in-memory implementation. Wrap behind interface for future PG/MySQL backends.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-031",
+    "title": "Implement EmbeddingProvider interface and Ollama adapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "embedding",
+    "files": ["lib/codebase_index/embedding/provider.rb"],
+    "description": "Interface: #embed(text), #embed_batch(texts), #dimensions. Ollama first (zero external API cost), OpenAI second.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-032",
+    "title": "Implement text preparation pipeline",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "embedding",
+    "files": ["lib/codebase_index/embedding/text_preparer.rb"],
+    "description": "Per CONTEXT_AND_CHUNKING.md: chunk selection, prefix formatting, token limit enforcement.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-033",
+    "title": "Implement indexing pipeline orchestrator",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "embedding",
+    "files": ["lib/codebase_index/embedding/indexer.rb"],
+    "description": "Reads ExtractedUnit JSON → prepares text → embeds → stores. Full + incremental modes via content_hash. Rake tasks: codebase_index:embed, codebase_index:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
+    "status": "resolved",
+    "depends_on": ["B-028", "B-031", "B-032"]
+  },
+  {
+    "id": "B-034",
+    "title": "Implement query classifier",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "retrieval",
+    "files": ["lib/codebase_index/retrieval/query_classifier.rb"],
+    "description": "Classify by intent (lookup, trace, explain, compare), scope (specific, bounded, broad), depth. Heuristic-based.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-035",
+    "title": "Implement search executor with strategy selection",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "retrieval",
+    "files": ["lib/codebase_index/retrieval/search_executor.rb"],
+    "description": "Maps classification → strategy (vector, keyword, graph, hybrid, direct). Executes against storage backends. Depends on: B-028, B-029, B-030, B-034.",
+    "status": "resolved",
+    "depends_on": ["B-028", "B-029", "B-030", "B-034"]
+  },
+  {
+    "id": "B-036",
+    "title": "Implement ranker with RRF",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "retrieval",
+    "files": ["lib/codebase_index/retrieval/ranker.rb"],
+    "description": "Reciprocal Rank Fusion (k=60) for combining multi-strategy results. Incorporates recency, PageRank, type-match signals. Depends on: B-035.",
+    "status": "resolved",
+    "depends_on": ["B-035"]
+  },
+  {
+    "id": "B-037",
+    "title": "Implement context assembler",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "retrieval",
+    "files": ["lib/codebase_index/retrieval/context_assembler.rb"],
+    "description": "Token-budgeted assembly: 10% structural, 50% primary, 25% supporting, 15% framework. Source attribution. Depends on: B-036.",
+    "status": "resolved",
+    "depends_on": ["B-036"]
   }
 ]

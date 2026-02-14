@@ -65,7 +65,7 @@ The callback fix also eliminates a silent `NoMethodError` that was being swallow
 
 ### 6. Token Estimation Includes Metadata
 
-**What changed:** `estimated_tokens` now sums `source_code.length / 4` and `metadata.to_json.length / 4`. Empty metadata (`{}`) adds nothing.
+**What changed:** `estimated_tokens` now sums `source_code.length / 3.5` and `metadata.to_json.length / 3.5`. Empty metadata (`{}`) adds nothing.
 
 **Why it matters for chunking and context assembly:** The token budget system described in [RETRIEVAL_ARCHITECTURE.md](RETRIEVAL_ARCHITECTURE.md) uses `estimated_tokens` to decide how many units fit in a context window. Source-only estimation undercounts by 2-3x for metadata-rich models — a model with 10 associations, 15 validations, and 20 callbacks has substantial metadata that the old estimate ignored. Accurate token estimates prevent context window overflow during assembly.
 

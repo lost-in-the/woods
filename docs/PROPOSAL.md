@@ -554,6 +554,8 @@ CodebaseIndex.configure_with_preset(:self_hosted, db: :mysql)  # MySQL variant
 
 9. **Extraction coverage gaps** — Serializers (ActiveModelSerializers, Blueprinter, Alba) and decorators (Draper) are not yet extracted. View components are Phlex-only; ViewComponent (GitHub) is not covered. These are common patterns in large Rails apps and should be addressed in a future extraction pass.
 
+   **Resolved:** SerializerExtractor (AMS/Blueprinter/Draper), ViewComponentExtractor, ManagerExtractor, PolicyExtractor, and ValidatorExtractor are now implemented.
+
 ---
 
 ## Next Steps

@@ -1,5 +1,7 @@
 # CodebaseIndex Optimization & Best Practices Review
 
+> **Note:** This file is now a historical archive. New items go in `docs/backlog.json`. Resolved items here are kept for context and commit references.
+
 ## Context
 
 CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines across 7 extractors). The extraction layer is complete and well-designed. This review identifies **29 items** across performance, security, correctness, coverage, and best practices — prioritized by impact. **Batches 1-4 fully resolved** (items #1-5, #7-11, #15-17) in commit `cab9061`. **Items #12-13 resolved** via shared AST layer (Prism-based `Ast::MethodExtractor` and `Ast::Parser`) in commit `30b6563`. Item #6 is partially resolved (86 gem specs + 87 integration specs; extractor-level fixture specs still needed).
@@ -256,7 +258,6 @@ Extractors run sequentially but are independent.
 
 **Deferred (needs more design):**
 - Test suite (#6) — 86 gem + 87 integration specs; extractor-level fixture specs still needed
-- Method boundary detection (#12) — needs gem dependency decision
 - Concurrent extraction (#22) — needs thread-safety audit
 - Token estimation (#21) — needs benchmarking
 
@@ -272,17 +273,17 @@ The index server currently has keyword regex search only (`search` tool). The AG
 
 **Depends on:** Retrieval pipeline (PROPOSAL.md Phase 2)
 
-### 31. MCP Index Server — Framework Source Tool
+### 31. ✅ MCP Index Server — Framework Source Tool — RESOLVED
 
-The `codebase_framework` tool from AGENTIC_STRATEGY.md (retrieve version-pinned Rails/gem source by concept) is not yet implemented. The `rails_source_extractor` already extracts this data — the tool just needs to query it.
+**Resolution:** `framework` tool implemented in MCP index server. Filters `rails_source` type units by concept keyword.
 
-**Fix:** Add a `framework` tool to the MCP server that filters `rails_source` type units by concept keyword.
+~~The `codebase_framework` tool from AGENTIC_STRATEGY.md (retrieve version-pinned Rails/gem source by concept) is not yet implemented.~~
 
-### 32. MCP Index Server — Recent Changes Tool
+### 32. ✅ MCP Index Server — Recent Changes Tool — RESOLVED
 
-The `codebase_recent_changes` tool from AGENTIC_STRATEGY.md is not implemented. Git metadata (change frequency, last modified) is already in extracted unit metadata.
+**Resolution:** `recent_changes` tool implemented in MCP index server. Sorts units by `metadata.git.last_modified` and returns most recently changed.
 
-**Fix:** Add a `recent_changes` tool that sorts units by `metadata.git.last_modified` and returns the most recently changed.
+~~The `codebase_recent_changes` tool from AGENTIC_STRATEGY.md is not implemented.~~
 
 ### 33. MCP Index Server — HTTP Transport
 
@@ -290,11 +291,11 @@ The server only supports stdio transport. AGENTIC_STRATEGY.md mentions HTTP/Rack
 
 **Depends on:** Evaluation of whether `mcp` gem supports HTTP transport, or if a Rack wrapper is needed.
 
-### 34. MCP Index Server — Resource Templates for Unit Lookup
+### 34. ✅ MCP Index Server — Resource Templates for Unit Lookup — RESOLVED
 
-MCP supports resource templates (e.g., `codebase://unit/{identifier}`). Currently only two static resources exist (manifest, graph). Parameterized resources would let clients browse units through the resource interface, not just tools.
+**Resolution:** `codebase://unit/{identifier}` and `codebase://type/{type}` resource templates implemented in MCP index server.
 
-**Fix:** Add `codebase://unit/{identifier}` and `codebase://type/{type}` resource templates.
+~~Currently only two static resources exist. Parameterized resources would let clients browse units through the resource interface.~~
 
 ---
 
@@ -342,32 +343,32 @@ Requested: add Amplitude as an analytics provider for Tier 3 tools. Amplitude's 
 
 **Depends on:** #38, Amplitude API key and event schema from client app.
 
-### 41. Extraction — Manager/Delegator Extractor
+### 41. ✅ Extraction — Manager/Delegator Extractor — RESOLVED
 
-The admin app uses SimpleDelegator subclasses in `app/managers/` for account-scoped domain logic (e.g., `AccountManagingProducts`). These are not covered by any existing extractor. An extractor would capture the wrapped model, public methods, and delegation chain.
+**Resolution:** `manager_extractor.rb` implemented with spec. Scans `app/managers/`, detects `SimpleDelegator` ancestors, captures wrapped model, public methods, and delegation chain.
 
-**Pattern:** Similar to service extractor but scans `app/managers/` and detects `SimpleDelegator` ancestors.
+~~The admin app uses SimpleDelegator subclasses in `app/managers/` for account-scoped domain logic. Not covered by any existing extractor.~~
 
-### 42. Extraction — Policy Class Extractor
+### 42. ✅ Extraction — Policy Class Extractor — RESOLVED
 
-Domain policy classes in `app/policies/` encapsulate business eligibility rules (not Pundit-style authorization). An extractor would capture policy names, the models they evaluate, and their decision methods (`allowed?`, `eligible?`, `valid?`).
+**Resolution:** `policy_extractor.rb` implemented with spec. Scans `app/policies/`, captures policy names, evaluated models, and decision methods.
 
-**Pattern:** Similar to service extractor, scans `app/policies/`.
+~~Domain policy classes in `app/policies/` encapsulate business eligibility rules. Not covered by any existing extractor.~~
 
-### 43. Extraction — Standalone Validator Extractor
+### 43. ✅ Extraction — Standalone Validator Extractor — RESOLVED
 
-Custom validator classes in `app/validators/` contain domain-specific validation logic that spans multiple models. An extractor would capture validator names, the models they operate on, and their validation rules.
+**Resolution:** `validator_extractor.rb` implemented with spec. Scans `app/validators/`, captures validator names, operated models, and validation rules.
 
-**Pattern:** Similar to service extractor, scans `app/validators/`.
+~~Custom validator classes in `app/validators/` contain domain-specific validation logic that spans multiple models.~~
 
 ---
 
 ## Recommended Implementation Order (New Items)
 
-**Batch 8 — MCP index server gaps (low effort):**
-- Add framework source tool (#31)
-- Add recent changes tool (#32)
-- Add resource templates (#34)
+**Batch 8 — MCP index server gaps (low effort):** ✅ ALL RESOLVED
+- ~~Add framework source tool (#31)~~ ✅
+- ~~Add recent changes tool (#32)~~ ✅
+- ~~Add resource templates (#34)~~ ✅
 
 **Batch 9 — Console server foundation:**
 - Bridge protocol (#35)
@@ -377,10 +378,10 @@ Custom validator classes in `app/validators/` contain domain-specific validation
 - Domain-aware tools (#37)
 - Job queue + cache + analytics (#38)
 
-**Batch 11 — Extraction coverage for domain classes:**
-- Manager/delegator extractor (#41)
-- Policy class extractor (#42)
-- Standalone validator extractor (#43)
+**Batch 11 — Extraction coverage for domain classes:** ✅ ALL RESOLVED
+- ~~Manager/delegator extractor (#41)~~ ✅
+- ~~Policy class extractor (#42)~~ ✅
+- ~~Standalone validator extractor (#43)~~ ✅
 
 **Batch 12 — Advanced console + analytics:**
 - Guarded eval (#39)

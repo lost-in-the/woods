@@ -5,7 +5,13 @@
       "Bash(bundle:*)",
       "Bash(rake:*)",
       "Bash(git:*)",
-      "Bash(ruby:*)"
+      "Bash(ruby:*)",
+      "Bash(ls:*)",
+      "Bash(python3 -m json.tool:*)"
     ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
   }
 }

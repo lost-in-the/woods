@@ -1,0 +1,32 @@
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.0
+  Exclude:
+    - 'vendor/**/*'
+    - 'tmp/**/*'
+
+# Spec files naturally have long describe/context blocks
+Metrics/BlockLength:
+  Exclude:
+    - 'spec/**/*'
+  AllowedMethods:
+    - 'refine'
+
+# Test helpers sometimes need many parameters
+Metrics/ParameterLists:
+  Exclude:
+    - 'spec/**/*'
+
+# Retrieval pipeline classes are inherently complex —
+# each has multiple strategy/signal methods that belong together.
+Metrics/ClassLength:
+  Exclude:
+    - 'lib/codebase_index/retrieval/**/*'
+
+# Search/ranking methods need more headroom than the default 10
+Metrics/MethodLength:
+  Max: 15
+
+# Search and ranking methods have inherently branchy logic
+Metrics/AbcSize:
+  Max: 22

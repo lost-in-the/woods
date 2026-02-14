@@ -1,6 +1,6 @@
 # Backlog Workflow
 
-The primary task source is `docs/OPTIMIZATION_BACKLOG.md`.
+The primary task source is `docs/backlog.json`. Historical context and batch notes are in `docs/OPTIMIZATION_BACKLOG.md` (read-only archive).
 
 ## Picking Work
 
@@ -12,7 +12,7 @@ The primary task source is `docs/OPTIMIZATION_BACKLOG.md`.
 ## Completing Work
 
 1. Implement with TDD — see Testing Workflow in CLAUDE.md.
-2. Mark the item resolved in `OPTIMIZATION_BACKLOG.md`: add ✅, resolution summary, and commit ref.
+2. Mark the item resolved in `docs/backlog.json` by setting `status` to `resolved`.
 3. Commit the backlog update alongside the implementation.
 
 ## Adding New Work
