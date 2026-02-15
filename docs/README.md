@@ -34,19 +34,19 @@
 | Extraction | ✅ Complete (13 extractors, dependency graph with PageRank, GraphAnalyzer, rake tasks) |
 | Storage Interfaces | ✅ Complete (VectorStore, MetadataStore, GraphStore with in-memory/SQLite adapters) |
 | Embedding Pipeline | ✅ Complete (EmbeddingProvider with Ollama + OpenAI adapters, TextPreparer, Indexer with resumability) |
-| Chunking Strategy | 📋 Designed (see CONTEXT_AND_CHUNKING.md) |
+| Chunking Strategy | ✅ Complete (Chunk value object, SemanticChunker with model/controller/generic splitting) |
 | Context Formatting | ✅ Complete (Base, ClaudeAdapter, GPTAdapter, GenericAdapter, HumanAdapter) |
 | Retrieval Core | ✅ Complete (QueryClassifier, SearchExecutor, Ranker with RRF, ContextAssembler) |
 | Retriever Orchestrator | ✅ Complete (Retriever with RetrievalResult, StructuralContextBuilder, degradation tiers) |
 | Backend Implementations | ✅ Complete (Pgvector adapter, Qdrant adapter) |
 | Resilience | ✅ Complete (CircuitBreaker, RetryableProvider, IndexValidator) |
-| Schema Management | 📋 Designed (see OPERATIONS.md) |
+| Schema Management | ✅ Complete (SchemaVersion, Migrator, 3 migrations, install + pgvector Rails generators) |
 | Observability | ✅ Complete (Instrumentation, StructuredLogger, HealthCheck) |
-| Agentic Integration | 📋 Planned (see AGENTIC_STRATEGY.md) |
-| MCP Index Server | ✅ Complete (11 tools incl. codebase_retrieve, 2 resources, 2 resource templates, standalone executable) |
-| Console MCP Server | 📋 Designed (see CONSOLE_SERVER.md) |
+| Agentic Integration | ✅ Complete (PipelineLock, FeedbackStore, GapDetector, StatusReporter, ErrorEscalator, PipelineGuard, RetrievalTrace, 9 new MCP tools → 20 total) |
+| MCP Index Server | ✅ Complete (20 tools incl. 5 operator + 4 feedback, 2 resources, 2 resource templates, standalone executable) |
+| Console MCP Server | ✅ Complete (31 tools across 4 tiers, Bridge, SafeContext, ConnectionManager, SqlValidator, AuditLogger, Confirmation, job + cache adapters) |
 | AST Layer | ✅ Complete (Prism adapter, normalized Node, MethodExtractor, CallSiteExtractor, ConstantResolver) |
 | RubyAnalyzer | ✅ Complete (ClassAnalyzer, MethodAnalyzer, DataFlowAnalyzer, TraceEnricher) |
 | Flow Extraction | ✅ Complete (FlowAssembler, OperationExtractor, ResponseCodeMapper, FlowDocument) |
-| Evaluation Harness | 📋 Planned (see PROPOSAL.md) |
+| Evaluation Harness | ✅ Complete (QuerySet, Metrics, Evaluator, BaselineRunner, ReportGenerator, rake tasks) |
 | Cost Modeling | 📋 Documented (see BACKEND_MATRIX.md) |
