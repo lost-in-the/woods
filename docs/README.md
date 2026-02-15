@@ -33,16 +33,17 @@
 |-------|--------|
 | Extraction | ✅ Complete (13 extractors, dependency graph with PageRank, GraphAnalyzer, rake tasks) |
 | Storage Interfaces | ✅ Complete (VectorStore, MetadataStore, GraphStore with in-memory/SQLite adapters) |
-| Embedding Pipeline | ✅ Complete (EmbeddingProvider with Ollama adapter, TextPreparer, Indexer with resumability) |
+| Embedding Pipeline | ✅ Complete (EmbeddingProvider with Ollama + OpenAI adapters, TextPreparer, Indexer with resumability) |
 | Chunking Strategy | 📋 Designed (see CONTEXT_AND_CHUNKING.md) |
-| Context Formatting | 📋 Designed (see CONTEXT_AND_CHUNKING.md) |
+| Context Formatting | ✅ Complete (Base, ClaudeAdapter, GPTAdapter, GenericAdapter, HumanAdapter) |
 | Retrieval Core | ✅ Complete (QueryClassifier, SearchExecutor, Ranker with RRF, ContextAssembler) |
-| Backend Implementations | 📋 Planned (see BACKEND_MATRIX.md) |
+| Retriever Orchestrator | ✅ Complete (Retriever with RetrievalResult, StructuralContextBuilder, degradation tiers) |
+| Backend Implementations | ✅ Complete (Pgvector adapter, Qdrant adapter) |
+| Resilience | ✅ Complete (CircuitBreaker, RetryableProvider, IndexValidator) |
 | Schema Management | 📋 Designed (see OPERATIONS.md) |
-| Error Handling | 📋 Designed (see OPERATIONS.md) |
-| Observability | 📋 Designed (see OPERATIONS.md) |
+| Observability | ✅ Complete (Instrumentation, StructuredLogger, HealthCheck) |
 | Agentic Integration | 📋 Planned (see AGENTIC_STRATEGY.md) |
-| MCP Index Server | ✅ Complete (10 tools, 2 resources, 2 resource templates, standalone executable) |
+| MCP Index Server | ✅ Complete (11 tools incl. codebase_retrieve, 2 resources, 2 resource templates, standalone executable) |
 | Console MCP Server | 📋 Designed (see CONSOLE_SERVER.md) |
 | AST Layer | ✅ Complete (Prism adapter, normalized Node, MethodExtractor, CallSiteExtractor, ConstantResolver) |
 | RubyAnalyzer | ✅ Complete (ClassAnalyzer, MethodAnalyzer, DataFlowAnalyzer, TraceEnricher) |

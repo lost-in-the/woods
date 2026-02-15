@@ -372,5 +372,160 @@
     "description": "Token-budgeted assembly: 10% structural, 50% primary, 25% supporting, 15% framework. Source attribution. Depends on: B-036.",
     "status": "resolved",
     "depends_on": ["B-036"]
+  },
+  {
+    "id": "B-038",
+    "title": "Retriever orchestrator",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "retrieval",
+    "files": ["lib/codebase_index/retriever.rb", "spec/retriever_spec.rb"],
+    "description": "Top-level Retriever class wiring classify → search → rank → assemble → format pipeline. Includes RetrievalResult struct and StructuralContextBuilder for 10% structural token budget.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-039",
+    "title": "StructuralContextBuilder (part of Retriever)",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "retrieval",
+    "files": ["lib/codebase_index/retriever.rb"],
+    "description": "Private helper in Retriever that queries metadata_store for unit counts by type, generating codebase overview for the structural context budget.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-040",
+    "title": "Context formatting base + ClaudeAdapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "formatting",
+    "files": ["lib/codebase_index/formatting/base.rb", "lib/codebase_index/formatting/claude_adapter.rb"],
+    "description": "Abstract Formatting::Base with #format interface and #estimate_tokens helper. ClaudeAdapter outputs XML tags (<codebase-context>, <unit>, <source>) for Claude API/MCP.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-041",
+    "title": "GPTAdapter + GenericAdapter + HumanAdapter",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "formatting",
+    "files": ["lib/codebase_index/formatting/gpt_adapter.rb", "lib/codebase_index/formatting/generic_adapter.rb", "lib/codebase_index/formatting/human_adapter.rb"],
+    "description": "GPTAdapter (Markdown headers + fenced code), GenericAdapter (plain text with separators), HumanAdapter (box-drawing chars for terminal).",
+    "status": "resolved",
+    "depends_on": ["B-040"]
+  },
+  {
+    "id": "B-042",
+    "title": "Pgvector vector store adapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "storage",
+    "files": ["lib/codebase_index/storage/pgvector.rb", "spec/storage/pgvector_spec.rb"],
+    "description": "VectorStore::Pgvector for PostgreSQL teams. HNSW index, parameterized SQL, cosine distance, filter translation to WHERE clauses, ensure_schema! for auto-setup.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-043",
+    "title": "Qdrant vector store adapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "storage",
+    "files": ["lib/codebase_index/storage/qdrant.rb", "spec/storage/qdrant_spec.rb"],
+    "description": "VectorStore::Qdrant via HTTP REST API. Qdrant-format filter translation, collection auto-creation, no gem dependencies.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-044",
+    "title": "Instrumentation module",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "observability",
+    "files": ["lib/codebase_index/observability/instrumentation.rb", "spec/observability/instrumentation_spec.rb"],
+    "description": "Thin wrapper around ActiveSupport::Notifications with fallback to direct yield when AS unavailable (MCP server without Rails).",
+    "status": "resolved"
+  },
+  {
+    "id": "B-045",
+    "title": "StructuredLogger",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "observability",
+    "files": ["lib/codebase_index/observability/structured_logger.rb", "spec/observability/structured_logger_spec.rb"],
+    "description": "JSON-line logger for pipeline operations. Supports info/warn/error/debug levels with timestamps and structured data.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-046",
+    "title": "HealthCheck",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "observability",
+    "files": ["lib/codebase_index/observability/health_check.rb", "spec/observability/health_check_spec.rb"],
+    "description": "Reports system component status (:ok, :error, :not_configured) for vector_store, metadata_store, embedding_provider.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-047",
+    "title": "CircuitBreaker",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "resilience",
+    "files": ["lib/codebase_index/resilience/circuit_breaker.rb", "spec/resilience/circuit_breaker_spec.rb"],
+    "description": "Three-state pattern (closed → open → half_open) protecting external service calls. Configurable threshold and reset_timeout. Raises CircuitOpenError when open.",
+    "status": "resolved",
+    "depends_on": ["B-038"]
+  },
+  {
+    "id": "B-048",
+    "title": "RetryableProvider",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "resilience",
+    "files": ["lib/codebase_index/resilience/retryable_provider.rb", "spec/resilience/retryable_provider_spec.rb"],
+    "description": "Decorator wrapping Embedding::Provider::Interface with exponential backoff and circuit breaker integration. Never retries CircuitOpenError.",
+    "status": "resolved",
+    "depends_on": ["B-047"]
+  },
+  {
+    "id": "B-049",
+    "title": "IndexValidator",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "resilience",
+    "files": ["lib/codebase_index/resilience/index_validator.rb", "spec/resilience/index_validator_spec.rb"],
+    "description": "Validates extraction output health: _index.json existence, file references, content hash integrity, stale file detection. Returns ValidationReport.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-050",
+    "title": "OpenAI embedding adapter",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "embedding",
+    "files": ["lib/codebase_index/embedding/openai.rb", "spec/embedding/openai_spec.rb"],
+    "description": "Provider::OpenAI supporting text-embedding-3-small (1536d) and text-embedding-3-large (3072d). HTTPS with Bearer auth, batch embedding with index-preservation.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-051",
+    "title": "MCP codebase_retrieve tool",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/codebase_index/mcp/server.rb", "spec/mcp/server_spec.rb"],
+    "description": "Semantic search tool added to MCP server. Accepts query + optional budget, returns formatted context + source attributions. Graceful degradation when no retriever configured.",
+    "status": "resolved",
+    "depends_on": ["B-038"]
+  },
+  {
+    "id": "B-052",
+    "title": "Retrieval + embedding rake tasks",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/tasks/codebase_index.rake"],
+    "description": "Three rake tasks: codebase_index:retrieve[query] (CLI retrieval with HumanAdapter), codebase_index:embed (full embedding pipeline), codebase_index:embed_incremental (content_hash-based).",
+    "status": "resolved",
+    "depends_on": ["B-038"]
   }
 ]
