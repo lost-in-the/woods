@@ -5,6 +5,12 @@ require_relative 'connection_manager'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'tools/tier1'
+require_relative 'tools/tier2'
+require_relative 'tools/tier3'
+require_relative 'tools/tier4'
+require_relative 'sql_validator'
+require_relative 'audit_logger'
+require_relative 'confirmation'
 
 module CodebaseIndex
   module Console
@@ -20,6 +26,11 @@ module CodebaseIndex
     #
     module Server # rubocop:disable Metrics/ModuleLength
       TIER1_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
+      TIER2_TOOLS = %w[diagnose_model data_snapshot validate_record check_setting update_setting
+                       check_policy validate_with check_eligibility decorate].freeze
+      TIER3_TOOLS = %w[slow_endpoints error_rates throughput job_queues job_failures job_find
+                       job_schedule redis_info cache_stats channel_status].freeze
+      TIER4_TOOLS = %w[eval sql query].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
         # Build a configured MCP::Server with console tools.
@@ -36,6 +47,9 @@ module CodebaseIndex
           )
 
           register_tier1_tools(server, conn_mgr)
+          register_tier2_tools(server, conn_mgr)
+          register_tier3_tools(server, conn_mgr)
+          register_tier4_tools(server, conn_mgr)
           server
         end
 
@@ -46,6 +60,33 @@ module CodebaseIndex
         # @return [void]
         def register_tier1_tools(server, conn_mgr)
           TIER1_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr) }
+        end
+
+        # Register Tier 2 domain-aware tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @return [void]
+        def register_tier2_tools(server, conn_mgr)
+          TIER2_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr) }
+        end
+
+        # Register Tier 3 analytics tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @return [void]
+        def register_tier3_tools(server, conn_mgr)
+          TIER3_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr) }
+        end
+
+        # Register Tier 4 guarded tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @return [void]
+        def register_tier4_tools(server, conn_mgr)
+          TIER4_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr) }
         end
 
         private
@@ -175,6 +216,274 @@ module CodebaseIndex
                               'System health check - list models and connection status',
                               properties: {}) do |_args|
             Tools::Tier1.console_status
+          end
+        end
+
+        # ── Tier 2 tool definitions ──────────────────────────────────────────
+
+        def define_diagnose_model(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_diagnose_model',
+                              'Diagnose a model: count, recent records, aggregates',
+                              properties: {
+                                model: str_prop('Model name'), scope: obj_prop('Filter conditions'),
+                                sample_size: int_prop('Sample records (default 5, max 25)')
+                              }, required: ['model']) do |args|
+            Tools::Tier2.console_diagnose_model(
+              model: args[:model], scope: args[:scope], sample_size: args[:sample_size] || 5
+            )
+          end
+        end
+
+        def define_data_snapshot(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_data_snapshot',
+                              'Snapshot a record with associations for debugging',
+                              properties: {
+                                model: str_prop('Model name'), id: int_prop('Record primary key'),
+                                associations: arr_prop('Association names to include'),
+                                depth: int_prop('Association depth (default 1, max 3)')
+                              }, required: %w[model id]) do |args|
+            Tools::Tier2.console_data_snapshot(
+              model: args[:model], id: args[:id],
+              associations: args[:associations], depth: args[:depth] || 1
+            )
+          end
+        end
+
+        def define_validate_record(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_validate_record',
+                              'Run validations on an existing record',
+                              properties: {
+                                model: str_prop('Model name'), id: int_prop('Record primary key'),
+                                attributes: obj_prop('Attributes to set before validating')
+                              }, required: %w[model id]) do |args|
+            Tools::Tier2.console_validate_record(
+              model: args[:model], id: args[:id], attributes: args[:attributes]
+            )
+          end
+        end
+
+        def define_check_setting(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_check_setting',
+                              'Check a configuration setting value',
+                              properties: {
+                                key: str_prop('Setting key'), namespace: str_prop('Setting namespace')
+                              }, required: ['key']) do |args|
+            Tools::Tier2.console_check_setting(key: args[:key], namespace: args[:namespace])
+          end
+        end
+
+        def define_update_setting(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_update_setting',
+                              'Update a configuration setting (requires confirmation)',
+                              properties: {
+                                key: str_prop('Setting key'), value: str_prop('New value'),
+                                namespace: str_prop('Setting namespace')
+                              }, required: %w[key value]) do |args|
+            Tools::Tier2.console_update_setting(
+              key: args[:key], value: args[:value], namespace: args[:namespace]
+            )
+          end
+        end
+
+        def define_check_policy(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_check_policy',
+                              'Check authorization policy for a record and user',
+                              properties: {
+                                model: str_prop('Model name'), id: int_prop('Record primary key'),
+                                user_id: int_prop('User to check'), action: str_prop('Policy action')
+                              }, required: %w[model id user_id action]) do |args|
+            Tools::Tier2.console_check_policy(
+              model: args[:model], id: args[:id], user_id: args[:user_id], action: args[:action]
+            )
+          end
+        end
+
+        def define_validate_with(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_validate_with',
+                              'Validate attributes against a model without persisting',
+                              properties: {
+                                model: str_prop('Model name'), attributes: obj_prop('Attributes to validate'),
+                                context: str_prop('Validation context')
+                              }, required: %w[model attributes]) do |args|
+            Tools::Tier2.console_validate_with(
+              model: args[:model], attributes: args[:attributes], context: args[:context]
+            )
+          end
+        end
+
+        def define_check_eligibility(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_check_eligibility',
+                              'Check feature eligibility for a record',
+                              properties: {
+                                model: str_prop('Model name'), id: int_prop('Record primary key'),
+                                feature: str_prop('Feature name')
+                              }, required: %w[model id feature]) do |args|
+            Tools::Tier2.console_check_eligibility(
+              model: args[:model], id: args[:id], feature: args[:feature]
+            )
+          end
+        end
+
+        def define_decorate(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_decorate',
+                              'Invoke a decorator on a record and return computed attributes',
+                              properties: {
+                                model: str_prop('Model name'), id: int_prop('Record primary key'),
+                                methods: arr_prop('Decorator methods to call')
+                              }, required: %w[model id]) do |args|
+            Tools::Tier2.console_decorate(model: args[:model], id: args[:id], methods: args[:methods])
+          end
+        end
+
+        # ── Tier 3 tool definitions ──────────────────────────────────────────
+
+        def define_slow_endpoints(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_slow_endpoints',
+                              'List slowest endpoints by response time',
+                              properties: {
+                                limit: int_prop('Max endpoints (default 10, max 100)'),
+                                period: str_prop('Time period (default: 1h)')
+                              }) do |args|
+            Tools::Tier3.console_slow_endpoints(limit: args[:limit] || 10, period: args[:period] || '1h')
+          end
+        end
+
+        def define_error_rates(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_error_rates',
+                              'Get error rates by controller or overall',
+                              properties: {
+                                period: str_prop('Time period (default: 1h)'),
+                                controller: str_prop('Filter by controller')
+                              }) do |args|
+            Tools::Tier3.console_error_rates(period: args[:period] || '1h', controller: args[:controller])
+          end
+        end
+
+        def define_throughput(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_throughput',
+                              'Get request throughput over time',
+                              properties: {
+                                period: str_prop('Time period (default: 1h)'),
+                                interval: str_prop('Aggregation interval (default: 5m)')
+                              }) do |args|
+            Tools::Tier3.console_throughput(
+              period: args[:period] || '1h', interval: args[:interval] || '5m'
+            )
+          end
+        end
+
+        def define_job_queues(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_job_queues',
+                              'Get job queue statistics',
+                              properties: {
+                                queue: str_prop('Filter by queue name')
+                              }) do |args|
+            Tools::Tier3.console_job_queues(queue: args[:queue])
+          end
+        end
+
+        def define_job_failures(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_job_failures',
+                              'List recent job failures',
+                              properties: {
+                                limit: int_prop('Max failures (default 10, max 100)'),
+                                queue: str_prop('Filter by queue name')
+                              }) do |args|
+            Tools::Tier3.console_job_failures(limit: args[:limit] || 10, queue: args[:queue])
+          end
+        end
+
+        def define_job_find(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_job_find',
+                              'Find a job by ID, optionally retry it (requires confirmation)',
+                              properties: {
+                                job_id: str_prop('Job identifier'),
+                                retry: bool_prop('Retry the job (requires confirmation)')
+                              }, required: ['job_id']) do |args|
+            Tools::Tier3.console_job_find(job_id: args[:job_id], retry_job: args[:retry])
+          end
+        end
+
+        def define_job_schedule(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_job_schedule',
+                              'List scheduled/upcoming jobs',
+                              properties: {
+                                limit: int_prop('Max jobs (default 20, max 100)')
+                              }) do |args|
+            Tools::Tier3.console_job_schedule(limit: args[:limit] || 20)
+          end
+        end
+
+        def define_redis_info(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_redis_info',
+                              'Get Redis server information',
+                              properties: {
+                                section: str_prop('INFO section (e.g., memory, stats)')
+                              }) do |args|
+            Tools::Tier3.console_redis_info(section: args[:section])
+          end
+        end
+
+        def define_cache_stats(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_cache_stats',
+                              'Get cache store statistics',
+                              properties: {
+                                namespace: str_prop('Cache namespace filter')
+                              }) do |args|
+            Tools::Tier3.console_cache_stats(namespace: args[:namespace])
+          end
+        end
+
+        def define_channel_status(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_channel_status',
+                              'Get ActionCable channel status',
+                              properties: {
+                                channel: str_prop('Filter by channel name')
+                              }) do |args|
+            Tools::Tier3.console_channel_status(channel: args[:channel])
+          end
+        end
+
+        # ── Tier 4 tool definitions ──────────────────────────────────────────
+
+        def define_eval(server, conn_mgr)
+          define_console_tool(server, conn_mgr, 'console_eval',
+                              'Execute arbitrary Ruby code (requires confirmation)',
+                              properties: {
+                                code: str_prop('Ruby code to execute'),
+                                timeout: int_prop('Timeout in seconds (default 10, max 30)')
+                              }, required: ['code']) do |args|
+            Tools::Tier4.console_eval(code: args[:code], timeout: args[:timeout] || 10)
+          end
+        end
+
+        def define_sql(server, conn_mgr)
+          validator = SqlValidator.new
+          define_console_tool(server, conn_mgr, 'console_sql',
+                              'Execute read-only SQL (SELECT/WITH...SELECT only)',
+                              properties: {
+                                sql: str_prop('SQL query (SELECT or WITH...SELECT only)'),
+                                limit: int_prop('Max rows returned (default unlimited, max 10000)')
+                              }, required: ['sql']) do |args|
+            Tools::Tier4.console_sql(sql: args[:sql], validator: validator, limit: args[:limit])
+          end
+        end
+
+        def define_query(server, conn_mgr)
+          props = {
+            model: str_prop('Model name'), select: arr_prop('Columns to select'),
+            joins: arr_prop('Associations to join'), group_by: arr_prop('Columns to group by'),
+            having: str_prop('HAVING clause'), order: obj_prop('Order specification'),
+            scope: obj_prop('Filter conditions'), limit: int_prop('Max rows (max 10000)')
+          }
+          define_console_tool(server, conn_mgr, 'console_query',
+                              'Enhanced query builder with joins and grouping',
+                              properties: props, required: %w[model select]) do |args|
+            Tools::Tier4.console_query(
+              model: args[:model], select: args[:select], joins: args[:joins],
+              group_by: args[:group_by], having: args[:having],
+              order: args[:order], scope: args[:scope], limit: args[:limit]
+            )
           end
         end
 

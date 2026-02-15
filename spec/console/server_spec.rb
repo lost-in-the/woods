@@ -21,29 +21,52 @@ RSpec.describe CodebaseIndex::Console::Server do
     end
   end
 
-  describe '.register_tier1_tools' do
-    it 'registers 9 tools on the server' do
+  describe 'tool registration' do
+    it 'registers all tools on the server' do
       server = described_class.build(config: config)
       tools = server.instance_variable_get(:@tools)
 
-      expect(tools.size).to eq(9)
+      expected_count = described_class::TIER1_TOOLS.size +
+                       described_class::TIER2_TOOLS.size +
+                       described_class::TIER3_TOOLS.size +
+                       described_class::TIER4_TOOLS.size
+      expect(tools.size).to eq(expected_count)
     end
 
-    it 'registers expected tool names' do
+    it 'registers all Tier 1 tool names' do
       server = described_class.build(config: config)
       tools = server.instance_variable_get(:@tools)
 
-      expect(tools.keys).to contain_exactly(
-        'console_count',
-        'console_sample',
-        'console_find',
-        'console_pluck',
-        'console_aggregate',
-        'console_association_count',
-        'console_schema',
-        'console_recent',
-        'console_status'
-      )
+      described_class::TIER1_TOOLS.each do |tool|
+        expect(tools).to have_key("console_#{tool}")
+      end
+    end
+
+    it 'registers all Tier 2 tool names' do
+      server = described_class.build(config: config)
+      tools = server.instance_variable_get(:@tools)
+
+      described_class::TIER2_TOOLS.each do |tool|
+        expect(tools).to have_key("console_#{tool}")
+      end
+    end
+
+    it 'registers all Tier 3 tool names' do
+      server = described_class.build(config: config)
+      tools = server.instance_variable_get(:@tools)
+
+      described_class::TIER3_TOOLS.each do |tool|
+        expect(tools).to have_key("console_#{tool}")
+      end
+    end
+
+    it 'registers all Tier 4 tool names' do
+      server = described_class.build(config: config)
+      tools = server.instance_variable_get(:@tools)
+
+      described_class::TIER4_TOOLS.each do |tool|
+        expect(tools).to have_key("console_#{tool}")
+      end
     end
   end
 end
