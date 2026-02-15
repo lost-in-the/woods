@@ -32,11 +32,11 @@
 | Layer | Status |
 |-------|--------|
 | Extraction | ✅ Complete (13 extractors, dependency graph with PageRank, GraphAnalyzer, rake tasks) |
-| Storage Interfaces | 📋 Designed (see RETRIEVAL_ARCHITECTURE.md) |
-| Embedding Pipeline | 📋 Designed (see RETRIEVAL_ARCHITECTURE.md) |
+| Storage Interfaces | ✅ Complete (VectorStore, MetadataStore, GraphStore with in-memory/SQLite adapters) |
+| Embedding Pipeline | ✅ Complete (EmbeddingProvider with Ollama adapter, TextPreparer, Indexer with resumability) |
 | Chunking Strategy | 📋 Designed (see CONTEXT_AND_CHUNKING.md) |
 | Context Formatting | 📋 Designed (see CONTEXT_AND_CHUNKING.md) |
-| Retrieval Core | 📋 Designed (see RETRIEVAL_ARCHITECTURE.md) |
+| Retrieval Core | ✅ Complete (QueryClassifier, SearchExecutor, Ranker with RRF, ContextAssembler) |
 | Backend Implementations | 📋 Planned (see BACKEND_MATRIX.md) |
 | Schema Management | 📋 Designed (see OPERATIONS.md) |
 | Error Handling | 📋 Designed (see OPERATIONS.md) |

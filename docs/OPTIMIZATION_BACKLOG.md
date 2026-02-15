@@ -388,7 +388,7 @@ Requested: add Amplitude as an analytics provider for Tier 3 tools. Amplitude's 
 - Amplitude integration (#40)
 
 **Deferred:**
-- Semantic search tool (#30) — blocked on retrieval pipeline
+- Semantic search tool (#30) — retrieval pipeline now implemented; needs MCP server integration
 - HTTP transport (#33) — blocked on transport library evaluation
 
 ---
