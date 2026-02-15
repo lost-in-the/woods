@@ -56,7 +56,7 @@ namespace :codebase_index do
                     elsif ENV['CI_COMMIT_BEFORE_SHA']
                       # GitLab CI
                       output, = Open3.capture2('git', 'diff', '--name-only',
-                                               "#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV['CI_COMMIT_SHA']}")
+                                               "#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}")
                       output.lines.map(&:strip)
                     elsif ENV['GITHUB_BASE_REF']
                       # GitHub Actions PR
@@ -302,6 +302,102 @@ namespace :codebase_index do
     else
       puts 'Index directory does not exist.'
     end
+  end
+
+  desc 'Retrieve context for a query (for testing)'
+  task :retrieve, [:query] => :environment do |_t, args|
+    query = args[:query] || raise('Usage: rake codebase_index:retrieve[query]')
+
+    require 'codebase_index'
+    require 'codebase_index/retriever'
+    require 'codebase_index/embedding/provider'
+    require 'codebase_index/storage/vector_store'
+    require 'codebase_index/storage/metadata_store'
+    require 'codebase_index/storage/graph_store'
+    require 'codebase_index/formatting/human_adapter'
+
+    config = CodebaseIndex.configuration
+
+    provider = CodebaseIndex::Embedding::Provider::Ollama.new
+    vector_store = CodebaseIndex::Storage::VectorStore::InMemory.new
+    metadata_store = CodebaseIndex::Storage::MetadataStore::SQLite.new
+    graph_store = CodebaseIndex::Storage::GraphStore::Memory.new
+
+    retriever = CodebaseIndex::Retriever.new(
+      vector_store: vector_store,
+      metadata_store: metadata_store,
+      graph_store: graph_store,
+      embedding_provider: provider
+    )
+
+    result = retriever.retrieve(query, budget: config.max_context_tokens)
+
+    formatter = CodebaseIndex::Formatting::HumanAdapter.new
+    puts formatter.format(result)
+  end
+
+  desc 'Embed all extracted units'
+  task embed: :environment do
+    require 'codebase_index'
+    require 'codebase_index/embedding/indexer'
+    require 'codebase_index/embedding/text_preparer'
+    require 'codebase_index/embedding/provider'
+    require 'codebase_index/storage/vector_store'
+
+    config = CodebaseIndex.configuration
+    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
+
+    provider = CodebaseIndex::Embedding::Provider::Ollama.new
+    text_preparer = CodebaseIndex::Embedding::TextPreparer.new
+    vector_store = CodebaseIndex::Storage::VectorStore::InMemory.new
+
+    indexer = CodebaseIndex::Embedding::Indexer.new(
+      provider: provider,
+      text_preparer: text_preparer,
+      vector_store: vector_store,
+      output_dir: output_dir
+    )
+
+    puts 'Embedding all extracted units...'
+    stats = indexer.index_all
+
+    puts
+    puts 'Embedding complete!'
+    puts "  Processed: #{stats[:processed]}"
+    puts "  Skipped:   #{stats[:skipped]}"
+    puts "  Errors:    #{stats[:errors]}"
+  end
+
+  desc 'Embed changed units only (incremental)'
+  task embed_incremental: :environment do
+    require 'codebase_index'
+    require 'codebase_index/embedding/indexer'
+    require 'codebase_index/embedding/text_preparer'
+    require 'codebase_index/embedding/provider'
+    require 'codebase_index/storage/vector_store'
+
+    config = CodebaseIndex.configuration
+    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
+
+    provider = CodebaseIndex::Embedding::Provider::Ollama.new
+    text_preparer = CodebaseIndex::Embedding::TextPreparer.new
+    vector_store = CodebaseIndex::Storage::VectorStore::InMemory.new
+
+    indexer = CodebaseIndex::Embedding::Indexer.new(
+      provider: provider,
+      text_preparer: text_preparer,
+      vector_store: vector_store,
+      output_dir: output_dir
+    )
+
+    puts 'Embedding changed units (incremental)...'
+    stats = indexer.index_incremental
+
+    puts
+    puts 'Incremental embedding complete!'
+    puts "  Processed: #{stats[:processed]}"
+    puts "  Skipped:   #{stats[:skipped]}"
+    puts "  Errors:    #{stats[:errors]}"
   end
 
   desc "Analyze the gem's own source code and generate self-analysis output"

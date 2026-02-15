@@ -11,12 +11,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
   describe '.build' do
     it 'returns an MCP::Server' do
-      expect(server).to be_a(::MCP::Server)
+      expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 10 tools' do
+    it 'registers 11 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(10)
+      expect(tools.size).to eq(11)
     end
 
     it 'registers expected tool names' do
@@ -24,7 +24,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(tools.keys).to contain_exactly(
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'pagerank', 'framework',
-        'recent_changes', 'reload'
+        'recent_changes', 'reload', 'codebase_retrieve'
       )
     end
 
@@ -348,6 +348,57 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
   end
 
+  describe 'tool: codebase_retrieve' do
+    context 'without retriever configured' do
+      it 'returns a fallback message' do
+        response = call_tool(server, 'codebase_retrieve', query: 'How does authentication work?')
+        text = response_text(response)
+        expect(text).to include('Semantic search is not available')
+        expect(text).to include('codebase_search')
+      end
+    end
+
+    context 'with retriever configured' do
+      let(:mock_result) do
+        Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, keyword_init: true).new(
+          context: "## User (model)\nclass User < ApplicationRecord\nend",
+          sources: [{ identifier: 'User', type: 'model' }],
+          classification: nil,
+          strategy: :vector,
+          tokens_used: 150,
+          budget: 8000
+        )
+      end
+
+      let(:retriever) do
+        instance_double('CodebaseIndex::Retriever').tap do |r|
+          allow(r).to receive(:retrieve).and_return(mock_result)
+        end
+      end
+
+      let(:server_with_retriever) do
+        described_class.build(index_dir: fixture_dir, retriever: retriever)
+      end
+
+      it 'calls the retriever with the query and default budget' do
+        call_tool(server_with_retriever, 'codebase_retrieve', query: 'How does the User model work?')
+        expect(retriever).to have_received(:retrieve).with('How does the User model work?', budget: 8000)
+      end
+
+      it 'passes a custom budget to the retriever' do
+        call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model', budget: 4000)
+        expect(retriever).to have_received(:retrieve).with('User model', budget: 4000)
+      end
+
+      it 'returns the context from the retrieval result' do
+        response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model')
+        text = response_text(response)
+        expect(text).to include('User (model)')
+        expect(text).to include('ApplicationRecord')
+      end
+    end
+  end
+
   describe 'resource template: codebase://unit/{identifier}' do
     it 'returns unit data for a valid identifier' do
       contents = read_resource(server, 'codebase://unit/Post')
@@ -404,7 +455,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
   # Call the resources_read_handler on the server.
   def read_resource(server, uri)
     handler = server.instance_variable_get(:@handlers)
-    read_handler = handler[::MCP::Methods::RESOURCES_READ]
+    read_handler = handler[MCP::Methods::RESOURCES_READ]
     read_handler.call(uri: uri)
   end
 end

@@ -22,8 +22,9 @@ module CodebaseIndex
         # Build a configured MCP::Server with all tools and resources.
         #
         # @param index_dir [String] Path to extraction output directory
+        # @param retriever [CodebaseIndex::Retriever, nil] Optional retriever for semantic search
         # @return [MCP::Server] Configured server ready for transport
-        def build(index_dir:)
+        def build(index_dir:, retriever: nil)
           reader = IndexReader.new(index_dir)
           resources = build_resources
           resource_templates = build_resource_templates
@@ -48,6 +49,7 @@ module CodebaseIndex
           define_framework_tool(server, reader, respond)
           define_recent_changes_tool(server, reader, respond)
           define_reload_tool(server, reader, respond)
+          define_retrieve_tool(server, retriever, respond)
           register_resource_handler(server, reader)
 
           server
@@ -372,6 +374,32 @@ module CodebaseIndex
                                                 total_units: manifest['total_units'],
                                                 counts: manifest['counts']
                                               }))
+          end
+        end
+
+        def define_retrieve_tool(server, retriever, respond)
+          server.define_tool(
+            name: 'codebase_retrieve',
+            description: 'Retrieve relevant codebase context for a natural language query using semantic search. ' \
+                         'Returns ranked code units assembled into a token-budgeted context string.',
+            input_schema: {
+              properties: {
+                query: { type: 'string',
+                         description: 'Natural language query (e.g. "How does user authentication work?")' },
+                budget: { type: 'integer', description: 'Token budget for context assembly (default: 8000)' }
+              },
+              required: ['query']
+            }
+          ) do |query:, server_context:, budget: nil|
+            if retriever
+              result = retriever.retrieve(query, budget: budget || 8000)
+              respond.call(result.context)
+            else
+              respond.call(
+                'Semantic search is not available. Embedding provider is not configured. ' \
+                'Use the codebase_search tool for pattern-based search instead.'
+              )
+            end
           end
         end
 
