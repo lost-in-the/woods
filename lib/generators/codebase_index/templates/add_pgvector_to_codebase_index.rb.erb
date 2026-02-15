@@ -1,0 +1,15 @@
+class AddPgvectorToCodebaseIndex < ActiveRecord::Migration[7.0]
+  def change
+    enable_extension 'vector' unless extension_enabled?('vector')
+
+    add_column :codebase_embeddings, :embedding_vector, :vector,
+               limit: <%= @dimensions || 1536 %>, null: true
+
+    # HNSW index for fast approximate nearest neighbor search
+    # Using cosine distance operator (vector_cosine_ops)
+    add_index :codebase_embeddings, :embedding_vector,
+              using: :hnsw,
+              opclass: :vector_cosine_ops,
+              name: 'idx_codebase_embeddings_vector_hnsw'
+  end
+end

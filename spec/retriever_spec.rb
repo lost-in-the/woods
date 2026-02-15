@@ -213,7 +213,7 @@ RSpec.describe CodebaseIndex::Retriever do
         budget: 8000
       )
 
-      expect(result).to respond_to(:context, :sources, :classification, :strategy, :tokens_used, :budget)
+      expect(result).to respond_to(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace)
     end
 
     it 'supports keyword initialization' do
@@ -229,6 +229,42 @@ RSpec.describe CodebaseIndex::Retriever do
       expect(result.context).to eq('test')
       expect(result.strategy).to eq(:hybrid)
       expect(result.budget).to eq(4000)
+    end
+  end
+
+  # ── RetrievalTrace ──────────────────────────────────────────────
+
+  describe 'RetrievalTrace' do
+    it 'has all expected fields' do
+      trace = CodebaseIndex::Retriever::RetrievalTrace.new(
+        classification: classification,
+        strategy: :vector,
+        candidate_count: 5,
+        ranked_count: 3,
+        tokens_used: 120,
+        elapsed_ms: 42.5
+      )
+
+      expect(trace.classification).to eq(classification)
+      expect(trace.strategy).to eq(:vector)
+      expect(trace.candidate_count).to eq(5)
+      expect(trace.ranked_count).to eq(3)
+      expect(trace.tokens_used).to eq(120)
+      expect(trace.elapsed_ms).to eq(42.5)
+    end
+  end
+
+  describe 'trace in retrieve result' do
+    it 'populates trace on retrieval result' do
+      result = retriever.retrieve('How does the User model work?')
+
+      expect(result.trace).to be_a(CodebaseIndex::Retriever::RetrievalTrace)
+      expect(result.trace.strategy).to eq(:vector)
+      expect(result.trace.candidate_count).to eq(1)
+      expect(result.trace.ranked_count).to eq(1)
+      expect(result.trace.tokens_used).to eq(120)
+      expect(result.trace.elapsed_ms).to be_a(Numeric)
+      expect(result.trace.elapsed_ms).to be >= 0
     end
   end
 

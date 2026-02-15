@@ -1,0 +1,22 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Console MCP server for querying live Rails application state.
+#
+# Usage:
+#   codebase-console-mcp
+#   CODEBASE_CONSOLE_CONFIG=/path/to/console.yml codebase-console-mcp
+#
+# Connects to a Rails application via a bridge process (Docker exec, direct,
+# or SSH) and exposes read-only query tools via the Model Context Protocol
+# (stdio transport).
+
+require 'yaml'
+require_relative '../lib/codebase_index/console/server'
+
+config_path = ENV.fetch('CODEBASE_CONSOLE_CONFIG', File.expand_path('~/.codebase_index/console.yml'))
+config = File.exist?(config_path) ? YAML.safe_load_file(config_path) : {}
+
+server = CodebaseIndex::Console::Server.build(config: config)
+transport = MCP::Server::Transports::StdioTransport.new(server)
+transport.open

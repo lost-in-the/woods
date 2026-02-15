@@ -14,9 +14,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 11 tools' do
+    it 'registers 20 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(11)
+      expect(tools.size).to eq(20)
     end
 
     it 'registers expected tool names' do
@@ -24,7 +24,11 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(tools.keys).to contain_exactly(
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'pagerank', 'framework',
-        'recent_changes', 'reload', 'codebase_retrieve'
+        'recent_changes', 'reload', 'codebase_retrieve',
+        'pipeline_extract', 'pipeline_embed', 'pipeline_status',
+        'pipeline_diagnose', 'pipeline_repair',
+        'retrieval_rate', 'retrieval_report_gap',
+        'retrieval_explain', 'retrieval_suggest'
       )
     end
 
@@ -395,6 +399,147 @@ RSpec.describe CodebaseIndex::MCP::Server do
         text = response_text(response)
         expect(text).to include('User (model)')
         expect(text).to include('ApplicationRecord')
+      end
+    end
+  end
+
+  # ── Operator tools ──────────────────────────────────────────────
+
+  describe 'tool: pipeline_status' do
+    context 'without operator configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'pipeline_status')
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+
+    context 'with operator configured' do
+      let(:status_reporter) do
+        instance_double('CodebaseIndex::Operator::StatusReporter').tap do |r|
+          allow(r).to receive(:report).and_return({
+            status: :ok,
+            extracted_at: '2026-02-15T10:00:00Z',
+            total_units: 42,
+            counts: { 'models' => 10 },
+            git_sha: 'abc123',
+            git_branch: 'main',
+            staleness_seconds: 3600
+          })
+        end
+      end
+
+      let(:operator) { { status_reporter: status_reporter } }
+
+      let(:server_with_operator) do
+        described_class.build(index_dir: fixture_dir, operator: operator)
+      end
+
+      it 'returns pipeline status' do
+        response = call_tool(server_with_operator, 'pipeline_status')
+        data = parse_response(response)
+        expect(data['status']).to eq('ok')
+        expect(data['total_units']).to eq(42)
+      end
+    end
+  end
+
+  describe 'tool: pipeline_extract' do
+    context 'without operator configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'pipeline_extract')
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+  end
+
+  describe 'tool: pipeline_repair' do
+    context 'without operator configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'pipeline_repair', action: 'clear_locks')
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+  end
+
+  # ── Feedback tools ─────────────────────────────────────────────
+
+  describe 'tool: retrieval_rate' do
+    context 'without feedback store configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'retrieval_rate', query: 'test', score: 4)
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+
+    context 'with feedback store configured' do
+      let(:feedback_store) do
+        instance_double('CodebaseIndex::Feedback::Store').tap do |s|
+          allow(s).to receive(:record_rating)
+        end
+      end
+
+      let(:server_with_feedback) do
+        described_class.build(index_dir: fixture_dir, feedback_store: feedback_store)
+      end
+
+      it 'records a rating and returns confirmation' do
+        response = call_tool(server_with_feedback, 'retrieval_rate', query: 'User model', score: 4)
+        data = parse_response(response)
+        expect(data['recorded']).to be true
+        expect(data['score']).to eq(4)
+        expect(feedback_store).to have_received(:record_rating).with(query: 'User model', score: 4, comment: nil)
+      end
+    end
+  end
+
+  describe 'tool: retrieval_report_gap' do
+    context 'without feedback store configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'retrieval_report_gap',
+                             query: 'payments', missing_unit: 'PaymentService', unit_type: 'service')
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+  end
+
+  describe 'tool: retrieval_explain' do
+    context 'without feedback store configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'retrieval_explain')
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+
+    context 'with feedback store configured' do
+      let(:feedback_store) do
+        instance_double('CodebaseIndex::Feedback::Store').tap do |s|
+          allow(s).to receive(:ratings).and_return([
+            { 'query' => 'test', 'score' => 4, 'timestamp' => '2026-02-15T10:00:00Z' }
+          ])
+          allow(s).to receive(:gaps).and_return([])
+          allow(s).to receive(:average_score).and_return(4.0)
+        end
+      end
+
+      let(:server_with_feedback) do
+        described_class.build(index_dir: fixture_dir, feedback_store: feedback_store)
+      end
+
+      it 'returns feedback statistics' do
+        response = call_tool(server_with_feedback, 'retrieval_explain')
+        data = parse_response(response)
+        expect(data['total_ratings']).to eq(1)
+        expect(data['average_score']).to eq(4.0)
+        expect(data['total_gaps']).to eq(0)
+      end
+    end
+  end
+
+  describe 'tool: retrieval_suggest' do
+    context 'without feedback store configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'retrieval_suggest')
+        expect(response_text(response)).to include('not configured')
       end
     end
   end

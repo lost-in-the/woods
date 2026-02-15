@@ -31,8 +31,13 @@ module CodebaseIndex
   #   result.tokens_used    # => 4200
   #
   class Retriever
+    # Diagnostic trace for retrieval quality analysis.
+    RetrievalTrace = Struct.new(:classification, :strategy, :candidate_count,
+                                :ranked_count, :tokens_used, :elapsed_ms,
+                                keyword_init: true)
+
     # The result of a retrieval operation.
-    RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget,
+    RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace,
                                  keyword_init: true)
 
     # Unit types queried for the structural context overview.
@@ -66,12 +71,25 @@ module CodebaseIndex
     # @param budget [Integer] Token budget for context assembly
     # @return [RetrievalResult] Complete retrieval result
     def retrieve(query, budget: 8000)
+      start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
       classification = @classifier.classify(query)
       execution_result = @executor.execute(query: query, classification: classification)
       ranked = @ranker.rank(execution_result.candidates, classification: classification)
       assembled = assemble_context(ranked, classification)
 
-      build_result(assembled, classification, execution_result.strategy, budget)
+      elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
+
+      trace = RetrievalTrace.new(
+        classification: classification,
+        strategy: execution_result.strategy,
+        candidate_count: execution_result.candidates.size,
+        ranked_count: ranked.size,
+        tokens_used: assembled.tokens_used,
+        elapsed_ms: elapsed_ms
+      )
+
+      build_result(assembled, classification, execution_result.strategy, budget, trace)
     end
 
     private
@@ -96,7 +114,7 @@ module CodebaseIndex
     # @param strategy [Symbol] Search strategy used
     # @param budget [Integer] Token budget
     # @return [RetrievalResult]
-    def build_result(assembled, classification, strategy, budget)
+    def build_result(assembled, classification, strategy, budget, trace = nil)
       context = @formatter ? @formatter.call(assembled.context) : assembled.context
 
       RetrievalResult.new(
@@ -105,7 +123,8 @@ module CodebaseIndex
         classification: classification,
         strategy: strategy,
         tokens_used: assembled.tokens_used,
-        budget: budget
+        budget: budget,
+        trace: trace
       )
     end
 

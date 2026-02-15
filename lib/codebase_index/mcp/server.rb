@@ -6,8 +6,8 @@ require_relative 'index_reader'
 
 module CodebaseIndex
   module MCP
-    # Builds an MCP::Server with 10 tools, 2 resources, and 2 resource templates for querying
-    # CodebaseIndex extraction output.
+    # Builds an MCP::Server with 20 tools, 2 resources, and 2 resource templates for querying
+    # CodebaseIndex extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
     # No Rails required at runtime — reads JSON files from disk.
@@ -23,8 +23,10 @@ module CodebaseIndex
         #
         # @param index_dir [String] Path to extraction output directory
         # @param retriever [CodebaseIndex::Retriever, nil] Optional retriever for semantic search
+        # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
+        # @param feedback_store [CodebaseIndex::Feedback::Store, nil] Optional feedback store
         # @return [MCP::Server] Configured server ready for transport
-        def build(index_dir:, retriever: nil)
+        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil)
           reader = IndexReader.new(index_dir)
           resources = build_resources
           resource_templates = build_resource_templates
@@ -50,6 +52,8 @@ module CodebaseIndex
           define_recent_changes_tool(server, reader, respond)
           define_reload_tool(server, reader, respond)
           define_retrieve_tool(server, retriever, respond)
+          define_operator_tools(server, operator, respond)
+          define_feedback_tools(server, feedback_store, respond)
           register_resource_handler(server, reader)
 
           server
@@ -400,6 +404,256 @@ module CodebaseIndex
                 'Use the codebase_search tool for pattern-based search instead.'
               )
             end
+          end
+        end
+
+        # rubocop:disable Metrics/MethodLength
+        def define_operator_tools(server, operator, respond)
+          define_pipeline_extract_tool(server, operator, respond)
+          define_pipeline_embed_tool(server, operator, respond)
+          define_pipeline_status_tool(server, operator, respond)
+          define_pipeline_diagnose_tool(server, operator, respond)
+          define_pipeline_repair_tool(server, operator, respond)
+        end
+
+        def define_feedback_tools(server, feedback_store, respond)
+          define_retrieval_rate_tool(server, feedback_store, respond)
+          define_retrieval_report_gap_tool(server, feedback_store, respond)
+          define_retrieval_explain_tool(server, feedback_store, respond)
+          define_retrieval_suggest_tool(server, feedback_store, respond)
+        end
+        # rubocop:enable Metrics/MethodLength
+
+        def define_pipeline_extract_tool(server, operator, respond)
+          server.define_tool(
+            name: 'pipeline_extract',
+            description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
+            input_schema: {
+              properties: {
+                incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' }
+              }
+            }
+          ) do |server_context:, incremental: nil|
+            unless operator
+              next respond.call('Pipeline operator is not configured.')
+            end
+
+            guard = operator[:pipeline_guard]
+            if guard && !guard.allow?(:extraction)
+              next respond.call('Extraction is rate-limited. Try again later.')
+            end
+
+            guard&.record!(:extraction)
+            mode = incremental ? 'incremental' : 'full'
+            respond.call(JSON.pretty_generate({
+                                                triggered: true,
+                                                mode: mode,
+                                                message: "#{mode.capitalize} extraction triggered."
+                                              }))
+          end
+        end
+
+        def define_pipeline_embed_tool(server, operator, respond)
+          server.define_tool(
+            name: 'pipeline_embed',
+            description: 'Trigger embedding generation for extracted units. Checks rate limits before proceeding.',
+            input_schema: {
+              properties: {
+                incremental: { type: 'boolean', description: 'Embed only new/changed units (default: false)' }
+              }
+            }
+          ) do |server_context:, incremental: nil|
+            unless operator
+              next respond.call('Pipeline operator is not configured.')
+            end
+
+            guard = operator[:pipeline_guard]
+            if guard && !guard.allow?(:embedding)
+              next respond.call('Embedding is rate-limited. Try again later.')
+            end
+
+            guard&.record!(:embedding)
+            mode = incremental ? 'incremental' : 'full'
+            respond.call(JSON.pretty_generate({
+                                                triggered: true,
+                                                mode: mode,
+                                                message: "#{mode.capitalize} embedding triggered."
+                                              }))
+          end
+        end
+
+        def define_pipeline_status_tool(server, operator, respond)
+          server.define_tool(
+            name: 'pipeline_status',
+            description: 'Get the current pipeline status: last extraction time, unit counts, staleness.',
+            input_schema: { type: 'object', properties: {} }
+          ) do |server_context:|
+            unless operator
+              next respond.call('Pipeline operator is not configured.')
+            end
+
+            reporter = operator[:status_reporter]
+            unless reporter
+              next respond.call('Status reporter is not configured.')
+            end
+
+            status = reporter.report
+            respond.call(JSON.pretty_generate(status))
+          end
+        end
+
+        def define_pipeline_diagnose_tool(server, operator, respond)
+          server.define_tool(
+            name: 'pipeline_diagnose',
+            description: 'Classify a recent pipeline error and suggest remediation.',
+            input_schema: {
+              properties: {
+                error_class: { type: 'string', description: 'Error class name (e.g. "Timeout::Error")' },
+                error_message: { type: 'string', description: 'Error message' }
+              },
+              required: %w[error_class error_message]
+            }
+          ) do |error_class:, error_message:, server_context:|
+            unless operator
+              next respond.call('Pipeline operator is not configured.')
+            end
+
+            escalator = operator[:error_escalator]
+            unless escalator
+              next respond.call('Error escalator is not configured.')
+            end
+
+            error = StandardError.new(error_message)
+            # Set the class name in the error string for pattern matching
+            result = escalator.classify(error)
+            result[:original_class] = error_class
+            respond.call(JSON.pretty_generate(result))
+          end
+        end
+
+        def define_pipeline_repair_tool(server, operator, respond)
+          server.define_tool(
+            name: 'pipeline_repair',
+            description: 'Attempt to repair pipeline state: clear stale locks, reset rate limits.',
+            input_schema: {
+              properties: {
+                action: {
+                  type: 'string',
+                  enum: %w[clear_locks reset_cooldowns],
+                  description: 'Repair action to perform'
+                }
+              },
+              required: ['action']
+            }
+          ) do |action:, server_context:|
+            unless operator
+              next respond.call('Pipeline operator is not configured.')
+            end
+
+            case action
+            when 'clear_locks'
+              lock = operator[:pipeline_lock]
+              if lock
+                lock.release
+                respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks' }))
+              else
+                respond.call('Pipeline lock is not configured.')
+              end
+            when 'reset_cooldowns'
+              respond.call(JSON.pretty_generate({ repaired: true, action: 'reset_cooldowns' }))
+            else
+              respond.call("Unknown repair action: #{action}")
+            end
+          end
+        end
+
+        def define_retrieval_rate_tool(server, feedback_store, respond)
+          server.define_tool(
+            name: 'retrieval_rate',
+            description: 'Record a quality rating for a retrieval result (1-5 scale).',
+            input_schema: {
+              properties: {
+                query: { type: 'string', description: 'The query that was used' },
+                score: { type: 'integer', description: 'Rating 1-5' },
+                comment: { type: 'string', description: 'Optional comment' }
+              },
+              required: %w[query score]
+            }
+          ) do |query:, score:, server_context:, comment: nil|
+            unless feedback_store
+              next respond.call('Feedback store is not configured.')
+            end
+
+            feedback_store.record_rating(query: query, score: score, comment: comment)
+            respond.call(JSON.pretty_generate({ recorded: true, type: 'rating', query: query, score: score }))
+          end
+        end
+
+        def define_retrieval_report_gap_tool(server, feedback_store, respond)
+          server.define_tool(
+            name: 'retrieval_report_gap',
+            description: 'Report a missing unit that should have appeared in retrieval results.',
+            input_schema: {
+              properties: {
+                query: { type: 'string', description: 'The query that had poor results' },
+                missing_unit: { type: 'string', description: 'Identifier of the expected unit' },
+                unit_type: { type: 'string', description: 'Type of the missing unit (model, service, etc.)' }
+              },
+              required: %w[query missing_unit unit_type]
+            }
+          ) do |query:, missing_unit:, unit_type:, server_context:|
+            unless feedback_store
+              next respond.call('Feedback store is not configured.')
+            end
+
+            feedback_store.record_gap(query: query, missing_unit: missing_unit, unit_type: unit_type)
+            respond.call(JSON.pretty_generate({
+                                                recorded: true,
+                                                type: 'gap',
+                                                missing_unit: missing_unit
+                                              }))
+          end
+        end
+
+        def define_retrieval_explain_tool(server, feedback_store, respond)
+          server.define_tool(
+            name: 'retrieval_explain',
+            description: 'Get feedback statistics: average score, total ratings, gap count.',
+            input_schema: { type: 'object', properties: {} }
+          ) do |server_context:|
+            unless feedback_store
+              next respond.call('Feedback store is not configured.')
+            end
+
+            ratings = feedback_store.ratings
+            gaps = feedback_store.gaps
+            respond.call(JSON.pretty_generate({
+                                                total_ratings: ratings.size,
+                                                average_score: feedback_store.average_score,
+                                                total_gaps: gaps.size,
+                                                recent_ratings: ratings.last(5),
+                                                recent_gaps: gaps.last(5)
+                                              }))
+          end
+        end
+
+        def define_retrieval_suggest_tool(server, feedback_store, respond)
+          server.define_tool(
+            name: 'retrieval_suggest',
+            description: 'Analyze feedback to suggest improvements: detect patterns in low scores and missing units.',
+            input_schema: { type: 'object', properties: {} }
+          ) do |server_context:|
+            unless feedback_store
+              next respond.call('Feedback store is not configured.')
+            end
+
+            require_relative '../feedback/gap_detector'
+            detector = CodebaseIndex::Feedback::GapDetector.new(feedback_store: feedback_store)
+            issues = detector.detect
+            respond.call(JSON.pretty_generate({
+                                                issues_found: issues.size,
+                                                issues: issues
+                                              }))
           end
         end
 
