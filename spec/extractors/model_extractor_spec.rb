@@ -89,7 +89,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
       expect(scopes.size).to eq(1)
       expect(scopes[0][:name]).to eq('conditional')
       expect(scopes[0][:source]).to include('if Rails.env.production?')
-      expect(scopes[0][:source].scan(/end/).size).to eq(2) # inner if + outer do
+      expect(scopes[0][:source].scan('end').size).to eq(2) # inner if + outer do
     end
 
     it 'extracts scope with parameterized lambda' do

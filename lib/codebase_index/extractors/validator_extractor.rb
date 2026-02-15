@@ -163,10 +163,8 @@ module CodebaseIndex
       end
 
       def extract_validation_rules(source)
-        rules = []
-
         # Conditional checks in validate/validate_each body
-        source.scan(/unless\s+(.+)$/).flatten.each { |r| rules << r.strip }
+        rules = source.scan(/unless\s+(.+)$/).flatten.map(&:strip)
         source.scan(/if\s+(.+?)(?:\s*$|\s*then)/).flatten.each { |r| rules << r.strip }
 
         # Regex validations
@@ -177,10 +175,8 @@ module CodebaseIndex
       end
 
       def extract_error_messages(source)
-        messages = []
-
         # errors.add(:attr, "message") or errors.add(variable, "message")
-        source.scan(/errors\.add\s*\(\s*:?\w+\s*,\s*["']([^"']+)["']/).flatten.each { |m| messages << m }
+        messages = source.scan(/errors\.add\s*\(\s*:?\w+\s*,\s*["']([^"']+)["']/).flatten.map { |m| m }
 
         # errors.add(:attr, :symbol) or errors.add(variable, :symbol)
         source.scan(/errors\.add\s*\(\s*:?\w+\s*,\s*:(\w+)/).flatten.each { |m| messages << ":#{m}" }
@@ -189,10 +185,8 @@ module CodebaseIndex
       end
 
       def extract_options(source)
-        options = []
-
         # options[:key] access
-        source.scan(/options\[:(\w+)\]/).flatten.each { |o| options << o }
+        options = source.scan(/options\[:(\w+)\]/).flatten.map { |o| o }
 
         options.uniq
       end

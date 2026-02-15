@@ -426,11 +426,10 @@ module CodebaseIndex
       def applicable_filters(controller, action)
         action_name = action.to_s
 
-        controller._process_action_callbacks.select do |cb|
+        applicable = controller._process_action_callbacks.select do |cb|
           callback_applies_to_action?(cb, action_name)
-        end.map do |cb|
-          { kind: cb.kind, filter: cb.filter }
         end
+        applicable.map { |cb| { kind: cb.kind, filter: cb.filter } }
       end
 
       # Determine if a callback applies to a given action name.

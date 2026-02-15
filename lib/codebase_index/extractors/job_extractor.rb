@@ -55,7 +55,7 @@ module CodebaseIndex
 
         # Also try class-based discovery for ActiveJob
         if defined?(ApplicationJob)
-          seen = units.map(&:identifier).to_set
+          seen = units.to_set(&:identifier)
           ApplicationJob.descendants.each do |job_class|
             next if seen.include?(job_class.name)
 
@@ -154,7 +154,7 @@ module CodebaseIndex
 
       def source_file_for(job_class)
         # Try to get from method source location
-        if job_class.instance_methods(false).include?(:perform)
+        if job_class.method_defined?(:perform, false)
           job_class.instance_method(:perform).source_location&.first
         end || Rails.root.join("app/jobs/#{job_class.name.underscore}.rb").to_s
       rescue StandardError

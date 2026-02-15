@@ -11,7 +11,7 @@ module CodebaseIndex
 
         # @param connection [Object] Database connection
         # @return [void]
-        def self.up(connection) # rubocop:disable Metrics/MethodLength
+        def self.up(connection)
           connection.execute(<<~SQL)
             CREATE TABLE IF NOT EXISTS codebase_embeddings (
               id INTEGER PRIMARY KEY AUTOINCREMENT,

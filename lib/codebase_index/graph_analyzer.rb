@@ -80,7 +80,7 @@ module CodebaseIndex
     def hubs(limit: 20)
       nodes = graph_nodes
 
-      nodes.map do |identifier, meta|
+      identifiers_with_dependents = nodes.map do |identifier, meta|
         dependents = @graph.dependents_of(identifier)
         {
           identifier: identifier,
@@ -89,8 +89,7 @@ module CodebaseIndex
           dependents: dependents
         }
       end
-           .sort_by { |h| -h[:dependent_count] }
-           .first(limit)
+      identifiers_with_dependents.sort_by { |h| -h[:dependent_count] }.first(limit)
     end
 
     # Detect circular dependency chains in the graph.

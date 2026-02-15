@@ -263,7 +263,7 @@ module CodebaseIndex
           if loader.respond_to?(:eager_load_dir)
             loader.eager_load_dir(dir.to_s)
           else
-            Dir.glob(dir.join('**/*.rb')).sort.each do |file|
+            Dir.glob(dir.join('**/*.rb')).each do |file|
               require file
             rescue NameError, LoadError => e
               Rails.logger.warn "[CodebaseIndex] Skipped #{file}: #{e.message}"
@@ -376,8 +376,6 @@ module CodebaseIndex
       result = {}
       relative_paths.each { |rp| result[rp] = {} }
 
-      # 1. Batch log: one git command for per-file commit history
-      #    Format: HASH|||AUTHOR|||DATE|||SUBJECT followed by list of changed files
       log_output = run_git(
         'log', '--all', '--name-only',
         '--format=__COMMIT__%H|||%an|||%cI|||%s',
@@ -385,9 +383,19 @@ module CodebaseIndex
         '--', *relative_paths
       )
 
-      # Parse the log output to build per-file data
+      parse_git_log_output(log_output, relative_paths.to_set, result)
+
+      ninety_days_ago = (Time.current - 90.days).iso8601
+      result.each do |relative_path, data|
+        result[relative_path] = build_file_metadata(data, ninety_days_ago)
+      end
+
+      result
+    end
+
+    # Parse git log output line-by-line, populating result with per-file commit data.
+    def parse_git_log_output(log_output, path_set, result)
       current_commit = nil
-      path_set = relative_paths.to_set
 
       log_output.each_line do |line|
         line = line.strip
@@ -395,69 +403,53 @@ module CodebaseIndex
 
         if line.start_with?('__COMMIT__')
           parts = line.sub('__COMMIT__', '').split('|||', 4)
-          current_commit = {
-            sha: parts[0],
-            author: parts[1],
-            date: parts[2],
-            message: parts[3]
-          }
+          current_commit = { sha: parts[0], author: parts[1], date: parts[2], message: parts[3] }
         elsif current_commit && path_set.include?(line)
           entry = result[line] ||= {}
-
-          # Track last modified (first commit we see per file is the most recent)
           unless entry[:last_modified]
             entry[:last_modified] = current_commit[:date]
             entry[:last_author] = current_commit[:author]
           end
-
-          # Accumulate commits for this file
-          entry[:commits] ||= []
-          entry[:commits] << current_commit
-
-          # Track contributors
-          entry[:contributors] ||= Hash.new(0)
-          entry[:contributors][current_commit[:author]] += 1
+          (entry[:commits] ||= []) << current_commit
+          (entry[:contributors] ||= Hash.new(0))[current_commit[:author]] += 1
         end
       end
+    end
 
-      # 2. Build final result hashes
-      ninety_days_ago = (Time.current - 90.days).iso8601
-
-      result.each do |relative_path, data|
-        all_commits = data[:commits] || []
-        contributor_counts = data[:contributors] || {}
-
-        recent_count = all_commits.count { |c| c[:date] && c[:date] > ninety_days_ago }
-        total_count = all_commits.size
-
-        change_frequency = if total_count <= 2
-                             :new
-                           elsif recent_count >= 10
-                             :hot
-                           elsif recent_count >= 3
-                             :active
-                           elsif recent_count >= 1
-                             :stable
-                           else
-                             :dormant
-                           end
-
-        result[relative_path] = {
-          last_modified: data[:last_modified],
-          last_author: data[:last_author],
-          commit_count: total_count,
-          contributors: contributor_counts
-                        .sort_by { |_, count| -count }
-                        .first(5)
-                        .map { |name, count| { name: name, commits: count } },
-          recent_commits: all_commits.first(5).map do |c|
-            { sha: c[:sha]&.first(8), message: c[:message], date: c[:date], author: c[:author] }
-          end,
-          change_frequency: change_frequency
-        }
+    # Classify how frequently a file changes based on commit counts.
+    def classify_change_frequency(total_count, recent_count)
+      if total_count <= 2
+        :new
+      elsif recent_count >= 10
+        :hot
+      elsif recent_count >= 3
+        :active
+      elsif recent_count >= 1
+        :stable
+      else
+        :dormant
       end
+    end
 
-      result
+    # Build final metadata hash from raw commit data.
+    def build_file_metadata(data, ninety_days_ago)
+      all_commits = data[:commits] || []
+      contributor_counts = data[:contributors] || {}
+      recent_count = all_commits.count { |c| c[:date] && c[:date] > ninety_days_ago }
+
+      {
+        last_modified: data[:last_modified],
+        last_author: data[:last_author],
+        commit_count: all_commits.size,
+        contributors: contributor_counts
+                      .sort_by { |_, count| -count }
+                      .first(5)
+                      .map { |name, count| { name: name, commits: count } },
+        recent_commits: all_commits.first(5).map do |c|
+          { sha: c[:sha]&.first(8), message: c[:message], date: c[:date], author: c[:author] }
+        end,
+        change_frequency: classify_change_frequency(all_commits.size, recent_count)
+      }
     end
 
     # ──────────────────────────────────────────────────────────────────────

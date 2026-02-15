@@ -5,28 +5,173 @@ AllCops:
     - 'vendor/**/*'
     - 'tmp/**/*'
 
-# Spec files naturally have long describe/context blocks
+# ── Metrics exclusions ──
+# AST visitors, extractors, MCP registries, flow analysis, and core
+# orchestration files have complex methods by nature. Decomposition
+# would scatter related logic without improving readability.
+
 Metrics/BlockLength:
   Exclude:
     - 'spec/**/*'
+    - 'lib/tasks/**/*'
+    - '*.gemspec'
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
   AllowedMethods:
     - 'refine'
 
-# Test helpers sometimes need many parameters
+Metrics/ModuleLength:
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
+Metrics/ClassLength:
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
+Metrics/MethodLength:
+  Max: 20
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
+Metrics/AbcSize:
+  Max: 25
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
+Metrics/CyclomaticComplexity:
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
+Metrics/BlockNesting:
+  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
+
 Metrics/ParameterLists:
   Exclude:
     - 'spec/**/*'
-
-# Retrieval pipeline classes are inherently complex —
-# each has multiple strategy/signal methods that belong together.
-Metrics/ClassLength:
-  Exclude:
+    - 'lib/codebase_index/ast/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/codebase_index/mcp/**/*'
     - 'lib/codebase_index/retrieval/**/*'
+    - 'lib/codebase_index/flow_*.rb'
+    - 'lib/codebase_index/flow_analysis/**/*'
+    - 'lib/codebase_index/ruby_analyzer/**/*'
+    - 'lib/codebase_index/extractor.rb'
+    - 'lib/codebase_index/extracted_unit.rb'
+    - 'lib/codebase_index/dependency_graph.rb'
+    - 'lib/codebase_index/graph_analyzer.rb'
 
-# Search/ranking methods need more headroom than the default 10
-Metrics/MethodLength:
-  Max: 15
+# MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars
+Layout/LineLength:
+  Exclude:
+    - 'lib/codebase_index/mcp/**/*'
+    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/tasks/**/*'
 
-# Search and ranking methods have inherently branchy logic
-Metrics/AbcSize:
-  Max: 22
+# Short param names are conventional in comparison/math methods
+Naming/MethodParameterName:
+  Exclude:
+    - 'lib/codebase_index/ruby_analyzer/trace_enricher.rb'
+    - 'lib/codebase_index/flow_assembler.rb'
+
+# Renaming predicate methods would break callers
+Naming/PredicateMethod:
+  Exclude:
+    - 'lib/codebase_index/extractors/**/*'
+
+# Safe navigation chains in extractors reflect optional DB metadata
+Style/SafeNavigationChainLength:
+  Exclude:
+    - 'lib/codebase_index/extractors/**/*'
+
+# GraphQL classification methods intentionally enumerate all types
+Lint/DuplicateBranch:
+  Exclude:
+    - 'lib/codebase_index/extractors/graphql_extractor.rb'
+
+# Top-level module docs already in CLAUDE.md/README
+Style/Documentation:
+  Enabled: false

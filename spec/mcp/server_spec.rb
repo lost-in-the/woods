@@ -417,14 +417,14 @@ RSpec.describe CodebaseIndex::MCP::Server do
       let(:status_reporter) do
         instance_double('CodebaseIndex::Operator::StatusReporter').tap do |r|
           allow(r).to receive(:report).and_return({
-            status: :ok,
-            extracted_at: '2026-02-15T10:00:00Z',
-            total_units: 42,
-            counts: { 'models' => 10 },
-            git_sha: 'abc123',
-            git_branch: 'main',
-            staleness_seconds: 3600
-          })
+                                                    status: :ok,
+                                                    extracted_at: '2026-02-15T10:00:00Z',
+                                                    total_units: 42,
+                                                    counts: { 'models' => 10 },
+                                                    git_sha: 'abc123',
+                                                    git_branch: 'main',
+                                                    staleness_seconds: 3600
+                                                  })
         end
       end
 
@@ -514,8 +514,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
       let(:feedback_store) do
         instance_double('CodebaseIndex::Feedback::Store').tap do |s|
           allow(s).to receive(:ratings).and_return([
-            { 'query' => 'test', 'score' => 4, 'timestamp' => '2026-02-15T10:00:00Z' }
-          ])
+                                                     { 'query' => 'test', 'score' => 4,
+                                                       'timestamp' => '2026-02-15T10:00:00Z' }
+                                                   ])
           allow(s).to receive(:gaps).and_return([])
           allow(s).to receive(:average_score).and_return(4.0)
         end
@@ -584,7 +585,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     tool_class = tools[tool_name]
     raise "Tool not found: #{tool_name}" unless tool_class
 
-    tool_class.call(**args, server_context: {})
+    tool_class.call(**args, _server_context: {})
   end
 
   # Extract the text content from a tool response.

@@ -139,55 +139,58 @@ module CodebaseIndex
       def build_schema_comment(model)
         return nil unless model.table_exists?
 
-        columns = model.columns.map do |col|
-          type_info = col.type.to_s
-          type_info += "(#{col.limit})" if col.limit
-          constraints = []
-          constraints << 'NOT NULL' unless col.null
-          constraints << "DEFAULT #{col.default.inspect}" if col.default
-          constraints << 'PRIMARY KEY' if col.name == model.primary_key
-
-          "  #{col.name.ljust(25)} #{type_info.ljust(15)} #{constraints.join(' ')}"
-        end
-
-        indexes = begin
-          ActiveRecord::Base.connection.indexes(model.table_name).map do |idx|
-            unique = idx.unique ? ' (unique)' : ''
-            "  #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
-          end
-        rescue StandardError
-          []
-        end
-
-        foreign_keys = begin
-          ActiveRecord::Base.connection.foreign_keys(model.table_name).map do |fk|
-            "  #{fk.from_table}.#{fk.column} → #{fk.to_table}"
-          end
-        rescue StandardError
-          []
-        end
-
         parts = []
         parts << '# == Schema Information'
         parts << '#'
         parts << "# Table: #{model.table_name}"
         parts << '#'
         parts << '# Columns:'
-        parts.concat(columns.map { |c| "# #{c}" })
+        parts.concat(format_columns_comment(model))
         parts << '#'
 
+        indexes = format_indexes_comment(model)
         if indexes.any?
           parts << '# Indexes:'
-          parts.concat(indexes.map { |i| "# #{i}" })
+          parts.concat(indexes)
           parts << '#'
         end
 
+        foreign_keys = format_foreign_keys_comment(model)
         if foreign_keys.any?
           parts << '# Foreign Keys:'
-          parts.concat(foreign_keys.map { |f| "# #{f}" })
+          parts.concat(foreign_keys)
         end
 
         parts.join("\n")
+      end
+
+      def format_columns_comment(model)
+        model.columns.map do |col|
+          type_info = col.type.to_s
+          type_info += "(#{col.limit})" if col.limit
+          constraints = []
+          constraints << 'NOT NULL' unless col.null
+          constraints << "DEFAULT #{col.default.inspect}" if col.default
+          constraints << 'PRIMARY KEY' if col.name == model.primary_key
+          "#   #{col.name.ljust(25)} #{type_info.ljust(15)} #{constraints.join(' ')}"
+        end
+      end
+
+      def format_indexes_comment(model)
+        ActiveRecord::Base.connection.indexes(model.table_name).map do |idx|
+          unique = idx.unique ? ' (unique)' : ''
+          "#   #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
+        end
+      rescue StandardError
+        []
+      end
+
+      def format_foreign_keys_comment(model)
+        ActiveRecord::Base.connection.foreign_keys(model.table_name).map do |fk|
+          "#   #{fk.from_table}.#{fk.column} → #{fk.to_table}"
+        end
+      rescue StandardError
+        []
       end
 
       # Read model source and inline all included concerns
@@ -473,11 +476,9 @@ module CodebaseIndex
 
       # Extract what this model depends on
       def extract_dependencies(model, source = nil)
-        deps = []
-
         # Associations point to other models
-        model.reflect_on_all_associations.each do |assoc|
-          deps << { type: :model, target: assoc.class_name, via: :association }
+        deps = model.reflect_on_all_associations.map do |assoc|
+          { type: :model, target: assoc.class_name, via: :association }
         end
 
         # Parse source for service/mailer/job references
@@ -510,53 +511,28 @@ module CodebaseIndex
       def build_chunks(unit)
         chunks = []
 
-        # Summary chunk: high-level overview for broad queries
-        summary_content = build_summary_chunk(unit)
-        chunks << {
-          chunk_type: :summary,
-          identifier: "#{unit.identifier}:summary",
-          content: summary_content,
-          content_hash: Digest::SHA256.hexdigest(summary_content),
-          metadata: { parent: unit.identifier, purpose: :overview }
-        }
-
-        # Associations chunk
+        add_chunk(chunks, :summary, unit, build_summary_chunk(unit), :overview)
         if unit.metadata[:associations].any?
-          assoc_content = build_associations_chunk(unit)
-          chunks << {
-            chunk_type: :associations,
-            identifier: "#{unit.identifier}:associations",
-            content: assoc_content,
-            content_hash: Digest::SHA256.hexdigest(assoc_content),
-            metadata: { parent: unit.identifier, purpose: :relationships }
-          }
+          add_chunk(chunks, :associations, unit, build_associations_chunk(unit), :relationships)
         end
-
-        # Callbacks chunk
-        if unit.metadata[:callbacks].any?
-          cb_content = build_callbacks_chunk(unit)
-          chunks << {
-            chunk_type: :callbacks,
-            identifier: "#{unit.identifier}:callbacks",
-            content: cb_content,
-            content_hash: Digest::SHA256.hexdigest(cb_content),
-            metadata: { parent: unit.identifier, purpose: :behavior }
-          }
-        end
-
-        # Validations chunk
+        add_chunk(chunks, :callbacks, unit, build_callbacks_chunk(unit), :behavior) if unit.metadata[:callbacks].any?
         if unit.metadata[:validations].any?
-          val_content = build_validations_chunk(unit)
-          chunks << {
-            chunk_type: :validations,
-            identifier: "#{unit.identifier}:validations",
-            content: val_content,
-            content_hash: Digest::SHA256.hexdigest(val_content),
-            metadata: { parent: unit.identifier, purpose: :constraints }
-          }
+          add_chunk(chunks, :validations, unit, build_validations_chunk(unit), :constraints)
         end
 
         chunks
+      end
+
+      def add_chunk(chunks, type, unit, content, purpose)
+        return if content.nil? || content.empty?
+
+        chunks << {
+          chunk_type: type,
+          identifier: "#{unit.identifier}:#{type}",
+          content: content,
+          content_hash: Digest::SHA256.hexdigest(content),
+          metadata: { parent: unit.identifier, purpose: purpose }
+        }
       end
 
       def build_summary_chunk(unit)

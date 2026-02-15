@@ -521,7 +521,7 @@ module CodebaseIndex
           field_hash = { name: name, type: type }
 
           if rest
-            field_hash[:null] = rest.include?('null: false') ? false : true
+            field_hash[:null] = !rest.include?('null: false')
             desc_match = rest.match(/description:\s*["']([^"']+)["']/)
             field_hash[:description] = desc_match[1] if desc_match
             resolver_match = rest.match(/resolver:\s*([\w:]+)/)
@@ -607,11 +607,9 @@ module CodebaseIndex
       # @param source [String]
       # @return [Array<String>]
       def extract_connections(source)
-        connections = []
-
         # field :items, Types::ItemType.connection_type
-        source.scan(/([\w:]+)\.connection_type/).flatten.each do |type|
-          connections << type
+        connections = source.scan(/([\w:]+)\.connection_type/).flatten.map do |type|
+          type
         end
 
         # connection_type_class ConnectionType
@@ -753,11 +751,9 @@ module CodebaseIndex
       # @param source [String]
       # @return [Array<Hash>]
       def extract_dependencies(source)
-        deps = []
-
         # Other GraphQL type references (Types::*)
-        source.scan(/Types::\w+/).uniq.each do |type_ref|
-          deps << { type: :graphql_type, target: type_ref, via: :type_reference }
+        deps = source.scan(/Types::\w+/).uniq.map do |type_ref|
+          { type: :graphql_type, target: type_ref, via: :type_reference }
         end
 
         # Model references: scan for capitalized constants that look like model names.

@@ -138,7 +138,7 @@ module CodebaseIndex
             out_degree.positive? ? scores[src] / out_degree : 0.0
           end
 
-          new_scores[id] = (1.0 - damping) / n + damping * (rank_sum + dangling_sum / n)
+          new_scores[id] = ((1.0 - damping) / n) + (damping * (rank_sum + (dangling_sum / n)))
         end
 
         scores = new_scores

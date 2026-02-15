@@ -63,7 +63,7 @@ module CodebaseIndex
         paths.each do |path|
           expanded = File.expand_path(path)
           if File.directory?(expanded)
-            Dir.glob(File.join(expanded, '**', '*.rb')).sort.each do |f|
+            Dir.glob(File.join(expanded, '**', '*.rb')).each do |f|
               files << f
             end
           elsif File.file?(expanded) && expanded.end_with?('.rb')

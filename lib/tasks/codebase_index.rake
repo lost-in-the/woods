@@ -416,7 +416,7 @@ namespace :codebase_index do
     manifest_path = File.join(json_dir, 'manifest.json')
 
     # 1. Check staleness via source_checksum
-    lib_files = Dir.glob(File.join(gem_root, 'lib', '**', '*.rb')).sort
+    lib_files = Dir.glob(File.join(gem_root, 'lib', '**', '*.rb'))
     source_content = lib_files.map { |f| File.read(f) }.join
     source_checksum = Digest::SHA256.hexdigest(source_content)
 

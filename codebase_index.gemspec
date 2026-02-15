@@ -22,6 +22,7 @@ Gem::Specification.new do |spec|
   spec.metadata['homepage_uri'] = spec.homepage
   spec.metadata['source_code_uri'] = spec.homepage
   spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
   spec.files = Dir[
@@ -41,13 +42,4 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'parser', '~> 3.3'
   spec.add_dependency 'prism', '>= 0.24'
-
-  # Development dependencies
-  spec.add_development_dependency 'bundler', '>= 2.0'
-  spec.add_development_dependency 'rake', '~> 13.0'
-  spec.add_development_dependency 'rspec', '~> 3.12'
-  spec.add_development_dependency 'rubocop', '~> 1.50'
-  spec.add_development_dependency 'rubocop-rails', '~> 2.19'
-  spec.add_development_dependency 'rubocop-rspec', '~> 2.22'
-  spec.add_development_dependency 'sqlite3', '>= 1.4'
 end

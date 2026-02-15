@@ -127,9 +127,7 @@ module CodebaseIndex
           prism_node.value.to_s
         when Prism::StringNode
           prism_node.unescaped
-        when Prism::IntegerNode
-          prism_node.value
-        when Prism::FloatNode
+        when Prism::IntegerNode, Prism::FloatNode
           prism_node.value
         when Prism::NilNode
           nil
@@ -362,7 +360,7 @@ module CodebaseIndex
         condition = convert_prism_node(prism_node.predicate, source)
         condition_source = extract_prism_source_text(prism_node.predicate, source)
         if condition.is_a?(Node) && condition.source.nil?
-          condition = Node.new(**condition.to_h.merge(source: condition_source))
+          condition = Node.new(**condition.to_h, source: condition_source)
         end
 
         then_body = prism_node.statements ? convert_prism_node(prism_node.statements, source) : nil
@@ -447,17 +445,13 @@ module CodebaseIndex
         case receiver_node
         when Prism::SelfNode
           'self'
-        when Prism::ConstantReadNode
+        when Prism::ConstantReadNode, Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode
           receiver_node.name.to_s
         when Prism::ConstantPathNode
           extract_const_path_text(receiver_node)
         when Prism::CallNode
           text = extract_prism_receiver_text(receiver_node.receiver, source) if receiver_node.receiver
           [text, receiver_node.name.to_s].compact.join('.')
-        when Prism::LocalVariableReadNode
-          receiver_node.name.to_s
-        when Prism::InstanceVariableReadNode
-          receiver_node.name.to_s
         else
           extract_prism_source_text(receiver_node, source)
         end
@@ -567,7 +561,7 @@ module CodebaseIndex
           condition = convert_parser_node(parser_node.children[0], source)
           condition_source = extract_parser_source_text(parser_node.children[0], source)
           if condition.is_a?(Node) && condition.source.nil?
-            condition = Node.new(**condition.to_h.merge(source: condition_source))
+            condition = Node.new(**condition.to_h, source: condition_source)
           end
           then_body = parser_node.children[1] ? convert_parser_node(parser_node.children[1], source) : nil
           else_body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
@@ -589,11 +583,7 @@ module CodebaseIndex
           )
         when :sym
           parser_node.children[0].to_s
-        when :str
-          parser_node.children[0]
-        when :int
-          parser_node.children[0]
-        when :float
+        when :str, :int, :float
           parser_node.children[0]
         when :nil
           nil

@@ -77,7 +77,7 @@ module CodebaseIndex
       raise ConfigurationError, "similarity_threshold must be Numeric, got #{value.inspect}" unless value.is_a?(Numeric)
 
       float_val = value.to_f
-      unless float_val >= 0.0 && float_val <= 1.0
+      unless float_val.between?(0.0, 1.0)
         raise ConfigurationError, "similarity_threshold must be between 0.0 and 1.0, got #{value.inspect}"
       end
 

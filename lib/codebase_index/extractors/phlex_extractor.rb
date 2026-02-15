@@ -139,7 +139,7 @@ module CodebaseIndex
           parent_component: component.superclass.name,
 
           # Phlex-specific
-          has_view_template: component.instance_methods.include?(:view_template),
+          has_view_template: component.method_defined?(:view_template),
 
           # For rendering context
           renders_many: extract_renders_many(source),

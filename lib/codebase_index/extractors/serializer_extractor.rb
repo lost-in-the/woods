@@ -60,7 +60,7 @@ module CodebaseIndex
         end
 
         # Class-based discovery for loaded gems
-        seen = units.map(&:identifier).to_set
+        seen = units.to_set(&:identifier)
         BASE_CLASSES.each_key do |base_class_name|
           base_class = begin
             base_class_name.constantize
@@ -308,12 +308,8 @@ module CodebaseIndex
       end
 
       def extract_views(source)
-        views = []
-
         # Blueprinter views: `view :extended do`
-        source.scan(/view\s+:(\w+)/).flatten.each { |v| views << v }
-
-        views
+        source.scan(/view\s+:(\w+)/).flatten.map { |v| v }
       end
 
       # ──────────────────────────────────────────────────────────────────────

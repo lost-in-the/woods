@@ -98,7 +98,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, include_source: nil, sections: nil|
+          ) do |identifier:, _server_context:, include_source: nil, sections: nil|
             unit = reader.find_unit(identifier)
             if unit
               always_include = %w[type identifier file_path namespace]
@@ -106,7 +106,7 @@ module CodebaseIndex
               filtered = filtered.except('source_code') if include_source == false
               if sections&.any?
                 allowed = (always_include + sections).to_set
-                filtered = filtered.select { |k, _| allowed.include?(k) }
+                filtered = filtered.slice(*allowed)
               end
               respond.call(JSON.pretty_generate(filtered))
             else
@@ -134,7 +134,7 @@ module CodebaseIndex
               },
               required: ['query']
             }
-          ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
+          ) do |query:, _server_context:, types: nil, fields: nil, limit: nil|
             results = reader.search(
               query,
               types: types,
@@ -164,7 +164,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil|
+          ) do |identifier:, _server_context:, depth: nil, types: nil|
             result = reader.traverse_dependencies(
               identifier,
               depth: depth || 2,
@@ -193,7 +193,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil|
+          ) do |identifier:, _server_context:, depth: nil, types: nil|
             result = reader.traverse_dependents(
               identifier,
               depth: depth || 2,
@@ -219,7 +219,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |server_context:, detail: nil|
+          ) do |_server_context:, detail: nil|
             result = { manifest: reader.manifest }
             result[:summary] = reader.summary if (detail || 'summary') == 'full'
             respond.call(JSON.pretty_generate(result))
@@ -241,7 +241,7 @@ module CodebaseIndex
                 limit: { type: 'integer', description: 'Limit results per section (default: 20)' }
               }
             }
-          ) do |server_context:, analysis: nil, limit: nil|
+          ) do |_server_context:, analysis: nil, limit: nil|
             data = reader.graph_analysis
             section = analysis || 'all'
 
@@ -292,7 +292,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |server_context:, limit: nil, types: nil|
+          ) do |_server_context:, limit: nil, types: nil|
             scores = reader.dependency_graph.pagerank
             graph_data = reader.raw_graph_data
             nodes = graph_data['nodes'] || {}
@@ -330,7 +330,7 @@ module CodebaseIndex
               },
               required: ['keyword']
             }
-          ) do |keyword:, server_context:, limit: nil|
+          ) do |keyword:, _server_context:, limit: nil|
             results = reader.framework_sources(keyword, limit: limit || 20)
             respond.call(JSON.pretty_generate({
                                                 keyword: keyword,
@@ -354,7 +354,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |server_context:, limit: nil, types: nil|
+          ) do |_server_context:, limit: nil, types: nil|
             results = reader.recent_changes(limit: limit || 10, types: types)
             respond.call(JSON.pretty_generate({
                                                 result_count: results.size,
@@ -369,7 +369,7 @@ module CodebaseIndex
             description: 'Reload extraction data from disk. Use after re-running extraction to pick up changes ' \
                          'without restarting the server.',
             input_schema: { type: 'object', properties: {} }
-          ) do |server_context:|
+          ) do |_server_context:|
             reader.reload!
             manifest = reader.manifest
             respond.call(JSON.pretty_generate({
@@ -394,7 +394,7 @@ module CodebaseIndex
               },
               required: ['query']
             }
-          ) do |query:, server_context:, budget: nil|
+          ) do |query:, _server_context:, budget: nil|
             if retriever
               result = retriever.retrieve(query, budget: budget || 8000)
               respond.call(result.context)
@@ -407,7 +407,6 @@ module CodebaseIndex
           end
         end
 
-        # rubocop:disable Metrics/MethodLength
         def define_operator_tools(server, operator, respond)
           define_pipeline_extract_tool(server, operator, respond)
           define_pipeline_embed_tool(server, operator, respond)
@@ -422,7 +421,6 @@ module CodebaseIndex
           define_retrieval_explain_tool(server, feedback_store, respond)
           define_retrieval_suggest_tool(server, feedback_store, respond)
         end
-        # rubocop:enable Metrics/MethodLength
 
         def define_pipeline_extract_tool(server, operator, respond)
           server.define_tool(
@@ -433,15 +431,11 @@ module CodebaseIndex
                 incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' }
               }
             }
-          ) do |server_context:, incremental: nil|
-            unless operator
-              next respond.call('Pipeline operator is not configured.')
-            end
+          ) do |_server_context:, incremental: nil|
+            next respond.call('Pipeline operator is not configured.') unless operator
 
             guard = operator[:pipeline_guard]
-            if guard && !guard.allow?(:extraction)
-              next respond.call('Extraction is rate-limited. Try again later.')
-            end
+            next respond.call('Extraction is rate-limited. Try again later.') if guard && !guard.allow?(:extraction)
 
             guard&.record!(:extraction)
             mode = incremental ? 'incremental' : 'full'
@@ -462,15 +456,11 @@ module CodebaseIndex
                 incremental: { type: 'boolean', description: 'Embed only new/changed units (default: false)' }
               }
             }
-          ) do |server_context:, incremental: nil|
-            unless operator
-              next respond.call('Pipeline operator is not configured.')
-            end
+          ) do |_server_context:, incremental: nil|
+            next respond.call('Pipeline operator is not configured.') unless operator
 
             guard = operator[:pipeline_guard]
-            if guard && !guard.allow?(:embedding)
-              next respond.call('Embedding is rate-limited. Try again later.')
-            end
+            next respond.call('Embedding is rate-limited. Try again later.') if guard && !guard.allow?(:embedding)
 
             guard&.record!(:embedding)
             mode = incremental ? 'incremental' : 'full'
@@ -487,15 +477,11 @@ module CodebaseIndex
             name: 'pipeline_status',
             description: 'Get the current pipeline status: last extraction time, unit counts, staleness.',
             input_schema: { type: 'object', properties: {} }
-          ) do |server_context:|
-            unless operator
-              next respond.call('Pipeline operator is not configured.')
-            end
+          ) do |_server_context:|
+            next respond.call('Pipeline operator is not configured.') unless operator
 
             reporter = operator[:status_reporter]
-            unless reporter
-              next respond.call('Status reporter is not configured.')
-            end
+            next respond.call('Status reporter is not configured.') unless reporter
 
             status = reporter.report
             respond.call(JSON.pretty_generate(status))
@@ -513,15 +499,11 @@ module CodebaseIndex
               },
               required: %w[error_class error_message]
             }
-          ) do |error_class:, error_message:, server_context:|
-            unless operator
-              next respond.call('Pipeline operator is not configured.')
-            end
+          ) do |error_class:, error_message:, _server_context:|
+            next respond.call('Pipeline operator is not configured.') unless operator
 
             escalator = operator[:error_escalator]
-            unless escalator
-              next respond.call('Error escalator is not configured.')
-            end
+            next respond.call('Error escalator is not configured.') unless escalator
 
             error = StandardError.new(error_message)
             # Set the class name in the error string for pattern matching
@@ -545,10 +527,8 @@ module CodebaseIndex
               },
               required: ['action']
             }
-          ) do |action:, server_context:|
-            unless operator
-              next respond.call('Pipeline operator is not configured.')
-            end
+          ) do |action:, _server_context:|
+            next respond.call('Pipeline operator is not configured.') unless operator
 
             case action
             when 'clear_locks'
@@ -579,10 +559,8 @@ module CodebaseIndex
               },
               required: %w[query score]
             }
-          ) do |query:, score:, server_context:, comment: nil|
-            unless feedback_store
-              next respond.call('Feedback store is not configured.')
-            end
+          ) do |query:, score:, _server_context:, comment: nil|
+            next respond.call('Feedback store is not configured.') unless feedback_store
 
             feedback_store.record_rating(query: query, score: score, comment: comment)
             respond.call(JSON.pretty_generate({ recorded: true, type: 'rating', query: query, score: score }))
@@ -601,10 +579,8 @@ module CodebaseIndex
               },
               required: %w[query missing_unit unit_type]
             }
-          ) do |query:, missing_unit:, unit_type:, server_context:|
-            unless feedback_store
-              next respond.call('Feedback store is not configured.')
-            end
+          ) do |query:, missing_unit:, unit_type:, _server_context:|
+            next respond.call('Feedback store is not configured.') unless feedback_store
 
             feedback_store.record_gap(query: query, missing_unit: missing_unit, unit_type: unit_type)
             respond.call(JSON.pretty_generate({
@@ -620,10 +596,8 @@ module CodebaseIndex
             name: 'retrieval_explain',
             description: 'Get feedback statistics: average score, total ratings, gap count.',
             input_schema: { type: 'object', properties: {} }
-          ) do |server_context:|
-            unless feedback_store
-              next respond.call('Feedback store is not configured.')
-            end
+          ) do |_server_context:|
+            next respond.call('Feedback store is not configured.') unless feedback_store
 
             ratings = feedback_store.ratings
             gaps = feedback_store.gaps
@@ -642,10 +616,8 @@ module CodebaseIndex
             name: 'retrieval_suggest',
             description: 'Analyze feedback to suggest improvements: detect patterns in low scores and missing units.',
             input_schema: { type: 'object', properties: {} }
-          ) do |server_context:|
-            unless feedback_store
-              next respond.call('Feedback store is not configured.')
-            end
+          ) do |_server_context:|
+            next respond.call('Feedback store is not configured.') unless feedback_store
 
             require_relative '../feedback/gap_detector'
             detector = CodebaseIndex::Feedback::GapDetector.new(feedback_store: feedback_store)

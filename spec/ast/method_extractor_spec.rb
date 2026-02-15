@@ -151,7 +151,7 @@ RSpec.describe CodebaseIndex::Ast::MethodExtractor do
     end
 
     it 'handles heredocs in method body' do
-      source = <<~'RUBY'
+      source = <<~RUBY
         class Foo
           def generate_sql
             <<~SQL

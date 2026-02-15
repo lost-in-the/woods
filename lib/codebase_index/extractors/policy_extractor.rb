@@ -198,11 +198,9 @@ module CodebaseIndex
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_dependencies(source, class_name)
-        deps = []
-
         # Evaluated model dependencies (specific :via)
-        detect_evaluated_models(source, class_name).each do |model|
-          deps << { type: :model, target: model, via: :policy_evaluation }
+        deps = detect_evaluated_models(source, class_name).map do |model|
+          { type: :model, target: model, via: :policy_evaluation }
         end
 
         deps.concat(scan_model_dependencies(source))
