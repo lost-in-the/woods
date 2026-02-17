@@ -14,9 +14,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 20 tools' do
+    it 'registers 21 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(20)
+      expect(tools.size).to eq(21)
     end
 
     it 'registers expected tool names' do
@@ -25,6 +25,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'pagerank', 'framework',
         'recent_changes', 'reload', 'codebase_retrieve',
+        'trace_flow',
         'pipeline_extract', 'pipeline_embed', 'pipeline_status',
         'pipeline_diagnose', 'pipeline_repair',
         'retrieval_rate', 'retrieval_report_gap',
@@ -449,6 +450,124 @@ RSpec.describe CodebaseIndex::MCP::Server do
         response = call_tool(server, 'pipeline_extract')
         expect(response_text(response)).to include('not configured')
       end
+    end
+
+    context 'with operator configured' do
+      let(:guard) do
+        instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+          allow(g).to receive(:allow?).with(:extraction).and_return(true)
+          allow(g).to receive(:record!).with(:extraction)
+        end
+      end
+
+      let(:operator) { { pipeline_guard: guard } }
+
+      let(:server_with_operator) do
+        described_class.build(index_dir: fixture_dir, operator: operator)
+      end
+
+      it 'returns started status and spawns a background thread' do
+        response = call_tool(server_with_operator, 'pipeline_extract')
+        data = parse_response(response)
+        expect(data['status']).to eq('started')
+        expect(data['message']).to include('background thread')
+        # Allow background thread to attempt execution and rescue
+        sleep 0.05
+      end
+
+      it 'is rate-limited when guard denies' do
+        allow(guard).to receive(:allow?).with(:extraction).and_return(false)
+        response = call_tool(server_with_operator, 'pipeline_extract')
+        expect(response_text(response)).to include('rate-limited')
+      end
+    end
+  end
+
+  describe 'tool: pipeline_embed' do
+    context 'without operator configured' do
+      it 'returns not configured message' do
+        response = call_tool(server, 'pipeline_embed')
+        expect(response_text(response)).to include('not configured')
+      end
+    end
+
+    context 'with operator configured' do
+      let(:guard) do
+        instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+          allow(g).to receive(:allow?).with(:embedding).and_return(true)
+          allow(g).to receive(:record!).with(:embedding)
+        end
+      end
+
+      let(:operator) { { pipeline_guard: guard } }
+
+      let(:server_with_operator) do
+        described_class.build(index_dir: fixture_dir, operator: operator)
+      end
+
+      it 'returns started status and spawns a background thread' do
+        response = call_tool(server_with_operator, 'pipeline_embed')
+        data = parse_response(response)
+        expect(data['status']).to eq('started')
+        expect(data['message']).to include('background thread')
+        sleep 0.05
+      end
+
+      it 'is rate-limited when guard denies' do
+        allow(guard).to receive(:allow?).with(:embedding).and_return(false)
+        response = call_tool(server_with_operator, 'pipeline_embed')
+        expect(response_text(response)).to include('rate-limited')
+      end
+    end
+  end
+
+  describe 'tool: trace_flow' do
+    let(:mock_flow_doc) do
+      instance_double(
+        'CodebaseIndex::FlowDocument',
+        to_h: {
+          entry_point: 'PostsController#create',
+          route: { verb: 'POST', path: '/posts' },
+          max_depth: 3,
+          generated_at: '2026-02-17T00:00:00Z',
+          steps: []
+        }
+      )
+    end
+
+    let(:mock_assembler) do
+      instance_double('CodebaseIndex::FlowAssembler').tap do |a|
+        allow(a).to receive(:assemble).and_return(mock_flow_doc)
+      end
+    end
+
+    before do
+      allow(CodebaseIndex::FlowAssembler).to receive(:new).and_return(mock_assembler)
+    end
+
+    it 'returns a flow document for a valid entry point' do
+      response = call_tool(server, 'trace_flow', entry_point: 'PostsController#create')
+      data = parse_response(response)
+      expect(data['entry_point']).to eq('PostsController#create')
+      expect(data).to have_key('steps')
+      expect(data).to have_key('route')
+    end
+
+    it 'passes entry_point and max_depth to the assembler' do
+      call_tool(server, 'trace_flow', entry_point: 'PostsController#create', depth: 5)
+      expect(mock_assembler).to have_received(:assemble).with('PostsController#create', max_depth: 5)
+    end
+
+    it 'uses default depth of 3 when not specified' do
+      call_tool(server, 'trace_flow', entry_point: 'PostsController#index')
+      expect(mock_assembler).to have_received(:assemble).with('PostsController#index', max_depth: 3)
+    end
+
+    it 'returns an error hash when assembly raises' do
+      allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'unit not found')
+      response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
+      data = parse_response(response)
+      expect(data['error']).to eq('unit not found')
     end
   end
 

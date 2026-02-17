@@ -71,10 +71,10 @@ The integration layer connects retrieval to consumption tools: CLI, editor plugi
 
 Every infrastructure dependency is behind an interface. Implementations are swappable without touching retrieval logic.
 
-**Vector stores:** Qdrant, pgvector, Pinecone, FAISS, Milvus, Weaviate, SQLite-vss, Chroma
-**Metadata stores:** PostgreSQL, MySQL, SQLite, in-memory
-**Graph stores:** In-memory (default), PostgreSQL (recursive CTEs), Neo4j
-**Embedding providers:** OpenAI, Voyage, Cohere, Ollama/local, Anthropic
+**Vector stores:** Qdrant, pgvector, Pinecone, FAISS, Milvus, Weaviate, SQLite-vss, Chroma (not yet implemented — current adapters: InMemory, Pgvector, Qdrant)
+**Metadata stores:** PostgreSQL, MySQL, SQLite, in-memory (current adapters: InMemory, SQLite)
+**Graph stores:** In-memory (default), PostgreSQL (recursive CTEs), Neo4j (not yet implemented — current adapter: InMemory)
+**Embedding providers:** OpenAI, Voyage, Cohere, Ollama/local, Anthropic (not yet implemented — current adapters: OpenAI, Ollama)
 **Background jobs:** Sidekiq, Solid Queue, GoodJob, DelayedJob, Resque, inline
 
 A team should be able to start with SQLite + FAISS + Ollama (zero external dependencies) and migrate to Qdrant + PostgreSQL + OpenAI without changing application code.
@@ -215,10 +215,10 @@ The system must work across common Rails infrastructure patterns. See `BACKEND_M
 | **Modern Rails 8** | pgvector | PostgreSQL | PostgreSQL | OpenAI/Voyage | Solid Queue |
 | **Classic Rails (MySQL)** | Qdrant | MySQL 8.0+ | MySQL (recursive CTEs) | OpenAI | Sidekiq |
 | **Classic Rails (PG)** | pgvector or Qdrant | PostgreSQL | PostgreSQL | OpenAI | Sidekiq |
-| **Self-hosted** | Qdrant/Milvus | PostgreSQL or MySQL | Same DB or in-memory | Ollama | Any |
-| **Zero-dependency** | FAISS/SQLite-vss | SQLite | In-memory | Ollama | Inline |
-| **Cloud-native** | Pinecone | PostgreSQL or Aurora MySQL | In-memory | OpenAI | Sidekiq/SQS |
-| **Enterprise** | Weaviate | PostgreSQL | Neo4j | Azure/Bedrock | Any |
+| **Self-hosted** | Qdrant/Milvus (Milvus not yet implemented) | PostgreSQL or MySQL | Same DB or in-memory | Ollama | Any |
+| **Zero-dependency** | FAISS/SQLite-vss (not yet implemented — use InMemory) | SQLite | In-memory | Ollama | Inline |
+| **Cloud-native** | Pinecone (not yet implemented) | PostgreSQL or Aurora MySQL | In-memory | OpenAI | Sidekiq/SQS |
+| **Enterprise** | Weaviate (not yet implemented) | PostgreSQL | Neo4j (not yet implemented) | Azure/Bedrock (not yet implemented) | Any |
 
 ### Interface Contracts
 
@@ -268,16 +268,16 @@ The system is designed for AI agents as primary consumers. See `AGENTIC_STRATEGY
 An agent interacting with CodebaseIndex has access to these tools:
 
 ```
-codebase_retrieve(query)              — Semantic retrieval with auto-classification
-codebase_lookup(identifier)           — Direct unit fetch by name
-codebase_dependencies(identifier)     — Forward dependency graph
-codebase_dependents(identifier)       — Reverse dependency graph ("who uses this?")
-codebase_search(keyword)              — Exact match search
-codebase_framework(concept)           — Rails/gem source for a concept
-codebase_structure()                  — High-level codebase overview
-codebase_recent_changes(n)            — Recently modified units
-codebase_graph_analysis(analysis)     — Structural analysis (orphans, dead ends, hubs, cycles, bridges)
-codebase_pagerank(limit)              — PageRank scores for dependency graph nodes
+codebase_retrieve(query)    — Semantic retrieval with auto-classification
+lookup(identifier)          — Direct unit fetch by name
+dependencies(identifier)    — Forward dependency graph
+dependents(identifier)      — Reverse dependency graph ("who uses this?")
+search(keyword)             — Exact match search
+framework(concept)          — Rails/gem source for a concept
+structure()                 — High-level codebase overview
+recent_changes(n)           — Recently modified units
+graph_analysis(analysis)    — Structural analysis (orphans, dead ends, hubs, cycles, bridges)
+pagerank(limit)             — PageRank scores for dependency graph nodes
 ```
 
 ### Multi-Turn Retrieval
@@ -348,7 +348,7 @@ The hypothesis is that runtime-aware extraction + semantic chunking + dependency
 **Goal:** Make extracted data searchable.
 
 - Define Ruby module interfaces for all storage backends
-- Implement SQLite + FAISS backend (zero-dependency starting point)
+- Implement SQLite + FAISS backend (zero-dependency starting point — current implementation uses InMemory VectorStore + SQLite MetadataStore)
 - Implement OpenAI embedding provider
 - Build text preparation pipeline (format units for embedding)
 - Build indexing pipeline (extract → prepare → embed → store)
@@ -442,7 +442,7 @@ end
 # Extract
 CodebaseIndex.extract!
 
-# Index (uses SQLite + FAISS defaults)
+# Index (uses InMemory VectorStore + SQLite MetadataStore defaults)
 CodebaseIndex.index!
 
 # Retrieve
@@ -515,21 +515,18 @@ end
 ### Presets
 
 ```ruby
-# Zero external dependencies
+# Zero external dependencies (InMemory VectorStore + SQLite + Ollama)
 CodebaseIndex.configure_with_preset(:local)
 
-# MySQL + Qdrant (classic Rails: MySQL/Percona + Sidekiq + Docker)
-CodebaseIndex.configure_with_preset(:mysql)
-
-# PostgreSQL + pgvector (Rails 8 / Solid suite style)
+# pgvector + SQLite + OpenAI
 CodebaseIndex.configure_with_preset(:postgresql)
 
-# PostgreSQL + Qdrant
-CodebaseIndex.configure_with_preset(:postgresql_qdrant)
+# Qdrant + SQLite + OpenAI (recommended for production)
+CodebaseIndex.configure_with_preset(:production)
 
-# Self-hosted, no external APIs (works with either database)
-CodebaseIndex.configure_with_preset(:self_hosted)             # defaults to PostgreSQL
-CodebaseIndex.configure_with_preset(:self_hosted, db: :mysql)  # MySQL variant
+# Aspirational presets (not yet implemented):
+# :mysql, :postgresql_qdrant, :self_hosted, :enterprise
+# Use :production with manual configuration overrides for these scenarios.
 ```
 
 ---

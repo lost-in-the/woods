@@ -55,7 +55,7 @@ tools:
         recency: string (optional, "hot" | "active" | "stable" | "dormant")
       include_framework: boolean (optional, default auto-detect)
 
-  - name: codebase_lookup
+  - name: lookup
     description: >
       Direct unit fetch by identifier. Returns the full extracted unit
       with metadata, source, dependencies, and chunks.
@@ -63,7 +63,7 @@ tools:
     parameters:
       identifier: string (required, e.g. "Order", "CheckoutService")
 
-  - name: codebase_dependencies
+  - name: dependencies
     description: >
       Forward dependency graph traversal. Returns everything
       this unit depends on, up to specified depth.
@@ -72,7 +72,7 @@ tools:
       depth: integer (optional, default 2)
       types: string[] (optional, filter dependency types)
 
-  - name: codebase_dependents
+  - name: dependents
     description: >
       Reverse dependency graph traversal. Returns everything
       that depends on this unit ("who uses this?").
@@ -81,7 +81,7 @@ tools:
       depth: integer (optional, default 2)
       types: string[] (optional)
 
-  - name: codebase_search
+  - name: search
     description: >
       Keyword/identifier search across indexed units.
       Best for finding units by name, method, column, or route.
@@ -90,7 +90,7 @@ tools:
       fields: string[] (optional, default all)
       filters: object (optional)
 
-  - name: codebase_framework
+  - name: framework
     description: >
       Retrieve Rails/gem source for a specific concept.
       Returns version-pinned implementation details.
@@ -98,14 +98,14 @@ tools:
       concept: string (required, e.g. "has_many", "validates", "before_action")
       gem: string (optional, e.g. "activerecord", "devise")
 
-  - name: codebase_structure
+  - name: structure
     description: >
       High-level codebase overview. Model counts, key services,
       architectural patterns, tech stack summary.
     parameters:
       detail: string (optional, "summary" | "full", default "summary")
 
-  - name: codebase_recent_changes
+  - name: recent_changes
     description: >
       Recently modified units. Useful for understanding what's
       actively being worked on.
@@ -113,7 +113,7 @@ tools:
       limit: integer (optional, default 20)
       type: string (optional, filter by unit type)
 
-  - name: codebase_graph_analysis
+  - name: graph_analysis
     description: >
       Structural analysis of the dependency graph. Returns orphans
       (no dependencies or dependents), dead ends (no dependents),
@@ -123,7 +123,7 @@ tools:
       analysis: string (optional, "orphans" | "dead_ends" | "hubs" | "cycles" | "bridges" | "all", default "all")
       limit: integer (optional, default 20)
 
-  - name: codebase_pagerank
+  - name: pagerank
     description: >
       PageRank scores for all units in the dependency graph.
       Identifies the most structurally important units — those
@@ -148,12 +148,12 @@ tools:
    → Token cost: ~3000
 
 2. Agent identifies CheckoutService as central.
-   codebase_dependencies("CheckoutService", depth: 1)
+   dependencies("CheckoutService", depth: 1)
    → Returns: PaymentGateway, ShippingCalculator, TaxService, Order
    → Token cost: ~2000
 
 3. Agent needs to understand payment specifically.
-   codebase_lookup("PaymentGateway")
+   lookup("PaymentGateway")
    → Returns: Full unit with methods, dependencies, error handling
    → Token cost: ~800
 
@@ -175,13 +175,13 @@ Agent now has enough context to explain the checkout flow.
 **Strategy: Direct lookup → callback/concern inspection → framework check**
 
 ```
-1. codebase_lookup("Order")
+1. lookup("Order")
    → Returns: Full model with inlined concerns, callbacks, methods
    → Agent checks: is calculate_total defined? In a concern? In a module?
    → Token cost: ~1500
 
 2. If method isn't visible, check if it's dynamically defined:
-   codebase_framework("method_missing activerecord")
+   framework("method_missing activerecord")
    → Returns: How AR handles dynamic methods, attribute methods, etc.
    → Token cost: ~500
 
@@ -190,7 +190,7 @@ Agent now has enough context to explain the checkout flow.
    Check the concern's conditional inclusion logic.
 
 4. Check recent changes:
-   codebase_recent_changes(limit: 10, type: "model")
+   recent_changes(limit: 10, type: "model")
    → Was Order or any of its concerns recently modified?
    → Token cost: ~400
 
@@ -217,18 +217,18 @@ Total budget used: ~2400 / 8000
    → Agent understands the payment abstraction pattern
    → Token cost: ~3000
 
-2. codebase_lookup("StripeService")
+2. lookup("StripeService")
    → Study how an existing payment method is implemented
    → Identify the interface: what methods it exposes, how it's called
    → Token cost: ~800
 
-3. codebase_dependents("PaymentGateway", depth: 1)
+3. dependents("PaymentGateway", depth: 1)
    → Who calls into the payment system?
    → Identifies: CheckoutService, RefundService, AdminPaymentsController
    → These are the integration points for the new payment method
    → Token cost: ~1000
 
-4. codebase_search(keywords: ["payment", "gateway"], fields: ["routes"])
+4. search(keywords: ["payment", "gateway"], fields: ["routes"])
    → Find the routes/controllers that handle payment selection
    → Token cost: ~300
 
@@ -251,21 +251,21 @@ create a GiftCardService that implements the same interface..."
 **Strategy: Trace the request path → identify heavy operations → check callback chains**
 
 ```
-1. codebase_search(keywords: ["orders"], fields: ["routes"])
+1. search(keywords: ["orders"], fields: ["routes"])
    → Find: GET /admin/orders → OrdersController#index
    → Token cost: ~200
 
-2. codebase_lookup("OrdersController")
+2. lookup("OrdersController")
    → Full controller with filter chain, actions, params
    → Agent sees: before_actions, eager loading (or lack thereof), serialization
    → Token cost: ~1200
 
-3. codebase_dependencies("OrdersController", depth: 1)
+3. dependencies("OrdersController", depth: 1)
    → Models loaded: Order, Account, LineItem, Shipment...
    → Agent checks for N+1 patterns in the action code
    → Token cost: ~2000
 
-4. codebase_lookup("Order")
+4. lookup("Order")
    → Check: scopes used in index, callback chain on load, association counts
    → Token cost: ~1500
 
@@ -291,7 +291,7 @@ Total budget used: ~5900 / 8000
 **Strategy: Direct framework source retrieval**
 
 ```
-1. codebase_framework("has_many", gem: "activerecord")
+1. framework("has_many", gem: "activerecord")
    → Returns: Exact source from the installed Rails version
    → Includes: all options, their defaults, and behavior
    → Token cost: ~2000
@@ -310,11 +310,11 @@ That's it. One call. No need for application code.
 **Strategy: Reverse dependency traversal → keyword search for column references**
 
 ```
-1. codebase_dependents("Order", depth: 2)
+1. dependents("Order", depth: 2)
    → Everything that uses Order: controllers, services, jobs, mailers, components
    → Token cost: ~3000
 
-2. codebase_search(keywords: ["total"], fields: ["method_names", "column_names"])
+2. search(keywords: ["total"], fields: ["method_names", "column_names"])
    → Find every unit that references a `total` method/column
    → Token cost: ~500
 
@@ -335,20 +335,20 @@ Total budget used: ~3500 / 8000
 **Strategy: Type lookup → field expansion → resolver inspection**
 
 ```
-1. codebase_search(keywords: ["order"], fields: ["identifier"], filters: { type: ["graphql_type", "graphql_query"] })
+1. search(keywords: ["order"], fields: ["identifier"], filters: { type: ["graphql_type", "graphql_query"] })
    → Returns: OrderType, OrderConnection, OrdersQuery
    → Token cost: ~300
 
-2. codebase_lookup("OrderType")
+2. lookup("OrderType")
    → Returns: Full type with fields, field-group chunks, arguments
    → Agent sees: all exposed fields, their types, resolver methods
    → Token cost: ~600
 
-3. codebase_dependencies("OrderType", depth: 1)
+3. dependencies("OrderType", depth: 1)
    → Returns: Order (model), LineItemType, AccountType — the underlying data sources
    → Token cost: ~1000
 
-4. codebase_lookup("OrdersQuery")
+4. lookup("OrdersQuery")
    → Returns: Query resolver with arguments, authorization, and data loading
    → Token cost: ~500
 
@@ -370,15 +370,15 @@ Agent can now explain what's available through the GraphQL API for orders.
 **Strategy: Mutation lookup → dependency chain → callback inspection**
 
 ```
-1. codebase_lookup("CreateOrderMutation")
+1. lookup("CreateOrderMutation")
    → Returns: Mutation with arguments, return type, resolver body
    → Token cost: ~600
 
-2. codebase_dependencies("CreateOrderMutation", depth: 1)
+2. dependencies("CreateOrderMutation", depth: 1)
    → Returns: Order, CheckoutService, OrderType — what it creates and calls
    → Token cost: ~800
 
-3. codebase_lookup("Order")
+3. lookup("Order")
    → Check callbacks: after_create hooks, mailer triggers, job enqueues
    → Token cost: ~1500
 
@@ -396,7 +396,7 @@ Total budget used: ~2900 / 8000
 **Strategy: Structure overview → key models → architectural patterns**
 
 ```
-1. codebase_structure(detail: "full")
+1. structure(detail: "full")
    → Returns: Model counts, service patterns, tech stack, key conventions
    → Token cost: ~1000
 
@@ -440,18 +440,18 @@ codebase_retrieve:
 
 ```
 Turn 1: "What does this codebase do?"
-  → codebase_structure() → broad overview
+  → structure() → broad overview
   
 Turn 2: "Tell me more about the order system"
   → codebase_retrieve("order system") → key order-related units
   
 Turn 3: "How are payments handled?"
-  → codebase_dependencies("Order") filtered to payment-related
-  → codebase_lookup("PaymentGateway")
+  → dependencies("Order") filtered to payment-related
+  → lookup("PaymentGateway")
   
 Turn 4: "What happens when a payment fails?"
   → codebase_retrieve("payment failure error handling retry")
-  → codebase_framework("rescue_from") if error handling is framework-level
+  → framework("rescue_from") if error handling is framework-level
 ```
 
 Each turn builds on the previous, and the agent's understanding compounds.
@@ -677,9 +677,9 @@ codebase_retrieve("tell me everything about orders", budget: 16000)
 
 ```
 # GOOD: Incremental, focused retrieval
-codebase_lookup("Order")
+lookup("Order")
 # ... assess what's needed ...
-codebase_dependencies("Order", depth: 1)
+dependencies("Order", depth: 1)
 ```
 
 ### Don't: Ignore Classification
@@ -691,14 +691,14 @@ codebase_retrieve("what column type is users.email")  # Wastes budget on semanti
 
 ```
 # GOOD: Use the right tool
-codebase_lookup("User")  # Direct lookup, check schema metadata
+lookup("User")  # Direct lookup, check schema metadata
 ```
 
 ### Don't: Re-Retrieve Known Context
 
 ```
 # BAD: Retrieve Order again in a follow-up turn
-Turn 1: codebase_lookup("Order")
+Turn 1: lookup("Order")
 Turn 2: codebase_retrieve("order validations")  # Will re-fetch Order
 ```
 
@@ -716,7 +716,7 @@ Turn 2: codebase_retrieve("order validations", previously_retrieved: ["Order"])
 
 ```
 # GOOD: 
-codebase_framework("validates", gem: "activerecord")
+framework("validates", gem: "activerecord")
 # Returns exact options for the installed Rails version
 ```
 
@@ -729,7 +729,7 @@ codebase_retrieve("services that use Order")  # May miss some
 
 ```
 # GOOD: Graph traversal is exhaustive
-codebase_dependents("Order", types: ["service"])
+dependents("Order", types: ["service"])
 # Returns ALL services that depend on Order
 ```
 
@@ -802,7 +802,7 @@ A fully autonomous coding agent should be able to notice that its index is stale
 
 ```yaml
 tools:
-  - name: codebase_extract
+  - name: pipeline_extract
     description: >
       Trigger extraction for the current codebase. Runs the extraction
       pipeline and produces updated JSON output. Supports full or
@@ -812,7 +812,7 @@ tools:
       extractors: string[] (optional, default all configured)
       dry_run: boolean (optional, default false)
 
-  - name: codebase_embed
+  - name: pipeline_embed
     description: >
       Trigger embedding for extracted units. Generates vector embeddings
       and stores them in the configured vector store. Supports full
@@ -821,14 +821,14 @@ tools:
       mode: string (required, "full" | "incremental")
       identifiers: string[] (optional, for incremental — specific units to re-embed)
 
-  - name: codebase_pipeline_status
+  - name: pipeline_status
     description: >
       Check the status of extraction and embedding pipelines.
       Returns last run times, unit counts, staleness assessment,
       and any pending retry queue items.
     parameters: {}
 
-  - name: codebase_diagnose
+  - name: pipeline_diagnose
     description: >
       Run diagnostic checks on the index. Validates schema version,
       embedding dimensions, manifest freshness, unit count consistency,
@@ -837,9 +837,9 @@ tools:
       checks: string[] (optional, default all)
         # Available: "schema", "dimensions", "freshness", "counts", "health"
 
-  - name: codebase_repair
+  - name: pipeline_repair
     description: >
-      Attempt to repair specific index issues identified by codebase_diagnose.
+      Attempt to repair specific index issues identified by pipeline_diagnose.
       Supports targeted repairs without full re-index.
     parameters:
       issue: string (required, "stale_units" | "missing_embeddings" | "orphaned_vectors" | "count_mismatch")
@@ -852,7 +852,7 @@ tools:
 {
   "tools": [
     {
-      "name": "extract",
+      "name": "pipeline_extract",
       "description": "Trigger codebase extraction (full or incremental)",
       "inputSchema": {
         "type": "object",
@@ -865,7 +865,7 @@ tools:
       }
     },
     {
-      "name": "embed",
+      "name": "pipeline_embed",
       "description": "Trigger embedding pipeline (full or incremental)",
       "inputSchema": {
         "type": "object",
@@ -882,7 +882,7 @@ tools:
       "inputSchema": { "type": "object", "properties": {} }
     },
     {
-      "name": "diagnose",
+      "name": "pipeline_diagnose",
       "description": "Run index health diagnostics",
       "inputSchema": {
         "type": "object",
@@ -892,7 +892,7 @@ tools:
       }
     },
     {
-      "name": "repair",
+      "name": "pipeline_repair",
       "description": "Repair specific index issues",
       "inputSchema": {
         "type": "object",
@@ -949,17 +949,17 @@ tools:
 When an agent encounters a retrieval that returns empty or degraded results, it should follow this diagnostic flow:
 
 ```
-1. codebase_pipeline_status()
+1. pipeline_status()
    → Check: Is the index stale? Is the embedding pipeline behind?
 
 2. If stale:
-   codebase_extract(mode: "incremental")
+   pipeline_extract(mode: "incremental")
    → Re-extract changed units
-   codebase_embed(mode: "incremental")
+   pipeline_embed(mode: "incremental")
    → Re-embed the newly extracted units
 
 3. If extraction fails:
-   codebase_diagnose(checks: ["schema", "health"])
+   pipeline_diagnose(checks: ["schema", "health"])
    → Identify: Is it a schema mismatch? A down backend?
 
 4. If a component is unhealthy:
@@ -978,10 +978,10 @@ When an agent encounters a retrieval that returns empty or degraded results, it 
 
 | Issue | Agent Can Self-Recover? | Recovery Action |
 |-------|------------------------|-----------------|
-| Stale index (few commits behind) | Yes | `codebase_extract(mode: "incremental")` + `codebase_embed(mode: "incremental")` |
-| Missing embeddings for some units | Yes | `codebase_repair(issue: "missing_embeddings")` |
-| Orphaned vectors (units deleted from extraction) | Yes | `codebase_repair(issue: "orphaned_vectors")` |
-| Count mismatch (extraction vs index) | Yes | `codebase_repair(issue: "count_mismatch")` |
+| Stale index (few commits behind) | Yes | `pipeline_extract(mode: "incremental")` + `pipeline_embed(mode: "incremental")` |
+| Missing embeddings for some units | Yes | `pipeline_repair(issue: "missing_embeddings")` |
+| Orphaned vectors (units deleted from extraction) | Yes | `pipeline_repair(issue: "orphaned_vectors")` |
+| Count mismatch (extraction vs index) | Yes | `pipeline_repair(issue: "count_mismatch")` |
 | Vector store unreachable | No | Report to human, degrade to Tier 2 |
 | Dimension mismatch | No | Report to human, requires full re-index |
 | Schema version mismatch | No | Report to human, requires migration |
@@ -993,8 +993,8 @@ Operator tools have higher blast radius than retrieval tools. Safety constraints
 
 1. **Extraction is read-only for source files.** It reads Ruby source and writes JSON output. It cannot modify application code.
 2. **Embedding writes to the vector store only.** It cannot modify extracted JSON or application data.
-3. **Repair operations are scoped.** `codebase_repair` only touches CodebaseIndex data, never application tables.
-4. **Dry-run by default for destructive operations.** `codebase_extract(mode: "full", dry_run: true)` previews what would change without executing.
+3. **Repair operations are scoped.** `pipeline_repair` only touches CodebaseIndex data, never application tables.
+4. **Dry-run by default for destructive operations.** `pipeline_extract(mode: "full", dry_run: true)` previews what would change without executing.
 5. **Rate-limited pipeline triggers.** An agent cannot trigger full extraction more than once per 5 minutes to prevent runaway loops.
 
 ```ruby
@@ -1209,10 +1209,10 @@ Agent A completes work, triggers extraction, and signals Agent B that the index 
 
 ```
 Agent A: completes code changes
-Agent A: codebase_extract(mode: "incremental")
-Agent A: codebase_embed(mode: "incremental")
+Agent A: pipeline_extract(mode: "incremental")
+Agent A: pipeline_embed(mode: "incremental")
 Agent A: signals Agent B (via shared task system or message queue)
-Agent B: codebase_pipeline_status()  → confirms index is current
+Agent B: pipeline_status()  → confirms index is current
 Agent B: begins retrieval
 ```
 
@@ -1221,7 +1221,7 @@ Agent B: begins retrieval
 Agents read from whatever index state is available and accept that results may be slightly behind. The `pipeline_status` response includes a `staleness` field so agents can decide whether to proceed or wait.
 
 ```
-Agent B: codebase_pipeline_status()
+Agent B: pipeline_status()
   → staleness: "3_commits_behind"
 Agent B: decides 3 commits is acceptable, proceeds with retrieval
 Agent B: notes in its output: "Based on index from commit abc123, 3 commits behind HEAD"
@@ -1253,7 +1253,7 @@ Agents should be able to assess whether the context they received was helpful, r
 
 ```yaml
 tools:
-  - name: codebase_rate_retrieval
+  - name: retrieval_rate
     description: >
       Report whether a retrieval result was useful. Enables the system
       to learn which queries produce good results and which need
@@ -1264,7 +1264,7 @@ tools:
       missing: string (optional, what the agent expected but didn't find)
       notes: string (optional, free-text feedback)
 
-  - name: codebase_report_gap
+  - name: retrieval_report_gap
     description: >
       Report a gap in the index — something the agent looked for but
       couldn't find. Feeds into an improvement pipeline that can
@@ -1275,7 +1275,7 @@ tools:
       expected_type: string (optional, "model" | "service" | "controller" | etc.)
       expected_identifier: string (optional, e.g. "DiscountCalculator")
 
-  - name: codebase_retrieval_explain
+  - name: retrieval_explain
     description: >
       Explain why a query returned specific results. Returns the full
       retrieval trace including classification, strategy selection,
@@ -1284,7 +1284,7 @@ tools:
       query: string (required)
       budget: integer (optional, default 8000)
 
-  - name: codebase_suggest_improvements
+  - name: retrieval_suggest
     description: >
       Based on accumulated feedback, suggest index improvements.
       Returns prioritized list of actions: units to re-extract,
@@ -1298,7 +1298,7 @@ tools:
 {
   "tools": [
     {
-      "name": "rate_retrieval",
+      "name": "retrieval_rate",
       "description": "Rate whether retrieval results were useful",
       "inputSchema": {
         "type": "object",
@@ -1312,7 +1312,7 @@ tools:
       }
     },
     {
-      "name": "report_gap",
+      "name": "retrieval_report_gap",
       "description": "Report a missing unit or coverage gap",
       "inputSchema": {
         "type": "object",
@@ -1338,7 +1338,7 @@ tools:
       }
     },
     {
-      "name": "suggest_improvements",
+      "name": "retrieval_suggest",
       "description": "Get prioritized index improvement suggestions",
       "inputSchema": { "type": "object", "properties": {} }
     }
@@ -1475,7 +1475,7 @@ end
 
 ### Improvement Pipeline
 
-Feedback flows into a prioritized improvement queue. The `codebase_suggest_improvements` tool returns actionable items:
+Feedback flows into a prioritized improvement queue. The `retrieval_suggest` tool returns actionable items:
 
 ```json
 {

@@ -95,6 +95,15 @@ module CodebaseIndex
         return if items.empty?
 
         vectors = @provider.embed_batch(items.map { |i| i[:text] })
+        store_vectors(items, vectors, checkpoint, stats)
+      rescue StandardError => e
+        stats[:errors] += items.size
+        stats[:error_messages] ||= []
+        stats[:error_messages] << e.message
+        raise CodebaseIndex::Error, "Embedding failed: #{e.message}"
+      end
+
+      def store_vectors(items, vectors, checkpoint, stats)
         items.each_with_index do |item, idx|
           metadata = { type: item[:unit_data]['type'], identifier: item[:identifier],
                        file_path: item[:unit_data]['file_path'] }
@@ -102,11 +111,6 @@ module CodebaseIndex
           checkpoint[item[:identifier]] = item[:source_hash]
           stats[:processed] += 1
         end
-      rescue StandardError => e
-        stats[:errors] += items.size
-        stats[:error_messages] ||= []
-        stats[:error_messages] << e.message
-        raise CodebaseIndex::Error, "Embedding failed: #{e.message}"
       end
 
       def load_checkpoint

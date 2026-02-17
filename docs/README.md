@@ -50,3 +50,7 @@
 | Flow Extraction | ✅ Complete (FlowAssembler, OperationExtractor, ResponseCodeMapper, FlowDocument) |
 | Evaluation Harness | ✅ Complete (QuerySet, Metrics, Evaluator, BaselineRunner, ReportGenerator, rake tasks) |
 | Cost Modeling | 📋 Documented (see BACKEND_MATRIX.md) |
+
+## Recent Fixes
+
+This branch includes security fixes (Wave 1: MCP dispatch, SQL injection, shell injection, ReDoS, TOCTOU, thread safety) and correctness fixes (Wave 2: ARG_MAX batching, vector dimension validation, budget passthrough, HTTP timeouts, safe filename alignment, and 10+ other bug fixes).

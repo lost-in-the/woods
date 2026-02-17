@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'codebase_index/feedback/store'
 require 'codebase_index/feedback/gap_detector'
 
 RSpec.describe CodebaseIndex::Feedback::GapDetector do
-  let(:feedback_store) { instance_double('CodebaseIndex::Feedback::Store') }
+  let(:feedback_store) { instance_double(CodebaseIndex::Feedback::Store) }
 
   subject(:detector) { described_class.new(feedback_store: feedback_store) }
 

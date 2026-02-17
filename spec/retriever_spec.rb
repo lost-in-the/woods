@@ -11,6 +11,11 @@ RSpec.describe CodebaseIndex::Retriever do
   let(:embedding_provider) { instance_double('EmbeddingProvider') }
   let(:formatter) { nil }
 
+  let(:classifier_double) { instance_double(CodebaseIndex::Retrieval::QueryClassifier) }
+  let(:executor_double) { instance_double(CodebaseIndex::Retrieval::SearchExecutor) }
+  let(:ranker_double) { instance_double(CodebaseIndex::Retrieval::Ranker) }
+  let(:assembler_double) { instance_double(CodebaseIndex::Retrieval::ContextAssembler) }
+
   let(:retriever) do
     described_class.new(
       vector_store: vector_store,
@@ -60,14 +65,15 @@ RSpec.describe CodebaseIndex::Retriever do
   end
 
   before do
-    allow_any_instance_of(CodebaseIndex::Retrieval::QueryClassifier)
-      .to receive(:classify).and_return(classification)
-    allow_any_instance_of(CodebaseIndex::Retrieval::SearchExecutor)
-      .to receive(:execute).and_return(execution_result)
-    allow_any_instance_of(CodebaseIndex::Retrieval::Ranker)
-      .to receive(:rank).and_return(ranked_candidates)
-    allow_any_instance_of(CodebaseIndex::Retrieval::ContextAssembler)
-      .to receive(:assemble).and_return(assembled_context)
+    allow(CodebaseIndex::Retrieval::QueryClassifier).to receive(:new).and_return(classifier_double)
+    allow(CodebaseIndex::Retrieval::SearchExecutor).to receive(:new).and_return(executor_double)
+    allow(CodebaseIndex::Retrieval::Ranker).to receive(:new).and_return(ranker_double)
+    allow(CodebaseIndex::Retrieval::ContextAssembler).to receive(:new).and_return(assembler_double)
+
+    allow(classifier_double).to receive(:classify).and_return(classification)
+    allow(executor_double).to receive(:execute).and_return(execution_result)
+    allow(ranker_double).to receive(:rank).and_return(ranked_candidates)
+    allow(assembler_double).to receive(:assemble).and_return(assembled_context)
 
     # build_structural_context calls metadata_store.count; default to 0 (nil result)
     allow(metadata_store).to receive(:count).and_return(0)
@@ -131,7 +137,7 @@ RSpec.describe CodebaseIndex::Retriever do
     end
 
     it 'passes budget to context assembler' do
-      expect_any_instance_of(CodebaseIndex::Retrieval::ContextAssembler)
+      expect(assembler_double)
         .to receive(:assemble)
         .with(hash_including(budget: 4000, structural_context: anything))
         .and_return(assembled_context)
@@ -140,7 +146,7 @@ RSpec.describe CodebaseIndex::Retriever do
     end
 
     it 'passes default budget of 8000 to context assembler when no budget given' do
-      expect_any_instance_of(CodebaseIndex::Retrieval::ContextAssembler)
+      expect(assembler_double)
         .to receive(:assemble)
         .with(hash_including(budget: 8000))
         .and_return(assembled_context)
@@ -174,16 +180,6 @@ RSpec.describe CodebaseIndex::Retriever do
 
   describe 'pipeline flow' do
     it 'calls classify, execute, rank, assemble in sequence' do
-      classifier_double = instance_double(CodebaseIndex::Retrieval::QueryClassifier)
-      executor_double = instance_double(CodebaseIndex::Retrieval::SearchExecutor)
-      ranker_double = instance_double(CodebaseIndex::Retrieval::Ranker)
-      assembler_double = instance_double(CodebaseIndex::Retrieval::ContextAssembler)
-
-      allow(CodebaseIndex::Retrieval::QueryClassifier).to receive(:new).and_return(classifier_double)
-      allow(CodebaseIndex::Retrieval::SearchExecutor).to receive(:new).and_return(executor_double)
-      allow(CodebaseIndex::Retrieval::Ranker).to receive(:new).and_return(ranker_double)
-      allow(CodebaseIndex::Retrieval::ContextAssembler).to receive(:new).and_return(assembler_double)
-
       expect(classifier_double).to receive(:classify).with('test query').and_return(classification).ordered
       expect(executor_double).to receive(:execute)
         .with(query: 'test query', classification: classification)
@@ -199,14 +195,7 @@ RSpec.describe CodebaseIndex::Retriever do
       # Need to allow metadata_store calls for structural context
       allow(metadata_store).to receive(:count).and_return(0)
 
-      fresh_retriever = described_class.new(
-        vector_store: vector_store,
-        metadata_store: metadata_store,
-        graph_store: graph_store,
-        embedding_provider: embedding_provider
-      )
-
-      fresh_retriever.retrieve('test query')
+      retriever.retrieve('test query')
     end
   end
 

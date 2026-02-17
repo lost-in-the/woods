@@ -16,4 +16,7 @@ group :development, :test do
   gem 'rubocop-rails', '~> 2.19'
   gem 'rubocop-rspec', '~> 2.22'
   gem 'sqlite3', '>= 1.4'
+  # Optional: only needed for flow analysis (AST parsing)
+  gem 'parser', '~> 3.3'
+  gem 'prism', '>= 0.24'
 end

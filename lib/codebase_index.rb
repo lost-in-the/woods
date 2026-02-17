@@ -35,7 +35,9 @@ module CodebaseIndex
   # ════════════════════════════════════════════════════════════════════════
 
   class Configuration
-    attr_accessor :embedding_model, :include_framework_sources, :gem_configs
+    attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
+                  :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
+                  :vector_store_options, :metadata_store_options, :embedding_options
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json
 
     def initialize
@@ -131,6 +133,38 @@ module CodebaseIndex
       end
     end
 
+    # Configure the module using a named preset and optional block customization.
+    #
+    # Valid preset names: :local, :postgresql, :production
+    #
+    # @param name [Symbol] Preset name
+    # @yield [config] Optional block for further customization after preset is applied
+    # @yieldparam config [Configuration] The configuration object
+    # @return [Configuration] The applied configuration
+    def configure_with_preset(name)
+      CONFIG_MUTEX.synchronize do
+        self.configuration = Builder.preset_config(name)
+        yield configuration if block_given?
+        configuration
+      end
+    end
+
+    # Build a Retriever wired with adapters from the current configuration.
+    #
+    # @return [Retriever] A fully wired retriever instance
+    def build_retriever
+      Builder.new(configuration).build_retriever
+    end
+
+    # Retrieve context for a natural language query using the current configuration.
+    #
+    # @param query [String] Natural language query
+    # @param opts [Hash] Options passed through to the retriever (e.g., budget:)
+    # @return [Retriever::RetrievalResult] Retrieval result
+    def retrieve(query, **opts)
+      build_retriever.retrieve(query, **opts)
+    end
+
     # Perform full extraction
     #
     # @param output_dir [String] Override output directory
@@ -159,4 +193,5 @@ module CodebaseIndex
   configure
 end
 
+require_relative 'codebase_index/builder'
 require_relative 'codebase_index/railtie' if defined?(Rails::Railtie)

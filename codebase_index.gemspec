@@ -3,8 +3,8 @@
 Gem::Specification.new do |spec|
   spec.name          = 'codebase_index'
   spec.version       = '0.1.0'
-  spec.authors       = ['Your Name']
-  spec.email         = ['your.email@example.com']
+  spec.authors       = ['TODO: Your Name']
+  spec.email         = ['TODO: your.email@example.com']
 
   spec.summary       = 'Rails codebase extraction and indexing for AI-assisted development'
   spec.description   = <<~DESC
@@ -21,7 +21,7 @@ Gem::Specification.new do |spec|
 
   spec.metadata['homepage_uri'] = spec.homepage
   spec.metadata['source_code_uri'] = spec.homepage
-  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['changelog_uri'] = "#{spec.homepage}/releases"
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
@@ -29,17 +29,13 @@ Gem::Specification.new do |spec|
     'lib/**/*',
     'exe/*',
     'LICENSE.txt',
-    'README.md',
-    'CHANGELOG.md'
+    'README.md'
   ]
   spec.bindir = 'exe'
-  spec.executables = ['codebase-index-mcp']
+  spec.executables = %w[codebase-index-mcp codebase-console-mcp]
   spec.require_paths = ['lib']
 
   # Runtime dependencies
   spec.add_dependency 'mcp', '~> 0.6'
-  spec.add_dependency 'rails', '>= 6.1'
-
-  spec.add_dependency 'parser', '~> 3.3'
-  spec.add_dependency 'prism', '>= 0.24'
+  spec.add_dependency 'railties', '>= 6.1'
 end

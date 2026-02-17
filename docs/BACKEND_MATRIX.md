@@ -650,7 +650,7 @@ The key point: the indexing pipeline itself is agnostic to job system. It's a sy
 
 ```ruby
 CodebaseIndex.configure_with_preset(:local)
-# Vector: SQLite-vss / FAISS
+# Vector: InMemory VectorStore
 # Metadata: SQLite
 # Graph: In-memory
 # Embedding: Ollama (nomic-embed-text)
@@ -665,9 +665,9 @@ CodebaseIndex.configure_with_preset(:local)
 ```ruby
 CodebaseIndex.configure_with_preset(:postgresql)
 # Vector: pgvector
-# Metadata: PostgreSQL
-# Graph: PostgreSQL (recursive CTEs)
-# Embedding: OpenAI text-embedding-3-small
+# Metadata: SQLite
+# Graph: In-memory
+# Embedding: OpenAI
 # Jobs: Solid Queue
 ```
 
@@ -677,11 +677,12 @@ CodebaseIndex.configure_with_preset(:postgresql)
 ### MySQL + Qdrant (Classic Rails)
 
 ```ruby
-CodebaseIndex.configure_with_preset(:mysql)
+# Note: :mysql preset is not yet implemented. Use :production preset + manual config
+CodebaseIndex.configure_with_preset(:production)
 # Vector: Qdrant
-# Metadata: MySQL (existing database)
-# Graph: MySQL (recursive CTEs, 8.0+)
-# Embedding: OpenAI text-embedding-3-small
+# Metadata: SQLite
+# Graph: In-memory
+# Embedding: OpenAI
 # Jobs: Sidekiq
 ```
 
@@ -691,11 +692,12 @@ CodebaseIndex.configure_with_preset(:mysql)
 ### Docker-Native
 
 ```ruby
-CodebaseIndex.configure_with_preset(:docker)
+# Note: :docker preset is not yet implemented. Use :production preset (Qdrant + SQLite + OpenAI)
+CodebaseIndex.configure_with_preset(:production)
 # Vector: Qdrant
-# Metadata: PostgreSQL or MySQL (whatever you run)
+# Metadata: SQLite
 # Graph: In-memory
-# Embedding: OpenAI or Voyage
+# Embedding: OpenAI
 # Jobs: Sidekiq or Solid Queue
 ```
 
@@ -705,19 +707,12 @@ CodebaseIndex.configure_with_preset(:docker)
 ### Fully Self-Hosted
 
 ```ruby
-# With PostgreSQL:
-CodebaseIndex.configure_with_preset(:self_hosted)
+# Note: :self_hosted preset is not yet implemented.
+# Use :production preset with Ollama as embedding provider via manual config.
+CodebaseIndex.configure_with_preset(:production)
 # Vector: Qdrant
-# Metadata: PostgreSQL
-# Graph: PostgreSQL
-# Embedding: Ollama (nomic-embed-text or custom)
-# Jobs: Any
-
-# With MySQL:
-CodebaseIndex.configure_with_preset(:self_hosted, db: :mysql)
-# Vector: Qdrant
-# Metadata: MySQL 8.0+
-# Graph: MySQL (recursive CTEs)
+# Metadata: SQLite
+# Graph: In-memory
 # Embedding: Ollama (nomic-embed-text or custom)
 # Jobs: Any
 ```
@@ -728,11 +723,11 @@ CodebaseIndex.configure_with_preset(:self_hosted, db: :mysql)
 ### Enterprise / Multi-Repo
 
 ```ruby
-CodebaseIndex.configure_with_preset(:enterprise)
-# Vector: Milvus or Weaviate
-# Metadata: PostgreSQL
-# Graph: Neo4j
-# Embedding: OpenAI or Azure OpenAI
+# Note: :enterprise preset is not yet implemented. Multi-repo / Milvus / Neo4j adapters are aspirational.
+# Vector: Milvus or Weaviate (not yet implemented)
+# Metadata: PostgreSQL (not yet implemented — current adapter: SQLite)
+# Graph: Neo4j (not yet implemented — current adapter: InMemory)
+# Embedding: OpenAI or Azure OpenAI (Azure not yet implemented)
 # Jobs: Any
 ```
 
@@ -828,12 +823,10 @@ Bytes per vector: `dimensions × 4` (float32). With metadata overhead, estimate 
 
 | Preset | Setup Cost | Monthly Ongoing | Notes |
 |--------|-----------|----------------|-------|
-| **Local** (SQLite + FAISS + Ollama) | $0 | $0 | Requires local GPU for decent embedding speed. CPU works but slow. |
-| **MySQL** (MySQL + Qdrant + OpenAI) | $0 | $0.05–0.50 | OpenAI API only. Qdrant in existing Docker infra. |
-| **PostgreSQL** (pgvector + OpenAI) | $0 | $0.05–0.50 | All-in-one, no extra infrastructure. |
-| **PostgreSQL + Qdrant** (PG + Qdrant + OpenAI) | $0 | $0.05–0.50 | Slightly better vector search, more infra. |
-| **Self-hosted** (Qdrant + Ollama) | $0 | $5–20 | GPU cost for Ollama. No API dependency. |
-| **Enterprise** (Milvus + Neo4j + OpenAI) | $50–200 setup | $50–200/mo | Significant infra. Only justified for multi-repo/large org. |
+| **local** (InMemory VectorStore + SQLite + Ollama) | $0 | $0 | Requires local GPU for decent embedding speed. CPU works but slow. |
+| **postgresql** (pgvector + SQLite + OpenAI) | $0 | $0.05–0.50 | pgvector for vectors, SQLite for metadata. Good quality, API dependency for embeddings. |
+| **production** (Qdrant + SQLite + OpenAI) | $0 | $0.05–0.50 | Qdrant for vectors, SQLite for metadata. Slightly better vector search, more infra. |
+| **MySQL / Self-hosted / Enterprise** (not yet implemented) | — | — | Aspirational presets. Use :production preset with manual configuration overrides. |
 
 ### The Real Cost: Developer Time
 
