@@ -42,6 +42,7 @@ module CodebaseIndex
         @state = :closed
         @failure_count = 0
         @last_failure_time = nil
+        @mutex = Mutex.new
       end
 
       # Execute a block through the circuit breaker.
@@ -51,13 +52,15 @@ module CodebaseIndex
       # @raise [CircuitOpenError] if the circuit is open and the timeout has not elapsed
       # @raise [StandardError] re-raises any error from the block
       def call(&block)
-        case @state
-        when :closed
-          execute_closed(&block)
-        when :open
-          try_half_open(&block)
-        when :half_open
-          execute_half_open(&block)
+        @mutex.synchronize do
+          case @state
+          when :closed
+            execute_closed(&block)
+          when :open
+            try_half_open(&block)
+          when :half_open
+            execute_half_open(&block)
+          end
         end
       end
 

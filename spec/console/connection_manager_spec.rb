@@ -80,4 +80,34 @@ RSpec.describe CodebaseIndex::Console::ConnectionManager do
       expect { m.connect! }.to raise_error(CodebaseIndex::Console::ConnectionError, /Unknown connection mode/)
     end
   end
+
+  describe 'shell injection protection' do
+    it 'builds commands as arrays to prevent shell injection' do
+      # Test docker mode
+      docker_config = {
+        'mode' => 'docker',
+        'container' => 'app; echo VULNERABLE',
+        'command' => 'echo test'
+      }
+      m = described_class.new(config: docker_config)
+      cmd = m.send(:build_command)
+
+      # Should be an array with the semicolon as part of the container name string,
+      # not as a shell command separator
+      expect(cmd).to be_an(Array)
+      expect(cmd).to eq(['docker', 'exec', '-i', 'app; echo VULNERABLE', 'echo', 'test'])
+
+      # Test ssh mode
+      ssh_config = {
+        'mode' => 'ssh',
+        'host' => 'host.example.com; rm -rf /',
+        'command' => 'echo test'
+      }
+      m2 = described_class.new(config: ssh_config)
+      cmd2 = m2.send(:build_command)
+
+      expect(cmd2).to be_an(Array)
+      expect(cmd2).to eq(['ssh', 'host.example.com; rm -rf /', 'echo', 'test'])
+    end
+  end
 end

@@ -150,4 +150,43 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
       expect(described_class.ancestors).to include(CodebaseIndex::Storage::VectorStore::Interface)
     end
   end
+
+  describe '#build_where security' do
+    it 'rejects malicious filter keys' do
+      allow(connection).to receive(:execute)
+      allow(connection).to receive(:quote) { |v| "'#{v}'" }
+
+      expect { store.search([0.1, 0.2, 0.3], filters: { "'; DROP TABLE users; --" => 'x' }) }
+        .to raise_error(ArgumentError, /Invalid filter key/)
+    end
+
+    it 'accepts valid filter keys' do
+      allow(connection).to receive(:execute).and_return([])
+      allow(connection).to receive(:quote) { |v| "'#{v}'" }
+
+      expect { store.search([0.1, 0.2, 0.3], filters: { type: 'model' }) }.not_to raise_error
+    end
+
+    it 'accepts filter keys with underscores and numbers' do
+      allow(connection).to receive(:execute).and_return([])
+      allow(connection).to receive(:quote) { |v| "'#{v}'" }
+
+      expect { store.search([0.1, 0.2, 0.3], filters: { unit_type: 'model' }) }.not_to raise_error
+    end
+  end
+
+  describe 'vector validation' do
+    it 'rejects non-numeric vector elements on store' do
+      allow(connection).to receive(:execute)
+      allow(connection).to receive(:quote) { |v| "'#{v}'" }
+
+      expect { store.store('doc1', [0.1, 'malicious', 0.3]) }
+        .to raise_error(ArgumentError, /not numeric/)
+    end
+
+    it 'rejects non-numeric vector elements on search' do
+      expect { store.search([0.1, nil, 0.3]) }
+        .to raise_error(ArgumentError, /not numeric/)
+    end
+  end
 end

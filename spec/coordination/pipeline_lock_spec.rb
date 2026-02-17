@@ -92,4 +92,24 @@ RSpec.describe CodebaseIndex::Coordination::PipelineLock do
       expect(stale_lock.acquire).to be true
     end
   end
+
+  describe 'concurrent acquisition' do
+    it 'only allows one thread to acquire the lock' do
+      results = []
+      mutex = Mutex.new
+      threads = 10.times.map do
+        Thread.new do
+          l = described_class.new(lock_dir: lock_dir, name: 'extraction')
+          acquired = l.acquire
+          mutex.synchronize { results << acquired }
+          sleep(0.05) if acquired # Hold lock briefly
+          l.release if acquired
+        end
+      end
+      threads.each(&:join)
+
+      # Exactly one thread should have acquired the lock
+      expect(results.count(true)).to eq(1)
+    end
+  end
 end

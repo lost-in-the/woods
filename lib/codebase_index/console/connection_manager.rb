@@ -2,6 +2,7 @@
 
 require 'json'
 require 'open3'
+require 'shellwords'
 
 # @see CodebaseIndex
 module CodebaseIndex
@@ -53,7 +54,13 @@ module CodebaseIndex
       # @raise [ConnectionError] if the process cannot be started
       def connect!
         cmd = build_command
-        @stdin, @stdout, @wait_thread = Open3.popen2(cmd)
+        if @mode == 'direct' && @config['directory']
+          Dir.chdir(@config['directory']) do
+            @stdin, @stdout, @wait_thread = Open3.popen2(*cmd)
+          end
+        else
+          @stdin, @stdout, @wait_thread = Open3.popen2(*cmd)
+        end
         @last_heartbeat = Time.now
         @retries = 0
       rescue StandardError => e
@@ -113,7 +120,7 @@ module CodebaseIndex
 
       # Build the shell command based on connection mode.
       #
-      # @return [String]
+      # @return [Array<String>]
       def build_command
         case @mode
         when 'docker' then build_docker_command
@@ -125,19 +132,18 @@ module CodebaseIndex
 
       def build_docker_command
         container = @config['container'] || raise(ConnectionError, 'Docker mode requires container name')
-        "docker exec -i #{container} #{@command}"
+        ['docker', 'exec', '-i', container] + @command.shellsplit
       end
 
       def build_ssh_command
         host = @config['host'] || raise(ConnectionError, 'SSH mode requires host')
         user = @config['user']
         target = user ? "#{user}@#{host}" : host
-        "ssh #{target} #{@command}"
+        ['ssh', target] + @command.shellsplit
       end
 
       def build_direct_command
-        dir = @config['directory']
-        dir ? "cd #{dir} && #{@command}" : @command
+        @command.shellsplit
       end
 
       # Ensure the connection is active.

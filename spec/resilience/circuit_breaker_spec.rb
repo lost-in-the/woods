@@ -134,4 +134,24 @@ RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
       expect(default_breaker.state).to eq(:closed)
     end
   end
+
+  describe 'thread safety' do
+    it 'correctly counts failures across threads' do
+      breaker = described_class.new(threshold: 100, reset_timeout: 60)
+      threads = 20.times.map do
+        Thread.new do
+          5.times do
+            breaker.call { raise StandardError, 'fail' }
+          rescue StandardError
+            nil
+          end
+        end
+      end
+      threads.each(&:join)
+
+      # With proper synchronization, all 100 failures should be counted
+      # and the circuit should be open
+      expect(breaker.state).to eq(:open)
+    end
+  end
 end

@@ -43,9 +43,24 @@ module CodebaseIndex
       # @param operation [Symbol, String] Operation name
       # @return [void]
       def record!(operation)
-        state = read_state
-        state[operation.to_s] = Time.now.iso8601
-        write_state(state)
+        FileUtils.mkdir_p(@state_dir)
+        File.open(@state_path, File::RDWR | File::CREAT) do |f|
+          f.flock(File::LOCK_EX)
+          content = f.read
+          state = if content.empty?
+                    {}
+                  else
+                    begin
+                      JSON.parse(content)
+                    rescue StandardError
+                      {}
+                    end
+                  end
+          state[operation.to_s] = Time.now.iso8601
+          f.rewind
+          f.write(JSON.generate(state))
+          f.truncate(f.pos)
+        end
       end
 
       # Get the last run time for an operation.

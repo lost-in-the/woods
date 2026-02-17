@@ -118,7 +118,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
 
     it 'respects limit' do
-      response = call_tool(server, 'search', query: '.*', limit: 1)
+      response = call_tool(server, 'search', query: 'o', limit: 1)
       data = parse_response(response)
       expect(data['results'].size).to eq(1)
     end
@@ -316,7 +316,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
 
     it 'respects limit' do
-      response = call_tool(server, 'framework', keyword: '.*', limit: 1)
+      response = call_tool(server, 'framework', keyword: 'Base', limit: 1)
       data = parse_response(response)
       expect(data['results'].size).to eq(1)
     end
@@ -358,7 +358,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
         response = call_tool(server, 'codebase_retrieve', query: 'How does authentication work?')
         text = response_text(response)
         expect(text).to include('Semantic search is not available')
-        expect(text).to include('codebase_search')
+        expect(text).to include('search')
       end
     end
 
@@ -585,7 +585,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     tool_class = tools[tool_name]
     raise "Tool not found: #{tool_name}" unless tool_class
 
-    tool_class.call(**args, _server_context: {})
+    tool_class.call(**args, server_context: {})
   end
 
   # Extract the text content from a tool response.

@@ -55,6 +55,7 @@ module CodebaseIndex
         # @param metadata [Hash] Optional metadata
         # @see Interface#store
         def store(id, vector, metadata = {})
+          validate_vector!(vector)
           quoted_id = @connection.quote(id)
           quoted_metadata = @connection.quote(JSON.generate(metadata))
           vector_literal = "[#{vector.join(',')}]"
@@ -77,6 +78,7 @@ module CodebaseIndex
         # @return [Array<SearchResult>] Results sorted by descending similarity
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {})
+          validate_vector!(query_vector)
           vector_literal = "[#{query_vector.join(',')}]"
           where_clause = build_where(filters)
 
@@ -134,9 +136,26 @@ module CodebaseIndex
           return '' if filters.empty?
 
           conditions = filters.map do |key, value|
-            "metadata->>'#{key}' = #{@connection.quote(value.to_s)}"
+            key_s = key.to_s
+            unless key_s.match?(/\A[a-zA-Z_][a-zA-Z0-9_]*\z/)
+              raise ArgumentError, "Invalid filter key: #{key_s.inspect}"
+            end
+
+            "metadata->>'#{key_s}' = #{@connection.quote(value.to_s)}"
           end
           "WHERE #{conditions.join(' AND ')}"
+        end
+
+        # Validate that all vector elements are numeric.
+        #
+        # @param vector [Array] The vector to validate
+        # @raise [ArgumentError] if any element is not numeric
+        def validate_vector!(vector)
+          vector.each_with_index do |element, i|
+            unless element.is_a?(Numeric)
+              raise ArgumentError, "Vector element at index #{i} is not numeric: #{element.inspect}"
+            end
+          end
         end
       end
     end

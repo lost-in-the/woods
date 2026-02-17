@@ -38,6 +38,7 @@ module CodebaseIndex
       def acquire
         FileUtils.mkdir_p(@lock_dir)
 
+        # Check for stale lock first (separate from atomic creation)
         if File.exist?(@lock_path)
           return false unless stale?
 
@@ -45,8 +46,10 @@ module CodebaseIndex
           FileUtils.rm_f(@lock_path)
         end
 
-        # Write lock file atomically
-        File.write(@lock_path, lock_content)
+        # Atomic lock creation: File::EXCL ensures this fails if file already exists
+        File.open(@lock_path, File::WRONLY | File::CREAT | File::EXCL) do |f|
+          f.write(lock_content)
+        end
         @held = true
         true
       rescue Errno::EEXIST

@@ -29,6 +29,10 @@ module CodebaseIndex
       # @param comment [String, nil] Optional comment
       # @return [void]
       def record_rating(query:, score:, comment: nil)
+        unless score.is_a?(Integer) && (1..5).cover?(score)
+          raise ArgumentError, "score must be an Integer between 1 and 5, got: #{score.inspect}"
+        end
+
         entry = {
           type: 'rating',
           query: query,

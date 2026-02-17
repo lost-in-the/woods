@@ -32,6 +32,38 @@ RSpec.describe CodebaseIndex::Feedback::Store do
       store.record_rating(query: 'q', score: 4)
       expect(store.all_entries.first['timestamp']).not_to be_nil
     end
+
+    context 'with invalid scores' do
+      it 'rejects nil score' do
+        expect { store.record_rating(query: 'q', score: nil) }
+          .to raise_error(ArgumentError, /score must be/)
+      end
+
+      it 'rejects string score' do
+        expect { store.record_rating(query: 'q', score: '4') }
+          .to raise_error(ArgumentError, /score must be/)
+      end
+
+      it 'rejects score of 0' do
+        expect { store.record_rating(query: 'q', score: 0) }
+          .to raise_error(ArgumentError, /score must be/)
+      end
+
+      it 'rejects score of 6' do
+        expect { store.record_rating(query: 'q', score: 6) }
+          .to raise_error(ArgumentError, /score must be/)
+      end
+
+      it 'rejects negative score' do
+        expect { store.record_rating(query: 'q', score: -1) }
+          .to raise_error(ArgumentError, /score must be/)
+      end
+
+      it 'rejects float score' do
+        expect { store.record_rating(query: 'q', score: 3.5) }
+          .to raise_error(ArgumentError, /score must be/)
+      end
+    end
   end
 
   describe '#record_gap' do

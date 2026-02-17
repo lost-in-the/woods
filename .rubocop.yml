@@ -172,6 +172,13 @@ Lint/DuplicateBranch:
   Exclude:
     - 'lib/codebase_index/extractors/graphql_extractor.rb'
 
+# MCP gem requires `server_context:` keyword in tool blocks for dispatch.
+# The parameter is unused in most handlers but must be present.
+Lint/UnusedBlockArgument:
+  Exclude:
+    - 'lib/codebase_index/mcp/server.rb'
+    - 'lib/codebase_index/console/server.rb'
+
 # Top-level module docs already in CLAUDE.md/README
 Style/Documentation:
   Enabled: false

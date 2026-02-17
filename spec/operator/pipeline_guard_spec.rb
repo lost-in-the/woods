@@ -59,4 +59,23 @@ RSpec.describe CodebaseIndex::Operator::PipelineGuard do
       expect(guard.last_run(:extraction)).to be_a(Time)
     end
   end
+
+  describe 'concurrent record!' do
+    it 'preserves all operations under concurrent access' do
+      threads = 10.times.map do |i|
+        Thread.new do
+          guard.record!(:"op_#{i}")
+        end
+      end
+      threads.each(&:join)
+
+      state_path = File.join(state_dir, 'pipeline_guard.json')
+      state = JSON.parse(File.read(state_path))
+      # All 10 operations should be present
+      expect(state.keys.size).to eq(10)
+      10.times do |i|
+        expect(state).to have_key("op_#{i}")
+      end
+    end
+  end
 end

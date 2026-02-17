@@ -132,7 +132,7 @@ module CodebaseIndex
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matches with :identifier, :type, :match_field keys
       def search(query, types: nil, fields: %w[identifier], limit: 20)
-        pattern = Regexp.new(query, Regexp::IGNORECASE)
+        pattern = Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
         results = []
 
         dirs = if types
@@ -202,7 +202,7 @@ module CodebaseIndex
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
-        pattern = Regexp.new(keyword, Regexp::IGNORECASE)
+        pattern = Regexp.new(Regexp.escape(keyword), Regexp::IGNORECASE)
         results = []
 
         entries = read_index('rails_source')

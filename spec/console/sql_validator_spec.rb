@@ -126,6 +126,83 @@ RSpec.describe CodebaseIndex::Console::SqlValidator do
       end
     end
 
+    context 'with UNION injection' do
+      it 'rejects SELECT with UNION' do
+        expect { validator.validate!('SELECT 1 UNION SELECT password FROM users') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /UNION/i)
+      end
+
+      it 'rejects SELECT with UNION ALL' do
+        expect { validator.validate!('SELECT id FROM users UNION ALL SELECT id FROM admins') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /UNION/i)
+      end
+    end
+
+    context 'with writable CTEs' do
+      it 'rejects WITH...DELETE' do
+        expect { validator.validate!('WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'rejects WITH...UPDATE' do
+        expect { validator.validate!('WITH u AS (UPDATE users SET admin=true RETURNING *) SELECT * FROM u') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'rejects WITH...INSERT' do
+        expect { validator.validate!('WITH i AS (INSERT INTO log(msg) VALUES (1) RETURNING *) SELECT * FROM i') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /writable CTE/i)
+      end
+    end
+
+    context 'with INTO OUTFILE / INTO DUMPFILE' do
+      it 'rejects SELECT INTO' do
+        expect { validator.validate!("SELECT * INTO OUTFILE '/tmp/evil' FROM users") }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /INTO/i)
+      end
+    end
+
+    context 'with dangerous functions' do
+      it 'rejects pg_sleep' do
+        expect { validator.validate!('SELECT pg_sleep(999)') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /dangerous function/i)
+      end
+
+      it 'rejects lo_import' do
+        expect { validator.validate!("SELECT lo_import('/etc/passwd')") }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /dangerous function/i)
+      end
+
+      it 'rejects pg_read_file' do
+        expect { validator.validate!("SELECT pg_read_file('/etc/passwd')") }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /dangerous function/i)
+      end
+
+      it 'rejects sleep (MySQL)' do
+        expect { validator.validate!('SELECT sleep(10)') }
+          .to raise_error(CodebaseIndex::Console::SqlValidationError, /dangerous function/i)
+      end
+    end
+
+    context 'with comment-hidden semicolons' do
+      it 'rejects semicolons hidden in line comments' do
+        sql = "SELECT 1 --;\nDELETE FROM users"
+        expect { validator.validate!(sql) }.to raise_error(CodebaseIndex::Console::SqlValidationError)
+      end
+
+      it 'rejects semicolons hidden in block comments' do
+        sql = 'SELECT 1 /*;*/ DELETE FROM users'
+        expect { validator.validate!(sql) }.to raise_error(CodebaseIndex::Console::SqlValidationError)
+      end
+    end
+
+    context 'with legitimate SQL that should still pass' do
+      it 'accepts WITH...SELECT (read-only CTE)' do
+        expect { validator.validate!('WITH active AS (SELECT * FROM users WHERE active = true) SELECT * FROM active') }
+          .not_to raise_error
+      end
+    end
+
     context 'with empty or nil input' do
       it 'rejects nil' do
         expect { validator.validate!(nil) }

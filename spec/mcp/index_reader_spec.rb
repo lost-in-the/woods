@@ -137,7 +137,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     end
 
     it 'respects limit' do
-      results = reader.search('.*', limit: 2)
+      results = reader.search('o', limit: 2)
       expect(results.size).to eq(2)
     end
 
@@ -238,7 +238,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     end
 
     it 'respects limit' do
-      results = reader.framework_sources('.*', limit: 1)
+      results = reader.framework_sources('Base', limit: 1)
       expect(results.size).to eq(1)
     end
 

@@ -493,7 +493,7 @@ module CodebaseIndex
           mgr = conn_mgr
           schema = { properties: properties }
           schema[:required] = required if required&.any?
-          server.define_tool(name: name, description: description, input_schema: schema) do |_server_context:, **args|
+          server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
             request = tool_block.call(args)
             send_to_bridge(mgr, request.transform_keys(&:to_s))
           end

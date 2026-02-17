@@ -98,7 +98,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, _server_context:, include_source: nil, sections: nil|
+          ) do |identifier:, server_context:, include_source: nil, sections: nil|
             unit = reader.find_unit(identifier)
             if unit
               always_include = %w[type identifier file_path namespace]
@@ -134,7 +134,7 @@ module CodebaseIndex
               },
               required: ['query']
             }
-          ) do |query:, _server_context:, types: nil, fields: nil, limit: nil|
+          ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
             results = reader.search(
               query,
               types: types,
@@ -164,7 +164,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, _server_context:, depth: nil, types: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil|
             result = reader.traverse_dependencies(
               identifier,
               depth: depth || 2,
@@ -193,7 +193,7 @@ module CodebaseIndex
               },
               required: ['identifier']
             }
-          ) do |identifier:, _server_context:, depth: nil, types: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil|
             result = reader.traverse_dependents(
               identifier,
               depth: depth || 2,
@@ -219,7 +219,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |_server_context:, detail: nil|
+          ) do |server_context:, detail: nil|
             result = { manifest: reader.manifest }
             result[:summary] = reader.summary if (detail || 'summary') == 'full'
             respond.call(JSON.pretty_generate(result))
@@ -241,7 +241,7 @@ module CodebaseIndex
                 limit: { type: 'integer', description: 'Limit results per section (default: 20)' }
               }
             }
-          ) do |_server_context:, analysis: nil, limit: nil|
+          ) do |server_context:, analysis: nil, limit: nil|
             data = reader.graph_analysis
             section = analysis || 'all'
 
@@ -292,7 +292,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |_server_context:, limit: nil, types: nil|
+          ) do |server_context:, limit: nil, types: nil|
             scores = reader.dependency_graph.pagerank
             graph_data = reader.raw_graph_data
             nodes = graph_data['nodes'] || {}
@@ -330,7 +330,7 @@ module CodebaseIndex
               },
               required: ['keyword']
             }
-          ) do |keyword:, _server_context:, limit: nil|
+          ) do |keyword:, server_context:, limit: nil|
             results = reader.framework_sources(keyword, limit: limit || 20)
             respond.call(JSON.pretty_generate({
                                                 keyword: keyword,
@@ -354,7 +354,7 @@ module CodebaseIndex
                 }
               }
             }
-          ) do |_server_context:, limit: nil, types: nil|
+          ) do |server_context:, limit: nil, types: nil|
             results = reader.recent_changes(limit: limit || 10, types: types)
             respond.call(JSON.pretty_generate({
                                                 result_count: results.size,
@@ -369,7 +369,7 @@ module CodebaseIndex
             description: 'Reload extraction data from disk. Use after re-running extraction to pick up changes ' \
                          'without restarting the server.',
             input_schema: { type: 'object', properties: {} }
-          ) do |_server_context:|
+          ) do |server_context:|
             reader.reload!
             manifest = reader.manifest
             respond.call(JSON.pretty_generate({
@@ -394,14 +394,14 @@ module CodebaseIndex
               },
               required: ['query']
             }
-          ) do |query:, _server_context:, budget: nil|
+          ) do |query:, server_context:, budget: nil|
             if retriever
               result = retriever.retrieve(query, budget: budget || 8000)
               respond.call(result.context)
             else
               respond.call(
                 'Semantic search is not available. Embedding provider is not configured. ' \
-                'Use the codebase_search tool for pattern-based search instead.'
+                'Use the search tool for pattern-based search instead.'
               )
             end
           end
@@ -431,7 +431,7 @@ module CodebaseIndex
                 incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' }
               }
             }
-          ) do |_server_context:, incremental: nil|
+          ) do |server_context:, incremental: nil|
             next respond.call('Pipeline operator is not configured.') unless operator
 
             guard = operator[:pipeline_guard]
@@ -456,7 +456,7 @@ module CodebaseIndex
                 incremental: { type: 'boolean', description: 'Embed only new/changed units (default: false)' }
               }
             }
-          ) do |_server_context:, incremental: nil|
+          ) do |server_context:, incremental: nil|
             next respond.call('Pipeline operator is not configured.') unless operator
 
             guard = operator[:pipeline_guard]
@@ -477,7 +477,7 @@ module CodebaseIndex
             name: 'pipeline_status',
             description: 'Get the current pipeline status: last extraction time, unit counts, staleness.',
             input_schema: { type: 'object', properties: {} }
-          ) do |_server_context:|
+          ) do |server_context:|
             next respond.call('Pipeline operator is not configured.') unless operator
 
             reporter = operator[:status_reporter]
@@ -499,7 +499,7 @@ module CodebaseIndex
               },
               required: %w[error_class error_message]
             }
-          ) do |error_class:, error_message:, _server_context:|
+          ) do |error_class:, error_message:, server_context:|
             next respond.call('Pipeline operator is not configured.') unless operator
 
             escalator = operator[:error_escalator]
@@ -527,7 +527,7 @@ module CodebaseIndex
               },
               required: ['action']
             }
-          ) do |action:, _server_context:|
+          ) do |action:, server_context:|
             next respond.call('Pipeline operator is not configured.') unless operator
 
             case action
@@ -559,7 +559,7 @@ module CodebaseIndex
               },
               required: %w[query score]
             }
-          ) do |query:, score:, _server_context:, comment: nil|
+          ) do |query:, score:, server_context:, comment: nil|
             next respond.call('Feedback store is not configured.') unless feedback_store
 
             feedback_store.record_rating(query: query, score: score, comment: comment)
@@ -579,7 +579,7 @@ module CodebaseIndex
               },
               required: %w[query missing_unit unit_type]
             }
-          ) do |query:, missing_unit:, unit_type:, _server_context:|
+          ) do |query:, missing_unit:, unit_type:, server_context:|
             next respond.call('Feedback store is not configured.') unless feedback_store
 
             feedback_store.record_gap(query: query, missing_unit: missing_unit, unit_type: unit_type)
@@ -596,7 +596,7 @@ module CodebaseIndex
             name: 'retrieval_explain',
             description: 'Get feedback statistics: average score, total ratings, gap count.',
             input_schema: { type: 'object', properties: {} }
-          ) do |_server_context:|
+          ) do |server_context:|
             next respond.call('Feedback store is not configured.') unless feedback_store
 
             ratings = feedback_store.ratings
@@ -616,7 +616,7 @@ module CodebaseIndex
             name: 'retrieval_suggest',
             description: 'Analyze feedback to suggest improvements: detect patterns in low scores and missing units.',
             input_schema: { type: 'object', properties: {} }
-          ) do |_server_context:|
+          ) do |server_context:|
             next respond.call('Feedback store is not configured.') unless feedback_store
 
             require_relative '../feedback/gap_detector'
