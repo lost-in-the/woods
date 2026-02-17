@@ -83,6 +83,8 @@ module CodebaseIndex
         def post_request(body)
           http = Net::HTTP.new(ENDPOINT.host, ENDPOINT.port)
           http.use_ssl = true
+          http.open_timeout = 10
+          http.read_timeout = 30
 
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'

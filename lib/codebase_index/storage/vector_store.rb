@@ -135,7 +135,13 @@ module CodebaseIndex
         # @param vec_a [Array<Float>] First vector
         # @param vec_b [Array<Float>] Second vector
         # @return [Float] Cosine similarity between -1.0 and 1.0
+        # @raise [ArgumentError] if vectors have different dimensions
         def cosine_similarity(vec_a, vec_b)
+          unless vec_a.length == vec_b.length
+            raise ArgumentError,
+                  "Vector dimension mismatch (#{vec_a.length} vs #{vec_b.length})"
+          end
+
           dot = vec_a.zip(vec_b).sum { |x, y| x * y }
           mag_a = Math.sqrt(vec_a.sum { |x| x**2 })
           mag_b = Math.sqrt(vec_b.sum { |x| x**2 })

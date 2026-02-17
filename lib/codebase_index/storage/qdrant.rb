@@ -147,6 +147,8 @@ module CodebaseIndex
         def build_http
           http = Net::HTTP.new(@uri.host, @uri.port)
           http.use_ssl = @uri.scheme == 'https'
+          http.open_timeout = 10
+          http.read_timeout = 30
           http
         end
 

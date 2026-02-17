@@ -62,11 +62,19 @@ module CodebaseIndex
       private
 
       # Set statement timeout on the connection.
-      # Supports PostgreSQL (SET statement_timeout) and MySQL (max_execution_time hint).
-      def set_timeout
-        @connection.execute("SET statement_timeout = #{@timeout_ms}")
+      #
+      # PostgreSQL uses SET statement_timeout (applies to all statement types).
+      # MySQL uses SET max_execution_time (applies to SELECT only — MySQL limitation:
+      # DDL and DML statements cannot be time-limited via this variable).
+      def set_timeout(connection = @connection, timeout_ms = @timeout_ms)
+        adapter = connection.adapter_name.downcase
+        if adapter.include?('mysql')
+          connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
+        else
+          connection.execute("SET statement_timeout = '#{timeout_ms.to_i}ms'")
+        end
       rescue StandardError
-        # MySQL or unsupported adapter — timeout enforcement is best-effort
+        # Unsupported adapter — timeout enforcement is best-effort
         nil
       end
     end

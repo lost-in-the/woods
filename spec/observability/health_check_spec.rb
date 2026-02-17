@@ -6,7 +6,7 @@ require 'codebase_index/observability/health_check'
 RSpec.describe CodebaseIndex::Observability::HealthCheck do
   let(:vector_store) { instance_double('VectorStore', count: 10) }
   let(:metadata_store) { instance_double('MetadataStore', count: 20) }
-  let(:embedding_provider) { instance_double('EmbeddingProvider', embed: [0.1, 0.2, 0.3]) }
+  let(:embedding_provider) { instance_double('EmbeddingProvider', embed: [0.1, 0.2, 0.3], dimensions: 1536) }
 
   describe '#run' do
     context 'when all components are healthy' do
@@ -105,11 +105,27 @@ RSpec.describe CodebaseIndex::Observability::HealthCheck do
     end
 
     context 'when embedding provider is probed' do
-      it 'calls embed with a test string' do
+      it 'does not make an API call to check provider health' do
         health_check = described_class.new(embedding_provider: embedding_provider)
         health_check.run
 
-        expect(embedding_provider).to have_received(:embed).with('test')
+        expect(embedding_provider).not_to have_received(:embed)
+      end
+
+      it 'returns ok when provider responds to embed and dimensions' do
+        health_check = described_class.new(embedding_provider: embedding_provider)
+        status = health_check.run
+
+        expect(status.components[:embedding_provider]).to eq(:ok)
+      end
+
+      it 'returns error when provider is missing required interface' do
+        bare_provider = instance_double('BareProvider', embed: [0.1])
+        # bare_provider does not respond to :dimensions
+        health_check = described_class.new(embedding_provider: bare_provider)
+        status = health_check.run
+
+        expect(status.components[:embedding_provider]).to eq(:error)
       end
     end
 

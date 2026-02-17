@@ -61,15 +61,18 @@ module CodebaseIndex
         :error
       end
 
-      # Probe an embedding provider by calling #embed with a test string.
+      # Probe an embedding provider by checking its capabilities without making network calls.
       #
       # @param provider [Object, nil] Embedding provider
       # @return [Symbol] :ok, :error, or :not_configured
       def probe_provider(provider)
         return :not_configured if provider.nil?
 
-        provider.embed('test')
-        :ok
+        if provider.respond_to?(:embed) && provider.respond_to?(:dimensions)
+          :ok
+        else
+          :error
+        end
       rescue StandardError
         :error
       end

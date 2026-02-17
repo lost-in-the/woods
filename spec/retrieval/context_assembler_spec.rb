@@ -4,9 +4,10 @@ require 'spec_helper'
 require 'codebase_index/retrieval/search_executor'
 require 'codebase_index/retrieval/query_classifier'
 require 'codebase_index/retrieval/context_assembler'
+require 'codebase_index/storage/metadata_store'
 
 RSpec.describe CodebaseIndex::Retrieval::ContextAssembler do
-  let(:metadata_store) { double('MetadataStore') }
+  let(:metadata_store) { instance_double(CodebaseIndex::Storage::MetadataStore::Interface) }
   let(:budget) { 8000 }
   let(:assembler) { described_class.new(metadata_store: metadata_store, budget: budget) }
 
@@ -283,6 +284,35 @@ RSpec.describe CodebaseIndex::Retrieval::ContextAssembler do
 
       expect(result.budget).to eq(500)
       expect(result.context).to include('... [truncated]')
+    end
+
+    it 'overrides instance budget when budget: keyword arg is passed to assemble' do
+      # Assembler initialized with 8000, but caller passes 2000
+      allow(metadata_store).to receive(:find).with('Unit').and_return(
+        unit_data(identifier: 'Unit', source_code: 'class Unit; end')
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'Unit', score: 0.9)],
+        classification: classification,
+        budget: 2000
+      )
+
+      expect(result.budget).to eq(2000)
+    end
+
+    it 'falls back to instance budget when budget: keyword arg is nil' do
+      allow(metadata_store).to receive(:find).with('Unit').and_return(
+        unit_data(identifier: 'Unit', source_code: 'class Unit; end')
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'Unit', score: 0.9)],
+        classification: classification,
+        budget: nil
+      )
+
+      expect(result.budget).to eq(8000)
     end
   end
 

@@ -4,9 +4,10 @@ require 'spec_helper'
 require 'codebase_index/retrieval/search_executor'
 require 'codebase_index/retrieval/query_classifier'
 require 'codebase_index/retrieval/ranker'
+require 'codebase_index/storage/metadata_store'
 
 RSpec.describe CodebaseIndex::Retrieval::Ranker do
-  let(:metadata_store) { double('MetadataStore') }
+  let(:metadata_store) { instance_double(CodebaseIndex::Storage::MetadataStore::Interface) }
   let(:ranker) { described_class.new(metadata_store: metadata_store) }
   let(:classifier) { CodebaseIndex::Retrieval::QueryClassifier.new }
 
@@ -257,6 +258,42 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
 
       # All units should still appear (penalty doesn't remove them)
       expect(result.size).to eq(10)
+    end
+  end
+
+  # ── Metadata caching (Bug M-4 fix) ─────────────────────────────────
+
+  describe 'metadata store lookup count' do
+    it 'calls metadata_store.find only once per candidate (cached for diversity pass)' do
+      allow(metadata_store).to receive(:find).with('User').and_return({
+                                                                        metadata: { namespace: 'App', type: :model }
+                                                                      })
+
+      candidates = [candidate(identifier: 'User', score: 0.8)]
+
+      expect(metadata_store).to receive(:find).with('User').once
+
+      ranker.rank(candidates, classification: classification)
+    end
+
+    it 'calls metadata_store.find once per candidate even with diversity penalty active' do
+      %w[A B C].each do |id|
+        allow(metadata_store).to receive(:find).with(id).and_return({
+                                                                      metadata: { namespace: 'Same', type: :model }
+                                                                    })
+      end
+
+      candidates = [
+        candidate(identifier: 'A', score: 0.9),
+        candidate(identifier: 'B', score: 0.8),
+        candidate(identifier: 'C', score: 0.7)
+      ]
+
+      expect(metadata_store).to receive(:find).with('A').once
+      expect(metadata_store).to receive(:find).with('B').once
+      expect(metadata_store).to receive(:find).with('C').once
+
+      ranker.rank(candidates, classification: classification)
     end
   end
 

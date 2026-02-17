@@ -119,6 +119,14 @@ RSpec.describe CodebaseIndex::Storage::VectorStore do
 
         expect(zero_result.score).to eq(0.0)
       end
+
+      it 'raises ArgumentError when query vector dimensions do not match stored vector dimensions' do
+        store.store('doc1', [1.0, 0.0, 0.0], { type: 'model' })
+
+        expect { store.search([1.0, 0.0]) }.to raise_error(
+          ArgumentError, /Vector dimension mismatch \(2 vs 3\)/
+        )
+      end
     end
 
     describe '#delete' do

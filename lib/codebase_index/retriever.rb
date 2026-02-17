@@ -71,6 +71,7 @@ module CodebaseIndex
     # @param budget [Integer] Token budget for context assembly
     # @return [RetrievalResult] Complete retrieval result
     def retrieve(query, budget: 8000)
+      @budget = budget
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
       classification = @classifier.classify(query)
@@ -103,7 +104,8 @@ module CodebaseIndex
       @assembler.assemble(
         candidates: ranked,
         classification: classification,
-        structural_context: build_structural_context
+        structural_context: build_structural_context,
+        budget: @budget
       )
     end
 

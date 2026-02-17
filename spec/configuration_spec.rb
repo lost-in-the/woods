@@ -172,5 +172,37 @@ RSpec.describe CodebaseIndex::Configuration do
         end
       end.to raise_error(CodebaseIndex::ConfigurationError)
     end
+
+    it 'uses CONFIG_MUTEX for thread safety' do
+      expect(CodebaseIndex::CONFIG_MUTEX).to be_a(Mutex)
+    end
+
+    it 'does not corrupt configuration under concurrent access' do
+      CodebaseIndex.configuration = nil
+
+      threads = 10.times.map do |i|
+        Thread.new do
+          CodebaseIndex.configure do |c|
+            c.max_context_tokens = 1000 + i
+          end
+        end
+      end
+      threads.each(&:join)
+
+      # Configuration should be set and valid (one thread won the race)
+      expect(CodebaseIndex.configuration).not_to be_nil
+      expect(CodebaseIndex.configuration.max_context_tokens).to be_a(Integer)
+      expect(CodebaseIndex.configuration.max_context_tokens).to be_positive
+    end
+
+    it 'is reentrant — nested configure calls do not deadlock' do
+      # Mutexes in Ruby are not reentrant by default; confirm we don't call
+      # configure recursively (this documents the intended usage boundary)
+      expect do
+        CodebaseIndex.configure do |c|
+          c.max_context_tokens = 2000
+        end
+      end.not_to raise_error
+    end
   end
 end

@@ -133,10 +133,19 @@ RSpec.describe CodebaseIndex::Retriever do
     it 'passes budget to context assembler' do
       expect_any_instance_of(CodebaseIndex::Retrieval::ContextAssembler)
         .to receive(:assemble)
-        .with(hash_including(structural_context: anything))
+        .with(hash_including(budget: 4000, structural_context: anything))
         .and_return(assembled_context)
 
       retriever.retrieve('How does the User model work?', budget: 4000)
+    end
+
+    it 'passes default budget of 8000 to context assembler when no budget given' do
+      expect_any_instance_of(CodebaseIndex::Retrieval::ContextAssembler)
+        .to receive(:assemble)
+        .with(hash_including(budget: 8000))
+        .and_return(assembled_context)
+
+      retriever.retrieve('How does the User model work?')
     end
 
     it 'applies formatter when provided' do
@@ -183,7 +192,8 @@ RSpec.describe CodebaseIndex::Retriever do
         .with(candidates, classification: classification)
         .and_return(ranked_candidates).ordered
       expect(assembler_double).to receive(:assemble)
-        .with(candidates: ranked_candidates, classification: classification, structural_context: anything)
+        .with(candidates: ranked_candidates, classification: classification, structural_context: anything,
+              budget: anything)
         .and_return(assembled_context).ordered
 
       # Need to allow metadata_store calls for structural context

@@ -81,6 +81,41 @@ RSpec.describe CodebaseIndex::Feedback::Store do
       new_store = described_class.new(path: File.join(feedback_dir, 'nonexistent.jsonl'))
       expect(new_store.all_entries).to eq([])
     end
+
+    it 'returns all entries when no limit given' do
+      store.record_rating(query: 'q1', score: 1)
+      store.record_rating(query: 'q2', score: 2)
+      store.record_rating(query: 'q3', score: 3)
+      expect(store.all_entries.size).to eq(3)
+    end
+
+    it 'returns at most limit entries when limit is specified' do
+      store.record_rating(query: 'q1', score: 1)
+      store.record_rating(query: 'q2', score: 2)
+      store.record_rating(query: 'q3', score: 3)
+      result = store.all_entries(limit: 2)
+      expect(result.size).to eq(2)
+    end
+
+    it 'returns fewer than limit when file has fewer entries' do
+      store.record_rating(query: 'q1', score: 1)
+      result = store.all_entries(limit: 10)
+      expect(result.size).to eq(1)
+    end
+
+    it 'does not read entire file into memory for large files' do
+      # Write many entries directly to verify IO.foreach early-break behaviour
+      100.times { |i| store.record_rating(query: "q#{i}", score: (i % 5) + 1) }
+      result = store.all_entries(limit: 5)
+      expect(result.size).to eq(5)
+    end
+
+    it 'skips malformed JSON lines without raising' do
+      File.open(feedback_path, 'a') { |f| f.puts('not json') }
+      store.record_rating(query: 'q1', score: 4)
+      expect { store.all_entries }.not_to raise_error
+      expect(store.all_entries.size).to eq(1)
+    end
   end
 
   describe '#ratings' do

@@ -376,14 +376,15 @@ module CodebaseIndex
       result = {}
       relative_paths.each { |rp| result[rp] = {} }
 
-      log_output = run_git(
-        'log', '--all', '--name-only',
-        '--format=__COMMIT__%H|||%an|||%cI|||%s',
-        '--since=365 days ago',
-        '--', *relative_paths
-      )
-
-      parse_git_log_output(log_output, relative_paths.to_set, result)
+      relative_paths.each_slice(500) do |batch|
+        log_output = run_git(
+          'log', '--all', '--name-only',
+          '--format=__COMMIT__%H|||%an|||%cI|||%s',
+          '--since=365 days ago',
+          '--', *batch
+        )
+        parse_git_log_output(log_output, relative_paths.to_set, result)
+      end
 
       ninety_days_ago = (Time.current - 90.days).iso8601
       result.each do |relative_path, data|
@@ -677,11 +678,13 @@ module CodebaseIndex
       return unless extractor
 
       unit = if (method = CLASS_BASED[type])
-               klass = begin
-                 unit_id.constantize
-               rescue StandardError
-                 nil
-               end
+               klass = if unit_id.match?(/\A[A-Z][A-Za-z0-9_:]*\z/)
+                         begin
+                           unit_id.constantize
+                         rescue StandardError
+                           nil
+                         end
+                       end
                extractor.public_send(method, klass) if klass
              elsif (method = FILE_BASED[type])
                extractor.public_send(method, file_path)

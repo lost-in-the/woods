@@ -23,6 +23,7 @@ module CodebaseIndex
     #
     class Bridge
       SUPPORTED_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
+      TOOL_HANDLERS = SUPPORTED_TOOLS.each_with_object({}) { |t, h| h[t] = :"handle_#{t}" }.freeze
 
       # @param input [IO] Input stream (reads JSON-lines)
       # @param output [IO] Output stream (writes JSON-lines)
@@ -99,7 +100,8 @@ module CodebaseIndex
           handle_schema(params)
         else
           validate_model_param(params)
-          send(:"handle_#{tool}", params)
+          handler = TOOL_HANDLERS.fetch(tool) { raise ValidationError, "Unknown tool: #{tool}" }
+          send(handler, params)
         end
       end
 

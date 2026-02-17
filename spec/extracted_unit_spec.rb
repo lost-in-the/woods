@@ -98,6 +98,17 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
       unit.metadata = {}
       expect(unit.estimated_tokens).to eq(29) # (100 / 3.5).ceil
     end
+
+    it 'recomputes fresh when source_code changes (no stale memoization)' do
+      unit.source_code = 'a' * 100
+      first = unit.estimated_tokens
+
+      unit.source_code = 'a' * 500
+      second = unit.estimated_tokens
+
+      expect(second).to be > first
+      expect(second).to eq((500 / 3.5).ceil)
+    end
   end
 
   describe '#needs_chunking?' do

@@ -131,6 +131,38 @@ RSpec.describe CodebaseIndex::Console::Bridge do
     end
   end
 
+  describe 'dispatch security' do
+    it 'rejects a tool name not in SUPPORTED_TOOLS even if a matching private method exists' do
+      # 'parse_request' is a private method — a crafted tool name must not reach it
+      request = { 'id' => 'sec1', 'tool' => 'parse_request', 'params' => { 'model' => 'User' } }
+      response = bridge.handle_request(request)
+
+      expect(response['ok']).to be false
+      expect(response['error_type']).to eq('unknown_tool')
+    end
+
+    it 'rejects a tool name that would call a private helper via handle_ prefix' do
+      # 'validate_model_param' is private; a tool named 'validate_model_param' must not succeed
+      request = { 'id' => 'sec2', 'tool' => 'validate_model_param', 'params' => { 'model' => 'User' } }
+      response = bridge.handle_request(request)
+
+      expect(response['ok']).to be false
+      expect(response['error_type']).to eq('unknown_tool')
+    end
+
+    it 'TOOL_HANDLERS covers every SUPPORTED_TOOLS entry' do
+      described_class::SUPPORTED_TOOLS.each do |tool|
+        expect(described_class::TOOL_HANDLERS).to have_key(tool)
+      end
+    end
+
+    it 'TOOL_HANDLERS maps each tool to its handle_ method symbol' do
+      described_class::SUPPORTED_TOOLS.each do |tool|
+        expect(described_class::TOOL_HANDLERS[tool]).to eq(:"handle_#{tool}")
+      end
+    end
+  end
+
   describe '#run' do
     it 'processes multiple JSON-lines requests' do
       requests = [

@@ -68,11 +68,9 @@ module CodebaseIndex
     #
     # @return [Integer] Estimated token count
     def estimated_tokens
-      @estimated_tokens ||= begin
-        source_tokens = source_code ? (source_code.length / 3.5).ceil : 0
-        metadata_tokens = metadata.any? ? (metadata.to_json.length / 3.5).ceil : 0
-        source_tokens + metadata_tokens
-      end
+      source_tokens = source_code ? (source_code.length / 3.5).ceil : 0
+      metadata_tokens = metadata.any? ? (metadata.to_json.length / 3.5).ceil : 0
+      source_tokens + metadata_tokens
     end
 
     # Check if unit needs chunking based on size

@@ -24,6 +24,16 @@ RSpec.describe CodebaseIndex::DependencyGraph do
       expect(graph.units_of_type(:model)).to include('User')
     end
 
+    it 'does not add duplicate entries to type_index on re-registration' do
+      unit = make_unit(type: :model, identifier: 'User')
+
+      graph.register(unit)
+      graph.register(unit)
+      graph.register(unit)
+
+      expect(graph.units_of_type(:model).count('User')).to eq(1)
+    end
+
     it 'builds reverse edges' do
       user_unit = make_unit(type: :model, identifier: 'User')
       order_unit = make_unit(

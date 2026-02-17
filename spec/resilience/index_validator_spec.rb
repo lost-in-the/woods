@@ -156,6 +156,45 @@ RSpec.describe CodebaseIndex::Resilience::IndexValidator do
     end
   end
 
+  describe '#safe_filename (alignment with Extractor)' do
+    let(:validator) { described_class.new(index_dir: tmp_dir) }
+
+    it 'converts :: to __ for namespaced identifiers' do
+      # This mirrors Extractor#safe_filename exactly
+      expect(validator.send(:safe_filename, 'Admin::UsersController')).to eq('Admin__UsersController.json')
+    end
+
+    it 'replaces special characters with underscores' do
+      expect(validator.send(:safe_filename, 'My::Widget/thing')).to eq('My__Widget_thing.json')
+    end
+
+    it 'leaves alphanumeric, underscores, and hyphens intact' do
+      expect(validator.send(:safe_filename, 'FooBar_Baz-123')).to eq('FooBar_Baz-123.json')
+    end
+
+    it 'appends .json extension' do
+      expect(validator.send(:safe_filename, 'User')).to eq('User.json')
+    end
+
+    context 'with a namespaced unit file on disk' do
+      before do
+        # Write a unit file using Extractor-style naming
+        write_unit_file('models', 'Admin__UsersController.json', source_code: 'class Admin::UsersController; end')
+        index = [{ 'identifier' => 'Admin::UsersController',
+                   'file_path' => 'app/controllers/admin/users_controller.rb' }]
+        write_json('models/_index.json', index)
+      end
+
+      it 'finds the file via safe_filename when exact match does not exist' do
+        validator = described_class.new(index_dir: tmp_dir)
+        report = validator.validate
+
+        expect(report.valid?).to be true
+        expect(report.errors).to be_empty
+      end
+    end
+  end
+
   describe 'ValidationReport' do
     it 'is a Struct with valid?, warnings, and errors' do
       report = CodebaseIndex::Resilience::IndexValidator::ValidationReport.new(

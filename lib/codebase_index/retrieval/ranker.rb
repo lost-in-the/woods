@@ -124,6 +124,7 @@ module CodebaseIndex
 
           {
             candidate: candidate,
+            unit: unit, # cached to avoid double lookup in apply_diversity_penalty
             scores: {
               semantic: candidate.score.to_f,
               keyword: keyword_score(candidate),
@@ -227,9 +228,11 @@ module CodebaseIndex
 
       # Compute diversity penalty for a single item and update seen counts.
       #
+      # Uses the unit cached in item[:unit] to avoid a redundant metadata store lookup.
+      #
       # @return [Float, nil] Penalty amount, or nil if unit not found
       def diversity_penalty_for(item, seen_namespaces, seen_types)
-        unit = @metadata_store.find(item[:candidate].identifier)
+        unit = item[:unit]
         return nil unless unit
 
         namespace = dig_metadata(unit, :namespace) || 'root'

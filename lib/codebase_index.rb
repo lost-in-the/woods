@@ -28,6 +28,8 @@ module CodebaseIndex
   class ConfigurationError < Error; end
   class ExtractionError < Error; end
 
+  CONFIG_MUTEX = Mutex.new
+
   # ════════════════════════════════════════════════════════════════════════
   # Configuration
   # ════════════════════════════════════════════════════════════════════════
@@ -122,9 +124,11 @@ module CodebaseIndex
     attr_accessor :configuration
 
     def configure
-      self.configuration ||= Configuration.new
-      yield(configuration) if block_given?
-      configuration
+      CONFIG_MUTEX.synchronize do
+        self.configuration ||= Configuration.new
+        yield(configuration) if block_given?
+        configuration
+      end
     end
 
     # Perform full extraction

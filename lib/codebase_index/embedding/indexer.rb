@@ -18,27 +18,21 @@ module CodebaseIndex
       end
 
       # Index all extracted units (full mode). Returns stats hash.
-      #
       # @return [Hash] Stats with :processed, :skipped, :errors counts
       def index_all
-        units = load_units
-        process_units(units, incremental: false)
+        process_units(load_units, incremental: false)
       end
 
       # Index only changed units (incremental mode). Returns stats hash.
-      #
       # @return [Hash] Stats with :processed, :skipped, :errors counts
       def index_incremental
-        units = load_units
-        process_units(units, incremental: true)
+        process_units(load_units, incremental: true)
       end
 
       private
 
-      # @return [Array<Hash>] Parsed unit data from JSON files in output directory
       def load_units
-        pattern = File.join(@output_dir, '**', '*.json')
-        Dir.glob(pattern).filter_map do |path|
+        Dir.glob(File.join(@output_dir, '**', '*.json')).filter_map do |path|
           next if File.basename(path) == 'checkpoint.json'
 
           JSON.parse(File.read(path))
@@ -47,7 +41,6 @@ module CodebaseIndex
         end
       end
 
-      # @return [Hash] Processing stats (:processed, :skipped, :errors)
       def process_units(units, incremental:)
         checkpoint = incremental ? load_checkpoint : {}
         stats = { processed: 0, skipped: 0, errors: 0 }
@@ -60,21 +53,18 @@ module CodebaseIndex
         stats
       end
 
-      # Process a single batch: filter unchanged, embed, and store.
       def process_batch(batch, checkpoint, stats, incremental:)
         to_embed = batch.each_with_object([]) do |unit_data, items|
           if incremental && checkpoint[unit_data['identifier']] == unit_data['source_hash']
             stats[:skipped] += 1
             next
           end
-
           collect_embed_items(unit_data, items)
         end
 
         embed_and_store(to_embed, checkpoint, stats)
       end
 
-      # Append embed items for a unit's prepared texts to the accumulator.
       def collect_embed_items(unit_data, items)
         texts = prepare_texts(unit_data)
         identifier = unit_data['identifier']
@@ -86,25 +76,14 @@ module CodebaseIndex
         end
       end
 
-      # @return [Array<String>] Prepared texts for embedding
       def prepare_texts(unit_data)
         unit = build_unit(unit_data)
-        if unit.chunks&.any?
-          @text_preparer.prepare_chunks(unit)
-        else
-          [@text_preparer.prepare(unit)]
-        end
+        unit.chunks&.any? ? @text_preparer.prepare_chunks(unit) : [@text_preparer.prepare(unit)]
       end
 
-      # @return [CodebaseIndex::ExtractedUnit] Unit built from parsed JSON data
       def build_unit(data)
         unit = ExtractedUnit.new(type: data['type']&.to_sym, identifier: data['identifier'],
                                  file_path: data['file_path'])
-        populate_unit(unit, data)
-      end
-
-      # Populate optional attributes on an ExtractedUnit from parsed data.
-      def populate_unit(unit, data)
         unit.namespace = data['namespace']
         unit.source_code = data['source_code']
         unit.dependencies = data['dependencies'] || []
@@ -112,19 +91,10 @@ module CodebaseIndex
         unit
       end
 
-      # Embed texts and store vectors, updating checkpoint and stats.
       def embed_and_store(items, checkpoint, stats)
         return if items.empty?
 
         vectors = @provider.embed_batch(items.map { |i| i[:text] })
-        store_results(items, vectors, checkpoint, stats)
-      rescue StandardError => e
-        stats[:errors] += items.size
-        raise CodebaseIndex::Error, "Embedding failed: #{e.message}"
-      end
-
-      # Store embedded vectors and update checkpoint tracking.
-      def store_results(items, vectors, checkpoint, stats)
         items.each_with_index do |item, idx|
           metadata = { type: item[:unit_data]['type'], identifier: item[:identifier],
                        file_path: item[:unit_data]['file_path'] }
@@ -132,6 +102,11 @@ module CodebaseIndex
           checkpoint[item[:identifier]] = item[:source_hash]
           stats[:processed] += 1
         end
+      rescue StandardError => e
+        stats[:errors] += items.size
+        stats[:error_messages] ||= []
+        stats[:error_messages] << e.message
+        raise CodebaseIndex::Error, "Embedding failed: #{e.message}"
       end
 
       def load_checkpoint

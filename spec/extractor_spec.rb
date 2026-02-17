@@ -159,6 +159,70 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── batch_git_data ───────────────────────────────────────────────────
+
+  describe '#batch_git_data' do
+    it 'returns empty hash for empty input' do
+      expect(extractor.send(:batch_git_data, [])).to eq({})
+    end
+
+    it 'batches paths in slices of 500 to avoid ARG_MAX' do
+      require 'active_support/core_ext/numeric/time'
+
+      file_paths = (1..1100).map { |i| File.join(tmpdir, "file_#{i}.rb") }
+
+      allow(extractor).to receive(:parse_git_log_output)
+      allow(extractor).to receive(:build_file_metadata).and_return({})
+
+      # Time.current is an ActiveSupport extension; stub it with a plain object
+      # that supports the arithmetic used in batch_git_data.
+      fake_ninety = double('ninety_days_ago', iso8601: '2023-10-01T00:00:00Z')
+      fake_now    = double('now')
+      allow(fake_now).to receive(:-).and_return(fake_ninety)
+      time_stub = Module.new
+      time_stub.define_singleton_method(:current) { fake_now }
+      stub_const('Time', time_stub)
+
+      # run_git should be called once per slice: ceil(1100 / 500) = 3 (500, 500, 100)
+      expect(extractor).to receive(:run_git).exactly(3).times.and_return('')
+
+      extractor.send(:batch_git_data, file_paths)
+    end
+  end
+
+  # ── re_extract_unit ───────────────────────────────────────────────────
+
+  describe '#re_extract_unit' do
+    it 'skips constantize for unit_id not matching Ruby constant format' do
+      # Inject a fake node with a CLASS_BASED type so we reach the constantize branch
+      node = { type: 'model', file_path: File.join(tmpdir, 'user.rb') }
+      FileUtils.touch(File.join(tmpdir, 'user.rb'))
+
+      graph = extractor.instance_variable_get(:@dependency_graph)
+      allow(graph).to receive(:to_h).and_return({ nodes: { '../malicious/path' => node } })
+
+      # constantize must NOT be called for an invalid identifier
+      expect_any_instance_of(String).not_to receive(:constantize)
+
+      extractor.send(:re_extract_unit, '../malicious/path')
+    end
+
+    it 'allows constantize for valid Ruby constant identifiers' do
+      node = { type: 'model', file_path: File.join(tmpdir, 'user.rb') }
+      FileUtils.touch(File.join(tmpdir, 'user.rb'))
+
+      graph = extractor.instance_variable_get(:@dependency_graph)
+      allow(graph).to receive(:to_h).and_return({ nodes: { 'User' => node } })
+
+      extractor_double = double('ModelExtractor')
+      allow(CodebaseIndex::Extractors::ModelExtractor).to receive(:new).and_return(extractor_double)
+
+      # constantize raises NameError (no Rails env) — that's fine, it just returns nil
+      # The important thing is no error from the format check itself
+      expect { extractor.send(:re_extract_unit, 'User') }.not_to raise_error
+    end
+  end
+
   # ── EXTRACTION_DIRECTORIES constant ──────────────────────────────────
 
   describe 'EXTRACTION_DIRECTORIES' do

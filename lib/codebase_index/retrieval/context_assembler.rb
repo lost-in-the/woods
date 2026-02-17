@@ -46,17 +46,19 @@ module CodebaseIndex
       # @param candidates [Array<Candidate>] Ranked search candidates
       # @param classification [QueryClassifier::Classification] Query classification
       # @param structural_context [String, nil] Optional codebase overview text
+      # @param budget [Integer, nil] Override token budget; falls back to @budget
       # @return [AssembledContext] Token-budgeted context with source attribution
-      def assemble(candidates:, classification:, structural_context: nil)
+      def assemble(candidates:, classification:, structural_context: nil, budget: nil)
+        effective_budget = budget || @budget
         sections = []
         sources = []
         tokens_used = 0
 
         # 1. Structural context (always first if provided)
-        tokens_used = add_structural_section(sections, structural_context, tokens_used)
+        tokens_used = add_structural_section(sections, structural_context, tokens_used, effective_budget)
 
         # 2. Compute per-section budgets from remaining tokens
-        budgets = compute_section_budgets(@budget - tokens_used, classification)
+        budgets = compute_section_budgets(effective_budget - tokens_used, classification)
 
         # 3. Primary, supporting, and framework sections
         add_candidate_section(sections, sources, :primary,
@@ -68,7 +70,7 @@ module CodebaseIndex
                                 candidates.select { |c| framework_candidate?(c) }, budgets[:framework])
         end
 
-        build_result(sections, sources)
+        build_result(sections, sources, effective_budget)
       end
 
       private
@@ -76,10 +78,10 @@ module CodebaseIndex
       # Add structural context section if provided.
       #
       # @return [Integer] Updated tokens_used count
-      def add_structural_section(sections, structural_context, tokens_used)
+      def add_structural_section(sections, structural_context, tokens_used, effective_budget)
         return tokens_used unless structural_context
 
-        budget = (@budget * BUDGET_ALLOCATION[:structural]).to_i
+        budget = (effective_budget * BUDGET_ALLOCATION[:structural]).to_i
         text = truncate_to_budget(structural_context, budget)
         sections << { section: :structural, content: text }
         tokens_used + estimate_tokens(text)
@@ -225,13 +227,16 @@ module CodebaseIndex
 
       # Build the final AssembledContext result.
       #
+      # @param sections [Array<Hash>] Assembled sections
+      # @param sources [Array<Hash>] Source attributions
+      # @param effective_budget [Integer] The budget actually used for assembly
       # @return [AssembledContext]
-      def build_result(sections, sources)
+      def build_result(sections, sources, effective_budget)
         context = sections.map { |s| s[:content] }.join("\n\n---\n\n")
         AssembledContext.new(
           context: context,
           tokens_used: estimate_tokens(context),
-          budget: @budget,
+          budget: effective_budget,
           sources: sources.uniq,
           sections: sections.map { |s| s[:section] }
         )

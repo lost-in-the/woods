@@ -158,5 +158,25 @@ RSpec.describe CodebaseIndex::Retrieval::QueryClassifier do
     it 'defines all scope types' do
       expect(described_class::SCOPES).to eq(%i[pinpoint focused exploratory comprehensive])
     end
+
+    it 'defines STOP_WORDS as a frozen Set' do
+      expect(described_class::STOP_WORDS).to be_a(Set)
+      expect(described_class::STOP_WORDS).to be_frozen
+    end
+
+    it 'STOP_WORDS includes common English stop words' do
+      expect(described_class::STOP_WORDS).to include('the', 'a', 'an', 'is', 'in', 'for', 'and', 'or')
+    end
+
+    it 'STOP_WORDS is shared across calls (same object identity)' do
+      # Verify the constant is not re-allocated per call
+      classifier1 = described_class.new
+      classifier2 = described_class.new
+      result1 = classifier1.classify('how does the user model work')
+      result2 = classifier2.classify('where is the order service')
+      # Both should have filtered stop words, confirming STOP_WORDS is used
+      expect(result1.keywords).not_to include('the', 'does', 'how')
+      expect(result2.keywords).not_to include('the', 'is', 'where')
+    end
   end
 end

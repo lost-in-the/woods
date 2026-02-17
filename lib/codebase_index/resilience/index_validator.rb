@@ -108,10 +108,10 @@ module CodebaseIndex
       # @param identifier [String] The unit identifier
       # @return [String, nil] Path to the unit file, or nil if not found
       def find_unit_file(type_dir, identifier)
-        # Try exact match first, then safe filename conversion
+        # Try exact match first, then safe filename conversion (mirroring Extractor logic)
         candidates = [
           File.join(type_dir, "#{identifier}.json"),
-          File.join(type_dir, "#{safe_filename(identifier)}.json")
+          File.join(type_dir, safe_filename(identifier))
         ]
 
         candidates.find { |path| File.exist?(path) }
@@ -154,12 +154,12 @@ module CodebaseIndex
         end
       end
 
-      # Convert an identifier to a safe filename (mirrors Extractor logic).
+      # Convert an identifier to a safe filename (mirrors Extractor#safe_filename exactly).
       #
-      # @param identifier [String] The unit identifier
-      # @return [String] A filesystem-safe filename
+      # @param identifier [String] The unit identifier (e.g., "Admin::UsersController")
+      # @return [String] A filesystem-safe filename (e.g., "Admin__UsersController.json")
       def safe_filename(identifier)
-        identifier.gsub(%r{[/:]+}, '_')
+        "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
       end
     end
   end

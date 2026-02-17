@@ -14,6 +14,8 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
   before do
     allow(Net::HTTP).to receive(:new).and_return(http)
     allow(http).to receive(:use_ssl=)
+    allow(http).to receive(:open_timeout=)
+    allow(http).to receive(:read_timeout=)
   end
 
   describe '#initialize' do
@@ -174,6 +176,28 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
       allow(http).to receive(:request).and_return(response)
 
       expect(store.count).to eq(42)
+    end
+  end
+
+  describe 'HTTP timeout configuration' do
+    it 'sets open_timeout on the HTTP connection' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":0}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      store.count
+
+      expect(http).to have_received(:open_timeout=).with(10)
+    end
+
+    it 'sets read_timeout on the HTTP connection' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":0}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      store.count
+
+      expect(http).to have_received(:read_timeout=).with(30)
     end
   end
 

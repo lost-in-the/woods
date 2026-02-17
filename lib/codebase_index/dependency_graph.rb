@@ -44,7 +44,7 @@ module CodebaseIndex
 
       # Type index for filtering
       @type_index[unit.type] ||= []
-      @type_index[unit.type] << unit.identifier
+      @type_index[unit.type] << unit.identifier unless @type_index[unit.type].include?(unit.identifier)
 
       # Build reverse edges
       unit.dependencies.each do |dep|

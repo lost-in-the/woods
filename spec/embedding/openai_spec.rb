@@ -37,6 +37,8 @@ RSpec.describe CodebaseIndex::Embedding::Provider::OpenAI do
   before do
     allow(Net::HTTP).to receive(:new).and_return(http_double)
     allow(http_double).to receive(:use_ssl=)
+    allow(http_double).to receive(:open_timeout=)
+    allow(http_double).to receive(:read_timeout=)
     allow(success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
     allow(batch_success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
   end
@@ -113,6 +115,20 @@ RSpec.describe CodebaseIndex::Embedding::Provider::OpenAI do
     it 'returns a custom model name' do
       custom_provider = described_class.new(api_key: 'test-key', model: 'text-embedding-3-large')
       expect(custom_provider.model_name).to eq('text-embedding-3-large')
+    end
+  end
+
+  describe 'HTTP timeout configuration' do
+    before { allow(http_double).to receive(:request).and_return(success_response) }
+
+    it 'sets open_timeout on the HTTP connection' do
+      provider.embed('hello')
+      expect(http_double).to have_received(:open_timeout=).with(10)
+    end
+
+    it 'sets read_timeout on the HTTP connection' do
+      provider.embed('hello')
+      expect(http_double).to have_received(:read_timeout=).with(30)
     end
   end
 

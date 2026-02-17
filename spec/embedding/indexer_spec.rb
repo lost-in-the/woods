@@ -230,6 +230,30 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
         CodebaseIndex::Error, /Embedding failed: connection refused/
       )
     end
+
+    it 'includes the error message in the raised exception' do
+      expect { indexer.index_all }.to raise_error(
+        CodebaseIndex::Error, /connection refused/
+      )
+    end
+
+    it 'populates error_messages in stats via embed_and_store' do
+      # Verify that embed_and_store mutates stats[:error_messages] before raising.
+      # We test this by calling the private method directly with a shared stats hash.
+      stats = { processed: 0, skipped: 0, errors: 0 }
+      items = [{ id: 'User', text: 'class User; end', unit_data: unit_data,
+                 source_hash: 'abc123', identifier: 'User' }]
+      checkpoint = {}
+
+      allow(provider).to receive(:embed_batch).and_raise(StandardError, 'network timeout')
+
+      expect do
+        indexer.send(:embed_and_store, items, checkpoint, stats)
+      end.to raise_error(CodebaseIndex::Error, /network timeout/)
+
+      expect(stats[:errors]).to eq(1)
+      expect(stats[:error_messages]).to eq(['network timeout'])
+    end
   end
 
   describe 'empty output directory' do

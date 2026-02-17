@@ -62,15 +62,20 @@ module CodebaseIndex
 
       # Read all feedback entries.
       #
+      # @param limit [Integer, nil] Maximum number of entries to return. Returns all if nil.
       # @return [Array<Hash>]
-      def all_entries
+      def all_entries(limit: nil)
         return [] unless File.exist?(@path)
 
-        File.readlines(@path).filter_map do |line|
-          JSON.parse(line.strip) unless line.strip.empty?
+        entries = []
+        File.foreach(@path) do |line|
+          entry = JSON.parse(line.strip)
+          entries << entry
+          break if limit && entries.size >= limit
         rescue JSON::ParserError
-          nil
+          next
         end
+        entries
       end
 
       # Filter to rating entries only.

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module CodebaseIndex
   module Retrieval
     # Classifies natural language queries to determine retrieval strategy.
@@ -16,6 +18,10 @@ module CodebaseIndex
 
       INTENTS = %i[understand locate trace debug implement reference compare framework].freeze
       SCOPES = %i[pinpoint focused exploratory comprehensive].freeze
+
+      STOP_WORDS = Set.new(%w[the a an is are was were be been being have has had do does did will would could
+                              should may might can shall in on at to for of and or but not with by from as
+                              this that these those it its how what when where why who which]).freeze
 
       # Intent patterns — order matters (first match wins)
       INTENT_PATTERNS = {
@@ -100,14 +106,10 @@ module CodebaseIndex
       # @param query [String]
       # @return [Array<String>]
       def extract_keywords(query)
-        stop_words = Set.new(%w[the a an is are was were be been being have has had do does did will would could
-                                should may might can shall in on at to for of and or but not with by from as
-                                this that these those it its how what when where why who which])
-
         query.downcase
              .gsub(/[^\w\s]/, ' ')
              .split
-             .reject { |w| stop_words.include?(w) || w.length < 2 }
+             .reject { |w| STOP_WORDS.include?(w) || w.length < 2 }
              .uniq
       end
     end

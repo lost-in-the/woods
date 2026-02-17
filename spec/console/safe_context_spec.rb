@@ -19,13 +19,17 @@ RSpec.describe CodebaseIndex::Console::SafeContext do
   describe '#execute' do
     subject(:ctx) { described_class.new(connection: connection, timeout_ms: 3000) }
 
+    before do
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+    end
+
     it 'runs the block inside a transaction' do
       expect(connection).to receive(:transaction)
       ctx.execute { |_c| 'result' }
     end
 
-    it 'sets statement timeout' do
-      expect(connection).to receive(:execute).with('SET statement_timeout = 3000')
+    it 'sets statement timeout using PostgreSQL syntax' do
+      expect(connection).to receive(:execute).with("SET statement_timeout = '3000ms'")
       ctx.execute { |_c| nil }
     end
 
@@ -37,6 +41,47 @@ RSpec.describe CodebaseIndex::Console::SafeContext do
     it 'silently handles timeout errors from unsupported adapters' do
       allow(connection).to receive(:execute).and_raise(StandardError, 'not supported')
       expect { ctx.execute { |_c| 'ok' } }.not_to raise_error
+    end
+  end
+
+  describe '#set_timeout (adapter detection)' do
+    context 'with a MySQL adapter' do
+      let(:mysql_connection) do
+        instance_double('MysqlConnection').tap do |conn|
+          allow(conn).to receive(:adapter_name).and_return('Mysql2')
+          allow(conn).to receive(:execute)
+          allow(conn).to receive(:transaction) do |&block|
+            block.call
+          rescue ActiveRecord::Rollback
+            nil
+          end
+        end
+      end
+
+      it 'uses max_execution_time syntax' do
+        ctx = described_class.new(connection: mysql_connection, timeout_ms: 5000)
+        expect(mysql_connection).to receive(:execute).with('SET max_execution_time = 5000')
+        ctx.execute { |_c| nil }
+      end
+
+      it 'handles mysql adapter name case-insensitively' do
+        allow(mysql_connection).to receive(:adapter_name).and_return('MySQL')
+        ctx = described_class.new(connection: mysql_connection, timeout_ms: 2000)
+        expect(mysql_connection).to receive(:execute).with('SET max_execution_time = 2000')
+        ctx.execute { |_c| nil }
+      end
+    end
+
+    context 'with a PostgreSQL adapter' do
+      before do
+        allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      end
+
+      it 'uses statement_timeout syntax with ms suffix' do
+        ctx = described_class.new(connection: connection, timeout_ms: 7500)
+        expect(connection).to receive(:execute).with("SET statement_timeout = '7500ms'")
+        ctx.execute { |_c| nil }
+      end
     end
   end
 
