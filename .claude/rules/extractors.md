@@ -28,7 +28,7 @@ end
 
 Rules:
 - Always return `ExtractedUnit` instances, never raw hashes
-- Set `unit.dependencies` as an array of `{ type:, target:, relationship: }` hashes
+- Set `unit.dependencies` as an array of `{ type:, target:, via: }` hashes
 - Use `File.read` for source, never `eval` or `load`
 - Runtime introspection (reflection APIs, `descendants`, route helpers) is preferred over parsing when available
 - Handle missing directories gracefully — a host app may not have `app/interactors/`

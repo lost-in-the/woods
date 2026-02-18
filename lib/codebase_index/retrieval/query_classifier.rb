@@ -46,7 +46,7 @@ module CodebaseIndex
 
       # Target type patterns
       TARGET_PATTERNS = {
-        model: /\b(model|activerecord|association|migration|schema|table|column|scope|validation)\b/i,
+        model: /\b(model|activerecord|association|schema|table|column|scope|validation)\b/i,
         controller: /\b(controller|action|route|endpoint|api|request|response|filter|callback)\b/i,
         service: /\b(service|interactor|operation|command|use.?case|business.?logic)\b/i,
         job: /\b(job|worker|background|async|sidekiq|queue|perform)\b/i,
@@ -59,7 +59,12 @@ module CodebaseIndex
         pundit_policy: /\b(pundit|authorize|policy|allowed|permitted)\b/i,
         configuration: /\b(config|initializer|environment|setting|configure)\b/i,
         engine: /\b(engine|mountable|mount|railtie|plugin|isolated.?namespace)\b/i,
-        view_template: /\b(view|template|partial|render|erb|layout|html)\b/i
+        view_template: /\b(view|template|partial|render|erb|layout|html)\b/i,
+        # rubocop:disable Layout/LineLength
+        migration: /\b(migration|migrate|schema.?change|add.?column|remove.?column|create.?table|drop.?table|db.?migrate)\b/i,
+        action_cable_channel: /\b(action.?cable|websocket|broadcast|cable.?channel|subscription.?channel|realtime|real.?time)\b/i,
+        scheduled_job: /\b(schedule[dr]?|recurring|cron|periodic|every\s+\d|daily|hourly|weekly|solid.?queue.*recur|sidekiq.?cron|whenever)\b/i
+        # rubocop:enable Layout/LineLength
       }.freeze
 
       # Classify a query string

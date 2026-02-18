@@ -1,6 +1,27 @@
 # CodebaseIndex Coverage Gap Analysis: Technical Review
 
-We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. CodebaseIndex currently covers 13 extractors producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, and Rails source. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
+We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. CodebaseIndex currently covers 24 extractors producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates, migrations, ActionCable channels, scheduled jobs, and Rails source. Extraction also includes behavioral enrichment: callback side-effect analysis, a behavioral profile of resolved `Rails.application.config` values, and optional pre-computed request flow maps. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
+
+## Implementation Status
+
+Since this analysis was written, all 8 ranked gaps have been addressed:
+
+| Gap | Status | Extractor |
+|-----|--------|-----------|
+| Concerns | **Done** | `ConcernExtractor` — scans `app/*/concerns/` |
+| Routes | **Done** | `RouteExtractor` — `Rails.application.routes` introspection |
+| Middleware | **Done** | `MiddlewareExtractor` — `Rails.application.middleware` introspection |
+| I18n | **Done** | `I18nExtractor` — YAML parsing of `config/locales/` |
+| Pundit | **Done** | `PunditExtractor` — Pundit authorization policies |
+| Configuration | **Partial** | `ConfigurationExtractor` (file scanning) + `BehavioralProfile` (runtime config introspection). Semantic parsing of heterogeneous initializer content remains. |
+| View templates | **Done** | `ViewTemplateExtractor` — ERB MVP, scans `app/views/**/*.erb` |
+| Engines | **Done** | `EngineExtractor` — `Rails::Engine.subclasses` introspection |
+
+Additionally, **behavioral depth** enrichment was added: callback side-effect analysis (`CallbackAnalyzer`), resolved config introspection (`BehavioralProfile`), and pre-computed request flow maps (`FlowPrecomputer`).
+
+The per-perspective analysis below reflects the original gap assessment. See the [Synthesized Priority Ranking](#synthesized-priority-ranking) for current status.
+
+---
 
 The existing extractor infrastructure — `SharedDependencyScanner`, `SharedUtilityMethods`, `ExtractedUnit`, the dependency graph with PageRank, and the 21-tool MCP server — provides a well-defined insertion point for new extractors. Most gaps fall into two categories: (1) file-based extractors that follow the `ServiceExtractor` pattern (directory scan, source read, metadata extraction), and (2) runtime-introspection extractors that follow the `ModelExtractor` pattern (class hierarchy traversal, reflection APIs).
 
@@ -53,14 +74,16 @@ Concrete scenario: "Why is `/admin/reports/:id` returning 404?" Namespace routin
 **Effort:** Small (8-12 hours). `Rails.application.routes.routes` provides everything via runtime introspection. The data is already partially computed by `ControllerExtractor#build_routes_map`.
 **Dependencies:** None new. Extends the existing runtime introspection pattern.
 
-**3. Configuration and Initializers**
+**3. Configuration and Initializers** *(partially addressed)*
 
-When debugging production issues, configuration is frequently the root cause. "Why is the cache returning nil?" is often answered by `config/initializers/cache_store.rb` or `config/environments/production.rb`. Currently, these files are invisible to the index.
+When debugging production issues, configuration is frequently the root cause. "Why is the cache returning nil?" is often answered by `config/initializers/cache_store.rb` or `config/environments/production.rb`.
 
-Concrete scenario: onboarding developer asks "what Redis instance does this app use?" or "is CORS configured?" The answer lives in initializers, not in any extractable Ruby class.
+**What's now covered:** `BehavioralProfile` introspects resolved `Rails.application.config` values at runtime — database adapter, active frameworks, behavior flags (api_only, strong_params_action, etc.), job adapter, cache store, email config. `ConfigurationExtractor` scans `config/initializers/` and `config/environments/` files as source units.
 
-**Effort:** Medium (16-24 hours). File-based scanning of `config/` is straightforward. The challenge is meaningful metadata extraction — configuration files are heterogeneous (some set global config, some register middleware, some patch classes).
-**Dependencies:** None. Follows the `ServiceExtractor` file-based pattern.
+**Remaining gap:** Raw initializer files that register middleware, patch classes, or configure third-party gems are extracted as source but not semantically parsed. Questions like "is CORS configured?" require reading initializer source rather than querying structured metadata.
+
+**Effort:** Medium (16-24 hours) for the remaining semantic parsing of heterogeneous initializer files.
+**Dependencies:** None. Extends the existing `ConfigurationExtractor`.
 
 **4. Concerns as Standalone Units**
 
@@ -206,30 +229,30 @@ What makes this straightforward: Pundit policies follow strict conventions (`app
 
 Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily get this elsewhere), (3) feasibility given existing architecture.
 
-| Rank | Gap | Perspectives | Unique Value | Effort | Rationale |
-|------|-----|-------------|-------------|--------|-----------|
-| 1 | **Concerns as standalone units** | All 3 | High | Small-Med (12-20h) | Highest cross-role demand. Concern data is already cached in `ModelExtractor`. Immediately plugs into `GraphAnalyzer` for hub/orphan/cycle detection. Fills a real hole in blast-radius computation via `DependencyGraph#affected_by`. Best ratio of value to effort on this list. |
-| 2 | **Routes as standalone units** | 2 of 3 (Dev, Architect) | High | Small (8-12h) | Route data is already partially computed by `ControllerExtractor#build_routes_map`. Promoting to standalone units is low-effort, high-impact. Enables path-based search ("what handles POST /webhooks?") that is currently impossible. No parsing required — pure runtime introspection via `Rails.application.routes`. |
-| 3 | **View templates** | 2 of 3 (Dev, AI) | Very High | Large (40-60h) | Highest unique value — no other tool provides structured view-to-partial-to-helper dependency graphs. But also the highest effort because templates require new parsing infrastructure outside Prism. The view layer is the largest blind spot in the index. Worth the investment, but not first. |
-| 4 | **Configuration/Initializers** | 2 of 3 (Dev, AI) | Medium | Medium (16-24h) | Configuration context prevents entire categories of AI generation errors. Useful for debugging. But the metadata extraction challenge is real — config files are heterogeneous and hard to structure meaningfully. The extractor is easy to build; making the output useful for retrieval is harder. |
-| 5 | **Middleware chain** | 1 of 3 (Architect), but uniquely valuable | Very High | Small (6-10h) | Simplest extractor on this list — `Rails.application.middleware` returns the full stack. Tiny effort, high value for architectural visibility. The reason it ranks below config is that middleware questions are less frequent, but when they matter, they *really* matter. Best effort-to-value ratio after concerns and routes. |
-| 6 | **I18n translations** | 1 of 3 (AI) | Medium | Small (6-10h) | Low effort (YAML parsing), high value for AI code generation in internationalized apps. But many Rails apps do not use I18n extensively, which limits the audience. For apps that do use I18n, this is a top-3 gap. |
-| 7 | **Pundit authorization policies** | 1 of 3 (AI), but cross-cutting concern | Medium | Small (8-12h) | Authorization is app-specific and convention-heavy — exactly the kind of context AI tools need. Extends existing `PolicyExtractor` infrastructure. Limited to Pundit apps, but Pundit is the dominant authorization gem. |
-| 8 | **Engines/mountable gems** | 1 of 3 (Architect) | High | Medium (16-24h) | Important for security audits and upgrade planning. Runtime introspection via `Rails::Engine.subclasses` makes discovery easy. But the scope question (how deep to extract engine internals?) makes this medium effort with design decisions to resolve. |
+| Rank | Gap | Status | Perspectives | Unique Value | Effort | Rationale |
+|------|-----|--------|-------------|-------------|--------|-----------|
+| 1 | **Concerns as standalone units** | **Done** | All 3 | High | — | `ConcernExtractor` scans `app/*/concerns/`, 19 specs. |
+| 2 | **Routes as standalone units** | **Done** | 2 of 3 (Dev, Architect) | High | — | `RouteExtractor` uses `Rails.application.routes`, 16 specs. |
+| 3 | **View templates** | **Done** | 2 of 3 (Dev, AI) | Very High | — | `ViewTemplateExtractor` — ERB MVP with render call, instance variable, and helper extraction. 24 specs. |
+| 4 | **Configuration/Initializers** | **Partial** | 2 of 3 (Dev, AI) | Medium | Medium (16-24h remaining) | `ConfigurationExtractor` scans initializer/environment files (16 specs). `BehavioralProfile` introspects resolved config values (43 specs). Remaining: semantic parsing of heterogeneous initializer content. |
+| 5 | **Middleware chain** | **Done** | 1 of 3 (Architect) | Very High | — | `MiddlewareExtractor` uses `Rails.application.middleware`, 10 specs. |
+| 6 | **I18n translations** | **Done** | 1 of 3 (AI) | Medium | — | `I18nExtractor` parses `config/locales/` YAML, 14 specs. |
+| 7 | **Pundit authorization policies** | **Done** | 1 of 3 (AI) | Medium | — | `PunditExtractor`, 17 specs. |
+| 8 | **Engines/mountable gems** | **Done** | 1 of 3 (Architect) | High | — | `EngineExtractor` — runtime introspection via `Rails::Engine.subclasses`. Mount path, route count, isolate_namespace. 18 specs. |
 
 ### What Didn't Make the Cut (and Why)
 
 **Stimulus/Hotwire JavaScript** (Perspective 1, #5): Valuable but requires JavaScript/TypeScript parsing — a fundamentally different toolchain from Ruby. The ROI is lower than Ruby-side gaps because CodebaseIndex's core strength is runtime introspection, which does not apply to frontend assets. If the tool expands to frontend, this should be a separate extraction pipeline, not bolted onto the Ruby extractors.
 
-**Database migrations** (Perspective 2, #5): Schema state is already extracted via reflection. Migration history is useful for architects but is readily available via `rails db:migrate:status` and `git log db/migrate/`. The unique value over existing tools is low compared to other gaps.
+**Database migrations** (Perspective 2, #5): **Now Done.** `MigrationExtractor` scans `db/migrate/*.rb`, extracting DDL metadata (tables, columns, indexes, references), reversibility, risk indicators (data migrations, raw SQL), and model dependencies via table name classification. 55 specs.
 
 **Rake tasks** (from the original list): Rarely queried. Most rake tasks are thin wrappers around service objects or direct ActiveRecord calls. The service extractor already captures the logic that matters.
 
-**ActionCable channels** (from the original list): Niche. Most Rails apps do not use ActionCable extensively. When they do, channels are simple enough to understand from source.
+**ActionCable channels** (from the original list): **Now Done.** `ActionCableExtractor` uses runtime introspection via `ActionCable::Channel::Base.descendants`. Extracts stream subscriptions, actions, broadcast patterns. 29 specs.
 
 **ActiveStorage/ActionText** (from the original list): Configuration-level concerns already partially covered by model association extraction (`has_one_attached`, `has_rich_text` show up in model metadata). A dedicated extractor adds little over what model extraction provides.
 
-**Scheduled job definitions** (from the original list): Cron/recurring job configuration is typically a single YAML or Ruby file (`config/recurring.yml`, `config/schedule.rb`). Extracting it as units adds overhead for minimal retrieval value. The job extractor already captures the jobs themselves; the schedule is a deployment concern.
+**Scheduled job definitions** (from the original list): **Now Done.** `ScheduledJobExtractor` parses three formats: Solid Queue (`config/recurring.yml`), Sidekiq-Cron (`config/sidekiq_cron.yml`), and Whenever (`config/schedule.rb`). One unit per scheduled entry with cron expression, job class, and human-readable frequency. 45 specs.
 
 ---
 
@@ -243,20 +266,18 @@ Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily g
 
 - **`EXTRACTION_DIRECTORIES`** (extractor.rb, line 46-63) currently does not include `app/views/` or `config/`. Adding view or config extraction requires updating this constant for the eager-load fallback path — though views and config do not contain autoloadable Ruby classes, so the update is a no-op functionally. The real change is adding new entries to the `EXTRACTORS` hash (line 65-79) and the dispatch maps.
 
-- **`QueryClassifier::TARGET_PATTERNS`** needs updates for each new unit type. Currently handles `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:graphql`. Adding concerns, routes, views, middleware, and config requires new pattern entries. Without these, the retrieval pipeline will not route queries like "which concerns handle caching?" to the correct units.
+- **`QueryClassifier::TARGET_PATTERNS`** needs updates for each new unit type. Concerns, routes, middleware, I18n, Pundit, and configuration patterns have been added. Views and engines still need entries when implemented.
 
 ---
 
 ## Suggested Implementation Order
 
-If pursuing these gaps, the recommended sequence is:
+All 8 original priority gaps are complete. The 3 "Didn't Make the Cut" items (Database Migrations, ActionCable Channels, Scheduled Jobs) are also now implemented, bringing the total to **24 extractors**.
 
-1. **Concerns + Routes + Middleware** (batch 1, ~30-40 hours total). Three small-to-medium extractors that follow existing patterns and provide immediate value. Concerns reuse cached data from `ModelExtractor`. Routes reuse partial data from `ControllerExtractor`. Middleware is pure runtime introspection. All three are additive — no existing extractor changes required.
+Remaining gap work:
 
-2. **I18n + Pundit** (batch 2, ~16-22 hours total). Two small extractors for specific audiences (internationalized apps, Pundit apps). Low risk, clear scope, minimal design decisions.
+1. **Configuration semantic parsing** (~16-24 hours). `ConfigurationExtractor` and `BehavioralProfile` cover file scanning and runtime introspection. Remaining: semantic parsing of heterogeneous initializer content for structured metadata.
 
-3. **Configuration/Initializers** (batch 3, ~16-24 hours). Requires design decisions about metadata structure for heterogeneous config files. Better tackled after batch 1 establishes patterns for non-class-based units.
+2. **View template expansion** — HAML/Slim support, layout inheritance, partial dependency graphs. The ERB MVP is in place.
 
-4. **View Templates** (batch 4, ~40-60 hours). Largest effort, highest unique value. Best tackled after batches 1-3 because view extraction benefits from having route units (route -> controller -> view chain) and concern units (shared view helpers via concerns) already in the graph.
-
-5. **Engines** (batch 5, ~16-24 hours). Benefits from route extraction being complete. Design decision about extraction depth should be informed by real-world usage of batches 1-4.
+3. **Stimulus/Hotwire JavaScript** — frontend layer extraction, requires separate JS/TS parsing toolchain.

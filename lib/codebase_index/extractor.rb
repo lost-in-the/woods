@@ -30,6 +30,9 @@ require_relative 'extractors/pundit_extractor'
 require_relative 'extractors/configuration_extractor'
 require_relative 'extractors/engine_extractor'
 require_relative 'extractors/view_template_extractor'
+require_relative 'extractors/migration_extractor'
+require_relative 'extractors/action_cable_extractor'
+require_relative 'extractors/scheduled_job_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
@@ -69,6 +72,7 @@ module CodebaseIndex
       managers
       policies
       validators
+      channels
     ].freeze
 
     EXTRACTORS = {
@@ -92,6 +96,9 @@ module CodebaseIndex
       configurations: Extractors::ConfigurationExtractor,
       engines: Extractors::EngineExtractor,
       view_templates: Extractors::ViewTemplateExtractor,
+      migrations: Extractors::MigrationExtractor,
+      action_cable_channels: Extractors::ActionCableExtractor,
+      scheduled_jobs: Extractors::ScheduledJobExtractor,
       rails_source: Extractors::RailsSourceExtractor
     }.freeze
 
@@ -123,6 +130,9 @@ module CodebaseIndex
       configuration: :configurations,
       engine: :engines,
       view_template: :view_templates,
+      migration: :migrations,
+      action_cable_channel: :action_cable_channels,
+      scheduled_job: :scheduled_jobs,
       rails_source: :rails_source
     }.freeze
 
@@ -130,7 +140,7 @@ module CodebaseIndex
     CLASS_BASED = {
       model: :extract_model, controller: :extract_controller,
       component: :extract_component, view_component: :extract_component,
-      mailer: :extract_mailer
+      mailer: :extract_mailer, action_cable_channel: :extract_channel
     }.freeze
 
     # Maps unit types to file-based extractor methods (pass file_path).
@@ -142,7 +152,8 @@ module CodebaseIndex
       i18n: :extract_i18n_file,
       pundit_policy: :extract_pundit_file,
       configuration: :extract_configuration_file,
-      view_template: :extract_view_template_file
+      view_template: :extract_view_template_file,
+      migration: :extract_migration_file
     }.freeze
 
     # GraphQL types all use the same extractor method.

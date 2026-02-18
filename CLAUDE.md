@@ -1,6 +1,6 @@
 # CodebaseIndex
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (21 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (24 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
 
 ## Commands
 
@@ -33,7 +33,8 @@ lib/
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
-│   ├── extractors/                      # 21 extractors (one per Rails concept)
+│   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
+│   ├── extractors/                      # 24 extractors + callback_analyzer + behavioral_profile
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -68,6 +69,7 @@ exe/
 - **Concerns get inlined.** When extracting a model, all `include`d concerns are resolved and their source is inlined into the unit's source_code. This is the key differentiator from file-level tools.
 - **Dependency graph is bidirectional.** First pass: each extractor records forward dependencies. Second pass: the graph resolves reverse edges (dependents). Both directions matter for retrieval.
 - **PageRank for importance scoring.** `DependencyGraph` computes PageRank over the unit graph to surface high-importance nodes for retrieval ranking. `GraphAnalyzer` provides structural analysis — orphans, dead ends, hubs, cycles, and bridges — for codebase health insights.
+- **Behavioral depth over structural metadata.** Extraction output answers "what happens when X runs?" not just "what exists." Callback side-effects (columns written, jobs enqueued, services called) are detected via `CallbackAnalyzer`. `BehavioralProfile` introspects resolved `Rails.application.config` values. `FlowPrecomputer` generates per-action request flow maps (opt-in via `precompute_flows` config flag, default false).
 
 ## Code Conventions
 
@@ -155,3 +157,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `CircuitBreaker` state is per-instance, not global. Each provider/store gets its own breaker. Don't share breaker instances across unrelated components.
 - Embedding dimensions must match between provider and vector store. A mismatch (e.g., switching models) requires full re-index — `IndexValidator` detects this.
 - `PipelineGuard` enforces a 5-minute cooldown on full extraction/embedding runs. Incremental runs are not rate-limited.
+- `CallbackAnalyzer` parses source via regex, not AST — it scans for patterns like `self.col =`, `perform_later`, etc. Proc/lambda callbacks are skipped gracefully.
+- `BehavioralProfile` guards every config introspection with `respond_to?`/`defined?` — a missing config section produces `nil`, not an error.
+- `FlowPrecomputer` is gated by `precompute_flows` config (default: false). Per-action errors are rescued so one failing action doesn't block others.
+- Incremental re-extraction skips unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`. These types require full extraction to update. This is acceptable — their source files rarely change independently.

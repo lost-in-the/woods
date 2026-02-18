@@ -151,6 +151,30 @@
       "completed_at": "2026-02-18",
       "blocked_by": [],
       "notes": "Created exe/codebase-index-mcp-http (65 lines) with StreamableHTTPTransport + Rack. 6 smoke specs. Updated gemspec executables. rackup is documented requirement, not runtime dep."
+    },
+    {
+      "id": "020",
+      "summary": "Extract database migrations",
+      "status": "completed",
+      "completed_at": "2026-02-18",
+      "blocked_by": [],
+      "notes": "MigrationExtractor: 55 specs. File-based, scans db/migrate/*.rb. Extracts DDL metadata, reversibility, risk indicators, model dependencies via table name classification."
+    },
+    {
+      "id": "021",
+      "summary": "Extract ActionCable channels",
+      "status": "completed",
+      "completed_at": "2026-02-18",
+      "blocked_by": [],
+      "notes": "ActionCableExtractor: 29 specs. Runtime introspection via ActionCable::Channel::Base.descendants. Extracts stream names, actions, broadcast patterns."
+    },
+    {
+      "id": "022",
+      "summary": "Extract scheduled job definitions",
+      "status": "completed",
+      "completed_at": "2026-02-18",
+      "blocked_by": [],
+      "notes": "ScheduledJobExtractor: 45 specs. Supports Solid Queue recurring.yml, Sidekiq-Cron sidekiq_cron.yml, Whenever schedule.rb. One unit per scheduled entry."
     }
   ]
 }
