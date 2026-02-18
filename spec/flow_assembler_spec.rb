@@ -206,6 +206,43 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       expect(after_ops).to be_empty
     end
 
+    it 'prepends filters using :filter key from controller metadata' do
+      write_unit('OrdersController',
+                 type: 'controller',
+                 source_code: <<~RUBY,
+                   class OrdersController < ApplicationController
+                     def create
+                       Order.create!(params)
+                     end
+                   end
+                 RUBY
+                 metadata: {
+                   'filters' => [
+                     { 'kind' => 'before', 'filter' => 'authenticate_user!' },
+                     { 'kind' => 'before', 'filter' => 'set_order', 'only' => %w[show update] },
+                     { 'kind' => 'after', 'filter' => 'track_event' }
+                   ]
+                 })
+
+      allow(graph).to receive(:dependencies_of).and_return([])
+
+      assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+      flow = assembler.assemble('OrdersController#create')
+
+      ops = flow.steps[0][:operations]
+      # authenticate_user! should be prepended (no :only filter)
+      callback_ops = ops.select { |o| o[:method] == 'authenticate_user!' }
+      expect(callback_ops.size).to eq(1)
+
+      # set_order should NOT be prepended (only: [show, update], not create)
+      set_order_ops = ops.select { |o| o[:method] == 'set_order' }
+      expect(set_order_ops).to be_empty
+
+      # after callbacks should NOT be prepended
+      after_ops = ops.select { |o| o[:method] == 'track_event' }
+      expect(after_ops).to be_empty
+    end
+
     it 'extracts route information from metadata' do
       write_unit('PostsController',
                  type: 'controller',

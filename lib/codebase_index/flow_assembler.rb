@@ -136,15 +136,20 @@ module CodebaseIndex
     end
 
     # Prepend before_action callbacks from controller metadata.
+    #
+    # Handles two metadata formats:
+    # - metadata[:callbacks] with :name key (legacy/test format)
+    # - metadata[:filters] with :filter key (ControllerExtractor format)
     def prepend_callbacks(operations, metadata, method_name)
-      callbacks = metadata[:callbacks]
+      callbacks = metadata[:callbacks] || metadata[:filters]
       return unless callbacks.is_a?(Array)
 
       callbacks.each do |cb|
         cb_kind = cb[:kind]&.to_s
         next unless cb_kind == 'before'
 
-        cb_name = cb[:name]
+        # Handle both :name (callbacks format) and :filter (controller filters format)
+        cb_name = cb[:name] || cb[:filter]
         next unless cb_name
 
         # Check if callback applies to this action (via :only/:except)

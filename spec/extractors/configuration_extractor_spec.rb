@@ -10,10 +10,24 @@ require 'codebase_index/extractors/configuration_extractor'
 RSpec.describe CodebaseIndex::Extractors::ConfigurationExtractor do
   include_context 'extractor setup'
 
+  # Stub Rails.application for BehavioralProfile integration
+  before do
+    rails_config = double('RailsConfig')
+    allow(rails_config).to receive(:respond_to?).and_return(false)
+    rails_app = double('RailsApp', config: rails_config)
+    allow(Rails).to receive(:application).and_return(rails_app)
+    allow(Rails).to receive(:version).and_return('7.1.3')
+  end
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
-    it_behaves_like 'handles missing directories'
+    it 'handles missing config directories gracefully' do
+      extractor = described_class.new
+      units = extractor.extract_all
+      config_units = units.reject { |u| u.identifier == 'BehavioralProfile' }
+      expect(config_units).to eq([])
+    end
   end
 
   # ── extract_all ──────────────────────────────────────────────────────
@@ -27,9 +41,10 @@ RSpec.describe CodebaseIndex::Extractors::ConfigurationExtractor do
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.size).to eq(1)
-      expect(units.first.identifier).to eq('initializers/devise.rb')
-      expect(units.first.type).to eq(:configuration)
+      config_units = units.reject { |u| u.identifier == 'BehavioralProfile' }
+      expect(config_units.size).to eq(1)
+      expect(config_units.first.identifier).to eq('initializers/devise.rb')
+      expect(config_units.first.type).to eq(:configuration)
     end
 
     it 'discovers environment files' do
@@ -41,8 +56,9 @@ RSpec.describe CodebaseIndex::Extractors::ConfigurationExtractor do
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.size).to eq(1)
-      expect(units.first.identifier).to eq('environments/production.rb')
+      config_units = units.reject { |u| u.identifier == 'BehavioralProfile' }
+      expect(config_units.size).to eq(1)
+      expect(config_units.first.identifier).to eq('environments/production.rb')
     end
 
     it 'discovers files from both directories' do
@@ -58,7 +74,16 @@ RSpec.describe CodebaseIndex::Extractors::ConfigurationExtractor do
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.size).to eq(2)
+      config_units = units.reject { |u| u.identifier == 'BehavioralProfile' }
+      expect(config_units.size).to eq(2)
+    end
+
+    it 'includes BehavioralProfile unit' do
+      units = described_class.new.extract_all
+      profile = units.find { |u| u.identifier == 'BehavioralProfile' }
+      expect(profile).not_to be_nil
+      expect(profile.type).to eq(:configuration)
+      expect(profile.metadata[:config_type]).to eq('behavioral_profile')
     end
   end
 

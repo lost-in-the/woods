@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'behavioral_profile'
 
 module CodebaseIndex
   module Extractors
@@ -31,15 +32,23 @@ module CodebaseIndex
                                          .select(&:directory?)
       end
 
-      # Extract all configuration files
+      # Extract all configuration files and the behavioral profile.
       #
       # @return [Array<ExtractedUnit>] List of configuration units
       def extract_all
-        @directories.flat_map do |dir|
+        units = @directories.flat_map do |dir|
           Dir[dir.join('**/*.rb')].filter_map do |file|
             extract_configuration_file(file)
           end
         end
+
+        profile = BehavioralProfile.new.extract
+        units << profile if profile
+
+        units
+      rescue StandardError => e
+        Rails.logger.error("BehavioralProfile integration failed: #{e.message}")
+        units || []
       end
 
       # Extract a single configuration file

@@ -3,6 +3,7 @@
 require 'digest'
 require_relative '../ast/parser'
 require_relative 'shared_dependency_scanner'
+require_relative 'callback_analyzer'
 
 module CodebaseIndex
   module Extractors
@@ -66,6 +67,9 @@ module CodebaseIndex
         unit.source_code = build_composite_source(model, source)
         unit.metadata = extract_metadata(model, source)
         unit.dependencies = extract_dependencies(model, source)
+
+        # Enrich callbacks with side-effect analysis
+        enrich_callbacks_with_side_effects(unit, source)
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
         unit.chunks = build_chunks(unit)
@@ -503,6 +507,26 @@ module CodebaseIndex
         deps.uniq { |d| [d[:type], d[:target]] }
       end
 
+      # Enrich callback metadata with side-effect analysis.
+      #
+      # Uses CallbackAnalyzer to find each callback's method body and
+      # classify its side effects (column writes, job enqueues, etc.).
+      #
+      # @param unit [ExtractedUnit] The model unit with metadata[:callbacks] set
+      # @param source [String, nil] The model source code
+      def enrich_callbacks_with_side_effects(unit, source)
+        return unless source && unit.metadata[:callbacks]&.any?
+
+        analyzer = CallbackAnalyzer.new(
+          source_code: unit.source_code,
+          column_names: unit.metadata[:column_names] || []
+        )
+
+        unit.metadata[:callbacks] = unit.metadata[:callbacks].map do |cb|
+          analyzer.analyze(cb)
+        end
+      end
+
       # ──────────────────────────────────────────────────────────────────────
       # Chunking (for large models)
       # ──────────────────────────────────────────────────────────────────────
@@ -516,6 +540,9 @@ module CodebaseIndex
           add_chunk(chunks, :associations, unit, build_associations_chunk(unit), :relationships)
         end
         add_chunk(chunks, :callbacks, unit, build_callbacks_chunk(unit), :behavior) if unit.metadata[:callbacks].any?
+        if unit.metadata[:callbacks]&.any? { |cb| cb[:side_effects] }
+          add_chunk(chunks, :callback_effects, unit, build_callback_effects_chunk(unit), :behavior_analysis)
+        end
         if unit.metadata[:validations].any?
           add_chunk(chunks, :validations, unit, build_validations_chunk(unit), :constraints)
         end
@@ -579,15 +606,113 @@ module CodebaseIndex
         grouped = meta[:callbacks].group_by { |c| c[:type] }
 
         sections = grouped.map do |type, callbacks|
-          filters = callbacks.map { |c| c[:filter] }.join(', ')
-          "#{type}: #{filters}"
+          callback_lines = callbacks.map { |c| format_callback_line(c) }
+          "#{type}:\n#{callback_lines.join("\n")}"
         end
 
         <<~CALLBACKS
           # #{unit.identifier} - Callbacks
 
-          #{sections.join("\n")}
+          #{sections.join("\n\n")}
         CALLBACKS
+      end
+
+      # Format a single callback line with optional side-effect annotations.
+      #
+      # @param callback [Hash] Callback hash, optionally with :side_effects
+      # @return [String]
+      def format_callback_line(callback)
+        line = "  #{callback[:filter]}"
+
+        effects = callback[:side_effects]
+        return line unless effects
+
+        annotations = []
+        annotations << "writes: #{effects[:columns_written].join(', ')}" if effects[:columns_written]&.any?
+        annotations << "enqueues: #{effects[:jobs_enqueued].join(', ')}" if effects[:jobs_enqueued]&.any?
+        annotations << "calls: #{effects[:services_called].join(', ')}" if effects[:services_called]&.any?
+        annotations << "mails: #{effects[:mailers_triggered].join(', ')}" if effects[:mailers_triggered]&.any?
+        annotations << "reads: #{effects[:database_reads].join(', ')}" if effects[:database_reads]&.any?
+
+        return line if annotations.empty?
+
+        "#{line} [#{annotations.join('; ')}]"
+      end
+
+      # Build a narrative chunk summarizing callback side effects by lifecycle phase.
+      #
+      # Groups callbacks with detected side effects by lifecycle event and
+      # produces a numbered, human-readable summary of what each callback does.
+      #
+      # @param unit [ExtractedUnit]
+      # @return [String]
+      def build_callback_effects_chunk(unit)
+        callbacks_with_effects = unit.metadata[:callbacks].select do |cb|
+          effects = cb[:side_effects]
+          effects && (
+            effects[:columns_written]&.any? ||
+            effects[:jobs_enqueued]&.any? ||
+            effects[:services_called]&.any? ||
+            effects[:mailers_triggered]&.any? ||
+            effects[:database_reads]&.any?
+          )
+        end
+
+        return '' if callbacks_with_effects.empty?
+
+        grouped = callbacks_with_effects.group_by { |cb| callback_lifecycle_group(cb[:type]) }
+
+        sections = grouped.map do |group_name, callbacks|
+          lines = callbacks.map { |cb| describe_callback_effects(cb) }
+          "## #{group_name}\n#{lines.join("\n")}"
+        end
+
+        <<~EFFECTS
+          # #{unit.identifier} - Callback Side Effects
+
+          #{sections.join("\n\n")}
+        EFFECTS
+      end
+
+      # Map a callback type to a lifecycle group name.
+      #
+      # @param type [Symbol]
+      # @return [String]
+      def callback_lifecycle_group(type)
+        case type
+        when :before_validation, :after_validation
+          'Validation'
+        when :before_save, :after_save, :around_save
+          'Save Lifecycle'
+        when :before_create, :after_create, :around_create
+          'Create Lifecycle'
+        when :before_update, :after_update, :around_update
+          'Update Lifecycle'
+        when :before_destroy, :after_destroy, :around_destroy
+          'Destroy Lifecycle'
+        when :after_commit, :after_rollback
+          'After Commit'
+        when :after_initialize, :after_find, :after_touch
+          'Initialization'
+        else
+          'Other'
+        end
+      end
+
+      # Describe a single callback's side effects in natural language.
+      #
+      # @param callback [Hash]
+      # @return [String]
+      def describe_callback_effects(callback)
+        effects = callback[:side_effects]
+        parts = []
+        parts << "writes #{effects[:columns_written].join(', ')}" if effects[:columns_written]&.any?
+        parts << "enqueues #{effects[:jobs_enqueued].join(', ')}" if effects[:jobs_enqueued]&.any?
+        parts << "calls #{effects[:services_called].join(', ')}" if effects[:services_called]&.any?
+        parts << "triggers #{effects[:mailers_triggered].join(', ')}" if effects[:mailers_triggered]&.any?
+        parts << "reads via #{effects[:database_reads].join(', ')}" if effects[:database_reads]&.any?
+
+        "- #{callback[:kind]} #{callback[:type]}: #{callback[:filter]} → #{parts.join(', ')}"
       end
 
       def build_validations_chunk(unit)
