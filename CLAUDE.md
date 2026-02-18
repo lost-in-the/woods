@@ -109,18 +109,14 @@ bundle exec rubocop -a
 
 After gem-level specs pass, validate in a host app if the change affects extraction output. See `.claude/rules/integration-testing.md` for host app validation workflow.
 
-## Planning Documents
+## Documentation
 
-The `docs/` directory contains design documents for all major layers — all now complete. Read `docs/README.md` for the index, reading order, and status table. These documents remain the source of truth for architectural decisions and backend selection. When modifying existing subsystems, read the relevant doc first — don't introduce patterns that conflict with the established design.
+See `docs/README.md` for the documentation index and roadmap.
 
-Key references by topic:
-- Backend selection → `docs/BACKEND_MATRIX.md`
-- Retrieval pipeline → `docs/RETRIEVAL_ARCHITECTURE.md`
-- Chunking and LLM context formatting → `docs/CONTEXT_AND_CHUNKING.md`
-- Schema management, error handling, observability → `docs/OPERATIONS.md`
-- Agent/MCP integration → `docs/AGENTIC_STRATEGY.md`
-- Cost analysis → `docs/BACKEND_MATRIX.md` (bottom section)
-- Optimization backlog → `docs/OPTIMIZATION_BACKLOG.md` — prioritized list of performance, correctness, and coverage improvements. Check resolved status before starting work on an item.
+Key references:
+- Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
+- Coverage gaps + future extractor work → `docs/COVERAGE_GAP_ANALYSIS.md`
+- Historical design documents (from the build phase) → `_project-resources/docs/`
 
 ## Backlog Workflow
 
