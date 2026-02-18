@@ -51,7 +51,15 @@ module CodebaseIndex
         service: /\b(service|interactor|operation|command|use.?case|business.?logic)\b/i,
         job: /\b(job|worker|background|async|sidekiq|queue|perform)\b/i,
         mailer: /\b(mailer|email|notification|send.?mail)\b/i,
-        graphql: /\b(graphql|mutation|query|type|resolver|field|argument|schema)\b/i
+        graphql: /\b(graphql|mutation|query|type|resolver|field|argument|schema)\b/i,
+        concern: /\b(concern|mixin|module|included|extend)\b/i,
+        route: /\b(route|path|url|endpoint|uri|http|get|post|put|patch|delete)\b/i,
+        middleware: /\b(middleware|rack|request.?pipeline|before.?action)\b/i,
+        i18n: /\b(i18n|translation|locale|internationalization|t\(|translate)\b/i,
+        pundit_policy: /\b(pundit|authorize|policy|allowed|permitted)\b/i,
+        configuration: /\b(config|initializer|environment|setting|configure)\b/i,
+        engine: /\b(engine|mountable|mount|railtie|plugin|isolated.?namespace)\b/i,
+        view_template: /\b(view|template|partial|render|erb|layout|html)\b/i
       }.freeze
 
       # Classify a query string

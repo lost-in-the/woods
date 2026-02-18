@@ -143,7 +143,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
 
     it 'truncates text exceeding the token limit' do
       result = preparer.prepare(large_unit)
-      estimated_tokens = (result.length / 3.5).ceil
+      estimated_tokens = (result.length / 4.0).ceil
       expect(estimated_tokens).to be <= 8192
     end
 
@@ -152,7 +152,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
 
       it 'enforces the custom limit' do
         result = small_preparer.prepare(large_unit)
-        estimated_tokens = (result.length / 3.5).ceil
+        estimated_tokens = (result.length / 4.0).ceil
         expect(estimated_tokens).to be <= 100
       end
     end

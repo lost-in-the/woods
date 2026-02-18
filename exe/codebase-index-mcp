@@ -11,11 +11,10 @@
 # them via the Model Context Protocol (stdio transport).
 # Does NOT require Rails — only reads pre-extracted data.
 
-require_relative '../lib/codebase_index/version'
+require_relative '../lib/codebase_index'
 require_relative '../lib/codebase_index/dependency_graph'
 require_relative '../lib/codebase_index/graph_analyzer'
 require_relative '../lib/codebase_index/mcp/server'
-require_relative '../lib/codebase_index/builder'
 require_relative '../lib/codebase_index/embedding/text_preparer'
 require_relative '../lib/codebase_index/embedding/indexer'
 
@@ -32,6 +31,25 @@ unless File.exist?(File.join(index_dir, 'manifest.json'))
   exit 1
 end
 
-server = CodebaseIndex::MCP::Server.build(index_dir: index_dir)
+# Attempt to build a retriever for semantic search.
+# Auto-configures from environment variables when no explicit configuration exists.
+retriever = begin
+  config = CodebaseIndex.configuration
+
+  if !config.embedding_provider && ENV.fetch('OPENAI_API_KEY', nil)
+    config.vector_store = :in_memory
+    config.metadata_store = :in_memory
+    config.graph_store = :in_memory
+    config.embedding_provider = :openai
+    config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY', nil) }
+  end
+
+  CodebaseIndex::Builder.new(config).build_retriever if config.embedding_provider
+rescue StandardError => e
+  warn "Note: Semantic search unavailable (#{e.message}). Using pattern-based search only."
+  nil
+end
+
+server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever)
 transport = MCP::Server::Transports::StdioTransport.new(server)
 transport.open

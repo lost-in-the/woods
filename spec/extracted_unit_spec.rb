@@ -71,9 +71,9 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
   end
 
   describe '#estimated_tokens' do
-    it 'estimates tokens at ~3.5 chars per token for Ruby code' do
+    it 'estimates tokens at ~4.0 chars per token for Ruby code' do
       unit.source_code = 'a' * 100
-      expect(unit.estimated_tokens).to eq(29) # (100 / 3.5).ceil
+      expect(unit.estimated_tokens).to eq(25) # (100 / 4.0).ceil
     end
 
     it 'returns 0 for nil source_code' do
@@ -83,20 +83,20 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
 
     it 'rounds up' do
       unit.source_code = 'a' * 5
-      expect(unit.estimated_tokens).to eq(2) # (5 / 3.5).ceil
+      expect(unit.estimated_tokens).to eq(2) # (5 / 4.0).ceil
     end
 
     it 'includes metadata weight when metadata is populated' do
       unit.source_code = 'a' * 100
       unit.metadata = { associations: [{ name: :comments, type: :has_many }], callbacks: [] }
-      source_only = (100 / 3.5).ceil
+      source_only = (100 / 4.0).ceil
       expect(unit.estimated_tokens).to be > source_only
     end
 
     it 'does not add metadata tokens when metadata is empty' do
       unit.source_code = 'a' * 100
       unit.metadata = {}
-      expect(unit.estimated_tokens).to eq(29) # (100 / 3.5).ceil
+      expect(unit.estimated_tokens).to eq(25) # (100 / 4.0).ceil
     end
 
     it 'recomputes fresh when source_code changes (no stale memoization)' do
@@ -107,7 +107,7 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
       second = unit.estimated_tokens
 
       expect(second).to be > first
-      expect(second).to eq((500 / 3.5).ceil)
+      expect(second).to eq((500 / 4.0).ceil)
     end
   end
 

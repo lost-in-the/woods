@@ -40,7 +40,7 @@ module CodebaseIndex
       #
       # @return [Integer]
       def token_count
-        @token_count ||= (content.length / 3.5).ceil
+        @token_count ||= (content.length / 4.0).ceil
       end
 
       # SHA256 hash of content for change detection.

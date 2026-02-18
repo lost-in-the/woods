@@ -1,6 +1,6 @@
 # CodebaseIndex
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (13 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (21 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
 
 ## Commands
 
@@ -33,7 +33,7 @@ lib/
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
-│   ├── extractors/                      # 13 extractors (one per Rails concept)
+│   ├── extractors/                      # 21 extractors (one per Rails concept)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -55,7 +55,8 @@ lib/
 ├── tasks/
 │   └── codebase_index.rake              # Rake task definitions
 exe/
-├── codebase-index-mcp                   # MCP Index Server executable
+├── codebase-index-mcp                   # MCP Index Server executable (stdio)
+├── codebase-index-mcp-http              # MCP Index Server executable (HTTP/Rack)
 └── codebase-console-mcp                 # Console MCP Server executable
 ```
 
@@ -76,7 +77,7 @@ exe/
 - All extractors return `Array<ExtractedUnit>`
 - Use `Rails.root.join()` for paths, never string concatenation
 - JSON output uses string keys, snake_case
-- Token estimation: `(string.length / 3.5).ceil` — Ruby code averages ~3.2-3.5 chars/token (symbols, do/end, underscored_names). Uses 3.5 as a compromise.
+- Token estimation: `(string.length / 4.0).ceil` — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md.
 - Error handling: raise `CodebaseIndex::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
 
 ## Testing
@@ -109,18 +110,14 @@ bundle exec rubocop -a
 
 After gem-level specs pass, validate in a host app if the change affects extraction output. See `.claude/rules/integration-testing.md` for host app validation workflow.
 
-## Planning Documents
+## Documentation
 
-The `docs/` directory contains design documents for all major layers — all now complete. Read `docs/README.md` for the index, reading order, and status table. These documents remain the source of truth for architectural decisions and backend selection. When modifying existing subsystems, read the relevant doc first — don't introduce patterns that conflict with the established design.
+See `docs/README.md` for the documentation index and roadmap.
 
-Key references by topic:
-- Backend selection → `docs/BACKEND_MATRIX.md`
-- Retrieval pipeline → `docs/RETRIEVAL_ARCHITECTURE.md`
-- Chunking and LLM context formatting → `docs/CONTEXT_AND_CHUNKING.md`
-- Schema management, error handling, observability → `docs/OPERATIONS.md`
-- Agent/MCP integration → `docs/AGENTIC_STRATEGY.md`
-- Cost analysis → `docs/BACKEND_MATRIX.md` (bottom section)
-- Optimization backlog → `docs/OPTIMIZATION_BACKLOG.md` — prioritized list of performance, correctness, and coverage improvements. Check resolved status before starting work on an item.
+Key references:
+- Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
+- Coverage gaps + future extractor work → `docs/COVERAGE_GAP_ANALYSIS.md`
+- Historical design documents (from the build phase) → `_project-resources/docs/`
 
 ## Backlog Workflow
 

@@ -28,7 +28,7 @@ RSpec.describe CodebaseIndex::Chunking::Chunk do
 
   describe '#token_count' do
     it 'estimates tokens from content length' do
-      expect(chunk.token_count).to eq((content.length / 3.5).ceil)
+      expect(chunk.token_count).to eq((content.length / 4.0).ceil)
     end
   end
 

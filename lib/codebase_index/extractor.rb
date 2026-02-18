@@ -22,6 +22,14 @@ require_relative 'extractors/view_component_extractor'
 require_relative 'extractors/manager_extractor'
 require_relative 'extractors/policy_extractor'
 require_relative 'extractors/validator_extractor'
+require_relative 'extractors/concern_extractor'
+require_relative 'extractors/route_extractor'
+require_relative 'extractors/middleware_extractor'
+require_relative 'extractors/i18n_extractor'
+require_relative 'extractors/pundit_extractor'
+require_relative 'extractors/configuration_extractor'
+require_relative 'extractors/engine_extractor'
+require_relative 'extractors/view_template_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 
@@ -75,6 +83,14 @@ module CodebaseIndex
       managers: Extractors::ManagerExtractor,
       policies: Extractors::PolicyExtractor,
       validators: Extractors::ValidatorExtractor,
+      concerns: Extractors::ConcernExtractor,
+      routes: Extractors::RouteExtractor,
+      middleware: Extractors::MiddlewareExtractor,
+      i18n: Extractors::I18nExtractor,
+      pundit_policies: Extractors::PunditExtractor,
+      configurations: Extractors::ConfigurationExtractor,
+      engines: Extractors::EngineExtractor,
+      view_templates: Extractors::ViewTemplateExtractor,
       rails_source: Extractors::RailsSourceExtractor
     }.freeze
 
@@ -98,6 +114,14 @@ module CodebaseIndex
       manager: :managers,
       policy: :policies,
       validator: :validators,
+      concern: :concerns,
+      route: :routes,
+      middleware: :middleware,
+      i18n: :i18n,
+      pundit_policy: :pundit_policies,
+      configuration: :configurations,
+      engine: :engines,
+      view_template: :view_templates,
       rails_source: :rails_source
     }.freeze
 
@@ -112,7 +136,12 @@ module CodebaseIndex
     FILE_BASED = {
       service: :extract_service_file, job: :extract_job_file,
       serializer: :extract_serializer_file, manager: :extract_manager_file,
-      policy: :extract_policy_file, validator: :extract_validator_file
+      policy: :extract_policy_file, validator: :extract_validator_file,
+      concern: :extract_concern_file,
+      i18n: :extract_i18n_file,
+      pundit_policy: :extract_pundit_file,
+      configuration: :extract_configuration_file,
+      view_template: :extract_view_template_file
     }.freeze
 
     # GraphQL types all use the same extractor method.
@@ -141,20 +170,10 @@ module CodebaseIndex
       safe_eager_load!
 
       # Phase 1: Extract all units
-      EXTRACTORS.each do |type, extractor_class|
-        Rails.logger.info "[CodebaseIndex] Extracting #{type}..."
-        start_time = Time.current
-
-        extractor = extractor_class.new
-        units = extractor.extract_all
-
-        @results[type] = units
-
-        elapsed = Time.current - start_time
-        Rails.logger.info "[CodebaseIndex] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
-
-        # Register in dependency graph
-        units.each { |unit| @dependency_graph.register(unit) }
+      if CodebaseIndex.configuration.concurrent_extraction
+        extract_all_concurrent
+      else
+        extract_all_sequential
       end
 
       # Phase 2: Resolve dependents (reverse dependencies)
@@ -272,6 +291,69 @@ module CodebaseIndex
         rescue NameError, LoadError => e
           Rails.logger.warn "[CodebaseIndex] Failed to eager load app/#{subdir}/: #{e.message}"
         end
+      end
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Extraction Strategies
+    # ──────────────────────────────────────────────────────────────────────
+
+    def extract_all_sequential
+      EXTRACTORS.each do |type, extractor_class|
+        Rails.logger.info "[CodebaseIndex] Extracting #{type}..."
+        start_time = Time.current
+
+        extractor = extractor_class.new
+        units = extractor.extract_all
+
+        @results[type] = units
+
+        elapsed = Time.current - start_time
+        Rails.logger.info "[CodebaseIndex] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+
+        # Register in dependency graph
+        units.each { |unit| @dependency_graph.register(unit) }
+      end
+    end
+
+    # Run each extractor in its own thread, then register results sequentially.
+    #
+    # Thread safety notes:
+    # - ModelNameCache is pre-computed before threads start (avoids ||= race)
+    # - Each thread gets its own extractor instance (no shared mutable state)
+    # - Results collected via Mutex-protected Hash
+    # - DependencyGraph registration is sequential (post-join)
+    def extract_all_concurrent
+      # Pre-compute ModelNameCache to avoid race on lazy memoization.
+      # Multiple threads calling model_names concurrently could trigger
+      # duplicate compute_model_names calls without this warm-up.
+      ModelNameCache.model_names
+      ModelNameCache.model_names_regex
+
+      results_mutex = Mutex.new
+      threads = EXTRACTORS.map do |type, extractor_class|
+        Thread.new do
+          Rails.logger.info "[CodebaseIndex] [Thread] Extracting #{type}..."
+          start_time = Time.current
+
+          extractor = extractor_class.new
+          units = extractor.extract_all
+
+          elapsed = Time.current - start_time
+          Rails.logger.info "[CodebaseIndex] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+
+          results_mutex.synchronize { @results[type] = units }
+        rescue StandardError => e
+          Rails.logger.error "[CodebaseIndex] [Thread] #{type} failed: #{e.message}"
+          results_mutex.synchronize { @results[type] = [] }
+        end
+      end
+
+      threads.each(&:join)
+
+      # Register into dependency graph sequentially — DependencyGraph is not thread-safe
+      EXTRACTORS.each_key do |type|
+        (@results[type] || []).each { |unit| @dependency_graph.register(unit) }
       end
     end
 

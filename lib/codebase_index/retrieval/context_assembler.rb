@@ -213,7 +213,7 @@ module CodebaseIndex
         return text if estimate_tokens(text) <= token_budget
 
         # Estimate target character count with 10% safety margin
-        target_chars = (token_budget * 3.5 * 0.9).to_i
+        target_chars = (token_budget * 4.0 * 0.9).to_i
         "#{text[0...target_chars]}\n... [truncated]"
       end
 
@@ -222,7 +222,7 @@ module CodebaseIndex
       # @param text [String]
       # @return [Integer]
       def estimate_tokens(text)
-        (text.length / 3.5).ceil
+        (text.length / 4.0).ceil
       end
 
       # Build the final AssembledContext result.
