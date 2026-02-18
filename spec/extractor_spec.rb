@@ -167,6 +167,7 @@ RSpec.describe CodebaseIndex::Extractor do
     end
 
     it 'batches paths in slices of 500 to avoid ARG_MAX' do
+      require 'active_support'
       require 'active_support/core_ext/numeric/time'
 
       file_paths = (1..1100).map { |i| File.join(tmpdir, "file_#{i}.rb") }
@@ -174,14 +175,9 @@ RSpec.describe CodebaseIndex::Extractor do
       allow(extractor).to receive(:parse_git_log_output)
       allow(extractor).to receive(:build_file_metadata).and_return({})
 
-      # Time.current is an ActiveSupport extension; stub it with a plain object
-      # that supports the arithmetic used in batch_git_data.
-      fake_ninety = double('ninety_days_ago', iso8601: '2023-10-01T00:00:00Z')
-      fake_now    = double('now')
-      allow(fake_now).to receive(:-).and_return(fake_ninety)
-      time_stub = Module.new
-      time_stub.define_singleton_method(:current) { fake_now }
-      stub_const('Time', time_stub)
+      # Stub Time.current to return a time that supports ActiveSupport duration arithmetic
+      fake_now = Time.new(2024, 1, 1, 0, 0, 0, '+00:00')
+      allow(Time).to receive(:current).and_return(fake_now)
 
       # run_git should be called once per slice: ceil(1100 / 500) = 3 (500, 500, 100)
       expect(extractor).to receive(:run_git).exactly(3).times.and_return('')

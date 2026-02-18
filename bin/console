@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+bundle exec irb -r codebase_index

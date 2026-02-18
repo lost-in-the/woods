@@ -42,8 +42,8 @@
 | Resilience | ✅ Complete (CircuitBreaker, RetryableProvider, IndexValidator) |
 | Schema Management | ✅ Complete (SchemaVersion, Migrator, 3 migrations, install + pgvector Rails generators) |
 | Observability | ✅ Complete (Instrumentation, StructuredLogger, HealthCheck) |
-| Agentic Integration | ✅ Complete (PipelineLock, FeedbackStore, GapDetector, StatusReporter, ErrorEscalator, PipelineGuard, RetrievalTrace, 9 new MCP tools → 20 total) |
-| MCP Index Server | ✅ Complete (20 tools incl. 5 operator + 4 feedback, 2 resources, 2 resource templates, standalone executable) |
+| Agentic Integration | ✅ Complete (PipelineLock, FeedbackStore, GapDetector, StatusReporter, ErrorEscalator, PipelineGuard, RetrievalTrace, 10 new MCP tools → 21 total) |
+| MCP Index Server | ✅ Complete (21 tools incl. 5 operator + 4 feedback, 2 resources, 2 resource templates, standalone executable) |
 | Console MCP Server | ✅ Complete (31 tools across 4 tiers, Bridge, SafeContext, ConnectionManager, SqlValidator, AuditLogger, Confirmation, job + cache adapters) |
 | AST Layer | ✅ Complete (Prism adapter, normalized Node, MethodExtractor, CallSiteExtractor, ConstantResolver) |
 | RubyAnalyzer | ✅ Complete (ClassAnalyzer, MethodAnalyzer, DataFlowAnalyzer, TraceEnricher) |

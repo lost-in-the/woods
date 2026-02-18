@@ -267,11 +267,11 @@ Extractors run sequentially but are independent.
 
 Items identified from the initial MCP server implementation (commits `baa5b85`..`6e4de8f`) and real-world testing against a production Rails app.
 
-### 30. MCP Index Server — Semantic Search Tool
+### 30. ✅ MCP Index Server — Semantic Search Tool — RESOLVED
 
-The index server currently has keyword regex search only (`search` tool). The AGENTIC_STRATEGY.md defines a `codebase_retrieve` tool for semantic search with auto-classification, token budgeting, and relevance scoring. This requires the embedding pipeline (Phase 1 of PROPOSAL.md) to be built first.
+**Resolution:** `codebase_retrieve` tool implemented in MCP index server with auto-classification, token budgeting, and relevance scoring.
 
-**Depends on:** Retrieval pipeline (PROPOSAL.md Phase 2)
+~~The index server currently has keyword regex search only (`search` tool). The AGENTIC_STRATEGY.md defines a `codebase_retrieve` tool for semantic search with auto-classification, token budgeting, and relevance scoring. This requires the embedding pipeline (Phase 1 of PROPOSAL.md) to be built first.~~
 
 ### 31. ✅ MCP Index Server — Framework Source Tool — RESOLVED
 
@@ -303,39 +303,49 @@ The server only supports stdio transport. AGENTIC_STRATEGY.md mentions HTTP/Rack
 
 Implementation items from the CONSOLE_SERVER.md design document, organized by phase.
 
-### 35. Console Server — Phase 0: Bridge Protocol
+### 35. ✅ Console Server — Phase 0: Bridge Protocol — RESOLVED
 
-Build the JSON-lines bridge script (`lib/codebase_index/console/bridge.rb`) that boots Rails, validates models/columns against `ActiveRecord::Base.descendants`, and dispatches structured requests. Implement connection manager with Docker exec, direct, and SSH modes.
+**Resolution:** Bridge protocol implemented in `lib/codebase_index/console/bridge.rb`, connection manager in `lib/codebase_index/console/connection_manager.rb`, model validation in `lib/codebase_index/console/model_validator.rb`.
 
-**Deliverables:** Bridge script, connection manager, heartbeat/reconnect, model validation allowlist.
+~~Build the JSON-lines bridge script (`lib/codebase_index/console/bridge.rb`) that boots Rails, validates models/columns against `ActiveRecord::Base.descendants`, and dispatches structured requests. Implement connection manager with Docker exec, direct, and SSH modes.~~
 
-### 36. Console Server — Phase 1: MVP Tools
+~~**Deliverables:** Bridge script, connection manager, heartbeat/reconnect, model validation allowlist.~~
 
-Implement Tier 1 tools: `count`, `sample`, `find`, `pluck`, `aggregate`, `association_count`, `schema`, `recent`, `console_status`. Wire up safety layers 1-4 (read-only connection, transaction rollback, statement timeout, structured validation). Add column redaction and result size caps.
+### 36. ✅ Console Server — Phase 1: MVP Tools — RESOLVED
 
-**Deliverables:** `exe/codebase-console-mcp`, 9 Tier 1 tools, safety layers.
-**Depends on:** #35
+**Resolution:** 9 Tier 1 tools in `lib/codebase_index/console/tools/tier1.rb`, SafeContext in `lib/codebase_index/console/safe_context.rb`, console server executable at `exe/codebase-console-mcp`.
 
-### 37. Console Server — Phase 2: Domain-Aware Tools + Controlled Writes
+~~Implement Tier 1 tools: `count`, `sample`, `find`, `pluck`, `aggregate`, `association_count`, `schema`, `recent`, `console_status`. Wire up safety layers 1-4 (read-only connection, transaction rollback, statement timeout, structured validation). Add column redaction and result size caps.~~
 
-Implement Tier 2 tools: `diagnose_model`, `data_snapshot`, `validate_record`, `check_setting`, `update_setting`, `check_policy`, `validate_with`, `check_eligibility`, `decorate`. Add registered write actions with human confirmation (safety layer 5). Add auto-detection for managers, policies, validators, decorators from conventional directories.
+~~**Deliverables:** `exe/codebase-console-mcp`, 9 Tier 1 tools, safety layers.~~
+~~**Depends on:** #35~~
 
-**Deliverables:** 9 Tier 2 tools, write action registry, class discovery, preset configurations.
-**Depends on:** #36
+### 37. ✅ Console Server — Phase 2: Domain-Aware Tools + Controlled Writes — RESOLVED
 
-### 38. Console Server — Phase 3: Job Queue, Cache, and Analytics Tools
+**Resolution:** 9 Tier 2 tools in `lib/codebase_index/console/tools/tier2.rb`, class discovery for managers/policies/validators/decorators.
 
-Implement Tier 3 tools: `job_queues`, `job_failures`, `job_find`, `job_schedule`, `redis_info`, `cache_stats`, `slow_endpoints`, `error_rates`, `throughput`, `channel_status`. Build adapters for Sidekiq (Redis API), Solid Queue (DB tables), GoodJob (DB tables). Build cache adapters for Redis, Solid Cache, memory/file stores.
+~~Implement Tier 2 tools: `diagnose_model`, `data_snapshot`, `validate_record`, `check_setting`, `update_setting`, `check_policy`, `validate_with`, `check_eligibility`, `decorate`. Add registered write actions with human confirmation (safety layer 5). Add auto-detection for managers, policies, validators, decorators from conventional directories.~~
 
-**Deliverables:** 10 Tier 3 tools, job backend adapters, cache backend adapters.
-**Depends on:** #36
+~~**Deliverables:** 9 Tier 2 tools, write action registry, class discovery, preset configurations.~~
+~~**Depends on:** #36~~
 
-### 39. Console Server — Phase 4: Guarded Eval + Advanced Queries
+### 38. ✅ Console Server — Phase 3: Job Queue, Cache, and Analytics Tools — RESOLVED
 
-Implement Tier 4 tools: `console_eval` (human-approved), `console_sql` (read-only validated), `console_query` (structured builder). Add SQL statement validation (reject DML/DDL), human confirmation flow, audit logging.
+**Resolution:** 10 Tier 3 tools in `lib/codebase_index/console/tools/tier3.rb`, job adapters (Sidekiq, Solid Queue, GoodJob) in `lib/codebase_index/console/adapters/`, cache adapter in `lib/codebase_index/console/adapters/cache_adapter.rb`.
 
-**Deliverables:** 3 Tier 4 tools, statement validator, audit log.
-**Depends on:** #36
+~~Implement Tier 3 tools: `job_queues`, `job_failures`, `job_find`, `job_schedule`, `redis_info`, `cache_stats`, `slow_endpoints`, `error_rates`, `throughput`, `channel_status`. Build adapters for Sidekiq (Redis API), Solid Queue (DB tables), GoodJob (DB tables). Build cache adapters for Redis, Solid Cache, memory/file stores.~~
+
+~~**Deliverables:** 10 Tier 3 tools, job backend adapters, cache backend adapters.~~
+~~**Depends on:** #36~~
+
+### 39. ✅ Console Server — Phase 4: Guarded Eval + Advanced Queries — RESOLVED
+
+**Resolution:** 3 Tier 4 tools in `lib/codebase_index/console/tools/tier4.rb`, SQL validator in `lib/codebase_index/console/sql_validator.rb`, audit logger in `lib/codebase_index/console/audit_logger.rb`.
+
+~~Implement Tier 4 tools: `console_eval` (human-approved), `console_sql` (read-only validated), `console_query` (structured builder). Add SQL statement validation (reject DML/DDL), human confirmation flow, audit logging.~~
+
+~~**Deliverables:** 3 Tier 4 tools, statement validator, audit log.~~
+~~**Depends on:** #36~~
 
 ### 40. Console Server — Amplitude Analytics Integration
 
@@ -370,25 +380,24 @@ Requested: add Amplitude as an analytics provider for Tier 3 tools. Amplitude's 
 - ~~Add recent changes tool (#32)~~ ✅
 - ~~Add resource templates (#34)~~ ✅
 
-**Batch 9 — Console server foundation:**
-- Bridge protocol (#35)
-- MVP tools (#36)
+**Batch 9 — Console server foundation:** ✅ ALL RESOLVED
+- ~~Bridge protocol (#35)~~ ✅
+- ~~MVP tools (#36)~~ ✅
 
-**Batch 10 — Console server domain tools:**
-- Domain-aware tools (#37)
-- Job queue + cache + analytics (#38)
+**Batch 10 — Console server domain tools:** ✅ ALL RESOLVED
+- ~~Domain-aware tools (#37)~~ ✅
+- ~~Job queue + cache + analytics (#38)~~ ✅
 
 **Batch 11 — Extraction coverage for domain classes:** ✅ ALL RESOLVED
 - ~~Manager/delegator extractor (#41)~~ ✅
 - ~~Policy class extractor (#42)~~ ✅
 - ~~Standalone validator extractor (#43)~~ ✅
 
-**Batch 12 — Advanced console + analytics:**
-- Guarded eval (#39)
+**Batch 12 — Advanced console + analytics:** ✅ ALL RESOLVED
+- ~~Guarded eval (#39)~~ ✅
 - Amplitude integration (#40)
 
 **Deferred:**
-- Semantic search tool (#30) — retrieval pipeline now implemented; needs MCP server integration
 - HTTP transport (#33) — blocked on transport library evaluation
 
 ---

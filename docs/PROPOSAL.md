@@ -48,18 +48,23 @@ The extraction layer runs inside a Rails application and produces structured JSO
 | Jobs/Workers | Queue config, retry/concurrency, perform signatures, ActiveJob + Sidekiq |
 | Mailers | Default settings, per-action templates, callbacks |
 | Components | Phlex slots/params, rendered sub-components, Stimulus refs |
+| ViewComponents | Component slots, template paths, preview classes, collection support |
 | GraphQL | Object types, input types, enums, unions, interfaces, mutations, resolvers, field metadata, authorization patterns |
 | Framework Source | Version-pinned Rails internals and gem source, importance-rated |
+| Serializers | ActiveModelSerializers, Blueprinter, Alba, Draper — auto-detected |
+| Managers | SimpleDelegator subclasses, wrapped model, public methods, delegation chain |
+| Policies | Domain policy classes, evaluated models, decision methods |
+| Validators | Custom validator classes, operated models, validation rules |
 
 Each unit includes bidirectional dependency edges, git enrichment (change frequency, contributors, recency), semantic chunks for large units, estimated token counts, and content hashes (`source_hash` on each unit, `content_hash` per chunk) for change detection.
 
 The dependency graph supports PageRank scoring (damping: 0.85, 20 iterations) for quantifying architectural importance, and a `GraphAnalyzer` that identifies structural features: orphans, dead ends, hubs, cycles, and bridges.
 
-### Retrieval (Proposed)
+### Retrieval (Complete)
 
 The retrieval layer transforms queries into contextually relevant, token-budgeted responses. It classifies queries, selects search strategies, ranks candidates, and assembles context with source attribution.
 
-### Integration (Proposed)
+### Integration (Complete)
 
 The integration layer connects retrieval to consumption tools: CLI, editor plugins, API endpoints, CI hooks, agentic orchestrators. Each integration point uses the same retrieval core but may configure different budgets, strategies, or output formats.
 
