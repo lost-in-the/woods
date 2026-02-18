@@ -32,6 +32,7 @@ require_relative 'extractors/engine_extractor'
 require_relative 'extractors/view_template_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
+require_relative 'flow_precomputer'
 
 module CodebaseIndex
   # Extractor is the main orchestrator for codebase extraction.
@@ -183,6 +184,12 @@ module CodebaseIndex
       # Phase 3: Graph analysis (PageRank, structural metrics)
       Rails.logger.info '[CodebaseIndex] Analyzing dependency graph...'
       @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
+
+      # Phase 3.5: Precompute request flows (opt-in)
+      if CodebaseIndex.configuration.precompute_flows
+        Rails.logger.info '[CodebaseIndex] Precomputing request flows...'
+        precompute_flows
+      end
 
       # Phase 4: Enrich with git data
       Rails.logger.info '[CodebaseIndex] Enriching with git data...'
@@ -388,6 +395,19 @@ module CodebaseIndex
           }
         end
       end
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Flow Precomputation
+    # ──────────────────────────────────────────────────────────────────────
+
+    def precompute_flows
+      all_units = @results.values.flatten
+      precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
+      flow_map = precomputer.precompute
+      Rails.logger.info "[CodebaseIndex] Precomputed #{flow_map.size} request flows"
+    rescue StandardError => e
+      Rails.logger.error "[CodebaseIndex] Flow precomputation failed: #{e.message}"
     end
 
     # ──────────────────────────────────────────────────────────────────────

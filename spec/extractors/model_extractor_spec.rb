@@ -206,4 +206,215 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
       expect(result).to eq('/app/app/models/thing.rb')
     end
   end
+
+  # ── enrich_callbacks_with_side_effects ─────────────────────────────
+
+  describe '#enrich_callbacks_with_side_effects' do
+    it 'adds side_effects to callback metadata' do
+      source = <<~RUBY
+        class User < ApplicationRecord
+          def normalize_email
+            self.email = email.downcase
+          end
+        end
+      RUBY
+
+      unit = CodebaseIndex::ExtractedUnit.new(
+        type: :model,
+        identifier: 'User',
+        file_path: 'app/models/user.rb'
+      )
+      unit.source_code = source
+      unit.metadata = {
+        callbacks: [{ type: :before_save, filter: 'normalize_email', kind: :before, conditions: {} }],
+        column_names: %w[email name]
+      }
+
+      extractor.send(:enrich_callbacks_with_side_effects, unit, source)
+
+      callback = unit.metadata[:callbacks].first
+      expect(callback).to have_key(:side_effects)
+      expect(callback[:side_effects][:columns_written]).to include('email')
+    end
+
+    it 'skips enrichment when source is nil' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.metadata = {
+        callbacks: [{ type: :before_save, filter: 'foo', kind: :before, conditions: {} }]
+      }
+
+      extractor.send(:enrich_callbacks_with_side_effects, unit, nil)
+
+      callback = unit.metadata[:callbacks].first
+      expect(callback).not_to have_key(:side_effects)
+    end
+
+    it 'skips enrichment when callbacks are empty' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.source_code = 'class User; end'
+      unit.metadata = { callbacks: [], column_names: %w[email] }
+
+      extractor.send(:enrich_callbacks_with_side_effects, unit, 'class User; end')
+
+      expect(unit.metadata[:callbacks]).to eq([])
+    end
+  end
+
+  # ── build_callbacks_chunk ──────────────────────────────────────────
+
+  describe '#build_callbacks_chunk' do
+    it 'includes side-effect annotations in chunk text' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.metadata = {
+        callbacks: [
+          {
+            type: :before_save, filter: 'normalize_email', kind: :before, conditions: {},
+            side_effects: {
+              columns_written: ['email'], jobs_enqueued: [], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          }
+        ]
+      }
+
+      chunk = extractor.send(:build_callbacks_chunk, unit)
+      expect(chunk).to include('normalize_email')
+      expect(chunk).to include('writes: email')
+    end
+
+    it 'omits annotations when no side effects detected' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.metadata = {
+        callbacks: [
+          {
+            type: :before_save, filter: 'do_nothing', kind: :before, conditions: {},
+            side_effects: {
+              columns_written: [], jobs_enqueued: [], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          }
+        ]
+      }
+
+      chunk = extractor.send(:build_callbacks_chunk, unit)
+      expect(chunk).to include('do_nothing')
+      expect(chunk).not_to include('[')
+    end
+
+    it 'handles callbacks without side_effects key gracefully' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.metadata = {
+        callbacks: [
+          { type: :before_save, filter: 'legacy_callback', kind: :before, conditions: {} }
+        ]
+      }
+
+      chunk = extractor.send(:build_callbacks_chunk, unit)
+      expect(chunk).to include('legacy_callback')
+    end
+  end
+
+  # ── format_callback_line ───────────────────────────────────────────
+
+  describe '#format_callback_line' do
+    it 'shows multiple side effect types' do
+      callback = {
+        filter: 'after_create_actions',
+        side_effects: {
+          columns_written: ['status'],
+          jobs_enqueued: ['WelcomeJob'],
+          services_called: ['AuditService'],
+          mailers_triggered: ['UserMailer'],
+          database_reads: ['where'],
+          operations: []
+        }
+      }
+
+      line = extractor.send(:format_callback_line, callback)
+      expect(line).to include('writes: status')
+      expect(line).to include('enqueues: WelcomeJob')
+      expect(line).to include('calls: AuditService')
+      expect(line).to include('mails: UserMailer')
+      expect(line).to include('reads: where')
+    end
+  end
+
+  # ── build_callback_effects_chunk ──────────────────────────────────
+
+  describe '#build_callback_effects_chunk' do
+    it 'groups callbacks by lifecycle phase with side-effect narrative' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'Order', file_path: 'app/models/order.rb')
+      unit.metadata = {
+        callbacks: [
+          {
+            type: :before_save, filter: 'calculate_total', kind: :before, conditions: {},
+            side_effects: {
+              columns_written: ['total_cents'], jobs_enqueued: [], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          },
+          {
+            type: :after_commit, filter: 'send_confirmation', kind: :after, conditions: {},
+            side_effects: {
+              columns_written: [], jobs_enqueued: ['ConfirmationJob'], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          }
+        ]
+      }
+
+      chunk = extractor.send(:build_callback_effects_chunk, unit)
+      expect(chunk).to include('Order - Callback Side Effects')
+      expect(chunk).to include('Save Lifecycle')
+      expect(chunk).to include('calculate_total')
+      expect(chunk).to include('writes total_cents')
+      expect(chunk).to include('After Commit')
+      expect(chunk).to include('send_confirmation')
+      expect(chunk).to include('enqueues ConfirmationJob')
+    end
+
+    it 'excludes callbacks with no side effects' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.metadata = {
+        callbacks: [
+          {
+            type: :before_save, filter: 'normalize_email', kind: :before, conditions: {},
+            side_effects: {
+              columns_written: ['email'], jobs_enqueued: [], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          },
+          {
+            type: :before_save, filter: 'no_effects', kind: :before, conditions: {},
+            side_effects: {
+              columns_written: [], jobs_enqueued: [], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          }
+        ]
+      }
+
+      chunk = extractor.send(:build_callback_effects_chunk, unit)
+      expect(chunk).to include('normalize_email')
+      expect(chunk).not_to include('no_effects')
+    end
+
+    it 'returns empty string when no callbacks have side effects' do
+      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.metadata = {
+        callbacks: [
+          {
+            type: :before_save, filter: 'no_effects', kind: :before, conditions: {},
+            side_effects: {
+              columns_written: [], jobs_enqueued: [], services_called: [],
+              mailers_triggered: [], database_reads: [], operations: []
+            }
+          }
+        ]
+      }
+
+      chunk = extractor.send(:build_callback_effects_chunk, unit)
+      expect(chunk).to eq('')
+    end
+  end
 end
