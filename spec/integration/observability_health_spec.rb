@@ -237,8 +237,6 @@ RSpec.describe 'Observability + Health Integration', :integration do
       logger = CodebaseIndex::Observability::StructuredLogger.new(output: output)
 
       result = CodebaseIndex::Observability::Instrumentation.instrument('extraction.unit', identifier: 'User') do
-        # Simulate work
-        sleep 0.01
         logger.info('extraction.unit.complete', identifier: 'User', tokens: 150)
         'extracted'
       end

@@ -109,15 +109,25 @@ RSpec.describe CodebaseIndex::Coordination::PipelineLock do
     it 'only allows one thread to acquire the lock' do
       results = []
       mutex = Mutex.new
-      threads = 10.times.map do
+      barrier = Queue.new
+
+      thread_count = 10
+      threads = thread_count.times.map do
         Thread.new do
           l = described_class.new(lock_dir: lock_dir, name: 'extraction')
           acquired = l.acquire
           mutex.synchronize { results << acquired }
-          sleep(0.05) if acquired # Hold lock briefly
-          l.release if acquired
+          if acquired
+            # Wait until all other threads have recorded their results
+            barrier.pop
+            l.release
+          end
         end
       end
+
+      # Poll until all threads have reported results
+      poll_until(timeout: 5) { mutex.synchronize { results.size == thread_count } }
+      barrier.push(:release)
       threads.each(&:join)
 
       # Exactly one thread should have acquired the lock

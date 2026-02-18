@@ -20,6 +20,10 @@ RSpec.describe CodebaseIndex::Extractors::SharedDependencyScanner do
       .and_return(/\b(?:User|Post)\b/)
   end
 
+  after do
+    CodebaseIndex::ModelNameCache.reset!
+  end
+
   # ── #scan_model_dependencies ────────────────────────────────────
 
   describe '#scan_model_dependencies' do

@@ -467,12 +467,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
       end
 
       it 'returns started status and spawns a background thread' do
-        response = call_tool(server_with_operator, 'pipeline_extract')
-        data = parse_response(response)
-        expect(data['status']).to eq('started')
-        expect(data['message']).to include('background thread')
-        # Allow background thread to attempt execution and rescue
-        sleep 0.05
+        wait_for_threads do
+          response = call_tool(server_with_operator, 'pipeline_extract')
+          data = parse_response(response)
+          expect(data['status']).to eq('started')
+          expect(data['message']).to include('background thread')
+        end
       end
 
       it 'is rate-limited when guard denies' do
@@ -506,11 +506,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
       end
 
       it 'returns started status and spawns a background thread' do
-        response = call_tool(server_with_operator, 'pipeline_embed')
-        data = parse_response(response)
-        expect(data['status']).to eq('started')
-        expect(data['message']).to include('background thread')
-        sleep 0.05
+        wait_for_threads do
+          response = call_tool(server_with_operator, 'pipeline_embed')
+          data = parse_response(response)
+          expect(data['status']).to eq('started')
+          expect(data['message']).to include('background thread')
+        end
       end
 
       it 'is rate-limited when guard denies' do
@@ -555,14 +556,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
 
     it 'calls extract_changed when incremental is true' do
-      call_tool(server_with_operator, 'pipeline_extract', incremental: true)
-      sleep 0.2
+      wait_for_threads { call_tool(server_with_operator, 'pipeline_extract', incremental: true) }
       expect(mock_extractor).to have_received(:extract_changed).with([])
     end
 
     it 'calls extract_all when incremental is false' do
-      call_tool(server_with_operator, 'pipeline_extract', incremental: false)
-      sleep 0.2
+      wait_for_threads { call_tool(server_with_operator, 'pipeline_extract', incremental: false) }
       expect(mock_extractor).to have_received(:extract_all)
     end
   end
@@ -611,14 +610,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
 
     it 'calls index_incremental when incremental is true' do
-      call_tool(server_with_operator, 'pipeline_embed', incremental: true)
-      sleep 0.2
+      wait_for_threads { call_tool(server_with_operator, 'pipeline_embed', incremental: true) }
       expect(mock_indexer).to have_received(:index_incremental)
     end
 
     it 'calls index_all when incremental is false' do
-      call_tool(server_with_operator, 'pipeline_embed', incremental: false)
-      sleep 0.2
+      wait_for_threads { call_tool(server_with_operator, 'pipeline_embed', incremental: false) }
       expect(mock_indexer).to have_received(:index_all)
     end
   end

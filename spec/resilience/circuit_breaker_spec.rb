@@ -87,7 +87,7 @@ RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
       end
 
       it 'transitions to half_open after the reset timeout elapses' do
-        sleep(0.15)
+        allow(Time).to receive(:now).and_return(Time.now + 0.2)
 
         # The next call attempt will transition to half_open
         breaker.call { 'recovered' }
@@ -102,7 +102,7 @@ RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
         rescue StandardError
           nil
         end
-        sleep(0.15)
+        allow(Time).to receive(:now).and_return(Time.now + 0.2)
       end
 
       it 'closes on successful call' do

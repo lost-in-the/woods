@@ -76,7 +76,7 @@ exe/
 - All extractors return `Array<ExtractedUnit>`
 - Use `Rails.root.join()` for paths, never string concatenation
 - JSON output uses string keys, snake_case
-- Token estimation: `(string.length / 3.5).ceil` — Ruby code averages ~3.2-3.5 chars/token (symbols, do/end, underscored_names). Uses 3.5 as a compromise.
+- Token estimation: `(string.length / 4.0).ceil` — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md.
 - Error handling: raise `CodebaseIndex::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
 
 ## Testing

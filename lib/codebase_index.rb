@@ -37,7 +37,8 @@ module CodebaseIndex
   class Configuration
     attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
-                  :vector_store_options, :metadata_store_options, :embedding_options
+                  :vector_store_options, :metadata_store_options, :embedding_options,
+                  :concurrent_extraction
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json
 
     def initialize
@@ -50,6 +51,7 @@ module CodebaseIndex
       @extractors = %i[models controllers services components view_components jobs mailers graphql serializers
                        managers policies validators rails_source]
       @pretty_json = true
+      @concurrent_extraction = false
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/codebase_index

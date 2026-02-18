@@ -1,16 +1,17 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# MCP server for querying CodebaseIndex extraction output.
+# MCP server for querying CodebaseIndex extraction output over HTTP.
 #
 # Usage:
-#   codebase-index-mcp [INDEX_DIR]
-#   CODEBASE_INDEX_DIR=/path/to/output codebase-index-mcp
+#   codebase-index-mcp-http [INDEX_DIR]
+#   CODEBASE_INDEX_DIR=/path/to/output codebase-index-mcp-http
 #
 # Reads JSON files from the extraction output directory and exposes
-# them via the Model Context Protocol (stdio transport).
-# Does NOT require Rails — only reads pre-extracted data.
+# them via the Model Context Protocol (Streamable HTTP transport).
+# Requires the `rackup` gem and a Rack-compatible server (e.g., puma).
 
+require 'rackup'
 require_relative '../lib/codebase_index'
 require_relative '../lib/codebase_index/dependency_graph'
 require_relative '../lib/codebase_index/graph_analyzer'
@@ -50,6 +51,14 @@ rescue StandardError => e
   nil
 end
 
+port = (ENV['PORT'] || 9292).to_i
+host = ENV['HOST'] || 'localhost'
+
 server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever)
-transport = MCP::Server::Transports::StdioTransport.new(server)
-transport.open
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+server.transport = transport
+
+app = proc { |env| transport.handle_request(Rack::Request.new(env)) }
+
+warn "CodebaseIndex MCP HTTP server starting on http://#{host}:#{port}"
+Rackup::Handler.default.run(app, Port: port, Host: host)

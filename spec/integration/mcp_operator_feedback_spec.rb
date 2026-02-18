@@ -70,12 +70,12 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
 
   describe 'tool: pipeline_extract' do
     it 'allows first extraction (guard has no prior runs)' do
-      response = call_tool(server, 'pipeline_extract')
-      data = parse_response(response)
+      wait_for_threads do
+        response = call_tool(server, 'pipeline_extract')
+        data = parse_response(response)
 
-      expect(data['status']).to eq('started')
-      # Allow background thread to run and rescue
-      sleep 0.05
+        expect(data['status']).to eq('started')
+      end
     end
 
     it 'blocks extraction within cooldown period' do
@@ -94,11 +94,12 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
       # Advance time past the 60-second cooldown instead of sleeping
       allow(Time).to receive(:now).and_return(Time.now + 61)
 
-      response = call_tool(server, 'pipeline_extract')
-      data = parse_response(response)
+      wait_for_threads do
+        response = call_tool(server, 'pipeline_extract')
+        data = parse_response(response)
 
-      expect(data['status']).to eq('started')
-      sleep 0.05
+        expect(data['status']).to eq('started')
+      end
     end
   end
 
@@ -106,11 +107,12 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
 
   describe 'tool: pipeline_embed' do
     it 'allows first embedding (guard has no prior runs)' do
-      response = call_tool(server, 'pipeline_embed')
-      data = parse_response(response)
+      wait_for_threads do
+        response = call_tool(server, 'pipeline_embed')
+        data = parse_response(response)
 
-      expect(data['status']).to eq('started')
-      sleep 0.05
+        expect(data['status']).to eq('started')
+      end
     end
 
     it 'blocks embedding within cooldown period' do

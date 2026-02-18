@@ -101,10 +101,10 @@ module CodebaseIndex
       # @param text [String] the text to truncate
       # @return [String] text within token limits
       def enforce_token_limit(text)
-        estimated = (text.length / 3.5).ceil
+        estimated = (text.length / 4.0).ceil
         return text if estimated <= @max_tokens
 
-        max_chars = (@max_tokens * 3.5).floor
+        max_chars = (@max_tokens * 4.0).floor
         text[0...max_chars]
       end
     end

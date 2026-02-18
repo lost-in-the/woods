@@ -147,7 +147,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
       end
 
       expect(breaker.state).to eq(:open)
-      sleep 1.1
+      allow(Time).to receive(:now).and_return(Time.now + 1.1)
 
       # Next call should transition to half_open and execute
       result = breaker.call { 'recovered' }
@@ -162,7 +162,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
         nil
       end
 
-      sleep 1.1
+      allow(Time).to receive(:now).and_return(Time.now + 1.1)
 
       result = breaker.call { 'ok' }
       expect(result).to eq('ok')
@@ -176,7 +176,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
         nil
       end
 
-      sleep 1.1
+      allow(Time).to receive(:now).and_return(Time.now + 1.1)
 
       begin
         breaker.call { raise 'still failing' }
@@ -291,7 +291,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
     it 'allows after cooldown expires' do
       guard.record!(:extraction)
-      sleep 1.1
+      allow(Time).to receive(:now).and_return(Time.now + 1.1)
       expect(guard.allow?(:extraction)).to be true
     end
 

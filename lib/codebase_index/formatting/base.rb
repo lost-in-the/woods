@@ -33,7 +33,7 @@ module CodebaseIndex
       # @param text [String]
       # @return [Integer]
       def estimate_tokens(text)
-        (text.length / 3.5).ceil
+        (text.length / 4.0).ceil
       end
     end
   end

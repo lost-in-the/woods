@@ -26,7 +26,7 @@ RSpec.describe CodebaseIndex::Formatting::Base do
   end
 
   describe '#estimate_tokens' do
-    it 'estimates tokens using the project convention (length / 3.5 ceil)' do
+    it 'estimates tokens using the project convention (length / 4.0 ceil)' do
       # estimate_tokens is private, so we test through a subclass
       subclass = Class.new(described_class) do
         def format(assembled_context)
@@ -35,7 +35,7 @@ RSpec.describe CodebaseIndex::Formatting::Base do
       end
 
       result = subclass.new.format(assembled_context)
-      expected = (assembled_context.context.length / 3.5).ceil
+      expected = (assembled_context.context.length / 4.0).ceil
       expect(result).to eq(expected)
     end
 
