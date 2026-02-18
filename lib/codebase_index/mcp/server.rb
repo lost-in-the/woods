@@ -7,7 +7,7 @@ require_relative 'index_reader'
 
 module CodebaseIndex
   module MCP
-    # Builds an MCP::Server with 20 tools, 2 resources, and 2 resource templates for querying
+    # Builds an MCP::Server with 21 tools, 2 resources, and 2 resource templates for querying
     # CodebaseIndex extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -53,7 +53,7 @@ module CodebaseIndex
           define_recent_changes_tool(server, reader, respond)
           define_reload_tool(server, reader, respond)
           define_retrieve_tool(server, retriever, respond)
-          define_trace_flow_tool(server, index_dir, respond)
+          define_trace_flow_tool(server, reader, index_dir, respond)
           define_operator_tools(server, operator, respond)
           define_feedback_tools(server, feedback_store, respond)
           register_resource_handler(server, reader)
@@ -409,7 +409,7 @@ module CodebaseIndex
           end
         end
 
-        def define_trace_flow_tool(server, index_dir, respond)
+        def define_trace_flow_tool(server, reader, index_dir, respond)
           require_relative '../flow_assembler'
           require_relative '../dependency_graph'
 
@@ -431,7 +431,6 @@ module CodebaseIndex
             }
           ) do |entry_point:, server_context:, depth: nil|
             max_depth = depth || 3
-            reader = IndexReader.new(index_dir)
             graph = reader.dependency_graph
 
             assembler = CodebaseIndex::FlowAssembler.new(
@@ -482,7 +481,7 @@ module CodebaseIndex
               extractor = CodebaseIndex::Extractor.new(
                 output_dir: CodebaseIndex.configuration.output_dir
               )
-              extractor.extract_all
+              incremental ? extractor.extract_changed([]) : extractor.extract_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[CodebaseIndex] Pipeline extract failed: #{e.message}")
@@ -515,16 +514,16 @@ module CodebaseIndex
             Thread.new do
               config = CodebaseIndex.configuration
               builder = CodebaseIndex::Builder.new(config)
-              provider = builder.send(:build_embedding_provider)
+              provider = builder.build_embedding_provider
               text_preparer = CodebaseIndex::Embedding::TextPreparer.new
-              vector_store = builder.send(:build_vector_store)
+              vector_store = builder.build_vector_store
               indexer = CodebaseIndex::Embedding::Indexer.new(
                 provider: provider,
                 text_preparer: text_preparer,
                 vector_store: vector_store,
                 output_dir: config.output_dir
               )
-              indexer.index_all
+              incremental ? indexer.index_incremental : indexer.index_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[CodebaseIndex] Pipeline embed failed: #{e.message}")

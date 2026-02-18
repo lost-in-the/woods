@@ -71,13 +71,12 @@ module CodebaseIndex
     # @param budget [Integer] Token budget for context assembly
     # @return [RetrievalResult] Complete retrieval result
     def retrieve(query, budget: 8000)
-      @budget = budget
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
       classification = @classifier.classify(query)
       execution_result = @executor.execute(query: query, classification: classification)
       ranked = @ranker.rank(execution_result.candidates, classification: classification)
-      assembled = assemble_context(ranked, classification)
+      assembled = assemble_context(ranked, classification, budget)
 
       elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
 
@@ -100,12 +99,12 @@ module CodebaseIndex
     # @param ranked [Array<Candidate>] Ranked search candidates
     # @param classification [QueryClassifier::Classification] Query classification
     # @return [AssembledContext]
-    def assemble_context(ranked, classification)
+    def assemble_context(ranked, classification, budget)
       @assembler.assemble(
         candidates: ranked,
         classification: classification,
         structural_context: build_structural_context,
-        budget: @budget
+        budget: budget
       )
     end
 

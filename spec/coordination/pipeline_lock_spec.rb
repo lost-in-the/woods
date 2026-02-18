@@ -91,6 +91,18 @@ RSpec.describe CodebaseIndex::Coordination::PipelineLock do
       stale_lock = described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 1800)
       expect(stale_lock.acquire).to be true
     end
+
+    it 'handles ENOENT when lock file is deleted between exist? and mtime checks' do
+      lock_path = File.join(lock_dir, 'extraction.lock')
+      # Create a lock file so File.exist? returns true
+      File.write(lock_path, '{}')
+
+      # Simulate the race: File.exist? sees the file, but File.mtime raises ENOENT
+      allow(File).to receive(:mtime).with(lock_path).and_raise(Errno::ENOENT)
+
+      new_lock = described_class.new(lock_dir: lock_dir, name: 'extraction')
+      expect { new_lock.acquire }.not_to raise_error
+    end
   end
 
   describe 'concurrent acquisition' do

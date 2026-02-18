@@ -17,7 +17,7 @@ module CodebaseIndex
     # Console MCP Server — queries live Rails application state.
     #
     # Communicates with a bridge process running inside the Rails environment
-    # via JSON-lines over stdio. Exposes Tier 1 read-only tools through MCP.
+    # via JSON-lines over stdio. Exposes Tier 1-4 tools (read-only, domain, analytics, guarded) through MCP.
     #
     # @example
     #   server = CodebaseIndex::Console::Server.build(config: config)

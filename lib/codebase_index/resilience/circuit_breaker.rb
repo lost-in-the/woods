@@ -52,60 +52,34 @@ module CodebaseIndex
       # @raise [CircuitOpenError] if the circuit is open and the timeout has not elapsed
       # @raise [StandardError] re-raises any error from the block
       def call(&block)
+        # Phase 1: Check state under mutex
         @mutex.synchronize do
           case @state
-          when :closed
-            execute_closed(&block)
           when :open
-            try_half_open(&block)
-          when :half_open
-            execute_half_open(&block)
+            unless Time.now - @last_failure_time >= @reset_timeout
+              raise CircuitOpenError, "Circuit breaker is open (#{@failure_count} failures)"
+            end
+
+            @state = :half_open
           end
         end
+
+        # Phase 2: Execute outside mutex
+        result = block.call
+
+        # Phase 3: Record success under mutex
+        @mutex.synchronize { reset! }
+
+        result
+      rescue CircuitOpenError
+        raise
+      rescue StandardError => e
+        # Phase 4: Record failure under mutex
+        @mutex.synchronize { record_failure }
+        raise e
       end
 
       private
-
-      # Execute in closed state. Record failures; open circuit at threshold.
-      #
-      # @yield The block to execute
-      # @return [Object] The return value of the block
-      def execute_closed(&block)
-        result = block.call
-        reset!
-        result
-      rescue StandardError => e
-        record_failure
-        raise e
-      end
-
-      # Attempt transition from open to half_open if timeout has elapsed.
-      #
-      # @yield The block to execute if transitioning to half_open
-      # @return [Object] The return value of the block
-      # @raise [CircuitOpenError] if the timeout has not elapsed
-      def try_half_open(&block)
-        unless Time.now - @last_failure_time >= @reset_timeout
-          raise CircuitOpenError, "Circuit breaker is open (#{@failure_count} failures)"
-        end
-
-        @state = :half_open
-        execute_half_open(&block)
-      end
-
-      # Execute in half_open state. Reset on success; re-open on failure.
-      #
-      # @yield The block to execute
-      # @return [Object] The return value of the block
-      def execute_half_open(&block)
-        result = block.call
-        reset!
-        result
-      rescue StandardError => e
-        @state = :open
-        @last_failure_time = Time.now
-        raise e
-      end
 
       # Record a failure and potentially open the circuit.
       def record_failure

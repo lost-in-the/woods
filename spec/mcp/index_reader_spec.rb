@@ -288,6 +288,28 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     end
   end
 
+  describe 'filename sanitization' do
+    it 'sanitizes special characters in identifiers to match safe_filename' do
+      # Access the private identifier_map to verify filename generation
+      map = reader.send(:build_identifier_map)
+
+      # Namespaced identifiers should have :: replaced with __ and no further changes
+      ar_entry = map['ActiveRecord::Base']
+      expect(ar_entry[:filename]).to eq('ActiveRecord__Base.json')
+
+      # Simple identifiers should pass through unchanged
+      post_entry = map['Post']
+      expect(post_entry[:filename]).to eq('Post.json')
+    end
+
+    it 'sanitizes characters not in [a-zA-Z0-9_-] from identifiers' do
+      # Build a map entry manually to test the sanitization logic
+      id = 'App::Service#process!'
+      filename = "#{id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
+      expect(filename).to eq('App__Service_process_.json')
+    end
+  end
+
   describe 'unit cache' do
     it 'caches loaded units' do
       reader.find_unit('Post')

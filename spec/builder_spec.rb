@@ -203,6 +203,29 @@ RSpec.describe CodebaseIndex::Builder do
     end
   end
 
+  # ── Public API: build_vector_store and build_embedding_provider ──────
+
+  describe 'public builder methods' do
+    let(:config) do
+      CodebaseIndex::Configuration.new.tap do |c|
+        c.vector_store = :in_memory
+        c.metadata_store = :sqlite
+        c.graph_store = :in_memory
+        c.embedding_provider = :ollama
+      end
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    it 'exposes build_vector_store as a public method' do
+      expect(builder).to respond_to(:build_vector_store)
+    end
+
+    it 'exposes build_embedding_provider as a public method' do
+      expect(builder).to respond_to(:build_embedding_provider)
+    end
+  end
+
   # ── Builder#build_vector_store — unknown type ────────────────────────
 
   describe '#build_vector_store with unknown type' do

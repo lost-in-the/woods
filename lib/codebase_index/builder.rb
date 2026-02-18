@@ -84,8 +84,6 @@ module CodebaseIndex
       )
     end
 
-    private
-
     # Instantiate the vector store adapter specified by the configuration.
     #
     # @return [Storage::VectorStore::Interface] Vector store adapter instance
@@ -98,6 +96,20 @@ module CodebaseIndex
       else raise ArgumentError, "Unknown vector_store: #{@config.vector_store}"
       end
     end
+
+    # Instantiate the embedding provider specified by the configuration.
+    #
+    # @return [Embedding::Provider::Interface] Embedding provider instance
+    # @raise [ArgumentError] if the configured type is not recognized
+    def build_embedding_provider
+      case @config.embedding_provider
+      when :openai then Embedding::Provider::OpenAI.new(**(@config.embedding_options || {}))
+      when :ollama then Embedding::Provider::Ollama.new(**(@config.embedding_options || {}))
+      else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
+      end
+    end
+
+    private
 
     # Instantiate the metadata store adapter specified by the configuration.
     #
@@ -119,18 +131,6 @@ module CodebaseIndex
       case @config.graph_store
       when :in_memory then Storage::GraphStore::Memory.new
       else raise ArgumentError, "Unknown graph_store: #{@config.graph_store}"
-      end
-    end
-
-    # Instantiate the embedding provider specified by the configuration.
-    #
-    # @return [Embedding::Provider::Interface] Embedding provider instance
-    # @raise [ArgumentError] if the configured type is not recognized
-    def build_embedding_provider
-      case @config.embedding_provider
-      when :openai then Embedding::Provider::OpenAI.new(**(@config.embedding_options || {}))
-      when :ollama then Embedding::Provider::Ollama.new(**(@config.embedding_options || {}))
-      else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
       end
     end
   end

@@ -521,6 +521,96 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
   end
 
+  describe 'tool: pipeline_extract incremental param' do
+    let(:guard) do
+      instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+        allow(g).to receive(:allow?).with(:extraction).and_return(true)
+        allow(g).to receive(:record!).with(:extraction)
+      end
+    end
+
+    let(:operator) { { pipeline_guard: guard } }
+
+    let(:server_with_operator) do
+      described_class.build(index_dir: fixture_dir, operator: operator)
+    end
+
+    let(:mock_extractor) do
+      double('Extractor').tap do |e|
+        allow(e).to receive(:extract_all)
+        allow(e).to receive(:extract_changed)
+      end
+    end
+
+    let(:extractor_class) { double('ExtractorClass', new: mock_extractor) }
+
+    before do
+      stub_const('CodebaseIndex::Extractor', extractor_class)
+    end
+
+    it 'calls extract_changed when incremental is true' do
+      call_tool(server_with_operator, 'pipeline_extract', incremental: true)
+      sleep 0.05
+      expect(mock_extractor).to have_received(:extract_changed).with([])
+    end
+
+    it 'calls extract_all when incremental is false' do
+      call_tool(server_with_operator, 'pipeline_extract', incremental: false)
+      sleep 0.05
+      expect(mock_extractor).to have_received(:extract_all)
+    end
+  end
+
+  describe 'tool: pipeline_embed incremental param' do
+    let(:guard) do
+      instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+        allow(g).to receive(:allow?).with(:embedding).and_return(true)
+        allow(g).to receive(:record!).with(:embedding)
+      end
+    end
+
+    let(:operator) { { pipeline_guard: guard } }
+
+    let(:server_with_operator) do
+      described_class.build(index_dir: fixture_dir, operator: operator)
+    end
+
+    let(:mock_builder) do
+      double('Builder').tap do |b|
+        allow(b).to receive(:build_embedding_provider).and_return(double('provider'))
+        allow(b).to receive(:build_vector_store).and_return(double('vector_store'))
+      end
+    end
+
+    let(:mock_indexer) do
+      double('Indexer').tap do |i|
+        allow(i).to receive(:index_all)
+        allow(i).to receive(:index_incremental)
+      end
+    end
+
+    let(:text_preparer_class) { double('TextPreparerClass', new: double('text_preparer')) }
+    let(:indexer_class) { double('IndexerClass', new: mock_indexer) }
+
+    before do
+      allow(CodebaseIndex::Builder).to receive(:new).and_return(mock_builder)
+      stub_const('CodebaseIndex::Embedding::TextPreparer', text_preparer_class)
+      stub_const('CodebaseIndex::Embedding::Indexer', indexer_class)
+    end
+
+    it 'calls index_incremental when incremental is true' do
+      call_tool(server_with_operator, 'pipeline_embed', incremental: true)
+      sleep 0.05
+      expect(mock_indexer).to have_received(:index_incremental)
+    end
+
+    it 'calls index_all when incremental is false' do
+      call_tool(server_with_operator, 'pipeline_embed', incremental: false)
+      sleep 0.05
+      expect(mock_indexer).to have_received(:index_all)
+    end
+  end
+
   describe 'tool: trace_flow' do
     let(:mock_flow_doc) do
       instance_double(
@@ -561,6 +651,14 @@ RSpec.describe CodebaseIndex::MCP::Server do
     it 'uses default depth of 3 when not specified' do
       call_tool(server, 'trace_flow', entry_point: 'PostsController#index')
       expect(mock_assembler).to have_received(:assemble).with('PostsController#index', max_depth: 3)
+    end
+
+    it 'reuses the existing IndexReader instead of creating a new one' do
+      # server is already built (which calls IndexReader.new once).
+      # Verify that calling trace_flow does NOT create another IndexReader.
+      server # force build
+      expect(CodebaseIndex::MCP::IndexReader).not_to receive(:new)
+      call_tool(server, 'trace_flow', entry_point: 'PostsController#create')
     end
 
     it 'returns an error hash when assembly raises' do

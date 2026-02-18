@@ -15,6 +15,9 @@ require_relative '../lib/codebase_index/version'
 require_relative '../lib/codebase_index/dependency_graph'
 require_relative '../lib/codebase_index/graph_analyzer'
 require_relative '../lib/codebase_index/mcp/server'
+require_relative '../lib/codebase_index/builder'
+require_relative '../lib/codebase_index/embedding/text_preparer'
+require_relative '../lib/codebase_index/embedding/indexer'
 
 index_dir = ARGV[0] || ENV['CODEBASE_INDEX_DIR'] || Dir.pwd
 

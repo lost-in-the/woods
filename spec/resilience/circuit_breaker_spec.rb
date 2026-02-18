@@ -153,5 +153,24 @@ RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
       # and the circuit should be open
       expect(breaker.state).to eq(:open)
     end
+
+    it 'does not hold the mutex during block execution (calls overlap)' do
+      breaker = described_class.new(threshold: 5, reset_timeout: 60)
+      sleep_duration = 0.1
+      thread_count = 3
+
+      start_time = Time.now
+      threads = thread_count.times.map do
+        Thread.new do
+          breaker.call { sleep(sleep_duration) }
+        end
+      end
+      threads.each(&:join)
+      elapsed = Time.now - start_time
+
+      # If mutex were held during block.call, total time would be ~3x sleep_duration.
+      # With mutex released, all 3 threads sleep concurrently, so total < 2x.
+      expect(elapsed).to be < (sleep_duration * 2)
+    end
   end
 end

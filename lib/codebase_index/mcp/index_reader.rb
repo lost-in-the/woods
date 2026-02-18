@@ -290,7 +290,7 @@ module CodebaseIndex
           entries = read_index(dir)
           entries.each do |entry|
             id = entry['identifier']
-            filename = "#{id.gsub('::', '__')}.json"
+            filename = "#{id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
             map[id] = { type_dir: dir, filename: filename }
           end
         end

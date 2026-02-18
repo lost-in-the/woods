@@ -96,6 +96,8 @@ module CodebaseIndex
 
         age = Time.now - File.mtime(@lock_path)
         age > @stale_timeout
+      rescue Errno::ENOENT
+        true
       end
 
       # @return [String] Lock file content (JSON with PID and timestamp)
