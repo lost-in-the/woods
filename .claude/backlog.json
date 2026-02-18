@@ -6,7 +6,8 @@
       "id": "001",
       "summary": "Verify and commit cost model + integration tests",
       "description": "Phase 2 work from the plan is complete but uncommitted. Run `bundle exec rspec spec/cost_model/ spec/integration/ --format json --out tmp/test_results.json` to verify all 12 integration specs + 4 cost model specs pass. Run rubocop. Fix any failures. Commit to main.",
-      "status": "pending",
+      "status": "completed",
+      "completed_at": "2026-02-18",
       "blocked_by": [],
       "files": [
         "lib/codebase_index/cost_model.rb",
@@ -23,9 +24,10 @@
     {
       "id": "002",
       "summary": "Merge open-source-packaging branch to main",
-      "description": "Branch `open-source-packaging` has 7 commits (README, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, CI workflow, issue templates, PR template, spec fixes). Merge to main or create PR. Remote is set to `git@github.com:LeahArmstrong/codebase_index.git`.",
-      "status": "pending",
-      "blocked_by": ["001"]
+      "description": "Branch `open-source-packaging` has 7 commits (README, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, CI workflow, issue templates, PR template, spec fixes). Merge to main or create PR. Remote is set to `git@github.com:LeahArmstrong/codebase_index.git`. Already merged upstream via PR #1.",
+      "status": "completed",
+      "completed_at": "2026-02-18",
+      "blocked_by": []
     },
     {
       "id": "003",
@@ -68,6 +70,102 @@
       "description": "Optimization backlog #22. Extractors run sequentially but are independent. Could use Concurrent::Promises or Thread.new with Queue for parallel extraction. Requires thread-safety audit of all extractors, ModelNameCache, and shared state. Guard with a config flag.",
       "status": "pending",
       "blocked_by": []
+    },
+    {
+      "id": "009",
+      "summary": "Extract concerns as standalone units",
+      "description": "Batch 1. Concerns are currently inlined into model/controller units but have no standalone ExtractedUnit nodes. This means GraphAnalyzer cannot compute blast radius for concern changes, and QueryClassifier cannot route concern-specific queries. Implementation: reuse the existing @concern_cache in ModelExtractor to create standalone concern units with type :concern. Register concern nodes in DependencyGraph so models/controllers depend on them. Add :concern to QueryClassifier::TARGET_PATTERNS. Plug into GraphAnalyzer hub/orphan/cycle detection. Gotcha: adding concern units changes dependency graph topology — models will depend on concerns, and concerns may depend on models. Test GraphAnalyzer metrics against the new edge types.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/retrieval/query_classifier.rb",
+        "lib/codebase_index/extractor.rb"
+      ]
+    },
+    {
+      "id": "010",
+      "summary": "Extract routes as standalone units",
+      "description": "Batch 1. Routes are partially computed by ControllerExtractor#build_routes_map but only embedded as controller metadata. Promote to standalone ExtractedUnit nodes to enable path-based search (e.g., 'what handles POST /webhooks?'). Implementation: pure runtime introspection via Rails.application.routes.routes. Each route unit captures: HTTP method, path pattern, controller#action, constraints, scopes, and middleware. Add :route to QueryClassifier::TARGET_PATTERNS, EXTRACTORS hash, and TYPE_TO_EXTRACTOR_KEY. Link route units to controller units in the dependency graph. Gotcha: engine-mounted routes need a design decision — if 016 (engines) is also implemented, engine routes should appear as children of the engine unit.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
+    },
+    {
+      "id": "011",
+      "summary": "Extract middleware chain",
+      "description": "Batch 1. Middleware ordering is invisible to the current index but critical for debugging authentication, rate limiting, CORS, and request lifecycle issues. Implementation: simplest possible extractor — Rails.application.middleware returns the full ordered stack via runtime introspection. Each middleware unit captures: class name, arguments, insertion order/position, and source location if available. Single unit for the full chain or one unit per middleware entry (design decision). Add :middleware to QueryClassifier::TARGET_PATTERNS. No parsing required.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
+    },
+    {
+      "id": "012",
+      "summary": "Extract I18n translations",
+      "description": "Batch 2. For internationalized apps, AI tools generate incorrect string handling without I18n context (hardcoded strings vs t() calls, absolute vs relative key paths). Implementation: YAML parsing of config/locales/ files. Each locale file becomes an ExtractedUnit with key paths as metadata. No Ruby parsing or runtime introspection needed — pure YAML traversal. Index key structure so retrieval can answer 'what translations exist for users.show?' Add :i18n to QueryClassifier::TARGET_PATTERNS. Simplest possible extractor on this list.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
+    },
+    {
+      "id": "013",
+      "summary": "Extract Pundit authorization policies",
+      "description": "Batch 2. The existing PolicyExtractor handles generic policy classes but does not specifically extract Pundit authorization policies with their convention-based structure (index?, show?, create?, etc. methods mapping to controller actions). Implementation: detect Pundit via defined?(Pundit). Scan app/policies/ for classes inheriting from ApplicationPolicy. Extract policy methods, their return logic, and the model they authorize. Link policy units to model units (policy -> model) and controller units (controller -> policy) in the dependency graph. Extends or complements the existing PolicyExtractor. Add Pundit-specific patterns to QueryClassifier.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
+    },
+    {
+      "id": "014",
+      "summary": "Extract configuration and initializers",
+      "description": "Batch 3. Configuration files (config/initializers/, config/environments/) are invisible to the index but frequently answer debugging questions ('what Redis instance?', 'is CORS configured?', 'what cache store?'). Implementation: file-based scanning of config/ following the ServiceExtractor pattern. The challenge is meaningful metadata extraction — config files are heterogeneous (some set global config, some register middleware, some patch classes). Design decision: how to structure metadata for retrieval when files have no consistent class/method interface. Better tackled after batch 1 establishes patterns for non-class-based units. Add :configuration to QueryClassifier::TARGET_PATTERNS.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
+    },
+    {
+      "id": "015",
+      "summary": "Extract view templates (ERB/HAML/Slim)",
+      "description": "Batch 4. Largest gap and highest unique value — no other tool provides structured view-to-partial-to-helper dependency graphs. Views are where Rails conventions are most chaotic: partials nest 3-4 levels deep, helpers span multiple modules, and controller-to-view mapping is implicit. Implementation requires new parsing infrastructure outside Prism — ERB uses erubi, HAML uses the haml gem, Slim uses the slim gem. Each template engine is a separate dependency and parsing path. Must handle: render partial:, render collection:, render template:, local variable passing, layout inheritance, helper method resolution. Add :view to QueryClassifier::TARGET_PATTERNS. Gotcha: EXTRACTION_DIRECTORIES does not include app/views/ — needs updating (though views are not autoloadable Ruby classes, so the update is cosmetic for the fallback path). Benefits from 010 (routes) and 009 (concerns) being done first for the full controller->route->view->partial chain.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
+    },
+    {
+      "id": "016",
+      "summary": "Extract engines and mountable gems",
+      "description": "Batch 5. Production Rails apps use engines (Devise, ActiveAdmin, Sidekiq Web, custom internal engines) that mount entire route trees and middleware stacks invisible to current extraction. Important for security audits ('what routes does Sidekiq Web expose?') and upgrade planning. Implementation: runtime introspection via Rails::Engine.subclasses for discovery, engine.routes.routes for route trees. Design decision: how deep to extract engine internals — engine routes are straightforward, but extracting engine models/controllers creates scope explosion. Recommend starting with engine metadata + mounted routes only. Benefits from 010 (routes) being done first — engine routes would be units that link to the engine's namespace. Add :engine to QueryClassifier::TARGET_PATTERNS.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/extractors/",
+        "lib/codebase_index/extractor.rb",
+        "lib/codebase_index/retrieval/query_classifier.rb"
+      ]
     }
   ]
 }
