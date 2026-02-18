@@ -167,6 +167,7 @@ RSpec.describe CodebaseIndex::Extractor do
     end
 
     it 'batches paths in slices of 500 to avoid ARG_MAX' do
+      require 'active_support'
       require 'active_support/core_ext/numeric/time'
 
       file_paths = (1..1100).map { |i| File.join(tmpdir, "file_#{i}.rb") }
