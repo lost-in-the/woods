@@ -4,9 +4,9 @@ CodebaseIndex is a Ruby gem that extracts structured data from Rails application
 
 ## Current State
 
-All major layers are implemented: 13 extractors, retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
+All major layers are implemented: 21 extractors, retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
 
-What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for extractor gaps and [backlog.json](backlog.json) for tracked tasks.
+What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for extractor gaps and [backlog.json](../.claude/backlog.json) for tracked tasks.
 
 ## Current Documents
 
@@ -14,7 +14,8 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for extrac
 |----------|---------|
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
 | [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) | Gap analysis identifying missing extraction coverage and untapped data uses |
-| [backlog.json](backlog.json) | Task tracker for pending development work |
+| [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/codebase-index-mcp-http`) |
+| [TOKEN_BENCHMARK.md](TOKEN_BENCHMARK.md) | Token estimation benchmark — tiktoken comparison, divisor calibration |
 
 Historical design documents from the build phase are in `_project-resources/docs/` for reference.
 
@@ -55,7 +56,7 @@ All configuration options in one place. Audience: anyone deploying or tuning the
 
 What each extractor produces. Audience: users wanting to understand extraction output, contributors adding extractors.
 
-- The 13 extractors: models, controllers, routes, jobs, mailers, services, concerns, initializers, configurations, views, channels, Rails sources, framework sources
+- The 21 extractors: models, controllers, services, jobs, mailers, serializers, managers, policies, validators, GraphQL, Phlex, ViewComponent, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates (ERB), Rails sources
 - What each extractor covers (associations, callbacks, scopes, validations, etc.)
 - Edge cases: STI, namespaced classes, empty files, concern inlining
 - How to add a new extractor (interface contract, registration, testing)
