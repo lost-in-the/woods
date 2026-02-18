@@ -20,7 +20,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
 
     context 'when Rails::Engine has no subclasses' do
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails::Engine).to receive(:subclasses).and_return([])
         stub_rails_application
       end
@@ -35,7 +35,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       let(:another_engine) { build_mock_engine('Sidekiq::Web::Engine', 'sidekiq-web') }
 
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails::Engine).to receive(:subclasses).and_return([engine_class, another_engine])
         stub_rails_application(engines: [engine_class, another_engine])
       end
@@ -96,7 +96,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       let(:engine_class) { build_mock_engine('Devise::Engine', 'devise') }
 
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails::Engine).to receive(:subclasses).and_return([engine_class])
         stub_rails_application(
           engines: [engine_class],
@@ -115,7 +115,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       let(:engine_class) { build_mock_engine('MyGem::Engine', 'my_gem') }
 
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails::Engine).to receive(:subclasses).and_return([engine_class])
         stub_rails_application(engines: [engine_class], mounts: {})
       end
@@ -132,7 +132,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       end
 
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails::Engine).to receive(:subclasses).and_return([engine_class])
         stub_rails_application(engines: [engine_class])
       end
@@ -162,7 +162,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       end
 
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails::Engine).to receive(:subclasses).and_return([bad_engine, good_engine])
         stub_rails_application(engines: [bad_engine, good_engine])
       end
@@ -189,7 +189,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
 
     context 'when Rails.application is not available' do
       before do
-        stub_const('Rails::Engine', Class.new)
+        stub_const('Rails::Engine', engine_base_class)
         allow(Rails).to receive(:respond_to?).and_call_original
         allow(Rails).to receive(:respond_to?).with(:application).and_return(false)
         allow(Rails).to receive(:respond_to?).with(:application, anything).and_return(false)
@@ -204,6 +204,15 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
   # ──────────────────────────────────────────────────────────────────────
   # Helpers
   # ──────────────────────────────────────────────────────────────────────
+
+  # Build a base class that has .subclasses defined (Ruby 3.0 compat).
+  # Class#subclasses was added in Ruby 3.1; on 3.0 RSpec's verify_partial_doubles
+  # rejects `allow(klass).to receive(:subclasses)` on a bare Class.
+  def engine_base_class
+    klass = Class.new
+    klass.define_singleton_method(:subclasses) { [] } unless klass.respond_to?(:subclasses)
+    klass
+  end
 
   def build_mock_engine(name, engine_name, controllers: [], route_count: 3)
     engine = double(name)

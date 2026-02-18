@@ -28,7 +28,7 @@ module CodebaseIndex
       def extract_all
         return [] unless engines_available?
 
-        engines = Rails::Engine.subclasses
+        engines = engine_subclasses
         return [] if engines.empty?
 
         mount_map = build_mount_map
@@ -44,6 +44,18 @@ module CodebaseIndex
         defined?(Rails::Engine) &&
           Rails.respond_to?(:application) &&
           Rails.application.respond_to?(:routes)
+      end
+
+      # Retrieve Engine subclasses, compatible with Ruby 3.0+.
+      # Class#subclasses was added in Ruby 3.1; fall back to descendants filtering.
+      #
+      # @return [Array<Class>]
+      def engine_subclasses
+        if Rails::Engine.respond_to?(:subclasses)
+          Rails::Engine.subclasses
+        else
+          ObjectSpace.each_object(Class).select { |klass| klass < Rails::Engine }
+        end
       end
 
       # Build a mapping from engine class to mounted path by scanning app routes.
