@@ -1,0 +1,73 @@
+{
+  "project": "codebase_index",
+  "created": "2026-02-18",
+  "tasks": [
+    {
+      "id": "001",
+      "summary": "Verify and commit cost model + integration tests",
+      "description": "Phase 2 work from the plan is complete but uncommitted. Run `bundle exec rspec spec/cost_model/ spec/integration/ --format json --out tmp/test_results.json` to verify all 12 integration specs + 4 cost model specs pass. Run rubocop. Fix any failures. Commit to main.",
+      "status": "pending",
+      "blocked_by": [],
+      "files": [
+        "lib/codebase_index/cost_model.rb",
+        "lib/codebase_index/cost_model/embedding_cost.rb",
+        "lib/codebase_index/cost_model/storage_cost.rb",
+        "lib/codebase_index/cost_model/estimator.rb",
+        "lib/codebase_index/cost_model/provider_pricing.rb",
+        "spec/cost_model/",
+        "spec/integration/",
+        "spec/support/fake_embedding_provider.rb",
+        "spec/support/integration_helpers.rb"
+      ]
+    },
+    {
+      "id": "002",
+      "summary": "Merge open-source-packaging branch to main",
+      "description": "Branch `open-source-packaging` has 7 commits (README, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, CI workflow, issue templates, PR template, spec fixes). Merge to main or create PR. Remote is set to `git@github.com:LeahArmstrong/codebase_index.git`.",
+      "status": "pending",
+      "blocked_by": ["001"]
+    },
+    {
+      "id": "003",
+      "summary": "Replace sleep calls with polling waits in thread-based specs",
+      "description": "32 sleep calls across 8 spec files use fixed delays for thread synchronization. Replace with polling waits using `Timeout.timeout(N) { sleep 0.01 until <condition> }` pattern. Priority files: spec/mcp/server_spec.rb (6 sleeps), spec/integration/coordination_resilience_spec.rb (4 sleeps), spec/integration/mcp_operator_feedback_spec.rb (4 sleeps), spec/resilience/circuit_breaker_spec.rb (3 sleeps). Note: RetryableProvider specs that stub sleep are fine — those test backoff timing, not thread sync. Longer-term: consider refactoring pipeline tools to return a Thread/Future that tests can .join on (design change, separate task).",
+      "status": "pending",
+      "blocked_by": ["001"]
+    },
+    {
+      "id": "004",
+      "summary": "Wire semantic search into MCP codebase_retrieve tool",
+      "description": "Optimization backlog #30. The retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler) is fully implemented. The MCP Index Server has a `codebase_retrieve` tool but it needs to be connected to the real Retriever with auto-classification, token budgeting, and relevance scoring. Currently the tool may only do keyword search.",
+      "status": "pending",
+      "blocked_by": []
+    },
+    {
+      "id": "005",
+      "summary": "Add extractor-level fixture specs",
+      "description": "Optimization backlog #6 (partially resolved). 86 gem unit specs + 87 integration specs exist, but no extractor-level specs against fixture Rails classes. Priority: individual extractors with fixture classes (requires booted Rails environment or careful mocking). Edge cases: empty files, namespaced classes, STI, concern inlining.",
+      "status": "pending",
+      "blocked_by": []
+    },
+    {
+      "id": "006",
+      "summary": "Evaluate MCP HTTP transport support",
+      "description": "Optimization backlog #33. MCP server only supports stdio transport. Evaluate whether the `mcp` gem supports HTTP/SSE transport natively. If not, design a Rack wrapper. Useful for shared team access or CI integration. Research-only first — implementation follows.",
+      "status": "pending",
+      "blocked_by": []
+    },
+    {
+      "id": "007",
+      "summary": "Benchmark token estimation accuracy",
+      "description": "Optimization backlog #21. Current heuristic is `(length / 3.5).ceil`. Consider tiktoken_ruby gem for accurate counting with heuristic fallback. Benchmark against real Ruby code samples to validate the 3.5 chars/token assumption. May not need changing if heuristic is close enough.",
+      "status": "pending",
+      "blocked_by": []
+    },
+    {
+      "id": "008",
+      "summary": "Add concurrent extraction with thread-safety audit",
+      "description": "Optimization backlog #22. Extractors run sequentially but are independent. Could use Concurrent::Promises or Thread.new with Queue for parallel extraction. Requires thread-safety audit of all extractors, ModelNameCache, and shared state. Guard with a config flag.",
+      "status": "pending",
+      "blocked_by": []
+    }
+  ]
+}

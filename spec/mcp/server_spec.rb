@@ -556,13 +556,13 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     it 'calls extract_changed when incremental is true' do
       call_tool(server_with_operator, 'pipeline_extract', incremental: true)
-      sleep 0.05
+      sleep 0.2
       expect(mock_extractor).to have_received(:extract_changed).with([])
     end
 
     it 'calls extract_all when incremental is false' do
       call_tool(server_with_operator, 'pipeline_extract', incremental: false)
-      sleep 0.05
+      sleep 0.2
       expect(mock_extractor).to have_received(:extract_all)
     end
   end
@@ -612,13 +612,13 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     it 'calls index_incremental when incremental is true' do
       call_tool(server_with_operator, 'pipeline_embed', incremental: true)
-      sleep 0.05
+      sleep 0.2
       expect(mock_indexer).to have_received(:index_incremental)
     end
 
     it 'calls index_all when incremental is false' do
       call_tool(server_with_operator, 'pipeline_embed', incremental: false)
-      sleep 0.05
+      sleep 0.2
       expect(mock_indexer).to have_received(:index_all)
     end
   end

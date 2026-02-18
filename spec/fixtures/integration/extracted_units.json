@@ -1,0 +1,195 @@
+[
+  {
+    "type": "model",
+    "identifier": "User",
+    "file_path": "app/models/user.rb",
+    "namespace": null,
+    "source_code": "class User < ApplicationRecord\n  has_many :posts, dependent: :destroy\n  has_many :comments, through: :posts\n  has_one :profile\n\n  validates :email, presence: true, uniqueness: true\n  validates :name, presence: true, length: { maximum: 100 }\n\n  before_create :generate_auth_token\n  after_create :send_welcome_email\n\n  scope :active, -> { where(active: true) }\n  scope :recently_created, -> { where('created_at > ?', 7.days.ago) }\n\n  def full_name\n    \"#{first_name} #{last_name}\"\n  end\n\n  def deactivate!\n    update!(active: false)\n  end\n\n  private\n\n  def generate_auth_token\n    self.auth_token = SecureRandom.hex(32)\n  end\n\n  def send_welcome_email\n    UserMailer.welcome(self).deliver_later\n  end\nend\n",
+    "metadata": {
+      "table_name": "users",
+      "primary_key": "id",
+      "associations": [
+        { "type": "has_many", "name": "posts", "class_name": "Post", "options": { "dependent": "destroy" } },
+        { "type": "has_many", "name": "comments", "class_name": "Comment", "options": { "through": "posts" } },
+        { "type": "has_one", "name": "profile", "class_name": "Profile" }
+      ],
+      "validations": [
+        { "type": "presence", "attributes": ["email"] },
+        { "type": "uniqueness", "attributes": ["email"] },
+        { "type": "presence", "attributes": ["name"] },
+        { "type": "length", "attributes": ["name"], "options": { "maximum": 100 } }
+      ],
+      "callbacks": [
+        { "type": "before_create", "method": "generate_auth_token" },
+        { "type": "after_create", "method": "send_welcome_email" }
+      ],
+      "scopes": ["active", "recently_created"],
+      "parent_class": "ApplicationRecord"
+    },
+    "dependencies": [
+      { "type": "model", "target": "Post", "via": "association" },
+      { "type": "model", "target": "Comment", "via": "association" },
+      { "type": "model", "target": "Profile", "via": "association" },
+      { "type": "mailer", "target": "UserMailer", "via": "method_call" }
+    ],
+    "dependents": [],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+  },
+  {
+    "type": "model",
+    "identifier": "Post",
+    "file_path": "app/models/post.rb",
+    "namespace": null,
+    "source_code": "class Post < ApplicationRecord\n  belongs_to :user\n  has_many :comments, dependent: :destroy\n\n  validates :title, presence: true\n  validates :body, presence: true, length: { minimum: 10 }\n\n  scope :published, -> { where(published: true) }\n  scope :recent, -> { order(created_at: :desc) }\n\n  def publish!\n    update!(published: true, published_at: Time.current)\n  end\n\n  def word_count\n    body.split.size\n  end\nend\n",
+    "metadata": {
+      "table_name": "posts",
+      "primary_key": "id",
+      "associations": [
+        { "type": "belongs_to", "name": "user", "class_name": "User" },
+        { "type": "has_many", "name": "comments", "class_name": "Comment", "options": { "dependent": "destroy" } }
+      ],
+      "validations": [
+        { "type": "presence", "attributes": ["title"] },
+        { "type": "presence", "attributes": ["body"] },
+        { "type": "length", "attributes": ["body"], "options": { "minimum": 10 } }
+      ],
+      "callbacks": [],
+      "scopes": ["published", "recent"],
+      "parent_class": "ApplicationRecord"
+    },
+    "dependencies": [
+      { "type": "model", "target": "User", "via": "association" },
+      { "type": "model", "target": "Comment", "via": "association" }
+    ],
+    "dependents": ["User", "PostsController"],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3"
+  },
+  {
+    "type": "model",
+    "identifier": "Comment",
+    "file_path": "app/models/comment.rb",
+    "namespace": null,
+    "source_code": "class Comment < ApplicationRecord\n  belongs_to :post\n  belongs_to :user\n\n  validates :body, presence: true\n\n  scope :recent, -> { order(created_at: :desc) }\n\n  def truncated_body(length: 100)\n    body.truncate(length)\n  end\nend\n",
+    "metadata": {
+      "table_name": "comments",
+      "primary_key": "id",
+      "associations": [
+        { "type": "belongs_to", "name": "post", "class_name": "Post" },
+        { "type": "belongs_to", "name": "user", "class_name": "User" }
+      ],
+      "validations": [
+        { "type": "presence", "attributes": ["body"] }
+      ],
+      "callbacks": [],
+      "scopes": ["recent"],
+      "parent_class": "ApplicationRecord"
+    },
+    "dependencies": [
+      { "type": "model", "target": "Post", "via": "association" },
+      { "type": "model", "target": "User", "via": "association" }
+    ],
+    "dependents": ["Post"],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+  },
+  {
+    "type": "controller",
+    "identifier": "UsersController",
+    "file_path": "app/controllers/users_controller.rb",
+    "namespace": null,
+    "source_code": "class UsersController < ApplicationController\n  before_action :authenticate_user!\n  before_action :set_user, only: [:show, :edit, :update]\n\n  def index\n    @users = User.active.page(params[:page])\n  end\n\n  def show\n  end\n\n  def edit\n  end\n\n  def update\n    if @user.update(user_params)\n      redirect_to @user, notice: 'User updated.'\n    else\n      render :edit\n    end\n  end\n\n  private\n\n  def set_user\n    @user = User.find(params[:id])\n  end\n\n  def user_params\n    params.require(:user).permit(:name, :email)\n  end\nend\n",
+    "metadata": {
+      "actions": ["index", "show", "edit", "update"],
+      "before_actions": ["authenticate_user!", "set_user"],
+      "parent_class": "ApplicationController"
+    },
+    "dependencies": [
+      { "type": "model", "target": "User", "via": "reference" }
+    ],
+    "dependents": [],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5"
+  },
+  {
+    "type": "controller",
+    "identifier": "PostsController",
+    "file_path": "app/controllers/posts_controller.rb",
+    "namespace": null,
+    "source_code": "class PostsController < ApplicationController\n  before_action :authenticate_user!\n  before_action :set_post, only: [:show, :edit, :update, :destroy]\n\n  def index\n    @posts = Post.published.recent.page(params[:page])\n  end\n\n  def show\n  end\n\n  def create\n    @post = current_user.posts.build(post_params)\n    if @post.save\n      redirect_to @post, notice: 'Post created.'\n    else\n      render :new\n    end\n  end\n\n  def update\n    if @post.update(post_params)\n      redirect_to @post, notice: 'Post updated.'\n    else\n      render :edit\n    end\n  end\n\n  def destroy\n    @post.destroy\n    redirect_to posts_url, notice: 'Post deleted.'\n  end\n\n  private\n\n  def set_post\n    @post = Post.find(params[:id])\n  end\n\n  def post_params\n    params.require(:post).permit(:title, :body)\n  end\nend\n",
+    "metadata": {
+      "actions": ["index", "show", "create", "update", "destroy"],
+      "before_actions": ["authenticate_user!", "set_post"],
+      "parent_class": "ApplicationController"
+    },
+    "dependencies": [
+      { "type": "model", "target": "Post", "via": "reference" },
+      { "type": "model", "target": "User", "via": "reference" }
+    ],
+    "dependents": [],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6"
+  },
+  {
+    "type": "service",
+    "identifier": "UserRegistrationService",
+    "file_path": "app/services/user_registration_service.rb",
+    "namespace": null,
+    "source_code": "class UserRegistrationService\n  def initialize(params)\n    @params = params\n  end\n\n  def call\n    user = User.new(@params)\n    if user.save\n      SendWelcomeEmailJob.perform_later(user.id)\n      { success: true, user: user }\n    else\n      { success: false, errors: user.errors.full_messages }\n    end\n  end\nend\n",
+    "metadata": {
+      "methods": ["initialize", "call"],
+      "service_pattern": "command"
+    },
+    "dependencies": [
+      { "type": "model", "target": "User", "via": "method_call" },
+      { "type": "job", "target": "SendWelcomeEmailJob", "via": "method_call" }
+    ],
+    "dependents": [],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1"
+  },
+  {
+    "type": "job",
+    "identifier": "SendWelcomeEmailJob",
+    "file_path": "app/jobs/send_welcome_email_job.rb",
+    "namespace": null,
+    "source_code": "class SendWelcomeEmailJob < ApplicationJob\n  queue_as :mailers\n\n  def perform(user_id)\n    user = User.find(user_id)\n    UserMailer.welcome(user).deliver_now\n  end\nend\n",
+    "metadata": {
+      "queue": "mailers",
+      "parent_class": "ApplicationJob"
+    },
+    "dependencies": [
+      { "type": "model", "target": "User", "via": "method_call" },
+      { "type": "mailer", "target": "UserMailer", "via": "method_call" }
+    ],
+    "dependents": ["UserRegistrationService"],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3"
+  },
+  {
+    "type": "mailer",
+    "identifier": "UserMailer",
+    "file_path": "app/mailers/user_mailer.rb",
+    "namespace": null,
+    "source_code": "class UserMailer < ApplicationMailer\n  def welcome(user)\n    @user = user\n    mail(to: user.email, subject: 'Welcome!')\n  end\n\n  def password_reset(user)\n    @user = user\n    @token = user.generate_reset_token\n    mail(to: user.email, subject: 'Reset your password')\n  end\nend\n",
+    "metadata": {
+      "actions": ["welcome", "password_reset"],
+      "parent_class": "ApplicationMailer"
+    },
+    "dependencies": [
+      { "type": "model", "target": "User", "via": "parameter" }
+    ],
+    "dependents": ["User", "SendWelcomeEmailJob"],
+    "chunks": [],
+    "extracted_at": "2026-02-18T10:00:00Z",
+    "source_hash": "b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4"
+  }
+]

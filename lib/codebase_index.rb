@@ -194,4 +194,5 @@ module CodebaseIndex
 end
 
 require_relative 'codebase_index/builder'
+require_relative 'codebase_index/cost_model'
 require_relative 'codebase_index/railtie' if defined?(Rails::Railtie)
