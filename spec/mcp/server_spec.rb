@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/version'
+require 'codebase_index'
 require 'codebase_index/dependency_graph'
 require 'codebase_index/mcp/server'
 
@@ -546,6 +546,12 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     before do
       stub_const('CodebaseIndex::Extractor', extractor_class)
+      mock_config = Struct.new(:output_dir).new(fixture_dir)
+      CodebaseIndex.configuration = mock_config
+    end
+
+    after do
+      CodebaseIndex.configuration = nil
     end
 
     it 'calls extract_changed when incremental is true' do
@@ -593,9 +599,15 @@ RSpec.describe CodebaseIndex::MCP::Server do
     let(:indexer_class) { double('IndexerClass', new: mock_indexer) }
 
     before do
+      mock_config = Struct.new(:output_dir).new(fixture_dir)
+      CodebaseIndex.configuration = mock_config
       allow(CodebaseIndex::Builder).to receive(:new).and_return(mock_builder)
       stub_const('CodebaseIndex::Embedding::TextPreparer', text_preparer_class)
       stub_const('CodebaseIndex::Embedding::Indexer', indexer_class)
+    end
+
+    after do
+      CodebaseIndex.configuration = nil
     end
 
     it 'calls index_incremental when incremental is true' do
