@@ -37,6 +37,8 @@ When the agent references information from retrieval, it should cite the source 
 
 ## Tool-Use Interface
 
+> **Implementation note:** The tool names and schemas below are the original design spec. See `lib/codebase_index/mcp/server.rb` for the actual 21 tool definitions, which closely follow this spec with minor naming adjustments.
+
 ### Available Tools
 
 ```yaml

@@ -1156,7 +1156,7 @@ CodebaseIndex::Console.configure_with_preset(:production)
 
 ## Phased Implementation
 
-### Phase 0: Bridge Protocol + Connection Layer
+### Phase 0: Bridge Protocol + Connection Layer — Complete
 
 **Goal:** Establish reliable communication between MCP server and Rails console.
 
@@ -1168,7 +1168,7 @@ CodebaseIndex::Console.configure_with_preset(:production)
 
 **Unlocks:** The communication foundation. No user-facing tools yet, but the bridge can be tested end-to-end.
 
-### Phase 1: MVP Tools + MCP Server
+### Phase 1: MVP Tools + MCP Server — Complete
 
 **Goal:** A working console MCP server with safe read-only tools.
 
@@ -1181,7 +1181,7 @@ CodebaseIndex::Console.configure_with_preset(:production)
 
 **Unlocks:** All six capability goals at a basic level. An agent can query live data alongside extraction data.
 
-### Phase 2: High-Level Tools + Controlled Writes
+### Phase 2: High-Level Tools + Controlled Writes — Complete
 
 **Goal:** Domain-aware tools that compose Tier 1 primitives, plus safe writes.
 
@@ -1193,7 +1193,7 @@ CodebaseIndex::Console.configure_with_preset(:production)
 
 **Unlocks:** Support diagnostics, data quality audits, policy/eligibility debugging, presentation previews, and controlled configuration changes without raw console access.
 
-### Phase 3: Analytics Integration
+### Phase 3: Analytics Integration — Complete
 
 **Goal:** Structured access to application performance and business metrics.
 
@@ -1209,7 +1209,7 @@ CodebaseIndex::Console.configure_with_preset(:production)
 
 **Unlocks:** Performance investigation and business intelligence queries through the agent, without building dashboards.
 
-### Phase 4: Guarded Eval + Advanced Queries
+### Phase 4: Guarded Eval + Advanced Queries — Complete
 
 **Goal:** Flexible query capabilities with appropriate guardrails.
 

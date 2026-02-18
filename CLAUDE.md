@@ -1,6 +1,6 @@
 # CodebaseIndex
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. The extraction layer is complete. Retrieval, embedding, and storage layers are in design — see `docs/` for planning.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (13 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
 
 ## Commands
 
@@ -25,24 +25,38 @@ bundle exec rake codebase_index:clean             # Remove index output
 
 ```
 lib/
-├── codebase_index.rb              # Module interface, Configuration class, entry point
+├── codebase_index.rb                    # Module interface, Configuration, entry point
 ├── codebase_index/
-│   ├── extractor.rb               # Orchestrator — coordinates all extractors, builds graph
-│   ├── extracted_unit.rb          # Value object — single code unit (model/controller/service/etc)
-│   ├── dependency_graph.rb        # Directed graph of unit relationships + PageRank scoring
-│   ├── graph_analyzer.rb          # Structural analysis — orphans, dead ends, hubs, cycles, bridges
-│   └── extractors/                # One extractor per Rails concept
-│       ├── model_extractor.rb     # ActiveRecord models — inlines concerns, resolves schema
-│       ├── controller_extractor.rb # Controllers — maps routes, resolves filter chains
-│       ├── service_extractor.rb   # Service objects — scans conventional directories
-│       ├── job_extractor.rb       # ActiveJob/Sidekiq workers
-│       ├── mailer_extractor.rb    # ActionMailer classes
-│       ├── phlex_extractor.rb     # Phlex view components
-│       ├── graphql_extractor.rb   # GraphQL types, mutations, queries, subscriptions
-│       └── rails_source_extractor.rb # Framework source from installed gems
+│   ├── extractor.rb                     # Orchestrator — coordinates all extractors
+│   ├── extracted_unit.rb                # Core value object
+│   ├── dependency_graph.rb              # Directed graph + PageRank scoring
+│   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
+│   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
+│   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
+│   ├── extractors/                      # 13 extractors (one per Rails concept)
+│   ├── ast/                             # Prism-based AST layer
+│   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
+│   ├── flow_analysis/                   # Execution flow tracing
+│   ├── chunking/                        # Semantic chunking (Chunk, SemanticChunker)
+│   ├── embedding/                       # Embedding pipeline (OpenAI, Ollama, Indexer)
+│   ├── storage/                         # Storage backends (VectorStore, MetadataStore, GraphStore, Pgvector, Qdrant)
+│   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
+│   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
+│   ├── mcp/                             # MCP Index Server (21 tools, 2 resources, 2 templates)
+│   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
+│   ├── coordination/                    # Multi-agent pipeline locking
+│   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
+│   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
+│   ├── observability/                   # Instrumentation, StructuredLogger, HealthCheck
+│   ├── resilience/                      # CircuitBreaker, RetryableProvider, IndexValidator
+│   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
+│   └── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
+├── generators/codebase_index/           # Rails generators (install, pgvector)
 ├── tasks/
-│   └── codebase_index.rake        # Rake task definitions
-docs/                              # Planning & design documents (see docs/README.md)
+│   └── codebase_index.rake              # Rake task definitions
+exe/
+├── codebase-index-mcp                   # MCP Index Server executable
+└── codebase-console-mcp                 # Console MCP Server executable
 ```
 
 ## Key Design Decisions
@@ -97,7 +111,7 @@ After gem-level specs pass, validate in a host app if the change affects extract
 
 ## Planning Documents
 
-The `docs/` directory contains the full design for unbuilt layers. Read `docs/README.md` for the index and reading order. These documents are the source of truth for architectural decisions, backend selection, and implementation sequencing. When implementing retrieval or storage features, read the relevant doc first — don't invent patterns that conflict with the established design.
+The `docs/` directory contains design documents for all major layers — all now complete. Read `docs/README.md` for the index, reading order, and status table. These documents remain the source of truth for architectural decisions and backend selection. When modifying existing subsystems, read the relevant doc first — don't introduce patterns that conflict with the established design.
 
 Key references by topic:
 - Backend selection → `docs/BACKEND_MATRIX.md`
@@ -137,3 +151,10 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `git_available?` is memoized — won't detect git becoming available mid-extraction (acceptable tradeoff).
 - Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit.
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
+- MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
+- Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
+- Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
+- `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."
+- `CircuitBreaker` state is per-instance, not global. Each provider/store gets its own breaker. Don't share breaker instances across unrelated components.
+- Embedding dimensions must match between provider and vector store. A mismatch (e.g., switching models) requires full re-index — `IndexValidator` detects this.
+- `PipelineGuard` enforces a 5-minute cooldown on full extraction/embedding runs. Incremental runs are not rate-limited.
