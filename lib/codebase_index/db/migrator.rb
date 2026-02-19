@@ -4,6 +4,8 @@ require_relative 'schema_version'
 require_relative 'migrations/001_create_units'
 require_relative 'migrations/002_create_edges'
 require_relative 'migrations/003_create_embeddings'
+require_relative 'migrations/004_create_snapshots'
+require_relative 'migrations/005_create_snapshot_units'
 
 module CodebaseIndex
   module Db
@@ -22,7 +24,9 @@ module CodebaseIndex
       MIGRATIONS = [
         Migrations::CreateUnits,
         Migrations::CreateEdges,
-        Migrations::CreateEmbeddings
+        Migrations::CreateEmbeddings,
+        Migrations::CreateSnapshots,
+        Migrations::CreateSnapshotUnits
       ].freeze
 
       attr_reader :schema_version

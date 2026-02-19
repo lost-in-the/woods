@@ -63,7 +63,8 @@ module CodebaseIndex
         # rubocop:disable Layout/LineLength
         migration: /\b(migration|migrate|schema.?change|add.?column|remove.?column|create.?table|drop.?table|db.?migrate)\b/i,
         action_cable_channel: /\b(action.?cable|websocket|broadcast|cable.?channel|subscription.?channel|realtime|real.?time)\b/i,
-        scheduled_job: /\b(schedule[dr]?|recurring|cron|periodic|every\s+\d|daily|hourly|weekly|solid.?queue.*recur|sidekiq.?cron|whenever)\b/i
+        scheduled_job: /\b(schedule[dr]?|recurring|cron|periodic|every\s+\d|daily|hourly|weekly|solid.?queue.*recur|sidekiq.?cron|whenever)\b/i,
+        rake_task: /\b(rake|rake.?task|lib.?tasks?|maintenance.?script|batch.?script)\b/i
         # rubocop:enable Layout/LineLength
       }.freeze
 

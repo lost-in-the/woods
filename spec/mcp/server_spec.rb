@@ -14,9 +14,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 22 tools' do
+    it 'registers 26 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(22)
+      expect(tools.size).to eq(26)
     end
 
     it 'registers expected tool names' do
@@ -29,7 +29,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
         'pipeline_extract', 'pipeline_embed', 'pipeline_status',
         'pipeline_diagnose', 'pipeline_repair',
         'retrieval_rate', 'retrieval_report_gap',
-        'retrieval_explain', 'retrieval_suggest'
+        'retrieval_explain', 'retrieval_suggest',
+        'list_snapshots', 'snapshot_diff',
+        'unit_history', 'snapshot_detail'
       )
     end
 

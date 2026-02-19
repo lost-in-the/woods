@@ -30,19 +30,19 @@ RSpec.describe CodebaseIndex::Db::Migrator do
 
     it 'records applied versions' do
       migrator.migrate!
-      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3])
+      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5])
     end
 
     it 'is idempotent — skips already-applied migrations' do
       migrator.migrate!
       # Should not raise on second run
       migrator.migrate!
-      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3])
+      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5])
     end
 
     it 'returns list of newly applied version numbers' do
       result = migrator.migrate!
-      expect(result).to eq([1, 2, 3])
+      expect(result).to eq([1, 2, 3, 4, 5])
 
       # Second run applies nothing
       result2 = migrator.migrate!
@@ -52,7 +52,7 @@ RSpec.describe CodebaseIndex::Db::Migrator do
 
   describe '#pending_versions' do
     it 'returns all versions when none applied' do
-      expect(migrator.pending_versions).to eq([1, 2, 3])
+      expect(migrator.pending_versions).to eq([1, 2, 3, 4, 5])
     end
 
     it 'returns only unapplied versions' do

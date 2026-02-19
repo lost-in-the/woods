@@ -1,6 +1,6 @@
 # CodebaseIndex
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (24 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (25 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, and evaluation harness.
 
 ## Commands
 
@@ -34,7 +34,7 @@ lib/
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
-│   ├── extractors/                      # 24 extractors + callback_analyzer + behavioral_profile
+│   ├── extractors/                      # 25 extractors + callback_analyzer + behavioral_profile
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -43,7 +43,7 @@ lib/
 │   ├── storage/                         # Storage backends (VectorStore, MetadataStore, GraphStore, Pgvector, Qdrant)
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
-│   ├── mcp/                             # MCP Index Server (22 tools, 2 resources, 2 templates)
+│   ├── mcp/                             # MCP Index Server (26 tools, 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
@@ -51,6 +51,7 @@ lib/
 │   ├── observability/                   # Instrumentation, StructuredLogger, HealthCheck
 │   ├── resilience/                      # CircuitBreaker, RetryableProvider, IndexValidator
 │   ├── session_tracer/                  # Session tracing middleware + flow assembly (FileStore, RedisStore, SolidCacheStore)
+│   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   └── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
 ├── generators/codebase_index/           # Rails generators (install, pgvector)
@@ -165,3 +166,5 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - Session tracer requires explicit store configuration (`session_store`) — no default store is provided. Set `session_tracer_enabled = true` and assign a store (FileStore, RedisStore, or SolidCacheStore) in the configure block.
 - Session tracer middleware position matters — it must be inserted after the session middleware but before the router. The railtie handles this via `app.middleware.use`.
 - `RedisStore` raises `SessionTracerError` if the `redis` gem is not available at initialization time.
+- `RakeTaskExtractor` reads `.rake` files statically (no Rails boot required for parsing). It uses `block_opener?` for depth tracking — `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks.
+- Temporal snapshots are gated by `enable_snapshots` config (default: false). `SnapshotStore` requires migrations 004 + 005 to be run first.

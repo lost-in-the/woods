@@ -58,13 +58,13 @@ RSpec.describe 'DB Migration Pipeline Integration', :integration do
     let(:migrator) { CodebaseIndex::Db::Migrator.new(connection: db) }
 
     it 'starts with all migrations pending' do
-      expect(migrator.pending_versions).to eq([1, 2, 3])
+      expect(migrator.pending_versions).to eq([1, 2, 3, 4, 5])
     end
 
-    it 'runs all 3 migrations' do
+    it 'runs all 5 migrations' do
       applied = migrator.migrate!
 
-      expect(applied).to eq([1, 2, 3])
+      expect(applied).to eq([1, 2, 3, 4, 5])
     end
 
     it 'creates the codebase_units table' do
@@ -91,8 +91,8 @@ RSpec.describe 'DB Migration Pipeline Integration', :integration do
     it 'records all versions as applied' do
       migrator.migrate!
 
-      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3])
-      expect(migrator.schema_version.current_version).to eq(3)
+      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5])
+      expect(migrator.schema_version.current_version).to eq(5)
     end
 
     it 'has no pending migrations after running all' do

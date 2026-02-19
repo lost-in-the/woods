@@ -33,6 +33,7 @@ require_relative 'extractors/view_template_extractor'
 require_relative 'extractors/migration_extractor'
 require_relative 'extractors/action_cable_extractor'
 require_relative 'extractors/scheduled_job_extractor'
+require_relative 'extractors/rake_task_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
@@ -99,6 +100,7 @@ module CodebaseIndex
       migrations: Extractors::MigrationExtractor,
       action_cable_channels: Extractors::ActionCableExtractor,
       scheduled_jobs: Extractors::ScheduledJobExtractor,
+      rake_tasks: Extractors::RakeTaskExtractor,
       rails_source: Extractors::RailsSourceExtractor
     }.freeze
 
@@ -133,6 +135,7 @@ module CodebaseIndex
       migration: :migrations,
       action_cable_channel: :action_cable_channels,
       scheduled_job: :scheduled_jobs,
+      rake_task: :rake_tasks,
       rails_source: :rails_source
     }.freeze
 
@@ -153,7 +156,8 @@ module CodebaseIndex
       pundit_policy: :extract_pundit_file,
       configuration: :extract_configuration_file,
       view_template: :extract_view_template_file,
-      migration: :extract_migration_file
+      migration: :extract_migration_file,
+      rake_task: :extract_rake_file
     }.freeze
 
     # GraphQL types all use the same extractor method.

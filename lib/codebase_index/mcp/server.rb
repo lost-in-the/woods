@@ -7,7 +7,7 @@ require_relative 'index_reader'
 
 module CodebaseIndex
   module MCP
-    # Builds an MCP::Server with 22 tools, 2 resources, and 2 resource templates for querying
+    # Builds an MCP::Server with 26 tools, 2 resources, and 2 resource templates for querying
     # CodebaseIndex extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -27,7 +27,7 @@ module CodebaseIndex
         # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
         # @param feedback_store [CodebaseIndex::Feedback::Store, nil] Optional feedback store
         # @return [MCP::Server] Configured server ready for transport
-        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil)
+        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil)
           reader = IndexReader.new(index_dir)
           resources = build_resources
           resource_templates = build_resource_templates
@@ -57,6 +57,7 @@ module CodebaseIndex
           define_session_trace_tool(server, reader, respond)
           define_operator_tools(server, operator, respond)
           define_feedback_tools(server, feedback_store, respond)
+          define_snapshot_tools(server, snapshot_store, respond)
           register_resource_handler(server, reader)
 
           server
@@ -719,6 +720,101 @@ module CodebaseIndex
                                                 issues_found: issues.size,
                                                 issues: issues
                                               }))
+          end
+        end
+
+        def define_snapshot_tools(server, snapshot_store, respond)
+          define_list_snapshots_tool(server, snapshot_store, respond)
+          define_snapshot_diff_tool(server, snapshot_store, respond)
+          define_unit_history_tool(server, snapshot_store, respond)
+          define_snapshot_detail_tool(server, snapshot_store, respond)
+        end
+
+        def define_list_snapshots_tool(server, snapshot_store, respond)
+          server.define_tool(
+            name: 'list_snapshots',
+            description: 'List temporal snapshots of past extraction runs, optionally filtered by branch.',
+            input_schema: {
+              properties: {
+                limit: { type: 'integer', description: 'Maximum results (default: 20)' },
+                branch: { type: 'string', description: 'Filter to this branch name' }
+              }
+            }
+          ) do |server_context:, limit: nil, branch: nil|
+            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+
+            results = snapshot_store.list(limit: limit || 20, branch: branch)
+            respond.call(JSON.pretty_generate({ snapshot_count: results.size, snapshots: results }))
+          end
+        end
+
+        def define_snapshot_diff_tool(server, snapshot_store, respond)
+          server.define_tool(
+            name: 'snapshot_diff',
+            description: 'Compare two extraction snapshots by git SHA. Returns lists of added, modified, and deleted units.',
+            input_schema: {
+              properties: {
+                sha_a: { type: 'string', description: 'Git SHA of the "before" snapshot' },
+                sha_b: { type: 'string', description: 'Git SHA of the "after" snapshot' }
+              },
+              required: %w[sha_a sha_b]
+            }
+          ) do |sha_a:, sha_b:, server_context:|
+            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+
+            result = snapshot_store.diff(sha_a, sha_b)
+            respond.call(JSON.pretty_generate({
+                                                sha_a: sha_a, sha_b: sha_b,
+                                                added: result[:added].size,
+                                                modified: result[:modified].size,
+                                                deleted: result[:deleted].size,
+                                                details: result
+                                              }))
+          end
+        end
+
+        def define_unit_history_tool(server, snapshot_store, respond)
+          server.define_tool(
+            name: 'unit_history',
+            description: 'Show the history of a single unit across extraction snapshots. Tracks when source changed.',
+            input_schema: {
+              properties: {
+                identifier: { type: 'string', description: 'Unit identifier (e.g. "User", "PostsController")' },
+                limit: { type: 'integer', description: 'Maximum entries (default: 20)' }
+              },
+              required: ['identifier']
+            }
+          ) do |identifier:, server_context:, limit: nil|
+            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+
+            entries = snapshot_store.unit_history(identifier, limit: limit || 20)
+            respond.call(JSON.pretty_generate({
+                                                identifier: identifier,
+                                                versions: entries.size,
+                                                history: entries
+                                              }))
+          end
+        end
+
+        def define_snapshot_detail_tool(server, snapshot_store, respond)
+          server.define_tool(
+            name: 'snapshot_detail',
+            description: 'Get full metadata for a specific extraction snapshot by git SHA.',
+            input_schema: {
+              properties: {
+                git_sha: { type: 'string', description: 'Git SHA of the snapshot' }
+              },
+              required: ['git_sha']
+            }
+          ) do |git_sha:, server_context:|
+            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+
+            snapshot = snapshot_store.find(git_sha)
+            if snapshot
+              respond.call(JSON.pretty_generate(snapshot))
+            else
+              respond.call("Snapshot not found for git SHA: #{git_sha}")
+            end
           end
         end
 
