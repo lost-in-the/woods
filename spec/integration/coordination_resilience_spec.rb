@@ -277,7 +277,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
   describe 'PipelineGuard' do
     let(:guard) do
-      CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 1)
+      CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
     end
 
     it 'allows first operation' do
@@ -291,7 +291,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
     it 'allows after cooldown expires' do
       guard.record!(:extraction)
-      allow(Time).to receive(:now).and_return(Time.now + 1.1)
+      allow(Time).to receive(:now).and_return(Time.now + 61)
       expect(guard.allow?(:extraction)).to be true
     end
 
@@ -313,7 +313,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
     it 'persists state across instances' do
       guard.record!(:extraction)
 
-      new_guard = CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 1)
+      new_guard = CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
       expect(new_guard.allow?(:extraction)).to be false
     end
   end

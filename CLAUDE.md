@@ -43,13 +43,14 @@ lib/
 │   ├── storage/                         # Storage backends (VectorStore, MetadataStore, GraphStore, Pgvector, Qdrant)
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
-│   ├── mcp/                             # MCP Index Server (21 tools, 2 resources, 2 templates)
+│   ├── mcp/                             # MCP Index Server (22 tools, 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
 │   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
 │   ├── observability/                   # Instrumentation, StructuredLogger, HealthCheck
 │   ├── resilience/                      # CircuitBreaker, RetryableProvider, IndexValidator
+│   ├── session_tracer/                  # Session tracing middleware + flow assembly (FileStore, RedisStore, SolidCacheStore)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   └── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
 ├── generators/codebase_index/           # Rails generators (install, pgvector)
@@ -161,3 +162,6 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `BehavioralProfile` guards every config introspection with `respond_to?`/`defined?` — a missing config section produces `nil`, not an error.
 - `FlowPrecomputer` is gated by `precompute_flows` config (default: false). Per-action errors are rescued so one failing action doesn't block others.
 - Incremental re-extraction skips unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`. These types require full extraction to update. This is acceptable — their source files rarely change independently.
+- Session tracer requires explicit store configuration (`session_store`) — no default store is provided. Set `session_tracer_enabled = true` and assign a store (FileStore, RedisStore, or SolidCacheStore) in the configure block.
+- Session tracer middleware position matters — it must be inserted after the session middleware but before the router. The railtie handles this via `app.middleware.use`.
+- `RedisStore` raises `SessionTracerError` if the `redis` gem is not available at initialization time.

@@ -7,7 +7,7 @@ require_relative 'index_reader'
 
 module CodebaseIndex
   module MCP
-    # Builds an MCP::Server with 21 tools, 2 resources, and 2 resource templates for querying
+    # Builds an MCP::Server with 22 tools, 2 resources, and 2 resource templates for querying
     # CodebaseIndex extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -54,6 +54,7 @@ module CodebaseIndex
           define_reload_tool(server, reader, respond)
           define_retrieve_tool(server, retriever, respond)
           define_trace_flow_tool(server, reader, index_dir, respond)
+          define_session_trace_tool(server, reader, respond)
           define_operator_tools(server, operator, respond)
           define_feedback_tools(server, feedback_store, respond)
           register_resource_handler(server, reader)
@@ -440,6 +441,34 @@ module CodebaseIndex
             flow_doc = assembler.assemble(entry_point, max_depth: max_depth)
 
             respond.call(JSON.pretty_generate(flow_doc.to_h))
+          rescue StandardError => e
+            respond.call(JSON.pretty_generate({ error: e.message }))
+          end
+        end
+
+        def define_session_trace_tool(server, reader, respond)
+          server.define_tool(
+            name: 'session_trace',
+            description: 'Assemble context from a browser session trace (requires session tracer middleware)',
+            input_schema: {
+              properties: {
+                session_id: { type: 'string', description: 'Session ID to trace' },
+                budget: { type: 'integer', description: 'Max token budget (default: 8000)' },
+                depth: { type: 'integer', description: 'Dependency resolution depth (default: 1)' }
+              },
+              required: ['session_id']
+            }
+          ) do |session_id:, server_context:, budget: nil, depth: nil|
+            store = CodebaseIndex.configuration.session_store
+            next respond.call(JSON.pretty_generate({ error: 'Session tracer not configured' })) unless store
+
+            require_relative '../session_tracer/session_flow_assembler'
+
+            assembler = CodebaseIndex::SessionTracer::SessionFlowAssembler.new(
+              store: store, reader: reader
+            )
+            doc = assembler.assemble(session_id, budget: budget || 8000, depth: depth || 1)
+            respond.call(doc.to_markdown)
           rescue StandardError => e
             respond.call(JSON.pretty_generate({ error: e.message }))
           end

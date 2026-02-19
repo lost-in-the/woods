@@ -35,6 +35,46 @@ RSpec.describe CodebaseIndex::Configuration do
     it 'sets gem_configs to an empty hash' do
       expect(config.gem_configs).to eq({})
     end
+
+    it 'sets session_tracer_enabled to false' do
+      expect(config.session_tracer_enabled).to eq(false)
+    end
+
+    it 'sets session_store to nil' do
+      expect(config.session_store).to be_nil
+    end
+
+    it 'sets session_id_proc to nil' do
+      expect(config.session_id_proc).to be_nil
+    end
+
+    it 'sets session_exclude_paths to empty array' do
+      expect(config.session_exclude_paths).to eq([])
+    end
+  end
+
+  describe 'session tracer configuration' do
+    it 'allows setting session_tracer_enabled' do
+      config.session_tracer_enabled = true
+      expect(config.session_tracer_enabled).to eq(true)
+    end
+
+    it 'allows setting session_store' do
+      store = Object.new
+      config.session_store = store
+      expect(config.session_store).to eq(store)
+    end
+
+    it 'allows setting session_id_proc' do
+      proc = ->(request) { request.session.id }
+      config.session_id_proc = proc
+      expect(config.session_id_proc).to eq(proc)
+    end
+
+    it 'allows setting session_exclude_paths' do
+      config.session_exclude_paths = ['/health', '/assets']
+      expect(config.session_exclude_paths).to eq(['/health', '/assets'])
+    end
   end
 
   describe '#max_context_tokens=' do

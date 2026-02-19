@@ -27,6 +27,7 @@ module CodebaseIndex
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class ExtractionError < Error; end
+  class SessionTracerError < Error; end
 
   CONFIG_MUTEX = Mutex.new
 
@@ -38,7 +39,8 @@ module CodebaseIndex
     attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
-                  :concurrent_extraction, :precompute_flows
+                  :concurrent_extraction, :precompute_flows,
+                  :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json
 
     def initialize
@@ -53,6 +55,10 @@ module CodebaseIndex
       @pretty_json = true
       @concurrent_extraction = false
       @precompute_flows = false
+      @session_tracer_enabled = false
+      @session_store = nil
+      @session_id_proc = nil
+      @session_exclude_paths = []
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/codebase_index

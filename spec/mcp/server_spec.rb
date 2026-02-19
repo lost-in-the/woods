@@ -14,9 +14,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 21 tools' do
+    it 'registers 22 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(21)
+      expect(tools.size).to eq(22)
     end
 
     it 'registers expected tool names' do
@@ -25,7 +25,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'pagerank', 'framework',
         'recent_changes', 'reload', 'codebase_retrieve',
-        'trace_flow',
+        'trace_flow', 'session_trace',
         'pipeline_extract', 'pipeline_embed', 'pipeline_status',
         'pipeline_diagnose', 'pipeline_repair',
         'retrieval_rate', 'retrieval_report_gap',
@@ -675,6 +675,82 @@ RSpec.describe CodebaseIndex::MCP::Server do
       response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
       data = parse_response(response)
       expect(data['error']).to eq('unit not found')
+    end
+  end
+
+  describe 'tool: session_trace' do
+    context 'without session store configured' do
+      before do
+        mock_config = Struct.new(:session_store).new(nil)
+        CodebaseIndex.configuration = mock_config
+      end
+
+      after { CodebaseIndex.configuration = nil }
+
+      it 'returns an error when session tracer is not configured' do
+        response = call_tool(server, 'session_trace', session_id: 'sess1')
+        data = parse_response(response)
+        expect(data['error']).to include('not configured')
+      end
+    end
+
+    context 'with session store configured' do
+      let(:mock_store) do
+        instance_double('CodebaseIndex::SessionTracer::FileStore').tap do |s|
+          allow(s).to receive(:read).with('sess1').and_return([
+                                                                {
+                                                                  'method' => 'GET', 'path' => '/posts',
+                                                                  'controller' => 'PostsController',
+                                                                  'action' => 'index',
+                                                                  'status' => 200, 'duration_ms' => 12
+                                                                }
+                                                              ])
+        end
+      end
+
+      let(:mock_doc) do
+        instance_double(
+          'CodebaseIndex::SessionTracer::SessionFlowDocument',
+          to_markdown: "## Session: sess1\n_Generated at 2026-02-18T00:00:00Z | 1 requests | ~42 tokens_"
+        )
+      end
+
+      let(:mock_assembler) do
+        instance_double('CodebaseIndex::SessionTracer::SessionFlowAssembler').tap do |a|
+          allow(a).to receive(:assemble).and_return(mock_doc)
+        end
+      end
+
+      before do
+        mock_config = Struct.new(:session_store).new(mock_store)
+        CodebaseIndex.configuration = mock_config
+        allow(CodebaseIndex::SessionTracer::SessionFlowAssembler).to receive(:new).and_return(mock_assembler)
+      end
+
+      after { CodebaseIndex.configuration = nil }
+
+      it 'calls the assembler with session_id and default parameters' do
+        call_tool(server, 'session_trace', session_id: 'sess1')
+        expect(mock_assembler).to have_received(:assemble).with('sess1', budget: 8000, depth: 1)
+      end
+
+      it 'passes custom budget and depth to the assembler' do
+        call_tool(server, 'session_trace', session_id: 'sess1', budget: 4000, depth: 2)
+        expect(mock_assembler).to have_received(:assemble).with('sess1', budget: 4000, depth: 2)
+      end
+
+      it 'returns the markdown from the session flow document' do
+        response = call_tool(server, 'session_trace', session_id: 'sess1')
+        text = response_text(response)
+        expect(text).to include('Session: sess1')
+      end
+
+      it 'returns an error hash when assembly raises' do
+        allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'store unavailable')
+        response = call_tool(server, 'session_trace', session_id: 'sess1')
+        data = parse_response(response)
+        expect(data['error']).to eq('store unavailable')
+      end
     end
   end
 
