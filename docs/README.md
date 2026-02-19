@@ -4,7 +4,7 @@ CodebaseIndex is a Ruby gem that extracts structured data from Rails application
 
 ## Current State
 
-All major layers are implemented: 24 extractors (including migrations, ActionCable channels, and scheduled jobs), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (21-tool index server + 31-tool console server), AST analysis, flow extraction, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
+All major layers are implemented: 32 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
 
 What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remaining coverage work (HAML/Slim expansion, configuration semantic parsing, Stimulus/Hotwire) and [backlog.json](../.claude/backlog.json) for tracked tasks.
 
@@ -56,8 +56,8 @@ All configuration options in one place. Audience: anyone deploying or tuning the
 
 What each extractor produces. Audience: users wanting to understand extraction output, contributors adding extractors.
 
-- The 24 extractors: models, controllers, services, jobs, mailers, serializers, managers, policies, validators, GraphQL, Phlex, ViewComponent, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates (ERB), migrations, ActionCable channels, scheduled jobs, Rails sources
-- Behavioral enrichment: callback side-effect analysis (columns written, jobs enqueued, services called), behavioral profile (resolved config values), pre-computed request flow maps
+- The 32 extractors: models, controllers, services, jobs, mailers, serializers, managers, policies, validators, GraphQL, Phlex, ViewComponent, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates (ERB), migrations, ActionCable channels, scheduled jobs, rake tasks, state machines, events, decorators, database views, caching patterns, factories, test mappings, Rails sources
+- Behavioral enrichment: callback side-effect analysis (columns written, jobs enqueued, services called), behavioral profile (resolved config values), pre-computed request flow maps, ActiveStorage/ActionText attachment metadata, multi-database topology
 - What each extractor covers (associations, callbacks, scopes, validations, etc.)
 - Edge cases: STI, namespaced classes, empty files, concern inlining
 - How to add a new extractor (interface contract, registration, testing)
@@ -66,7 +66,7 @@ What each extractor produces. Audience: users wanting to understand extraction o
 
 Setting up and using the MCP servers. Audience: developers integrating with AI coding tools.
 
-- Index server (21 tools) vs Console server (31 tools) — when to use which
+- Index server (26 tools) vs Console server (31 tools) — when to use which
 - Tool catalog organized by category
 - Setup and configuration for each server
 - Security model: SafeContext, SqlValidator, audit logging, read-only transactions

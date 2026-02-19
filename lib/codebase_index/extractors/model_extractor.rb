@@ -330,8 +330,108 @@ module CodebaseIndex
           # Schema info
           table_exists: model.table_exists?,
           column_count: model.table_exists? ? model.columns.size : 0,
-          column_names: model.table_exists? ? model.column_names : []
+          column_names: model.table_exists? ? model.column_names : [],
+
+          # ActiveStorage / ActionText
+          active_storage_attachments: extract_active_storage_attachments(source),
+          action_text_fields: extract_action_text_fields(source),
+          variant_definitions: extract_variant_definitions(source),
+
+          # Multi-database topology
+          database_roles: extract_database_roles(source),
+          shard_config: extract_shard_config(source)
         }
+      end
+
+      # Extract ActiveStorage attachment declarations from source.
+      #
+      # Scans for +has_one_attached+ and +has_many_attached+ declarations.
+      #
+      # @param source [String, nil] The model source code
+      # @return [Array<Hash>] Attachment declarations with :name and :type
+      def extract_active_storage_attachments(source)
+        return [] unless source
+
+        attachments = []
+        source.scan(/has_one_attached\s+:(\w+)/) { |m| attachments << { name: m.first, type: :has_one_attached } }
+        source.scan(/has_many_attached\s+:(\w+)/) { |m| attachments << { name: m.first, type: :has_many_attached } }
+        attachments
+      end
+
+      # Extract ActionText rich text field declarations from source.
+      #
+      # Scans for +has_rich_text+ declarations.
+      #
+      # @param source [String, nil] The model source code
+      # @return [Array<String>] Rich text field names
+      def extract_action_text_fields(source)
+        return [] unless source
+
+        source.scan(/has_rich_text\s+:(\w+)/).flatten
+      end
+
+      # Extract ActiveStorage variant definitions from source.
+      #
+      # Scans for +variant+ declarations inside +with_attached+ blocks.
+      #
+      # @param source [String, nil] The model source code
+      # @return [Array<Hash>] Variant declarations with :name and :options
+      def extract_variant_definitions(source)
+        return [] unless source
+
+        source.scan(/variant\s+:(\w+),\s*(.+)/).map do |name, options|
+          { name: name, options: options.strip }
+        end
+      end
+
+      # Extract database role configuration from connects_to database: { ... }.
+      #
+      # Parses +connects_to database:+ declarations and returns a hash of
+      # role names to database keys (e.g. +{ writing: :primary, reading: :replica }+).
+      #
+      # @param source [String, nil] The model source code
+      # @return [Hash, nil] Database role map or nil when not configured
+      def extract_database_roles(source)
+        return nil unless source
+
+        match = source.match(/connects_to\s+database:\s*\{([^}]+)\}/)
+        return nil unless match
+
+        parse_role_hash(match[1])
+      end
+
+      # Extract shard configuration from connects_to shards: { ... }.
+      #
+      # Parses +connects_to shards:+ declarations and returns a hash of
+      # shard names to their nested database role maps.
+      # Uses a nested-brace-aware pattern to capture the full shard hash.
+      #
+      # @param source [String, nil] The model source code
+      # @return [Hash, nil] Shard config map or nil when not configured
+      def extract_shard_config(source)
+        return nil unless source
+
+        # Pattern handles one level of inner braces: { shard: { role: :db }, ... }
+        match = source.match(/connects_to\s+shards:\s*\{((?:[^{}]|\{[^}]*\})*)\}/)
+        return nil unless match
+
+        shards = {}
+        match[1].scan(/(\w+):\s*\{([^}]+)\}/) do |shard_name, roles_str|
+          shards[shard_name.to_sym] = parse_role_hash(roles_str)
+        end
+        shards.empty? ? nil : shards
+      end
+
+      # Parse a key: :value hash string into a symbol-keyed hash.
+      #
+      # @param hash_str [String] Contents of a Ruby hash literal
+      # @return [Hash] Parsed key-value pairs as symbol keys
+      def parse_role_hash(hash_str)
+        result = {}
+        hash_str.scan(/(\w+):\s*:(\w+)/) do |key, value|
+          result[key.to_sym] = value.to_sym
+        end
+        result
       end
 
       # Extract all associations with full details

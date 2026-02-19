@@ -1,6 +1,6 @@
 # CodebaseIndex Coverage Gap Analysis: Technical Review
 
-We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. CodebaseIndex currently covers 24 extractors producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates, migrations, ActionCable channels, scheduled jobs, and Rails source. Extraction also includes behavioral enrichment: callback side-effect analysis, a behavioral profile of resolved `Rails.application.config` values, and optional pre-computed request flow maps. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
+We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. CodebaseIndex currently covers 32 extractors producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates, migrations, ActionCable channels, scheduled jobs, rake tasks, state machines, events, decorators, database views, caching patterns, factories, test mappings, and Rails source. Extraction also includes behavioral enrichment: callback side-effect analysis, a behavioral profile of resolved `Rails.application.config` values, and optional pre-computed request flow maps. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
 
 ## Implementation Status
 
@@ -246,11 +246,11 @@ Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily g
 
 **Database migrations** (Perspective 2, #5): **Now Done.** `MigrationExtractor` scans `db/migrate/*.rb`, extracting DDL metadata (tables, columns, indexes, references), reversibility, risk indicators (data migrations, raw SQL), and model dependencies via table name classification. 55 specs.
 
-**Rake tasks** (from the original list): Rarely queried. Most rake tasks are thin wrappers around service objects or direct ActiveRecord calls. The service extractor already captures the logic that matters.
+**Rake tasks** (from the original list): **Now Done.** `RakeTaskExtractor` statically parses `.rake` files in `lib/tasks/`, extracting task names, namespaces, descriptions, dependencies, arguments, and cross-task invocations.
 
 **ActionCable channels** (from the original list): **Now Done.** `ActionCableExtractor` uses runtime introspection via `ActionCable::Channel::Base.descendants`. Extracts stream subscriptions, actions, broadcast patterns. 29 specs.
 
-**ActiveStorage/ActionText** (from the original list): Configuration-level concerns already partially covered by model association extraction (`has_one_attached`, `has_rich_text` show up in model metadata). A dedicated extractor adds little over what model extraction provides.
+**ActiveStorage/ActionText** (from the original list): **Now Done.** `ModelExtractor` enriches model metadata with `active_storage_attachments`, `action_text_fields`, and `variant_definitions` extracted from source.
 
 **Scheduled job definitions** (from the original list): **Now Done.** `ScheduledJobExtractor` parses three formats: Solid Queue (`config/recurring.yml`), Sidekiq-Cron (`config/sidekiq_cron.yml`), and Whenever (`config/schedule.rb`). One unit per scheduled entry with cron expression, job class, and human-readable frequency. 45 specs.
 
@@ -272,7 +272,7 @@ Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily g
 
 ## Suggested Implementation Order
 
-All 8 original priority gaps are complete. The 3 "Didn't Make the Cut" items (Database Migrations, ActionCable Channels, Scheduled Jobs) are also now implemented, bringing the total to **24 extractors**.
+All 8 original priority gaps are complete. The 3 "Didn't Make the Cut" items (Database Migrations, ActionCable Channels, Scheduled Jobs) are also now implemented. Sprint 3 added 7 more extractors (state machines, events, decorators, database views, caching, factories, test mappings) plus 3 enhancements (job-to-job deps, ActiveStorage/ActionText, multi-DB topology), bringing the total to **32 extractors**.
 
 Remaining gap work:
 

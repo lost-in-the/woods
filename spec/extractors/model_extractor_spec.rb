@@ -339,6 +339,197 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
   end
 
+  # ── extract_active_storage_attachments ────────────────────────────
+
+  describe '#extract_active_storage_attachments' do
+    it 'extracts has_one_attached declarations' do
+      source = <<~RUBY
+        class User < ApplicationRecord
+          has_one_attached :avatar
+        end
+      RUBY
+
+      attachments = extractor.send(:extract_active_storage_attachments, source)
+      expect(attachments).to include(hash_including(name: 'avatar', type: :has_one_attached))
+    end
+
+    it 'extracts has_many_attached declarations' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          has_many_attached :images
+        end
+      RUBY
+
+      attachments = extractor.send(:extract_active_storage_attachments, source)
+      expect(attachments).to include(hash_including(name: 'images', type: :has_many_attached))
+    end
+
+    it 'extracts multiple attachments of mixed types' do
+      source = <<~RUBY
+        class Document < ApplicationRecord
+          has_one_attached :cover
+          has_many_attached :pages
+        end
+      RUBY
+
+      attachments = extractor.send(:extract_active_storage_attachments, source)
+      names = attachments.map { |a| a[:name] }
+      expect(names).to include('cover', 'pages')
+    end
+
+    it 'returns empty array when no attachments are present' do
+      source = <<~RUBY
+        class Plain < ApplicationRecord
+          validates :name, presence: true
+        end
+      RUBY
+
+      attachments = extractor.send(:extract_active_storage_attachments, source)
+      expect(attachments).to eq([])
+    end
+
+    it 'returns empty array when source is nil' do
+      expect(extractor.send(:extract_active_storage_attachments, nil)).to eq([])
+    end
+  end
+
+  # ── extract_action_text_fields ────────────────────────────────────
+
+  describe '#extract_action_text_fields' do
+    it 'extracts has_rich_text declarations' do
+      source = <<~RUBY
+        class Post < ApplicationRecord
+          has_rich_text :content
+        end
+      RUBY
+
+      fields = extractor.send(:extract_action_text_fields, source)
+      expect(fields).to include('content')
+    end
+
+    it 'extracts multiple has_rich_text declarations' do
+      source = <<~RUBY
+        class Article < ApplicationRecord
+          has_rich_text :body
+          has_rich_text :summary
+        end
+      RUBY
+
+      fields = extractor.send(:extract_action_text_fields, source)
+      expect(fields).to include('body', 'summary')
+    end
+
+    it 'returns empty array when no rich text fields are present' do
+      source = <<~RUBY
+        class Plain < ApplicationRecord
+          validates :name, presence: true
+        end
+      RUBY
+
+      fields = extractor.send(:extract_action_text_fields, source)
+      expect(fields).to eq([])
+    end
+
+    it 'returns empty array when source is nil' do
+      expect(extractor.send(:extract_action_text_fields, nil)).to eq([])
+    end
+  end
+
+  # ── extract_variant_definitions ───────────────────────────────────
+
+  describe '#extract_variant_definitions' do
+    it 'extracts variant definitions' do
+      source = <<~RUBY
+        class User < ApplicationRecord
+          has_one_attached :avatar do |attachable|
+            attachable.variant :thumb, resize_to_limit: [100, 100]
+          end
+        end
+      RUBY
+
+      variants = extractor.send(:extract_variant_definitions, source)
+      expect(variants).to include(hash_including(name: 'thumb'))
+    end
+
+    it 'returns empty array when no variants are defined' do
+      source = <<~RUBY
+        class Plain < ApplicationRecord
+          has_one_attached :avatar
+        end
+      RUBY
+
+      variants = extractor.send(:extract_variant_definitions, source)
+      expect(variants).to eq([])
+    end
+
+    it 'returns empty array when source is nil' do
+      expect(extractor.send(:extract_variant_definitions, nil)).to eq([])
+    end
+  end
+
+  # ── extract_database_roles ────────────────────────────────────────
+
+  describe '#extract_database_roles' do
+    it 'extracts connects_to database roles' do
+      source = <<~RUBY
+        class AnimalsBase < ApplicationRecord
+          self.abstract_class = true
+          connects_to database: { writing: :primary, reading: :replica }
+        end
+      RUBY
+
+      roles = extractor.send(:extract_database_roles, source)
+      expect(roles).to eq({ writing: :primary, reading: :replica })
+    end
+
+    it 'returns nil when connects_to is not present' do
+      source = <<~RUBY
+        class User < ApplicationRecord
+          validates :name, presence: true
+        end
+      RUBY
+
+      roles = extractor.send(:extract_database_roles, source)
+      expect(roles).to be_nil
+    end
+
+    it 'returns nil when source is nil' do
+      expect(extractor.send(:extract_database_roles, nil)).to be_nil
+    end
+  end
+
+  # ── extract_shard_config ──────────────────────────────────────────
+
+  describe '#extract_shard_config' do
+    it 'extracts connects_to shard configuration' do
+      source = <<~RUBY
+        class ShardedBase < ApplicationRecord
+          self.abstract_class = true
+          connects_to shards: { shard_one: { writing: :shard_one }, shard_two: { writing: :shard_two } }
+        end
+      RUBY
+
+      shards = extractor.send(:extract_shard_config, source)
+      expect(shards).to have_key(:shard_one)
+      expect(shards[:shard_one]).to eq({ writing: :shard_one })
+    end
+
+    it 'returns nil when no shard config is present' do
+      source = <<~RUBY
+        class User < ApplicationRecord
+          validates :name, presence: true
+        end
+      RUBY
+
+      shards = extractor.send(:extract_shard_config, source)
+      expect(shards).to be_nil
+    end
+
+    it 'returns nil when source is nil' do
+      expect(extractor.send(:extract_shard_config, nil)).to be_nil
+    end
+  end
+
   # ── build_callback_effects_chunk ──────────────────────────────────
 
   describe '#build_callback_effects_chunk' do

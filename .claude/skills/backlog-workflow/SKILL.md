@@ -1,3 +1,8 @@
+---
+name: backlog-workflow
+description: Guides backlog task selection, TDD implementation, and status updates
+argument-hint: "[item-number]"
+---
 # Backlog Workflow
 
 The primary task source is `docs/backlog.json`. Historical context and batch notes are in `docs/OPTIMIZATION_BACKLOG.md` (read-only archive).

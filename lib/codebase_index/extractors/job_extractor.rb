@@ -90,7 +90,7 @@ module CodebaseIndex
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata_from_source(source, class_name)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, class_name)
 
         unit
       rescue StandardError => e
@@ -117,7 +117,7 @@ module CodebaseIndex
         unit.namespace = extract_namespace(job_class.name)
         unit.source_code = annotate_source(source, job_class.name)
         unit.metadata = extract_metadata_from_class(job_class, source)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, job_class.name)
 
         unit
       rescue StandardError => e
@@ -203,7 +203,7 @@ module CodebaseIndex
       # Metadata Extraction (from source)
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_metadata_from_source(source, _class_name)
+      def extract_metadata_from_source(source, class_name)
         {
           job_type: detect_job_type(source),
           queue: extract_queue(source),
@@ -223,6 +223,9 @@ module CodebaseIndex
 
           # Callbacks
           callbacks: extract_callbacks(source),
+
+          # Job chaining
+          enqueues_jobs: extract_enqueued_jobs(source, class_name),
 
           # Metrics
           loc: source.lines.count { |l| l.strip.present? && !l.strip.start_with?('#') }
@@ -329,8 +332,17 @@ module CodebaseIndex
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(source)
-        deps = scan_common_dependencies(source)
+      def extract_dependencies(source, current_class_name = nil)
+        # Scan standard dep types individually (not scan_common_dependencies) so we can
+        # handle job deps with the richer :job_enqueue via and self-reference exclusion.
+        deps = scan_model_dependencies(source)
+        deps.concat(scan_service_dependencies(source))
+        deps.concat(scan_mailer_dependencies(source))
+
+        # Job-to-job dependencies with specific :job_enqueue via and self-reference exclusion
+        extract_enqueued_jobs(source, current_class_name).each do |job_name|
+          deps << { type: :job, target: job_name, via: :job_enqueue }
+        end
 
         # External services
         if source.match?(/HTTParty|Faraday|RestClient|Net::HTTP/)
@@ -340,6 +352,17 @@ module CodebaseIndex
         deps << { type: :infrastructure, target: :redis, via: :code_reference } if source.match?(/Redis\.current|REDIS/)
 
         deps.uniq { |d| [d[:type], d[:target]] }
+      end
+
+      # Scan source for job class enqueue calls and return the list of enqueued job names.
+      #
+      # @param source [String] The job source code
+      # @param current_class_name [String, nil] The current job class name (excluded from results)
+      # @return [Array<String>] Unique list of enqueued job class names
+      def extract_enqueued_jobs(source, current_class_name = nil)
+        pattern = /(\w+Job)\.(?:perform_later|perform_async|perform_in|perform_at|set\b)/
+        job_names = source.scan(pattern).flatten.uniq
+        job_names.reject { |name| name == current_class_name }
       end
     end
   end

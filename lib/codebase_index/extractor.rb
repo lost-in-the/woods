@@ -34,6 +34,13 @@ require_relative 'extractors/migration_extractor'
 require_relative 'extractors/action_cable_extractor'
 require_relative 'extractors/scheduled_job_extractor'
 require_relative 'extractors/rake_task_extractor'
+require_relative 'extractors/state_machine_extractor'
+require_relative 'extractors/event_extractor'
+require_relative 'extractors/decorator_extractor'
+require_relative 'extractors/database_view_extractor'
+require_relative 'extractors/caching_extractor'
+require_relative 'extractors/factory_extractor'
+require_relative 'extractors/test_mapping_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
@@ -74,6 +81,8 @@ module CodebaseIndex
       policies
       validators
       channels
+      presenters
+      form_objects
     ].freeze
 
     EXTRACTORS = {
@@ -101,6 +110,13 @@ module CodebaseIndex
       action_cable_channels: Extractors::ActionCableExtractor,
       scheduled_jobs: Extractors::ScheduledJobExtractor,
       rake_tasks: Extractors::RakeTaskExtractor,
+      state_machines: Extractors::StateMachineExtractor,
+      events: Extractors::EventExtractor,
+      decorators: Extractors::DecoratorExtractor,
+      database_views: Extractors::DatabaseViewExtractor,
+      caching: Extractors::CachingExtractor,
+      factories: Extractors::FactoryExtractor,
+      test_mappings: Extractors::TestMappingExtractor,
       rails_source: Extractors::RailsSourceExtractor
     }.freeze
 
@@ -136,6 +152,13 @@ module CodebaseIndex
       action_cable_channel: :action_cable_channels,
       scheduled_job: :scheduled_jobs,
       rake_task: :rake_tasks,
+      state_machine: :state_machines,
+      event: :events,
+      decorator: :decorators,
+      database_view: :database_views,
+      caching: :caching,
+      factory: :factories,
+      test_mapping: :test_mappings,
       rails_source: :rails_source
     }.freeze
 
@@ -157,7 +180,11 @@ module CodebaseIndex
       configuration: :extract_configuration_file,
       view_template: :extract_view_template_file,
       migration: :extract_migration_file,
-      rake_task: :extract_rake_file
+      rake_task: :extract_rake_file,
+      decorator: :extract_decorator_file,
+      database_view: :extract_view_file,
+      caching: :extract_caching_file,
+      test_mapping: :extract_test_file
     }.freeze
 
     # GraphQL types all use the same extractor method.

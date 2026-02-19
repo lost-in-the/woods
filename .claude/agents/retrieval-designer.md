@@ -1,6 +1,7 @@
 ---
 name: retrieval-designer
 description: Designs retrieval queries and patterns for finding and assembling extracted units
+model: haiku
 tools:
   - Read
   - Glob

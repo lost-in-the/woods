@@ -1,6 +1,6 @@
 # CodebaseIndex: Use Cases & Feature Gap Analysis
 
-Comprehensive evaluation of CodebaseIndex's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 24 extractors, the retrieval pipeline, both MCP servers (21 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
+Comprehensive evaluation of CodebaseIndex's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 32 extractors, the retrieval pipeline, both MCP servers (26 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
 
 ---
 
@@ -324,27 +324,27 @@ Both component frameworks are extracted with slots, initialize params, sidecar t
 | Multi-Backend Deployment | 5 | Local dev, PostgreSQL, Docker, air-gapped, MySQL |
 | Rails Ecosystem Coverage | 6 | GraphQL, components, serializers, ActionCable, scheduling |
 
-### Feature Gaps: 20 identified, ordered by impact
+### Feature Gaps: 20 identified, ordered by impact (10 resolved in Sprint 3)
 
-| Priority | Gap | Impact | Category |
-|----------|-----|--------|----------|
-| 1 | HAML/Slim view templates | High | Extraction |
-| 2 | Stimulus/Hotwire frontend | High | Extraction |
-| 3 | Configuration semantic parsing | Medium | Extraction |
-| 4 | Rake task extraction | Medium | Extraction |
-| 5 | State machine extraction | Medium | Extraction |
-| 6 | Webhook/event system extraction | Medium | Extraction |
-| 7 | API documentation correlation | Medium | Extraction |
-| 8 | Test coverage mapping | Medium | Extraction |
-| 9 | Caching strategy extraction | Low-Medium | Extraction |
-| 10 | Job dependency chain visualization | Low-Medium | Extraction |
-| 11 | Factory/fixture extraction | Low-Medium | Extraction |
-| 12 | ActiveStorage/ActionText enrichment | Low-Medium | Extraction |
-| 13 | Decorator/presenter extraction | Low | Extraction |
-| 14 | Database view/function extraction | Low | Extraction |
-| 15 | Multi-database topology | Low | Extraction |
-| 16 | Persistent graph store | Low | Infrastructure |
-| 17 | MetadataStore backend diversity | Low | Infrastructure |
-| 18 | Observability depth | Low | Infrastructure |
-| 19 | Cross-application federation | Low | Future Architecture |
-| 20 | Temporal index / change tracking | Low | Future Architecture |
+| Priority | Gap | Impact | Category | Status |
+|----------|-----|--------|----------|--------|
+| 1 | HAML/Slim view templates | High | Extraction | Open |
+| 2 | Stimulus/Hotwire frontend | High | Extraction | Open |
+| 3 | Configuration semantic parsing | Medium | Extraction | Open |
+| 4 | Rake task extraction | Medium | Extraction | **Done** (Sprint 2) |
+| 5 | State machine extraction | Medium | Extraction | **Done** (Sprint 3) |
+| 6 | Webhook/event system extraction | Medium | Extraction | **Done** (Sprint 3) |
+| 7 | API documentation correlation | Medium | Extraction | Open |
+| 8 | Test coverage mapping | Medium | Extraction | **Done** (Sprint 3) |
+| 9 | Caching strategy extraction | Low-Medium | Extraction | **Done** (Sprint 3) |
+| 10 | Job dependency chain visualization | Low-Medium | Extraction | **Done** (Sprint 3) |
+| 11 | Factory/fixture extraction | Low-Medium | Extraction | **Done** (Sprint 3) |
+| 12 | ActiveStorage/ActionText enrichment | Low-Medium | Extraction | **Done** (Sprint 3) |
+| 13 | Decorator/presenter extraction | Low | Extraction | **Done** (Sprint 3) |
+| 14 | Database view/function extraction | Low | Extraction | **Done** (Sprint 3) |
+| 15 | Multi-database topology | Low | Extraction | **Done** (Sprint 3) |
+| 16 | Persistent graph store | Low | Infrastructure | Open |
+| 17 | MetadataStore backend diversity | Low | Infrastructure | Open |
+| 18 | Observability depth | Low | Infrastructure | Open |
+| 19 | Cross-application federation | Low | Future Architecture | Open |
+| 20 | Temporal index / change tracking | Low | Future Architecture | **Done** (Sprint 2) |

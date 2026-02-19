@@ -572,6 +572,115 @@ RSpec.describe CodebaseIndex::Extractors::JobExtractor do
     end
   end
 
+  # ── Job-to-Job Dependencies ──────────────────────────────────────────
+
+  describe 'job-to-job dependency chain' do
+    it 'detects perform_later enqueue as a :job dependency' do
+      path = create_file('app/jobs/orchestrator_job.rb', <<~RUBY)
+        class OrchestratorJob < ApplicationJob
+          def perform(order_id)
+            NotificationJob.perform_later(order_id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      expect(job_deps.map { |d| d[:target] }).to include('NotificationJob')
+      expect(job_deps.first[:via]).to eq(:job_enqueue)
+    end
+
+    it 'detects perform_async enqueue as a :job dependency' do
+      path = create_file('app/jobs/dispatch_job.rb', <<~RUBY)
+        class DispatchJob < ApplicationJob
+          def perform(user_id)
+            WelcomeEmailJob.perform_async(user_id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      expect(job_deps.map { |d| d[:target] }).to include('WelcomeEmailJob')
+    end
+
+    it 'detects .set().perform_later enqueue as a :job dependency' do
+      path = create_file('app/jobs/delayed_job.rb', <<~RUBY)
+        class DelayedJob < ApplicationJob
+          def perform(report_id)
+            ReportCleanupJob.set(wait: 1.hour).perform_later(report_id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      expect(job_deps.map { |d| d[:target] }).to include('ReportCleanupJob')
+      expect(job_deps.first[:via]).to eq(:job_enqueue)
+    end
+
+    it 'detects multiple enqueued jobs' do
+      path = create_file('app/jobs/pipeline_job.rb', <<~RUBY)
+        class PipelineJob < ApplicationJob
+          def perform(record_id)
+            ValidateJob.perform_later(record_id)
+            TransformJob.perform_later(record_id)
+            LoadJob.perform_later(record_id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      targets = job_deps.map { |d| d[:target] }
+      expect(targets).to include('ValidateJob', 'TransformJob', 'LoadJob')
+    end
+
+    it 'excludes self-references from job dependencies' do
+      path = create_file('app/jobs/retry_chain_job.rb', <<~RUBY)
+        class RetryChainJob < ApplicationJob
+          def perform(id, attempt = 0)
+            RetryChainJob.perform_later(id, attempt + 1) if attempt < 3
+            NotifyJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      targets = job_deps.map { |d| d[:target] }
+      expect(targets).not_to include('RetryChainJob')
+      expect(targets).to include('NotifyJob')
+    end
+
+    it 'populates enqueues_jobs metadata field' do
+      path = create_file('app/jobs/chain_job.rb', <<~RUBY)
+        class ChainJob < ApplicationJob
+          def perform(id)
+            StepOneJob.perform_later(id)
+            StepTwoJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      expect(unit.metadata[:enqueues_jobs]).to include('StepOneJob', 'StepTwoJob')
+    end
+
+    it 'returns empty enqueues_jobs when no jobs are enqueued' do
+      path = create_file('app/jobs/standalone_job.rb', <<~RUBY)
+        class StandaloneJob < ApplicationJob
+          def perform(id)
+            Record.find(id).process!
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      expect(unit.metadata[:enqueues_jobs]).to eq([])
+    end
+  end
+
   # ── Namespaced Jobs ──────────────────────────────────────────────────
 
   describe 'namespaced jobs' do

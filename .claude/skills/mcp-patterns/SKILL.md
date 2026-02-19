@@ -1,3 +1,9 @@
+---
+name: mcp-patterns
+description: Design rules and reference patterns for building MCP servers in CodebaseIndex
+disable-model-invocation: true
+user-invocable: false
+---
 # MCP Server Patterns
 
 Design rules and reference implementation for building MCP servers in CodebaseIndex.

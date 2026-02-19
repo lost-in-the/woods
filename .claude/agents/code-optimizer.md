@@ -1,6 +1,7 @@
 ---
 name: code-optimizer
 description: Analyzes CodebaseIndex code for simplification and optimization opportunities
+model: haiku
 tools:
   - Read
   - Glob
@@ -38,7 +39,7 @@ For each opportunity found, report:
 
 ## Context
 
-- Token estimation uses `(string.length / 3.5).ceil`
+- Token estimation uses `(string.length / 4.0).ceil`
 - Extractors share a common interface — see `.claude/rules/extractors.md`
 - `ModelNameCache` provides precomputed regex for model name scanning
 - Dependencies must include `:via` key

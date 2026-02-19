@@ -1,6 +1,6 @@
 # CodebaseIndex
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (25 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (32 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, and evaluation harness.
 
 ## Commands
 
@@ -34,7 +34,7 @@ lib/
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
-│   ├── extractors/                      # 25 extractors + callback_analyzer + behavioral_profile
+│   ├── extractors/                      # 32 extractors + callback_analyzer + behavioral_profile
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -168,3 +168,9 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `RedisStore` raises `SessionTracerError` if the `redis` gem is not available at initialization time.
 - `RakeTaskExtractor` reads `.rake` files statically (no Rails boot required for parsing). It uses `block_opener?` for depth tracking — `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks.
 - Temporal snapshots are gated by `enable_snapshots` config (default: false). `SnapshotStore` requires migrations 004 + 005 to be run first.
+- `StateMachineExtractor` and `FactoryExtractor` return arrays from their file methods (like `ScheduledJobExtractor`) — can't be registered in FILE_BASED dispatch map. Incremental re-extraction skips these types.
+- `EventExtractor` uses a two-pass approach (collect publishes, then subscribes, then merge) — no single-file extraction method exists. Like routes, it requires full extraction to update.
+- `DatabaseViewExtractor` only extracts the latest version of each Scenic view (highest `_vNN` suffix). Older versions are skipped.
+- `DecoratorExtractor` scans `app/decorators/`, `app/presenters/`, and `app/form_objects/` — these directories are also added to `EXTRACTION_DIRECTORIES` for eager loading.
+- `CachingExtractor` scans controllers, models, and view templates (`.erb`) — the `file_type` parameter on `extract_caching_file` defaults to nil (auto-detected from path).
+- `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.

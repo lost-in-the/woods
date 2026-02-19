@@ -1,6 +1,7 @@
 ---
 name: doc-reviewer
 description: Checks if documentation and backlog need updating after implementation changes
+model: haiku
 tools:
   - Read
   - Glob

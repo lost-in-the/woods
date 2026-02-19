@@ -1,6 +1,7 @@
 ---
 name: use-case-explorer
 description: Identifies gaps in extraction coverage and untapped uses for extracted data
+model: haiku
 tools:
   - Read
   - Glob

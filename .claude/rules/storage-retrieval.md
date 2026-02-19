@@ -6,8 +6,6 @@ paths:
 ---
 # Storage & Retrieval Layer Conventions
 
-These directories don't exist yet. When building them, follow the designs in `docs/RETRIEVAL_ARCHITECTURE.md` and `docs/OPERATIONS.md`.
-
 Rules:
 - Every storage adapter (vector, metadata, graph) implements a common interface. See `docs/RETRIEVAL_ARCHITECTURE.md` for the interface contracts.
 - MySQL and PostgreSQL adapters are first-class citizens with equal test coverage. SQLite is the local development default.

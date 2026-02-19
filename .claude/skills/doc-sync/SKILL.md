@@ -1,3 +1,8 @@
+---
+name: doc-sync
+description: Checks if documentation needs updating after implementation changes
+disable-model-invocation: true
+---
 # Documentation Sync
 
 After any implementation that changes extraction output, dependencies, configuration, or MCP tools, check whether documentation needs updating.
