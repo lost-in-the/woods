@@ -219,6 +219,14 @@ module CodebaseIndex
         extract_all_sequential
       end
 
+      # Phase 1.5: Deduplicate results
+      Rails.logger.info '[CodebaseIndex] Deduplicating results...'
+      deduplicate_results
+
+      # Rebuild graph from deduped results for consistency
+      @dependency_graph = DependencyGraph.new
+      @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
+
       # Phase 2: Resolve dependents (reverse dependencies)
       Rails.logger.info '[CodebaseIndex] Resolving dependents...'
       resolve_dependents
@@ -436,6 +444,30 @@ module CodebaseIndex
             identifier: unit.identifier
           }
         end
+      end
+    end
+
+    # Remove duplicate units (same identifier) within each type, keeping the first occurrence.
+    # This prevents File.write from silently overwriting earlier files when multiple units
+    # share the same identifier (e.g., engine-mounted routes duplicating app routes).
+    def deduplicate_results
+      @results.each do |type, units|
+        seen = Set.new
+        deduped = []
+        dropped = 0
+
+        units.each do |unit|
+          if seen.include?(unit.identifier)
+            dropped += 1
+          else
+            seen.add(unit.identifier)
+            deduped << unit
+          end
+        end
+
+        Rails.logger.warn "[CodebaseIndex] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
+
+        @results[type] = deduped
       end
     end
 
@@ -768,6 +800,19 @@ module CodebaseIndex
     # @return [String] Safe filename (e.g., "Admin__UsersController.json")
     def safe_filename(identifier)
       "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
+    end
+
+    # Generate a collision-safe JSON filename by appending a short digest.
+    # Unlike safe_filename, this guarantees distinct filenames even when two
+    # identifiers differ only in characters that safe_filename normalizes
+    # (e.g., "GET /foo/bar" vs "GET /foo_bar" both become "GET__foo_bar.json").
+    #
+    # @param identifier [String] Unit identifier
+    # @return [String] Collision-safe filename (e.g., "GET__foo_bar_a1b2c3d4.json")
+    def collision_safe_filename(identifier)
+      base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+      digest = ::Digest::SHA256.hexdigest(identifier)[0, 8]
+      "#{base}_#{digest}.json"
     end
 
     def json_serialize(data)

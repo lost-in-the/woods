@@ -219,6 +219,90 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── deduplicate_results ──────────────────────────────────────────────
+
+  describe '#deduplicate_results' do
+    def make_unit(type:, identifier:)
+      CodebaseIndex::ExtractedUnit.new(
+        type: type,
+        identifier: identifier,
+        file_path: "/app/#{type}s/#{identifier}.rb"
+      )
+    end
+
+    it 'removes duplicate identifiers, keeping first occurrence' do
+      first = make_unit(type: :route, identifier: 'GET /posts')
+      second = make_unit(type: :route, identifier: 'GET /posts')
+      second.metadata = { engine: true }
+
+      extractor.instance_variable_set(:@results, { routes: [first, second] })
+      extractor.send(:deduplicate_results)
+
+      expect(extractor.instance_variable_get(:@results)[:routes]).to eq([first])
+    end
+
+    it 'leaves types with no duplicates unchanged' do
+      unit_a = make_unit(type: :model, identifier: 'User')
+      unit_b = make_unit(type: :model, identifier: 'Post')
+
+      extractor.instance_variable_set(:@results, { models: [unit_a, unit_b] })
+      extractor.send(:deduplicate_results)
+
+      expect(extractor.instance_variable_get(:@results)[:models]).to eq([unit_a, unit_b])
+    end
+
+    it 'deduplicates across types independently' do
+      route1 = make_unit(type: :route, identifier: 'GET /posts')
+      route2 = make_unit(type: :route, identifier: 'GET /posts')
+      job1 = make_unit(type: :job, identifier: 'SyncJob')
+      job2 = make_unit(type: :job, identifier: 'SyncJob')
+
+      extractor.instance_variable_set(:@results, { routes: [route1, route2], jobs: [job1, job2] })
+      extractor.send(:deduplicate_results)
+
+      results = extractor.instance_variable_get(:@results)
+      expect(results[:routes]).to eq([route1])
+      expect(results[:jobs]).to eq([job1])
+    end
+
+    it 'logs dropped count per type' do
+      route1 = make_unit(type: :route, identifier: 'GET /posts')
+      route2 = make_unit(type: :route, identifier: 'GET /posts')
+      route3 = make_unit(type: :route, identifier: 'GET /posts')
+
+      extractor.instance_variable_set(:@results, { routes: [route1, route2, route3] })
+
+      expect(Rails.logger).to receive(:warn).with(/Deduplicated routes: dropped 2 duplicate/)
+      extractor.send(:deduplicate_results)
+    end
+  end
+
+  # ── collision_safe_filename ──────────────────────────────────────────
+
+  describe '#collision_safe_filename' do
+    it 'produces a hash-suffixed filename' do
+      result = extractor.send(:collision_safe_filename, 'GET /foo/bar')
+      expect(result).to match(/\A.+_[a-f0-9]{8}\.json\z/)
+    end
+
+    it 'produces different filenames for colliding identifiers' do
+      # These two identifiers produce the same safe_filename:
+      # "GET /foo/bar" -> "GET__foo_bar.json"
+      # "GET /foo_bar" -> "GET__foo_bar.json"
+      result_a = extractor.send(:collision_safe_filename, 'GET /foo/bar')
+      result_b = extractor.send(:collision_safe_filename, 'GET /foo_bar')
+
+      expect(result_a).not_to eq(result_b)
+    end
+
+    it 'is deterministic' do
+      result_a = extractor.send(:collision_safe_filename, 'GET /posts')
+      result_b = extractor.send(:collision_safe_filename, 'GET /posts')
+
+      expect(result_a).to eq(result_b)
+    end
+  end
+
   # ── EXTRACTION_DIRECTORIES constant ──────────────────────────────────
 
   describe 'EXTRACTION_DIRECTORIES' do
