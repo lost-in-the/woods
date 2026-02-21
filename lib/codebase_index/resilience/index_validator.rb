@@ -108,10 +108,11 @@ module CodebaseIndex
       # @param identifier [String] The unit identifier
       # @return [String, nil] Path to the unit file, or nil if not found
       def find_unit_file(type_dir, identifier)
-        # Try exact match first, then safe filename conversion (mirroring Extractor logic)
+        # Try collision-safe first (current format), then legacy safe_filename, then exact match
         candidates = [
-          File.join(type_dir, "#{identifier}.json"),
-          File.join(type_dir, safe_filename(identifier))
+          File.join(type_dir, collision_safe_filename(identifier)),
+          File.join(type_dir, safe_filename(identifier)),
+          File.join(type_dir, "#{identifier}.json")
         ]
 
         candidates.find { |path| File.exist?(path) }
@@ -143,23 +144,41 @@ module CodebaseIndex
       # @param indexed_identifiers [Set<String>] Identifiers listed in the index
       # @param warnings [Array<String>] Accumulated warnings
       def check_stale_files(type_dir, type_name, indexed_identifiers, warnings)
+        # Build a set of expected filenames from indexed identifiers (both current and legacy formats)
+        expected_filenames = Set.new
+        indexed_identifiers.each do |id|
+          expected_filenames << collision_safe_filename(id)
+          expected_filenames << safe_filename(id)
+          expected_filenames << "#{id}.json"
+        end
+
         Dir[File.join(type_dir, '*.json')].each do |file|
           basename = File.basename(file)
           next if basename == '_index.json'
-
-          identifier = basename.sub(/\.json\z/, '')
-          next if indexed_identifiers.include?(identifier)
+          next if expected_filenames.include?(basename)
 
           warnings << "Stale file not in index: #{type_name}/#{basename}"
         end
       end
 
-      # Convert an identifier to a safe filename (mirrors Extractor#safe_filename exactly).
+      # Convert an identifier to a safe filename (legacy format, mirrors Extractor#safe_filename).
       #
       # @param identifier [String] The unit identifier (e.g., "Admin::UsersController")
       # @return [String] A filesystem-safe filename (e.g., "Admin__UsersController.json")
       def safe_filename(identifier)
         "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
+      end
+
+      # Convert an identifier to a collision-safe filename (current format).
+      # Mirrors {Extractor#collision_safe_filename} — appends a short SHA256 digest
+      # to disambiguate identifiers that normalize to the same safe_filename.
+      #
+      # @param identifier [String] The unit identifier
+      # @return [String] Collision-safe filename (e.g., "Admin__UsersController_a1b2c3d4.json")
+      def collision_safe_filename(identifier)
+        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+        digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+        "#{base}_#{digest}.json"
       end
     end
   end

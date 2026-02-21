@@ -219,6 +219,15 @@ module CodebaseIndex
         extract_all_sequential
       end
 
+      # Phase 1.5: Deduplicate results
+      Rails.logger.info '[CodebaseIndex] Deduplicating results...'
+      deduplicate_results
+
+      # Rebuild graph from deduped results — Phase 1 registered all units including
+      # duplicates, and DependencyGraph has no remove/unregister API.
+      @dependency_graph = DependencyGraph.new
+      @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
+
       # Phase 2: Resolve dependents (reverse dependencies)
       Rails.logger.info '[CodebaseIndex] Resolving dependents...'
       resolve_dependents
@@ -439,6 +448,21 @@ module CodebaseIndex
       end
     end
 
+    # Remove duplicate units (same identifier) within each type, keeping the first occurrence.
+    # Duplicates arise when multiple extractors produce the same unit (e.g., engine-mounted
+    # routes duplicating app routes). Without dedup, downstream phases would produce inflated
+    # counts, duplicate _index.json entries, and last-writer-wins file overwrites.
+    def deduplicate_results
+      @results.each do |type, units|
+        deduped = units.uniq(&:identifier)
+        dropped = units.size - deduped.size
+
+        Rails.logger.warn "[CodebaseIndex] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
+
+        @results[type] = deduped
+      end
+    end
+
     # ──────────────────────────────────────────────────────────────────────
     # Flow Precomputation
     # ──────────────────────────────────────────────────────────────────────
@@ -607,7 +631,7 @@ module CodebaseIndex
 
         units.each do |unit|
           File.write(
-            type_dir.join(safe_filename(unit.identifier)),
+            type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
@@ -770,6 +794,19 @@ module CodebaseIndex
       "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
     end
 
+    # Generate a collision-safe JSON filename by appending a short digest.
+    # Unlike safe_filename, this guarantees distinct filenames even when two
+    # identifiers differ only in characters that safe_filename normalizes
+    # (e.g., "GET /foo/bar" vs "GET /foo_bar" both become "GET__foo_bar.json").
+    #
+    # @param identifier [String] Unit identifier
+    # @return [String] Collision-safe filename (e.g., "GET__foo_bar_a1b2c3d4.json")
+    def collision_safe_filename(identifier)
+      base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+      digest = ::Digest::SHA256.hexdigest(identifier)[0, 8]
+      "#{base}_#{digest}.json"
+    end
+
     def json_serialize(data)
       if CodebaseIndex.configuration.pretty_json
         JSON.pretty_generate(data)
@@ -848,7 +885,7 @@ module CodebaseIndex
       type_dir = @output_dir.join(extractor_key.to_s)
 
       File.write(
-        type_dir.join(safe_filename(unit.identifier)),
+        type_dir.join(collision_safe_filename(unit.identifier)),
         json_serialize(unit.to_h)
       )
 
