@@ -36,6 +36,10 @@ RSpec.describe CodebaseIndex::Configuration do
       expect(config.gem_configs).to eq({})
     end
 
+    it 'sets context_format to :markdown' do
+      expect(config.context_format).to eq(:markdown)
+    end
+
     it 'sets session_tracer_enabled to false' do
       expect(config.session_tracer_enabled).to eq(false)
     end
@@ -74,6 +78,25 @@ RSpec.describe CodebaseIndex::Configuration do
     it 'allows setting session_exclude_paths' do
       config.session_exclude_paths = ['/health', '/assets']
       expect(config.session_exclude_paths).to eq(['/health', '/assets'])
+    end
+  end
+
+  describe '#context_format=' do
+    it 'accepts valid format symbols' do
+      %i[claude markdown plain json].each do |fmt|
+        config.context_format = fmt
+        expect(config.context_format).to eq(fmt)
+      end
+    end
+
+    it 'raises on invalid format' do
+      expect { config.context_format = :xml }.to raise_error(
+        CodebaseIndex::ConfigurationError, /context_format must be one of/
+      )
+    end
+
+    it 'raises on string format' do
+      expect { config.context_format = 'markdown' }.to raise_error(CodebaseIndex::ConfigurationError)
     end
   end
 

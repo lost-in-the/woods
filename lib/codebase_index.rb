@@ -41,7 +41,7 @@ module CodebaseIndex
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :enable_snapshots,
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths
-    attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json
+    attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format
 
     def initialize
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -56,6 +56,7 @@ module CodebaseIndex
       @concurrent_extraction = false
       @precompute_flows = false
       @enable_snapshots = false
+      @context_format = :markdown
       @session_tracer_enabled = false
       @session_store = nil
       @session_id_proc = nil
@@ -116,6 +117,17 @@ module CodebaseIndex
       end
 
       @pretty_json = value
+    end
+
+    # @param value [Symbol] Must be one of :claude, :markdown, :plain, :json
+    # @raise [ConfigurationError] if value is not a valid format
+    def context_format=(value)
+      valid = %i[claude markdown plain json]
+      unless valid.include?(value)
+        raise ConfigurationError, "context_format must be one of #{valid.inspect}, got #{value.inspect}"
+      end
+
+      @context_format = value
     end
 
     # Add a gem to be indexed

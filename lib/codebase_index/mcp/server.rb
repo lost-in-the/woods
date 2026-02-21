@@ -4,6 +4,7 @@ require 'logger'
 require 'mcp'
 require 'set'
 require_relative 'index_reader'
+require_relative 'tool_response_renderer'
 
 module CodebaseIndex
   module MCP
@@ -27,8 +28,11 @@ module CodebaseIndex
         # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
         # @param feedback_store [CodebaseIndex::Feedback::Store, nil] Optional feedback store
         # @return [MCP::Server] Configured server ready for transport
-        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil)
+        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, response_format: nil)
           reader = IndexReader.new(index_dir)
+          config = CodebaseIndex.configuration
+          format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
+          renderer = ToolResponseRenderer.for(format)
           resources = build_resources
           resource_templates = build_resource_templates
 
@@ -42,18 +46,18 @@ module CodebaseIndex
             resource_templates: resource_templates
           )
 
-          define_lookup_tool(server, reader, respond)
-          define_search_tool(server, reader, respond)
-          define_dependencies_tool(server, reader, respond)
-          define_dependents_tool(server, reader, respond)
-          define_structure_tool(server, reader, respond)
-          define_graph_analysis_tool(server, reader, respond)
-          define_pagerank_tool(server, reader, respond)
-          define_framework_tool(server, reader, respond)
-          define_recent_changes_tool(server, reader, respond)
+          define_lookup_tool(server, reader, respond, renderer)
+          define_search_tool(server, reader, respond, renderer)
+          define_dependencies_tool(server, reader, respond, renderer)
+          define_dependents_tool(server, reader, respond, renderer)
+          define_structure_tool(server, reader, respond, renderer)
+          define_graph_analysis_tool(server, reader, respond, renderer)
+          define_pagerank_tool(server, reader, respond, renderer)
+          define_framework_tool(server, reader, respond, renderer)
+          define_recent_changes_tool(server, reader, respond, renderer)
           define_reload_tool(server, reader, respond)
           define_retrieve_tool(server, retriever, respond)
-          define_trace_flow_tool(server, reader, index_dir, respond)
+          define_trace_flow_tool(server, reader, index_dir, respond, renderer)
           define_session_trace_tool(server, reader, respond)
           define_operator_tools(server, operator, respond)
           define_feedback_tools(server, feedback_store, respond)
@@ -84,7 +88,7 @@ module CodebaseIndex
           end
         end
 
-        def define_lookup_tool(server, reader, respond)
+        def define_lookup_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'lookup',
             description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \
@@ -112,14 +116,14 @@ module CodebaseIndex
                 allowed = (always_include + sections).to_set
                 filtered = filtered.slice(*allowed)
               end
-              respond.call(JSON.pretty_generate(filtered))
+              respond.call(renderer.render(:lookup, filtered))
             else
               respond.call("Unit not found: #{identifier}")
             end
           end
         end
 
-        def define_search_tool(server, reader, respond)
+        def define_search_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'search',
             description: 'Search code units by pattern. Matches against identifiers by default; can also search source_code and metadata fields.',
@@ -145,15 +149,15 @@ module CodebaseIndex
               fields: fields || %w[identifier],
               limit: limit || 20
             )
-            respond.call(JSON.pretty_generate({
-                                                query: query,
-                                                result_count: results.size,
-                                                results: results
-                                              }))
+            respond.call(renderer.render(:search, {
+                                           query: query,
+                                           result_count: results.size,
+                                           results: results
+                                         }))
           end
         end
 
-        def define_dependencies_tool(server, reader, respond)
+        def define_dependencies_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'dependencies',
             description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.',
@@ -178,11 +182,11 @@ module CodebaseIndex
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
-            respond.call(JSON.pretty_generate(result))
+            respond.call(renderer.render(:dependencies, result))
           end
         end
 
-        def define_dependents_tool(server, reader, respond)
+        def define_dependents_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'dependents',
             description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.',
@@ -207,11 +211,11 @@ module CodebaseIndex
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
-            respond.call(JSON.pretty_generate(result))
+            respond.call(renderer.render(:dependents, result))
           end
         end
 
-        def define_structure_tool(server, reader, respond)
+        def define_structure_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'structure',
             description: 'Get codebase structure overview. Returns manifest (counts, versions, git info) and optionally the full summary.',
@@ -226,11 +230,11 @@ module CodebaseIndex
           ) do |server_context:, detail: nil|
             result = { manifest: reader.manifest }
             result[:summary] = reader.summary if (detail || 'summary') == 'full'
-            respond.call(JSON.pretty_generate(result))
+            respond.call(renderer.render(:structure, result))
           end
         end
 
-        def define_graph_analysis_tool(server, reader, respond)
+        def define_graph_analysis_tool(server, reader, respond, renderer)
           truncate = method(:truncate_section)
           server.define_tool(
             name: 'graph_analysis',
@@ -279,11 +283,11 @@ module CodebaseIndex
                        single
                      end
 
-            respond.call(JSON.pretty_generate(result))
+            respond.call(renderer.render(:graph_analysis, result))
           end
         end
 
-        def define_pagerank_tool(server, reader, respond)
+        def define_pagerank_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'pagerank',
             description: 'Get PageRank importance scores for code units. Higher scores indicate more structurally important nodes.',
@@ -317,11 +321,11 @@ module CodebaseIndex
               total_nodes: scores.size,
               results: ranked.first(effective_limit)
             }
-            respond.call(JSON.pretty_generate(result))
+            respond.call(renderer.render(:pagerank, result))
           end
         end
 
-        def define_framework_tool(server, reader, respond)
+        def define_framework_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'framework',
             description: 'Search Rails framework source units by concept keyword. Matches against identifier, ' \
@@ -336,15 +340,15 @@ module CodebaseIndex
             }
           ) do |keyword:, server_context:, limit: nil|
             results = reader.framework_sources(keyword, limit: limit || 20)
-            respond.call(JSON.pretty_generate({
-                                                keyword: keyword,
-                                                result_count: results.size,
-                                                results: results
-                                              }))
+            respond.call(renderer.render(:framework, {
+                                           keyword: keyword,
+                                           result_count: results.size,
+                                           results: results
+                                         }))
           end
         end
 
-        def define_recent_changes_tool(server, reader, respond)
+        def define_recent_changes_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'recent_changes',
             description: 'List recently modified code units sorted by git last_modified timestamp. ' \
@@ -360,10 +364,10 @@ module CodebaseIndex
             }
           ) do |server_context:, limit: nil, types: nil|
             results = reader.recent_changes(limit: limit || 10, types: types)
-            respond.call(JSON.pretty_generate({
-                                                result_count: results.size,
-                                                results: results
-                                              }))
+            respond.call(renderer.render(:recent_changes, {
+                                           result_count: results.size,
+                                           results: results
+                                         }))
           end
         end
 
@@ -411,7 +415,7 @@ module CodebaseIndex
           end
         end
 
-        def define_trace_flow_tool(server, reader, index_dir, respond)
+        def define_trace_flow_tool(server, reader, index_dir, respond, renderer)
           require_relative '../flow_assembler'
           require_relative '../dependency_graph'
 
@@ -441,7 +445,7 @@ module CodebaseIndex
             )
             flow_doc = assembler.assemble(entry_point, max_depth: max_depth)
 
-            respond.call(JSON.pretty_generate(flow_doc.to_h))
+            respond.call(renderer.render(:trace_flow, flow_doc.to_h))
           rescue StandardError => e
             respond.call(JSON.pretty_generate({ error: e.message }))
           end

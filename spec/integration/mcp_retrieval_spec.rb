@@ -100,7 +100,8 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   let(:server) do
     CodebaseIndex::MCP::Server.build(
       index_dir: fixture_dir,
-      retriever: retriever
+      retriever: retriever,
+      response_format: :json
     )
   end
 

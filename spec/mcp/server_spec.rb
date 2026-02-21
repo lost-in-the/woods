@@ -7,7 +7,7 @@ require 'codebase_index/mcp/server'
 
 RSpec.describe CodebaseIndex::MCP::Server do
   let(:fixture_dir) { File.expand_path('../fixtures/codebase_index', __dir__) }
-  let(:server) { described_class.build(index_dir: fixture_dir) }
+  let(:server) { described_class.build(index_dir: fixture_dir, response_format: :json) }
 
   describe '.build' do
     it 'returns an MCP::Server' do
@@ -384,7 +384,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       end
 
       let(:server_with_retriever) do
-        described_class.build(index_dir: fixture_dir, retriever: retriever)
+        described_class.build(index_dir: fixture_dir, retriever: retriever, response_format: :json)
       end
 
       it 'calls the retriever with the query and default budget' do
@@ -434,7 +434,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       let(:operator) { { status_reporter: status_reporter } }
 
       let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator)
+        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
       end
 
       it 'returns pipeline status' do
@@ -465,7 +465,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       let(:operator) { { pipeline_guard: guard } }
 
       let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator)
+        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
       end
 
       it 'returns started status and spawns a background thread' do
@@ -504,7 +504,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       let(:operator) { { pipeline_guard: guard } }
 
       let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator)
+        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
       end
 
       it 'returns started status and spawns a background thread' do
@@ -535,7 +535,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     let(:operator) { { pipeline_guard: guard } }
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: operator)
+      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
     end
 
     let(:mock_extractor) do
@@ -579,7 +579,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     let(:operator) { { pipeline_guard: guard } }
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: operator)
+      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
     end
 
     let(:mock_builder) do
@@ -681,6 +681,8 @@ RSpec.describe CodebaseIndex::MCP::Server do
   end
 
   describe 'tool: session_trace' do
+    before(:all) { require 'codebase_index/session_tracer/session_flow_assembler' }
+
     context 'without session store configured' do
       before do
         mock_config = Struct.new(:session_store).new(nil)
@@ -783,7 +785,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       end
 
       let(:server_with_feedback) do
-        described_class.build(index_dir: fixture_dir, feedback_store: feedback_store)
+        described_class.build(index_dir: fixture_dir, feedback_store: feedback_store, response_format: :json)
       end
 
       it 'records a rating and returns confirmation' do
@@ -827,7 +829,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       end
 
       let(:server_with_feedback) do
-        described_class.build(index_dir: fixture_dir, feedback_store: feedback_store)
+        described_class.build(index_dir: fixture_dir, feedback_store: feedback_store, response_format: :json)
       end
 
       it 'returns feedback statistics' do
@@ -846,6 +848,48 @@ RSpec.describe CodebaseIndex::MCP::Server do
         response = call_tool(server, 'retrieval_suggest')
         expect(response_text(response)).to include('not configured')
       end
+    end
+  end
+
+  context 'with markdown format' do
+    let(:md_server) { described_class.build(index_dir: fixture_dir, response_format: :markdown) }
+
+    it 'renders lookup as markdown' do
+      response = call_tool(md_server, 'lookup', identifier: 'Post')
+      text = response_text(response)
+      expect(text).to include('## Post (model)')
+      expect(text).to include('```ruby')
+      expect(text).not_to start_with('{')
+    end
+
+    it 'renders search as markdown' do
+      response = call_tool(md_server, 'search', query: 'Post')
+      text = response_text(response)
+      expect(text).to include('## Search: "Post"')
+      expect(text).to include('results found')
+      expect(text).not_to start_with('{')
+    end
+
+    it 'renders dependencies as markdown' do
+      response = call_tool(md_server, 'dependencies', identifier: 'Comment')
+      text = response_text(response)
+      expect(text).to include('## Dependencies of Comment')
+      expect(text).not_to start_with('{')
+    end
+
+    it 'renders structure as markdown' do
+      response = call_tool(md_server, 'structure')
+      text = response_text(response)
+      expect(text).to include('## Codebase Structure')
+      expect(text).not_to start_with('{')
+    end
+
+    it 'renders pagerank as markdown table' do
+      response = call_tool(md_server, 'pagerank')
+      text = response_text(response)
+      expect(text).to include('## PageRank Scores')
+      expect(text).to include('| Rank | Identifier | Type | Score |')
+      expect(text).not_to start_with('{')
     end
   end
 
