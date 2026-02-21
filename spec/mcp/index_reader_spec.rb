@@ -289,17 +289,17 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
   end
 
   describe 'filename sanitization' do
-    it 'sanitizes special characters in identifiers to match safe_filename' do
+    it 'generates collision-safe filenames with digest suffix' do
       # Access the private identifier_map to verify filename generation
       map = reader.send(:build_identifier_map)
 
-      # Namespaced identifiers should have :: replaced with __ and no further changes
+      # Namespaced identifiers should have :: replaced with __ plus digest
       ar_entry = map['ActiveRecord::Base']
-      expect(ar_entry[:filename]).to eq('ActiveRecord__Base.json')
+      expect(ar_entry[:filename]).to eq('ActiveRecord__Base_902403fd.json')
 
-      # Simple identifiers should pass through unchanged
+      # Simple identifiers get digest suffix too
       post_entry = map['Post']
-      expect(post_entry[:filename]).to eq('Post.json')
+      expect(post_entry[:filename]).to eq('Post_a5554622.json')
     end
 
     it 'sanitizes characters not in [a-zA-Z0-9_-] from identifiers' do

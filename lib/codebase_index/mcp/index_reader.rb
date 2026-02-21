@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'pathname'
 require 'set'
@@ -290,7 +291,9 @@ module CodebaseIndex
           entries = read_index(dir)
           entries.each do |entry|
             id = entry['identifier']
-            filename = "#{id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
+            base = id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+            digest = Digest::SHA256.hexdigest(id)[0, 8]
+            filename = "#{base}_#{digest}.json"
             map[id] = { type_dir: dir, filename: filename }
           end
         end

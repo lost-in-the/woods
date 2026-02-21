@@ -34,7 +34,9 @@ RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
       'dependencies' => dependencies.map { |d| { 'target' => d } }
     }
 
-    filename = "#{identifier.gsub('::', '__')}.json"
+    base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+    digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+    filename = "#{base}_#{digest}.json"
     File.write(File.join(dir, filename), JSON.generate(data))
     data
   end

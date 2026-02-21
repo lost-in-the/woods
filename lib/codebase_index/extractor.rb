@@ -223,7 +223,8 @@ module CodebaseIndex
       Rails.logger.info '[CodebaseIndex] Deduplicating results...'
       deduplicate_results
 
-      # Rebuild graph from deduped results for consistency
+      # Rebuild graph from deduped results — Phase 1 registered all units including
+      # duplicates, and DependencyGraph has no remove/unregister API.
       @dependency_graph = DependencyGraph.new
       @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
 
@@ -448,22 +449,13 @@ module CodebaseIndex
     end
 
     # Remove duplicate units (same identifier) within each type, keeping the first occurrence.
-    # This prevents File.write from silently overwriting earlier files when multiple units
-    # share the same identifier (e.g., engine-mounted routes duplicating app routes).
+    # Duplicates arise when multiple extractors produce the same unit (e.g., engine-mounted
+    # routes duplicating app routes). Without dedup, downstream phases would produce inflated
+    # counts, duplicate _index.json entries, and last-writer-wins file overwrites.
     def deduplicate_results
       @results.each do |type, units|
-        seen = Set.new
-        deduped = []
-        dropped = 0
-
-        units.each do |unit|
-          if seen.include?(unit.identifier)
-            dropped += 1
-          else
-            seen.add(unit.identifier)
-            deduped << unit
-          end
-        end
+        deduped = units.uniq(&:identifier)
+        dropped = units.size - deduped.size
 
         Rails.logger.warn "[CodebaseIndex] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
 
@@ -639,7 +631,7 @@ module CodebaseIndex
 
         units.each do |unit|
           File.write(
-            type_dir.join(safe_filename(unit.identifier)),
+            type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
@@ -893,7 +885,7 @@ module CodebaseIndex
       type_dir = @output_dir.join(extractor_key.to_s)
 
       File.write(
-        type_dir.join(safe_filename(unit.identifier)),
+        type_dir.join(collision_safe_filename(unit.identifier)),
         json_serialize(unit.to_h)
       )
 

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'set'
 require_relative 'ast/parser'
@@ -223,17 +224,24 @@ module CodebaseIndex
 
     # Load an ExtractedUnit's data from its JSON file on disk.
     #
-    # Uses the same filename convention as {Extractor#safe_filename}: colons
-    # become double underscores, non-alphanumeric chars become underscores.
+    # Uses {Extractor#collision_safe_filename} convention (with SHA256 digest suffix).
+    # Falls back to legacy {Extractor#safe_filename} for older indexes.
     # Searches across type subdirectories since the extractor writes to
-    # `<output_dir>/<type>/<safe_filename>.json`.
+    # `<output_dir>/<type>/<filename>.json`.
     def load_unit(unit_id)
-      filename = "#{unit_id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
+      base = unit_id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+      digest = Digest::SHA256.hexdigest(unit_id)[0, 8]
+      filenames = [
+        "#{base}_#{digest}.json",
+        "#{base}.json"
+      ]
 
-      Dir[File.join(@extracted_dir, '*', filename)].each do |path|
-        return JSON.parse(File.read(path), symbolize_names: true)
-      rescue JSON::ParserError
-        next
+      filenames.each do |filename|
+        Dir[File.join(@extracted_dir, '*', filename)].each do |path|
+          return JSON.parse(File.read(path), symbolize_names: true)
+        rescue JSON::ParserError
+          next
+        end
       end
 
       nil

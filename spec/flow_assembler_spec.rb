@@ -22,10 +22,12 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       'metadata' => metadata,
       'dependencies' => dependencies
     }
-    # Mirror the extractor's output layout: <type>s/<safe_filename>.json
+    # Mirror the extractor's output layout: <type>s/<collision_safe_filename>.json
     type_dir = File.join(extracted_dir, "#{type}s")
     FileUtils.mkdir_p(type_dir)
-    filename = "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
+    base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+    digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+    filename = "#{base}_#{digest}.json"
     File.write(File.join(type_dir, filename), JSON.generate(data))
   end
 
