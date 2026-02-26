@@ -29,3 +29,8 @@ tmp/
 .claude/agents/host-app-validator.md
 .claude/context/session-state.md
 .claude/settings.local.json
+
+# Grove (worktree manager)
+.grove/state.json
+.grove/state.json.bak
+.grove/.envrc
