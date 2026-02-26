@@ -14,9 +14,10 @@
     "serializers": 0,
     "decorators": 1,
     "concerns": 1,
-    "rails_source": 2
+    "rails_source": 2,
+    "libs": 1
   },
-  "total_units": 7,
+  "total_units": 8,
   "total_chunks": 0,
   "git_sha": "abc1234",
   "git_branch": "main"

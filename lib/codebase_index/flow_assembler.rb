@@ -184,10 +184,7 @@ module CodebaseIndex
         target = op[:target]
         return unless target
 
-        # Check if the target is a known unit in the graph
-        unit_id, = parse_identifier(current_unit)
-        dep_ids = @graph.dependencies_of(unit_id)
-        candidate = resolve_target(target, dep_ids)
+        candidate = resolve_target(target)
         return unless candidate
 
         expand(candidate, steps, visited, depth: depth + 1, max_depth: max_depth)
@@ -202,31 +199,27 @@ module CodebaseIndex
       end
     end
 
-    # Resolve a call target to a unit identifier using a three-tier strategy.
+    # Resolve a call target to a unit identifier using graph-wide lookup.
     #
-    # Tier 1: Direct dependency match — fastest, checks the current unit's known deps.
-    # Tier 2: Graph-wide lookup — checks if the node exists anywhere in the graph,
+    # Uses node existence checks rather than dependency edges, because
+    # dependency edges are structural (associations, includes) and don't
+    # represent actual call relationships in execution flows.
+    #
+    # Tier 1: Graph-wide lookup — checks if the node exists anywhere in the graph,
     #          including suffix matching for unqualified class names.
-    # Tier 3: Disk fallback — attempts to load the unit JSON from disk, covering
+    # Tier 2: Disk fallback — attempts to load the unit JSON from disk, covering
     #          units that exist in the index but were not loaded into the graph.
     #
     # @param target [String] The call target name to resolve
-    # @param known_deps [Array<String>] Direct dependencies of the current unit
     # @return [String, nil] The resolved unit identifier, or nil if not found
-    def resolve_target(target, known_deps)
-      # Tier 1: Direct dependency match (fastest path)
-      return target if known_deps.include?(target)
-
-      suffix_match = known_deps.find { |dep| dep.end_with?("::#{target}") }
-      return suffix_match if suffix_match
-
-      # Tier 2: Graph-wide lookup
+    def resolve_target(target)
+      # Tier 1: Graph-wide lookup
       return target if @graph.node_exists?(target)
 
       graph_match = @graph.find_node_by_suffix(target)
       return graph_match if graph_match
 
-      # Tier 3: Disk fallback (unit JSON exists but isn't in the graph)
+      # Tier 2: Disk fallback (unit JSON exists but isn't in the graph)
       unit_data = load_unit(target)
       return target if unit_data
 

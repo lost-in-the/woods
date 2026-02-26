@@ -32,7 +32,7 @@ Gem::Specification.new do |spec|
     'README.md'
   ]
   spec.bindir = 'exe'
-  spec.executables = %w[codebase-index-mcp codebase-console-mcp codebase-index-mcp-http]
+  spec.executables = %w[codebase-index-mcp codebase-index-mcp-start codebase-console-mcp codebase-index-mcp-http]
   spec.require_paths = ['lib']
 
   # Runtime dependencies

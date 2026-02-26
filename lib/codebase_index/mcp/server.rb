@@ -107,6 +107,7 @@ module CodebaseIndex
               required: ['identifier']
             }
           ) do |identifier:, server_context:, include_source: nil, sections: nil|
+            sections = [sections] if sections.is_a?(String)
             unit = reader.find_unit(identifier)
             if unit
               always_include = %w[type identifier file_path namespace]
@@ -143,6 +144,8 @@ module CodebaseIndex
               required: ['query']
             }
           ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
+            types = [types] if types.is_a?(String)
+            fields = [fields] if fields.is_a?(String)
             results = reader.search(
               query,
               types: types,
@@ -173,6 +176,7 @@ module CodebaseIndex
               required: ['identifier']
             }
           ) do |identifier:, server_context:, depth: nil, types: nil|
+            types = [types] if types.is_a?(String)
             result = reader.traverse_dependencies(
               identifier,
               depth: depth || 2,
@@ -202,6 +206,7 @@ module CodebaseIndex
               required: ['identifier']
             }
           ) do |identifier:, server_context:, depth: nil, types: nil|
+            types = [types] if types.is_a?(String)
             result = reader.traverse_dependents(
               identifier,
               depth: depth || 2,
@@ -246,25 +251,29 @@ module CodebaseIndex
                   enum: %w[orphans dead_ends hubs cycles bridges all],
                   description: 'Which analysis to return. Default: all'
                 },
-                limit: { type: 'integer', description: 'Limit results per section (default: 20)' }
+                limit: { type: 'integer', description: 'Limit results per section (default: 20)' },
+                offset: { type: 'integer', description: 'Skip this many results per section (default: 0)' }
               }
             }
-          ) do |server_context:, analysis: nil, limit: nil|
+          ) do |server_context:, analysis: nil, limit: nil, offset: nil|
             data = reader.graph_analysis
             section = analysis || 'all'
+            effective_offset = offset || 0
 
             result = if section == 'all'
-                       if limit
+                       if limit || effective_offset.positive?
                          truncated = data.dup
                          %w[orphans dead_ends hubs cycles bridges].each do |key|
                            next unless truncated[key].is_a?(Array)
 
                            original = truncated[key]
-                           truncated[key] = truncate.call(original, limit)
-                           if original.size > limit
+                           sliced = effective_offset.positive? ? original.drop(effective_offset) : original
+                           truncated[key] = limit ? truncate.call(sliced, limit) : sliced
+                           if original.size > effective_offset + (limit || original.size)
                              truncated["#{key}_total"] = original.size
                              truncated["#{key}_truncated"] = true
                            end
+                           truncated["#{key}_offset"] = effective_offset if effective_offset.positive?
                          end
                          truncated
                        else
@@ -272,13 +281,15 @@ module CodebaseIndex
                        end
                      else
                        single = { section => data[section], 'stats' => data['stats'] }
-                       if limit && data[section].is_a?(Array)
+                       if data[section].is_a?(Array) && (limit || effective_offset.positive?)
                          original = data[section]
-                         single[section] = truncate.call(original, limit)
-                         if original.size > limit
+                         sliced = effective_offset.positive? ? original.drop(effective_offset) : original
+                         single[section] = limit ? truncate.call(sliced, limit) : sliced
+                         if original.size > effective_offset + (limit || original.size)
                            single["#{section}_total"] = original.size
                            single["#{section}_truncated"] = true
                          end
+                         single["#{section}_offset"] = effective_offset if effective_offset.positive?
                        end
                        single
                      end
@@ -301,6 +312,7 @@ module CodebaseIndex
               }
             }
           ) do |server_context:, limit: nil, types: nil|
+            types = [types] if types.is_a?(String)
             scores = reader.dependency_graph.pagerank
             graph_data = reader.raw_graph_data
             nodes = graph_data['nodes'] || {}
@@ -363,6 +375,7 @@ module CodebaseIndex
               }
             }
           ) do |server_context:, limit: nil, types: nil|
+            types = [types] if types.is_a?(String)
             results = reader.recent_changes(limit: limit || 10, types: types)
             respond.call(renderer.render(:recent_changes, {
                                            result_count: results.size,

@@ -34,7 +34,6 @@ RSpec.describe CodebaseIndex::FlowAssembler do
   # Shared helpers to stub graph methods with safe defaults.
   # Tests that need specific behavior override these stubs individually.
   def stub_graph_defaults
-    allow(graph).to receive(:dependencies_of).and_return([])
     allow(graph).to receive(:node_exists?).and_return(false)
     allow(graph).to receive(:find_node_by_suffix).and_return(nil)
   end
@@ -99,7 +98,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       RUBY
 
       stub_graph_defaults
-      allow(graph).to receive(:dependencies_of).with('PostsController').and_return(['PostService'])
+      allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('PostsController#create')
@@ -126,8 +125,8 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       RUBY
 
       stub_graph_defaults
-      allow(graph).to receive(:dependencies_of).with('ServiceA').and_return(['ServiceB'])
-      allow(graph).to receive(:dependencies_of).with('ServiceB').and_return(['ServiceA'])
+      allow(graph).to receive(:node_exists?).with('ServiceA').and_return(true)
+      allow(graph).to receive(:node_exists?).with('ServiceB').and_return(true)
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('ServiceA')
@@ -166,8 +165,8 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       RUBY
 
       stub_graph_defaults
-      allow(graph).to receive(:dependencies_of).with('A').and_return(['B'])
-      allow(graph).to receive(:dependencies_of).with('B').and_return(['C'])
+      allow(graph).to receive(:node_exists?).with('B').and_return(true)
+      allow(graph).to receive(:node_exists?).with('C').and_return(true)
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('A', max_depth: 1)
@@ -315,8 +314,8 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       expect(flow.steps).to be_empty
     end
 
-    describe 'three-tier target resolution' do
-      it 'resolves targets via graph-wide lookup when not a direct dependency (tier 2)' do
+    describe 'target resolution' do
+      it 'resolves targets via graph-wide node existence (tier 1)' do
         write_unit('PostsController', source_code: <<~RUBY)
           class PostsController < ApplicationController
             def create
@@ -333,9 +332,8 @@ RSpec.describe CodebaseIndex::FlowAssembler do
           end
         RUBY
 
-        # PostService is NOT in PostsController's direct dependencies (tier 1 misses)
         stub_graph_defaults
-        # But PostService IS a known node in the graph (tier 2 succeeds)
+        # PostService is a known node in the graph (tier 1 succeeds)
         allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
 
         assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
@@ -345,7 +343,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         expect(flow.steps[1][:unit]).to eq('PostService')
       end
 
-      it 'resolves targets via suffix match in the graph when not a direct dependency (tier 2 suffix)' do
+      it 'resolves targets via suffix match in the graph (tier 1 suffix)' do
         write_unit('PostsController', source_code: <<~RUBY)
           class PostsController < ApplicationController
             def create
@@ -373,7 +371,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         expect(flow.steps[1][:unit]).to eq('Order::Update')
       end
 
-      it 'resolves targets via disk fallback when not in graph (tier 3)' do
+      it 'resolves targets via disk fallback when not in graph (tier 2)' do
         write_unit('PostsController', source_code: <<~RUBY)
           class PostsController < ApplicationController
             def create
@@ -390,7 +388,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
           end
         RUBY
 
-        # Neither tier 1 nor tier 2 resolves PostService — falls through to disk
+        # Tier 1 (graph) doesn't have PostService — falls through to disk
         stub_graph_defaults
 
         assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)

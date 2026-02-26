@@ -1,0 +1,17 @@
+{
+  "type": "lib",
+  "identifier": "External::Analytics",
+  "file_path": "lib/external/analytics.rb",
+  "namespace": "External",
+  "source_code": "module External\n  class Analytics\n    def self.track(event, properties = {})\n      # Send analytics event\n    end\n  end\nend",
+  "metadata": {
+    "public_methods": ["track"],
+    "class_methods": ["track"],
+    "initialize_params": [],
+    "parent_class": null,
+    "loc": 7,
+    "method_count": 1,
+    "entry_points": ["unknown"]
+  },
+  "dependencies": []
+}

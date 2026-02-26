@@ -30,7 +30,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
       expect(reader.manifest).to include(
         'rails_version' => '8.1.2',
         'ruby_version' => '4.0.1',
-        'total_units' => 7
+        'total_units' => 8
       )
     end
 
@@ -102,7 +102,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
       expect(identifiers).to contain_exactly(
         'Post', 'Comment', 'PostsController',
         'ActiveRecord::Base', 'ActionController::Base',
-        'PostDecorator', 'Publishable'
+        'PostDecorator', 'Publishable', 'External::Analytics'
       )
     end
 
@@ -332,6 +332,28 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
       results = reader.recent_changes(types: ['decorator'])
       expect(results).to be_an(Array)
     end
+
+    it 'finds lib units via find_unit' do
+      unit = reader.find_unit('External::Analytics')
+      expect(unit).to include(
+        'type' => 'lib',
+        'identifier' => 'External::Analytics',
+        'source_code' => a_string_including('Analytics')
+      )
+    end
+
+    it 'lists lib units via list_units' do
+      units = reader.list_units(type: 'lib')
+      identifiers = units.map { |u| u['identifier'] }
+      expect(identifiers).to include('External::Analytics')
+    end
+
+    it 'searches lib units by identifier' do
+      results = reader.search('Analytics', types: ['lib'])
+      expect(results).to include(
+        a_hash_including(identifier: 'External::Analytics', type: 'lib')
+      )
+    end
   end
 
   describe 'TYPE_DIRS coverage' do
@@ -390,7 +412,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
   describe '#reload!' do
     it 'clears cached manifest so next access re-reads from disk' do
       original = reader.manifest
-      expect(original['total_units']).to eq(7)
+      expect(original['total_units']).to eq(8)
 
       # Swap manifest on disk, reload, and verify fresh data is returned
       manifest_path = File.join(fixture_dir, 'manifest.json')

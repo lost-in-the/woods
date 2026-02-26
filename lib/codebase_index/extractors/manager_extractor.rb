@@ -149,7 +149,10 @@ module CodebaseIndex
         # Infer from class name: OrderManager -> Order
         stripped = class_name.split('::').last
         inferred = stripped.sub(/Manager\z/, '')
-        inferred.empty? ? nil : inferred
+        # Return nil if no suffix was removed (not a FooManager pattern)
+        return nil if inferred == stripped || inferred.empty?
+
+        inferred
       end
 
       def detect_delegation_type(source)

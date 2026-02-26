@@ -148,6 +148,19 @@ RSpec.describe CodebaseIndex::Extractors::ManagerExtractor do
       expect(unit).to be_nil
     end
 
+    it 'returns nil wrapped_model for non-Manager class names' do
+      path = create_file('app/managers/account_managing_products.rb', <<~RUBY)
+        class AccountManagingProducts < SimpleDelegator
+          def active_products
+            products.select(&:active?)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_manager_file(path)
+      expect(unit.metadata[:wrapped_model]).to be_nil
+    end
+
     it 'infers wrapped model from class name when no explicit super' do
       path = create_file('app/managers/product_manager.rb', <<~RUBY)
         class ProductManager < SimpleDelegator

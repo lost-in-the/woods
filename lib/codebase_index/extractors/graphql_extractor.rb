@@ -106,7 +106,7 @@ module CodebaseIndex
         unit.namespace = extract_namespace(class_name)
         unit.source_code = build_annotated_source(source, class_name, unit_type, runtime_class)
         unit.metadata = build_metadata(source, class_name, unit_type, runtime_class)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, class_name)
         unit.chunks = build_chunks(unit, runtime_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
 
         unit
@@ -190,7 +190,7 @@ module CodebaseIndex
         unit.namespace = extract_namespace(type_class.name)
         unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)
         unit.metadata = build_metadata(source, type_class.name, unit_type, type_class)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, type_class.name)
         unit.chunks = build_chunks(unit, type_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
 
         unit
@@ -761,9 +761,11 @@ module CodebaseIndex
       #
       # @param source [String]
       # @return [Array<Hash>]
-      def extract_dependencies(source)
-        # Other GraphQL type references (Types::*)
-        deps = source.scan(/Types::\w+/).uniq.map do |type_ref|
+      def extract_dependencies(source, identifier = nil)
+        # Other GraphQL type references (Types::*), excluding self-references
+        deps = source.scan(/Types::\w+/).uniq.filter_map do |type_ref|
+          next if type_ref == identifier
+
           { type: :graphql_type, target: type_ref, via: :type_reference }
         end
 

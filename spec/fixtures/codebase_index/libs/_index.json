@@ -1,0 +1,9 @@
+[
+  {
+    "identifier": "External::Analytics",
+    "file_path": "lib/external/analytics.rb",
+    "namespace": "External",
+    "estimated_tokens": 60,
+    "chunk_count": 1
+  }
+]

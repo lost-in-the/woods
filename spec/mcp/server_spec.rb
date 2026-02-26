@@ -125,6 +125,20 @@ RSpec.describe CodebaseIndex::MCP::Server do
       data = parse_response(response)
       expect(data['results'].size).to eq(1)
     end
+
+    it 'coerces string types parameter to array' do
+      response = call_tool(server, 'search', query: 'Post', types: 'model')
+      data = parse_response(response)
+      data['results'].each do |r|
+        expect(r['type']).to eq('model')
+      end
+    end
+
+    it 'coerces string fields parameter to array' do
+      response = call_tool(server, 'search', query: 'class', fields: 'source_code')
+      data = parse_response(response)
+      expect(data['result_count']).to be >= 1
+    end
   end
 
   describe 'tool: dependencies' do
@@ -227,6 +241,25 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(data['hubs']).to eq([])
       expect(data).to have_key('stats')
     end
+
+    it 'applies offset to skip items per section' do
+      # Get full results first for reference
+      full = parse_response(call_tool(server, 'graph_analysis', analysis: 'hubs', limit: 10))
+      total_hubs = full['hubs'].size
+
+      # Skip the first item
+      response = call_tool(server, 'graph_analysis', analysis: 'hubs', offset: 1, limit: 10)
+      data = parse_response(response)
+      expect(data['hubs'].size).to eq(total_hubs - 1)
+      expect(data['hubs_offset']).to eq(1)
+    end
+
+    it 'applies offset with limit for pagination' do
+      response = call_tool(server, 'graph_analysis', analysis: 'hubs', offset: 1, limit: 1)
+      data = parse_response(response)
+      expect(data['hubs'].size).to eq(1)
+      expect(data['hubs_offset']).to eq(1)
+    end
   end
 
   describe 'tool: pagerank' do
@@ -251,6 +284,14 @@ RSpec.describe CodebaseIndex::MCP::Server do
         expect(r['type']).to eq('model')
       end
     end
+
+    it 'coerces string types parameter to array' do
+      response = call_tool(server, 'pagerank', types: 'model')
+      data = parse_response(response)
+      data['results'].each do |r|
+        expect(r['type']).to eq('model')
+      end
+    end
   end
 
   describe 'tool: reload' do
@@ -266,7 +307,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     it 'picks up changed data after reload' do
       # Read structure before reload
       pre = parse_response(call_tool(server, 'structure'))
-      expect(pre['manifest']['total_units']).to eq(7)
+      expect(pre['manifest']['total_units']).to eq(8)
 
       # Modify manifest on disk
       manifest_path = File.join(fixture_dir, 'manifest.json')
@@ -348,6 +389,14 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     it 'filters by type' do
       response = call_tool(server, 'recent_changes', types: ['controller'])
+      data = parse_response(response)
+      data['results'].each do |r|
+        expect(r['type']).to eq('controller')
+      end
+    end
+
+    it 'coerces string types parameter to array' do
+      response = call_tool(server, 'recent_changes', types: 'controller')
       data = parse_response(response)
       data['results'].each do |r|
         expect(r['type']).to eq('controller')

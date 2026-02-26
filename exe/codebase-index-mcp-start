@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Self-healing wrapper for the CodebaseIndex MCP server.
+# Ensures Ruby dependencies are installed, validates the index directory,
+# and starts the stdio MCP server.
+#
+# Usage (direct):
+#   codebase-index-mcp-start /path/to/index_dir
+#
+# Usage (.mcp.json):
+#   {
+#     "command": "${HOME}/work/codebase_index/exe/codebase-index-mcp-start",
+#     "args": ["${HOME}/work/example-docker/admin-codebase-index/tmp/codebase_index"]
+#   }
+#
+# All diagnostic output goes to stderr to keep stdio clean for MCP protocol.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+GEM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+INDEX_DIR="${1:-${CODEBASE_INDEX_DIR:-}}"
+
+# --- Validate index directory ---
+if [[ -z "$INDEX_DIR" ]]; then
+  echo "Error: No index directory specified." >&2
+  echo "Usage: codebase-index-mcp-start /path/to/index_dir" >&2
+  exit 1
+fi
+
+if [[ ! -d "$INDEX_DIR" ]]; then
+  echo "Error: Index directory does not exist: $INDEX_DIR" >&2
+  echo "Run extraction first: bundle exec rake codebase_index:extract" >&2
+  exit 1
+fi
+
+if [[ ! -f "$INDEX_DIR/manifest.json" ]]; then
+  echo "Error: No manifest.json in: $INDEX_DIR" >&2
+  echo "Run extraction first: bundle exec rake codebase_index:extract" >&2
+  exit 1
+fi
+
+# --- Ensure Ruby dependencies are installed ---
+export BUNDLE_GEMFILE="${GEM_DIR}/Gemfile"
+
+if ! bundle check > /dev/null 2>&1; then
+  echo "Installing codebase_index dependencies..." >&2
+  if ! bundle install --quiet >&2 2>&1; then
+    echo "Error: bundle install failed. Check Ruby version and network." >&2
+    exit 1
+  fi
+  echo "Dependencies installed." >&2
+fi
+
+# --- Pin MCP protocol version for Claude Code compatibility ---
+export MCP_PROTOCOL_VERSION="${MCP_PROTOCOL_VERSION:-2024-11-05}"
+
+# --- Start the MCP server ---
+exec bundle exec ruby "${GEM_DIR}/exe/codebase-index-mcp" "$INDEX_DIR"

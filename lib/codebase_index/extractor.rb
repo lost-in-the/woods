@@ -42,6 +42,7 @@ require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
 require_relative 'extractors/poro_extractor'
+require_relative 'extractors/lib_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
@@ -119,7 +120,8 @@ module CodebaseIndex
       factories: Extractors::FactoryExtractor,
       test_mappings: Extractors::TestMappingExtractor,
       rails_source: Extractors::RailsSourceExtractor,
-      poros: Extractors::PoroExtractor
+      poros: Extractors::PoroExtractor,
+      libs: Extractors::LibExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -162,7 +164,8 @@ module CodebaseIndex
       factory: :factories,
       test_mapping: :test_mappings,
       rails_source: :rails_source,
-      poro: :poros
+      poro: :poros,
+      lib: :libs
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -188,7 +191,8 @@ module CodebaseIndex
       database_view: :extract_view_file,
       caching: :extract_caching_file,
       test_mapping: :extract_test_file,
-      poro: :extract_poro_file
+      poro: :extract_poro_file,
+      lib: :extract_lib_file
     }.freeze
 
     # GraphQL types all use the same extractor method.

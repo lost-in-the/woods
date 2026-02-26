@@ -661,6 +661,26 @@ RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
       expect(resolver_deps.map { |d| d[:target] }).to include('Resolvers::UsersResolver')
     end
 
+    it 'excludes self-referential type dependencies' do
+      source = <<~RUBY
+        module Types
+          class UserType < Types::BaseObject
+            field :friends, [Types::UserType], null: false
+            field :posts, [Types::PostType], null: false
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/types/user_type.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      type_deps = unit.dependencies.select { |d| d[:type] == :graphql_type }
+      targets = type_deps.map { |d| d[:target] }
+      expect(targets).to include('Types::PostType')
+      expect(targets).not_to include('Types::UserType')
+    end
+
     it 'includes :via key on all dependencies' do
       source = <<~RUBY
         module Mutations

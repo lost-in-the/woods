@@ -51,5 +51,11 @@ rescue StandardError => e
 end
 
 server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever)
+
+# Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
+if ENV['MCP_PROTOCOL_VERSION']
+  server.configuration = MCP::Configuration.new(protocol_version: ENV['MCP_PROTOCOL_VERSION'])
+end
+
 transport = MCP::Server::Transports::StdioTransport.new(server)
 transport.open
