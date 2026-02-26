@@ -52,6 +52,87 @@ RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
     end
   end
 
+  # ── source_file_for_class ─────────────────────────────────────────────
+
+  describe '#source_file_for_class' do
+    let(:extractor) { described_class.new }
+    let(:app_root) { tmp_dir }
+
+    it 'skips graphql gem paths and returns the convention path' do
+      gem_path = '/path/to/gems/graphql/lib/graphql/schema/object.rb'
+
+      klass = double('TypeClass')
+      allow(klass).to receive(:name).and_return('Types::UserType')
+      allow(klass).to receive(:instance_methods).with(false).and_return([:resolve])
+      allow(klass).to receive(:instance_method).with(:resolve).and_return(
+        double('UnboundMethod', source_location: [gem_path, 1])
+      )
+      allow(klass).to receive(:singleton_methods).with(false).and_return([])
+
+      result = extractor.send(:source_file_for_class, klass)
+
+      expect(result).not_to eq(gem_path)
+      expect(result).to eq(File.join(app_root, 'app/graphql/types/user_type.rb'))
+    end
+
+    it 'returns an app-root instance method path when found' do
+      app_path = File.join(app_root, 'app/graphql/mutations/create_user.rb')
+
+      klass = double('MutationClass')
+      allow(klass).to receive(:name).and_return('Mutations::CreateUser')
+      allow(klass).to receive(:instance_methods).with(false).and_return([:resolve])
+      allow(klass).to receive(:instance_method).with(:resolve).and_return(
+        double('UnboundMethod', source_location: [app_path, 5])
+      )
+
+      result = extractor.send(:source_file_for_class, klass)
+
+      expect(result).to eq(app_path)
+    end
+
+    it 'falls through to singleton methods when instance methods only return gem paths' do
+      gem_path = '/path/to/gems/graphql/lib/graphql/schema/mutation.rb'
+      app_path = File.join(app_root, 'app/graphql/mutations/create_user.rb')
+
+      klass = double('MutationClass')
+      allow(klass).to receive(:name).and_return('Mutations::CreateUser')
+      allow(klass).to receive(:instance_methods).with(false).and_return([:resolve])
+      allow(klass).to receive(:instance_method).with(:resolve).and_return(
+        double('UnboundMethod', source_location: [gem_path, 1])
+      )
+      allow(klass).to receive(:singleton_methods).with(false).and_return([:authorized?])
+      allow(klass).to receive(:method).with(:authorized?).and_return(
+        double('Method', source_location: [app_path, 3])
+      )
+
+      result = extractor.send(:source_file_for_class, klass)
+
+      expect(result).to eq(app_path)
+    end
+
+    it 'returns convention path when no methods resolve to app root' do
+      klass = double('TypeClass')
+      allow(klass).to receive(:name).and_return('Types::PostType')
+      allow(klass).to receive(:instance_methods).with(false).and_return([])
+      allow(klass).to receive(:singleton_methods).with(false).and_return([])
+
+      result = extractor.send(:source_file_for_class, klass)
+
+      expect(result).to eq(File.join(app_root, 'app/graphql/types/post_type.rb'))
+    end
+
+    it 'returns convention path on StandardError instead of nil' do
+      klass = double('TypeClass')
+      allow(klass).to receive(:name).and_return('Types::BrokenType')
+      allow(klass).to receive(:instance_methods).with(false).and_raise(StandardError, 'introspection failed')
+
+      result = extractor.send(:source_file_for_class, klass)
+
+      expect(result).not_to be_nil
+      expect(result).to eq(File.join(app_root, 'app/graphql/types/broken_type.rb'))
+    end
+  end
+
   # ── graphql_class? ────────────────────────────────────────────────────
 
   describe '#graphql_class?' do

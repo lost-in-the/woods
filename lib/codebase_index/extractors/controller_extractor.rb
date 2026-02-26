@@ -113,12 +113,40 @@ module CodebaseIndex
       # Source Building
       # ──────────────────────────────────────────────────────────────────────
 
+      # Find the source file for a controller, validating paths are within Rails.root.
+      #
+      # Uses a multi-tier strategy to avoid returning gem/vendor paths that appear
+      # when controllers include modules from gems (e.g., decent_exposure, appsignal).
+      #
+      # @param controller [Class] The controller class
+      # @return [String] Absolute path to the controller source file
       def source_file_for(controller)
-        # Try to get from method source location
-        if controller.instance_methods(false).any?
-          method = controller.instance_methods(false).first
-          controller.instance_method(method).source_location&.first
-        end || Rails.root.join("app/controllers/#{controller.name.underscore}.rb").to_s
+        app_root = Rails.root.to_s
+        convention_path = Rails.root.join("app/controllers/#{controller.name.underscore}.rb").to_s
+
+        # Tier 1: Instance methods defined directly on this controller
+        controller.instance_methods(false).each do |method_name|
+          loc = controller.instance_method(method_name).source_location&.first
+          return loc if loc&.start_with?(app_root)
+        end
+
+        # Tier 2: Class/singleton methods defined on this controller
+        controller.methods(false).each do |method_name|
+          loc = controller.method(method_name).source_location&.first
+          return loc if loc&.start_with?(app_root)
+        end
+
+        # Tier 3: Convention path if file exists
+        return convention_path if File.exist?(convention_path)
+
+        # Tier 4: const_source_location (Ruby 3.0+)
+        if Object.respond_to?(:const_source_location)
+          loc = Object.const_source_location(controller.name)&.first
+          return loc if loc&.start_with?(app_root)
+        end
+
+        # Tier 5: Always return convention path — never a gem path
+        convention_path
       rescue StandardError
         Rails.root.join("app/controllers/#{controller.name.underscore}.rb").to_s
       end
@@ -272,7 +300,8 @@ module CodebaseIndex
 
       # Extract comprehensive metadata
       def extract_metadata(controller, source = nil)
-        actions = controller.action_methods.to_a
+        own_methods = controller.instance_methods(false).to_set(&:to_s)
+        actions = controller.action_methods.select { |m| own_methods.include?(m) }.to_a
 
         {
           # Actions and routes

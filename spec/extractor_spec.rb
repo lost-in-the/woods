@@ -303,6 +303,85 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── normalize_file_path ──────────────────────────────────────────────
+
+  describe '#normalize_file_path' do
+    it 'strips Rails.root prefix from an absolute path' do
+      absolute = File.join(tmpdir, 'app/models/user.rb')
+      expect(extractor.send(:normalize_file_path, absolute)).to eq('app/models/user.rb')
+    end
+
+    it 'leaves an already-relative path unchanged' do
+      expect(extractor.send(:normalize_file_path, 'app/models/user.rb')).to eq('app/models/user.rb')
+    end
+
+    it 'returns nil when given nil' do
+      expect(extractor.send(:normalize_file_path, nil)).to be_nil
+    end
+
+    it 'leaves a gem path unchanged when it does not start with Rails.root' do
+      gem_path = '/usr/local/bundle/gems/activerecord-7.1.0/lib/active_record/base.rb'
+      expect(extractor.send(:normalize_file_path, gem_path)).to eq(gem_path)
+    end
+
+    it 'handles Rails.root without trailing slash' do
+      # rails_root is a Pathname; Rails.root.to_s has no trailing slash
+      absolute = "#{tmpdir}/app/services/user_service.rb"
+      expect(extractor.send(:normalize_file_path, absolute)).to eq('app/services/user_service.rb')
+    end
+  end
+
+  # ── normalize_file_paths ─────────────────────────────────────────────
+
+  describe '#normalize_file_paths' do
+    def make_unit(file_path)
+      CodebaseIndex::ExtractedUnit.new(
+        type: :model,
+        identifier: 'User',
+        file_path: file_path
+      )
+    end
+
+    it 'normalizes absolute paths across all units in all types' do
+      unit_a = make_unit(File.join(tmpdir, 'app/models/user.rb'))
+      unit_b = make_unit(File.join(tmpdir, 'app/controllers/users_controller.rb'))
+
+      extractor.instance_variable_set(:@results, { models: [unit_a], controllers: [unit_b] })
+      extractor.send(:normalize_file_paths)
+
+      expect(unit_a.file_path).to eq('app/models/user.rb')
+      expect(unit_b.file_path).to eq('app/controllers/users_controller.rb')
+    end
+
+    it 'leaves already-relative paths unchanged' do
+      unit = make_unit('app/models/post.rb')
+
+      extractor.instance_variable_set(:@results, { models: [unit] })
+      extractor.send(:normalize_file_paths)
+
+      expect(unit.file_path).to eq('app/models/post.rb')
+    end
+
+    it 'leaves nil paths unchanged' do
+      unit = make_unit(nil)
+
+      extractor.instance_variable_set(:@results, { models: [unit] })
+      extractor.send(:normalize_file_paths)
+
+      expect(unit.file_path).to be_nil
+    end
+
+    it 'leaves gem paths unchanged' do
+      gem_path = '/usr/local/bundle/gems/activerecord-7.1.0/lib/active_record/base.rb'
+      unit = make_unit(gem_path)
+
+      extractor.instance_variable_set(:@results, { rails_source: [unit] })
+      extractor.send(:normalize_file_paths)
+
+      expect(unit.file_path).to eq(gem_path)
+    end
+  end
+
   # ── EXTRACTION_DIRECTORIES constant ──────────────────────────────────
 
   describe 'EXTRACTION_DIRECTORIES' do
@@ -317,6 +396,172 @@ RSpec.describe CodebaseIndex::Extractor do
 
     it 'does not include graphql (handled separately)' do
       expect(CodebaseIndex::Extractor::EXTRACTION_DIRECTORIES).not_to include('graphql')
+    end
+  end
+
+  # ── write_structural_summary ──────────────────────────────────────────
+
+  describe '#write_structural_summary' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor)  { described_class.new(output_dir: output_dir) }
+
+    before do
+      FileUtils.mkdir_p(output_dir)
+
+      require 'active_support'
+      require 'active_support/core_ext/numeric/time'
+
+      # Stub Rails.version for the header line
+      allow(Rails).to receive(:version).and_return('8.1.0')
+    end
+
+    def make_unit(type:, identifier:, namespace: nil, chunks: [])
+      unit = CodebaseIndex::ExtractedUnit.new(
+        type: type,
+        identifier: identifier,
+        file_path: "/app/#{type}s/#{identifier.downcase.tr('::', '/')}.rb"
+      )
+      unit.namespace = namespace
+      unit.chunks    = chunks
+      unit
+    end
+
+    def build_results
+      {
+        models: [
+          make_unit(type: :model, identifier: 'User'),
+          make_unit(type: :model, identifier: 'Post'),
+          *Array.new(10) { |i| make_unit(type: :model, identifier: "Admin::Model#{i}", namespace: 'Admin::') },
+          *Array.new(5)  { |i| make_unit(type: :model, identifier: "Api::Model#{i}",   namespace: 'Api::') }
+        ],
+        controllers: [
+          make_unit(type: :controller, identifier: 'ApplicationController'),
+          *Array.new(8) { |i| make_unit(type: :controller, identifier: "Api::V1::Controller#{i}", namespace: 'Api::V1::') }
+        ],
+        jobs: [
+          make_unit(type: :job, identifier: 'SyncJob', chunks: [{ text: 'chunk' }]),
+          make_unit(type: :job, identifier: 'CleanupJob')
+        ]
+      }
+    end
+
+    let(:results) { build_results }
+
+    before do
+      extractor.instance_variable_set(:@results, results)
+    end
+
+    it 'writes SUMMARY.md to the output directory' do
+      extractor.send(:write_structural_summary)
+      expect(File.exist?(File.join(output_dir, 'SUMMARY.md'))).to be true
+    end
+
+    it 'produces a file under 32KB' do
+      extractor.send(:write_structural_summary)
+      size = File.size(File.join(output_dir, 'SUMMARY.md'))
+      expect(size).to be < 32_768
+    end
+
+    it 'includes category headers with unit counts' do
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      model_count = results[:models].size
+      expect(content).to include("## Models (#{model_count})")
+
+      controller_count = results[:controllers].size
+      expect(content).to include("## Controllers (#{controller_count})")
+
+      job_count = results[:jobs].size
+      expect(content).to include("## Jobs (#{job_count})")
+    end
+
+    it 'includes the header with total units, chunks, and category counts' do
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      total_units = results.values.sum(&:size)
+      expect(content).to include("Units: #{total_units}")
+      expect(content).to include('Chunks:')
+      expect(content).to include('Categories:')
+    end
+
+    it 'includes namespace breakdowns for categories' do
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      # Models have (root), Admin::, Api:: namespaces
+      expect(content).to include('Namespaces:')
+      expect(content).to include('Admin::')
+      expect(content).to include('Api::')
+    end
+
+    it 'does not include individual unit identifiers' do
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      # No per-unit bullet points — identifiers should not appear as list items
+      expect(content).not_to match(/^- User$/)
+      expect(content).not_to match(/^- Post$/)
+      expect(content).not_to match(/^- SyncJob$/)
+      expect(content).not_to match(/^- ApplicationController$/)
+    end
+
+    it 'does not use sub-headers for namespaces' do
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      # Old format used ### namespace sub-headers — new format must not
+      expect(content).not_to match(/^### /)
+    end
+
+    it 'skips empty categories' do
+      results_with_empty = results.merge(services: [])
+      extractor.instance_variable_set(:@results, results_with_empty)
+
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      expect(content).not_to include('## Services')
+    end
+
+    it 'returns early without writing when @results is empty' do
+      extractor.instance_variable_set(:@results, {})
+      extractor.send(:write_structural_summary)
+
+      expect(File.exist?(File.join(output_dir, 'SUMMARY.md'))).to be false
+    end
+
+    it 'includes dependency overview section' do
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      expect(content).to include('## Dependency Overview')
+    end
+
+    it 'does not include hub node line when @graph_analysis is nil' do
+      extractor.instance_variable_set(:@graph_analysis, nil)
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      expect(content).not_to include('Hub nodes')
+    end
+
+    it 'includes hub node line when significant hubs exist' do
+      hub_data = {
+        hubs: [
+          { identifier: 'Account', dependent_count: 50 },
+          { identifier: 'User',    dependent_count: 30 },
+          { identifier: 'Minor',   dependent_count: 5  }
+        ]
+      }
+      extractor.instance_variable_set(:@graph_analysis, hub_data)
+
+      extractor.send(:write_structural_summary)
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+      expect(content).to include('Hub nodes (>20 dependents): Account, User')
+      expect(content).not_to include('Minor')
     end
   end
 end

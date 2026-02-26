@@ -33,16 +33,23 @@ RSpec.describe CodebaseIndex::Extractors::ControllerExtractor, 'fixture specs' d
     klass.define_singleton_method(:included_modules) { [] }
     klass.define_singleton_method(:descendants) { [] }
 
-    if source_file
-      # Define a fake instance method so source_file_for can find it
-      klass.define_method(:__fixture_action) { nil }
-      allow(klass).to receive(:instance_methods).with(false).and_return([:__fixture_action])
-      allow(klass.instance_method(:__fixture_action)).to receive(:source_location).and_return([source_file, 1])
-    else
-      klass.define_singleton_method(:instance_methods) { |_inherit| [] }
-    end
+    # Define action methods so instance_method(:action_name) works
+    actions.each { |a| klass.define_method(a.to_sym) { nil } }
+    stub_instance_methods(klass, actions, source_file)
 
     klass
+  end
+
+  def stub_instance_methods(klass, actions, source_file)
+    if source_file
+      klass.define_method(:__fixture_action) { nil }
+      methods_list = actions.map(&:to_sym) + [:__fixture_action]
+      allow(klass).to receive(:instance_methods).with(false).and_return(methods_list)
+      allow(klass.instance_method(:__fixture_action)).to receive(:source_location).and_return([source_file, 1])
+    else
+      methods_list = actions.map(&:to_sym)
+      klass.define_singleton_method(:instance_methods) { |_inherit| methods_list }
+    end
   end
 
   def build_action_filter(actions)

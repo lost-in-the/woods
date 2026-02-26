@@ -246,6 +246,10 @@ module CodebaseIndex
       Rails.logger.info '[CodebaseIndex] Enriching with git data...'
       enrich_with_git_data
 
+      # Phase 4.5: Normalize file_path to relative paths
+      Rails.logger.info '[CodebaseIndex] Normalizing file paths...'
+      normalize_file_paths
+
       # Phase 5: Write output
       Rails.logger.info '[CodebaseIndex] Writing output...'
       write_results
@@ -510,6 +514,35 @@ module CodebaseIndex
       end
     end
 
+    # Normalize all unit file_paths to relative paths (relative to Rails.root).
+    #
+    # Extractors set file_path via source_location, which returns absolute paths.
+    # This normalization ensures consistent relative paths (e.g., "app/models/user.rb")
+    # across all environments (local, Docker, CI) where Rails.root differs.
+    #
+    # Must run after enrich_with_git_data, which needs absolute paths for
+    # File.exist? checks and git log commands.
+    def normalize_file_paths
+      @results.each_value do |units|
+        units.each do |unit|
+          unit.file_path = normalize_file_path(unit.file_path)
+        end
+      end
+    end
+
+    # Strip Rails.root prefix from a file path, converting it to a relative path.
+    #
+    # @param path [String, nil] Absolute or relative file path
+    # @return [String, nil] Relative path, or the original value if already relative,
+    #   nil, or not under Rails.root (e.g., a gem path)
+    def normalize_file_path(path)
+      return path unless path
+
+      root = Rails.root.to_s
+      prefix = root.end_with?('/') ? root : "#{root}/"
+      path.start_with?(prefix) ? path.sub(prefix, '') : path
+    end
+
     def git_available?
       return @git_available if defined?(@git_available)
 
@@ -701,33 +734,43 @@ module CodebaseIndex
       )
     end
 
+    # Write a compact TOC-style summary of extracted units.
+    #
+    # Produces a SUMMARY.md under 8K tokens (~24KB) by listing one line per
+    # category with count and top-5 namespace breakdown, rather than enumerating
+    # every unit. Per-unit detail is available in the per-category _index.json files.
+    #
+    # @return [void]
     def write_structural_summary
       return if @results.empty?
 
-      summary = []
+      total_units    = @results.values.sum(&:size)
+      total_chunks   = @results.values.flatten.sum { |u| [u.chunks.size, 1].max }
+      category_count = @results.count { |_, units| units.any? }
 
+      summary = []
       summary << '# Codebase Index Summary'
       summary << "Generated: #{Time.current.iso8601}"
       summary << "Rails #{Rails.version} / Ruby #{RUBY_VERSION}"
+      summary << "Units: #{total_units} | Chunks: #{total_chunks} | Categories: #{category_count}"
       summary << ''
 
       @results.each do |type, units|
-        summary << "## #{type.to_s.titleize} (#{units.size})"
-        summary << ''
+        next if units.empty?
 
-        # Group by namespace
-        by_namespace = units.group_by { |u| u.namespace || '(root)' }
-        by_namespace.sort.each do |ns, ns_units|
-          summary << "### #{ns}"
-          ns_units.sort_by(&:identifier).each do |unit|
-            chunks = unit.chunks.any? ? " [#{unit.chunks.size} chunks]" : ''
-            summary << "- #{unit.identifier}#{chunks}"
-          end
-          summary << ''
-        end
+        summary << "## #{type.to_s.titleize} (#{units.size})"
+
+        ns_counts = units
+                    .group_by { |u| u.namespace.nil? || u.namespace.empty? ? '(root)' : u.namespace }
+                    .transform_values(&:size)
+                    .sort_by { |_, count| -count }
+                    .first(5)
+
+        ns_parts = ns_counts.map { |ns, count| "#{ns} #{count}" }
+        summary << "Namespaces: #{ns_parts.join(', ')}" unless ns_parts.empty?
+        summary << ''
       end
 
-      # Dependency summary
       summary << '## Dependency Overview'
       summary << ''
 
@@ -736,6 +779,16 @@ module CodebaseIndex
         summary << "- Total nodes: #{graph_stats[:node_count]}"
         summary << "- Total edges: #{graph_stats[:edge_count]}"
       end
+
+      if @graph_analysis
+        hub_nodes = @graph_analysis[:hubs]
+        significant_hubs = hub_nodes&.select { |h| h[:dependent_count] > 20 }
+        if significant_hubs&.any?
+          hub_names = significant_hubs.map { |h| h[:identifier] }.join(', ')
+          summary << "- Hub nodes (>20 dependents): #{hub_names}"
+        end
+      end
+
       summary << ''
 
       File.write(

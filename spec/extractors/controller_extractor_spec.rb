@@ -189,6 +189,128 @@ RSpec.describe CodebaseIndex::Extractors::ControllerExtractor do
     end
   end
 
+  # ── source_file_for ───────────────────────────────────────────────────
+
+  describe '#source_file_for' do
+    let(:app_root) { '/app' }
+
+    before do
+      extractor.instance_variable_get(:@routes_map) # already initialized
+      allow(Rails).to receive(:root).and_return(Pathname.new(app_root))
+    end
+
+    it 'skips gem paths and falls through to the convention path when the file does not exist' do
+      gem_path = '/path/to/gems/decent_exposure/lib/decent_exposure.rb'
+
+      controller = double('Controller')
+      allow(controller).to receive(:name).and_return('UsersController')
+      allow(controller).to receive(:instance_methods).with(false).and_return([:show])
+      allow(controller).to receive(:instance_method).with(:show).and_return(
+        double('UnboundMethod', source_location: [gem_path, 10])
+      )
+      allow(controller).to receive(:methods).with(false).and_return([])
+
+      result = extractor.send(:source_file_for, controller)
+
+      expect(result).not_to eq(gem_path)
+      expect(result).to eq("#{app_root}/app/controllers/users_controller.rb")
+    end
+
+    it 'returns an instance method path when it is within app root' do
+      app_path = "#{app_root}/app/controllers/users_controller.rb"
+
+      controller = double('Controller')
+      allow(controller).to receive(:name).and_return('UsersController')
+      allow(controller).to receive(:instance_methods).with(false).and_return([:index])
+      allow(controller).to receive(:instance_method).with(:index).and_return(
+        double('UnboundMethod', source_location: [app_path, 5])
+      )
+
+      result = extractor.send(:source_file_for, controller)
+
+      expect(result).to eq(app_path)
+    end
+
+    it 'falls through to class methods when instance methods only return gem paths' do
+      gem_path = '/path/to/gems/some_gem/lib/some_gem.rb'
+      app_path = "#{app_root}/app/controllers/admin_controller.rb"
+
+      controller = double('Controller')
+      allow(controller).to receive(:name).and_return('AdminController')
+      allow(controller).to receive(:instance_methods).with(false).and_return([:index])
+      allow(controller).to receive(:instance_method).with(:index).and_return(
+        double('UnboundMethod', source_location: [gem_path, 1])
+      )
+      allow(controller).to receive(:methods).with(false).and_return([:some_class_method])
+      allow(controller).to receive(:method).with(:some_class_method).and_return(
+        double('Method', source_location: [app_path, 3])
+      )
+
+      result = extractor.send(:source_file_for, controller)
+
+      expect(result).to eq(app_path)
+    end
+
+    it 'returns convention path when controller has no instance or class methods' do
+      controller = double('Controller')
+      allow(controller).to receive(:name).and_return('EmptyController')
+      allow(controller).to receive(:instance_methods).with(false).and_return([])
+      allow(controller).to receive(:methods).with(false).and_return([])
+
+      result = extractor.send(:source_file_for, controller)
+
+      expect(result).to eq("#{app_root}/app/controllers/empty_controller.rb")
+    end
+
+    it 'returns convention path on StandardError' do
+      controller = double('Controller')
+      allow(controller).to receive(:name).and_return('BrokenController')
+      allow(controller).to receive(:instance_methods).with(false).and_raise(StandardError, 'introspection failed')
+
+      result = extractor.send(:source_file_for, controller)
+
+      expect(result).to eq("#{app_root}/app/controllers/broken_controller.rb")
+    end
+  end
+
+  # ── extract_metadata — own actions only ──────────────────────────────
+
+  describe '#extract_metadata (own actions)' do
+    it 'only includes actions defined on the controller itself, not inherited ones' do
+      child_own_methods = %i[create update]
+      child_action_methods = Set.new(%w[create update inherited_action])
+
+      child_controller = double('ChildController')
+      allow(child_controller).to receive(:name).and_return('ChildController')
+      allow(child_controller).to receive(:instance_methods).with(false).and_return(child_own_methods)
+      allow(child_controller).to receive(:action_methods).and_return(child_action_methods)
+      allow(child_controller).to receive(:_process_action_callbacks).and_return([])
+      allow(child_controller).to receive(:ancestors).and_return([])
+      allow(child_controller).to receive(:included_modules).and_return([])
+
+      # Pass source explicitly so extract_metadata does not call source_file_for
+      metadata = extractor.send(:extract_metadata, child_controller, '')
+
+      expect(metadata[:actions]).to match_array(%w[create update])
+      expect(metadata[:actions]).not_to include('inherited_action')
+    end
+
+    it 'returns empty actions when the controller defines no own methods' do
+      controller = double('Controller')
+      allow(controller).to receive(:name).and_return('BaseController')
+      allow(controller).to receive(:instance_methods).with(false).and_return([])
+      allow(controller).to receive(:action_methods).and_return(Set.new(%w[index show]))
+      allow(controller).to receive(:_process_action_callbacks).and_return([])
+      allow(controller).to receive(:ancestors).and_return([])
+      allow(controller).to receive(:included_modules).and_return([])
+
+      # Pass source explicitly so extract_metadata does not call source_file_for
+      metadata = extractor.send(:extract_metadata, controller, '')
+
+      expect(metadata[:actions]).to be_empty
+    end
+  end
+
   # ── extract_filter_chain (integration) ───────────────────────────────
 
   describe '#extract_filter_chain' do
