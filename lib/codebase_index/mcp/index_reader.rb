@@ -33,7 +33,7 @@ module CodebaseIndex
 
       # Singular type name for each directory (used in search filtering).
       # Derived from TYPE_DIRS via ActiveSupport singularize — no manual sync needed.
-      DIR_TO_TYPE = TYPE_DIRS.each_with_object({}) { |dir, h| h[dir] = dir.singularize }.freeze
+      DIR_TO_TYPE = TYPE_DIRS.to_h { |dir| [dir, dir.singularize] }.freeze
 
       TYPE_TO_DIR = DIR_TO_TYPE.invert.freeze
 

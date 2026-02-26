@@ -23,7 +23,7 @@ module CodebaseIndex
     #
     class Bridge
       SUPPORTED_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
-      TOOL_HANDLERS = SUPPORTED_TOOLS.each_with_object({}) { |t, h| h[t] = :"handle_#{t}" }.freeze
+      TOOL_HANDLERS = SUPPORTED_TOOLS.to_h { |t| [t, :"handle_#{t}"] }.freeze
 
       # @param input [IO] Input stream (reads JSON-lines)
       # @param output [IO] Output stream (writes JSON-lines)

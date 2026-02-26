@@ -141,7 +141,7 @@ module CodebaseIndex
       return {} if n.zero?
 
       base_score = 1.0 / n
-      scores = @nodes.keys.each_with_object({}) { |id, h| h[id] = base_score }
+      scores = @nodes.keys.to_h { |id| [id, base_score] }
 
       iterations.times do
         # Collect rank from dangling nodes (no outgoing edges) and redistribute

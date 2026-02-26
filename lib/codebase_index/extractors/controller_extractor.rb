@@ -314,7 +314,7 @@ module CodebaseIndex
           # Parent chain for understanding inherited behavior
           ancestors: controller.ancestors
                      .take_while { |a| a != ActionController::Base && a != ActionController::API }
-                     .select { |a| a.is_a?(Class) }
+                     .grep(Class)
                      .map(&:name)
                      .compact,
 

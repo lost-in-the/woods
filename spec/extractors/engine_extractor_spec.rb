@@ -241,7 +241,7 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
   end
 
   def stub_rails_application(engines: [], mounts: nil)
-    mounts ||= engines.each_with_object({}) { |e, h| h[e] = nil }
+    mounts ||= engines.to_h { |e| [e, nil] }
     mount_routes = build_mount_routes(mounts)
 
     app_routes = double('app_routes')

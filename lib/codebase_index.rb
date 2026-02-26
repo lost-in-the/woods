@@ -102,7 +102,7 @@ module CodebaseIndex
     # @param value [Array<Symbol>] List of extractor names
     # @raise [ConfigurationError] if value is not an Array of Symbols
     def extractors=(value)
-      unless value.is_a?(Array) && value.all? { |v| v.is_a?(Symbol) }
+      unless value.is_a?(Array) && value.all?(Symbol)
         raise ConfigurationError, "extractors must be an Array of Symbols, got #{value.inspect}"
       end
 

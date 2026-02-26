@@ -254,13 +254,13 @@ module CodebaseIndex
         SQL
         rows = @db.execute(sql, [snapshot_id])
 
-        rows.each_with_object({}) do |row, hash|
-          hash[row['identifier']] = {
+        rows.to_h do |row|
+          [row['identifier'], {
             unit_type: row['unit_type'],
             source_hash: row['source_hash'],
             metadata_hash: row['metadata_hash'],
             dependencies_hash: row['dependencies_hash']
-          }
+          }]
         end
       end
 

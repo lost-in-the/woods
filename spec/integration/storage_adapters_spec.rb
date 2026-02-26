@@ -157,11 +157,11 @@ RSpec.describe 'Storage adapters working together', :integration do
       models = metadata_store.find_by_type('model')
       model_ids = models.map { |m| m['id'] }
 
-      relationships = model_ids.each_with_object({}) do |id, hash|
-        hash[id] = {
+      relationships = model_ids.to_h do |id|
+        [id, {
           dependencies: graph_store.dependencies_of(id),
           dependents: graph_store.dependents_of(id)
-        }
+        }]
       end
 
       expect(relationships['User'][:dependencies]).to include('Post')
