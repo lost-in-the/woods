@@ -1,0 +1,18 @@
+# Grove hooks configuration
+# Project type: ruby gem
+#
+# Edit: grove config --hooks -e
+# Docs: https://github.com/LeahArmstrong/grove-cli#hooks
+
+[[hooks.post_create]]
+type = "copy"
+from = ".claude/settings.local.json"
+to = ".claude/settings.local.json"
+required = false
+
+[[hooks.post_create]]
+type = "command"
+command = "bundle install --quiet"
+timeout = 300
+on_failure = "warn"
+
