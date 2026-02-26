@@ -62,7 +62,7 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
       response = call_tool(server, 'pipeline_status')
       data = parse_response(response)
 
-      expect(data['total_units']).to eq(5)
+      expect(data['total_units']).to eq(7)
     end
   end
 

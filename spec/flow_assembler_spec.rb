@@ -31,6 +31,14 @@ RSpec.describe CodebaseIndex::FlowAssembler do
     File.write(File.join(type_dir, filename), JSON.generate(data))
   end
 
+  # Shared helpers to stub graph methods with safe defaults.
+  # Tests that need specific behavior override these stubs individually.
+  def stub_graph_defaults
+    allow(graph).to receive(:dependencies_of).and_return([])
+    allow(graph).to receive(:node_exists?).and_return(false)
+    allow(graph).to receive(:find_node_by_suffix).and_return(nil)
+  end
+
   describe '#assemble' do
     it 'produces a FlowDocument' do
       write_unit('PostsController', source_code: <<~RUBY)
@@ -42,7 +50,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         end
       RUBY
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('PostsController#create')
@@ -63,7 +71,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         end
       RUBY
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('PostsController#create')
@@ -90,7 +98,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         end
       RUBY
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
       allow(graph).to receive(:dependencies_of).with('PostsController').and_return(['PostService'])
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
@@ -117,7 +125,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         end
       RUBY
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
       allow(graph).to receive(:dependencies_of).with('ServiceA').and_return(['ServiceB'])
       allow(graph).to receive(:dependencies_of).with('ServiceB').and_return(['ServiceA'])
 
@@ -157,7 +165,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         end
       RUBY
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
       allow(graph).to receive(:dependencies_of).with('A').and_return(['B'])
       allow(graph).to receive(:dependencies_of).with('B').and_return(['C'])
 
@@ -189,7 +197,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
                    ]
                  })
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('PostsController#create')
@@ -226,7 +234,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
                    ]
                  })
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('OrdersController#create')
@@ -262,7 +270,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
                    ]
                  })
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('PostsController#create')
@@ -279,7 +287,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
         end
       RUBY
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('SomeService')
@@ -288,7 +296,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
     end
 
     it 'handles missing unit files gracefully' do
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('NonExistent#method')
@@ -299,12 +307,118 @@ RSpec.describe CodebaseIndex::FlowAssembler do
     it 'handles units with no source code' do
       write_unit('EmptyController', source_code: '')
 
-      allow(graph).to receive(:dependencies_of).and_return([])
+      stub_graph_defaults
 
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('EmptyController#create')
 
       expect(flow.steps).to be_empty
+    end
+
+    describe 'three-tier target resolution' do
+      it 'resolves targets via graph-wide lookup when not a direct dependency (tier 2)' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              PostService.call(params)
+            end
+          end
+        RUBY
+
+        write_unit('PostService', type: 'service', source_code: <<~RUBY)
+          class PostService
+            def call
+              do_work
+            end
+          end
+        RUBY
+
+        # PostService is NOT in PostsController's direct dependencies (tier 1 misses)
+        stub_graph_defaults
+        # But PostService IS a known node in the graph (tier 2 succeeds)
+        allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        expect(flow.steps.size).to eq(2)
+        expect(flow.steps[1][:unit]).to eq('PostService')
+      end
+
+      it 'resolves targets via suffix match in the graph when not a direct dependency (tier 2 suffix)' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              Update.call(params)
+            end
+          end
+        RUBY
+
+        write_unit('Order::Update', type: 'service', source_code: <<~RUBY)
+          class Order::Update
+            def call
+              do_work
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+        # Exact match misses, but suffix match finds Order::Update
+        allow(graph).to receive(:find_node_by_suffix).with('Update').and_return('Order::Update')
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        expect(flow.steps.size).to eq(2)
+        expect(flow.steps[1][:unit]).to eq('Order::Update')
+      end
+
+      it 'resolves targets via disk fallback when not in graph (tier 3)' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              PostService.call(params)
+            end
+          end
+        RUBY
+
+        write_unit('PostService', type: 'service', source_code: <<~RUBY)
+          class PostService
+            def call
+              do_work
+            end
+          end
+        RUBY
+
+        # Neither tier 1 nor tier 2 resolves PostService — falls through to disk
+        stub_graph_defaults
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        # Tier 3 finds the JSON on disk and expands
+        expect(flow.steps.size).to eq(2)
+        expect(flow.steps[1][:unit]).to eq('PostService')
+      end
+
+      it 'stops expansion when target is not found in any tier' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              NonExistentService.call(params)
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        # Only the controller step — NonExistentService is nowhere
+        expect(flow.steps.size).to eq(1)
+        expect(flow.steps[0][:unit]).to eq('PostsController#create')
+      end
     end
   end
 end

@@ -1,0 +1,9 @@
+[
+  {
+    "identifier": "Publishable",
+    "file_path": "app/models/concerns/publishable.rb",
+    "namespace": null,
+    "estimated_tokens": 60,
+    "chunk_count": 1
+  }
+]

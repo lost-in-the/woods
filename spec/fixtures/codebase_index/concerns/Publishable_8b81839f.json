@@ -1,0 +1,17 @@
+{
+  "type": "concern",
+  "identifier": "Publishable",
+  "file_path": "app/models/concerns/publishable.rb",
+  "namespace": null,
+  "source_code": "module Publishable\n  extend ActiveSupport::Concern\n\n  included do\n    scope :published, -> { where(published: true) }\n  end\n\n  def publish!\n    update!(published: true)\n  end\nend\n",
+  "metadata": {
+    "included_in": ["Post"],
+    "methods": ["publish!"],
+    "scopes": ["published"]
+  },
+  "dependencies": [],
+  "dependents": ["Post"],
+  "chunks": [],
+  "extracted_at": "2026-01-15T12:00:00Z",
+  "source_hash": "con123"
+}

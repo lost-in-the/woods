@@ -121,6 +121,56 @@ RSpec.describe CodebaseIndex::DependencyGraph do
     end
   end
 
+  describe '#node_exists?' do
+    before do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :service, identifier: 'Order::Update'))
+    end
+
+    it 'returns true for a registered node' do
+      expect(graph.node_exists?('User')).to be true
+    end
+
+    it 'returns false for an unknown identifier' do
+      expect(graph.node_exists?('NonExistent')).to be false
+    end
+
+    it 'returns true for a namespaced node by full identifier' do
+      expect(graph.node_exists?('Order::Update')).to be true
+    end
+
+    it 'returns false for a partial identifier that is not an exact match' do
+      expect(graph.node_exists?('Update')).to be false
+    end
+  end
+
+  describe '#find_node_by_suffix' do
+    before do
+      graph.register(make_unit(type: :service, identifier: 'Order::Update'))
+      graph.register(make_unit(type: :service, identifier: 'User::Update'))
+      graph.register(make_unit(type: :model, identifier: 'Product'))
+    end
+
+    it 'returns the matching node identifier when suffix matches' do
+      result = graph.find_node_by_suffix('Update')
+      expect(['Order::Update', 'User::Update']).to include(result)
+    end
+
+    it 'returns nil when no node matches the suffix' do
+      expect(graph.find_node_by_suffix('NonExistent')).to be_nil
+    end
+
+    it 'returns nil for an exact-match identifier (suffix requires :: prefix)' do
+      expect(graph.find_node_by_suffix('Product')).to be_nil
+    end
+
+    it 'returns the first match when multiple nodes share a suffix' do
+      result = graph.find_node_by_suffix('Update')
+      expect(result).not_to be_nil
+      expect(result).to end_with('::Update')
+    end
+  end
+
   describe 'JSON round-trip' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User',

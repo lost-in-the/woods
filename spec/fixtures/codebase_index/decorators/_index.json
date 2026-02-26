@@ -1,0 +1,9 @@
+[
+  {
+    "identifier": "PostDecorator",
+    "file_path": "app/decorators/post_decorator.rb",
+    "namespace": null,
+    "estimated_tokens": 80,
+    "chunk_count": 1
+  }
+]

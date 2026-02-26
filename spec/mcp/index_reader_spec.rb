@@ -19,6 +19,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     end
 
     it 'raises ArgumentError for directory without manifest.json' do
+      require 'tmpdir'
       expect { described_class.new(Dir.tmpdir) }
         .to raise_error(ArgumentError, /No manifest\.json/)
     end
@@ -29,7 +30,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
       expect(reader.manifest).to include(
         'rails_version' => '8.1.2',
         'ruby_version' => '4.0.1',
-        'total_units' => 5
+        'total_units' => 7
       )
     end
 
@@ -98,7 +99,11 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     it 'returns all units when no type filter' do
       units = reader.list_units
       identifiers = units.map { |u| u['identifier'] }
-      expect(identifiers).to contain_exactly('Post', 'Comment', 'PostsController', 'ActiveRecord::Base', 'ActionController::Base')
+      expect(identifiers).to contain_exactly(
+        'Post', 'Comment', 'PostsController',
+        'ActiveRecord::Base', 'ActionController::Base',
+        'PostDecorator', 'Publishable'
+      )
     end
 
     it 'filters by type' do
@@ -288,6 +293,69 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
     end
   end
 
+  describe 'previously invisible types' do
+    it 'finds decorator units via find_unit' do
+      unit = reader.find_unit('PostDecorator')
+      expect(unit).to include(
+        'type' => 'decorator',
+        'identifier' => 'PostDecorator',
+        'source_code' => a_string_including('display_title')
+      )
+    end
+
+    it 'lists concern units via list_units' do
+      units = reader.list_units(type: 'concern')
+      identifiers = units.map { |u| u['identifier'] }
+      expect(identifiers).to include('Publishable')
+    end
+
+    it 'searches with types filter for decorators' do
+      results = reader.search('Post', types: ['decorator'])
+      expect(results).to include(
+        a_hash_including(identifier: 'PostDecorator', type: 'decorator')
+      )
+    end
+
+    it 'searches decorator source_code' do
+      results = reader.search('display_title', types: ['decorator'], fields: %w[source_code])
+      expect(results.first[:identifier]).to eq('PostDecorator')
+      expect(results.first[:match_field]).to eq('source_code')
+    end
+
+    it 'searches concern metadata' do
+      results = reader.search('publish', types: ['concern'], fields: %w[metadata])
+      expect(results.first[:identifier]).to eq('Publishable')
+    end
+
+    it 'includes decorators in recent_changes' do
+      # PostDecorator has no git metadata, so it won't appear — but the type filter works
+      results = reader.recent_changes(types: ['decorator'])
+      expect(results).to be_an(Array)
+    end
+  end
+
+  describe 'TYPE_DIRS coverage' do
+    it 'covers all Extractor::EXTRACTORS keys' do
+      # This test prevents future drift between IndexReader and Extractor
+      require 'codebase_index/extractor'
+      extractor_keys = CodebaseIndex::Extractor::EXTRACTORS.keys.map(&:to_s)
+      missing = extractor_keys - described_class::TYPE_DIRS
+      expect(missing).to be_empty, "TYPE_DIRS is missing: #{missing.join(', ')}"
+    end
+
+    it 'has a DIR_TO_TYPE entry for every TYPE_DIRS entry' do
+      missing = described_class::TYPE_DIRS - described_class::DIR_TO_TYPE.keys
+      expect(missing).to be_empty, "DIR_TO_TYPE is missing: #{missing.join(', ')}"
+    end
+
+    it 'has a TYPE_TO_DIR entry for every DIR_TO_TYPE value' do
+      described_class::DIR_TO_TYPE.each do |dir, type|
+        expect(described_class::TYPE_TO_DIR[type]).to eq(dir),
+                                                      "TYPE_TO_DIR missing reverse for #{dir} => #{type}"
+      end
+    end
+  end
+
   describe 'filename sanitization' do
     it 'generates collision-safe filenames with digest suffix' do
       # Access the private identifier_map to verify filename generation
@@ -322,7 +390,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
   describe '#reload!' do
     it 'clears cached manifest so next access re-reads from disk' do
       original = reader.manifest
-      expect(original['total_units']).to eq(5)
+      expect(original['total_units']).to eq(7)
 
       # Swap manifest on disk, reload, and verify fresh data is returned
       manifest_path = File.join(fixture_dir, 'manifest.json')

@@ -266,7 +266,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
     it 'picks up changed data after reload' do
       # Read structure before reload
       pre = parse_response(call_tool(server, 'structure'))
-      expect(pre['manifest']['total_units']).to eq(5)
+      expect(pre['manifest']['total_units']).to eq(7)
 
       # Modify manifest on disk
       manifest_path = File.join(fixture_dir, 'manifest.json')

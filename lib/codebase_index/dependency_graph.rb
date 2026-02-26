@@ -82,6 +82,27 @@ module CodebaseIndex
       affected.to_a
     end
 
+    # Check if a node exists in the graph by exact identifier.
+    #
+    # @param identifier [String] Unit identifier to check
+    # @return [Boolean] true if the node exists
+    def node_exists?(identifier)
+      @nodes.key?(identifier)
+    end
+
+    # Find a node by suffix matching (e.g., "Update" matches "Order::Update").
+    #
+    # When multiple nodes share the same suffix, the first match wins.
+    # Suffix matching requires a "::" separator — bare identifiers (no namespace)
+    # are not matched by this method; use {#node_exists?} for exact lookups.
+    #
+    # @param suffix [String] The suffix to match against
+    # @return [String, nil] The first matching identifier, or nil
+    def find_node_by_suffix(suffix)
+      target_suffix = "::#{suffix}"
+      @nodes.keys.find { |id| id.end_with?(target_suffix) }
+    end
+
     # Get direct dependencies of a unit
     #
     # @param identifier [String] Unit identifier

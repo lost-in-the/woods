@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'active_support/core_ext/string/inflections'
 require 'digest'
 require 'json'
 require 'pathname'
@@ -19,24 +20,20 @@ module CodebaseIndex
     #
     class IndexReader
       # Directories that correspond to extractor types in the output.
+      # Must stay in sync with Extractor::EXTRACTORS keys.
       TYPE_DIRS = %w[
-        models controllers services components view_components
-        jobs mailers graphql serializers rails_source
+        models controllers graphql components view_components
+        services jobs mailers serializers managers policies validators
+        concerns routes middleware i18n pundit_policies configurations
+        engines view_templates migrations action_cable_channels
+        scheduled_jobs rake_tasks state_machines events decorators
+        database_views caching factories test_mappings rails_source
+        poros
       ].freeze
 
       # Singular type name for each directory (used in search filtering).
-      DIR_TO_TYPE = {
-        'models' => 'model',
-        'controllers' => 'controller',
-        'services' => 'service',
-        'components' => 'component',
-        'view_components' => 'view_component',
-        'jobs' => 'job',
-        'mailers' => 'mailer',
-        'graphql' => 'graphql',
-        'serializers' => 'serializer',
-        'rails_source' => 'rails_source'
-      }.freeze
+      # Derived from TYPE_DIRS via ActiveSupport singularize — no manual sync needed.
+      DIR_TO_TYPE = TYPE_DIRS.each_with_object({}) { |dir, h| h[dir] = dir.singularize }.freeze
 
       TYPE_TO_DIR = DIR_TO_TYPE.invert.freeze
 
