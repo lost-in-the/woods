@@ -2452,7 +2452,7 @@ end
 
 ### Target Environment: Large Rails Monolith
 
-Based on the Example Corp admin application analysis:
+Based on a production Rails monolith analysis:
 
 **Scale:**
 - 993 models

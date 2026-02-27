@@ -341,7 +341,7 @@ Requested: add Amplitude as an analytics provider for Tier 3 tools. Amplitude's 
 
 **Resolution:** `ManagerExtractor` implemented. Scans `app/managers/` for `SimpleDelegator` subclasses. Captures wrapped model, public methods, and delegation chain. Registered in default extractors config.
 
-~~The admin app uses SimpleDelegator subclasses in `app/managers/`.~~
+~~The host app uses SimpleDelegator subclasses in `app/managers/`.~~
 
 ### 42. ✅ Extraction — Policy Class Extractor — RESOLVED
 
