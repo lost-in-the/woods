@@ -39,6 +39,9 @@ module CodebaseIndex
       # @param request [Hash] Request with 'tool' and 'params' keys
       # @return [Hash] Response with 'ok', 'result'/'error', and 'timing_ms'
       def send_request(request)
+        # Deep-stringify keys — Tier1 tool builders use symbol keys, but the bridge
+        # path naturally stringifies via JSON round-trip. Replicate that here.
+        request = deep_stringify_keys(request)
         tool = request['tool']
         params = request['params'] || {}
 
@@ -267,6 +270,21 @@ module CodebaseIndex
       # @return [Object] Database connection
       def active_connection
         @connection || ActiveRecord::Base.connection
+      end
+
+      # Recursively convert all Hash keys to strings.
+      #
+      # @param obj [Object] The object to stringify
+      # @return [Object] Object with string keys
+      def deep_stringify_keys(obj)
+        case obj
+        when Hash
+          obj.each_with_object({}) { |(k, v), h| h[k.to_s] = deep_stringify_keys(v) }
+        when Array
+          obj.map { |item| deep_stringify_keys(item) }
+        else
+          obj
+        end
       end
     end
   end

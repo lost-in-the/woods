@@ -144,13 +144,14 @@ module CodebaseIndex
             text = renderer ? renderer.render_default(result) : JSON.pretty_generate(result)
             respond(text)
           else
+            error_text = "#{response['error_type']}: #{response['error']}"
             ::MCP::Tool::Response.new(
-              [{ type: 'text', text: "#{response['error_type']}: #{response['error']}" }],
-              is_error: true
+              [{ type: 'text', text: error_text }],
+              error: error_text
             )
           end
         rescue ConnectionError => e
-          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], is_error: true)
+          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: e.message)
         end
 
         # Apply SafeContext column redaction to a result value.
