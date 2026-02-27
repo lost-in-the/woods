@@ -1,6 +1,6 @@
 ---
 name: validate-in-host
-description: Spawns a host-app-validator agent to run extraction validation in host-app or example-docker/admin
+description: Spawns a host-app-validator agent to run extraction validation in a host Rails app (local or Docker)
 argument-hint: "[host-app|admin] [what-to-validate]"
 allowed-tools: Task, Read
 ---
@@ -12,7 +12,7 @@ Spawn a `host-app-validator` agent to validate extraction in a host Rails enviro
 
 `/validate-in-host [environment] [description]`
 
-- `$ARGUMENTS[0]` = environment: `host-app` (default) or `admin`
+- `$ARGUMENTS[0]` = environment: `local` (default) or `docker`
 - Remaining arguments = what to validate (e.g., "full pipeline", "model_extractor output", "new event_extractor")
 
 If no arguments, default to `host-app` with full integration spec run.
@@ -27,17 +27,17 @@ If no arguments, default to `host-app` with full integration spec run.
 
 | Scope | Commands |
 |---|---|
-| Full pipeline | `cd ~/work/host-app && bundle exec rspec spec/integration/ --format json --out tmp/test_results.json` |
-| Specific extractor | `cd ~/work/host-app && bundle exec rake codebase_index:extract` then inspect `tmp/codebase_index/` output |
-| Stats/health | `cd ~/work/host-app && bundle exec rake codebase_index:stats && bundle exec rake codebase_index:validate` |
+| Full pipeline | `cd $HOST_APP_DIR && bundle exec rspec spec/integration/ --format json --out tmp/test_results.json` |
+| Specific extractor | `cd $HOST_APP_DIR && bundle exec rake codebase_index:extract` then inspect `tmp/codebase_index/` output |
+| Stats/health | `cd $HOST_APP_DIR && bundle exec rake codebase_index:stats && bundle exec rake codebase_index:validate` |
 
-### For `admin`
+### For `docker`
 
 | Scope | Commands |
 |---|---|
-| Full extraction | `cd ~/work/example-docker && docker compose exec app bin/rails codebase_index:extract` |
-| Stats/health | `cd ~/work/example-docker && docker compose exec app bin/rails codebase_index:stats` |
-| Console check | `cd ~/work/example-docker && docker compose exec app bin/rails codebase_index:validate` |
+| Full extraction | `cd $COMPOSE_DIR && docker compose exec $SERVICE bin/rails codebase_index:extract` |
+| Stats/health | `cd $COMPOSE_DIR && docker compose exec $SERVICE bin/rails codebase_index:stats` |
+| Console check | `cd $COMPOSE_DIR && docker compose exec $SERVICE bin/rails codebase_index:validate` |
 
 4. **Spawn the agent** — Use the Task tool with:
    - `subagent_type: "host-app-validator"`
@@ -47,22 +47,22 @@ If no arguments, default to `host-app` with full integration spec run.
 
 ## Example Prompts to Agent
 
-### Full host-app validation
+### Full local validation
 ```
-Validate CodebaseIndex extraction in host-app:
-1. cd ~/work/host-app
+Validate CodebaseIndex extraction in host app:
+1. cd $HOST_APP_DIR
 2. Run: bundle exec rspec spec/integration/ --format progress --format json --out tmp/test_results.json
 3. If any failures, read tmp/test_results.json and report the failing specs with error messages.
 4. Run: bundle exec rake codebase_index:stats
 5. Report: spec pass/fail counts and extraction stats.
 ```
 
-### Specific extractor in admin
+### Specific extractor in Docker
 ```
-Validate the EventExtractor in example-docker/admin:
-1. cd ~/work/example-docker
+Validate the EventExtractor in a Docker host app:
+1. cd $COMPOSE_DIR
 2. Verify container: docker compose ps
-3. Run: docker compose exec app bin/rails codebase_index:extract
-4. Check output for event-type units: docker compose exec app bin/rails runner "puts CodebaseIndex::Extractor.new.extract_all.select { |u| u.unit_type == 'event' }.count"
+3. Run: docker compose exec $SERVICE bin/rails codebase_index:extract
+4. Check output for event-type units: docker compose exec $SERVICE bin/rails runner "puts CodebaseIndex::Extractor.new.extract_all.select { |u| u.unit_type == 'event' }.count"
 5. Report: count of event units, any errors during extraction.
 ```

@@ -1,6 +1,8 @@
 # Design Documents
 
-Design-phase documents extracted from the `feat/simplification` branch (Feb 2026). These were written during the early architecture phase before all subsystems were built out. Most items are now resolved — the documents serve as architectural reference and decision records.
+> **Note for contributors:** These are historical architectural decision records (ADRs) from the build phase (Feb 2026). They document design rationale and tradeoffs but are **not user-facing documentation**. For user guides, see [`docs/README.md`](../README.md).
+
+These were written during the early architecture phase before all subsystems were built out. Most items are now resolved — the documents serve as architectural reference and decision records.
 
 ## Key References
 

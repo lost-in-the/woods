@@ -682,7 +682,7 @@ RSpec.describe CodebaseIndex::FlowAnalysis::OperationExtractor do
 end
 ```
 
-### Integration Specs (host-app, `~/work/host-app/spec/integration/`)
+### Integration Specs (host Rails app, `spec/integration/`)
 
 The host-app has Post, Comment models, controllers, jobs, and a mailer. Add a flow extraction integration test:
 

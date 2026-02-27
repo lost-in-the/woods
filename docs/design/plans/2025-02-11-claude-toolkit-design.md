@@ -7,7 +7,7 @@ Every Claude Code session starts from zero on operational knowledge that never c
 1. **Context loading overhead** — Re-explaining architecture, conventions, and design decisions each session.
 2. **Repetitive workflows** — Same multi-step sequences (pick backlog item, TDD, validate in host app) done manually.
 3. **Quality drift** — Changes that don't align with design docs, conventions breaking, test apps getting out of sync.
-4. **Retraining cost** — Walking Claude through the two-app testing setup (host-app + example-docker/admin) every time.
+4. **Retraining cost** — Walking Claude through the two-app testing setup (host app + Docker app) every time.
 
 ## Solution
 
@@ -42,7 +42,7 @@ Agents are dispatched with a plan and operate independently. They report results
 
 | Agent | Tools | Purpose |
 |---|---|---|
-| `host-app-validator` | Bash, Read, Glob, Grep | Validates extraction in host-app (host) or example-docker/admin (Docker). Takes environment as parameter. |
+| `host-app-validator` | Bash, Read, Glob, Grep | Validates extraction in a host Rails app (local or Docker). Takes environment as parameter. |
 | `code-optimizer` | Read, Glob, Grep, Bash | Analyzes code for simplification opportunities. Proposes changes with rationale, doesn't implement. |
 | `doc-reviewer` | Read, Glob, Grep | Cross-references recent changes against docs. Reports gaps, doesn't fix them. |
 | `use-case-explorer` | Read, Glob, Grep, WebSearch | Identifies extraction coverage gaps and untapped uses for extracted data. Two modes: coverage gaps + untapped uses. |
@@ -57,7 +57,7 @@ Added to CLAUDE.md (139 lines total):
 
 ### Privacy
 
-Files with direct references to local projects (example-docker, host-app) are gitignored:
+Files with direct references to local projects are gitignored:
 - `.claude/rules/integration-testing.md`
 - `.claude/agents/host-app-validator.md`
 - `.claude/context/session-state.md`
@@ -79,4 +79,4 @@ Files with direct references to local projects (example-docker, host-app) are gi
 - **Agents propose, don't act.** code-optimizer, doc-reviewer, and retrieval-designer report findings. The human or main session decides what to implement. host-app-validator executes but only runs read-only validation.
 - **Single validator agent, environment as parameter.** host-app and admin validation share the same workflow shape — only the commands differ.
 - **Extractor-patterns stays as a rule, not a skill.** It's path-triggered, concise, and always relevant when touching extractors. No workflow guidance needed.
-- **Privacy via .gitignore.** Files referencing local project paths (example-docker, container names) are not committed.
+- **Privacy via .gitignore.** Files referencing local project paths and container names are not committed.

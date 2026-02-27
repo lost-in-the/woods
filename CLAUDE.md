@@ -89,7 +89,7 @@ exe/
 **Two test suites** — the gem has unit specs with mocks, and a separate Rails app has integration specs that run real extractions.
 
 - **Gem unit specs** (`spec/`): RSpec with `rubocop-rspec` enforcement. Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
-- **Integration specs** (`~/work/host-app/spec/integration/`): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Requires `cd ~/work/host-app && bundle exec rspec`.
+- **Integration specs** (in a separate Rails app): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Set up a host Rails app per the Getting Started guide, then run `bundle exec rspec spec/integration/`.
 - Every extractor needs tests for: happy path extraction, edge cases (empty files, namespaced classes, STI), concern inlining, dependency detection
 - Test `ExtractedUnit#to_h` serialization round-trips
 - Test `DependencyGraph` for cycle detection, bidirectional edge resolution, and PageRank computation
