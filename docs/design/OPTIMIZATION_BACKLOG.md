@@ -49,7 +49,7 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ## Critical: Missing Fundamentals
 
 ### 6. 🔶 Test Suite — PARTIALLY RESOLVED
-**Status:** 86 unit specs in the gem (`spec/`) + 87 integration specs in the test app (`host-app/spec/`). Unit-level coverage for core value objects, graph analysis, ModelNameCache, and json_serialize. Integration coverage for full extraction pipeline, incremental extraction, `:via` assertions, `_index.json` regeneration, git metadata structure, and `pretty_json` config.
+**Status:** 86 unit specs in the gem (`spec/`) + 87 integration specs in the host Rails app (`spec/integration/`). Unit-level coverage for core value objects, graph analysis, ModelNameCache, and json_serialize. Integration coverage for full extraction pipeline, incremental extraction, `:via` assertions, `_index.json` regeneration, git metadata structure, and `pretty_json` config.
 
 **Remaining:** Extractor-level specs against fixture Rails apps are still needed. Priority areas:
 - Individual extractors with fixture classes (requires a booted Rails environment)

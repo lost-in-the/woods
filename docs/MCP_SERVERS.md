@@ -196,7 +196,7 @@ Higher-level operations: diagnostics, validation, settings, policies.
 | `console_check_eligibility` | Check feature eligibility for a record |
 | `console_decorate` | Invoke a decorator and return computed attributes |
 
-#### Tier 3: Analytics (12 tools)
+#### Tier 3: Analytics (10 tools)
 
 Performance metrics, job monitoring, cache stats.
 

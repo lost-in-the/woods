@@ -182,12 +182,12 @@ Additional extractors available (not in default set):
 | `:routes` | RouteExtractor | Rails routes (auto-included) |
 | `:middleware` | MiddlewareExtractor | Rack middleware stack |
 | `:i18n` | I18nExtractor | Locale translation files |
-| `:pundit` | PunditExtractor | Pundit authorization policies |
-| `:configuration` | ConfigurationExtractor | Rails initializers + behavioral profile |
+| `:pundit_policies` | PunditExtractor | Pundit authorization policies |
+| `:configurations` | ConfigurationExtractor | Rails initializers + behavioral profile |
 | `:engines` | EngineExtractor | Mounted Rails engines |
 | `:view_templates` | ViewTemplateExtractor | ERB view templates |
 | `:migrations` | MigrationExtractor | ActiveRecord migrations |
-| `:action_cable` | ActionCableExtractor | ActionCable channels |
+| `:action_cable_channels` | ActionCableExtractor | ActionCable channels |
 | `:scheduled_jobs` | ScheduledJobExtractor | Recurring/scheduled jobs |
 | `:rake_tasks` | RakeTaskExtractor | Rake task definitions |
 | `:state_machines` | StateMachineExtractor | AASM/Statesman state machines |
@@ -198,7 +198,7 @@ Additional extractors available (not in default set):
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
 | `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
-| `:lib` | LibExtractor | Ruby files in lib/ |
+| `:libs` | LibExtractor | Ruby files in lib/ |
 
 ## Database Compatibility
 

@@ -684,7 +684,7 @@ end
 
 ### Integration Specs (host Rails app, `spec/integration/`)
 
-The host-app has Post, Comment models, controllers, jobs, and a mailer. Add a flow extraction integration test:
+The host Rails app has Post, Comment models, controllers, jobs, and a mailer. Add a flow extraction integration test:
 
 1. Run full extraction to produce ExtractedUnits.
 2. Call `FlowAssembler.assemble("PostsController#create")`.
@@ -717,7 +717,7 @@ The host-app has Post, Comment models, controllers, jobs, and a mailer. Add a fl
 - `FlowDocument` value object with `to_h` (JSON) and `to_markdown`
 - Integration with `DependencyGraph` for target resolution
 - Integration with `ControllerExtractor` route and callback metadata
-- Unit specs for assembler, integration specs in host-app
+- Unit specs for assembler, integration specs in the host Rails app
 
 **Unlocks:** Can generate a complete flow trace from any entry point in the extracted codebase.
 
