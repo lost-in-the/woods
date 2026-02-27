@@ -14,9 +14,9 @@ RSpec.describe CodebaseIndex::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 26 tools' do
+    it 'registers 27 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(26)
+      expect(tools.size).to eq(27)
     end
 
     it 'registers expected tool names' do
@@ -31,7 +31,8 @@ RSpec.describe CodebaseIndex::MCP::Server do
         'retrieval_rate', 'retrieval_report_gap',
         'retrieval_explain', 'retrieval_suggest',
         'list_snapshots', 'snapshot_diff',
-        'unit_history', 'snapshot_detail'
+        'unit_history', 'snapshot_detail',
+        'notion_sync'
       )
     end
 

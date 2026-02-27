@@ -537,4 +537,49 @@ namespace :codebase_index do
       puts flow.to_markdown
     end
   end
+
+  desc 'Sync extraction data to Notion databases (Data Models + Columns)'
+  task notion_sync: :environment do
+    require 'codebase_index/notion/exporter'
+
+    config = CodebaseIndex.configuration
+    api_token = ENV.fetch('NOTION_API_TOKEN', nil) || config.notion_api_token
+
+    unless api_token
+      puts 'ERROR: Notion API token not configured.'
+      puts 'Set NOTION_API_TOKEN env var or configure notion_api_token in CodebaseIndex.configure.'
+      exit 1
+    end
+
+    # Allow env var override for token
+    config.notion_api_token = api_token if config.notion_api_token.nil?
+
+    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
+
+    db_ids = config.notion_database_ids || {}
+    if db_ids.empty?
+      puts 'ERROR: No Notion database IDs configured.'
+      puts 'Set notion_database_ids in CodebaseIndex.configure:'
+      puts '  config.notion_database_ids = { data_models: "db-uuid", columns: "db-uuid" }'
+      exit 1
+    end
+
+    puts 'Syncing extraction data to Notion...'
+    puts "  Output dir: #{output_dir}"
+    puts "  Databases:  #{db_ids.keys.join(', ')}"
+    puts
+
+    exporter = CodebaseIndex::Notion::Exporter.new(index_dir: output_dir)
+    stats = exporter.sync_all
+
+    puts 'Sync complete!'
+    puts "  Data Models: #{stats[:data_models]} synced"
+    puts "  Columns:     #{stats[:columns]} synced"
+
+    if stats[:errors].any?
+      puts "  Errors:      #{stats[:errors].size}"
+      stats[:errors].first(5).each { |e| puts "    - #{e}" }
+      puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+    end
+  end
 end

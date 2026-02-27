@@ -62,6 +62,7 @@ module CodebaseIndex
           define_operator_tools(server, operator, respond)
           define_feedback_tools(server, feedback_store, respond)
           define_snapshot_tools(server, snapshot_store, respond)
+          define_notion_sync_tool(server, reader, index_dir, respond)
           register_resource_handler(server, reader)
 
           server
@@ -832,6 +833,46 @@ module CodebaseIndex
             else
               respond.call("Snapshot not found for git SHA: #{git_sha}")
             end
+          end
+        end
+
+        def define_notion_sync_tool(server, reader, index_dir, respond)
+          server.define_tool(
+            name: 'notion_sync',
+            description: 'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
+                         'Requires notion_api_token and notion_database_ids to be configured.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                databases: {
+                  type: 'array',
+                  items: { type: 'string', enum: %w[data_models columns] },
+                  description: 'Which databases to sync (default: all configured)'
+                }
+              }
+            }
+          ) do |server_context:, databases: nil|
+            config = CodebaseIndex.configuration
+            unless config.notion_api_token
+              next respond.call('Error: notion_api_token is not configured. Set it in CodebaseIndex.configure.')
+            end
+
+            if (config.notion_database_ids || {}).empty?
+              next respond.call('Error: notion_database_ids is not configured. Set it in CodebaseIndex.configure.')
+            end
+
+            require_relative '../notion/exporter'
+            exporter = CodebaseIndex::Notion::Exporter.new(index_dir: index_dir, reader: reader)
+            stats = exporter.sync_all
+
+            respond.call(JSON.pretty_generate({
+                                                synced: true,
+                                                data_models: stats[:data_models],
+                                                columns: stats[:columns],
+                                                errors: stats[:errors].first(10)
+                                              }))
+          rescue StandardError => e
+            respond.call("Notion sync failed: #{e.message}")
           end
         end
 
