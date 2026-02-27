@@ -1,7 +1,7 @@
 ---
 name: validate-in-host
 description: Spawns a host-app-validator agent to run extraction validation in a host Rails app (local or Docker)
-argument-hint: "[host-app|admin] [what-to-validate]"
+argument-hint: "[local|docker] [what-to-validate]"
 allowed-tools: Task, Read
 ---
 # Validate in Host App
@@ -15,7 +15,7 @@ Spawn a `host-app-validator` agent to validate extraction in a host Rails enviro
 - `$ARGUMENTS[0]` = environment: `local` (default) or `docker`
 - Remaining arguments = what to validate (e.g., "full pipeline", "model_extractor output", "new event_extractor")
 
-If no arguments, default to `host-app` with full integration spec run.
+If no arguments, default to `local` with full integration spec run.
 
 ## Workflow
 
@@ -23,7 +23,7 @@ If no arguments, default to `host-app` with full integration spec run.
 2. **Read the rules** — Read `.claude/rules/integration-testing.md` to get environment-specific commands.
 3. **Build the plan** — Construct a validation plan based on the scope:
 
-### For `host-app`
+### For `local`
 
 | Scope | Commands |
 |---|---|

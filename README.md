@@ -38,6 +38,8 @@ Or install directly:
 gem install codebase_index
 ```
 
+> **Requires Rails.** Extraction runs inside a booted Rails application using runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, etc.). The gem cannot extract from source files alone. See [Getting Started](docs/GETTING_STARTED.md) for setup.
+
 ## Target Environment
 
 Designed for Rails applications of any scale, with particular strength in large monoliths:
@@ -95,23 +97,71 @@ Extraction runs inside the Rails application (via rake task) to access runtime i
 3. **Enrich with git** — Last modified, contributors, change frequency, recent commits
 4. **Write output** — JSON per unit, dependency graph, manifest, structural summary
 
-### Extractors
+### Extractors (34)
+
+**Core Application**
 
 | Extractor | What it captures |
 |-----------|-----------------|
-| **ModelExtractor** | Schema (columns, indexes, FKs), associations with options, validations, callbacks (all 13 types), scopes, enums, inlined concerns. Chunks large models into summary/associations/callbacks/validations. |
-| **ControllerExtractor** | Route mapping (verb → path → action), filter chain resolution per action, response formats, permitted params. Creates per-action chunks with applicable filters and route context. |
-| **ServiceExtractor** | Scans `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`. Extracts entry points (call/perform/execute), dependency injection patterns, custom errors, return type inference. |
-| **JobExtractor** | ActiveJob and Sidekiq workers from `app/jobs` and `app/workers`. Queue configuration, retry/concurrency options, perform arguments, callbacks. Critical for understanding async behavior. |
-| **MailerExtractor** | ActionMailer classes with default settings, per-action templates, callbacks, helper usage. Creates per-action chunks with template associations. |
-| **PhlexExtractor** | Phlex component slots, initialize params, rendered sub-components, model dependencies, Stimulus controller references, route helpers. |
+| **ModelExtractor** | Schema (columns, indexes, FKs), associations, validations, callbacks (all 13 types), scopes, enums, inlined concerns. Chunks large models into summary/associations/callbacks/validations. |
+| **ControllerExtractor** | Route mapping (verb → path → action), filter chains per action, response formats, permitted params. Per-action chunks with applicable filters and route context. |
+| **ServiceExtractor** | Scans `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`. Entry points, dependency injection, custom errors, return type inference. |
+| **JobExtractor** | ActiveJob and Sidekiq workers. Queue config, retry/concurrency options, perform arguments, callbacks. |
+| **MailerExtractor** | ActionMailer classes with defaults, per-action templates, callbacks, helper usage. |
+| **ConfigurationExtractor** | Rails initializers from `config/initializers` and `config/environments`, plus behavioral profile from resolved `Rails.application.config`. |
+| **RouteExtractor** | All Rails routes via runtime introspection of `Rails.application.routes`. |
+| **MiddlewareExtractor** | Rack middleware stack as a single ordered unit. |
+
+**UI Components**
+
+| Extractor | What it captures |
+|-----------|-----------------|
+| **PhlexExtractor** | Phlex component slots, initialize params, sub-components, Stimulus controller references, route helpers. |
 | **ViewComponentExtractor** | ViewComponent slots, template paths, preview classes, collection support. |
-| **GraphQLExtractor** | Object types, input types, enums, unions, interfaces, mutations, resolvers, field metadata, authorization patterns. |
-| **SerializerExtractor** | ActiveModelSerializers, Blueprinter, Alba, and Draper. Auto-detects loaded gems and extracts accordingly. |
-| **ManagerExtractor** | SimpleDelegator subclasses in `app/managers/`. Wrapped model, public methods, delegation chain. |
-| **PolicyExtractor** | Domain policy classes in `app/policies/`. Policy names, evaluated models, decision methods. |
-| **ValidatorExtractor** | Custom validator classes in `app/validators/`. Validator names, operated models, validation rules. |
-| **RailsSourceExtractor** | High-value Rails framework paths (associations, callbacks, validations, relations) and gem source (Devise, Pundit, Sidekiq, etc.) pinned to exact installed versions. Rates importance for retrieval ranking. |
+| **ViewTemplateExtractor** | ERB view templates with render calls, instance variables, helper usage. |
+| **DecoratorExtractor** | Decorators, presenters, and form objects from `app/decorators`, `app/presenters`, `app/form_objects`. |
+
+**Data Layer**
+
+| Extractor | What it captures |
+|-----------|-----------------|
+| **ConcernExtractor** | ActiveSupport::Concern modules from `app/models/concerns` and `app/controllers/concerns`. |
+| **PoroExtractor** | Plain Ruby objects in `app/models` (non-ActiveRecord classes, excluding concerns). |
+| **SerializerExtractor** | ActiveModelSerializers, Blueprinter, Alba, and Draper. Auto-detects loaded serialization gems. |
+| **ValidatorExtractor** | Custom ActiveModel validator classes with validation rules. |
+| **ManagerExtractor** | SimpleDelegator subclasses — wrapped model, public methods, delegation chain. |
+
+**API & Authorization**
+
+| Extractor | What it captures |
+|-----------|-----------------|
+| **GraphQLExtractor** | graphql-ruby types, mutations, queries, resolvers, field metadata, authorization patterns. Produces 4 unit types. |
+| **PunditExtractor** | Pundit authorization policies with action methods (index?, show?, create?, etc.). |
+| **PolicyExtractor** | Domain policy classes with decision methods and eligibility rules. |
+
+**Infrastructure**
+
+| Extractor | What it captures |
+|-----------|-----------------|
+| **EngineExtractor** | Mounted Rails engines via runtime introspection with mount points and route counts. |
+| **I18nExtractor** | Locale files from `config/locales` with translation key structures. |
+| **ActionCableExtractor** | ActionCable channels with stream subscriptions, actions, broadcast patterns. |
+| **ScheduledJobExtractor** | Scheduled jobs from `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`. |
+| **RakeTaskExtractor** | Rake tasks from `lib/tasks/*.rake` with namespaces, dependencies, descriptions. |
+| **MigrationExtractor** | ActiveRecord migrations with DDL metadata, table operations, reversibility, risk indicators. |
+| **DatabaseViewExtractor** | SQL views from `db/views` (Scenic convention) with materialization and table references. |
+| **StateMachineExtractor** | AASM, Statesman, and state_machines DSL definitions with states and transitions. |
+| **EventExtractor** | Event publish/subscribe patterns (ActiveSupport::Notifications, Wisper). |
+| **CachingExtractor** | Cache usage across controllers, models, and views — strategies, TTLs, cache keys. |
+
+**Testing & Source**
+
+| Extractor | What it captures |
+|-----------|-----------------|
+| **FactoryExtractor** | FactoryBot factory definitions with traits and associations. |
+| **TestMappingExtractor** | Test file → subject class mapping with test counts and framework type. |
+| **LibExtractor** | Ruby files from `lib/` (excluding tasks and generators). |
+| **RailsSourceExtractor** | High-value Rails framework source and gem source pinned to exact installed versions. |
 
 ### Key Design Decisions
 
@@ -122,6 +172,24 @@ Extraction runs inside the Rails application (via rake task) to access runtime i
 **Semantic chunking.** Large models are split into purpose-specific chunks (summary, associations, callbacks, validations) rather than arbitrary size-based splits. Controllers chunk per-action with the relevant filters and route attached.
 
 **Dependency graph with BFS blast radius.** The graph tracks both forward dependencies (what this unit uses) and reverse dependencies (what uses this unit). Changed-file impact is computed via breadth-first traversal — if a concern changes, every model including it gets re-indexed.
+
+## MCP Servers
+
+CodebaseIndex ships two [MCP](https://modelcontextprotocol.io/) servers for integrating with AI development tools (Claude Code, Cursor, Windsurf, etc.).
+
+**Index Server** (26 tools) — Reads pre-extracted data from disk. No Rails boot required. Provides code lookup, dependency traversal, graph analysis, semantic search, pipeline management, feedback collection, and temporal snapshots.
+
+```bash
+codebase-index-mcp /path/to/rails-app/tmp/codebase_index
+```
+
+**Console Server** (31 tools) — Bridges to a live Rails process for database queries, model diagnostics, job monitoring, and guarded operations. All queries run in rolled-back transactions with SQL validation and audit logging.
+
+```bash
+codebase-console-mcp
+```
+
+See [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) for the full tool catalog and setup instructions.
 
 ## Subsystems
 
@@ -139,7 +207,7 @@ lib/
 │   ├── version.rb                              # Gem version
 │   ├── railtie.rb                              # Rails integration
 │   │
-│   ├── extractors/                             # 13 extractors (one per Rails concept)
+│   ├── extractors/                             # 34 extractors (one per Rails concept)
 │   │   ├── model_extractor.rb                  # ActiveRecord models
 │   │   ├── controller_extractor.rb             # ActionController
 │   │   ├── service_extractor.rb                # Service objects
@@ -207,7 +275,7 @@ lib/
 │   │   ├── generic_adapter.rb                  # Generic LLM output
 │   │   └── human_adapter.rb                    # Human-readable output
 │   │
-│   ├── mcp/                                    # MCP Index Server (21 tools)
+│   ├── mcp/                                    # MCP Index Server (26 tools)
 │   │   ├── server.rb                           # Tool definitions + dispatch
 │   │   └── index_reader.rb                     # JSON index reader
 │   │
@@ -261,6 +329,16 @@ lib/
 │   │       ├── 002_create_edges.rb
 │   │       └── 003_create_embeddings.rb
 │   │
+│   ├── session_tracer/                          # Session tracing middleware + stores
+│   │   ├── middleware.rb                        # Rack middleware
+│   │   ├── file_store.rb                        # File-based trace storage
+│   │   ├── redis_store.rb                       # Redis trace storage
+│   │   └── solid_cache_store.rb                 # SolidCache trace storage
+│   │
+│   ├── temporal/                                # Temporal snapshot system
+│   │   ├── snapshot_store.rb                    # Snapshot persistence + diff
+│   │   └── snapshot_metadata.rb                 # Snapshot metadata
+│   │
 │   └── evaluation/                             # Retrieval evaluation
 │       ├── query_set.rb                        # Evaluation query loading
 │       ├── metrics.rb                          # Precision@k, Recall, MRR
@@ -276,7 +354,9 @@ lib/
 │   └── codebase_index.rake                     # Rake task definitions
 │
 exe/
-├── codebase-index-mcp                          # MCP Index Server executable
+├── codebase-index-mcp                          # MCP Index Server executable (stdio)
+├── codebase-index-mcp-start                    # Self-healing MCP wrapper
+├── codebase-index-mcp-http                     # MCP Index Server (HTTP/Rack)
 └── codebase-console-mcp                        # Console MCP Server executable
 ```
 
