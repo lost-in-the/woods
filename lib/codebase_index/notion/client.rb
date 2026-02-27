@@ -3,11 +3,10 @@
 require 'json'
 require 'net/http'
 require 'uri'
+require 'codebase_index'
 require_relative 'rate_limiter'
 
 module CodebaseIndex
-  class Error < StandardError; end unless defined?(CodebaseIndex::Error)
-
   module Notion
     # Thin wrapper around the Notion REST API (v2022-06-28).
     #
@@ -149,13 +148,17 @@ module CodebaseIndex
       #
       # @return [Net::HTTPResponse]
       # @raise [CodebaseIndex::Error] on persistent network failures
-      def execute_with_retry(method, path, body, retries)
-        @rate_limiter.throttle { execute_http(method, path, body) }
-      rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
-        raise CodebaseIndex::Error, "Network error after #{MAX_RETRIES} retries: #{e.message}" if retries >= MAX_RETRIES
+      def execute_with_retry(method, path, body, _retries)
+        attempts = 0
+        begin
+          @rate_limiter.throttle { execute_http(method, path, body) }
+        rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
+          attempts += 1
+          raise CodebaseIndex::Error, "Network error after #{attempts} retries: #{e.message}" if attempts >= MAX_RETRIES
 
-        sleep(2**retries)
-        retry
+          sleep(2**attempts)
+          retry
+        end
       end
 
       # Raise a descriptive error from a non-success Notion response.

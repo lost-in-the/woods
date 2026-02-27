@@ -14,6 +14,8 @@ module CodebaseIndex
       #   client.create_page(database_id: db_id, properties: properties)
       #
       class ModelMapper
+        MAX_RICH_TEXT_LENGTH = 2000
+
         # Map a model unit to Notion Data Models page properties.
         #
         # @param unit_data [Hash] Parsed model ExtractedUnit JSON
@@ -152,7 +154,9 @@ module CodebaseIndex
 
         # @return [Hash]
         def rich_text_property(text)
-          { rich_text: [{ text: { content: text.to_s } }] }
+          content = text.to_s
+          content = "#{content[0...1997]}..." if content.length > MAX_RICH_TEXT_LENGTH
+          { rich_text: [{ text: { content: content } }] }
         end
       end
     end

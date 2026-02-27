@@ -38,15 +38,10 @@ module CodebaseIndex
 
         @mutex.synchronize do
           wait_for_interval
-        end
-
-        result = yield
-
-        @mutex.synchronize do
           @last_request_at = monotonic_now
         end
 
-        result
+        yield
       end
 
       private

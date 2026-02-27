@@ -123,7 +123,7 @@ steps:
     if: build.branch == "main" && build.state == "passed"
     soft_fail: true
     env:
-      NOTION_API_TOKEN: "secret_..."
+      NOTION_API_TOKEN: $NOTION_API_TOKEN  # Set in pipeline environment settings
 ```
 
 For post-migration syncs only:

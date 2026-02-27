@@ -1,12 +1,11 @@
 # frozen_string_literal: true
 
+require 'codebase_index'
 require_relative 'client'
 require_relative 'mapper'
 require_relative 'rate_limiter'
 
 module CodebaseIndex
-  class ConfigurationError < Error; end unless defined?(CodebaseIndex::ConfigurationError)
-
   module Notion
     # Orchestrates syncing CodebaseIndex extraction data to Notion databases.
     #

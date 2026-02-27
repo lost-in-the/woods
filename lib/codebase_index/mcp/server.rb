@@ -8,7 +8,7 @@ require_relative 'tool_response_renderer'
 
 module CodebaseIndex
   module MCP
-    # Builds an MCP::Server with 26 tools, 2 resources, and 2 resource templates for querying
+    # Builds an MCP::Server with 27 tools, 2 resources, and 2 resource templates for querying
     # CodebaseIndex extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -843,15 +843,9 @@ module CodebaseIndex
                          'Requires notion_api_token and notion_database_ids to be configured.',
             input_schema: {
               type: 'object',
-              properties: {
-                databases: {
-                  type: 'array',
-                  items: { type: 'string', enum: %w[data_models columns] },
-                  description: 'Which databases to sync (default: all configured)'
-                }
-              }
+              properties: {}
             }
-          ) do |server_context:, databases: nil|
+          ) do |server_context:|
             config = CodebaseIndex.configuration
             unless config.notion_api_token
               next respond.call('Error: notion_api_token is not configured. Set it in CodebaseIndex.configure.')

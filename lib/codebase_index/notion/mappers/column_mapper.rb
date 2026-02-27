@@ -13,6 +13,8 @@ module CodebaseIndex
       #   properties = mapper.map(column, model_identifier: "User", validations: [...], parent_page_id: "page-123")
       #
       class ColumnMapper
+        MAX_RICH_TEXT_LENGTH = 2000
+
         # Map a single column to Notion Columns page properties.
         #
         # @param column [Hash] Column hash from metadata["columns"] (name, type, null, default)
@@ -53,7 +55,9 @@ module CodebaseIndex
         # @param text [String]
         # @return [Hash]
         def rich_text_property(text)
-          { rich_text: [{ text: { content: text.to_s } }] }
+          content = text.to_s
+          content = "#{content[0...1997]}..." if content.length > MAX_RICH_TEXT_LENGTH
+          { rich_text: [{ text: { content: content } }] }
         end
       end
     end
