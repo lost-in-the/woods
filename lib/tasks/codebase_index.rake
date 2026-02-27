@@ -538,6 +538,20 @@ namespace :codebase_index do
     end
   end
 
+  desc 'Start the embedded console MCP server (stdio transport)'
+  task :console do
+    # Capture stdout before Rails boot to keep MCP protocol clean.
+    # Rails boot emits OpenTelemetry, gem warnings, etc. to stdout —
+    # MCP client cannot parse these as JSON-RPC.
+    # Global variable passes the fd to exe/codebase-console via load.
+    $codebase_index_protocol_out = $stdout.dup # rubocop:disable Style/GlobalVars
+    $stdout.reopen($stderr)
+
+    Rake::Task[:environment].invoke
+
+    load File.expand_path('../../exe/codebase-console', __dir__)
+  end
+
   desc 'Sync extraction data to Notion databases (Data Models + Columns)'
   task notion_sync: :environment do
     require 'codebase_index/notion/exporter'

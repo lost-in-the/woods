@@ -34,7 +34,7 @@ module CodebaseIndex
       TIER4_TOOLS = %w[eval sql query].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
-        # Build a configured MCP::Server with console tools.
+        # Build a configured MCP::Server with console tools using the bridge protocol.
         #
         # @param config [Hash] Configuration hash (from YAML or env)
         # @return [MCP::Server] Configured server ready for transport
@@ -44,18 +44,30 @@ module CodebaseIndex
           redacted_columns = Array(config['redacted_columns'] || connection_config['redacted_columns'])
           safe_ctx = redacted_columns.any? ? SafeContext.new(connection: nil, redacted_columns: redacted_columns) : nil
 
-          server = ::MCP::Server.new(
-            name: 'codebase-console',
-            version: defined?(CodebaseIndex::VERSION) ? CodebaseIndex::VERSION : '0.1.0'
+          build_server(conn_mgr, safe_ctx)
+        end
+
+        # Build a configured MCP::Server using embedded ActiveRecord execution.
+        #
+        # No bridge process needed — queries run directly via ActiveRecord.
+        # Pass the returned server to StdioTransport or StreamableHTTPTransport.
+        #
+        # @param model_validator [ModelValidator] Validates model/column names
+        # @param safe_context [SafeContext] Wraps queries in rolled-back transactions
+        # @param redacted_columns [Array<String>] Column names to redact from output
+        # @return [MCP::Server] Configured server ready for transport
+        def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil)
+          require_relative 'embedded_executor'
+
+          executor = EmbeddedExecutor.new(
+            model_validator: model_validator, safe_context: safe_context, connection: connection
           )
+          redact_ctx = if redacted_columns.any?
+                         SafeContext.new(connection: nil,
+                                         redacted_columns: redacted_columns)
+                       end
 
-          renderer = build_console_renderer
-
-          register_tier1_tools(server, conn_mgr, safe_ctx, renderer: renderer)
-          register_tier2_tools(server, conn_mgr, safe_ctx, renderer: renderer)
-          register_tier3_tools(server, conn_mgr, safe_ctx, renderer: renderer)
-          register_tier4_tools(server, conn_mgr, safe_ctx, renderer: renderer)
-          server
+          build_server(executor, redact_ctx)
         end
 
         # Register Tier 1 read-only tools on the server.
@@ -99,6 +111,26 @@ module CodebaseIndex
         end
 
         private
+
+        # Shared server construction used by both build() and build_embedded().
+        #
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Any object with send_request(Hash) -> Hash
+        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
+        # @return [MCP::Server]
+        def build_server(conn_mgr, safe_ctx)
+          server = ::MCP::Server.new(
+            name: 'codebase-console',
+            version: defined?(CodebaseIndex::VERSION) ? CodebaseIndex::VERSION : '0.1.0'
+          )
+
+          renderer = build_console_renderer
+
+          register_tier1_tools(server, conn_mgr, safe_ctx, renderer: renderer)
+          register_tier2_tools(server, conn_mgr, safe_ctx, renderer: renderer)
+          register_tier3_tools(server, conn_mgr, safe_ctx, renderer: renderer)
+          register_tier4_tools(server, conn_mgr, safe_ctx, renderer: renderer)
+          server
+        end
 
         def respond(text)
           ::MCP::Tool::Response.new([{ type: 'text', text: text }])
@@ -536,11 +568,12 @@ module CodebaseIndex
           mgr = conn_mgr
           ctx = safe_ctx
           rdr = renderer
+          bridge_method = method(:send_to_bridge)
           schema = { properties: properties }
           schema[:required] = required if required&.any?
           server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
             request = tool_block.call(args)
-            send_to_bridge(mgr, request.transform_keys(&:to_s), ctx, renderer: rdr)
+            bridge_method.call(mgr, request.transform_keys(&:to_s), ctx, renderer: rdr)
           end
         end
         # rubocop:enable Metrics/ParameterLists

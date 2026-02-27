@@ -191,6 +191,55 @@ codebase-console-mcp
 
 See [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) for the full tool catalog and setup instructions.
 
+### Claude Code Setup
+
+Add the servers to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "codebase-index": {
+      "command": "codebase-index-mcp",
+      "args": ["/path/to/rails-app/tmp/codebase_index"]
+    },
+    "codebase-console": {
+      "command": "bundle",
+      "args": ["exec", "rake", "codebase_index:console"],
+      "cwd": "/path/to/rails-app"
+    }
+  }
+}
+```
+
+The **index server** reads from a pre-extracted directory — run `bundle exec rake codebase_index:extract` in your Rails app first.
+
+The **console server** runs embedded inside your Rails app (no config file needed). For Docker:
+
+```json
+{
+  "mcpServers": {
+    "codebase-console": {
+      "command": "docker",
+      "args": ["exec", "-i", "my_container", "bundle", "exec", "rake", "codebase_index:console"]
+    }
+  }
+}
+```
+
+### Validation
+
+Verify each server starts and lists its tools:
+
+```bash
+# Index server — should list 27 tools
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
+  codebase-index-mcp /path/to/rails-app/tmp/codebase_index
+
+# Console server — should list 31 tools (requires Rails app)
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
+  bundle exec rake codebase_index:console
+```
+
 ## Subsystems
 
 ```
