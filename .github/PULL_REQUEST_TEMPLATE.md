@@ -4,11 +4,15 @@ Brief description of the changes.
 
 ## Motivation
 
-Why is this change needed?
+Why is this change needed? Link any related issues (e.g., `Fixes #123`).
+
+## Changes
+
+- ...
 
 ## Testing
 
-How was this tested?
+How was this tested? Include relevant specs or manual verification steps.
 
 ## Checklist
 
@@ -16,3 +20,4 @@ How was this tested?
 - [ ] `bundle exec rake spec` passes
 - [ ] `bundle exec rubocop` passes
 - [ ] CHANGELOG.md updated (if user-facing change)
+- [ ] Documentation updated (if applicable)

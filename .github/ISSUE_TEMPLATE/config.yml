@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Help
+    url: https://github.com/LeahArmstrong/codebase_index/discussions/categories/q-a
+    about: Ask the community for help — please don't open issues for questions.
+  - name: Ideas & Feature Discussion
+    url: https://github.com/LeahArmstrong/codebase_index/discussions/categories/ideas
+    about: Discuss feature ideas before opening a formal request.
