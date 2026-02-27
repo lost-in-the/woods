@@ -543,16 +543,14 @@ namespace :codebase_index do
     require 'codebase_index/notion/exporter'
 
     config = CodebaseIndex.configuration
-    api_token = ENV.fetch('NOTION_API_TOKEN', nil) || config.notion_api_token
+    # Env var takes precedence over configured value
+    config.notion_api_token = ENV.fetch('NOTION_API_TOKEN', nil) || config.notion_api_token
 
-    unless api_token
+    unless config.notion_api_token
       puts 'ERROR: Notion API token not configured.'
       puts 'Set NOTION_API_TOKEN env var or configure notion_api_token in CodebaseIndex.configure.'
       exit 1
     end
-
-    # Allow env var override for token
-    config.notion_api_token = api_token if config.notion_api_token.nil?
 
     output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
 

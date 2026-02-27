@@ -42,10 +42,12 @@ module CodebaseIndex
         model_stats = @database_ids[:data_models] ? sync_data_models : empty_stats
         column_stats = @database_ids[:columns] && @database_ids[:data_models] ? sync_columns : empty_stats
 
+        all_errors = model_stats[:errors] + column_stats[:errors]
+
         {
           data_models: model_stats[:synced],
           columns: column_stats[:synced],
-          errors: model_stats[:errors] + column_stats[:errors]
+          errors: cap_errors(all_errors)
         }
       end
 
@@ -82,6 +84,8 @@ module CodebaseIndex
 
         { synced: synced, errors: errors }
       end
+
+      MAX_ERRORS = 100
 
       private
 
@@ -189,6 +193,16 @@ module CodebaseIndex
       # @return [Hash]
       def empty_stats
         { synced: 0, errors: [] }
+      end
+
+      # Cap errors to prevent unbounded memory growth.
+      #
+      # @param errors [Array<String>]
+      # @return [Array<String>]
+      def cap_errors(errors)
+        return errors if errors.size <= MAX_ERRORS
+
+        errors.first(MAX_ERRORS) + ["... and #{errors.size - MAX_ERRORS} more errors"]
       end
 
       # @return [String]

@@ -19,7 +19,7 @@ module CodebaseIndex
     #   client.create_page(database_id: "db-uuid", properties: { ... })
     #   client.query_database(database_id: "db-uuid", filter: { ... })
     #
-    class Client
+    class Client # rubocop:disable Metrics/ClassLength
       BASE_URL = 'https://api.notion.com/v1'
       NOTION_VERSION = '2022-06-28'
       MAX_RETRIES = 3
@@ -130,9 +130,7 @@ module CodebaseIndex
         retries = 0
 
         loop do
-          response = @rate_limiter.throttle do
-            execute_http(method, path, body)
-          end
+          response = execute_with_retry(method, path, body, retries)
 
           return JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
 
@@ -143,14 +141,34 @@ module CodebaseIndex
             next
           end
 
-          parsed = begin
-            JSON.parse(response.body)
-          rescue StandardError
-            {}
-          end
-          message = parsed['message'] || 'Unknown error'
-          raise CodebaseIndex::Error, "Notion API error #{response.code}: #{message}"
+          raise_api_error(response)
         end
+      end
+
+      # Execute HTTP with rate limiting and network error retry.
+      #
+      # @return [Net::HTTPResponse]
+      # @raise [CodebaseIndex::Error] on persistent network failures
+      def execute_with_retry(method, path, body, retries)
+        @rate_limiter.throttle { execute_http(method, path, body) }
+      rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
+        raise CodebaseIndex::Error, "Network error after #{MAX_RETRIES} retries: #{e.message}" if retries >= MAX_RETRIES
+
+        sleep(2**retries)
+        retry
+      end
+
+      # Raise a descriptive error from a non-success Notion response.
+      #
+      # @raise [CodebaseIndex::Error]
+      def raise_api_error(response)
+        parsed = begin
+          JSON.parse(response.body)
+        rescue JSON::ParserError
+          { 'message' => "Unparseable response body: #{response.body&.slice(0, 200)}" }
+        end
+        message = parsed['message'] || 'Unknown error'
+        raise CodebaseIndex::Error, "Notion API error #{response.code}: #{message}"
       end
 
       # Perform the raw HTTP request.
