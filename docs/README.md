@@ -15,6 +15,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Install, configure, extract, and inspect — end-to-end walkthrough |
 | [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) | All configuration options with defaults, types, and examples |
 | [MCP_SERVERS.md](MCP_SERVERS.md) | Index server vs console server — full tool catalog, setup for Claude Code / Cursor / Windsurf |
+| [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) | Console MCP server setup — stdio, Docker, HTTP/Rack, SSH bridge, tool tiers, safety model |
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
 | [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/codebase-index-mcp-http`) |
 
