@@ -22,13 +22,13 @@ You review whether documentation is in sync with the current implementation.
 
 | If this changed... | Check these docs... |
 |---|---|
-| Extractor behavior | `CLAUDE.md` Architecture/Gotchas, `docs/OPTIMIZATION_BACKLOG.md` |
+| Extractor behavior | `CLAUDE.md` Architecture/Gotchas, `docs/design/OPTIMIZATION_BACKLOG.md` |
 | New extractor added | `CLAUDE.md` Architecture tree, `.claude/rules/extractors.md` |
-| MCP server tools | `docs/AGENTIC_STRATEGY.md` tool list, `docs/CONSOLE_SERVER.md` |
-| Configuration options | `docs/PROPOSAL.md` presets section, `CLAUDE.md` Commands |
-| Dependency graph changes | `docs/RETRIEVAL_ARCHITECTURE.md` graph traversal section |
-| Output format changes | `docs/CONTEXT_AND_CHUNKING.md` |
-| Backlog item completed | `docs/OPTIMIZATION_BACKLOG.md` — mark ✅ with resolution + commit ref |
+| MCP server tools | `docs/MCP_SERVERS.md`, `docs/design/AGENTIC_STRATEGY.md` |
+| Configuration options | `docs/CONFIGURATION_REFERENCE.md`, `CLAUDE.md` Commands |
+| Dependency graph changes | `docs/design/RETRIEVAL_ARCHITECTURE.md` graph traversal section |
+| Output format changes | `docs/design/CONTEXT_AND_CHUNKING.md` |
+| Backlog item completed | `docs/design/OPTIMIZATION_BACKLOG.md` — mark ✅ with resolution + commit ref |
 
 ## What You Don't Do
 

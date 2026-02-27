@@ -36,8 +36,8 @@ Analyze a host Rails app's structure against the current extractors to find unco
 Given what CodebaseIndex already extracts, brainstorm what AI-assisted workflows it could power beyond the ones already designed.
 
 **Process:**
-1. Read `docs/AGENTIC_STRATEGY.md` for currently planned use cases.
-2. Read `docs/PROPOSAL.md` for the project vision.
+1. Read `docs/design/AGENTIC_STRATEGY.md` for currently planned use cases.
+2. Read `docs/design/PROPOSAL.md` for the project vision.
 3. Identify uses not covered: code review automation, onboarding guides, migration planning, dead code detection, API documentation generation, test gap analysis, etc.
 
 **Output per use case:**

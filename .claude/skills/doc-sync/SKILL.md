@@ -10,7 +10,7 @@ After any implementation that changes extraction output, dependencies, configura
 ## What to Check
 
 1. **`docs/README.md`** — Is the status table current? Mark completed features, update phase status.
-2. **`docs/OPTIMIZATION_BACKLOG.md`** — Is the resolved item marked ✅ with commit ref?
+2. **`docs/design/OPTIMIZATION_BACKLOG.md`** — Is the resolved item marked ✅ with commit ref?
 3. **`CLAUDE.md`** — Do the Architecture, Gotchas, or Commands sections reflect the change?
 4. **Design docs** — If the change implements something from a design doc, update the doc to reflect what was actually built vs. what was planned.
 
