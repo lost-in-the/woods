@@ -9,7 +9,7 @@
 # Usage (.mcp.json):
 #   {
 #     "command": "${HOME}/work/codebase_index/exe/codebase-index-mcp-start",
-#     "args": ["${HOME}/work/example-docker/admin-codebase-index/tmp/codebase_index"]
+#     "args": ["${HOME}/my-rails-app/tmp/codebase_index"]
 #   }
 #
 # All diagnostic output goes to stderr to keep stdio clean for MCP protocol.

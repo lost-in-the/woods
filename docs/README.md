@@ -4,91 +4,39 @@ CodebaseIndex is a Ruby gem that extracts structured data from Rails application
 
 ## Current State
 
-All major layers are implemented: 32 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
+All major layers are implemented: 34 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
 
-What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remaining coverage work (HAML/Slim expansion, configuration semantic parsing, Stimulus/Hotwire) and [backlog.json](../.claude/backlog.json) for tracked tasks.
+What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remaining coverage work (HAML/Slim expansion, configuration semantic parsing, Stimulus/Hotwire).
 
-## Current Documents
+## User Guides
 
 | Document | Purpose |
 |----------|---------|
+| [GETTING_STARTED.md](GETTING_STARTED.md) | Install, configure, extract, and inspect — end-to-end walkthrough |
+| [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) | All configuration options with defaults, types, and examples |
+| [MCP_SERVERS.md](MCP_SERVERS.md) | Index server vs console server — full tool catalog, setup for Claude Code / Cursor / Windsurf |
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
-| [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) | Gap analysis identifying missing extraction coverage and untapped data uses |
 | [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/codebase-index-mcp-http`) |
+
+## Reference
+
+| Document | Purpose |
+|----------|---------|
+| [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) | Gap analysis identifying missing extraction coverage and untapped data uses |
 | [TOKEN_BENCHMARK.md](TOKEN_BENCHMARK.md) | Token estimation benchmark — tiktoken comparison, divisor calibration |
+| [USE_CASES_AND_FEATURE_GAPS.md](USE_CASES_AND_FEATURE_GAPS.md) | 37 use cases across 4 categories with implementation status |
+| [self-analysis/](self-analysis/) | CodebaseIndex analyzed by itself — extraction output, quality audit |
 
-Historical design documents from the build phase are in `_project-resources/docs/` for reference.
+Historical design documents from the build phase are in [design/](design/) (see [design/README.md](design/README.md)).
 
-## Documentation Roadmap
+## Planned Documentation
 
-The pages below don't exist yet — each heading describes a planned document with its scope and audience.
-
-### Getting Started
-
-Installation, configuration, running your first extraction. Audience: a developer adding the gem to a Rails app.
-
-- Adding the gem to a Gemfile
-- Generator-based setup (`rails generate codebase_index:install`)
-- Configuration options (backend selection, embedding provider)
-- Running `rake codebase_index:extract` and inspecting output
-- Incremental extraction workflow
-
-### Architecture
-
-High-level pipeline overview. Audience: contributors and advanced users who need to understand how data flows.
-
-- Pipeline stages: extraction → chunking → embedding → storage → retrieval → formatting → MCP
-- `ExtractedUnit` as the universal data object
-- Runtime introspection vs static parsing — why and what it means
-- Backend agnosticism — how storage/embedding adapters work
-- Dependency graph with PageRank scoring
-
-### Configuration Reference
-
-All configuration options in one place. Audience: anyone deploying or tuning the gem.
-
-- Complete option reference with defaults
-- Backend selection (pgvector vs Qdrant vs SQLite, OpenAI vs Ollama)
-- Environment-specific settings
-- Presets for common stacks (PostgreSQL + pgvector + OpenAI, SQLite + Ollama)
-
-### Extractor Reference
-
-What each extractor produces. Audience: users wanting to understand extraction output, contributors adding extractors.
-
-- The 32 extractors: models, controllers, services, jobs, mailers, serializers, managers, policies, validators, GraphQL, Phlex, ViewComponent, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates (ERB), migrations, ActionCable channels, scheduled jobs, rake tasks, state machines, events, decorators, database views, caching patterns, factories, test mappings, Rails sources
-- Behavioral enrichment: callback side-effect analysis (columns written, jobs enqueued, services called), behavioral profile (resolved config values), pre-computed request flow maps, ActiveStorage/ActionText attachment metadata, multi-database topology
-- What each extractor covers (associations, callbacks, scopes, validations, etc.)
-- Edge cases: STI, namespaced classes, empty files, concern inlining
-- How to add a new extractor (interface contract, registration, testing)
-
-### MCP Server Guide
-
-Setting up and using the MCP servers. Audience: developers integrating with AI coding tools.
-
-- Index server (26 tools) vs Console server (31 tools) — when to use which
-- Tool catalog organized by category
-- Setup and configuration for each server
-- Security model: SafeContext, SqlValidator, audit logging, read-only transactions
-
-### Retrieval Guide
-
-How retrieval works and how to tune it. Audience: users optimizing AI responses for their codebase.
-
-- Query classification (structural, semantic, mixed)
-- Search strategies and when each is used
-- Ranking with Reciprocal Rank Fusion (RRF)
-- Context assembly and token budgets
-- Tuning retrieval for different use cases
-
-### API Reference
-
-Key public classes and their interfaces. Audience: contributors and advanced users.
-
-- Core classes: `ExtractedUnit`, `DependencyGraph`, `Retriever`, `Configuration`
-- Extractor interface contract
-- Storage adapter interface
-- Future: generated from YARD docs
+| Document | Scope |
+|----------|-------|
+| ARCHITECTURE.md | Pipeline stages, ExtractedUnit, dependency graph, backend agnosticism |
+| EXTRACTOR_REFERENCE.md | Per-extractor output details, edge cases, how to add a new extractor |
+| RETRIEVAL_GUIDE.md | Query classification, search strategies, RRF ranking, token budget tuning |
+| API_REFERENCE.md | Key public classes and interfaces (may generate from YARD) |
 
 ## Documentation Principles
 

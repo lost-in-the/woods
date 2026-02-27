@@ -92,7 +92,7 @@ These fixes sit at the extraction layer but have ripple effects through every do
 
 ## Verification Results
 
-All changes verified against the host-app (Post + Comment models, 3 controllers, 2 jobs, 1 mailer):
+All changes verified against the host app (Post + Comment models, 3 controllers, 2 jobs, 1 mailer):
 
 - **Unit tests:** 162 examples, 0 failures
 - **Integration tests:** 87 examples, 0 failures
@@ -103,4 +103,4 @@ All changes verified against the host-app (Post + Comment models, 3 controllers,
 
 ## Backlog Status
 
-These fixes address new items discovered during host-app extraction review. They are independent of the [optimization backlog](OPTIMIZATION_BACKLOG.md), which tracks items #1-29 (batches 1-7 fully resolved, 4 deferred). The token estimation change partially addresses deferred item #21 (token accuracy) by including metadata weight — the `tiktoken_ruby` approach remains deferred.
+These fixes address new items discovered during host app extraction review. They are independent of the [optimization backlog](OPTIMIZATION_BACKLOG.md), which tracks items #1-29 (batches 1-7 fully resolved, 4 deferred). The token estimation change partially addresses deferred item #21 (token accuracy) by including metadata weight — the `tiktoken_ruby` approach remains deferred.

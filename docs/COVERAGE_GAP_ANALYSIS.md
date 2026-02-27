@@ -31,14 +31,14 @@ The existing extractor infrastructure — `SharedDependencyScanner`, `SharedUtil
 
 We examined:
 
-- All 13 existing extractors in `~/work/codebase_index/lib/codebase_index/extractors/` to understand the interface contract
-- The orchestrator at `~/work/codebase_index/lib/codebase_index/extractor.rb` (lines 43-79) for `EXTRACTORS`, `TYPE_TO_EXTRACTOR_KEY`, `CLASS_BASED`, and `FILE_BASED` dispatch maps
-- `SharedDependencyScanner` at `~/work/codebase_index/lib/codebase_index/extractors/shared_dependency_scanner.rb` for dependency infrastructure
-- `DependencyGraph` at `~/work/codebase_index/lib/codebase_index/dependency_graph.rb` for graph integration requirements
-- `QueryClassifier` at `~/work/codebase_index/lib/codebase_index/retrieval/query_classifier.rb` for retrieval integration
+- All 13 existing extractors in `lib/codebase_index/extractors/` to understand the interface contract
+- The orchestrator at `lib/codebase_index/extractor.rb` (lines 43-79) for `EXTRACTORS`, `TYPE_TO_EXTRACTOR_KEY`, `CLASS_BASED`, and `FILE_BASED` dispatch maps
+- `SharedDependencyScanner` at `lib/codebase_index/extractors/shared_dependency_scanner.rb` for dependency infrastructure
+- `DependencyGraph` at `lib/codebase_index/dependency_graph.rb` for graph integration requirements
+- `QueryClassifier` at `lib/codebase_index/retrieval/query_classifier.rb` for retrieval integration
 - The `EXTRACTION_DIRECTORIES` constant (extractor.rb, line 46-63) for the current eager-load fallback scope
-- The MCP server at `~/work/codebase_index/lib/codebase_index/mcp/server.rb` for tool surface area
-- Existing docs in `~/work/codebase_index/docs/` for architectural constraints
+- The MCP server at `lib/codebase_index/mcp/server.rb` for tool surface area
+- Existing docs in `docs/` for architectural constraints
 
 Each gap was evaluated for: (a) concrete use-case frequency, (b) whether the information is available elsewhere or uniquely requires CodebaseIndex's runtime introspection, and (c) implementation effort given the existing extractor contract.
 
@@ -258,7 +258,7 @@ Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily g
 
 ## Gotchas
 
-- **View template parsing is not Prism.** The existing AST layer (`~/work/codebase_index/lib/codebase_index/ast/`) is Prism-based and handles Ruby source. ERB/HAML/Slim templates require dedicated parsers (`erubi` for ERB, `haml` gem for HAML, `slim` gem for Slim). Each template engine is a separate dependency and parsing path. This is why views are ranked #3 despite highest unique value — the implementation cost is discontinuous with other extractors.
+- **View template parsing is not Prism.** The existing AST layer (`lib/codebase_index/ast/`) is Prism-based and handles Ruby source. ERB/HAML/Slim templates require dedicated parsers (`erubi` for ERB, `haml` gem for HAML, `slim` gem for Slim). Each template engine is a separate dependency and parsing path. This is why views are ranked #3 despite highest unique value — the implementation cost is discontinuous with other extractors.
 
 - **Concern extraction changes the dependency graph semantics.** Today, model units have dependencies on other models, services, jobs, etc. Adding concern units means models would depend on concerns, and concerns would depend on models. This creates a new class of edges in the graph. `GraphAnalyzer`'s hub/cycle detection would need testing against this new topology to ensure the metrics remain meaningful.
 

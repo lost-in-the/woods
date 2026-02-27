@@ -14,9 +14,9 @@ jobs:
       matrix:
         ruby-version: ['3.0', '3.1', '3.2', '3.3']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Set up Ruby ${{ matrix.ruby-version }}
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@a4eede24a7e7248e4a58b2b4e4795a6e8b8e4a48 # v1
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
@@ -28,9 +28,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@a4eede24a7e7248e4a58b2b4e4795a6e8b8e4a48 # v1
         with:
           ruby-version: '3.3'
           bundler-cache: true

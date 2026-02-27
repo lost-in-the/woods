@@ -22,6 +22,8 @@ Gem::Specification.new do |spec|
   spec.metadata['homepage_uri'] = spec.homepage
   spec.metadata['source_code_uri'] = spec.homepage
   spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['bug_tracker_uri'] = "#{spec.homepage}/issues"
+  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/main/docs"
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
@@ -29,7 +31,10 @@ Gem::Specification.new do |spec|
     'lib/**/*',
     'exe/*',
     'LICENSE.txt',
-    'README.md'
+    'README.md',
+    'CHANGELOG.md',
+    'CONTRIBUTING.md',
+    'CODE_OF_CONDUCT.md'
   ]
   spec.bindir = 'exe'
   spec.executables = %w[codebase-index-mcp codebase-index-mcp-start codebase-console-mcp codebase-index-mcp-http]
