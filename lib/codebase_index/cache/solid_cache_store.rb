@@ -86,9 +86,9 @@ module CodebaseIndex
                     'codebase_index:cache:*'
                   end
 
-        if @cache.respond_to?(:delete_matched)
-          @cache.delete_matched(pattern)
-        end
+        return unless @cache.respond_to?(:delete_matched)
+
+        @cache.delete_matched(pattern)
       end
     end
   end

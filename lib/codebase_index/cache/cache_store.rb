@@ -24,7 +24,7 @@ module CodebaseIndex
     # @param parts [Array<String>] Key components (will be SHA256-hashed if long)
     # @return [String] Namespaced key
     def self.cache_key(domain, *parts)
-      raw = parts.map(&:to_s).join(':')
+      raw = parts.join(':')
       suffix = raw.length > 64 ? Digest::SHA256.hexdigest(raw) : raw
       "codebase_index:cache:#{domain}:#{suffix}"
     end

@@ -26,7 +26,7 @@ module CodebaseIndex
   #     config.vector_store_options = { url: ENV['QDRANT_URL'], collection: 'myapp' }
   #   end
   #
-  class Builder
+  class Builder # rubocop:disable Metrics/ClassLength
     # Named presets mapping to default adapter types.
     #
     # :local      — fully local, no external services required

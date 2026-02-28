@@ -46,27 +46,13 @@ module CodebaseIndex
       # @param texts [Array<String>] Texts to embed
       # @return [Array<Array<Float>>] Embedding vectors (same order as input)
       def embed_batch(texts)
-        results = Array.new(texts.size)
-        misses = []
-        miss_indices = []
-
-        texts.each_with_index do |text, idx|
-          key = embedding_key(text)
-          cached = @cache_store.read(key)
-          if cached
-            results[idx] = cached
-          else
-            misses << text
-            miss_indices << idx
-          end
-        end
+        results, misses, miss_indices = partition_cached(texts)
 
         if misses.any?
           fresh_vectors = @provider.embed_batch(misses)
           misses.each_with_index do |text, i|
-            vector = fresh_vectors[i]
-            results[miss_indices[i]] = vector
-            @cache_store.write(embedding_key(text), vector, ttl: @ttl)
+            results[miss_indices[i]] = fresh_vectors[i]
+            @cache_store.write(embedding_key(text), fresh_vectors[i], ttl: @ttl)
           end
         end
 
@@ -88,6 +74,28 @@ module CodebaseIndex
       end
 
       private
+
+      # Split texts into cached hits and uncached misses.
+      #
+      # @param texts [Array<String>]
+      # @return [Array(Array, Array<String>, Array<Integer>)]
+      def partition_cached(texts)
+        results = Array.new(texts.size)
+        misses = []
+        miss_indices = []
+
+        texts.each_with_index do |text, idx|
+          cached = @cache_store.read(embedding_key(text))
+          if cached
+            results[idx] = cached
+          else
+            misses << text
+            miss_indices << idx
+          end
+        end
+
+        [results, misses, miss_indices]
+      end
 
       # Build a cache key for an embedding text.
       #

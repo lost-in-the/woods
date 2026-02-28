@@ -59,12 +59,12 @@ RSpec.shared_examples 'a CacheStore' do
   describe '#fetch' do
     it 'returns cached value on hit' do
       store.write('key:fetch', 'cached')
-      result = store.fetch('key:fetch') { 'computed' }
+      result = store.fetch('key:fetch') { 'computed' } # rubocop:disable Style/RedundantFetchBlock
       expect(result).to eq('cached')
     end
 
     it 'executes block and caches on miss' do
-      result = store.fetch('key:fetch_miss') { 'computed' }
+      result = store.fetch('key:fetch_miss') { 'computed' } # rubocop:disable Style/RedundantFetchBlock
       expect(result).to eq('computed')
       expect(store.read('key:fetch_miss')).to eq('computed')
     end
@@ -72,7 +72,10 @@ RSpec.shared_examples 'a CacheStore' do
     it 'does not execute block on hit' do
       store.write('key:fetch_noop', 'cached')
       called = false
-      store.fetch('key:fetch_noop') { called = true; 'computed' }
+      store.fetch('key:fetch_noop') do
+        called = true
+        'computed'
+      end
       expect(called).to be false
     end
   end
