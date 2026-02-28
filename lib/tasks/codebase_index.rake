@@ -304,7 +304,7 @@ namespace :codebase_index do
     end
   end
 
-  desc 'Retrieve context for a query (for testing)'
+  # Internal debugging tool — hidden from `rails -T`
   task :retrieve, [:query] => :environment do |_t, args|
     query = args[:query] || raise('Usage: rake codebase_index:retrieve[query]')
 
@@ -400,7 +400,7 @@ namespace :codebase_index do
     puts "  Errors:    #{stats[:errors]}"
   end
 
-  desc "Analyze the gem's own source code and generate self-analysis output"
+  # Internal debugging tool — hidden from `rails -T`
   task :self_analyze do
     require 'digest'
     require 'json'
