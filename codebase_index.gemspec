@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = 'codebase_index'
-  spec.version       = '0.1.0'
+  spec.version       = '0.2.0'
   spec.authors       = ['Leah Armstrong']
   spec.email         = ['info@leah.wtf']
 
