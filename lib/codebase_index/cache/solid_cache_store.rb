@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'logger'
 require_relative 'cache_store'
 
 module CodebaseIndex
@@ -86,7 +87,12 @@ module CodebaseIndex
                     'codebase_index:cache:*'
                   end
 
-        return unless @cache.respond_to?(:delete_matched)
+        unless @cache.respond_to?(:delete_matched)
+          logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+          logger.warn("[CodebaseIndex] Cache#clear(namespace: #{namespace.inspect}) is a no-op: " \
+                      "backend #{@cache.class} does not support delete_matched")
+          return
+        end
 
         @cache.delete_matched(pattern)
       end

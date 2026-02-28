@@ -80,9 +80,11 @@ module CodebaseIndex
 
       # Read-through cache: return cached value or execute block and cache result.
       #
-      # NOTE: nil is treated as a cache miss. If the block returns nil, it will
-      # be cached but the next fetch will re-execute the block. This is acceptable
-      # for our use case (embeddings and context are never nil).
+      # @note nil is treated as a cache miss. If the wrapped operation legitimately
+      #   returns nil, every call will re-execute the block. Custom backend
+      #   implementers should preserve this semantic — do not return nil for keys
+      #   that were written with a non-nil value. This is acceptable for the
+      #   built-in use cases (embeddings and formatted context are never nil).
       #
       # @param key [String] Cache key
       # @param ttl [Integer, nil] TTL in seconds
