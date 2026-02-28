@@ -99,7 +99,7 @@ module CodebaseIndex
         begin
           write(key, value, ttl: ttl)
         rescue StandardError => e
-          warn("[CodebaseIndex] CacheStore#fetch write failed for #{key}: #{e.message}")
+          logger.warn("[CodebaseIndex] CacheStore#fetch write failed for #{key}: #{e.message}")
         end
         value
       end

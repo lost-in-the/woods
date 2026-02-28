@@ -39,12 +39,13 @@ module CodebaseIndex
       def self.build_retriever
         config = CodebaseIndex.configuration
 
-        if !config.embedding_provider && ENV.fetch('OPENAI_API_KEY', nil)
+        openai_key = ENV.fetch('OPENAI_API_KEY', nil)
+        if !config.embedding_provider && openai_key
           config.vector_store = :in_memory
           config.metadata_store = :in_memory
           config.graph_store = :in_memory
           config.embedding_provider = :openai
-          config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY', nil) }
+          config.embedding_options = { api_key: openai_key }
         end
 
         CodebaseIndex::Builder.new(config).build_retriever if config.embedding_provider

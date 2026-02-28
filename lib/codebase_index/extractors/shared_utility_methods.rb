@@ -55,7 +55,7 @@ module CodebaseIndex
       # @param source [String] Ruby source code
       # @return [Boolean]
       def skip_file?(source)
-        source.match?(/^\s*module\s+\w+\s*$/) && !source.match?(/^\s*class\s+/)
+        source.match?(/^\s*module\s+[\w:]+\s*$/) && !source.match?(/^\s*class\s+/)
       end
 
       # Extract custom error/exception class names defined inline.
@@ -196,10 +196,14 @@ module CodebaseIndex
         source.scan(/def\s+self\.(\w+[?!=]?)/).flatten
       end
 
-      # Extract initialize parameters from source code.
+      # Extract initialize parameters from source code via regex.
       #
       # Parses the parameter list of the initialize method to determine
       # parameter names, defaults, and whether they are keyword arguments.
+      #
+      # Note: PhlexExtractor and ViewComponentExtractor override this with a
+      # runtime-introspection version that takes a Class object instead of source
+      # text, providing richer type information (:req, :opt, :keyreq, :rest, etc.).
       #
       # @param source [String] Ruby source code
       # @return [Array<Hash>] Parameter info hashes with :name, :has_default, :keyword
