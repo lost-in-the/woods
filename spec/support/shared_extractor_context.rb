@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'pathname'
+
 RSpec.shared_context 'extractor setup' do
   let(:tmp_dir) { Dir.mktmpdir }
   let(:rails_root) { Pathname.new(tmp_dir) }
