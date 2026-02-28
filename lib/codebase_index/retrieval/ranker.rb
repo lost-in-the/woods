@@ -119,8 +119,11 @@ module CodebaseIndex
       # @param classification [QueryClassifier::Classification]
       # @return [Array<Hash>]
       def score_candidates(candidates, classification)
+        # Batch-fetch all metadata in one query instead of per-candidate lookups
+        unit_map = @metadata_store.find_batch(candidates.map(&:identifier))
+
         candidates.map do |candidate|
-          unit = @metadata_store.find(candidate.identifier)
+          unit = unit_map[candidate.identifier]
 
           {
             candidate: candidate,

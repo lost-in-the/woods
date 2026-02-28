@@ -443,19 +443,24 @@ module CodebaseIndex
     # ──────────────────────────────────────────────────────────────────────
 
     def resolve_dependents
-      all_units = @results.values.flatten
-      unit_map = all_units.index_by(&:identifier)
+      # Build complete unit map first (cross-type dependencies require all units indexed).
+      unit_map = @results.each_with_object({}) do |(_type, units), map|
+        units.each { |u| map[u.identifier] = u }
+      end
 
-      all_units.each do |unit|
-        unit.dependencies.each do |dep|
-          target_unit = unit_map[dep[:target]]
-          next unless target_unit
+      # Resolve dependents using the complete map.
+      @results.each_value do |units|
+        units.each do |unit|
+          unit.dependencies.each do |dep|
+            target_unit = unit_map[dep[:target]]
+            next unless target_unit
 
-          target_unit.dependents ||= []
-          target_unit.dependents << {
-            type: unit.type,
-            identifier: unit.identifier
-          }
+            target_unit.dependents ||= []
+            target_unit.dependents << {
+              type: unit.type,
+              identifier: unit.identifier
+            }
+          end
         end
       end
     end
@@ -480,7 +485,7 @@ module CodebaseIndex
     # ──────────────────────────────────────────────────────────────────────
 
     def precompute_flows
-      all_units = @results.values.flatten
+      all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
       flow_map = precomputer.precompute
       Rails.logger.info "[CodebaseIndex] Precomputed #{flow_map.size} request flows"
@@ -585,6 +590,7 @@ module CodebaseIndex
       result = {}
       relative_paths.each { |rp| result[rp] = {} }
 
+      path_set = relative_paths.to_set
       relative_paths.each_slice(500) do |batch|
         log_output = run_git(
           'log', '--all', '--name-only',
@@ -592,7 +598,7 @@ module CodebaseIndex
           '--since=365 days ago',
           '--', *batch
         )
-        parse_git_log_output(log_output, relative_paths.to_set, result)
+        parse_git_log_output(log_output, path_set, result)
       end
 
       ninety_days_ago = (Time.current - 90.days).iso8601
@@ -725,7 +731,7 @@ module CodebaseIndex
 
         # Total stats
         total_units: @results.values.sum(&:size),
-        total_chunks: @results.values.flatten.sum { |u| u.chunks.size },
+        total_chunks: @results.sum { |_, units| units.sum { |u| u.chunks.size } },
 
         # Git info
         git_sha: run_git('rev-parse', 'HEAD').presence,
@@ -753,7 +759,7 @@ module CodebaseIndex
       return if @results.empty?
 
       total_units    = @results.values.sum(&:size)
-      total_chunks   = @results.values.flatten.sum { |u| [u.chunks.size, 1].max }
+      total_chunks   = @results.sum { |_, units| units.sum { |u| [u.chunks.size, 1].max } }
       category_count = @results.count { |_, units| units.any? }
 
       summary = []
@@ -878,7 +884,7 @@ module CodebaseIndex
 
     def log_summary
       total = @results.values.sum(&:size)
-      chunks = @results.values.flatten.sum { |u| u.chunks.size }
+      chunks = @results.sum { |_, units| units.sum { |u| u.chunks.size } }
 
       Rails.logger.info '[CodebaseIndex] ═══════════════════════════════════════════'
       Rails.logger.info '[CodebaseIndex] Extraction Complete'

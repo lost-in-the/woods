@@ -89,7 +89,7 @@ module CodebaseIndex
           dependents: dependents
         }
       end
-      identifiers_with_dependents.sort_by { |h| -h[:dependent_count] }.first(limit)
+      identifiers_with_dependents.max_by(limit) { |h| h[:dependent_count] }
     end
 
     # Detect circular dependency chains in the graph.

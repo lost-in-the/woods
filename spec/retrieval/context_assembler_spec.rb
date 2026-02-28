@@ -41,6 +41,13 @@ RSpec.describe CodebaseIndex::Retrieval::ContextAssembler do
 
   before do
     allow(metadata_store).to receive(:find).and_return(nil)
+    # find_batch delegates to individual find stubs
+    allow(metadata_store).to receive(:find_batch) do |ids|
+      ids.each_with_object({}) do |id, result|
+        data = metadata_store.find(id)
+        result[id] = data if data
+      end
+    end
   end
 
   # ── #assemble ──────────────────────────────────────────────────────

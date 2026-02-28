@@ -39,6 +39,9 @@ RSpec.describe CodebaseIndex::Embedding::Provider::OpenAI do
     allow(http_double).to receive(:use_ssl=)
     allow(http_double).to receive(:open_timeout=)
     allow(http_double).to receive(:read_timeout=)
+    allow(http_double).to receive(:keep_alive_timeout=)
+    allow(http_double).to receive(:start).and_return(http_double)
+    allow(http_double).to receive(:started?).and_return(true)
     allow(success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
     allow(batch_success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
   end
@@ -158,6 +161,41 @@ RSpec.describe CodebaseIndex::Embedding::Provider::OpenAI do
       expect { provider.embed('text') }.to raise_error(
         CodebaseIndex::Error, /OpenAI API error: 500 internal server error/
       )
+    end
+  end
+
+  describe 'connection retry' do
+    it 'retries once on ECONNRESET' do
+      allow(http_double).to receive(:request)
+        .and_raise(Errno::ECONNRESET)
+      retry_http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http_double, retry_http)
+      allow(retry_http).to receive(:use_ssl=)
+      allow(retry_http).to receive(:open_timeout=)
+      allow(retry_http).to receive(:read_timeout=)
+      allow(retry_http).to receive(:keep_alive_timeout=)
+      allow(retry_http).to receive(:start).and_return(retry_http)
+      allow(retry_http).to receive(:started?).and_return(true)
+      allow(retry_http).to receive(:request).and_return(success_response)
+
+      result = provider.embed('hello')
+      expect(result).to eq(single_embedding)
+    end
+
+    it 'propagates error when retry also fails' do
+      allow(http_double).to receive(:request)
+        .and_raise(Errno::ECONNRESET)
+      retry_http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http_double, retry_http)
+      allow(retry_http).to receive(:use_ssl=)
+      allow(retry_http).to receive(:open_timeout=)
+      allow(retry_http).to receive(:read_timeout=)
+      allow(retry_http).to receive(:keep_alive_timeout=)
+      allow(retry_http).to receive(:start).and_return(retry_http)
+      allow(retry_http).to receive(:started?).and_return(true)
+      allow(retry_http).to receive(:request).and_raise(Errno::ECONNRESET)
+
+      expect { provider.embed('hello') }.to raise_error(Errno::ECONNRESET)
     end
   end
 

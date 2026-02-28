@@ -35,6 +35,20 @@ module CodebaseIndex
           raise NotImplementedError
         end
 
+        # Find multiple units by IDs in a single query.
+        #
+        # Default implementation falls back to individual find calls.
+        # Adapters should override for batch-optimized behavior.
+        #
+        # @param ids [Array<String>] The identifiers to look up
+        # @return [Hash<String, Hash>] Map of id => metadata for found units
+        def find_batch(ids)
+          ids.each_with_object({}) do |id, result|
+            data = find(id)
+            result[id] = data if data
+          end
+        end
+
         # Find all units of a given type.
         #
         # @param type [String] The unit type to filter by
@@ -110,6 +124,17 @@ module CodebaseIndex
           return nil unless row
 
           JSON.parse(row['data'])
+        end
+
+        # @see Interface#find_batch
+        def find_batch(ids)
+          return {} if ids.empty?
+
+          placeholders = Array.new(ids.size, '?').join(', ')
+          rows = @db.execute("SELECT id, data FROM units WHERE id IN (#{placeholders})", ids)
+          rows.to_h do |row|
+            [row['id'], JSON.parse(row['data'])]
+          end
         end
 
         # @see Interface#find_by_type

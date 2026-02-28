@@ -34,6 +34,21 @@ module CodebaseIndex
       # Async enqueue methods that indicate a job is being dispatched.
       ASYNC_METHODS = %w[perform_later perform_async perform_in perform_at].freeze
 
+      # Pre-compiled regex patterns (avoid dynamic regex construction in hot loops)
+      SINGLE_COLUMN_WRITER_PATTERNS = SINGLE_COLUMN_WRITERS.to_h do |w|
+        [w, /\b#{Regexp.escape(w)}\s*\(?\s*[:'"](\w+)/]
+      end.freeze
+
+      MULTI_COLUMN_WRITER_PATTERNS = MULTI_COLUMN_WRITERS.to_h do |w|
+        [w, /\b#{Regexp.escape(w)}\s*\(([^)]+)\)/m]
+      end.freeze
+
+      ASYNC_PATTERN = /(\w+(?:Job|Worker))\.(?:#{ASYNC_METHODS.map { |m| Regexp.escape(m) }.join('|')})/
+
+      DB_READ_PATTERNS = DB_READ_METHODS.to_h do |m|
+        [m, /\.#{Regexp.escape(m)}\b/]
+      end.freeze
+
       # @param source_code [String] Composite model source (with inlined concerns)
       # @param column_names [Array<String>] Model's database column names
       def initialize(source_code:, column_names: [])
@@ -141,15 +156,15 @@ module CodebaseIndex
         end
 
         # Pattern: update_column(:col, ...) / write_attribute(:col, ...)
-        SINGLE_COLUMN_WRITERS.each do |writer|
-          method_source.scan(/\b#{Regexp.escape(writer)}\s*\(?\s*[:'"](\w+)/).flatten.each do |col|
+        SINGLE_COLUMN_WRITER_PATTERNS.each_value do |pattern|
+          method_source.scan(pattern).flatten.each do |col|
             columns << col if @column_names.include?(col)
           end
         end
 
         # Pattern: update_columns(col: ...) / assign_attributes(col: ...)
-        MULTI_COLUMN_WRITERS.each do |writer|
-          method_source.scan(/\b#{Regexp.escape(writer)}\s*\(([^)]+)\)/m).each do |match|
+        MULTI_COLUMN_WRITER_PATTERNS.each_value do |pattern|
+          method_source.scan(pattern).each do |match|
             match[0].scan(/\b(\w+)\s*:(?!:)/).flatten.each do |col|
               columns << col if @column_names.include?(col)
             end
@@ -166,8 +181,7 @@ module CodebaseIndex
       # @param method_source [String]
       # @return [Array<String>]
       def detect_jobs_enqueued(method_source)
-        async_pattern = ASYNC_METHODS.map { |m| Regexp.escape(m) }.join('|')
-        method_source.scan(/(\w+(?:Job|Worker))\.(?:#{async_pattern})/).flatten.uniq.sort
+        method_source.scan(ASYNC_PATTERN).flatten.uniq.sort
       end
 
       # Detect service objects called by the callback method.
@@ -197,8 +211,8 @@ module CodebaseIndex
       # @param method_source [String]
       # @return [Array<String>]
       def detect_database_reads(method_source)
-        DB_READ_METHODS.select do |method|
-          method_source.match?(/\.#{Regexp.escape(method)}\b/)
+        DB_READ_PATTERNS.filter_map do |method, pattern|
+          method if method_source.match?(pattern)
         end
       end
 

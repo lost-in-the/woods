@@ -19,7 +19,7 @@ module CodebaseIndex
       #   store.store("User", [0.1, 0.2, ...], { type: "model" })
       #   results = store.search([0.1, 0.2, ...], limit: 5)
       #
-      class Qdrant
+      class Qdrant # rubocop:disable Metrics/ClassLength
         include Interface
 
         # @param url [String] Qdrant server URL
@@ -60,6 +60,25 @@ module CodebaseIndex
                 payload: metadata
               }
             ]
+          }
+          request(:put, "/collections/#{@collection}/points", body)
+        end
+
+        # Store multiple vectors in a single batch upsert request.
+        #
+        # Sends the entire entries array in one HTTP call. Callers are responsible
+        # for chunking into reasonable batch sizes (e.g., 100–500 points) before
+        # calling this method; the embedding Indexer's +batch_size+ config controls
+        # the upstream chunk size.
+        #
+        # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
+        def store_batch(entries)
+          return if entries.empty?
+
+          body = {
+            points: entries.map do |entry|
+              { id: entry[:id], vector: entry[:vector], payload: entry[:metadata] || {} }
+            end
           }
           request(:put, "/collections/#{@collection}/points", body)
         end
@@ -130,10 +149,18 @@ module CodebaseIndex
         # @return [Hash] Parsed JSON response
         # @raise [CodebaseIndex::Error] if the API returns a non-success status
         def request(method, path, body = nil)
-          http = build_http
           req = build_request(method, path, body)
-          response = http.request(req)
+          response = http_client.request(req)
 
+          unless response.is_a?(Net::HTTPSuccess)
+            raise CodebaseIndex::Error, "Qdrant API error: #{response.code} #{response.body}"
+          end
+
+          JSON.parse(response.body)
+        rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
+          # Connection dropped — reset and retry once
+          @http_client = nil
+          response = http_client.request(req)
           unless response.is_a?(Net::HTTPSuccess)
             raise CodebaseIndex::Error, "Qdrant API error: #{response.code} #{response.body}"
           end
@@ -141,15 +168,21 @@ module CodebaseIndex
           JSON.parse(response.body)
         end
 
-        # Build an HTTP client for the Qdrant server.
+        # Return a reusable, started HTTP client for the Qdrant server.
+        # Calling http.start opens a persistent TCP connection so
+        # keep_alive_timeout actually takes effect across requests.
         #
         # @return [Net::HTTP]
-        def build_http
+        def http_client
+          return @http_client if @http_client&.started?
+
           http = Net::HTTP.new(@uri.host, @uri.port)
           http.use_ssl = @uri.scheme == 'https'
           http.open_timeout = 10
           http.read_timeout = 30
-          http
+          http.keep_alive_timeout = 30
+          http.start
+          @http_client = http
         end
 
         # Build an HTTP request with headers and body.

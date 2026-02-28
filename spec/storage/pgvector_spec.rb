@@ -55,6 +55,65 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
     end
   end
 
+  describe '#store_batch' do
+    before do
+      allow(connection).to receive(:execute)
+      allow(connection).to receive(:quote) { |v| "'#{v}'" }
+    end
+
+    it 'inserts multiple rows in a single SQL statement' do
+      entries = [
+        { id: 'doc1', vector: [0.1, 0.2, 0.3], metadata: { type: 'model' } },
+        { id: 'doc2', vector: [0.4, 0.5, 0.6], metadata: { type: 'service' } }
+      ]
+
+      store.store_batch(entries)
+
+      expect(connection).to have_received(:execute).once
+      expect(connection).to have_received(:execute).with(/INSERT INTO codebase_index_vectors/)
+    end
+
+    it 'includes all entries in the VALUES clause' do
+      entries = [
+        { id: 'a', vector: [1.0, 2.0, 3.0], metadata: {} },
+        { id: 'b', vector: [4.0, 5.0, 6.0], metadata: {} },
+        { id: 'c', vector: [7.0, 8.0, 9.0], metadata: {} }
+      ]
+
+      store.store_batch(entries)
+
+      expect(connection).to have_received(:execute).with(/VALUES.*'a'.*'b'.*'c'/m)
+    end
+
+    it 'uses ON CONFLICT upsert' do
+      entries = [{ id: 'doc1', vector: [0.1, 0.2, 0.3], metadata: {} }]
+
+      store.store_batch(entries)
+
+      expect(connection).to have_received(:execute).with(/ON CONFLICT \(id\) DO UPDATE/)
+    end
+
+    it 'does nothing for empty entries' do
+      store.store_batch([])
+
+      expect(connection).not_to have_received(:execute)
+    end
+
+    it 'validates vectors in the batch' do
+      entries = [{ id: 'doc1', vector: [0.1, 'bad', 0.3], metadata: {} }]
+
+      expect { store.store_batch(entries) }.to raise_error(ArgumentError, /not numeric/)
+    end
+
+    it 'defaults metadata to empty hash when not provided' do
+      entries = [{ id: 'doc1', vector: [0.1, 0.2, 0.3] }]
+
+      store.store_batch(entries)
+
+      expect(connection).to have_received(:execute).with(/\{\}/)
+    end
+  end
+
   describe '#search' do
     let(:result_row) do
       { 'id' => 'doc1', 'distance' => 0.1, 'metadata' => '{"type":"model"}' }

@@ -54,6 +54,9 @@ module CodebaseIndex
         sources = []
         tokens_used = 0
 
+        # Pre-fetch all candidate metadata in one batch query
+        @unit_cache = @metadata_store.find_batch(candidates.map(&:identifier))
+
         # 1. Structural context (always first if provided)
         tokens_used = add_structural_section(sections, structural_context, tokens_used, effective_budget)
 
@@ -141,7 +144,7 @@ module CodebaseIndex
 
       # Append a single candidate to the section. Returns updated tokens_used, or nil to stop.
       def append_candidate(parts, sources, candidate, budget, tokens_used)
-        unit = @metadata_store.find(candidate.identifier)
+        unit = @unit_cache[candidate.identifier]
         return tokens_used unless unit
 
         text = format_unit(unit, candidate)

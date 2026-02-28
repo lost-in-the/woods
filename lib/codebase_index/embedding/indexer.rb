@@ -9,12 +9,14 @@ module CodebaseIndex
     # generates embeddings, and stores vectors. Supports full and incremental
     # modes with checkpoint-based resumability.
     class Indexer
-      def initialize(provider:, text_preparer:, vector_store:, output_dir:, batch_size: 32)
+      # @param checkpoint_interval [Integer] Save checkpoint every N batches (default: 10)
+      def initialize(provider:, text_preparer:, vector_store:, output_dir:, batch_size: 32, checkpoint_interval: 10) # rubocop:disable Metrics/ParameterLists
         @provider = provider
         @text_preparer = text_preparer
         @vector_store = vector_store
         @output_dir = output_dir
         @batch_size = batch_size
+        @checkpoint_interval = checkpoint_interval
       end
 
       # Index all extracted units (full mode). Returns stats hash.
@@ -44,11 +46,16 @@ module CodebaseIndex
       def process_units(units, incremental:)
         checkpoint = incremental ? load_checkpoint : {}
         stats = { processed: 0, skipped: 0, errors: 0 }
+        batch_count = 0
 
         units.each_slice(@batch_size) do |batch|
           process_batch(batch, checkpoint, stats, incremental: incremental)
-          save_checkpoint(checkpoint)
+          batch_count += 1
+          save_checkpoint(checkpoint) if (batch_count % @checkpoint_interval).zero?
         end
+
+        # Always save final checkpoint
+        save_checkpoint(checkpoint)
 
         stats
       end
@@ -104,10 +111,15 @@ module CodebaseIndex
       end
 
       def store_vectors(items, vectors, checkpoint, stats)
-        items.each_with_index do |item, idx|
-          metadata = { type: item[:unit_data]['type'], identifier: item[:identifier],
-                       file_path: item[:unit_data]['file_path'] }
-          @vector_store.store(item[:id], vectors[idx], metadata)
+        entries = items.each_with_index.map do |item, idx|
+          { id: item[:id], vector: vectors[idx],
+            metadata: { type: item[:unit_data]['type'], identifier: item[:identifier],
+                        file_path: item[:unit_data]['file_path'] } }
+        end
+
+        @vector_store.store_batch(entries)
+
+        items.each do |item|
           checkpoint[item[:identifier]] = item[:source_hash]
           stats[:processed] += 1
         end

@@ -35,6 +35,13 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
   # Default: metadata store returns nil (unknown unit)
   before do
     allow(metadata_store).to receive(:find).and_return(nil)
+    # find_batch delegates to individual find stubs
+    allow(metadata_store).to receive(:find_batch) do |ids|
+      ids.each_with_object({}) do |id, result|
+        data = metadata_store.find(id)
+        result[id] = data if data
+      end
+    end
   end
 
   # ── #rank ────────────────────────────────────────────────────────────
@@ -264,19 +271,21 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
   # ── Metadata caching (Bug M-4 fix) ─────────────────────────────────
 
   describe 'metadata store lookup count' do
-    it 'calls metadata_store.find only once per candidate (cached for diversity pass)' do
+    it 'calls find_batch once for all candidates (batch lookup)' do
       allow(metadata_store).to receive(:find).with('User').and_return({
                                                                         metadata: { namespace: 'App', type: :model }
                                                                       })
 
       candidates = [candidate(identifier: 'User', score: 0.8)]
 
-      expect(metadata_store).to receive(:find).with('User').once
+      expect(metadata_store).to receive(:find_batch).with(['User']).once do |ids|
+        ids.to_h { |id| [id, metadata_store.find(id)] }.compact
+      end
 
       ranker.rank(candidates, classification: classification)
     end
 
-    it 'calls metadata_store.find once per candidate even with diversity penalty active' do
+    it 'calls find_batch once even with diversity penalty active' do
       %w[A B C].each do |id|
         allow(metadata_store).to receive(:find).with(id).and_return({
                                                                       metadata: { namespace: 'Same', type: :model }
@@ -289,9 +298,9 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
         candidate(identifier: 'C', score: 0.7)
       ]
 
-      expect(metadata_store).to receive(:find).with('A').once
-      expect(metadata_store).to receive(:find).with('B').once
-      expect(metadata_store).to receive(:find).with('C').once
+      expect(metadata_store).to receive(:find_batch).once do |ids|
+        ids.to_h { |id| [id, metadata_store.find(id)] }.compact
+      end
 
       ranker.rank(candidates, classification: classification)
     end
