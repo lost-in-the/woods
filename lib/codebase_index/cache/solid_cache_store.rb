@@ -13,14 +13,14 @@ module CodebaseIndex
     # as `expires_in:` to the underlying cache.
     #
     # @example With SolidCache
-    #   store = SolidCacheCacheStore.new(cache: SolidCache::Store.new, default_ttl: 3600)
+    #   store = SolidCacheStore.new(cache: SolidCache::Store.new, default_ttl: 3600)
     #   store.write("ci:emb:abc", [0.1, 0.2], ttl: 86_400)
     #   store.read("ci:emb:abc") # => [0.1, 0.2]
     #
     # @example With Rails.cache (any backend)
-    #   store = SolidCacheCacheStore.new(cache: Rails.cache)
+    #   store = SolidCacheStore.new(cache: Rails.cache)
     #
-    class SolidCacheCacheStore < CacheStore
+    class SolidCacheStore < CacheStore
       # @param cache [ActiveSupport::Cache::Store] A SolidCache or compatible cache instance
       # @param default_ttl [Integer, nil] Default TTL in seconds (nil = no expiry)
       def initialize(cache:, default_ttl: nil)
@@ -39,6 +39,10 @@ module CodebaseIndex
 
         JSON.parse(raw)
       rescue JSON::ParserError
+        delete_silently(key)
+        nil
+      rescue StandardError => e
+        logger.warn("[CodebaseIndex] SolidCacheStore#read failed for #{key}: #{e.message}")
         nil
       end
 
@@ -54,6 +58,9 @@ module CodebaseIndex
 
         opts = effective_ttl ? { expires_in: effective_ttl } : {}
         @cache.write(key, serialized, **opts)
+      rescue StandardError => e
+        logger.warn("[CodebaseIndex] SolidCacheStore#write failed for #{key}: #{e.message}")
+        nil
       end
 
       # Delete a key from the cache.
@@ -62,6 +69,9 @@ module CodebaseIndex
       # @return [void]
       def delete(key)
         @cache.delete(key)
+      rescue StandardError => e
+        logger.warn("[CodebaseIndex] SolidCacheStore#delete failed for #{key}: #{e.message}")
+        nil
       end
 
       # Check if a key exists in the cache.
@@ -70,6 +80,9 @@ module CodebaseIndex
       # @return [Boolean]
       def exist?(key)
         @cache.exist?(key)
+      rescue StandardError => e
+        logger.warn("[CodebaseIndex] SolidCacheStore#exist? failed for #{key}: #{e.message}")
+        false
       end
 
       # Clear cached entries by namespace or all codebase_index cache keys.
@@ -88,13 +101,27 @@ module CodebaseIndex
                   end
 
         unless @cache.respond_to?(:delete_matched)
-          logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
           logger.warn("[CodebaseIndex] Cache#clear(namespace: #{namespace.inspect}) is a no-op: " \
                       "backend #{@cache.class} does not support delete_matched")
           return
         end
 
         @cache.delete_matched(pattern)
+      rescue StandardError => e
+        logger.warn("[CodebaseIndex] SolidCacheStore#clear failed: #{e.message}")
+        nil
+      end
+
+      private
+
+      def logger
+        @logger ||= defined?(Rails) ? Rails.logger : Logger.new($stderr)
+      end
+
+      def delete_silently(key)
+        @cache.delete(key)
+      rescue StandardError
+        nil
       end
     end
   end

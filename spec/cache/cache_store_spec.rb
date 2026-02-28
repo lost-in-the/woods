@@ -4,6 +4,8 @@ require 'spec_helper'
 require 'codebase_index'
 require 'codebase_index/cache/cache_store'
 require 'codebase_index/cache/cache_middleware'
+require 'codebase_index/cache/redis_cache_store'
+require 'codebase_index/cache/solid_cache_store'
 
 RSpec.shared_examples 'a CacheStore' do
   describe '#write and #read' do
@@ -389,6 +391,162 @@ RSpec.describe CodebaseIndex::Cache::CachedRetriever do
 
       expect(r1.context).to eq('small')
       expect(r2.context).to eq('large')
+    end
+  end
+end
+
+# ── RedisCacheStore ────────────────────────────────────────────────────
+
+RSpec.describe CodebaseIndex::Cache::RedisCacheStore do
+  # Stub Redis classes so specs don't require the redis gem
+  before do
+    stub_const('Redis::BaseError', Class.new(StandardError)) unless defined?(Redis::BaseError)
+    stub_const('Redis', Class.new) unless defined?(Redis)
+  end
+
+  let(:redis_double) { double('Redis') }
+  let(:store) { described_class.new(redis: redis_double) }
+
+  describe 'JSON round-trip' do
+    it 'writes JSON and parses on read' do
+      allow(redis_double).to receive(:set)
+      allow(redis_double).to receive(:get).with('k').and_return('[0.1,0.2]')
+
+      store.write('k', [0.1, 0.2])
+      expect(store.read('k')).to eq([0.1, 0.2])
+    end
+
+    it 'returns nil for missing keys' do
+      allow(redis_double).to receive(:get).with('k').and_return(nil)
+      expect(store.read('k')).to be_nil
+    end
+  end
+
+  describe 'TTL passthrough' do
+    it 'passes ex: when ttl is provided' do
+      allow(redis_double).to receive(:set)
+      store.write('k', 'v', ttl: 3600)
+      expect(redis_double).to have_received(:set).with('k', '"v"', ex: 3600)
+    end
+
+    it 'passes ex: when default_ttl is set' do
+      store_with_ttl = described_class.new(redis: redis_double, default_ttl: 7200)
+      allow(redis_double).to receive(:set)
+      store_with_ttl.write('k', 'v')
+      expect(redis_double).to have_received(:set).with('k', '"v"', ex: 7200)
+    end
+
+    it 'omits ex: when no ttl' do
+      allow(redis_double).to receive(:set)
+      store.write('k', 'v')
+      expect(redis_double).to have_received(:set).with('k', '"v"')
+    end
+  end
+
+  describe 'connection error degradation' do
+    it 'returns nil on read failure' do
+      allow(redis_double).to receive(:get).and_raise(Errno::ECONNREFUSED)
+      expect(store.read('k')).to be_nil
+    end
+
+    it 'returns nil on write failure' do
+      allow(redis_double).to receive(:set).and_raise(Errno::ECONNRESET)
+      expect(store.write('k', 'v')).to be_nil
+    end
+
+    it 'returns nil on delete failure' do
+      allow(redis_double).to receive(:del).and_raise(Errno::ECONNREFUSED)
+      expect(store.delete('k')).to be_nil
+    end
+
+    it 'returns false on exist? failure' do
+      allow(redis_double).to receive(:exists?).and_raise(Errno::ECONNRESET)
+      expect(store.exist?('k')).to be false
+    end
+  end
+
+  describe 'corrupted JSON handling' do
+    it 'returns nil and deletes the key' do
+      allow(redis_double).to receive(:get).with('k').and_return('not-json{{{')
+      allow(redis_double).to receive(:del)
+
+      expect(store.read('k')).to be_nil
+      expect(redis_double).to have_received(:del).with('k')
+    end
+  end
+end
+
+# ── SolidCacheStore ───────────────────────────────────────────────────
+
+RSpec.describe CodebaseIndex::Cache::SolidCacheStore do
+  let(:cache_double) { instance_double('ActiveSupport::Cache::Store') }
+  let(:store) { described_class.new(cache: cache_double) }
+
+  describe 'JSON round-trip' do
+    it 'writes JSON and parses on read' do
+      allow(cache_double).to receive(:write)
+      allow(cache_double).to receive(:read).with('k').and_return('[0.1,0.2]')
+
+      store.write('k', [0.1, 0.2])
+      expect(store.read('k')).to eq([0.1, 0.2])
+    end
+
+    it 'returns nil for missing keys' do
+      allow(cache_double).to receive(:read).with('k').and_return(nil)
+      expect(store.read('k')).to be_nil
+    end
+  end
+
+  describe 'TTL passthrough' do
+    it 'passes expires_in: when ttl is provided' do
+      allow(cache_double).to receive(:write)
+      store.write('k', 'v', ttl: 3600)
+      expect(cache_double).to have_received(:write).with('k', '"v"', expires_in: 3600)
+    end
+
+    it 'passes expires_in: when default_ttl is set' do
+      store_with_ttl = described_class.new(cache: cache_double, default_ttl: 7200)
+      allow(cache_double).to receive(:write)
+      store_with_ttl.write('k', 'v')
+      expect(cache_double).to have_received(:write).with('k', '"v"', expires_in: 7200)
+    end
+
+    it 'omits expires_in: when no ttl' do
+      allow(cache_double).to receive(:write)
+      store.write('k', 'v')
+      expect(cache_double).to have_received(:write).with('k', '"v"')
+    end
+  end
+
+  describe 'connection error degradation' do
+    it 'returns nil on read failure' do
+      allow(cache_double).to receive(:read).and_raise(StandardError, 'connection lost')
+      expect(store.read('k')).to be_nil
+    end
+
+    it 'returns nil on write failure' do
+      allow(cache_double).to receive(:write).and_raise(StandardError, 'connection lost')
+      expect(store.write('k', 'v')).to be_nil
+    end
+
+    it 'returns nil on delete failure' do
+      allow(cache_double).to receive(:delete).and_raise(StandardError, 'connection lost')
+      expect(store.delete('k')).to be_nil
+    end
+
+    it 'returns false on exist? failure' do
+      allow(cache_double).to receive(:exist?).and_raise(StandardError, 'connection lost')
+      expect(store.exist?('k')).to be false
+    end
+  end
+
+  describe 'corrupted JSON handling' do
+    it 'returns nil and deletes the key' do
+      allow(cache_double).to receive(:read).with('k').and_return('not-json{{{')
+      allow(cache_double).to receive(:delete)
+
+      expect(store.read('k')).to be_nil
+      expect(cache_double).to have_received(:delete).with('k')
     end
   end
 end

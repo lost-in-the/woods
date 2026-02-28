@@ -95,7 +95,11 @@ module CodebaseIndex
         return cached unless cached.nil?
 
         value = yield
-        write(key, value, ttl: ttl)
+        begin
+          write(key, value, ttl: ttl)
+        rescue StandardError => e
+          warn("[CodebaseIndex] CacheStore#fetch write failed for #{key}: #{e.message}")
+        end
         value
       end
     end

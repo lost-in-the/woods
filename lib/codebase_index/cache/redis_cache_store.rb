@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'logger'
 require_relative 'cache_store'
 
 module CodebaseIndex
@@ -43,6 +44,10 @@ module CodebaseIndex
 
         JSON.parse(raw)
       rescue JSON::ParserError
+        delete_silently(key)
+        nil
+      rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
+        logger.warn("[CodebaseIndex] RedisCacheStore#read failed for #{key}: #{e.message}")
         nil
       end
 
@@ -61,6 +66,9 @@ module CodebaseIndex
         else
           @redis.set(key, serialized)
         end
+      rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
+        logger.warn("[CodebaseIndex] RedisCacheStore#write failed for #{key}: #{e.message}")
+        nil
       end
 
       # Delete a key from Redis.
@@ -69,6 +77,9 @@ module CodebaseIndex
       # @return [void]
       def delete(key)
         @redis.del(key)
+      rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
+        logger.warn("[CodebaseIndex] RedisCacheStore#delete failed for #{key}: #{e.message}")
+        nil
       end
 
       # Check if a key exists in Redis.
@@ -77,6 +88,9 @@ module CodebaseIndex
       # @return [Boolean]
       def exist?(key)
         @redis.exists?(key)
+      rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
+        logger.warn("[CodebaseIndex] RedisCacheStore#exist? failed for #{key}: #{e.message}")
+        false
       end
 
       # Clear cached entries by namespace or all codebase_index cache keys.
@@ -98,6 +112,21 @@ module CodebaseIndex
           @redis.del(*keys) if keys.any?
           break if cursor == '0'
         end
+      rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
+        logger.warn("[CodebaseIndex] RedisCacheStore#clear failed: #{e.message}")
+        nil
+      end
+
+      private
+
+      def logger
+        @logger ||= defined?(Rails) ? Rails.logger : Logger.new($stderr)
+      end
+
+      def delete_silently(key)
+        @redis.del(key)
+      rescue StandardError
+        nil
       end
     end
   end

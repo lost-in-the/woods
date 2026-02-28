@@ -161,11 +161,11 @@ module CodebaseIndex
         Cache::RedisCacheStore.new(redis: opts.fetch(:redis), default_ttl: opts[:default_ttl])
       when :solid_cache
         require_relative 'cache/solid_cache_store'
-        Cache::SolidCacheCacheStore.new(cache: opts.fetch(:cache), default_ttl: opts[:default_ttl])
+        Cache::SolidCacheStore.new(cache: opts.fetch(:cache), default_ttl: opts[:default_ttl])
       when Cache::CacheStore
         @config.cache_store
       else
-        Cache::InMemory.new
+        raise ArgumentError, "Unknown cache_store: #{@config.cache_store}"
       end
     end
 

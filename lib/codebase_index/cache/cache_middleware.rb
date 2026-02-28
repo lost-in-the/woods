@@ -52,7 +52,11 @@ module CodebaseIndex
           fresh_vectors = @provider.embed_batch(misses)
           misses.each_with_index do |text, i|
             results[miss_indices[i]] = fresh_vectors[i]
-            @cache_store.write(embedding_key(text), fresh_vectors[i], ttl: @ttl)
+            begin
+              @cache_store.write(embedding_key(text), fresh_vectors[i], ttl: @ttl)
+            rescue StandardError => e
+              warn("[CodebaseIndex] CachedEmbeddingProvider cache write failed: #{e.message}")
+            end
           end
         end
 
@@ -155,7 +159,11 @@ module CodebaseIndex
 
         result = @retriever.retrieve(query, budget: budget)
 
-        @cache_store.write(key, serialize_result(result), ttl: @context_ttl)
+        begin
+          @cache_store.write(key, serialize_result(result), ttl: @context_ttl)
+        rescue StandardError => e
+          warn("[CodebaseIndex] CachedRetriever cache write failed: #{e.message}")
+        end
 
         result
       end
