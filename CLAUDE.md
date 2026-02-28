@@ -1,6 +1,6 @@
 # CodebaseIndex
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (28-tool index server + 33-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
 
 ## Commands
 
@@ -35,6 +35,7 @@ lib/
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
+│   ├── filename_utils.rb               # Safe filename generation
 │   ├── extractors/                      # 34 extractors + callback_analyzer + behavioral_profile
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
@@ -45,13 +46,15 @@ lib/
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
-│   ├── mcp/                             # MCP Index Server (27 tools, 2 resources, 2 templates)
-│   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
+│   ├── mcp/                             # MCP Index Server (28 tools, 2 resources, 2 templates)
+│   ├── console/                         # Console MCP Server (33 tools, 4 tiers, job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
 │   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
 │   ├── observability/                   # Instrumentation, StructuredLogger, HealthCheck
 │   ├── resilience/                      # CircuitBreaker, RetryableProvider, IndexValidator
+│   ├── cache/                           # Response caching (CacheMiddleware, CacheStore, Redis, SolidCache)
+│   ├── cost_model/                      # Cost estimation (EmbeddingCost, Estimator, ProviderPricing, StorageCost)
 │   ├── session_tracer/                  # Session tracing middleware + flow assembly (FileStore, RedisStore, SolidCacheStore)
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
@@ -61,6 +64,7 @@ lib/
 │   └── codebase_index.rake              # Rake task definitions
 exe/
 ├── codebase-index-mcp                   # MCP Index Server executable (stdio)
+├── codebase-index-mcp-start             # Self-healing MCP wrapper
 ├── codebase-index-mcp-http              # MCP Index Server executable (HTTP/Rack)
 └── codebase-console-mcp                 # Console MCP Server executable
 ```
