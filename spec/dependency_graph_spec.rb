@@ -210,10 +210,11 @@ RSpec.describe CodebaseIndex::DependencyGraph do
       graph.register(make_unit(type: :model, identifier: 'User'))
     end
 
-    it 'returns the same object on consecutive calls' do
+    it 'returns equal but distinct objects on consecutive calls (dup protection)' do
       first = graph.to_h
       second = graph.to_h
-      expect(first).to equal(second)
+      expect(first).to eq(second)
+      expect(first).not_to equal(second)
     end
 
     it 'invalidates the cache when a new unit is registered' do

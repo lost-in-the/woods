@@ -173,6 +173,7 @@ module CodebaseIndex
     end
 
     # Serialize graph for persistence. Memoized — cache is invalidated on register.
+    # Returns a dup so callers can't pollute the cached hash.
     #
     # @return [Hash] Complete graph data
     def to_h
@@ -188,6 +189,7 @@ module CodebaseIndex
           types: @type_index.transform_values(&:size)
         }
       }
+      @to_h.dup
     end
 
     # Load graph from persisted data
