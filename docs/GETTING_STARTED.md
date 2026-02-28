@@ -113,7 +113,7 @@ Each unit JSON contains:
 | Field | Description |
 |-------|-------------|
 | `identifier` | Unique name (e.g., `User`, `OrdersController`) |
-| `unit_type` | Category (model, controller, service, job, etc.) |
+| `type` | Category (model, controller, service, job, etc.) |
 | `file_path` | Source file location relative to Rails.root |
 | `source_code` | Annotated source with inlined concerns and schema |
 | `metadata` | Rich structured data (associations, callbacks, routes, etc.) |
