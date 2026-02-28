@@ -56,6 +56,12 @@ module CodebaseIndex
         def retry_job(id:)
           { tool: "#{prefix}_retry_job", params: { id: id } }
         end
+
+        private
+
+        def prefix
+          raise NotImplementedError, "#{self.class}#prefix must be implemented"
+        end
       end
     end
   end

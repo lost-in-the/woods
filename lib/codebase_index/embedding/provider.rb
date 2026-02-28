@@ -127,10 +127,14 @@ module CodebaseIndex
           end
 
           JSON.parse(response.body)
-        rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
+        rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout, IOError
           # Connection dropped — reset and retry once
           @http_client = nil
-          response = http_client.request(request)
+          begin
+            response = http_client.request(request)
+          rescue StandardError => retry_error
+            raise CodebaseIndex::Error, "Ollama API error (retry failed): #{retry_error.message}"
+          end
           unless response.is_a?(Net::HTTPSuccess)
             raise CodebaseIndex::Error, "Ollama API error: #{response.code} #{response.body}"
           end

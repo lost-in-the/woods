@@ -70,7 +70,15 @@ module CodebaseIndex
       # @param default [Object] Value to return when key is absent (default: nil)
       # @return [Object]
       def fetch_key(data, key, default = nil)
-        data[key.to_sym] || data[key.to_s] || default
+        sym_key = key.to_sym
+        str_key = key.to_s
+        if data.key?(sym_key)
+          data[sym_key]
+        elsif data.key?(str_key)
+          data[str_key]
+        else
+          default
+        end
       end
     end
   end
