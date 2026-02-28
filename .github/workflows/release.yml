@@ -6,10 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Set up Ruby
@@ -18,15 +16,26 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
       - name: Run tests
-        run: bundle exec rake spec
+        run: bundle exec rspec
       - name: Run linter
         run: bundle exec rubocop
-      - name: Build gem
-        run: gem build codebase_index.gemspec
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    environment: release
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@09a7688d3b55cf0e976497ff046b70949eeaccfd # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
       - name: Publish to RubyGems
-        run: gem push codebase_index-*.gem
-        env:
-          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        uses: rubygems/release-gem@1c162a739e8b4cb21a676e97b087e8268d8fc40b # v1.1.2
       - name: Create GitHub Release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2
         with:
