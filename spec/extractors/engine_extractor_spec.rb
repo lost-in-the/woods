@@ -292,10 +292,13 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
     allow(Rails).to receive(:respond_to?).with(:application).and_return(true)
     allow(Rails).to receive(:respond_to?).with(:application, anything).and_return(true)
     allow(Rails).to receive(:application).and_return(application)
+    stub_rails_root_and_logger
+  end
 
-    # framework_engine? needs Rails.root; extract_engine rescue needs Rails.logger
-    # Rails module is created by stub_const — doesn't implement root/logger,
-    # so we disable verification for these stubs.
+  # framework_engine? needs Rails.root; extract_engine rescue needs Rails.logger.
+  # Rails module is created by stub_const — doesn't implement root/logger,
+  # so we disable verification for these stubs.
+  def stub_rails_root_and_logger
     without_partial_double_verification do
       rails_root = double('root', to_s: '/rails/app')
       allow(Rails).to receive(:root).and_return(rails_root)
