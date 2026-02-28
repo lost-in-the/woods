@@ -2,6 +2,7 @@
 
 require 'json'
 require 'set'
+require_relative '../token_utils'
 require_relative 'session_flow_document'
 
 module CodebaseIndex
@@ -220,10 +221,10 @@ module CodebaseIndex
           source = unit[:source_code]
           next unless source
 
-          source_tokens = estimate_token_count(source)
+          source_tokens = TokenUtils.estimate_tokens(source)
           unit[:source_code] = "# source truncated (#{source_tokens} tokens)"
           total -= source_tokens
-          total += estimate_token_count(unit[:source_code])
+          total += TokenUtils.estimate_tokens(unit[:source_code])
         end
 
         [total, 0].max
@@ -236,18 +237,8 @@ module CodebaseIndex
       def estimate_tokens(context_pool)
         context_pool.values.sum do |unit|
           source = unit[:source_code] || ''
-          estimate_token_count(source) + 20 # overhead for tags/metadata
+          TokenUtils.estimate_tokens(source) + 20 # overhead for tags/metadata
         end
-      end
-
-      # Estimate token count for a string.
-      # Uses project convention: (string.length / 4.0).ceil
-      # See docs/TOKEN_BENCHMARK.md — conservative floor (~10.6% overestimate).
-      #
-      # @param text [String] Text to estimate
-      # @return [Integer] Estimated token count
-      def estimate_token_count(text)
-        (text.length / 4.0).ceil
       end
 
       # Build an empty document for sessions with no requests.

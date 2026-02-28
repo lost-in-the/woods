@@ -567,15 +567,12 @@ module CodebaseIndex
         # rubocop:disable Metrics/ParameterLists
         def define_console_tool(server, conn_mgr, name, description, properties:, required: nil,
                                 safe_ctx: nil, renderer: nil, &tool_block)
-          mgr = conn_mgr
-          ctx = safe_ctx
-          rdr = renderer
           bridge_method = method(:send_to_bridge)
           schema = { properties: properties }
           schema[:required] = required if required&.any?
           server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
             request = tool_block.call(args)
-            bridge_method.call(mgr, request.transform_keys(&:to_s), ctx, renderer: rdr)
+            bridge_method.call(conn_mgr, request.transform_keys(&:to_s), safe_ctx, renderer: renderer)
           end
         end
         # rubocop:enable Metrics/ParameterLists

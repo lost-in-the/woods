@@ -22,36 +22,18 @@ module CodebaseIndex
         @output = output
       end
 
-      # Log at info level.
-      #
-      # @param event [String] Event name
-      # @param data [Hash] Additional structured data
-      def info(event, **data)
-        write_entry('info', event, data)
-      end
-
-      # Log at warn level.
-      #
-      # @param event [String] Event name
-      # @param data [Hash] Additional structured data
-      def warn(event, **data)
-        write_entry('warn', event, data)
-      end
-
-      # Log at error level.
-      #
-      # @param event [String] Event name
-      # @param data [Hash] Additional structured data
-      def error(event, **data)
-        write_entry('error', event, data)
-      end
-
-      # Log at debug level.
-      #
-      # @param event [String] Event name
-      # @param data [Hash] Additional structured data
-      def debug(event, **data)
-        write_entry('debug', event, data)
+      # @!method info(event, **data)
+      #   Log at info level.
+      #   @param event [String] Event name
+      #   @param data [Hash] Additional structured data
+      # @!method warn(event, **data)
+      #   Log at warn level.
+      # @!method error(event, **data)
+      #   Log at error level.
+      # @!method debug(event, **data)
+      #   Log at debug level.
+      %w[info warn error debug].each do |level|
+        define_method(level) { |event, **data| write_entry(level, event, data) }
       end
 
       private

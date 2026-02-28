@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'bridge'
 require_relative 'model_validator'
 require_relative 'safe_context'
 
@@ -20,7 +21,7 @@ module CodebaseIndex
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
       AGGREGATE_FUNCTIONS = %w[sum average minimum maximum].freeze
 
-      TIER1_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
+      TIER1_TOOLS = Bridge::TIER1_TOOLS
 
       # @param model_validator [ModelValidator] Validates model/column names
       # @param safe_context [SafeContext] Wraps execution in rolled-back transaction

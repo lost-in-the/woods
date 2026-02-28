@@ -57,7 +57,7 @@ module CodebaseIndex
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a service
       def extract_service_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(file_path, source)
+        class_name = extract_class_name(file_path, source, '(?:services|interactors|operations|commands|use_cases)')
 
         return nil unless class_name
         return nil if skip_file?(source)
@@ -82,29 +82,6 @@ module CodebaseIndex
       private
 
       # ──────────────────────────────────────────────────────────────────────
-      # Class Discovery
-      # ──────────────────────────────────────────────────────────────────────
-
-      def extract_class_name(file_path, source)
-        # Try to extract from source first (handles nested modules)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
-
-        # Fall back to convention
-        relative_path = file_path.sub("#{Rails.root}/", '')
-
-        # app/services/payments/stripe_service.rb -> Payments::StripeService
-        relative_path
-          .sub(%r{^app/(services|interactors|operations|commands|use_cases)/}, '')
-          .sub('.rb', '')
-          .camelize
-      end
-
-      def skip_file?(source)
-        # Skip module-only files (concerns, base modules)
-        source.match?(/^\s*module\s+\w+\s*$/) && !source.match?(/^\s*class\s+/)
-      end
-
-      # ──────────────────────────────────────────────────────────────────────
       # Source Annotation
       # ──────────────────────────────────────────────────────────────────────
 
@@ -121,16 +98,6 @@ module CodebaseIndex
         ANNOTATION
 
         annotation + source
-      end
-
-      def detect_entry_points(source)
-        points = []
-        points << 'call' if source.match?(/def (self\.)?call\b/)
-        points << 'perform' if source.match?(/def (self\.)?perform\b/)
-        points << 'execute' if source.match?(/def (self\.)?execute\b/)
-        points << 'run' if source.match?(/def (self\.)?run\b/)
-        points << 'process' if source.match?(/def (self\.)?process\b/)
-        points.empty? ? ['unknown'] : points
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -186,10 +153,6 @@ module CodebaseIndex
         end
 
         deps.uniq
-      end
-
-      def extract_custom_errors(source)
-        source.scan(/class\s+(\w+(?:Error|Exception))\s*</).flatten
       end
 
       def extract_rescue_handlers(source)

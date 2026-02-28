@@ -23,6 +23,8 @@ module CodebaseIndex
     #
     class Bridge
       SUPPORTED_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
+      # Alias used by EmbeddedExecutor to avoid duplicating the list.
+      TIER1_TOOLS = SUPPORTED_TOOLS
       TOOL_HANDLERS = SUPPORTED_TOOLS.to_h { |t| [t, :"handle_#{t}"] }.freeze
 
       # @param input [IO] Input stream (reads JSON-lines)
@@ -112,6 +114,11 @@ module CodebaseIndex
 
         @model_validator.validate_model!(model)
       end
+
+      # Stub handlers below return empty/zero data by design.
+      # This Bridge class is a protocol scaffold — real execution happens
+      # in EmbeddedExecutor (in-process) or a live Rails bridge process.
+      # The stubs satisfy the protocol contract for testing and offline use.
 
       def handle_count(_params)
         { 'count' => 0 }

@@ -84,5 +84,33 @@ module CodebaseIndex
         end
       end
     end
+
+    # Mixin for line-range source extraction, shared across Parser, MethodExtractor,
+    # and ClassAnalyzer.
+    #
+    # @example
+    #   include Ast::SourceSpan
+    #   extract_source_span(source, node.line, node.end_line)
+    #
+    module SourceSpan
+      private
+
+      # Extract source lines for a 1-based start/end line range.
+      #
+      # @param source [String] Full source text
+      # @param start_line [Integer, nil] 1-based start line
+      # @param end_line [Integer, nil] 1-based end line
+      # @return [String, nil] Extracted lines joined, or nil if out of range
+      def extract_source_span(source, start_line, end_line)
+        return nil unless start_line && end_line
+
+        lines = source.lines
+        start_idx = start_line - 1
+        end_idx = end_line - 1
+        return nil if start_idx.negative? || end_idx >= lines.length
+
+        lines[start_idx..end_idx].join
+      end
+    end
   end
 end

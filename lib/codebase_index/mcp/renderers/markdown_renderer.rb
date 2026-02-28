@@ -53,18 +53,20 @@ module CodebaseIndex
         # @param data [Hash] Search results with :query, :result_count, :results
         # @return [String] Markdown search results
         def render_search(data, **)
+          query = fetch_key(data, :query)
+          count = fetch_key(data, :result_count, 0)
+          results = fetch_key(data, :results, [])
+
           lines = []
-          lines << "## Search: \"#{data[:query] || data['query']}\""
-          count = data[:result_count] || data['result_count'] || 0
+          lines << "## Search: \"#{query}\""
           lines << ''
           lines << "#{count} result#{'s' unless count == 1} found."
           lines << ''
 
-          results = data[:results] || data['results'] || []
           results.each do |r|
-            ident = r['identifier'] || r[:identifier]
-            type = r['type'] || r[:type]
-            match = r['match_field'] || r[:match_field]
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
+            match = fetch_key(r, :match_field)
             line = "- **#{ident}** (#{type})"
             line += " — matched in #{match}" if match
             lines << line
@@ -92,7 +94,7 @@ module CodebaseIndex
         # @param data [Hash] Structure data with :manifest and optional :summary
         # @return [String] Markdown structure overview
         def render_structure(data, **)
-          manifest = data[:manifest] || data['manifest'] || {}
+          manifest = fetch_key(data, :manifest, {})
           lines = []
           lines << '## Codebase Structure'
           lines << ''
@@ -113,7 +115,7 @@ module CodebaseIndex
             lines << ''
           end
 
-          summary = data[:summary] || data['summary']
+          summary = fetch_key(data, :summary)
           if summary
             lines << '### Summary'
             lines << ''
@@ -132,14 +134,14 @@ module CodebaseIndex
           lines << '## Graph Analysis'
           lines << ''
 
-          stats = data['stats'] || data[:stats]
+          stats = fetch_key(data, :stats)
           if stats.is_a?(Hash)
             stats.each { |k, v| lines << "- **#{k}:** #{v}" }
             lines << ''
           end
 
           %w[orphans dead_ends hubs cycles bridges].each do |section|
-            items = data[section] || data[section.to_sym]
+            items = fetch_key(data, section)
             next unless items.is_a?(Array) && items.any?
 
             lines << "### #{section.tr('_', ' ').capitalize}"
@@ -171,17 +173,14 @@ module CodebaseIndex
           lines = []
           lines << '## PageRank Scores'
           lines << ''
-          lines << "#{data[:total_nodes] || data['total_nodes']} nodes in graph."
+          lines << "#{fetch_key(data, :total_nodes)} nodes in graph."
           lines << ''
           lines << '| Rank | Identifier | Type | Score |'
           lines << '|------|-----------|------|-------|'
 
-          results = data[:results] || data['results'] || []
+          results = fetch_key(data, :results, [])
           results.each_with_index do |r, i|
-            ident = r[:identifier] || r['identifier']
-            type = r[:type] || r['type']
-            score = r[:score] || r['score']
-            lines << "| #{i + 1} | #{ident} | #{type} | #{score} |"
+            lines << "| #{i + 1} | #{fetch_key(r, :identifier)} | #{fetch_key(r, :type)} | #{fetch_key(r, :score)} |"
           end
 
           lines.join("\n").rstrip
@@ -192,19 +191,20 @@ module CodebaseIndex
         # @param data [Hash] Framework search results
         # @return [String] Markdown framework results
         def render_framework(data, **)
+          keyword = fetch_key(data, :keyword)
+          count = fetch_key(data, :result_count, 0)
+          results = fetch_key(data, :results, [])
+
           lines = []
-          keyword = data[:keyword] || data['keyword']
-          count = data[:result_count] || data['result_count'] || 0
           lines << "## Framework: \"#{keyword}\""
           lines << ''
           lines << "#{count} result#{'s' unless count == 1} found."
           lines << ''
 
-          results = data[:results] || data['results'] || []
           results.each do |r|
-            ident = r['identifier'] || r[:identifier]
-            type = r['type'] || r[:type]
-            file = r['file_path'] || r[:file_path]
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
+            file = fetch_key(r, :file_path)
             line = "- **#{ident}** (#{type})"
             line += " — `#{file}`" if file
             lines << line
@@ -218,8 +218,10 @@ module CodebaseIndex
         # @param data [Hash] Recent changes with :result_count and :results
         # @return [String] Markdown table of recent changes
         def render_recent_changes(data, **)
+          count = fetch_key(data, :result_count, 0)
+          results = fetch_key(data, :results, [])
+
           lines = []
-          count = data[:result_count] || data['result_count'] || 0
           lines << '## Recent Changes'
           lines << ''
           lines << "#{count} recently modified unit#{'s' unless count == 1}."
@@ -227,12 +229,11 @@ module CodebaseIndex
           lines << '| Identifier | Type | Last Modified | Author |'
           lines << '|-----------|------|---------------|--------|'
 
-          results = data[:results] || data['results'] || []
           results.each do |r|
-            ident = r['identifier'] || r[:identifier]
-            type = r['type'] || r[:type]
-            modified = r['last_modified'] || r[:last_modified] || '-'
-            author = r['author'] || r[:author] || '-'
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
+            modified = fetch_key(r, :last_modified) || '-'
+            author = fetch_key(r, :author) || '-'
             lines << "| #{ident} | #{type} | #{modified} | #{author} |"
           end
 
@@ -257,23 +258,23 @@ module CodebaseIndex
         private
 
         def render_traversal(label, data)
-          root = data[:root] || data['root']
+          root = fetch_key(data, :root)
           found = data[:found] || data['found']
-          nodes = data[:nodes] || data['nodes'] || {}
-          message = data[:message] || data['message']
+          nodes = fetch_key(data, :nodes, {})
+          message = fetch_key(data, :message)
 
           lines = []
           lines << "## #{label} of #{root}"
           lines << ''
 
           if found == false
-            (lines << message) || "Identifier '#{root}' not found in the index."
+            lines << (message || "Identifier '#{root}' not found in the index.")
             return lines.join("\n").rstrip
           end
 
           nodes.each do |id, info|
-            depth = info['depth'] || info[:depth] || 0
-            deps = info['deps'] || info[:deps] || []
+            depth = fetch_key(info, :depth) || 0
+            deps = fetch_key(info, :deps, [])
             indent = '  ' * depth
             lines << "#{indent}- **#{id}**"
             deps.each { |d| lines << "#{indent}  - #{d}" }

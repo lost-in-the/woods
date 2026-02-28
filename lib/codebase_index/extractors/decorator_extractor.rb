@@ -119,14 +119,6 @@ module CodebaseIndex
         end
       end
 
-      # Skip module-only files (concerns, base modules without a class).
-      #
-      # @param source [String] Ruby source code
-      # @return [Boolean]
-      def skip_file?(source)
-        source.match?(/^\s*module\s+\w+\s*$/) && !source.match?(/^\s*class\s+/)
-      end
-
       # ──────────────────────────────────────────────────────────────────────
       # Source Annotation
       # ──────────────────────────────────────────────────────────────────────

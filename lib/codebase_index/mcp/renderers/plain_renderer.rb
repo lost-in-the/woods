@@ -58,17 +58,17 @@ module CodebaseIndex
         end
 
         def render_search(data, **)
-          query = data[:query] || data['query']
-          count = data[:result_count] || data['result_count'] || 0
-          results = data[:results] || data['results'] || []
+          query = fetch_key(data, :query)
+          count = fetch_key(data, :result_count, 0)
+          results = fetch_key(data, :results, [])
 
           lines = []
           lines << "Search: \"#{query}\" (#{count} results)"
           lines << DIVIDER
 
           results.each do |r|
-            ident = r['identifier'] || r[:identifier]
-            type = r['type'] || r[:type]
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
             lines << "  #{ident} (#{type})"
           end
 
@@ -84,7 +84,7 @@ module CodebaseIndex
         end
 
         def render_structure(data, **)
-          manifest = data[:manifest] || data['manifest'] || {}
+          manifest = fetch_key(data, :manifest, {})
           lines = []
           lines << 'Codebase Structure'
           lines << DIVIDER
@@ -100,7 +100,7 @@ module CodebaseIndex
             counts.sort_by { |_k, v| -v }.each { |type, count| lines << "  #{type}: #{count}" }
           end
 
-          summary = data[:summary] || data['summary']
+          summary = fetch_key(data, :summary)
           if summary
             lines << ''
             lines << DIVIDER
@@ -115,14 +115,14 @@ module CodebaseIndex
           lines << 'Graph Analysis'
           lines << DIVIDER
 
-          stats = data['stats'] || data[:stats]
+          stats = fetch_key(data, :stats)
           if stats.is_a?(Hash)
             stats.each { |k, v| lines << "  #{k}: #{v}" }
             lines << ''
           end
 
           %w[orphans dead_ends hubs cycles bridges].each do |section|
-            items = data[section] || data[section.to_sym]
+            items = fetch_key(data, section)
             next unless items.is_a?(Array) && items.any?
 
             lines << "#{section.tr('_', ' ').upcase}:"
@@ -144,14 +144,14 @@ module CodebaseIndex
 
         def render_pagerank(data, **)
           lines = []
-          lines << "PageRank Scores (#{data[:total_nodes] || data['total_nodes']} nodes)"
+          lines << "PageRank Scores (#{fetch_key(data, :total_nodes)} nodes)"
           lines << DIVIDER
 
-          results = data[:results] || data['results'] || []
+          results = fetch_key(data, :results, [])
           results.each_with_index do |r, i|
-            ident = r[:identifier] || r['identifier']
-            type = r[:type] || r['type']
-            score = r[:score] || r['score']
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
+            score = fetch_key(r, :score)
             lines << "  #{i + 1}. #{ident} (#{type}) - #{score}"
           end
 
@@ -159,17 +159,17 @@ module CodebaseIndex
         end
 
         def render_framework(data, **)
-          keyword = data[:keyword] || data['keyword']
-          count = data[:result_count] || data['result_count'] || 0
-          results = data[:results] || data['results'] || []
+          keyword = fetch_key(data, :keyword)
+          count = fetch_key(data, :result_count, 0)
+          results = fetch_key(data, :results, [])
 
           lines = []
           lines << "Framework: \"#{keyword}\" (#{count} results)"
           lines << DIVIDER
 
           results.each do |r|
-            ident = r['identifier'] || r[:identifier]
-            type = r['type'] || r[:type]
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
             lines << "  #{ident} (#{type})"
           end
 
@@ -177,17 +177,17 @@ module CodebaseIndex
         end
 
         def render_recent_changes(data, **)
-          count = data[:result_count] || data['result_count'] || 0
-          results = data[:results] || data['results'] || []
+          count = fetch_key(data, :result_count, 0)
+          results = fetch_key(data, :results, [])
 
           lines = []
           lines << "Recent Changes (#{count} units)"
           lines << DIVIDER
 
           results.each do |r|
-            ident = r['identifier'] || r[:identifier]
-            type = r['type'] || r[:type]
-            modified = r['last_modified'] || r[:last_modified] || '-'
+            ident = fetch_key(r, :identifier)
+            type = fetch_key(r, :type)
+            modified = fetch_key(r, :last_modified) || '-'
             lines << "  #{ident} (#{type}) - #{modified}"
           end
 
@@ -210,10 +210,10 @@ module CodebaseIndex
         private
 
         def render_plain_traversal(label, data)
-          root = data[:root] || data['root']
+          root = fetch_key(data, :root)
           found = data[:found] || data['found']
-          nodes = data[:nodes] || data['nodes'] || {}
-          message = data[:message] || data['message']
+          nodes = fetch_key(data, :nodes, {})
+          message = fetch_key(data, :message)
 
           lines = []
           lines << "#{label} of #{root}"
@@ -225,8 +225,8 @@ module CodebaseIndex
           end
 
           nodes.each do |id, info|
-            depth = info['depth'] || info[:depth] || 0
-            deps = info['deps'] || info[:deps] || []
+            depth = fetch_key(info, :depth) || 0
+            deps = fetch_key(info, :deps, [])
             indent = '  ' * (depth + 1)
             lines << "#{indent}#{id}"
             deps.each { |d| lines << "#{indent}  -> #{d}" }

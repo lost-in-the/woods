@@ -139,19 +139,10 @@ module CodebaseIndex
       end
 
       def extract_defaults(mailer)
-        defaults = {}
-
-        begin
-          mailer_defaults = mailer.default
-          defaults[:from] = mailer_defaults[:from] if mailer_defaults[:from]
-          defaults[:reply_to] = mailer_defaults[:reply_to] if mailer_defaults[:reply_to]
-          defaults[:cc] = mailer_defaults[:cc] if mailer_defaults[:cc]
-          defaults[:bcc] = mailer_defaults[:bcc] if mailer_defaults[:bcc]
-        rescue StandardError
-          # Defaults not accessible
-        end
-
-        defaults
+        mailer_defaults = mailer.default
+        mailer_defaults.slice(:from, :reply_to, :cc, :bcc).compact
+      rescue StandardError
+        {}
       end
 
       def extract_callbacks(mailer)
@@ -170,72 +161,6 @@ module CodebaseIndex
         end
       rescue StandardError
         []
-      end
-
-      # Extract :only/:except action lists and :if/:unless conditions from a callback.
-      #
-      # Modern Rails (4.2+) stores conditions in @if/@unless ivar arrays.
-      # ActionFilter objects hold action Sets; other conditions are procs/symbols.
-      #
-      # @param callback [ActiveSupport::Callbacks::Callback]
-      # @return [Array(Array<String>, Array<String>, Array<String>, Array<String>)]
-      #   [only_actions, except_actions, if_labels, unless_labels]
-      def extract_callback_conditions(callback)
-        if_conditions = callback.instance_variable_get(:@if) || []
-        unless_conditions = callback.instance_variable_get(:@unless) || []
-
-        only = []
-        except = []
-        if_labels = []
-        unless_labels = []
-
-        if_conditions.each do |cond|
-          actions = extract_action_filter_actions(cond)
-          if actions
-            only.concat(actions)
-          else
-            if_labels << condition_label(cond)
-          end
-        end
-
-        unless_conditions.each do |cond|
-          actions = extract_action_filter_actions(cond)
-          if actions
-            except.concat(actions)
-          else
-            unless_labels << condition_label(cond)
-          end
-        end
-
-        [only, except, if_labels, unless_labels]
-      end
-
-      # Extract action names from an ActionFilter-like condition object.
-      # Duck-types on the @actions ivar being a Set, avoiding dependence
-      # on private class names across Rails versions.
-      #
-      # @param condition [Object] A condition from the callback's @if/@unless array
-      # @return [Array<String>, nil] Action names, or nil if not an ActionFilter
-      def extract_action_filter_actions(condition)
-        return nil unless condition.instance_variable_defined?(:@actions)
-
-        actions = condition.instance_variable_get(:@actions)
-        return nil unless actions.is_a?(Set)
-
-        actions.to_a
-      end
-
-      # Human-readable label for a non-ActionFilter condition.
-      #
-      # @param condition [Object] A proc, symbol, or other condition
-      # @return [String]
-      def condition_label(condition)
-        case condition
-        when Symbol then ":#{condition}"
-        when Proc then 'Proc'
-        when String then condition
-        else condition.class.name
-        end
       end
 
       def extract_layout(mailer, source)

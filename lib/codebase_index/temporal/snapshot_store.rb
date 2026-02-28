@@ -236,11 +236,11 @@ module CodebaseIndex
           unit_hashes.each do |uh|
             params = [
               snapshot_id,
-              uh[:identifier] || uh['identifier'],
-              (uh[:type] || uh['type']).to_s,
-              uh[:source_hash] || uh['source_hash'],
-              uh[:metadata_hash] || uh['metadata_hash'],
-              uh[:dependencies_hash] || uh['dependencies_hash']
+              mget(uh, 'identifier'),
+              mget(uh, 'type').to_s,
+              mget(uh, 'source_hash'),
+              mget(uh, 'metadata_hash'),
+              mget(uh, 'dependencies_hash')
             ]
             @db.execute(sql, params)
           end

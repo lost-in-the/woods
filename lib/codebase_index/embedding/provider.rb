@@ -118,16 +118,39 @@ module CodebaseIndex
         # @return [Hash] parsed JSON response
         # @raise [CodebaseIndex::Error] if the API returns a non-success status
         def post_request(body)
-          http = Net::HTTP.new(@uri.host, @uri.port)
           request = Net::HTTP::Post.new(@uri.path, 'Content-Type' => 'application/json')
           request.body = body.to_json
-          response = http.request(request)
+          response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
             raise CodebaseIndex::Error, "Ollama API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)
+        rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
+          # Connection dropped — reset and retry once
+          @http_client = nil
+          response = http_client.request(request)
+          unless response.is_a?(Net::HTTPSuccess)
+            raise CodebaseIndex::Error, "Ollama API error: #{response.code} #{response.body}"
+          end
+
+          JSON.parse(response.body)
+        end
+
+        # Return a reusable, started HTTP client for the Ollama API.
+        #
+        # @return [Net::HTTP]
+        def http_client
+          return @http_client if @http_client&.started?
+
+          http = Net::HTTP.new(@uri.host, @uri.port)
+          http.use_ssl = @uri.scheme == 'https'
+          http.open_timeout = 10
+          http.read_timeout = 30
+          http.keep_alive_timeout = 30
+          http.start
+          @http_client = http
         end
       end
     end

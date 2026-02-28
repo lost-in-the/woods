@@ -54,7 +54,7 @@ module CodebaseIndex
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a validator
       def extract_validator_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(file_path, source)
+        class_name = extract_class_name(file_path, source, 'validators')
 
         return nil unless class_name
         return nil unless validator_file?(source)
@@ -81,16 +81,6 @@ module CodebaseIndex
       # ──────────────────────────────────────────────────────────────────────
       # Class Discovery
       # ──────────────────────────────────────────────────────────────────────
-
-      def extract_class_name(file_path, source)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
-
-        file_path
-          .sub("#{Rails.root}/", '')
-          .sub(%r{^app/validators/}, '')
-          .sub('.rb', '')
-          .camelize
-      end
 
       def validator_file?(source)
         source.match?(/< ActiveModel::Validator/) ||
@@ -176,7 +166,7 @@ module CodebaseIndex
 
       def extract_error_messages(source)
         # errors.add(:attr, "message") or errors.add(variable, "message")
-        messages = source.scan(/errors\.add\s*\(\s*:?\w+\s*,\s*["']([^"']+)["']/).flatten.map { |m| m }
+        messages = source.scan(/errors\.add\s*\(\s*:?\w+\s*,\s*["']([^"']+)["']/).flatten
 
         # errors.add(:attr, :symbol) or errors.add(variable, :symbol)
         source.scan(/errors\.add\s*\(\s*:?\w+\s*,\s*:(\w+)/).flatten.each { |m| messages << ":#{m}" }
@@ -186,7 +176,7 @@ module CodebaseIndex
 
       def extract_options(source)
         # options[:key] access
-        options = source.scan(/options\[:(\w+)\]/).flatten.map { |o| o }
+        options = source.scan(/options\[:(\w+)\]/).flatten
 
         options.uniq
       end
@@ -198,10 +188,6 @@ module CodebaseIndex
         stripped = class_name.split('::').last
         inferred = stripped.sub(/Validator\z/, '')
         inferred.empty? ? [] : [inferred]
-      end
-
-      def extract_custom_errors(source)
-        source.scan(/class\s+(\w+(?:Error|Exception))\s*</).flatten
       end
 
       # ──────────────────────────────────────────────────────────────────────

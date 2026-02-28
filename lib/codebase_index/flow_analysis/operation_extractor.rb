@@ -185,10 +185,7 @@ module CodebaseIndex
 
       # Detect response calls (render, redirect_to, head, render_*).
       def response_call?(node)
-        return true if RESPONSE_METHODS.include?(node.method_name)
-        return true if node.method_name&.start_with?('render')
-
-        false
+        RESPONSE_METHODS.include?(node.method_name) || node.method_name&.start_with?('render')
       end
 
       # Detect dynamic dispatch (send, public_send).

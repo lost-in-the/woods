@@ -234,9 +234,7 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
       )
     end
 
-    it 'populates error_messages in stats via embed_and_store' do
-      # Verify that embed_and_store mutates stats[:error_messages] before raising.
-      # We test this by calling the private method directly with a shared stats hash.
+    it 'increments error count in stats via embed_and_store' do
       stats = { processed: 0, skipped: 0, errors: 0 }
       items = [{ id: 'User', text: 'class User; end', unit_data: unit_data,
                  source_hash: 'abc123', identifier: 'User' }]
@@ -249,7 +247,6 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
       end.to raise_error(CodebaseIndex::Error, /network timeout/)
 
       expect(stats[:errors]).to eq(1)
-      expect(stats[:error_messages]).to eq(['network timeout'])
     end
   end
 

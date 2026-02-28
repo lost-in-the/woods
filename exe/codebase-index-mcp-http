@@ -16,40 +16,12 @@ require_relative '../lib/codebase_index'
 require_relative '../lib/codebase_index/dependency_graph'
 require_relative '../lib/codebase_index/graph_analyzer'
 require_relative '../lib/codebase_index/mcp/server'
+require_relative '../lib/codebase_index/mcp/bootstrapper'
 require_relative '../lib/codebase_index/embedding/text_preparer'
 require_relative '../lib/codebase_index/embedding/indexer'
 
-index_dir = ARGV[0] || ENV['CODEBASE_INDEX_DIR'] || Dir.pwd
-
-unless Dir.exist?(index_dir)
-  warn "Error: Index directory does not exist: #{index_dir}"
-  exit 1
-end
-
-unless File.exist?(File.join(index_dir, 'manifest.json'))
-  warn "Error: No manifest.json found in: #{index_dir}"
-  warn 'Run `bundle exec rake codebase_index:extract` in your Rails app first.'
-  exit 1
-end
-
-# Attempt to build a retriever for semantic search.
-# Auto-configures from environment variables when no explicit configuration exists.
-retriever = begin
-  config = CodebaseIndex.configuration
-
-  if !config.embedding_provider && ENV.fetch('OPENAI_API_KEY', nil)
-    config.vector_store = :in_memory
-    config.metadata_store = :in_memory
-    config.graph_store = :in_memory
-    config.embedding_provider = :openai
-    config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY', nil) }
-  end
-
-  CodebaseIndex::Builder.new(config).build_retriever if config.embedding_provider
-rescue StandardError => e
-  warn "Note: Semantic search unavailable (#{e.message}). Using pattern-based search only."
-  nil
-end
+index_dir = CodebaseIndex::MCP::Bootstrapper.resolve_index_dir(ARGV)
+retriever = CodebaseIndex::MCP::Bootstrapper.build_retriever
 
 port = (ENV['PORT'] || 9292).to_i
 host = ENV['HOST'] || 'localhost'

@@ -168,10 +168,10 @@ module CodebaseIndex
       # @param candidate [Candidate] The search candidate
       # @return [String]
       def format_unit(unit, _candidate)
-        identifier = unit[:identifier] || unit['identifier']
-        type = unit[:type] || unit['type']
-        file_path = unit[:file_path] || unit['file_path']
-        source = unit[:source_code] || unit['source_code'] || ''
+        identifier = unit_field(unit, :identifier)
+        type = unit_field(unit, :type)
+        file_path = unit_field(unit, :file_path)
+        source = unit_field(unit, :source_code) || ''
 
         <<~UNIT.strip
           ## #{identifier} (#{type})
@@ -187,12 +187,21 @@ module CodebaseIndex
       def build_source_attribution(candidate, unit, truncated: false)
         attribution = {
           identifier: candidate.identifier,
-          type: unit[:type] || unit['type'],
+          type: unit_field(unit, :type),
           score: candidate.score,
-          file_path: unit[:file_path] || unit['file_path']
+          file_path: unit_field(unit, :file_path)
         }
         attribution[:truncated] = true if truncated
         attribution
+      end
+
+      # Read a field from a unit hash, accepting either symbol or string keys.
+      #
+      # @param unit [Hash]
+      # @param key [Symbol]
+      # @return [Object, nil]
+      def unit_field(unit, key)
+        unit[key] || unit[key.to_s]
       end
 
       # Check if a candidate is framework source.

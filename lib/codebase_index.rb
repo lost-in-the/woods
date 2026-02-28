@@ -124,10 +124,7 @@ module CodebaseIndex
     # @param value [Boolean] Must be true or false
     # @raise [ConfigurationError] if value is not a boolean
     def pretty_json=(value)
-      unless value.is_a?(TrueClass) || value.is_a?(FalseClass)
-        raise ConfigurationError, "pretty_json must be true or false, got #{value.inspect}"
-      end
-
+      validate_boolean!(:pretty_json, value)
       @pretty_json = value
     end
 
@@ -145,10 +142,7 @@ module CodebaseIndex
     # @param value [Boolean] Enable or disable the cache layer
     # @raise [ConfigurationError] if value is not a boolean
     def cache_enabled=(value)
-      unless value.is_a?(TrueClass) || value.is_a?(FalseClass)
-        raise ConfigurationError, "cache_enabled must be true or false, got #{value.inspect}"
-      end
-
+      validate_boolean!(:cache_enabled, value)
       @cache_enabled = value
     end
 
@@ -159,6 +153,14 @@ module CodebaseIndex
     # @param priority [Symbol] :high, :medium, or :low
     def add_gem(gem_name, paths:, priority: :medium)
       @gem_configs[gem_name] = { paths: paths, priority: priority }
+    end
+
+    private
+
+    def validate_boolean!(name, value)
+      return if value.is_a?(TrueClass) || value.is_a?(FalseClass)
+
+      raise ConfigurationError, "#{name} must be true or false, got #{value.inspect}"
     end
   end
 

@@ -140,11 +140,7 @@ module CodebaseIndex
         # @see Interface#find_by_type
         def find_by_type(type)
           rows = @db.execute('SELECT id, data FROM units WHERE type = ?', [type.to_s])
-          rows.map do |row|
-            parsed = JSON.parse(row['data'])
-            parsed['id'] = row['id']
-            parsed
-          end
+          rows.map { |row| parse_row(row) }
         end
 
         # @see Interface#search
@@ -157,11 +153,7 @@ module CodebaseIndex
             rows = @db.execute('SELECT id, data FROM units WHERE data LIKE ?', ["%#{query}%"])
           end
 
-          rows.map do |row|
-            parsed = JSON.parse(row['data'])
-            parsed['id'] = row['id']
-            parsed
-          end
+          rows.map { |row| parse_row(row) }
         end
 
         # @see Interface#delete
@@ -175,6 +167,16 @@ module CodebaseIndex
         end
 
         private
+
+        # Parse a database row into a metadata hash with the id field injected.
+        #
+        # @param row [Hash] Database row with 'id' and 'data' keys
+        # @return [Hash] Parsed metadata with 'id' key set
+        def parse_row(row)
+          parsed = JSON.parse(row['data'])
+          parsed['id'] = row['id']
+          parsed
+        end
 
         # Create the units table if it doesn't exist.
         def create_table

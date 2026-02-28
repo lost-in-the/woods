@@ -201,37 +201,6 @@ module CodebaseIndex
         }
       end
 
-      # Extract the parent class name from a class definition.
-      #
-      # @param source [String] Ruby source code
-      # @return [String, nil] Parent class name or nil
-      def extract_parent_class(source)
-        match = source.match(/^\s*class\s+[\w:]+\s*<\s*([\w:]+)/)
-        match ? match[1] : nil
-      end
-
-      # Count non-blank, non-comment lines of code.
-      #
-      # @param source [String] Ruby source code
-      # @return [Integer] LOC count
-      def count_loc(source)
-        source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
-      end
-
-      # Detect common entry point methods.
-      #
-      # @param source [String] Ruby source code
-      # @return [Array<String>] Entry point method names
-      def detect_entry_points(source)
-        points = []
-        points << 'call'    if source.match?(/def (self\.)?call\b/)
-        points << 'perform' if source.match?(/def (self\.)?perform\b/)
-        points << 'execute' if source.match?(/def (self\.)?execute\b/)
-        points << 'run'     if source.match?(/def (self\.)?run\b/)
-        points << 'process' if source.match?(/def (self\.)?process\b/)
-        points.empty? ? ['unknown'] : points
-      end
-
       # ──────────────────────────────────────────────────────────────────────
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────

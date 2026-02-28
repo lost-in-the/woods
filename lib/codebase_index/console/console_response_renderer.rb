@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../mcp/tool_response_renderer'
+require_relative '../mcp/renderers/json_renderer'
 
 module CodebaseIndex
   module Console
@@ -66,13 +67,8 @@ module CodebaseIndex
     end
 
     # JSON passthrough renderer for backward compatibility.
-    # Returns JSON.pretty_generate output for any data.
-    class JsonConsoleRenderer < MCP::ToolResponseRenderer
-      # @param data [Object] Any JSON-serializable data
-      # @return [String] Pretty-printed JSON
-      def render_default(data)
-        JSON.pretty_generate(data)
-      end
+    # Delegates to MCP::Renderers::JsonRenderer for consistent JSON output.
+    class JsonConsoleRenderer < MCP::Renderers::JsonRenderer
     end
   end
 end

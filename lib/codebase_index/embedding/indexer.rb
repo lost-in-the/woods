@@ -105,8 +105,6 @@ module CodebaseIndex
         store_vectors(items, vectors, checkpoint, stats)
       rescue StandardError => e
         stats[:errors] += items.size
-        stats[:error_messages] ||= []
-        stats[:error_messages] << e.message
         raise CodebaseIndex::Error, "Embedding failed: #{e.message}"
       end
 
