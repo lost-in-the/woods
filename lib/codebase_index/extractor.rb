@@ -717,9 +717,16 @@ module CodebaseIndex
     def write_graph_analysis
       return unless @graph_analysis
 
+      enriched = @graph_analysis.merge(
+        generated_at: Time.current.iso8601,
+        graph_sha: Digest::SHA256.hexdigest(
+          File.read(@output_dir.join('dependency_graph.json'))
+        )
+      )
+
       File.write(
         @output_dir.join('graph_analysis.json'),
-        json_serialize(@graph_analysis)
+        json_serialize(enriched)
       )
     end
 

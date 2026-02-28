@@ -434,6 +434,63 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── write_graph_analysis ────────────────────────────────────────────
+
+  describe '#write_graph_analysis' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor)  { described_class.new(output_dir: output_dir) }
+
+    before do
+      require 'codebase_index'
+      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+
+      # write_graph_analysis reads dependency_graph.json to compute graph_sha
+      File.write(File.join(output_dir, 'dependency_graph.json'), '{"nodes":{},"edges":[]}')
+
+      require 'active_support'
+      require 'active_support/core_ext/time'
+    end
+
+    after do
+      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+    end
+
+    it 'includes generated_at timestamp' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expect(output).to have_key('generated_at')
+      expect(output['generated_at']).to match(/\d{4}-\d{2}-\d{2}T/)
+    end
+
+    it 'includes graph_sha matching dependency_graph.json content' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expected_sha = Digest::SHA256.hexdigest('{"nodes":{},"edges":[]}')
+      expect(output['graph_sha']).to eq(expected_sha)
+    end
+
+    it 'preserves original analysis data alongside staleness metadata' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: %w[User Post], orphans: ['Legacy'] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expect(output['hubs']).to eq(%w[User Post])
+      expect(output['orphans']).to eq(['Legacy'])
+    end
+
+    it 'does not write when @graph_analysis is nil' do
+      extractor.instance_variable_set(:@graph_analysis, nil)
+      extractor.send(:write_graph_analysis)
+
+      expect(File.exist?(File.join(output_dir, 'graph_analysis.json'))).to be false
+    end
+  end
+
   # ── write_structural_summary ──────────────────────────────────────────
 
   describe '#write_structural_summary' do
