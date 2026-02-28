@@ -168,20 +168,21 @@ module CodebaseIndex
           JSON.parse(response.body)
         end
 
-        # Return a reusable HTTP client for the Qdrant server.
-        # Lazily created and kept alive across requests to avoid
-        # TCP handshake overhead on every call.
+        # Return a reusable, started HTTP client for the Qdrant server.
+        # Calling http.start opens a persistent TCP connection so
+        # keep_alive_timeout actually takes effect across requests.
         #
         # @return [Net::HTTP]
         def http_client
-          @http_client ||= begin
-            http = Net::HTTP.new(@uri.host, @uri.port)
-            http.use_ssl = @uri.scheme == 'https'
-            http.open_timeout = 10
-            http.read_timeout = 30
-            http.keep_alive_timeout = 30
-            http
-          end
+          return @http_client if @http_client&.started?
+
+          http = Net::HTTP.new(@uri.host, @uri.port)
+          http.use_ssl = @uri.scheme == 'https'
+          http.open_timeout = 10
+          http.read_timeout = 30
+          http.keep_alive_timeout = 30
+          http.start
+          @http_client = http
         end
 
         # Build an HTTP request with headers and body.

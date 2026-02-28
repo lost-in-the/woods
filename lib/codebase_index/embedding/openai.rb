@@ -93,21 +93,32 @@ module CodebaseIndex
           end
 
           JSON.parse(response.body)
+        rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
+          # Connection dropped — reset and retry once
+          @http_client = nil
+          response = http_client.request(request)
+          unless response.is_a?(Net::HTTPSuccess)
+            raise CodebaseIndex::Error, "OpenAI API error: #{response.code} #{response.body}"
+          end
+
+          JSON.parse(response.body)
         end
 
-        # Return a reusable HTTP client for the OpenAI API.
-        # Lazily created and kept alive across requests.
+        # Return a reusable, started HTTP client for the OpenAI API.
+        # Calling http.start opens a persistent TCP connection so
+        # keep_alive_timeout actually takes effect across requests.
         #
         # @return [Net::HTTP]
         def http_client
-          @http_client ||= begin
-            http = Net::HTTP.new(ENDPOINT.host, ENDPOINT.port)
-            http.use_ssl = true
-            http.open_timeout = 10
-            http.read_timeout = 30
-            http.keep_alive_timeout = 30
-            http
-          end
+          return @http_client if @http_client&.started?
+
+          http = Net::HTTP.new(ENDPOINT.host, ENDPOINT.port)
+          http.use_ssl = true
+          http.open_timeout = 10
+          http.read_timeout = 30
+          http.keep_alive_timeout = 30
+          http.start
+          @http_client = http
         end
       end
     end

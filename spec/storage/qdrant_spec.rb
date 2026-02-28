@@ -17,6 +17,8 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
     allow(http).to receive(:open_timeout=)
     allow(http).to receive(:read_timeout=)
     allow(http).to receive(:keep_alive_timeout=)
+    allow(http).to receive(:start).and_return(http)
+    allow(http).to receive(:started?).and_return(true)
   end
 
   describe '#initialize' do
@@ -246,6 +248,30 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
       store.count
 
       expect(http).to have_received(:read_timeout=).with(30)
+    end
+  end
+
+  describe 'connection retry' do
+    it 'retries once on ECONNRESET' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":0}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      call_count = 0
+      allow(http).to receive(:request) do
+        call_count += 1
+        raise Errno::ECONNRESET if call_count == 1
+
+        response
+      end
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect(store.count).to eq(0)
+    end
+
+    it 'propagates error when retry also fails' do
+      allow(http).to receive(:request).and_raise(Errno::ECONNRESET)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }.to raise_error(Errno::ECONNRESET)
     end
   end
 
