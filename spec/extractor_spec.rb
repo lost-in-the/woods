@@ -159,6 +159,41 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── schema_sha ─────────────────────────────────────────────────────
+
+  describe '#schema_sha' do
+    it 'returns SHA for db/schema.rb when it exists' do
+      FileUtils.mkdir_p(File.join(tmpdir, 'db'))
+      File.write(File.join(tmpdir, 'db', 'schema.rb'), 'ActiveRecord::Schema.define {}')
+
+      result = extractor.send(:schema_sha)
+      expect(result).to match(/\A[a-f0-9]{64}\z/)
+    end
+
+    it 'falls back to db/structure.sql when schema.rb does not exist' do
+      FileUtils.mkdir_p(File.join(tmpdir, 'db'))
+      File.write(File.join(tmpdir, 'db', 'structure.sql'), 'CREATE TABLE users;')
+
+      result = extractor.send(:schema_sha)
+      expect(result).to match(/\A[a-f0-9]{64}\z/)
+    end
+
+    it 'prefers schema.rb over structure.sql when both exist' do
+      FileUtils.mkdir_p(File.join(tmpdir, 'db'))
+      File.write(File.join(tmpdir, 'db', 'schema.rb'), 'schema content')
+      File.write(File.join(tmpdir, 'db', 'structure.sql'), 'structure content')
+
+      expected = Digest::SHA256.hexdigest('schema content')
+      result = extractor.send(:schema_sha)
+      expect(result).to eq(expected)
+    end
+
+    it 'returns nil when neither file exists' do
+      result = extractor.send(:schema_sha)
+      expect(result).to be_nil
+    end
+  end
+
   # ── batch_git_data ───────────────────────────────────────────────────
 
   describe '#batch_git_data' do

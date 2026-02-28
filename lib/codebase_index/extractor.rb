@@ -850,10 +850,11 @@ module CodebaseIndex
     end
 
     def schema_sha
-      schema_path = Rails.root.join('db/schema.rb')
-      return nil unless schema_path.exist?
-
-      Digest::SHA256.file(schema_path).hexdigest
+      %w[db/schema.rb db/structure.sql].each do |path|
+        full = Rails.root.join(path)
+        return Digest::SHA256.file(full).hexdigest if full.exist?
+      end
+      nil
     end
 
     def json_serialize(data)
