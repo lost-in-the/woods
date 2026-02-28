@@ -193,8 +193,7 @@ module CodebaseIndex
       Cache::CachedRetriever.new(
         retriever: retriever,
         cache_store: cache,
-        context_ttl: ttls.fetch(:context, Cache::DEFAULT_TTLS[:context]),
-        structural_ttl: ttls.fetch(:structural, Cache::DEFAULT_TTLS[:structural])
+        context_ttl: ttls.fetch(:context, Cache::DEFAULT_TTLS[:context])
       )
     end
   end

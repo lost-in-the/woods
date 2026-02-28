@@ -114,13 +114,10 @@ module CodebaseIndex
       # @param retriever [Retriever] The real retriever instance
       # @param cache_store [CacheStore] Cache backend instance
       # @param context_ttl [Integer] TTL for formatted context results
-      # @param structural_ttl [Integer] TTL for structural overview cache
-      def initialize(retriever:, cache_store:, context_ttl: DEFAULT_TTLS[:context],
-                     structural_ttl: DEFAULT_TTLS[:structural])
+      def initialize(retriever:, cache_store:, context_ttl: DEFAULT_TTLS[:context])
         @retriever = retriever
         @cache_store = cache_store
         @context_ttl = context_ttl
-        @structural_ttl = structural_ttl
       end
 
       # Execute the retrieval pipeline with context-level caching.
