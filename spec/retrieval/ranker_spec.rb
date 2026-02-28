@@ -279,7 +279,7 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
       candidates = [candidate(identifier: 'User', score: 0.8)]
 
       expect(metadata_store).to receive(:find_batch).with(['User']).once do |ids|
-        ids.each_with_object({}) { |id, r| r[id] = metadata_store.find(id) }.compact
+        ids.to_h { |id| [id, metadata_store.find(id)] }.compact
       end
 
       ranker.rank(candidates, classification: classification)
@@ -299,7 +299,7 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
       ]
 
       expect(metadata_store).to receive(:find_batch).once do |ids|
-        ids.each_with_object({}) { |id, r| r[id] = metadata_store.find(id) }.compact
+        ids.to_h { |id| [id, metadata_store.find(id)] }.compact
       end
 
       ranker.rank(candidates, classification: classification)
