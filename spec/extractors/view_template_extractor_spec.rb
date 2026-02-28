@@ -178,11 +178,15 @@ RSpec.describe CodebaseIndex::Extractors::ViewTemplateExtractor do
 
     context 'when file read fails' do
       before do
-        path = create_file('app/views/broken/index.html.erb', 'content')
-        File.chmod(0o000, path)
+        create_file('app/views/broken/index.html.erb', 'content')
       end
 
       it 'skips the file and returns empty array' do
+        allow(File).to receive(:read).and_call_original
+        allow(File).to receive(:read).with(
+          a_string_matching(%r{app/views/broken/index\.html\.erb})
+        ).and_raise(Errno::EACCES)
+
         units = described_class.new.extract_all
         expect(units).to eq([])
       end

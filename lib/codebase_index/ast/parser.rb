@@ -346,13 +346,14 @@ module CodebaseIndex
 
       def convert_prism_constant_path(prism_node, _source)
         parent_text = (extract_const_path_text(prism_node.parent) if prism_node.parent)
+        const_name = prism_node.respond_to?(:name) ? prism_node.name.to_s : prism_node.child.name.to_s
 
         Node.new(
           type: :const,
           children: [],
           line: line_for_prism(prism_node),
           receiver: parent_text,
-          method_name: prism_node.name.to_s
+          method_name: const_name
         )
       end
 
@@ -364,7 +365,8 @@ module CodebaseIndex
         end
 
         then_body = prism_node.statements ? convert_prism_node(prism_node.statements, source) : nil
-        else_body = prism_node.subsequent ? convert_prism_node(prism_node.subsequent, source) : nil
+        else_clause = prism_else_clause(prism_node)
+        else_body = else_clause ? convert_prism_node(else_clause, source) : nil
 
         Node.new(
           type: :if,
@@ -380,7 +382,8 @@ module CodebaseIndex
         condition_source = extract_prism_source_text(prism_node.predicate, source)
 
         then_body = prism_node.statements ? convert_prism_node(prism_node.statements, source) : nil
-        else_body = prism_node.else_clause ? convert_prism_node(prism_node.else_clause, source) : nil
+        else_clause = prism_else_clause(prism_node)
+        else_body = else_clause ? convert_prism_node(else_clause, source) : nil
 
         Node.new(
           type: :if,
@@ -395,7 +398,8 @@ module CodebaseIndex
         children = []
         children << convert_prism_node(prism_node.predicate, source) if prism_node.predicate
         prism_node.conditions.each { |c| children << convert_prism_node(c, source) }
-        children << convert_prism_node(prism_node.else_clause, source) if prism_node.else_clause
+        else_clause = prism_else_clause(prism_node)
+        children << convert_prism_node(else_clause, source) if else_clause
         Node.new(type: :case, children: children, line: line_for_prism(prism_node))
       end
 
@@ -416,6 +420,18 @@ module CodebaseIndex
           children << converted if converted
         end
         children
+      end
+
+      # Portable accessor for the else/consequent clause of if/unless/case nodes.
+      # Prism < 1.0 uses :consequent, Prism >= 1.0 uses :else_clause/:subsequent.
+      def prism_else_clause(node)
+        if node.respond_to?(:consequent)
+          node.consequent
+        elsif node.respond_to?(:else_clause)
+          node.else_clause
+        elsif node.respond_to?(:subsequent)
+          node.subsequent
+        end
       end
 
       def line_for_prism(node)
@@ -463,7 +479,8 @@ module CodebaseIndex
           node.name.to_s
         when Prism::ConstantPathNode
           parent = node.parent ? extract_const_path_text(node.parent) : nil
-          [parent, node.name.to_s].compact.join('::')
+          const_name = node.respond_to?(:name) ? node.name.to_s : node.child.name.to_s
+          [parent, const_name].compact.join('::')
         end
       end
 
