@@ -22,5 +22,17 @@ module CodebaseIndex
         )
       end
     end
+
+    initializer 'codebase_index.console_mcp' do |app|
+      config = CodebaseIndex.configuration
+      if config.console_mcp_enabled
+        require 'codebase_index/console/rack_middleware'
+
+        app.middleware.use(
+          CodebaseIndex::Console::RackMiddleware,
+          path: config.console_mcp_path
+        )
+      end
+    end
   end
 end

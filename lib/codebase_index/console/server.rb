@@ -34,7 +34,7 @@ module CodebaseIndex
       TIER4_TOOLS = %w[eval sql query].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
-        # Build a configured MCP::Server with console tools.
+        # Build a configured MCP::Server with console tools using the bridge protocol.
         #
         # @param config [Hash] Configuration hash (from YAML or env)
         # @return [MCP::Server] Configured server ready for transport
@@ -44,6 +44,81 @@ module CodebaseIndex
           redacted_columns = Array(config['redacted_columns'] || connection_config['redacted_columns'])
           safe_ctx = redacted_columns.any? ? SafeContext.new(connection: nil, redacted_columns: redacted_columns) : nil
 
+          build_server(conn_mgr, safe_ctx)
+        end
+
+        # Build a configured MCP::Server using embedded ActiveRecord execution.
+        #
+        # No bridge process needed — queries run directly via ActiveRecord.
+        # Pass the returned server to StdioTransport or StreamableHTTPTransport.
+        #
+        # @param model_validator [ModelValidator] Validates model/column names
+        # @param safe_context [SafeContext] Wraps queries in rolled-back transactions
+        # @param redacted_columns [Array<String>] Column names to redact from output
+        # @param connection [Object, nil] Database connection for adapter detection
+        # @return [MCP::Server] Configured server ready for transport
+        def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil)
+          require_relative 'embedded_executor'
+
+          executor = EmbeddedExecutor.new(
+            model_validator: model_validator, safe_context: safe_context, connection: connection
+          )
+          redact_ctx = if redacted_columns.any?
+                         SafeContext.new(connection: nil,
+                                         redacted_columns: redacted_columns)
+                       end
+
+          build_server(executor, redact_ctx)
+        end
+
+        # Register Tier 1 read-only tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
+        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
+        # @return [void]
+        def register_tier1_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
+          TIER1_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
+        end
+
+        # Register Tier 2 domain-aware tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
+        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
+        # @return [void]
+        def register_tier2_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
+          TIER2_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
+        end
+
+        # Register Tier 3 analytics tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
+        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
+        # @return [void]
+        def register_tier3_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
+          TIER3_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
+        end
+
+        # Register Tier 4 guarded tools on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
+        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
+        # @return [void]
+        def register_tier4_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
+          TIER4_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
+        end
+
+        private
+
+        # Shared server construction used by both build() and build_embedded().
+        #
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Any object with send_request(Hash) -> Hash
+        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
+        # @return [MCP::Server]
+        def build_server(conn_mgr, safe_ctx)
           server = ::MCP::Server.new(
             name: 'codebase-console',
             version: defined?(CodebaseIndex::VERSION) ? CodebaseIndex::VERSION : '0.1.0'
@@ -58,48 +133,6 @@ module CodebaseIndex
           server
         end
 
-        # Register Tier 1 read-only tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
-        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier1_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          TIER1_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
-        end
-
-        # Register Tier 2 domain-aware tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
-        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier2_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          TIER2_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
-        end
-
-        # Register Tier 3 analytics tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
-        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier3_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          TIER3_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
-        end
-
-        # Register Tier 4 guarded tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
-        # @param safe_ctx [SafeContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier4_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          TIER4_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, safe_ctx, renderer: renderer) }
-        end
-
-        private
-
         def respond(text)
           ::MCP::Tool::Response.new([{ type: 'text', text: text }])
         end
@@ -112,13 +145,14 @@ module CodebaseIndex
             text = renderer ? renderer.render_default(result) : JSON.pretty_generate(result)
             respond(text)
           else
+            error_text = "#{response['error_type']}: #{response['error']}"
             ::MCP::Tool::Response.new(
-              [{ type: 'text', text: "#{response['error_type']}: #{response['error']}" }],
-              is_error: true
+              [{ type: 'text', text: error_text }],
+              error: error_text
             )
           end
         rescue ConnectionError => e
-          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], is_error: true)
+          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: e.message)
         end
 
         # Apply SafeContext column redaction to a result value.
@@ -536,11 +570,12 @@ module CodebaseIndex
           mgr = conn_mgr
           ctx = safe_ctx
           rdr = renderer
+          bridge_method = method(:send_to_bridge)
           schema = { properties: properties }
           schema[:required] = required if required&.any?
           server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
             request = tool_block.call(args)
-            send_to_bridge(mgr, request.transform_keys(&:to_s), ctx, renderer: rdr)
+            bridge_method.call(mgr, request.transform_keys(&:to_s), ctx, renderer: rdr)
           end
         end
         # rubocop:enable Metrics/ParameterLists

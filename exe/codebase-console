@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Embedded console MCP server — runs inside a Rails environment.
+#
+# Usage (via rake, recommended):
+#   bundle exec rake codebase_index:console
+#
+# Usage (via rails runner):
+#   bundle exec rails runner "$(bundle show codebase_index)/exe/codebase-console"
+#
+# The rake task captures stdout before Rails boots and passes the fd via
+# $codebase_index_protocol_out. When run via rails runner, this script
+# captures stdout itself to keep MCP protocol clean.
+
+# Check if the rake task already captured stdout for us.
+protocol_out = $codebase_index_protocol_out # rubocop:disable Style/GlobalVars
+
+unless protocol_out
+  # Running via rails runner — capture stdout ourselves.
+  protocol_out = $stdout.dup
+  $stdout.reopen($stderr)
+end
+
+require 'codebase_index/console/server'
+
+# Ensure all application models are loaded for the registry.
+Rails.application.eager_load!
+
+registry = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+  next if model.abstract_class?
+  next unless model.table_exists?
+
+  hash[model.name] = model.column_names
+rescue StandardError
+  next
+end
+
+validator = CodebaseIndex::Console::ModelValidator.new(registry: registry)
+safe_context = CodebaseIndex::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
+
+redacted_columns = if CodebaseIndex.respond_to?(:configuration) && CodebaseIndex.configuration
+                     Array(CodebaseIndex.configuration.console_redacted_columns)
+                   else
+                     []
+                   end
+
+server = CodebaseIndex::Console::Server.build_embedded(
+  model_validator: validator,
+  safe_context: safe_context,
+  redacted_columns: redacted_columns
+)
+
+# Restore the protocol output for MCP transport.
+$stdout.reopen(protocol_out)
+protocol_out.close unless protocol_out.closed?
+
+transport = MCP::Server::Transports::StdioTransport.new(server)
+transport.open

@@ -41,10 +41,11 @@ module CodebaseIndex
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :enable_snapshots,
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
+                  :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :notion_api_token, :notion_database_ids
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format
 
-    def initialize
+    def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
       @embedding_model = 'text-embedding-3-small'
       @max_context_tokens = 8000
@@ -62,6 +63,9 @@ module CodebaseIndex
       @session_store = nil
       @session_id_proc = nil
       @session_exclude_paths = []
+      @console_mcp_enabled = false
+      @console_mcp_path = '/mcp/console'
+      @console_redacted_columns = []
       @notion_api_token = nil
       @notion_database_ids = {}
     end

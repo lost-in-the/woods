@@ -37,7 +37,8 @@ Gem::Specification.new do |spec|
     'CODE_OF_CONDUCT.md'
   ]
   spec.bindir = 'exe'
-  spec.executables = %w[codebase-index-mcp codebase-index-mcp-start codebase-console-mcp codebase-index-mcp-http]
+  spec.executables = %w[codebase-index-mcp codebase-index-mcp-start codebase-console-mcp codebase-console
+                        codebase-index-mcp-http]
   spec.require_paths = ['lib']
 
   # Runtime dependencies
