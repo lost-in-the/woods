@@ -92,6 +92,29 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       end
     end
 
+    context 'with engine_source tagging' do
+      let(:framework_engine) { build_mock_engine('ActionCable::Engine', 'action_cable') }
+      let(:app_engine) { build_mock_engine('MyApp::Engine', 'my_app', root_path: '/rails/app/engines/my_app') }
+
+      before do
+        stub_const('Rails::Engine', engine_base_class)
+        allow(Rails::Engine).to receive(:subclasses).and_return([framework_engine, app_engine])
+        stub_rails_application(engines: [framework_engine, app_engine])
+      end
+
+      it 'tags framework engines as :framework' do
+        units = extractor.extract_all
+        fw_unit = units.find { |u| u.identifier == 'ActionCable::Engine' }
+        expect(fw_unit.metadata[:engine_source]).to eq(:framework)
+      end
+
+      it 'tags application engines as :application' do
+        units = extractor.extract_all
+        app_unit = units.find { |u| u.identifier == 'MyApp::Engine' }
+        expect(app_unit.metadata[:engine_source]).to eq(:application)
+      end
+    end
+
     context 'with mounted engines' do
       let(:engine_class) { build_mock_engine('Devise::Engine', 'devise') }
 
@@ -214,12 +237,12 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
     klass
   end
 
-  def build_mock_engine(name, engine_name, controllers: [], route_count: 3)
+  def build_mock_engine(name, engine_name, controllers: [], route_count: 3, root_path: nil)
     engine = double(name)
     allow(engine).to receive(:name).and_return(name)
     allow(engine).to receive(:engine_name).and_return(engine_name)
 
-    root = double('root', to_s: "/gems/#{engine_name}-4.9.0")
+    root = double('root', to_s: root_path || "/gems/#{engine_name}-4.9.0")
     allow(engine).to receive(:root).and_return(root)
 
     stub_engine_routes(engine, controllers, route_count)
@@ -269,5 +292,14 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
     allow(Rails).to receive(:respond_to?).with(:application).and_return(true)
     allow(Rails).to receive(:respond_to?).with(:application, anything).and_return(true)
     allow(Rails).to receive(:application).and_return(application)
+
+    # framework_engine? needs Rails.root; extract_engine rescue needs Rails.logger
+    # Rails module is created by stub_const — doesn't implement root/logger,
+    # so we disable verification for these stubs.
+    without_partial_double_verification do
+      rails_root = double('root', to_s: '/rails/app')
+      allow(Rails).to receive(:root).and_return(rails_root)
+      allow(Rails).to receive(:logger).and_return(double('Logger', error: nil, warn: nil, info: nil, debug: nil))
+    end
   end
 end
