@@ -171,6 +171,61 @@ RSpec.describe CodebaseIndex::DependencyGraph do
     end
   end
 
+  describe 'Set-based internals' do
+    it 'stores @reverse values as Sets' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [{ type: :model, target: 'User' }]))
+
+      reverse = graph.instance_variable_get(:@reverse)
+      expect(reverse['User']).to be_a(Set)
+      expect(reverse['User']).to include('Order')
+    end
+
+    it 'stores @type_index values as Sets' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :model, identifier: 'Post'))
+
+      type_index = graph.instance_variable_get(:@type_index)
+      expect(type_index[:model]).to be_a(Set)
+      expect(type_index[:model]).to contain_exactly('User', 'Post')
+    end
+
+    it 'deduplicates reverse entries on repeated registration' do
+      user = make_unit(type: :model, identifier: 'User')
+      order = make_unit(type: :model, identifier: 'Order',
+                        dependencies: [{ type: :model, target: 'User' }])
+
+      graph.register(user)
+      graph.register(order)
+      graph.register(order) # duplicate
+
+      reverse = graph.instance_variable_get(:@reverse)
+      expect(reverse['User'].size).to eq(1)
+    end
+  end
+
+  describe '#to_h memoization' do
+    before do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+    end
+
+    it 'returns the same object on consecutive calls' do
+      first = graph.to_h
+      second = graph.to_h
+      expect(first).to equal(second)
+    end
+
+    it 'invalidates the cache when a new unit is registered' do
+      first = graph.to_h
+      graph.register(make_unit(type: :model, identifier: 'Post'))
+      second = graph.to_h
+
+      expect(second).not_to equal(first)
+      expect(second[:stats][:node_count]).to eq(2)
+    end
+  end
+
   describe 'JSON round-trip' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User',
@@ -205,6 +260,36 @@ RSpec.describe CodebaseIndex::DependencyGraph do
 
       expect(restored.units_of_type(:model)).to include('User')
       expect(restored.units_of_type(:service)).to include('UserService')
+    end
+
+    it 'restores @reverse as Sets after round-trip' do
+      json = JSON.generate(graph.to_h)
+      restored = described_class.from_h(JSON.parse(json))
+
+      reverse = restored.instance_variable_get(:@reverse)
+      expect(reverse['User']).to be_a(Set)
+      expect(reverse['User']).to include('UserService')
+    end
+
+    it 'restores @type_index as Sets after round-trip' do
+      json = JSON.generate(graph.to_h)
+      restored = described_class.from_h(JSON.parse(json))
+
+      type_index = restored.instance_variable_get(:@type_index)
+      expect(type_index[:model]).to be_a(Set)
+      expect(type_index[:service]).to be_a(Set)
+    end
+
+    it 'serializes @reverse Sets as arrays in to_h output' do
+      serialized = graph.to_h
+      expect(serialized[:reverse]['User']).to be_a(Array)
+      expect(serialized[:reverse]['User']).to include('UserService')
+    end
+
+    it 'serializes @type_index Sets as arrays in to_h output' do
+      serialized = graph.to_h
+      expect(serialized[:type_index][:model]).to be_a(Array)
+      expect(serialized[:type_index][:service]).to be_a(Array)
     end
   end
 end

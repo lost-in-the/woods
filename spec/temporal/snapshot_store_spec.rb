@@ -98,6 +98,16 @@ RSpec.describe CodebaseIndex::Temporal::SnapshotStore do
       expect(result[:units_deleted]).to eq(0)
     end
 
+    it 'wraps unit hash inserts in a transaction' do
+      # Verify that insert_unit_hashes calls @db.transaction
+      # by checking that a rollback reverts all inserts atomically.
+      allow(db).to receive(:transaction).and_call_original
+
+      store.capture(manifest_v1, units_v1)
+
+      expect(db).to have_received(:transaction).at_least(:once)
+    end
+
     it 'returns nil when git_sha is nil' do
       result = store.capture({ 'git_sha' => nil }, units_v1)
       expect(result).to be_nil

@@ -485,7 +485,7 @@ module CodebaseIndex
     # ──────────────────────────────────────────────────────────────────────
 
     def precompute_flows
-      all_units = @results.each_value.flat_map(&:itself)
+      all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
       flow_map = precomputer.precompute
       Rails.logger.info "[CodebaseIndex] Precomputed #{flow_map.size} request flows"

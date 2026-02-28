@@ -109,6 +109,26 @@ RSpec.describe CodebaseIndex::ExtractedUnit do
       expect(second).to be > first
       expect(second).to eq((500 / 4.0).ceil)
     end
+
+    it 'invalidates cache when metadata is reassigned via setter' do
+      unit.source_code = 'a' * 100
+      unit.metadata = {}
+      first = unit.estimated_tokens
+
+      unit.metadata = { associations: [{ name: :comments, type: :has_many }] }
+      second = unit.estimated_tokens
+
+      expect(second).to be > first
+    end
+
+    it 'returns cached value on repeated calls without mutation' do
+      unit.source_code = 'a' * 100
+      first = unit.estimated_tokens
+      second = unit.estimated_tokens
+
+      expect(first).to eq(second)
+      expect(first).to equal(second) # same object reference (Fixnum identity)
+    end
   end
 
   describe '#needs_chunking?' do

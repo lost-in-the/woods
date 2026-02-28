@@ -27,14 +27,14 @@ module CodebaseIndex
       @reverse = {}    # identifier => Set of dependent identifiers
       @file_map = {}   # file_path => identifier
       @type_index = {} # type => Set of identifiers
-      @to_h_cache = nil
+      @to_h = nil
     end
 
     # Register a unit in the graph
     #
     # @param unit [ExtractedUnit] The unit to register
     def register(unit)
-      @to_h_cache = nil
+      @to_h = nil
 
       @nodes[unit.identifier] = {
         type: unit.type,

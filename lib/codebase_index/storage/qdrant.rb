@@ -66,6 +66,11 @@ module CodebaseIndex
 
         # Store multiple vectors in a single batch upsert request.
         #
+        # Sends the entire entries array in one HTTP call. Callers are responsible
+        # for chunking into reasonable batch sizes (e.g., 100–500 points) before
+        # calling this method; the embedding Indexer's +batch_size+ config controls
+        # the upstream chunk size.
+        #
         # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
         def store_batch(entries)
           return if entries.empty?

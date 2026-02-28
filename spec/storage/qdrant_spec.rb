@@ -76,6 +76,53 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
     end
   end
 
+  describe '#store_batch' do
+    it 'sends all entries in a single PUT request' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      entries = [
+        { id: 'doc1', vector: [0.1, 0.2, 0.3], metadata: { type: 'model' } },
+        { id: 'doc2', vector: [0.4, 0.5, 0.6], metadata: { type: 'service' } }
+      ]
+
+      store.store_batch(entries)
+
+      expect(http).to have_received(:request).once do |req|
+        expect(req).to be_a(Net::HTTP::Put)
+        expect(req.path).to eq('/collections/test_collection/points')
+        body = JSON.parse(req.body)
+        expect(body['points'].size).to eq(2)
+        expect(body['points'][0]['id']).to eq('doc1')
+        expect(body['points'][1]['id']).to eq('doc2')
+      end
+    end
+
+    it 'does nothing for empty entries' do
+      allow(http).to receive(:request)
+
+      store.store_batch([])
+
+      expect(http).not_to have_received(:request)
+    end
+
+    it 'defaults metadata to empty hash when not provided' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      entries = [{ id: 'doc1', vector: [0.1, 0.2, 0.3] }]
+
+      store.store_batch(entries)
+
+      expect(http).to have_received(:request) do |req|
+        body = JSON.parse(req.body)
+        expect(body['points'][0]['payload']).to eq({})
+      end
+    end
+  end
+
   describe '#search' do
     let(:search_response_body) do
       {
