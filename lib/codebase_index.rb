@@ -42,8 +42,10 @@ module CodebaseIndex
                   :concurrent_extraction, :precompute_flows, :enable_snapshots,
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
-                  :notion_api_token, :notion_database_ids
-    attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format
+                  :notion_api_token, :notion_database_ids,
+                  :cache_store, :cache_options
+    attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
+                :cache_enabled
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -68,6 +70,9 @@ module CodebaseIndex
       @console_redacted_columns = []
       @notion_api_token = nil
       @notion_database_ids = {}
+      @cache_enabled = false
+      @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
+      @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/codebase_index
@@ -135,6 +140,16 @@ module CodebaseIndex
       end
 
       @context_format = value
+    end
+
+    # @param value [Boolean] Enable or disable the cache layer
+    # @raise [ConfigurationError] if value is not a boolean
+    def cache_enabled=(value)
+      unless value.is_a?(TrueClass) || value.is_a?(FalseClass)
+        raise ConfigurationError, "cache_enabled must be true or false, got #{value.inspect}"
+      end
+
+      @cache_enabled = value
     end
 
     # Add a gem to be indexed
@@ -224,4 +239,6 @@ end
 
 require_relative 'codebase_index/builder'
 require_relative 'codebase_index/cost_model'
+require_relative 'codebase_index/cache/cache_store'
+require_relative 'codebase_index/cache/cache_middleware'
 require_relative 'codebase_index/railtie' if defined?(Rails::Railtie)

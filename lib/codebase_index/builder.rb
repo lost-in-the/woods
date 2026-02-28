@@ -26,7 +26,7 @@ module CodebaseIndex
   #     config.vector_store_options = { url: ENV['QDRANT_URL'], collection: 'myapp' }
   #   end
   #
-  class Builder
+  class Builder # rubocop:disable Metrics/ClassLength
     # Named presets mapping to default adapter types.
     #
     # :local      — fully local, no external services required
@@ -74,14 +74,25 @@ module CodebaseIndex
 
     # Build a {Retriever} wired with adapters from the configuration.
     #
-    # @return [Retriever] A fully instantiated, wired retriever
+    # When `cache_enabled` is true, the embedding provider is wrapped with
+    # {Cache::CachedEmbeddingProvider} and the retriever is wrapped with
+    # {Cache::CachedRetriever} for transparent caching of expensive operations.
+    #
+    # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
     def build_retriever
-      Retriever.new(
+      provider = build_embedding_provider
+      cache = build_cache_store
+
+      provider = wrap_with_embedding_cache(provider, cache) if cache
+
+      retriever = Retriever.new(
         vector_store: build_vector_store,
         metadata_store: build_metadata_store,
         graph_store: build_graph_store,
-        embedding_provider: build_embedding_provider
+        embedding_provider: provider
       )
+
+      cache ? wrap_with_retriever_cache(retriever, cache) : retriever
     end
 
     # Instantiate the vector store adapter specified by the configuration.
@@ -132,6 +143,58 @@ module CodebaseIndex
       when :in_memory then Storage::GraphStore::Memory.new
       else raise ArgumentError, "Unknown graph_store: #{@config.graph_store}"
       end
+    end
+
+    # Build a cache store from configuration, or nil if caching is disabled.
+    #
+    # @return [Cache::CacheStore, nil]
+    def build_cache_store
+      return nil unless @config.cache_enabled
+
+      opts = @config.cache_options || {}
+
+      case @config.cache_store
+      when :memory
+        Cache::InMemory.new(max_entries: opts.fetch(:max_entries, 500))
+      when :redis
+        require_relative 'cache/redis_cache_store'
+        Cache::RedisCacheStore.new(redis: opts.fetch(:redis), default_ttl: opts[:default_ttl])
+      when :solid_cache
+        require_relative 'cache/solid_cache_store'
+        Cache::SolidCacheStore.new(cache: opts.fetch(:cache), default_ttl: opts[:default_ttl])
+      when Cache::CacheStore
+        @config.cache_store
+      else
+        raise ArgumentError, "Unknown cache_store: #{@config.cache_store}"
+      end
+    end
+
+    # Wrap an embedding provider with caching.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @param cache [Cache::CacheStore]
+    # @return [Cache::CachedEmbeddingProvider]
+    def wrap_with_embedding_cache(provider, cache)
+      ttls = (@config.cache_options || {}).fetch(:ttl, {})
+      Cache::CachedEmbeddingProvider.new(
+        provider: provider,
+        cache_store: cache,
+        ttl: ttls.fetch(:embeddings, Cache::DEFAULT_TTLS[:embeddings])
+      )
+    end
+
+    # Wrap a retriever with caching.
+    #
+    # @param retriever [Retriever]
+    # @param cache [Cache::CacheStore]
+    # @return [Cache::CachedRetriever]
+    def wrap_with_retriever_cache(retriever, cache)
+      ttls = (@config.cache_options || {}).fetch(:ttl, {})
+      Cache::CachedRetriever.new(
+        retriever: retriever,
+        cache_store: cache,
+        context_ttl: ttls.fetch(:context, Cache::DEFAULT_TTLS[:context])
+      )
     end
   end
 end
