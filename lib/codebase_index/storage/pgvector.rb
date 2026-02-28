@@ -17,7 +17,7 @@ module CodebaseIndex
       #   store.store("User", [0.1, 0.2, ...], { type: "model" })
       #   results = store.search([0.1, 0.2, ...], limit: 5, filters: { type: "model" })
       #
-      class Pgvector
+      class Pgvector # rubocop:disable Metrics/ClassLength
         include Interface
 
         TABLE = 'codebase_index_vectors'
@@ -63,6 +63,30 @@ module CodebaseIndex
           @connection.execute(<<~SQL)
             INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
             VALUES (#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+              embedding = EXCLUDED.embedding,
+              metadata = EXCLUDED.metadata,
+              created_at = CURRENT_TIMESTAMP
+          SQL
+        end
+
+        # Store multiple vectors in a single multi-row INSERT.
+        #
+        # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
+        def store_batch(entries)
+          return if entries.empty?
+
+          values = entries.map do |entry|
+            validate_vector!(entry[:vector])
+            quoted_id = @connection.quote(entry[:id])
+            quoted_metadata = @connection.quote(JSON.generate(entry[:metadata] || {}))
+            vector_literal = "[#{entry[:vector].join(',')}]"
+            "(#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)"
+          end
+
+          @connection.execute(<<~SQL)
+            INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
+            VALUES #{values.join(",\n")}
             ON CONFLICT (id) DO UPDATE SET
               embedding = EXCLUDED.embedding,
               metadata = EXCLUDED.metadata,

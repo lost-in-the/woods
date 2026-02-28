@@ -16,6 +16,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
     allow(http).to receive(:use_ssl=)
     allow(http).to receive(:open_timeout=)
     allow(http).to receive(:read_timeout=)
+    allow(http).to receive(:keep_alive_timeout=)
   end
 
   describe '#initialize' do

@@ -25,6 +25,17 @@ module CodebaseIndex
           raise NotImplementedError
         end
 
+        # Store multiple vectors in a single batch operation.
+        #
+        # Default implementation falls back to individual store calls.
+        # Adapters should override for bulk-optimized behavior (e.g.,
+        # multi-row INSERT for pgvector, batch upsert for Qdrant).
+        #
+        # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
+        def store_batch(entries)
+          entries.each { |e| store(e[:id], e[:vector], e[:metadata] || {}) }
+        end
+
         # Search for similar vectors using cosine similarity.
         #
         # @param query_vector [Array<Float>] The query embedding vector

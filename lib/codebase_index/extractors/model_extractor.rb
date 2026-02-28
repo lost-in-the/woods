@@ -25,13 +25,14 @@ module CodebaseIndex
     class ModelExtractor
       include SharedDependencyScanner
 
-      AR_INTERNAL_METHOD_PATTERNS = [
-        /\A_/,                                    # _run_save_callbacks, _validators, etc.
-        /\Aautosave_associated_records_for_/,     # autosave_associated_records_for_comments
-        /\Avalidate_associated_records_for_/,     # validate_associated_records_for_comments
-        /\Aafter_(?:add|remove)_for_/,            # collection callbacks
-        /\Abefore_(?:add|remove)_for_/            # collection callbacks
-      ].freeze
+      # Single combined regex for filtering AR-generated internal methods.
+      # Replaces 5 separate patterns with one alternation for O(1) matching.
+      AR_INTERNAL_METHOD_PATTERN = /\A(?:
+        _                                         | # _run_save_callbacks, _validators, etc.
+        autosave_associated_records_for_           | # autosave_associated_records_for_comments
+        validate_associated_records_for_           | # validate_associated_records_for_comments
+        (?:after|before)_(?:add|remove)_for_         # collection callbacks
+      )/x
 
       def initialize
         @concern_cache = {}
@@ -906,8 +907,7 @@ module CodebaseIndex
       # @return [Array<Symbol>]
       def filter_instance_methods(methods)
         methods.reject do |method_name|
-          name = method_name.to_s
-          AR_INTERNAL_METHOD_PATTERNS.any? { |pattern| pattern.match?(name) }
+          AR_INTERNAL_METHOD_PATTERN.match?(method_name.to_s)
         end
       end
 

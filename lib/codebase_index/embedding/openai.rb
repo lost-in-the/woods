@@ -81,23 +81,33 @@ module CodebaseIndex
         # @return [Hash] parsed JSON response
         # @raise [CodebaseIndex::Error] if the API returns a non-success status
         def post_request(body)
-          http = Net::HTTP.new(ENDPOINT.host, ENDPOINT.port)
-          http.use_ssl = true
-          http.open_timeout = 10
-          http.read_timeout = 30
-
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'
           request['Authorization'] = "Bearer #{@api_key}"
           request.body = body.to_json
 
-          response = http.request(request)
+          response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
             raise CodebaseIndex::Error, "OpenAI API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)
+        end
+
+        # Return a reusable HTTP client for the OpenAI API.
+        # Lazily created and kept alive across requests.
+        #
+        # @return [Net::HTTP]
+        def http_client
+          @http_client ||= begin
+            http = Net::HTTP.new(ENDPOINT.host, ENDPOINT.port)
+            http.use_ssl = true
+            http.open_timeout = 10
+            http.read_timeout = 30
+            http.keep_alive_timeout = 30
+            http
+          end
         end
       end
     end

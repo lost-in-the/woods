@@ -230,16 +230,20 @@ module CodebaseIndex
           VALUES (?, ?, ?, ?, ?, ?)
         SQL
 
-        unit_hashes.each do |uh|
-          params = [
-            snapshot_id,
-            uh[:identifier] || uh['identifier'],
-            (uh[:type] || uh['type']).to_s,
-            uh[:source_hash] || uh['source_hash'],
-            uh[:metadata_hash] || uh['metadata_hash'],
-            uh[:dependencies_hash] || uh['dependencies_hash']
-          ]
-          @db.execute(sql, params)
+        # Wrap in a transaction to batch all inserts into a single commit,
+        # reducing per-row fsync overhead from O(n) to O(1).
+        @db.transaction do
+          unit_hashes.each do |uh|
+            params = [
+              snapshot_id,
+              uh[:identifier] || uh['identifier'],
+              (uh[:type] || uh['type']).to_s,
+              uh[:source_hash] || uh['source_hash'],
+              uh[:metadata_hash] || uh['metadata_hash'],
+              uh[:dependencies_hash] || uh['dependencies_hash']
+            ]
+            @db.execute(sql, params)
+          end
         end
       end
 

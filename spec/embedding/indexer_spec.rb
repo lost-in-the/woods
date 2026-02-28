@@ -17,7 +17,7 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
   let(:text_preparer) { CodebaseIndex::Embedding::TextPreparer.new }
 
   let(:vector_store) do
-    instance_double('VectorStore', store: nil, delete: nil, count: 0)
+    instance_double('VectorStore', store: nil, store_batch: nil, delete: nil, count: 0)
   end
 
   let(:indexer) do
@@ -83,12 +83,11 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
       expect(provider).to have_received(:embed_batch)
     end
 
-    it 'stores vectors in the vector store' do
+    it 'stores vectors in the vector store via batch' do
       indexer.index_all
-      expect(vector_store).to have_received(:store).with(
-        'User',
-        [0.1, 0.2],
-        hash_including(type: 'model', identifier: 'User')
+      expect(vector_store).to have_received(:store_batch).with(
+        [hash_including(id: 'User', vector: [0.1, 0.2],
+                        metadata: hash_including(type: 'model', identifier: 'User'))]
       )
     end
 
@@ -129,14 +128,12 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
         expect(stats[:processed]).to eq(2)
       end
 
-      it 'stores each chunk with a chunk suffix ID' do
+      it 'stores each chunk with a chunk suffix ID via batch' do
         indexer.index_all
-        expect(vector_store).to have_received(:store).with(
-          'User#chunk_0', anything, anything
-        )
-        expect(vector_store).to have_received(:store).with(
-          'User#chunk_1', anything, anything
-        )
+        expect(vector_store).to have_received(:store_batch) do |entries|
+          ids = entries.map { |e| e[:id] }
+          expect(ids).to include('User#chunk_0', 'User#chunk_1')
+        end
       end
     end
 

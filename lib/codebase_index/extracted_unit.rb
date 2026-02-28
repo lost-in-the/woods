@@ -25,11 +25,27 @@ module CodebaseIndex
                   :identifier,     # String: Unique key, e.g., "User", "Users::RegistrationsController#create"
                   :file_path,      # String: Absolute path to source file
                   :namespace,      # String: Module namespace if any
-                  :source_code,    # String: The actual code, with concerns inlined for models
-                  :metadata,       # Hash: Type-specific structured data
                   :dependencies,   # Array<Hash>: What this unit calls/references
                   :dependents,     # Array<Hash>: What references this unit (populated in second pass)
                   :chunks          # Array<Hash>: Pre-chunked versions if unit is large
+
+    attr_reader :metadata, :source_code
+
+    # Set source_code and invalidate cached token estimate.
+    #
+    # @param value [String] The actual code, with concerns inlined for models
+    def source_code=(value)
+      @source_code = value
+      @estimated_tokens = nil
+    end
+
+    # Set metadata and invalidate cached token estimate.
+    #
+    # @param value [Hash] Type-specific structured data
+    def metadata=(value)
+      @metadata = value
+      @estimated_tokens = nil
+    end
 
     def initialize(type:, identifier:, file_path:)
       @type = type
@@ -65,11 +81,12 @@ module CodebaseIndex
     # Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor
     # (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md.
     #
+    # Cached to avoid repeated metadata JSON serialization — invalidated
+    # when metadata is reassigned via the setter.
+    #
     # @return [Integer] Estimated token count
     def estimated_tokens
-      source_tokens = source_code ? (source_code.length / 4.0).ceil : 0
-      metadata_tokens = metadata.any? ? (metadata.to_json.length / 4.0).ceil : 0
-      source_tokens + metadata_tokens
+      @estimated_tokens ||= compute_estimated_tokens
     end
 
     # Check if unit needs chunking based on size
@@ -132,6 +149,12 @@ module CodebaseIndex
     end
 
     private
+
+    def compute_estimated_tokens
+      source_tokens = source_code ? (source_code.length / 4.0).ceil : 0
+      metadata_tokens = metadata.any? ? (metadata.to_json.length / 4.0).ceil : 0
+      source_tokens + metadata_tokens
+    end
 
     def build_chunk_header
       <<~HEADER
