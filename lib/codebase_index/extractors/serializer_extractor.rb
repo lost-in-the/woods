@@ -171,13 +171,18 @@ module CodebaseIndex
           source.match?(/view\s+:/) # Blueprinter views
       end
 
+      # Locate the source file for a serializer class.
+      #
+      # Convention path first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
+      #
+      # @param klass [Class]
+      # @return [String, nil]
       def source_file_for(klass)
-        methods = klass.instance_methods(false)
-        if methods.any?
-          klass.instance_method(methods.first).source_location&.first
-        end || Rails.root.join("app/serializers/#{klass.name.underscore}.rb").to_s
-      rescue StandardError
-        nil
+        convention_path = Rails.root.join("app/serializers/#{klass.name.underscore}.rb").to_s
+        return convention_path if File.exist?(convention_path)
+
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: convention_path)
       end
 
       # ──────────────────────────────────────────────────────────────────────

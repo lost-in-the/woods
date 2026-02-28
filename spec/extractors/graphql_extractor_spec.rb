@@ -67,7 +67,7 @@ RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
       allow(klass).to receive(:instance_method).with(:resolve).and_return(
         double('UnboundMethod', source_location: [gem_path, 1])
       )
-      allow(klass).to receive(:singleton_methods).with(false).and_return([])
+      allow(klass).to receive(:methods).with(false).and_return([])
 
       result = extractor.send(:source_file_for_class, klass)
 
@@ -84,6 +84,7 @@ RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
       allow(klass).to receive(:instance_method).with(:resolve).and_return(
         double('UnboundMethod', source_location: [app_path, 5])
       )
+      allow(klass).to receive(:methods).with(false).and_return([])
 
       result = extractor.send(:source_file_for_class, klass)
 
@@ -100,7 +101,7 @@ RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
       allow(klass).to receive(:instance_method).with(:resolve).and_return(
         double('UnboundMethod', source_location: [gem_path, 1])
       )
-      allow(klass).to receive(:singleton_methods).with(false).and_return([:authorized?])
+      allow(klass).to receive(:methods).with(false).and_return([:authorized?])
       allow(klass).to receive(:method).with(:authorized?).and_return(
         double('Method', source_location: [app_path, 3])
       )
@@ -114,7 +115,7 @@ RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
       klass = double('TypeClass')
       allow(klass).to receive(:name).and_return('Types::PostType')
       allow(klass).to receive(:instance_methods).with(false).and_return([])
-      allow(klass).to receive(:singleton_methods).with(false).and_return([])
+      allow(klass).to receive(:methods).with(false).and_return([])
 
       result = extractor.send(:source_file_for_class, klass)
 

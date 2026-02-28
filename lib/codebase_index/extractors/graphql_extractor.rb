@@ -202,39 +202,16 @@ module CodebaseIndex
       # Determine the source file for a runtime-loaded class, validating that
       # paths are within Rails.root to avoid returning graphql gem internals.
       #
-      # Uses a multi-tier strategy matching the model extractor's pattern.
+      # Convention path first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
       #
       # @param klass [Class]
       # @return [String] Absolute path to the source file
       def source_file_for_class(klass)
-        app_root = Rails.root.to_s
         convention_path = Rails.root.join("#{GRAPHQL_DIRECTORY}/#{klass.name.underscore}.rb").to_s
-
-        # Tier 1: Instance methods defined directly on this class
-        klass.instance_methods(false).each do |method_name|
-          loc = klass.instance_method(method_name).source_location&.first
-          return loc if loc&.start_with?(app_root)
-        end
-
-        # Tier 2: Singleton methods defined on this class
-        klass.singleton_methods(false).each do |method_name|
-          loc = klass.method(method_name).source_location&.first
-          return loc if loc&.start_with?(app_root)
-        end
-
-        # Tier 3: Convention path if file exists
         return convention_path if File.exist?(convention_path)
 
-        # Tier 4: const_source_location (Ruby 3.0+)
-        if Object.respond_to?(:const_source_location)
-          loc = Object.const_source_location(klass.name)&.first
-          return loc if loc&.start_with?(app_root)
-        end
-
-        # Tier 5: Always return convention path — never a gem path
-        convention_path
-      rescue StandardError
-        Rails.root.join("#{GRAPHQL_DIRECTORY}/#{klass.name.underscore}.rb").to_s
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: convention_path)
       end
 
       # ──────────────────────────────────────────────────────────────────────
