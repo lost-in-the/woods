@@ -258,7 +258,7 @@ module CodebaseIndex
 
       # DB-dialect-aware random ordering function.
       #
-      # @return [Arel::Nodes::NamedFunction]
+      # @return [Arel::Nodes::SqlLiteral]
       def random_function
         adapter = active_connection.adapter_name.downcase
         func = adapter.include?('mysql') ? 'RAND' : 'RANDOM'

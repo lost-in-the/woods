@@ -55,6 +55,7 @@ module CodebaseIndex
         # @param model_validator [ModelValidator] Validates model/column names
         # @param safe_context [SafeContext] Wraps queries in rolled-back transactions
         # @param redacted_columns [Array<String>] Column names to redact from output
+        # @param connection [Object, nil] Database connection for adapter detection
         # @return [MCP::Server] Configured server ready for transport
         def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil)
           require_relative 'embedded_executor'
@@ -73,7 +74,7 @@ module CodebaseIndex
         # Register Tier 1 read-only tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
         # @param safe_ctx [SafeContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier1_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
@@ -83,7 +84,7 @@ module CodebaseIndex
         # Register Tier 2 domain-aware tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
         # @param safe_ctx [SafeContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier2_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
@@ -93,7 +94,7 @@ module CodebaseIndex
         # Register Tier 3 analytics tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
         # @param safe_ctx [SafeContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier3_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
@@ -103,7 +104,7 @@ module CodebaseIndex
         # Register Tier 4 guarded tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager] Bridge connection
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
         # @param safe_ctx [SafeContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier4_tools(server, conn_mgr, safe_ctx = nil, renderer: nil)
