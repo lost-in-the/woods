@@ -71,13 +71,18 @@ module CodebaseIndex
 
       private
 
+      # Locate the source file for a mailer class.
+      #
+      # Convention path first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
+      #
+      # @param mailer [Class]
+      # @return [String]
       def source_file_for(mailer)
-        if mailer.instance_methods(false).any?
-          method = mailer.instance_methods(false).first
-          mailer.instance_method(method).source_location&.first
-        end || Rails.root.join("app/mailers/#{mailer.name.underscore}.rb").to_s
-      rescue StandardError
-        Rails.root.join("app/mailers/#{mailer.name.underscore}.rb").to_s
+        convention_path = Rails.root.join("app/mailers/#{mailer.name.underscore}.rb").to_s
+        return convention_path if File.exist?(convention_path)
+
+        resolve_source_location(mailer, app_root: Rails.root.to_s, fallback: convention_path)
       end
 
       # ──────────────────────────────────────────────────────────────────────

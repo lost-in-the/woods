@@ -10,6 +10,7 @@ RSpec.describe CodebaseIndex::Extractors::ActionCableExtractor do
   before do
     stub_const('CodebaseIndex::ModelNameCache',
                double('ModelNameCache', model_names_regex: /\b(?:User|Post|Room)\b/))
+    stub_rails_root('/rails')
   end
 
   describe '#extract_all' do
@@ -573,6 +574,7 @@ RSpec.describe CodebaseIndex::Extractors::ActionCableExtractor do
     channel = double(name || 'anonymous')
     allow(channel).to receive(:name).and_return(name)
     allow(channel).to receive(:instance_methods).with(false).and_return(public_methods)
+    allow(channel).to receive(:methods).with(false).and_return([])
     stub_channel_source_location(channel, source_location)
     stub_channel_file_reading(source_location, source)
     channel

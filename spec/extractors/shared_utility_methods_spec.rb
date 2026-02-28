@@ -13,6 +13,107 @@ RSpec.describe CodebaseIndex::Extractors::SharedUtilityMethods do
 
   subject(:utility) { test_class.new }
 
+  # ── #app_source? ──────────────────────────────────────────────
+
+  describe '#app_source?' do
+    let(:app_root) { '/app' }
+
+    it 'returns true for a path inside app_root' do
+      expect(utility.app_source?('/app/app/models/user.rb', app_root)).to be true
+    end
+
+    it 'returns false for nil path' do
+      expect(utility.app_source?(nil, app_root)).to be false
+    end
+
+    it 'returns false for a path outside app_root' do
+      expect(utility.app_source?('/gems/activerecord/base.rb', app_root)).to be false
+    end
+
+    it 'returns false for a vendor bundle path' do
+      expect(utility.app_source?('/app/vendor/bundle/ruby/3.3.0/gems/activerecord-7.0.8.7/lib/active_record/base.rb',
+                                 app_root)).to be false
+    end
+
+    it 'returns false for a node_modules path' do
+      expect(utility.app_source?('/app/node_modules/some-package/index.rb', app_root)).to be false
+    end
+  end
+
+  # ── #resolve_source_location ────────────────────────────────────
+
+  describe '#resolve_source_location' do
+    let(:app_root) { '/app' }
+    let(:fallback) { '/app/app/models/thing.rb' }
+
+    it 'returns const_source_location when it points to app source' do
+      klass = double('Klass', name: 'Thing', instance_methods: [], methods: [])
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
+      allow(Object).to receive(:const_source_location).with('Thing').and_return(['/app/app/models/thing.rb', 1])
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq('/app/app/models/thing.rb')
+    end
+
+    it 'skips vendor const_source_location and falls through to instance methods' do
+      method_double = double('Method', source_location: ['/app/app/models/thing.rb', 10])
+      klass = double('Klass', name: 'Thing', instance_methods: [:foo], methods: [])
+      allow(klass).to receive(:instance_method).with(:foo).and_return(method_double)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
+      vendor_path = '/app/vendor/bundle/ruby/3.3.0/gems/ar-7.0/lib/ar/base.rb'
+      allow(Object).to receive(:const_source_location)
+        .with('Thing').and_return([vendor_path, 1])
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq('/app/app/models/thing.rb')
+    end
+
+    it 'returns instance method location when const_source_location is unavailable' do
+      method_double = double('Method', source_location: ['/app/app/models/widget.rb', 5])
+      klass = double('Klass', name: 'Widget', instance_methods: [:bar], methods: [])
+      allow(klass).to receive(:instance_method).with(:bar).and_return(method_double)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: '/app/app/models/widget.rb')
+      expect(result).to eq('/app/app/models/widget.rb')
+    end
+
+    it 'skips vendor instance method and uses class method' do
+      vendor_method = double('Method', source_location: ['/app/vendor/bundle/ruby/3.3.0/gems/foo/lib/foo.rb', 1])
+      app_method = double('Method', source_location: ['/app/app/models/thing.rb', 3])
+      klass = double('Klass', name: 'Thing', instance_methods: [:vendor_m], methods: [:app_m])
+      allow(klass).to receive(:instance_method).with(:vendor_m).and_return(vendor_method)
+      allow(klass).to receive(:method).with(:app_m).and_return(app_method)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq('/app/app/models/thing.rb')
+    end
+
+    it 'returns fallback when no methods resolve to app source' do
+      klass = double('Klass', name: 'Ghost', instance_methods: [], methods: [])
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq(fallback)
+    end
+
+    it 'returns fallback on StandardError' do
+      klass = double('Klass', name: 'Broken')
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
+      allow(Object).to receive(:const_source_location).and_raise(StandardError, 'boom')
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq(fallback)
+    end
+  end
+
   # ── #extract_namespace ──────────────────────────────────────────
 
   describe '#extract_namespace' do

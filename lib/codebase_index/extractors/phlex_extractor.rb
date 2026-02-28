@@ -96,8 +96,14 @@ module CodebaseIndex
         defined?(ViewComponent::Base) && klass < ViewComponent::Base
       end
 
+      # Locate the source file for a Phlex component class.
+      #
+      # Convention paths first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
+      #
+      # @param component [Class]
+      # @return [String, nil]
       def source_file_for(component)
-        # Try common locations
         possible_paths = [
           Rails.root.join("app/views/components/#{component.name.underscore}.rb"),
           Rails.root.join("app/components/#{component.name.underscore}.rb"),
@@ -107,13 +113,7 @@ module CodebaseIndex
         found = possible_paths.find { |p| File.exist?(p) }
         return found.to_s if found
 
-        # Try to get from method source location
-        if component.instance_methods(false).any?
-          method = component.instance_methods(false).first
-          component.instance_method(method).source_location&.first
-        end
-      rescue StandardError
-        nil
+        resolve_source_location(component, app_root: Rails.root.to_s, fallback: nil)
       end
 
       def read_source(file_path)

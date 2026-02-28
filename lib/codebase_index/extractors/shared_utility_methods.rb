@@ -20,6 +20,58 @@ module CodebaseIndex
     #   end
     #
     module SharedUtilityMethods
+      # Check whether a path points to application source (under app_root, but
+      # not inside vendor/ or node_modules/ directories).
+      #
+      # In Docker environments where Rails.root is `/app`, a naive
+      # `start_with?(app_root)` also matches vendor bundle paths like
+      # `/app/vendor/bundle/ruby/…`. This helper rejects those.
+      #
+      # @param path [String, nil] Absolute file path
+      # @param app_root [String] Rails.root.to_s
+      # @return [Boolean]
+      def app_source?(path, app_root)
+        return false unless path
+
+        path.start_with?(app_root) && !path.include?('/vendor/') && !path.include?('/node_modules/')
+      end
+
+      # Resolve the source file for a class using reliable introspection,
+      # filtered through {#app_source?} to reject vendor/gem paths.
+      #
+      # Tier order:
+      #   1. +const_source_location+ (returns the class definition site)
+      #   2. Instance method source locations (first match wins)
+      #   3. Class/singleton method source locations (first match wins)
+      #
+      # @param klass [Class, Module] The class to resolve
+      # @param app_root [String] Rails.root.to_s
+      # @param fallback [String] Path to return when resolution fails
+      # @return [String] Resolved source path or fallback
+      def resolve_source_location(klass, app_root:, fallback:)
+        # Tier 1: const_source_location (most reliable — returns class definition site)
+        if Object.respond_to?(:const_source_location) && klass.name
+          loc = Object.const_source_location(klass.name)&.first
+          return loc if app_source?(loc, app_root)
+        end
+
+        # Tier 2: Instance methods defined directly on this class
+        klass.instance_methods(false).each do |method_name|
+          loc = klass.instance_method(method_name).source_location&.first
+          return loc if app_source?(loc, app_root)
+        end
+
+        # Tier 3: Class/singleton methods defined on this class
+        klass.methods(false).each do |method_name|
+          loc = klass.method(method_name).source_location&.first
+          return loc if app_source?(loc, app_root)
+        end
+
+        fallback
+      rescue StandardError
+        fallback
+      end
+
       # Extract the primary class name from source or fall back to a file path convention.
       #
       # @param file_path [String] Absolute path to the Ruby file

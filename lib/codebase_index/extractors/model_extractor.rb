@@ -2,6 +2,7 @@
 
 require 'digest'
 require_relative '../ast/parser'
+require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'callback_analyzer'
 
@@ -23,6 +24,7 @@ module CodebaseIndex
     #   user_unit = units.find { |u| u.identifier == "User" }
     #
     class ModelExtractor
+      include SharedUtilityMethods
       include SharedDependencyScanner
 
       # Single combined regex for filtering AR-generated internal methods.
@@ -85,38 +87,14 @@ module CodebaseIndex
 
       # Find the source file for a model, handling STI and namespacing.
       #
-      # Falls back to convention-based path when reflection points outside
-      # the app (e.g., ActiveRecord::Core#initialize for models that don't
-      # override initialize).
+      # Uses convention path first (most reliable for models), then falls
+      # back to introspection via {#resolve_source_location} which filters
+      # out vendor/node_modules paths.
       def source_file_for(model)
-        app_root = Rails.root.to_s
         convention_path = Rails.root.join("app/models/#{model.name.underscore}.rb").to_s
-
-        # Tier 1: Instance methods defined directly on this model
-        model.instance_methods(false).each do |method_name|
-          loc = model.instance_method(method_name).source_location&.first
-          return loc if loc&.start_with?(app_root)
-        end
-
-        # Tier 2: Class/singleton methods (catches models with only scopes)
-        model.methods(false).each do |method_name|
-          loc = model.method(method_name).source_location&.first
-          return loc if loc&.start_with?(app_root)
-        end
-
-        # Tier 3: Convention path if file exists
         return convention_path if File.exist?(convention_path)
 
-        # Tier 4: const_source_location (Ruby 3.0+)
-        if Object.respond_to?(:const_source_location)
-          loc = Object.const_source_location(model.name)&.first
-          return loc if loc&.start_with?(app_root)
-        end
-
-        # Tier 5: Always return convention path — never a gem path
-        convention_path
-      rescue StandardError
-        convention_path
+        resolve_source_location(model, app_root: Rails.root.to_s, fallback: convention_path)
       end
 
       # Detect Rails-generated HABTM join models (e.g., Product::HABTM_Categories)
@@ -242,7 +220,7 @@ module CodebaseIndex
           # Skip obvious non-app modules (from gems/stdlib)
           if Object.respond_to?(:const_source_location)
             loc = Object.const_source_location(mod.name)
-            next false if loc && !loc.first&.start_with?(app_root)
+            next false if loc && !app_source?(loc.first, app_root)
           end
 
           # Include if it's in app/models/concerns or app/controllers/concerns
@@ -259,16 +237,18 @@ module CodebaseIndex
       # @param mod [Module] The module to check
       # @return [Boolean] true if the module is defined within Rails.root
       def defined_in_app?(mod)
+        app_root = Rails.root.to_s
+
         # Fast path: const_source_location is cheaper than iterating methods
         if mod.respond_to?(:const_source_location) || Object.respond_to?(:const_source_location)
           loc = Object.const_source_location(mod.name)
-          return loc.first.start_with?(Rails.root.to_s) if loc
+          return app_source?(loc.first, app_root) if loc
         end
 
         # Slow path: check instance method source locations
         mod.instance_methods(false).any? do |method|
           loc = mod.instance_method(method).source_location&.first
-          loc&.start_with?(Rails.root.to_s)
+          app_source?(loc, app_root)
         end
       rescue StandardError
         false
@@ -836,19 +816,6 @@ module CodebaseIndex
       # ──────────────────────────────────────────────────────────────────────
       # Condition & Filter Helpers
       # ──────────────────────────────────────────────────────────────────────
-
-      # Human-readable label for a condition (Symbol, Proc, String, etc.)
-      #
-      # @param condition [Object] A proc, symbol, or other condition
-      # @return [String]
-      def condition_label(condition)
-        case condition
-        when Symbol then ":#{condition}"
-        when Proc then 'Proc'
-        when String then condition
-        else condition.class.name
-        end
-      end
 
       # Build conditions hash from validator options, converting Procs to labels
       #

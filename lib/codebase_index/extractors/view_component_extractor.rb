@@ -86,7 +86,10 @@ module CodebaseIndex
         defined?(ViewComponent::Preview) && klass < ViewComponent::Preview
       end
 
-      # Locate the source file for a component class
+      # Locate the source file for a component class.
+      #
+      # Convention paths first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
       #
       # @param component [Class]
       # @return [String, nil]
@@ -99,13 +102,7 @@ module CodebaseIndex
         found = possible_paths.find { |p| File.exist?(p) }
         return found.to_s if found
 
-        # Fall back to method source location
-        if component.instance_methods(false).any?
-          method = component.instance_methods(false).first
-          component.instance_method(method).source_location&.first
-        end
-      rescue StandardError
-        nil
+        resolve_source_location(component, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # @param file_path [String, nil]

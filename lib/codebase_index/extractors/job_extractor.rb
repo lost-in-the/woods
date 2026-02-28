@@ -152,13 +152,18 @@ module CodebaseIndex
           source.match?(/def perform/)
       end
 
+      # Locate the source file for a job class.
+      #
+      # Convention path first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
+      #
+      # @param job_class [Class]
+      # @return [String, nil]
       def source_file_for(job_class)
-        # Try to get from method source location
-        if job_class.method_defined?(:perform, false)
-          job_class.instance_method(:perform).source_location&.first
-        end || Rails.root.join("app/jobs/#{job_class.name.underscore}.rb").to_s
-      rescue StandardError
-        nil
+        convention_path = Rails.root.join("app/jobs/#{job_class.name.underscore}.rb").to_s
+        return convention_path if File.exist?(convention_path)
+
+        resolve_source_location(job_class, app_root: Rails.root.to_s, fallback: convention_path)
       end
 
       # ──────────────────────────────────────────────────────────────────────

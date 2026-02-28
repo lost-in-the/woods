@@ -50,7 +50,7 @@ module CodebaseIndex
       # @return [ExtractedUnit, nil]
       def extract_channel(klass)
         name = klass.name
-        file_path = discover_source_path(klass, name)
+        file_path = source_file_for(klass, name)
         source = read_source(file_path)
         own_methods = klass.instance_methods(false)
 
@@ -89,48 +89,21 @@ module CodebaseIndex
         end
       end
 
-      # Discover the source file path for a channel class.
+      # Locate the source file for a channel class.
       #
-      # Tries source_location on instance methods, then falls back to
-      # the Rails convention path.
+      # Convention path first, then introspection via {#resolve_source_location}
+      # which filters out vendor/node_modules paths.
       #
       # @param klass [Class] The channel class
       # @param name [String] The channel class name
       # @return [String, nil]
-      def discover_source_path(klass, name)
-        path = source_location_from_methods(klass)
-        return path if path
-
-        convention_fallback(name)
-      end
-
-      # Try to get source_location from the channel's instance methods.
-      # Tries subscribed first, then any other instance method.
-      #
-      # @param klass [Class] The channel class
-      # @return [String, nil]
-      def source_location_from_methods(klass)
-        try_methods = [:subscribed] + (klass.instance_methods(false) - [:subscribed])
-        try_methods.each do |method_name|
-          location = klass.instance_method(method_name).source_location
-          return location[0] if location
-        rescue NameError, TypeError
-          next
-        end
-        nil
-      rescue StandardError
-        nil
-      end
-
-      # Fall back to Rails convention path for channel files.
-      #
-      # @param name [String] Channel class name
-      # @return [String, nil]
-      def convention_fallback(name)
+      def source_file_for(klass, name)
         return nil unless defined?(Rails) && Rails.respond_to?(:root) && Rails.root
 
-        path = Rails.root.join('app', 'channels', "#{name.underscore}.rb").to_s
-        File.exist?(path) ? path : nil
+        convention_path = Rails.root.join('app', 'channels', "#{name.underscore}.rb").to_s
+        return convention_path if File.exist?(convention_path)
+
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # Read source code from a file path.

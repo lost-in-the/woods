@@ -149,44 +149,27 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
       stub_const('Rails', double('Rails', root: rails_root))
     end
 
-    it 'returns instance method source location when in app root (tier 1)' do
-      method_double = double('Method', source_location: ['/app/app/models/user.rb', 10])
-      model = double('Model', name: 'User', instance_methods: [:foo], methods: [])
-      allow(model).to receive(:instance_method).with(:foo).and_return(method_double)
-
-      result = extractor.send(:source_file_for, model)
-      expect(result).to eq('/app/app/models/user.rb')
-    end
-
-    it 'falls back to class methods when no instance methods in app (tier 2)' do
-      method_double = double('Method', source_location: ['/app/app/models/widget.rb', 5])
-      model = double('Model', name: 'Widget', instance_methods: [], methods: [:my_scope])
-      allow(model).to receive(:method).with(:my_scope).and_return(method_double)
-
-      result = extractor.send(:source_file_for, model)
-      expect(result).to eq('/app/app/models/widget.rb')
-    end
-
-    it 'falls back to convention path when file exists (tier 3)' do
-      model = double('Model', name: 'Order', instance_methods: [], methods: [])
+    it 'returns convention path when file exists' do
+      model = double('Model', name: 'Order')
       allow(File).to receive(:exist?).with('/app/app/models/order.rb').and_return(true)
 
       result = extractor.send(:source_file_for, model)
       expect(result).to eq('/app/app/models/order.rb')
     end
 
-    it 'falls back to const_source_location when available (tier 4)' do
-      model = double('Model', name: 'Invoice', instance_methods: [], methods: [])
+    it 'falls back to resolve_source_location when convention path does not exist' do
+      method_double = double('Method', source_location: ['/app/app/models/invoice.rb', 10])
+      model = double('Model', name: 'Invoice', instance_methods: [:foo], methods: [])
+      allow(model).to receive(:instance_method).with(:foo).and_return(method_double)
       allow(File).to receive(:exist?).with('/app/app/models/invoice.rb').and_return(false)
       allow(Object).to receive(:respond_to?).and_call_original
-      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
-      allow(Object).to receive(:const_source_location).with('Invoice').and_return(['/app/app/models/invoice.rb', 1])
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
 
       result = extractor.send(:source_file_for, model)
       expect(result).to eq('/app/app/models/invoice.rb')
     end
 
-    it 'returns convention path as final fallback — never a gem path (tier 5)' do
+    it 'returns convention path as final fallback — never a gem path' do
       model = double('Model', name: 'Legacy', instance_methods: [], methods: [])
       allow(File).to receive(:exist?).with('/app/app/models/legacy.rb').and_return(false)
       allow(Object).to receive(:respond_to?).and_call_original
@@ -196,14 +179,18 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
       expect(result).to eq('/app/app/models/legacy.rb')
     end
 
-    it 'skips instance method locations outside app root' do
-      gem_method = double('Method', source_location: ['/gems/activerecord/base.rb', 1])
-      model = double('Model', name: 'Thing', instance_methods: [:initialize], methods: [])
-      allow(model).to receive(:instance_method).with(:initialize).and_return(gem_method)
-      allow(File).to receive(:exist?).with('/app/app/models/thing.rb').and_return(true)
+    it 'rejects vendor bundle paths that start with app_root' do
+      vendor_path = '/app/vendor/bundle/ruby/3.3.0/gems/' \
+                    'activerecord-7.0.8.7/lib/active_record/autosave_association.rb'
+      vendor_method = double('Method', source_location: [vendor_path, 1])
+      model = double('Model', name: 'VendorLeaky', instance_methods: [:save_associated], methods: [])
+      allow(model).to receive(:instance_method).with(:save_associated).and_return(vendor_method)
+      allow(File).to receive(:exist?).with('/app/app/models/vendor_leaky.rb').and_return(false)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
 
       result = extractor.send(:source_file_for, model)
-      expect(result).to eq('/app/app/models/thing.rb')
+      expect(result).to eq('/app/app/models/vendor_leaky.rb')
     end
   end
 
