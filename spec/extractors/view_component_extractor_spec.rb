@@ -153,7 +153,7 @@ RSpec.describe CodebaseIndex::Extractors::ViewComponentExtractor do
       end
     end
 
-    context 'with a framework-internal component (no file_path, no source)' do
+    context 'with a framework-internal component (no file_path)' do
       it 'returns nil' do
         internal_class = build_component(name: 'ViewComponent::InternalThing', params: [])
 

@@ -115,6 +115,40 @@ RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
       end
     end
 
+    context 'with Docker environment (vendor/bundle under Rails.root)' do
+      let(:docker_framework_engine) do
+        build_mock_engine(
+          'ActionText::Engine', 'action_text',
+          root_path: '/app/vendor/bundle/ruby/3.4.0/gems/actiontext-7.2.0'
+        )
+      end
+      let(:docker_app_engine) do
+        build_mock_engine('MyApp::Engine', 'my_app', root_path: '/app/engines/my_app')
+      end
+
+      before do
+        stub_const('Rails::Engine', engine_base_class)
+        allow(Rails::Engine).to receive(:subclasses).and_return([docker_framework_engine, docker_app_engine])
+        stub_rails_application(engines: [docker_framework_engine, docker_app_engine])
+        # Override Rails.root to /app (Docker convention)
+        without_partial_double_verification do
+          allow(Rails).to receive(:root).and_return(double('root', to_s: '/app'))
+        end
+      end
+
+      it 'tags vendor-bundle engines as :framework even under Rails.root' do
+        units = extractor.extract_all
+        fw_unit = units.find { |u| u.identifier == 'ActionText::Engine' }
+        expect(fw_unit.metadata[:engine_source]).to eq(:framework)
+      end
+
+      it 'tags app engines as :application' do
+        units = extractor.extract_all
+        app_unit = units.find { |u| u.identifier == 'MyApp::Engine' }
+        expect(app_unit.metadata[:engine_source]).to eq(:application)
+      end
+    end
+
     context 'with mounted engines' do
       let(:engine_class) { build_mock_engine('Devise::Engine', 'devise') }
 

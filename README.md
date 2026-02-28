@@ -188,13 +188,13 @@ Extraction runs inside the Rails application (via rake task) to access runtime i
 
 CodebaseIndex ships two [MCP](https://modelcontextprotocol.io/) servers for integrating with AI development tools (Claude Code, Cursor, Windsurf, etc.).
 
-**Index Server** (28 tools) — Reads pre-extracted data from disk. No Rails boot required. Provides code lookup, dependency traversal, graph analysis, semantic search, pipeline management, feedback collection, and temporal snapshots.
+**Index Server** (27 tools) — Reads pre-extracted data from disk. No Rails boot required. Provides code lookup, dependency traversal, graph analysis, semantic search, pipeline management, feedback collection, and temporal snapshots.
 
 ```bash
 codebase-index-mcp /path/to/rails-app/tmp/codebase_index
 ```
 
-**Console Server** (33 tools) — Bridges to a live Rails process for database queries, model diagnostics, job monitoring, and guarded operations. All queries run in rolled-back transactions with SQL validation and audit logging.
+**Console Server** (31 tools) — Bridges to a live Rails process for database queries, model diagnostics, job monitoring, and guarded operations. All queries run in rolled-back transactions with SQL validation and audit logging.
 
 ```bash
 codebase-console-mcp
@@ -244,11 +244,11 @@ The **console server** runs embedded inside your Rails app (no config file neede
 Verify each server starts and lists its tools:
 
 ```bash
-# Index server — should list 28 tools
+# Index server — should list 27 tools
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
   codebase-index-mcp /path/to/rails-app/tmp/codebase_index
 
-# Console server — should list 33 tools (requires Rails app)
+# Console server — should list 31 tools (requires Rails app)
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
   bundle exec rake codebase_index:console
 ```
@@ -339,7 +339,7 @@ lib/
 │   │   ├── generic_adapter.rb                  # Generic LLM output
 │   │   └── human_adapter.rb                    # Human-readable output
 │   │
-│   ├── mcp/                                    # MCP Index Server (28 tools)
+│   ├── mcp/                                    # MCP Index Server (27 tools)
 │   │   ├── server.rb                           # Tool definitions + dispatch
 │   │   ├── index_reader.rb                     # JSON index reader
 │   │   └── renderers/
@@ -348,7 +348,7 @@ lib/
 │   │       ├── markdown_renderer.rb            # Markdown responses
 │   │       └── plain_renderer.rb               # Plain text responses
 │   │
-│   ├── console/                                # Console MCP Server (33 tools)
+│   ├── console/                                # Console MCP Server (31 tools)
 │   │   ├── server.rb                           # Console server + tool registration
 │   │   ├── bridge.rb                           # JSON-lines protocol bridge
 │   │   ├── safe_context.rb                     # Transaction rollback + timeout
@@ -358,9 +358,9 @@ lib/
 │   │   ├── audit_logger.rb                     # JSONL audit logging
 │   │   ├── confirmation.rb                     # Human-in-the-loop confirmation
 │   │   ├── tools/
-│   │   │   ├── tier1.rb                        # 8 read-only tools
-│   │   │   ├── tier2.rb                        # 10 domain-aware tools
-│   │   │   ├── tier3.rb                        # 12 analytics tools
+│   │   │   ├── tier1.rb                        # 9 read-only tools
+│   │   │   ├── tier2.rb                        # 9 domain-aware tools
+│   │   │   ├── tier3.rb                        # 10 analytics tools
 │   │   │   └── tier4.rb                        # 3 guarded tools
 │   │   └── adapters/
 │   │       ├── sidekiq_adapter.rb              # Sidekiq job backend

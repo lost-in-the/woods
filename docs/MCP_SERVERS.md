@@ -8,7 +8,7 @@ CodebaseIndex ships two MCP (Model Context Protocol) servers that integrate with
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 26 | 31 |
+| **Tools** | 27 | 31 |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/codebase_index/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
@@ -56,7 +56,7 @@ codebase-index-mcp-http /path/to/rails-app/tmp/codebase_index
 }
 ```
 
-### Tools (26)
+### Tools (27)
 
 #### Core Query (6)
 
@@ -117,6 +117,12 @@ codebase-index-mcp-http /path/to/rails-app/tmp/codebase_index
 | `snapshot_diff` | Compare two snapshots — added, modified, deleted units. |
 | `unit_history` | Track how a single unit changed across snapshots. |
 | `snapshot_detail` | Full metadata for a specific snapshot by git SHA. |
+
+#### Notion (1)
+
+| Tool | Description |
+|------|-------------|
+| `notion_sync` | Sync models and columns to a Notion database. Requires `notion_api_token` and `notion_database_ids` configuration. |
 
 #### Utility (1)
 

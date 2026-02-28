@@ -56,10 +56,10 @@ module CodebaseIndex
           file_path: source_file_for(component)
         )
 
-        unit.source_code = read_source(unit.file_path)
+        # Skip components with no resolvable source file (framework/internal)
+        return nil unless unit.file_path
 
-        # Skip framework/internal components with no resolvable source
-        return nil if unit.file_path.nil? && unit.source_code.empty?
+        unit.source_code = read_source(unit.file_path)
 
         unit.namespace = extract_namespace(component)
         unit.metadata = extract_metadata(component, unit.source_code)
