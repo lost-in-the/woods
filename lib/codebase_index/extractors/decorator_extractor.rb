@@ -90,11 +90,10 @@ module CodebaseIndex
       # Class Discovery
       # ──────────────────────────────────────────────────────────────────────
 
-      # Extract the class name from source or fall back to filename convention.
-      #
-      # Handles namespaced classes defined inside module blocks by combining
-      # outer module names with the class name (e.g., module Admin / class
-      # UserDecorator → "Admin::UserDecorator").
+      # Override SharedUtilityMethods#extract_class_name for decorator-specific
+      # namespace resolution. The shared version only matches `class Foo::Bar`
+      # (inline namespacing); this version also handles `module Admin / class
+      # UserDecorator` (block namespacing) by scanning for enclosing modules.
       #
       # @param file_path [String] Path to the file
       # @param source [String] Ruby source code
@@ -117,14 +116,6 @@ module CodebaseIndex
             .sub('.rb', '')
             .camelize
         end
-      end
-
-      # Skip module-only files (concerns, base modules without a class).
-      #
-      # @param source [String] Ruby source code
-      # @return [Boolean]
-      def skip_file?(source)
-        source.match?(/^\s*module\s+\w+\s*$/) && !source.match?(/^\s*class\s+/)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -220,7 +211,9 @@ module CodebaseIndex
         methods.uniq
       end
 
-      # Detect common entry points for decorator invocation.
+      # Override SharedUtilityMethods#detect_entry_points with decorator-specific
+      # entry points (decorate, present, to_partial_path) instead of the generic
+      # service-oriented ones (perform, execute, run, process).
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Entry point method names

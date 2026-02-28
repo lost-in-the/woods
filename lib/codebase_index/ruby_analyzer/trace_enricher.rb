@@ -64,19 +64,19 @@ module CodebaseIndex
 
           traces = grouped[key]
 
-          calls = traces.select { |t| t['event'] == 'call' || t[:event] == 'call' }
-          returns = traces.select { |t| t['event'] == 'return' || t[:event] == 'return' }
+          calls = traces.select { |t| fetch_key(t, :event) == 'call' }
+          returns = traces.select { |t| fetch_key(t, :event) == 'return' }
 
           callers = calls.filter_map do |t|
-            caller_class = t['caller_class'] || t[:caller_class]
-            caller_method = t['caller_method'] || t[:caller_method]
+            caller_class = fetch_key(t, :caller_class)
+            caller_method = fetch_key(t, :caller_method)
             next unless caller_class
 
             { 'caller_class' => caller_class, 'caller_method' => caller_method }
           end
 
           return_types = returns.filter_map do |t|
-            t['return_class'] || t[:return_class]
+            fetch_key(t, :return_class)
           end.uniq
 
           unit.metadata[:trace] = {
@@ -90,11 +90,15 @@ module CodebaseIndex
       class << self
         private
 
+        def fetch_key(hash, key)
+          hash[key.to_s] || hash[key.to_sym]
+        end
+
         def group_traces(trace_data)
           grouped = Hash.new { |h, k| h[k] = [] }
           trace_data.each do |trace|
-            class_name = trace['class_name'] || trace[:class_name]
-            method_name = trace['method_name'] || trace[:method_name]
+            class_name = fetch_key(trace, :class_name)
+            method_name = fetch_key(trace, :method_name)
             next unless class_name && method_name
 
             key = "#{class_name}##{method_name}"

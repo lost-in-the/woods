@@ -117,8 +117,7 @@ module CodebaseIndex
     # @param identifier [String] Unit identifier
     # @return [Array<String>] List of dependent identifiers
     def dependents_of(identifier)
-      set = @reverse[identifier]
-      set ? set.to_a : []
+      @reverse.fetch(identifier, Set.new).to_a
     end
 
     # Get all units of a specific type
@@ -126,8 +125,7 @@ module CodebaseIndex
     # @param type [Symbol] Unit type (:model, :controller, etc.)
     # @return [Array<String>] List of unit identifiers
     def units_of_type(type)
-      set = @type_index[type]
-      set ? set.to_a : []
+      @type_index.fetch(type, Set.new).to_a
     end
 
     # Compute PageRank scores for all nodes

@@ -21,6 +21,11 @@ module CodebaseIndex
       CONSTRUCTION_METHODS = %w[new].freeze
       SERIALIZATION_METHODS = %w[to_h to_json to_a serialize as_json].freeze
       DESERIALIZATION_METHODS = %w[from_json parse].freeze
+      CATEGORY_BY_METHOD = [
+        *CONSTRUCTION_METHODS.map { |m| [m, :construction] },
+        *SERIALIZATION_METHODS.map { |m| [m, :serialization] },
+        *DESERIALIZATION_METHODS.map { |m| [m, :deserialization] }
+      ].to_h.freeze
 
       # @param parser [Ast::Parser, nil] Parser instance (creates default if nil)
       def initialize(parser: nil)
@@ -65,13 +70,7 @@ module CodebaseIndex
       end
 
       def categorize(method_name)
-        if CONSTRUCTION_METHODS.include?(method_name)
-          :construction
-        elsif SERIALIZATION_METHODS.include?(method_name)
-          :serialization
-        elsif DESERIALIZATION_METHODS.include?(method_name)
-          :deserialization
-        end
+        CATEGORY_BY_METHOD[method_name]
       end
     end
   end

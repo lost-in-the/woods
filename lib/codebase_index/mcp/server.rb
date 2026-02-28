@@ -48,8 +48,16 @@ module CodebaseIndex
 
           define_lookup_tool(server, reader, respond, renderer)
           define_search_tool(server, reader, respond, renderer)
-          define_dependencies_tool(server, reader, respond, renderer)
-          define_dependents_tool(server, reader, respond, renderer)
+          define_traversal_tool(server, reader, respond, renderer,
+                                name: 'dependencies',
+                                description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.',
+                                reader_method: :traverse_dependencies,
+                                render_key: :dependencies)
+          define_traversal_tool(server, reader, respond, renderer,
+                                name: 'dependents',
+                                description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.',
+                                reader_method: :traverse_dependents,
+                                render_key: :dependents)
           define_structure_tool(server, reader, respond, renderer)
           define_graph_analysis_tool(server, reader, respond, renderer)
           define_pagerank_tool(server, reader, respond, renderer)
@@ -89,7 +97,38 @@ module CodebaseIndex
           end
         end
 
+        # Coerce a value to an Array. Wraps a single String in an Array;
+        # leaves existing Arrays and nil unchanged.
+        #
+        # @param value [String, Array, nil] The input value
+        # @return [Array, nil]
+        def coerce_array(value)
+          value.is_a?(String) ? [value] : value
+        end
+
+        # Apply offset+limit pagination to a single section key within a container hash.
+        # Adds `_total`, `_truncated`, and `_offset` metadata keys when truncating.
+        #
+        # @param container [Hash] The hash to mutate
+        # @param key [String] The section key whose value is an Array
+        # @param limit [Integer, nil] Max items to retain; nil means no limit
+        # @param offset [Integer] Items to skip from the front
+        # @return [void]
+        def paginate_section(container, key, limit, offset)
+          original = container[key]
+          return unless original.is_a?(Array)
+
+          sliced = offset.positive? ? original.drop(offset) : original
+          container[key] = limit ? truncate_section(sliced, limit) : sliced
+          if original.size > offset + (limit || original.size)
+            container["#{key}_total"] = original.size
+            container["#{key}_truncated"] = true
+          end
+          container["#{key}_offset"] = offset if offset.positive?
+        end
+
         def define_lookup_tool(server, reader, respond, renderer)
+          coerce = method(:coerce_array)
           server.define_tool(
             name: 'lookup',
             description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \
@@ -108,7 +147,7 @@ module CodebaseIndex
               required: ['identifier']
             }
           ) do |identifier:, server_context:, include_source: nil, sections: nil|
-            sections = [sections] if sections.is_a?(String)
+            sections = coerce.call(sections)
             unit = reader.find_unit(identifier)
             if unit
               always_include = %w[type identifier file_path namespace]
@@ -126,6 +165,7 @@ module CodebaseIndex
         end
 
         def define_search_tool(server, reader, respond, renderer)
+          coerce = method(:coerce_array)
           server.define_tool(
             name: 'search',
             description: 'Search code units by pattern. Matches against identifiers by default; can also search source_code and metadata fields.',
@@ -145,8 +185,8 @@ module CodebaseIndex
               required: ['query']
             }
           ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
-            types = [types] if types.is_a?(String)
-            fields = [fields] if fields.is_a?(String)
+            types = coerce.call(types)
+            fields = coerce.call(fields)
             results = reader.search(
               query,
               types: types,
@@ -161,10 +201,11 @@ module CodebaseIndex
           end
         end
 
-        def define_dependencies_tool(server, reader, respond, renderer)
+        def define_traversal_tool(server, reader, respond, renderer, name:, description:, reader_method:, render_key:)
+          coerce = method(:coerce_array)
           server.define_tool(
-            name: 'dependencies',
-            description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.',
+            name: name,
+            description: description,
             input_schema: {
               properties: {
                 identifier: { type: 'string', description: 'Unit identifier to start from' },
@@ -177,47 +218,13 @@ module CodebaseIndex
               required: ['identifier']
             }
           ) do |identifier:, server_context:, depth: nil, types: nil|
-            types = [types] if types.is_a?(String)
-            result = reader.traverse_dependencies(
-              identifier,
-              depth: depth || 2,
-              types: types
-            )
+            types = coerce.call(types)
+            result = reader.send(reader_method, identifier, depth: depth || 2, types: types)
             if result[:found] == false
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
-            respond.call(renderer.render(:dependencies, result))
-          end
-        end
-
-        def define_dependents_tool(server, reader, respond, renderer)
-          server.define_tool(
-            name: 'dependents',
-            description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.',
-            input_schema: {
-              properties: {
-                identifier: { type: 'string', description: 'Unit identifier to start from' },
-                depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' },
-                types: {
-                  type: 'array', items: { type: 'string' },
-                  description: 'Filter to these types'
-                }
-              },
-              required: ['identifier']
-            }
-          ) do |identifier:, server_context:, depth: nil, types: nil|
-            types = [types] if types.is_a?(String)
-            result = reader.traverse_dependents(
-              identifier,
-              depth: depth || 2,
-              types: types
-            )
-            if result[:found] == false
-              result[:message] =
-                "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
-            end
-            respond.call(renderer.render(:dependents, result))
+            respond.call(renderer.render(render_key, result))
           end
         end
 
@@ -241,7 +248,7 @@ module CodebaseIndex
         end
 
         def define_graph_analysis_tool(server, reader, respond, renderer)
-          truncate = method(:truncate_section)
+          paginate = method(:paginate_section)
           server.define_tool(
             name: 'graph_analysis',
             description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, and bridges.',
@@ -265,16 +272,7 @@ module CodebaseIndex
                        if limit || effective_offset.positive?
                          truncated = data.dup
                          %w[orphans dead_ends hubs cycles bridges].each do |key|
-                           next unless truncated[key].is_a?(Array)
-
-                           original = truncated[key]
-                           sliced = effective_offset.positive? ? original.drop(effective_offset) : original
-                           truncated[key] = limit ? truncate.call(sliced, limit) : sliced
-                           if original.size > effective_offset + (limit || original.size)
-                             truncated["#{key}_total"] = original.size
-                             truncated["#{key}_truncated"] = true
-                           end
-                           truncated["#{key}_offset"] = effective_offset if effective_offset.positive?
+                           paginate.call(truncated, key, limit, effective_offset)
                          end
                          truncated
                        else
@@ -282,16 +280,7 @@ module CodebaseIndex
                        end
                      else
                        single = { section => data[section], 'stats' => data['stats'] }
-                       if data[section].is_a?(Array) && (limit || effective_offset.positive?)
-                         original = data[section]
-                         sliced = effective_offset.positive? ? original.drop(effective_offset) : original
-                         single[section] = limit ? truncate.call(sliced, limit) : sliced
-                         if original.size > effective_offset + (limit || original.size)
-                           single["#{section}_total"] = original.size
-                           single["#{section}_truncated"] = true
-                         end
-                         single["#{section}_offset"] = effective_offset if effective_offset.positive?
-                       end
+                       paginate.call(single, section, limit, effective_offset) if limit || effective_offset.positive?
                        single
                      end
 
@@ -300,6 +289,7 @@ module CodebaseIndex
         end
 
         def define_pagerank_tool(server, reader, respond, renderer)
+          coerce = method(:coerce_array)
           server.define_tool(
             name: 'pagerank',
             description: 'Get PageRank importance scores for code units. Higher scores indicate more structurally important nodes.',
@@ -313,7 +303,7 @@ module CodebaseIndex
               }
             }
           ) do |server_context:, limit: nil, types: nil|
-            types = [types] if types.is_a?(String)
+            types = coerce.call(types)
             scores = reader.dependency_graph.pagerank
             graph_data = reader.raw_graph_data
             nodes = graph_data['nodes'] || {}
@@ -362,6 +352,7 @@ module CodebaseIndex
         end
 
         def define_recent_changes_tool(server, reader, respond, renderer)
+          coerce = method(:coerce_array)
           server.define_tool(
             name: 'recent_changes',
             description: 'List recently modified code units sorted by git last_modified timestamp. ' \
@@ -376,7 +367,7 @@ module CodebaseIndex
               }
             }
           ) do |server_context:, limit: nil, types: nil|
-            types = [types] if types.is_a?(String)
+            types = coerce.call(types)
             results = reader.recent_changes(limit: limit || 10, types: types)
             respond.call(renderer.render(:recent_changes, {
                                            result_count: results.size,

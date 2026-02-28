@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module CodebaseIndex
   module RubyAnalyzer
     # Renders Mermaid-format diagrams from extracted units, dependency graphs,
@@ -25,31 +27,24 @@ module CodebaseIndex
         lines = ['graph TD']
         return lines.join("\n") if units.nil? || units.empty?
 
-        seen_nodes = {}
-        edges = []
+        seen_nodes = Set.new
+        seen_edges = Set.new
 
         units.each do |unit|
           node_id = sanitize_id(unit.identifier)
-          unless seen_nodes[node_id]
-            seen_nodes[node_id] = true
-            lines << "  #{node_id}[\"#{escape_label(unit.identifier)}\"]"
-          end
+          lines << "  #{node_id}[\"#{escape_label(unit.identifier)}\"]" if seen_nodes.add?(node_id)
 
           (unit.dependencies || []).each do |dep|
             target = dep[:target] || dep['target']
             next unless target
 
             target_id = sanitize_id(target)
-            unless seen_nodes[target_id]
-              seen_nodes[target_id] = true
-              lines << "  #{target_id}[\"#{escape_label(target)}\"]"
-            end
+            lines << "  #{target_id}[\"#{escape_label(target)}\"]" if seen_nodes.add?(target_id)
 
             via = dep[:via] || dep['via']
             edge_key = "#{node_id}->#{target_id}"
-            next if edges.include?(edge_key)
+            next unless seen_edges.add?(edge_key)
 
-            edges << edge_key
             lines << if via
                        "  #{node_id} -->|#{via}| #{target_id}"
                      else
@@ -95,16 +90,14 @@ module CodebaseIndex
         end
 
         # Render edges
-        seen_edges = []
+        seen_edges = Set.new
         edges.each do |source, targets|
-          targets = Array(targets)
-          targets.each do |target|
+          Array(targets).each do |target|
             next unless nodes.key?(target)
 
             edge_key = "#{sanitize_id(source)}->#{sanitize_id(target)}"
-            next if seen_edges.include?(edge_key)
+            next unless seen_edges.add?(edge_key)
 
-            seen_edges << edge_key
             lines << "  #{sanitize_id(source)} --> #{sanitize_id(target)}"
           end
         end
@@ -123,15 +116,14 @@ module CodebaseIndex
         lines = ['flowchart TD']
         return lines.join("\n") if units.nil? || units.empty?
 
-        seen_nodes = {}
+        seen_nodes = Set.new
 
         units.each do |unit|
           transformations = unit.metadata[:data_transformations] || unit.metadata['data_transformations']
           next unless transformations.is_a?(Array) && transformations.any?
 
           node_id = sanitize_id(unit.identifier)
-          unless seen_nodes[node_id]
-            seen_nodes[node_id] = true
+          if seen_nodes.add?(node_id)
             shape = dataflow_shape(transformations)
             lines << "  #{node_id}#{shape}"
           end
@@ -144,10 +136,7 @@ module CodebaseIndex
             category = (t[:category] || t['category'])&.to_s
             method_name = t[:method] || t['method']
 
-            unless seen_nodes[receiver_id]
-              seen_nodes[receiver_id] = true
-              lines << "  #{receiver_id}[\"#{escape_label(receiver)}\"]"
-            end
+            lines << "  #{receiver_id}[\"#{escape_label(receiver)}\"]" if seen_nodes.add?(receiver_id)
 
             label = [category, method_name].compact.join(': ')
             lines << "  #{node_id} -->|#{label}| #{receiver_id}"
@@ -200,40 +189,56 @@ module CodebaseIndex
         # Analysis summary
         sections << '## Analysis Summary'
         sections << ''
-        if analysis
-          stats = analysis[:stats] || analysis['stats'] || {}
-          sections << "- **Orphans:** #{stats[:orphan_count] || stats['orphan_count'] || 0}"
-          sections << "- **Dead ends:** #{stats[:dead_end_count] || stats['dead_end_count'] || 0}"
-          sections << "- **Hubs:** #{stats[:hub_count] || stats['hub_count'] || 0}"
-          sections << "- **Cycles:** #{stats[:cycle_count] || stats['cycle_count'] || 0}"
-
-          hubs = analysis[:hubs] || analysis['hubs'] || []
-          if hubs.any?
-            sections << ''
-            sections << '### Top Hubs'
-            sections << ''
-            hubs.first(5).each do |hub|
-              id = hub[:identifier] || hub['identifier']
-              count = hub[:dependent_count] || hub['dependent_count']
-              sections << "- #{id} (#{count} dependents)"
-            end
-          end
-
-          cycles = analysis[:cycles] || analysis['cycles'] || []
-          if cycles.any?
-            sections << ''
-            sections << '### Cycles'
-            sections << ''
-            cycles.each do |cycle|
-              sections << "- #{cycle.join(' -> ')}"
-            end
-          end
-        end
+        sections.concat(render_stats_section(analysis))
 
         sections.join("\n")
       end
 
       private
+
+      # Render the Analysis Summary section lines for a given analysis hash.
+      #
+      # @param analysis [Hash, nil] Graph analysis report from GraphAnalyzer#analyze
+      # @return [Array<String>] Lines to append to the architecture document
+      def render_stats_section(analysis)
+        lines = []
+        return lines unless analysis
+
+        stats = analysis[:stats] || analysis['stats'] || {}
+        lines << "- **Orphans:** #{stats[:orphan_count] || stats['orphan_count'] || 0}"
+        lines << "- **Dead ends:** #{stats[:dead_end_count] || stats['dead_end_count'] || 0}"
+        lines << "- **Hubs:** #{stats[:hub_count] || stats['hub_count'] || 0}"
+        lines << "- **Cycles:** #{stats[:cycle_count] || stats['cycle_count'] || 0}"
+
+        hubs = analysis[:hubs] || analysis['hubs'] || []
+        lines.concat(render_hubs_section(hubs))
+
+        cycles = analysis[:cycles] || analysis['cycles'] || []
+        if cycles.any?
+          lines << ''
+          lines << '### Cycles'
+          lines << ''
+          cycles.each { |cycle| lines << "- #{cycle.join(' -> ')}" }
+        end
+
+        lines
+      end
+
+      # Render the Top Hubs subsection lines.
+      #
+      # @param hubs [Array<Hash>] Hub entries with :identifier and :dependent_count keys
+      # @return [Array<String>] Lines to append, or empty array if no hubs
+      def render_hubs_section(hubs)
+        return [] unless hubs.any?
+
+        lines = ['', '### Top Hubs', '']
+        hubs.first(5).each do |hub|
+          id = hub[:identifier] || hub['identifier']
+          count = hub[:dependent_count] || hub['dependent_count']
+          lines << "- #{id} (#{count} dependents)"
+        end
+        lines
+      end
 
       # Sanitize an identifier for use as a Mermaid node ID.
       #

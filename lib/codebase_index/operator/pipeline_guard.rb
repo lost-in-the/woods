@@ -87,13 +87,6 @@ module CodebaseIndex
       rescue JSON::ParserError
         {}
       end
-
-      # @param state [Hash]
-      # @return [void]
-      def write_state(state)
-        FileUtils.mkdir_p(@state_dir)
-        File.write(@state_path, JSON.generate(state))
-      end
     end
   end
 end

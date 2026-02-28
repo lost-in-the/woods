@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'shared'
+
 module CodebaseIndex
   module Notion
     module Mappers
@@ -13,7 +15,7 @@ module CodebaseIndex
       #   properties = mapper.map(column, model_identifier: "User", validations: [...], parent_page_id: "page-123")
       #
       class ColumnMapper
-        MAX_RICH_TEXT_LENGTH = 2000
+        include Shared
 
         # Map a single column to Notion Columns page properties.
         #
@@ -48,16 +50,6 @@ module CodebaseIndex
           return 'None' if matched.empty?
 
           matched.map { |v| v['type'] }.join(', ')
-        end
-
-        # Build a Notion rich_text property.
-        #
-        # @param text [String]
-        # @return [Hash]
-        def rich_text_property(text)
-          content = text.to_s
-          content = "#{content[0...1997]}..." if content.length > MAX_RICH_TEXT_LENGTH
-          { rich_text: [{ text: { content: content } }] }
         end
       end
     end

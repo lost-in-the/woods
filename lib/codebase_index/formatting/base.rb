@@ -25,16 +25,6 @@ module CodebaseIndex
       def format(_assembled_context)
         raise NotImplementedError, "#{self.class}#format must be implemented"
       end
-
-      private
-
-      # Estimate token count using the project convention.
-      #
-      # @param text [String]
-      # @return [Integer]
-      def estimate_tokens(text)
-        (text.length / 4.0).ceil
-      end
     end
   end
 end

@@ -140,21 +140,13 @@ module CodebaseIndex
       return nil if total.zero?
 
       type_counts = STRUCTURAL_TYPES.filter_map do |type|
-        count = count_by_type(type)
+        count = @metadata_store.find_by_type(type).size
         "#{count} #{type}s" if count.positive?
       end
 
       "Codebase: #{total} units (#{type_counts.join(', ')})"
     rescue StandardError
       nil
-    end
-
-    # Count units of a given type in the metadata store.
-    #
-    # @param type [String] The unit type to count
-    # @return [Integer] Number of units of this type
-    def count_by_type(type)
-      @metadata_store.find_by_type(type).size
     end
   end
 end

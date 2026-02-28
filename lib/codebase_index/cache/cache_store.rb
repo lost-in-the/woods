@@ -2,6 +2,7 @@
 
 require 'digest'
 require 'json'
+require 'logger'
 
 module CodebaseIndex
   module Cache
@@ -98,9 +99,38 @@ module CodebaseIndex
         begin
           write(key, value, ttl: ttl)
         rescue StandardError => e
-          warn("[CodebaseIndex] CacheStore#fetch write failed for #{key}: #{e.message}")
+          logger.warn("[CodebaseIndex] CacheStore#fetch write failed for #{key}: #{e.message}")
         end
         value
+      end
+
+      private
+
+      # Return a logger instance (Rails.logger in Rails apps, stderr elsewhere).
+      #
+      # @return [Logger]
+      def logger
+        @logger ||= defined?(Rails) ? Rails.logger : Logger.new($stderr)
+      end
+
+      # Build a wildcard pattern for clearing cache entries.
+      #
+      # @param namespace [Symbol, nil] Cache domain, or nil for all entries
+      # @return [String]
+      def clear_pattern(namespace)
+        namespace ? "codebase_index:cache:#{namespace}:*" : 'codebase_index:cache:*'
+      end
+
+      # Delete a key, silently swallowing any errors.
+      #
+      # Used for cleanup on corrupt/stale entries where failure is acceptable.
+      #
+      # @param key [String]
+      # @return [nil]
+      def delete_silently(key)
+        delete(key)
+      rescue StandardError
+        nil
       end
     end
 

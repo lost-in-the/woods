@@ -619,9 +619,7 @@ module CodebaseIndex
       # @return [Array<String>]
       def extract_connections(source)
         # field :items, Types::ItemType.connection_type
-        connections = source.scan(/([\w:]+)\.connection_type/).flatten.map do |type|
-          type
-        end
+        connections = source.scan(/([\w:]+)\.connection_type/).flatten
 
         # connection_type_class ConnectionType
         source.scan(/connection_type_class\s+([\w:]+)/).flatten.each do |type|

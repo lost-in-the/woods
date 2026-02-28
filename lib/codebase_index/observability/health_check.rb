@@ -73,8 +73,6 @@ module CodebaseIndex
         else
           :error
         end
-      rescue StandardError
-        :error
       end
     end
   end

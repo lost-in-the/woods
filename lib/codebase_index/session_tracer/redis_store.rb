@@ -72,13 +72,7 @@ module CodebaseIndex
         expired.each { |id| @redis.srem(SESSIONS_KEY, id) } if expired.any?
 
         active.first(limit).map do |session_id|
-          requests = read(session_id)
-          {
-            'session_id' => session_id,
-            'request_count' => requests.size,
-            'first_request' => requests.first&.fetch('timestamp', nil),
-            'last_request' => requests.last&.fetch('timestamp', nil)
-          }
+          session_summary(session_id, read(session_id))
         end
       end
 

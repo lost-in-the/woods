@@ -7,6 +7,7 @@ require 'open3'
 require 'pathname'
 require 'set'
 
+require_relative 'filename_utils'
 require_relative 'extracted_unit'
 require_relative 'dependency_graph'
 require_relative 'extractors/model_extractor'
@@ -62,6 +63,8 @@ module CodebaseIndex
   #   extractor.extract_changed(["app/models/user.rb", "app/services/checkout.rb"])
   #
   class Extractor
+    include FilenameUtils
+
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
     # Rails.application.eager_load! fails (e.g., NameError from graphql/).
@@ -851,27 +854,6 @@ module CodebaseIndex
       return nil unless schema_path.exist?
 
       Digest::SHA256.file(schema_path).hexdigest
-    end
-
-    # Generate a safe JSON filename from a unit identifier.
-    #
-    # @param identifier [String] Unit identifier (e.g., "Admin::UsersController")
-    # @return [String] Safe filename (e.g., "Admin__UsersController.json")
-    def safe_filename(identifier)
-      "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
-    end
-
-    # Generate a collision-safe JSON filename by appending a short digest.
-    # Unlike safe_filename, this guarantees distinct filenames even when two
-    # identifiers differ only in characters that safe_filename normalizes
-    # (e.g., "GET /foo/bar" vs "GET /foo_bar" both become "GET__foo_bar.json").
-    #
-    # @param identifier [String] Unit identifier
-    # @return [String] Collision-safe filename (e.g., "GET__foo_bar_a1b2c3d4.json")
-    def collision_safe_filename(identifier)
-      base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-      digest = ::Digest::SHA256.hexdigest(identifier)[0, 8]
-      "#{base}_#{digest}.json"
     end
 
     def json_serialize(data)

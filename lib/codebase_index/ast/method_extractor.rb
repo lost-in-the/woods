@@ -16,6 +16,8 @@ module CodebaseIndex
     #   # => "def create\n  @user = User.find(params[:id])\nend\n"
     #
     class MethodExtractor
+      include SourceSpan
+
       # @param parser [Ast::Parser, nil] Parser instance (creates default if nil)
       def initialize(parser: nil)
         @parser = parser || Parser.new
@@ -62,14 +64,7 @@ module CodebaseIndex
         return node.source if node.source
 
         # Fallback: extract by line range
-        return nil unless node.line && node.end_line
-
-        lines = source.lines
-        start_idx = node.line - 1
-        end_idx = node.end_line - 1
-        return nil if start_idx.negative? || end_idx >= lines.length
-
-        lines[start_idx..end_idx].join
+        extract_source_span(source, node.line, node.end_line)
       end
     end
   end

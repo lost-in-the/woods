@@ -102,8 +102,9 @@ module CodebaseIndex
       #
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map)
+        original_by_id = candidates.index_by(&:identifier)
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
-          original = candidates.find { |c| c.identifier == identifier }
+          original = original_by_id[identifier]
           build_candidate(
             identifier: identifier,
             score: score,

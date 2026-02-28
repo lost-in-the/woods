@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'digest'
+require_relative '../filename_utils'
 
 module CodebaseIndex
   module Resilience
@@ -18,6 +18,8 @@ module CodebaseIndex
     #   report = validator.validate
     #   puts report.errors if !report.valid?
     class IndexValidator
+      include CodebaseIndex::FilenameUtils
+
       # Report produced by {#validate}.
       #
       # @!attribute [r] valid?
@@ -159,26 +161,6 @@ module CodebaseIndex
 
           warnings << "Stale file not in index: #{type_name}/#{basename}"
         end
-      end
-
-      # Convert an identifier to a safe filename (legacy format, mirrors Extractor#safe_filename).
-      #
-      # @param identifier [String] The unit identifier (e.g., "Admin::UsersController")
-      # @return [String] A filesystem-safe filename (e.g., "Admin__UsersController.json")
-      def safe_filename(identifier)
-        "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}.json"
-      end
-
-      # Convert an identifier to a collision-safe filename (current format).
-      # Mirrors {Extractor#collision_safe_filename} — appends a short SHA256 digest
-      # to disambiguate identifiers that normalize to the same safe_filename.
-      #
-      # @param identifier [String] The unit identifier
-      # @return [String] Collision-safe filename (e.g., "Admin__UsersController_a1b2c3d4.json")
-      def collision_safe_filename(identifier)
-        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-        digest = Digest::SHA256.hexdigest(identifier)[0, 8]
-        "#{base}_#{digest}.json"
       end
     end
   end

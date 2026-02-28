@@ -129,7 +129,7 @@ module CodebaseIndex
         retries = 0
 
         loop do
-          response = execute_with_retry(method, path, body, retries)
+          response = execute_with_retry(method, path, body)
 
           return JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
 
@@ -148,7 +148,7 @@ module CodebaseIndex
       #
       # @return [Net::HTTPResponse]
       # @raise [CodebaseIndex::Error] on persistent network failures
-      def execute_with_retry(method, path, body, _retries)
+      def execute_with_retry(method, path, body)
         attempts = 0
         begin
           @rate_limiter.throttle { execute_http(method, path, body) }

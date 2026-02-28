@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'logger'
 require_relative 'cache_store'
 
 module CodebaseIndex
@@ -94,11 +93,7 @@ module CodebaseIndex
       # @param namespace [Symbol, nil] Domain to clear, or nil for all cache keys
       # @return [void]
       def clear(namespace: nil)
-        pattern = if namespace
-                    "codebase_index:cache:#{namespace}:*"
-                  else
-                    'codebase_index:cache:*'
-                  end
+        pattern = clear_pattern(namespace)
 
         unless @cache.respond_to?(:delete_matched)
           logger.warn("[CodebaseIndex] Cache#clear(namespace: #{namespace.inspect}) is a no-op: " \
@@ -109,18 +104,6 @@ module CodebaseIndex
         @cache.delete_matched(pattern)
       rescue StandardError => e
         logger.warn("[CodebaseIndex] SolidCacheStore#clear failed: #{e.message}")
-        nil
-      end
-
-      private
-
-      def logger
-        @logger ||= defined?(Rails) ? Rails.logger : Logger.new($stderr)
-      end
-
-      def delete_silently(key)
-        @cache.delete(key)
-      rescue StandardError
         nil
       end
     end

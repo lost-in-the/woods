@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'logger'
 require_relative 'cache_store'
 
 module CodebaseIndex
@@ -100,11 +99,7 @@ module CodebaseIndex
       # @param namespace [Symbol, nil] Domain to clear, or nil for all cache keys
       # @return [void]
       def clear(namespace: nil)
-        pattern = if namespace
-                    "codebase_index:cache:#{namespace}:*"
-                  else
-                    'codebase_index:cache:*'
-                  end
+        pattern = clear_pattern(namespace)
 
         cursor = '0'
         loop do
@@ -114,18 +109,6 @@ module CodebaseIndex
         end
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
         logger.warn("[CodebaseIndex] RedisCacheStore#clear failed: #{e.message}")
-        nil
-      end
-
-      private
-
-      def logger
-        @logger ||= defined?(Rails) ? Rails.logger : Logger.new($stderr)
-      end
-
-      def delete_silently(key)
-        @redis.del(key)
-      rescue StandardError
         nil
       end
     end

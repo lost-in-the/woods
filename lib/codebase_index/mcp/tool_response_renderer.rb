@@ -57,6 +57,29 @@ module CodebaseIndex
       def render_default(data)
         raise NotImplementedError, "#{self.class}#render_default must be implemented"
       end
+
+      private
+
+      # Fetch a value from a hash by symbol or string key, falling back to a default.
+      #
+      # Handles data hashes that may use either symbol or string keys (e.g., data
+      # assembled from JSON parsing vs. direct Hash literals).
+      #
+      # @param data [Hash] The source hash
+      # @param key [Symbol, String] The key to look up
+      # @param default [Object] Value to return when key is absent (default: nil)
+      # @return [Object]
+      def fetch_key(data, key, default = nil)
+        sym_key = key.to_sym
+        str_key = key.to_s
+        if data.key?(sym_key)
+          data[sym_key]
+        elsif data.key?(str_key)
+          data[str_key]
+        else
+          default
+        end
+      end
     end
   end
 end

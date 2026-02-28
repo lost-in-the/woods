@@ -33,26 +33,11 @@ module CodebaseIndex
 
       # Strategy mapping from (intent, scope) → strategy.
       #
-      # Pinpoint scope always uses :direct for locate/reference.
-      # Comprehensive/exploratory scopes use :hybrid.
-      # Framework intent always uses :keyword against framework sources.
+      # Covers pinpoint overrides for locate/reference (:direct).
+      # Trace and framework intents are handled before this map is consulted.
       STRATEGY_MAP = {
-        # [intent, scope] => strategy
-        # Pinpoint
         %i[locate pinpoint] => :direct,
-        %i[reference pinpoint] => :direct,
-
-        # Trace always uses graph
-        %i[trace pinpoint] => :graph,
-        %i[trace focused] => :graph,
-        %i[trace exploratory] => :graph,
-        %i[trace comprehensive] => :graph,
-
-        # Framework always keyword
-        %i[framework pinpoint] => :keyword,
-        %i[framework focused] => :keyword,
-        %i[framework exploratory] => :keyword,
-        %i[framework comprehensive] => :keyword
+        %i[reference pinpoint] => :direct
       }.freeze
 
       # @param vector_store [Storage::VectorStore::Interface] Vector store adapter
@@ -93,7 +78,11 @@ module CodebaseIndex
         intent = classification.intent
         scope = classification.scope
 
-        # Check explicit mapping first
+        # Intent-level overrides (apply regardless of scope)
+        return :graph if intent == :trace
+        return :keyword if intent == :framework
+
+        # Pinpoint overrides for locate/reference
         mapped = STRATEGY_MAP[[intent, scope]]
         return mapped if mapped
 

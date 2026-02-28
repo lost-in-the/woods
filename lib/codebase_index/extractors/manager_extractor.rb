@@ -53,7 +53,7 @@ module CodebaseIndex
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a manager
       def extract_manager_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(file_path, source)
+        class_name = extract_class_name(file_path, source, 'managers')
 
         return nil unless class_name
         return nil unless manager_file?(source)
@@ -80,16 +80,6 @@ module CodebaseIndex
       # ──────────────────────────────────────────────────────────────────────
       # Class Discovery
       # ──────────────────────────────────────────────────────────────────────
-
-      def extract_class_name(file_path, source)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
-
-        file_path
-          .sub("#{Rails.root}/", '')
-          .sub(%r{^app/managers/}, '')
-          .sub('.rb', '')
-          .camelize
-      end
 
       def manager_file?(source)
         source.match?(/< SimpleDelegator/) ||
@@ -176,10 +166,6 @@ module CodebaseIndex
       def extract_overridden_methods(source)
         # Methods that call super — these override delegated behavior
         source.scan(/def\s+(\w+[?!=]?).*?\n.*?super/m).flatten
-      end
-
-      def extract_custom_errors(source)
-        source.scan(/class\s+(\w+(?:Error|Exception))\s*</).flatten
       end
 
       # ──────────────────────────────────────────────────────────────────────

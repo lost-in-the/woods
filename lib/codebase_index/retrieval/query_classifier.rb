@@ -87,28 +87,30 @@ module CodebaseIndex
       # @param query [String]
       # @return [Symbol]
       def detect_intent(query)
-        INTENT_PATTERNS.each do |intent, pattern|
-          return intent if query.match?(pattern)
-        end
-        :understand # default
+        match_first(INTENT_PATTERNS, query, default: :understand)
       end
 
       # @param query [String]
       # @return [Symbol]
       def detect_scope(query)
-        SCOPE_PATTERNS.each do |scope, pattern|
-          return scope if query.match?(pattern)
-        end
-        :focused # default
+        match_first(SCOPE_PATTERNS, query, default: :focused)
       end
 
       # @param query [String]
       # @return [Symbol, nil]
       def detect_target_type(query)
-        TARGET_PATTERNS.each do |type, pattern|
-          return type if query.match?(pattern)
-        end
-        nil # no specific type detected
+        match_first(TARGET_PATTERNS, query, default: nil)
+      end
+
+      # Match query against a hash of {key => pattern}, returning the first matching key.
+      #
+      # @param patterns [Hash{Symbol => Regexp}]
+      # @param query [String]
+      # @param default [Object] value if no pattern matches
+      # @return [Object]
+      def match_first(patterns, query, default:)
+        patterns.each { |key, pattern| return key if query.match?(pattern) }
+        default
       end
 
       # @param query [String]

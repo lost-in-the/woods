@@ -62,6 +62,20 @@ module CodebaseIndex
       def sanitize_session_id(session_id)
         session_id.to_s.gsub(/[^a-zA-Z0-9_-]/, '_')
       end
+
+      # Build a session summary hash from a session ID and its requests.
+      #
+      # @param session_id [String]
+      # @param requests [Array<Hash>]
+      # @return [Hash]
+      def session_summary(session_id, requests)
+        {
+          'session_id' => session_id,
+          'request_count' => requests.size,
+          'first_request' => requests.first&.fetch('timestamp', nil),
+          'last_request' => requests.last&.fetch('timestamp', nil)
+        }
+      end
     end
   end
 end

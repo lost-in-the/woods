@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'shared'
+
 module CodebaseIndex
   module Notion
     module Mappers
@@ -14,7 +16,7 @@ module CodebaseIndex
       #   client.create_page(database_id: db_id, properties: properties)
       #
       class ModelMapper
-        MAX_RICH_TEXT_LENGTH = 2000
+        include Shared
 
         # Map a model unit to Notion Data Models page properties.
         #
@@ -83,9 +85,7 @@ module CodebaseIndex
 
         # @return [String]
         def format_associations(associations)
-          return 'None' if associations.nil? || associations.empty?
-
-          associations.map { |a| format_single_association(a) }.join("\n")
+          format_list(associations) { |items| items.map { |a| format_single_association(a) }.join("\n") }
         end
 
         # @return [String]
@@ -99,18 +99,16 @@ module CodebaseIndex
 
         # @return [String]
         def format_validations(validations)
-          return 'None' if validations.nil? || validations.empty?
-
-          validations.group_by { |v| v['attribute'] }.map do |attr, vals|
-            "#{attr}: #{vals.map { |v| v['type'] }.join(', ')}"
-          end.join("\n")
+          format_list(validations) do |items|
+            items.group_by { |v| v['attribute'] }.map do |attr, vals|
+              "#{attr}: #{vals.map { |v| v['type'] }.join(', ')}"
+            end.join("\n")
+          end
         end
 
         # @return [String]
         def format_callbacks(callbacks)
-          return 'None' if callbacks.nil? || callbacks.empty?
-
-          callbacks.map { |callback| format_single_callback(callback) }.join("\n")
+          format_list(callbacks) { |items| items.map { |callback| format_single_callback(callback) }.join("\n") }
         end
 
         # @return [String]
@@ -135,16 +133,12 @@ module CodebaseIndex
 
         # @return [String]
         def format_scopes(scopes)
-          return 'None' if scopes.nil? || scopes.empty?
-
-          scopes.map { |s| s['name'] }.join(', ')
+          format_list(scopes) { |items| items.map { |s| s['name'] }.join(', ') }
         end
 
         # @return [String]
         def format_dependencies(dependencies)
-          return 'None' if dependencies.nil? || dependencies.empty?
-
-          dependencies.map { |dep| "#{dep['target']} (via #{dep['via']})" }.join(', ')
+          format_list(dependencies) { |items| items.map { |dep| "#{dep['target']} (via #{dep['via']})" }.join(', ') }
         end
 
         # @return [Hash]
@@ -152,11 +146,14 @@ module CodebaseIndex
           { title: [{ text: { content: text } }] }
         end
 
-        # @return [Hash]
-        def rich_text_property(text)
-          content = text.to_s
-          content = "#{content[0...1997]}..." if content.length > MAX_RICH_TEXT_LENGTH
-          { rich_text: [{ text: { content: content } }] }
+        # Return 'None' for nil/empty lists; otherwise yield items to a formatting block.
+        #
+        # @param items [Array, nil]
+        # @return [String]
+        def format_list(items)
+          return 'None' if items.nil? || items.empty?
+
+          yield items
         end
       end
     end

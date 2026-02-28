@@ -15,6 +15,8 @@ module CodebaseIndex
     #   root.find_all(:def).first.method_name #=> "bar"
     #
     class Parser
+      include SourceSpan
+
       # Parse Ruby source into a normalized AST.
       #
       # @param source [String] Ruby source code
@@ -26,8 +28,6 @@ module CodebaseIndex
         else
           parse_with_parser_gem(source)
         end
-      rescue CodebaseIndex::ExtractionError
-        raise
       rescue StandardError => e
         raise CodebaseIndex::ExtractionError, "Failed to parse source: #{e.message}"
       end
@@ -36,15 +36,12 @@ module CodebaseIndex
       #
       # @return [Boolean]
       def prism_available?
-        if @prism_available.nil?
-          begin
-            require 'prism'
-            @prism_available = defined?(Prism) ? true : false
-          rescue LoadError
-            @prism_available = false
-          end
-        end
-        @prism_available
+        return @prism_available unless @prism_available.nil?
+
+        require 'prism'
+        @prism_available = true
+      rescue LoadError
+        @prism_available = false
       end
 
       private
@@ -105,10 +102,8 @@ module CodebaseIndex
           )
         when Prism::ConstantPathNode
           convert_prism_constant_path(prism_node, source)
-        when Prism::IfNode
+        when Prism::IfNode, Prism::UnlessNode
           convert_prism_if(prism_node, source)
-        when Prism::UnlessNode
-          convert_prism_unless(prism_node, source)
         when Prism::CaseNode
           convert_prism_case(prism_node, source)
         when Prism::BeginNode
@@ -223,17 +218,7 @@ module CodebaseIndex
       def convert_prism_class(prism_node, source)
         name_node = convert_prism_node(prism_node.constant_path, source)
         superclass = prism_node.superclass ? convert_prism_node(prism_node.superclass, source) : nil
-        body_children = if prism_node.body
-                          if prism_node.body.is_a?(Prism::StatementsNode)
-                            prism_node.body.body.map do |c|
-                              convert_prism_node(c, source)
-                            end
-                          else
-                            [convert_prism_node(prism_node.body, source)]
-                          end
-                        else
-                          []
-                        end
+        body_children = extract_prism_body_children(prism_node, source)
 
         children = [name_node, superclass] + body_children
 
@@ -248,17 +233,7 @@ module CodebaseIndex
 
       def convert_prism_module(prism_node, source)
         name_node = convert_prism_node(prism_node.constant_path, source)
-        body_children = if prism_node.body
-                          if prism_node.body.is_a?(Prism::StatementsNode)
-                            prism_node.body.body.map do |c|
-                              convert_prism_node(c, source)
-                            end
-                          else
-                            [convert_prism_node(prism_node.body, source)]
-                          end
-                        else
-                          []
-                        end
+        body_children = extract_prism_body_children(prism_node, source)
 
         children = [name_node] + body_children
 
@@ -272,15 +247,7 @@ module CodebaseIndex
       end
 
       def convert_prism_def(prism_node, source)
-        body_children = if prism_node.body
-                          if prism_node.body.is_a?(Prism::StatementsNode)
-                            prism_node.body.body.map { |c| convert_prism_node(c, source) }
-                          else
-                            [convert_prism_node(prism_node.body, source)]
-                          end
-                        else
-                          []
-                        end
+        body_children = extract_prism_body_children(prism_node, source)
 
         is_class_method = prism_node.respond_to?(:receiver) && prism_node.receiver
         receiver_text = if is_class_method
@@ -377,23 +344,6 @@ module CodebaseIndex
         )
       end
 
-      def convert_prism_unless(prism_node, source)
-        condition = convert_prism_node(prism_node.predicate, source)
-        condition_source = extract_prism_source_text(prism_node.predicate, source)
-
-        then_body = prism_node.statements ? convert_prism_node(prism_node.statements, source) : nil
-        else_clause = prism_else_clause(prism_node)
-        else_body = else_clause ? convert_prism_node(else_clause, source) : nil
-
-        Node.new(
-          type: :if,
-          children: [condition, then_body, else_body].compact,
-          line: line_for_prism(prism_node),
-          end_line: end_line_for_prism(prism_node),
-          source: condition_source
-        )
-      end
-
       def convert_prism_case(prism_node, source)
         children = []
         children << convert_prism_node(prism_node.predicate, source) if prism_node.predicate
@@ -401,6 +351,16 @@ module CodebaseIndex
         else_clause = prism_else_clause(prism_node)
         children << convert_prism_node(else_clause, source) if else_clause
         Node.new(type: :case, children: children, line: line_for_prism(prism_node))
+      end
+
+      def extract_prism_body_children(prism_node, source)
+        return [] unless prism_node.body
+
+        if prism_node.body.is_a?(Prism::StatementsNode)
+          prism_node.body.body.map { |c| convert_prism_node(c, source) }
+        else
+          [convert_prism_node(prism_node.body, source)]
+        end
       end
 
       def convert_prism_children(statements_node, source)
@@ -414,12 +374,7 @@ module CodebaseIndex
       end
 
       def extract_prism_generic_children(prism_node, source)
-        children = []
-        prism_node.child_nodes.compact.each do |child|
-          converted = convert_prism_node(child, source)
-          children << converted if converted
-        end
-        children
+        prism_node.child_nodes.compact.filter_map { |child| convert_prism_node(child, source) }
       end
 
       # Portable accessor for the else/consequent clause of if/unless/case nodes.
@@ -443,12 +398,7 @@ module CodebaseIndex
       end
 
       def extract_prism_source_span(node, source)
-        lines = source.lines
-        start_idx = node.location.start_line - 1
-        end_idx = node.location.end_line - 1
-        return nil if start_idx.negative? || end_idx >= lines.length
-
-        lines[start_idx..end_idx].join
+        extract_source_span(source, node.location.start_line, node.location.end_line)
       end
 
       def extract_prism_source_text(node, source)
@@ -485,12 +435,7 @@ module CodebaseIndex
       end
 
       def extract_const_name(node)
-        case node
-        when Prism::ConstantReadNode
-          node.name.to_s
-        when Prism::ConstantPathNode
-          extract_const_path_text(node)
-        end
+        extract_const_path_text(node)
       end
 
       # ── Parser gem fallback ──────────────────────────────────────────────
@@ -507,7 +452,7 @@ module CodebaseIndex
           name_node = convert_parser_node(parser_node.children[0], source)
           superclass = parser_node.children[1] ? convert_parser_node(parser_node.children[1], source) : nil
           body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
-          body_children = body&.type == :begin ? body.children : [body].compact
+          body_children = parser_body_children(body)
           children = [name_node, superclass] + body_children
           Node.new(
             type: :class,
@@ -519,7 +464,7 @@ module CodebaseIndex
         when :module
           name_node = convert_parser_node(parser_node.children[0], source)
           body = parser_node.children[1] ? convert_parser_node(parser_node.children[1], source) : nil
-          body_children = body&.type == :begin ? body.children : [body].compact
+          body_children = parser_body_children(body)
           children = [name_node] + body_children
           Node.new(
             type: :module,
@@ -530,7 +475,7 @@ module CodebaseIndex
           )
         when :def
           body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
-          body_children = body&.type == :begin ? body.children : [body].compact
+          body_children = parser_body_children(body)
           Node.new(
             type: :def,
             children: body_children,
@@ -541,7 +486,7 @@ module CodebaseIndex
           )
         when :defs
           body = parser_node.children[3] ? convert_parser_node(parser_node.children[3], source) : nil
-          body_children = body&.type == :begin ? body.children : [body].compact
+          body_children = parser_body_children(body)
           receiver = parser_node.children[0].type == :self ? 'self' : parser_node.children[0].to_s
           Node.new(
             type: :defs,
@@ -622,13 +567,12 @@ module CodebaseIndex
         end
       end
 
-      def extract_parser_source_span(node, source)
-        lines = source.lines
-        start_idx = node.loc.line - 1
-        end_idx = node.loc.expression.last_line - 1
-        return nil if start_idx.negative? || end_idx >= lines.length
+      def parser_body_children(body_node)
+        body_node&.type == :begin ? body_node.children : [body_node].compact
+      end
 
-        lines[start_idx..end_idx].join
+      def extract_parser_source_span(node, source)
+        extract_source_span(source, node.loc.line, node.loc.expression.last_line)
       end
 
       def extract_parser_source_text(node, source)

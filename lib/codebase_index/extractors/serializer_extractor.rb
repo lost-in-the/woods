@@ -309,7 +309,7 @@ module CodebaseIndex
 
       def extract_views(source)
         # Blueprinter views: `view :extended do`
-        source.scan(/view\s+:(\w+)/).flatten.map { |v| v }
+        source.scan(/view\s+:(\w+)/).flatten
       end
 
       # ──────────────────────────────────────────────────────────────────────

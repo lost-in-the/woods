@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'mappers/shared'
 require_relative 'mappers/model_mapper'
 require_relative 'mappers/column_mapper'
 require_relative 'mappers/migration_mapper'

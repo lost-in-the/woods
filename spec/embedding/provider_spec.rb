@@ -49,6 +49,12 @@ RSpec.describe CodebaseIndex::Embedding::Provider do
 
     before do
       allow(Net::HTTP).to receive(:new).and_return(http_double)
+      allow(http_double).to receive(:use_ssl=)
+      allow(http_double).to receive(:open_timeout=)
+      allow(http_double).to receive(:read_timeout=)
+      allow(http_double).to receive(:keep_alive_timeout=)
+      allow(http_double).to receive(:start)
+      allow(http_double).to receive(:started?).and_return(false, true)
       allow(success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       allow(batch_success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
     end

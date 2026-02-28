@@ -56,13 +56,11 @@ module CodebaseIndex
         # @see Interface#store
         def store(id, vector, metadata = {})
           validate_vector!(vector)
-          quoted_id = @connection.quote(id)
-          quoted_metadata = @connection.quote(JSON.generate(metadata))
-          vector_literal = "[#{vector.join(',')}]"
+          entry = format_entry(id, vector, metadata)
 
           @connection.execute(<<~SQL)
             INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
-            VALUES (#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)
+            VALUES #{entry}
             ON CONFLICT (id) DO UPDATE SET
               embedding = EXCLUDED.embedding,
               metadata = EXCLUDED.metadata,
@@ -78,10 +76,7 @@ module CodebaseIndex
 
           values = entries.map do |entry|
             validate_vector!(entry[:vector])
-            quoted_id = @connection.quote(entry[:id])
-            quoted_metadata = @connection.quote(JSON.generate(entry[:metadata] || {}))
-            vector_literal = "[#{entry[:vector].join(',')}]"
-            "(#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)"
+            format_entry(entry[:id], entry[:vector], entry[:metadata] || {})
           end
 
           @connection.execute(<<~SQL)
@@ -137,6 +132,19 @@ module CodebaseIndex
         end
 
         private
+
+        # Format a single entry as a SQL VALUES tuple.
+        #
+        # @param id [String] Unique identifier
+        # @param vector [Array<Float>] Embedding vector
+        # @param metadata [Hash] Entry metadata
+        # @return [String] SQL values row literal
+        def format_entry(id, vector, metadata)
+          quoted_id = @connection.quote(id)
+          quoted_metadata = @connection.quote(JSON.generate(metadata))
+          vector_literal = "[#{vector.join(',')}]"
+          "(#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)"
+        end
 
         # Convert a database row to a SearchResult.
         #

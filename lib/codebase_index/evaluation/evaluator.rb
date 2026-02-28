@@ -23,6 +23,8 @@ module CodebaseIndex
       # Aggregate report across all queries.
       EvaluationReport = Struct.new(:results, :aggregates, keyword_init: true)
 
+      METRIC_KEYS = %i[precision_at5 precision_at10 recall mrr context_completeness token_efficiency].freeze
+
       # @param retriever [CodebaseIndex::Retriever] Configured retriever instance
       # @param query_set [QuerySet] Set of evaluation queries with ground truth
       # @param budget [Integer] Token budget per query
@@ -113,10 +115,9 @@ module CodebaseIndex
       def compute_aggregates(results)
         return empty_aggregates if results.empty?
 
-        metric_keys = %i[precision_at5 precision_at10 recall mrr context_completeness token_efficiency]
         aggregates = {}
 
-        metric_keys.each do |key|
+        METRIC_KEYS.each do |key|
           values = results.map { |r| r.scores[key] }
           aggregates[:"mean_#{key}"] = values.sum / values.size.to_f
         end
@@ -130,16 +131,8 @@ module CodebaseIndex
       #
       # @return [Hash]
       def empty_aggregates
-        {
-          mean_precision_at5: 0.0,
-          mean_precision_at10: 0.0,
-          mean_recall: 0.0,
-          mean_mrr: 0.0,
-          mean_context_completeness: 0.0,
-          mean_token_efficiency: 0.0,
-          total_queries: 0,
-          mean_tokens_used: 0.0
-        }
+        METRIC_KEYS.to_h { |key| [:"mean_#{key}", 0.0] }
+                   .merge(total_queries: 0, mean_tokens_used: 0.0)
       end
     end
   end

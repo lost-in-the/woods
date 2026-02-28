@@ -56,7 +56,7 @@ module CodebaseIndex
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a policy
       def extract_policy_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(file_path, source)
+        class_name = extract_class_name(file_path, source, 'policies')
 
         return nil unless class_name
         return nil if skip_file?(source)
@@ -79,25 +79,6 @@ module CodebaseIndex
       end
 
       private
-
-      # ──────────────────────────────────────────────────────────────────────
-      # Class Discovery
-      # ──────────────────────────────────────────────────────────────────────
-
-      def extract_class_name(file_path, source)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
-
-        file_path
-          .sub("#{Rails.root}/", '')
-          .sub(%r{^app/policies/}, '')
-          .sub('.rb', '')
-          .camelize
-      end
-
-      def skip_file?(source)
-        # Skip module-only files (concerns, base modules)
-        source.match?(/^\s*module\s+\w+\s*$/) && !source.match?(/^\s*class\s+/)
-      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Source Annotation
@@ -187,10 +168,6 @@ module CodebaseIndex
         source.match?(/< ApplicationPolicy/) ||
           source.match?(/def\s+initialize\s*\(\s*user\s*,/) ||
           source.match?(/attr_reader\s+:user\s*,\s*:record/)
-      end
-
-      def extract_custom_errors(source)
-        source.scan(/class\s+(\w+(?:Error|Exception))\s*</).flatten
       end
 
       # ──────────────────────────────────────────────────────────────────────

@@ -4,6 +4,31 @@ require_relative 'chunk'
 
 module CodebaseIndex
   module Chunking
+    # Shared method-detection patterns used by ModelChunker and ControllerChunker.
+    METHOD_PATTERN = /^\s*def\s+/
+    PRIVATE_PATTERN = /^\s*(private|protected)\s*$/
+
+    # Mixin that provides the shared build_chunk helper for chunker classes.
+    #
+    # Requires the including class to have an @unit ivar (ExtractedUnit).
+    module ChunkBuilder
+      private
+
+      # Build a Chunk for a given section.
+      #
+      # @param chunk_type [Symbol]
+      # @param content [String]
+      # @return [Chunk]
+      def build_chunk(chunk_type, content)
+        Chunk.new(
+          content: content,
+          chunk_type: chunk_type,
+          parent_identifier: @unit.identifier,
+          parent_type: @unit.type
+        )
+      end
+    end
+
     # Splits ExtractedUnits into semantic chunks based on unit type.
     #
     # Models are split by: summary, associations, validations, callbacks,
@@ -62,13 +87,13 @@ module CodebaseIndex
     #
     # @api private
     class ModelChunker
+      include ChunkBuilder
+
       ASSOCIATION_PATTERN = /^\s*(has_many|has_one|belongs_to|has_and_belongs_to_many)\b/
       VALIDATION_PATTERN = /^\s*validates?\b/
       CALLBACK_ACTIONS = '(save|create|update|destroy|validation|action|commit|rollback|find|initialize|touch)'
       CALLBACK_PATTERN = /^\s*(before_|after_|around_)#{CALLBACK_ACTIONS}\b/
       SCOPE_PATTERN = /^\s*scope\s+:/
-      METHOD_PATTERN = /^\s*def\s+/
-      PRIVATE_PATTERN = /^\s*(private|protected)\s*$/
 
       SECTION_PATTERNS = {
         associations: ASSOCIATION_PATTERN,
@@ -181,16 +206,6 @@ module CodebaseIndex
           state[:sections][state[:current]] << line
         end
       end
-
-      # @return [Chunk]
-      def build_chunk(chunk_type, content)
-        Chunk.new(
-          content: content,
-          chunk_type: chunk_type,
-          parent_identifier: @unit.identifier,
-          parent_type: @unit.type
-        )
-      end
     end
 
     # Chunks a controller unit by actions: summary (class + filters),
@@ -198,9 +213,9 @@ module CodebaseIndex
     #
     # @api private
     class ControllerChunker
+      include ChunkBuilder
+
       FILTER_PATTERN = /^\s*(before_action|after_action|around_action|skip_before_action)\b/
-      METHOD_PATTERN = /^\s*def\s+/
-      PRIVATE_PATTERN = /^\s*(private|protected)\s*$/
 
       # @param unit [ExtractedUnit]
       def initialize(unit)
@@ -274,16 +289,6 @@ module CodebaseIndex
         end
 
         chunks
-      end
-
-      # @return [Chunk]
-      def build_chunk(chunk_type, content)
-        Chunk.new(
-          content: content,
-          chunk_type: chunk_type,
-          parent_identifier: @unit.identifier,
-          parent_type: @unit.type
-        )
       end
     end
   end

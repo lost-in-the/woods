@@ -212,23 +212,6 @@ module CodebaseIndex
         }
       end
 
-      # Extract the parent class name from a class definition.
-      #
-      # @param source [String] Ruby source code
-      # @return [String, nil] Parent class name or nil
-      def extract_parent_class(source)
-        match = source.match(/^\s*class\s+[\w:]+\s*<\s*([\w:]+)/)
-        match ? match[1] : nil
-      end
-
-      # Count non-blank, non-comment lines of code.
-      #
-      # @param source [String] Ruby source code
-      # @return [Integer] LOC count
-      def count_loc(source)
-        source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
-      end
-
       # ──────────────────────────────────────────────────────────────────────
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────

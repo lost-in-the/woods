@@ -18,6 +18,7 @@ module CodebaseIndex
     #
     class ClassAnalyzer
       include FqnBuilder
+      include Ast::SourceSpan
 
       # @param parser [Ast::Parser, nil] Parser instance (creates default if nil)
       def initialize(parser: nil)
@@ -43,22 +44,14 @@ module CodebaseIndex
 
         case node.type
         when :class
-          process_class(node, source, file_path, namespace_stack, units)
+          process_definition(node, :ruby_class, source, file_path, namespace_stack, units)
         when :module
-          process_module(node, source, file_path, namespace_stack, units)
+          process_definition(node, :ruby_module, source, file_path, namespace_stack, units)
         else
           (node.children || []).each do |child|
             extract_definitions(child, source, file_path, namespace_stack, units)
           end
         end
-      end
-
-      def process_class(node, source, file_path, namespace_stack, units)
-        process_definition(node, :ruby_class, source, file_path, namespace_stack, units)
-      end
-
-      def process_module(node, source, file_path, namespace_stack, units)
-        process_definition(node, :ruby_module, source, file_path, namespace_stack, units)
       end
 
       def process_definition(node, type, source, file_path, namespace_stack, units)
@@ -144,13 +137,7 @@ module CodebaseIndex
 
       # Count def and defs nodes in body children (non-recursive — only direct methods).
       def count_methods(body_children)
-        count = 0
-        body_children.each do |child|
-          next unless child.is_a?(Ast::Node)
-
-          count += 1 if %i[def defs].include?(child.type)
-        end
-        count
+        body_children.count { |child| child.is_a?(Ast::Node) && %i[def defs].include?(child.type) }
       end
 
       # Build the constant name from a :const node (may have receiver for namespaced).
@@ -163,14 +150,7 @@ module CodebaseIndex
 
       # Extract source text for a node using line range.
       def extract_source(node, source)
-        return nil unless node.line && node.end_line
-
-        lines = source.lines
-        start_idx = node.line - 1
-        end_idx = node.end_line - 1
-        return nil if start_idx.negative? || end_idx >= lines.length
-
-        lines[start_idx..end_idx].join
+        extract_source_span(source, node.line, node.end_line)
       end
 
       # Build dependency list from superclass, includes, and extends.
