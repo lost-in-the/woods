@@ -510,10 +510,37 @@ bundle exec rake codebase_index:extract_framework
 
 ### Docker
 
+When using Docker, extraction runs inside the container but the Index Server runs on the host (it reads static JSON, no Rails needed). The Console Server connects to the container for live queries.
+
 ```bash
+# Extraction (inside container)
 docker compose exec app bundle exec rake codebase_index:extract
 docker compose exec app bundle exec rake codebase_index:incremental
 ```
+
+Docker `.mcp.json` — both servers configured:
+
+```json
+{
+  "mcpServers": {
+    "codebase-index": {
+      "command": "codebase-index-mcp-start",
+      "args": ["./tmp/codebase_index"]
+    },
+    "codebase-console": {
+      "command": "docker",
+      "args": [
+        "compose", "exec", "-i", "app",
+        "bundle", "exec", "rake", "codebase_index:console"
+      ]
+    }
+  }
+}
+```
+
+> **Note:** The Index Server `args` path must be the **host path** to the volume-mounted extraction output, not the container path. The Console Server uses `docker compose exec -i` to pipe MCP protocol into the container.
+
+See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for the full Docker guide — architecture overview, bridge mode for all 31 console tools, path translation, and troubleshooting.
 
 ### Other Tasks
 

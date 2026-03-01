@@ -56,6 +56,25 @@ codebase-index-mcp-http /path/to/rails-app/tmp/codebase_index
 }
 ```
 
+### Docker Note
+
+The Index Server runs on the **host**, not inside Docker. It reads static JSON files and does not need Rails. Point it at the volume-mounted extraction output using the host-side path:
+
+```json
+{
+  "mcpServers": {
+    "codebase": {
+      "command": "codebase-index-mcp-start",
+      "args": ["./tmp/codebase_index"]
+    }
+  }
+}
+```
+
+Do **not** use the container path (e.g., `/app/tmp/codebase_index`) — the server cannot access it. The `codebase-index-mcp-start` wrapper validates the directory and `manifest.json` before starting.
+
+See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
+
 ### Tools (27)
 
 #### Core Query (6)

@@ -23,6 +23,8 @@ end
 bundle install
 ```
 
+> **Docker:** Run `docker compose exec app bundle install` and all subsequent commands through `docker compose exec app ...`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker workflow.
+
 Then run the install generator:
 
 ```bash
@@ -67,6 +69,9 @@ Run a full extraction from your Rails app root:
 
 ```bash
 bundle exec rake codebase_index:extract
+
+# Docker:
+# docker compose exec app bundle exec rake codebase_index:extract
 ```
 
 This will:
@@ -153,6 +158,8 @@ Configure in your AI tool's MCP settings:
 codebase-console-mcp
 ```
 
+> **Docker:** The Index Server runs on the host reading volume-mounted output — use the host path in `.mcp.json`. The Console Server connects to the container via `docker compose exec -i`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for Docker-specific `.mcp.json` examples.
+
 See [MCP_SERVERS.md](MCP_SERVERS.md) for detailed setup instructions.
 
 ## 6. Incremental Updates
@@ -178,6 +185,13 @@ jobs:
         run: bundle exec rake codebase_index:incremental
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
+```
+
+For Docker-based CI, replace the run command with your compose equivalent:
+
+```yaml
+      - name: Update index
+        run: docker compose exec -T app bundle exec rake codebase_index:incremental
 ```
 
 ## Next Steps
