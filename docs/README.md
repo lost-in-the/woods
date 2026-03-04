@@ -19,6 +19,12 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) | Console MCP server setup — stdio, Docker, HTTP/Rack, SSH bridge, tool tiers, safety model |
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
 | [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/codebase-index-mcp-http`) |
+| [FAQ.md](FAQ.md) | Frequently asked questions — general, setup, extraction, MCP servers, Docker, storage |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix for extraction, MCP, embedding, storage, Docker, and Notion problems |
+| [WHY_CODEBASE_INDEX.md](WHY_CODEBASE_INDEX.md) | What CodebaseIndex is, why it exists, before/after examples |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline stages, ExtractedUnit, dependency graph, retrieval, storage backends, MCP servers |
+| [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 34 extractors captures, edge cases, example output |
+| [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
 
 ## Reference
 
@@ -36,8 +42,6 @@ Historical design documents from the build phase are in [design/](design/) (see 
 
 | Document | Scope |
 |----------|-------|
-| ARCHITECTURE.md | Pipeline stages, ExtractedUnit, dependency graph, backend agnosticism |
-| EXTRACTOR_REFERENCE.md | Per-extractor output details, edge cases, how to add a new extractor |
 | RETRIEVAL_GUIDE.md | Query classification, search strategies, RRF ranking, token budget tuning |
 | API_REFERENCE.md | Key public classes and interfaces (may generate from YARD) |
 

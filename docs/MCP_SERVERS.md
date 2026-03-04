@@ -13,6 +13,27 @@ CodebaseIndex ships two MCP (Model Context Protocol) servers that integrate with
 | **Data source** | `tmp/codebase_index/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
 
+## Choosing the Right Tool
+
+| I want to... | Tool | Server |
+|---|---|---|
+| Look up a specific model or controller | `lookup` | Index |
+| Search for code patterns | `search` | Index |
+| Find what depends on a unit | `dependents` | Index |
+| Find what a unit depends on | `dependencies` | Index |
+| Trace an execution flow | `trace_flow` | Index |
+| Count database records | `console_count` | Console |
+| Sample records for debugging | `console_sample` | Console |
+| Check database schema | `console_schema` | Console |
+| Diagnose a model's data | `console_diagnose_model` | Console |
+| Monitor job queues | `console_job_queues` | Console |
+| Find dead code | `graph_analysis` | Index |
+| Check codebase health | `pipeline_status` | Index |
+
+For detailed examples with parameters and expected output, see [MCP Tool Cookbook](MCP_TOOL_COOKBOOK.md).
+
+---
+
 ## Index Server
 
 The Index Server reads pre-extracted data from disk and serves it via MCP. No Rails boot required — it works with the JSON output from `rake codebase_index:extract`.

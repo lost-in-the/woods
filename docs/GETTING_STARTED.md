@@ -194,9 +194,21 @@ For Docker-based CI, replace the run command with your compose equivalent:
         run: docker compose exec -T app bundle exec rake codebase_index:incremental
 ```
 
+## Common First-Run Issues
+
+**Extraction produces 0 units** — Rails booted but `eager_load!` failed. Run `bundle exec rails runner 'Rails.application.eager_load!; puts "OK"'` and look for `NameError`. The most common cause is `app/graphql/` referencing an uninstalled gem.
+
+**"manifest.json not found" from MCP server** — The Index Server path is wrong. It needs the extraction output directory (`tmp/codebase_index`), not the Rails root. Verify with `ls tmp/codebase_index/manifest.json`.
+
+**Console server shows only 9 tools** — Expected behavior in embedded mode (rake task / Docker exec). Use bridge mode for all 31 tools. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md).
+
+For more, see [Troubleshooting](TROUBLESHOOTING.md).
+
 ## Next Steps
 
 - [Configuration Reference](CONFIGURATION_REFERENCE.md) — all options with defaults and examples
 - [MCP Servers](MCP_SERVERS.md) — index server vs console server, tool catalog, setup guides
 - [Backend Matrix](BACKEND_MATRIX.md) — supported database, vector store, and embedding combinations
+- [FAQ](FAQ.md) — common questions about setup, extraction, MCP, Docker
+- [Troubleshooting](TROUBLESHOOTING.md) — symptom → cause → fix for common problems
 - [Coverage Gap Analysis](COVERAGE_GAP_ANALYSIS.md) — what's extracted and what's not (yet)
