@@ -153,6 +153,16 @@ RSpec.describe CodebaseIndex::Extractors::ViewComponentExtractor do
       end
     end
 
+    context 'with a framework-internal component (no file_path)' do
+      it 'returns nil' do
+        internal_class = build_component(name: 'ViewComponent::InternalThing', params: [])
+
+        extractor = described_class.new
+        result = extractor.extract_component(internal_class)
+        expect(result).to be_nil
+      end
+    end
+
     context 'with a valid component' do
       let(:component_class) do
         build_component(
@@ -195,6 +205,10 @@ RSpec.describe CodebaseIndex::Extractors::ViewComponentExtractor do
     end
 
     context 'when extraction raises an error' do
+      let(:file_system) do
+        { '/rails/app/components/broken_component.rb' => 'class BrokenComponent; end' }
+      end
+
       it 'logs the error and returns nil' do
         klass = Class.new
         klass.define_singleton_method(:name) { 'BrokenComponent' }

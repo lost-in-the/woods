@@ -717,9 +717,16 @@ module CodebaseIndex
     def write_graph_analysis
       return unless @graph_analysis
 
+      enriched = @graph_analysis.merge(
+        generated_at: Time.current.iso8601,
+        graph_sha: Digest::SHA256.hexdigest(
+          File.read(@output_dir.join('dependency_graph.json'))
+        )
+      )
+
       File.write(
         @output_dir.join('graph_analysis.json'),
-        json_serialize(@graph_analysis)
+        json_serialize(enriched)
       )
     end
 
@@ -850,10 +857,11 @@ module CodebaseIndex
     end
 
     def schema_sha
-      schema_path = Rails.root.join('db/schema.rb')
-      return nil unless schema_path.exist?
-
-      Digest::SHA256.file(schema_path).hexdigest
+      %w[db/schema.rb db/structure.sql].each do |path|
+        full = Rails.root.join(path)
+        return Digest::SHA256.file(full).hexdigest if full.exist?
+      end
+      nil
     end
 
     def json_serialize(data)

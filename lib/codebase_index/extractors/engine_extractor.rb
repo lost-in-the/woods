@@ -132,7 +132,8 @@ module CodebaseIndex
           mounted_path: mounted_path,
           route_count: route_count,
           isolate_namespace: isolated,
-          controllers: controllers
+          controllers: controllers,
+          engine_source: framework_engine?(engine) ? :framework : :application
         }
         unit.dependencies = build_engine_dependencies(controllers)
 
@@ -140,6 +141,24 @@ module CodebaseIndex
       rescue StandardError => e
         Rails.logger.error("Failed to extract engine #{engine.name}: #{e.message}")
         nil
+      end
+
+      # Check if an engine is a framework gem rather than an application engine.
+      #
+      # An engine is framework if it lives outside Rails.root, or inside
+      # Rails.root but under vendor/bundle or bundler/gems (common in Docker
+      # where Rails.root is /app and gems install to /app/vendor/bundle).
+      #
+      # @param engine [Class] A Rails::Engine subclass
+      # @return [Boolean]
+      def framework_engine?(engine)
+        root = engine.root.to_s
+
+        # Engine outside Rails.root is definitely framework
+        return true unless root.start_with?(Rails.root.to_s)
+
+        # Engine inside Rails.root but in vendor/bundler paths is framework
+        root.include?('/vendor/') || root.include?('/bundler/gems/')
       end
 
       # Count routes defined by an engine.

@@ -1,6 +1,6 @@
 # CodebaseIndex: Use Cases & Feature Gap Analysis
 
-Comprehensive evaluation of CodebaseIndex's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 32 extractors, the retrieval pipeline, both MCP servers (26 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
+Comprehensive evaluation of CodebaseIndex's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 32 extractors, the retrieval pipeline, both MCP servers (27 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
 
 ---
 

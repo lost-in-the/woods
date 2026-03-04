@@ -1,0 +1,19 @@
+{
+  "url": "https://context7.com/leaharmstrong/codebase_index",
+  "public_key": "pk_lHvYkoK2DwC8Cbj0p10kg",
+  "folders": ["docs"],
+  "excludeFolders": [
+    "docs/design",
+    "docs/design/plans",
+    "docs/self-analysis",
+    "_project-resources",
+    ".claude",
+    "spec",
+    "lib"
+  ],
+  "excludeFiles": [
+    "docs/TOKEN_BENCHMARK.md",
+    "docs/COVERAGE_GAP_ANALYSIS.md",
+    "docs/USE_CASES_AND_FEATURE_GAPS.md"
+  ]
+}

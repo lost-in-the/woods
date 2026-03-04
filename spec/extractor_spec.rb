@@ -159,6 +159,41 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── schema_sha ─────────────────────────────────────────────────────
+
+  describe '#schema_sha' do
+    it 'returns SHA for db/schema.rb when it exists' do
+      FileUtils.mkdir_p(File.join(tmpdir, 'db'))
+      File.write(File.join(tmpdir, 'db', 'schema.rb'), 'ActiveRecord::Schema.define {}')
+
+      result = extractor.send(:schema_sha)
+      expect(result).to match(/\A[a-f0-9]{64}\z/)
+    end
+
+    it 'falls back to db/structure.sql when schema.rb does not exist' do
+      FileUtils.mkdir_p(File.join(tmpdir, 'db'))
+      File.write(File.join(tmpdir, 'db', 'structure.sql'), 'CREATE TABLE users;')
+
+      result = extractor.send(:schema_sha)
+      expect(result).to match(/\A[a-f0-9]{64}\z/)
+    end
+
+    it 'prefers schema.rb over structure.sql when both exist' do
+      FileUtils.mkdir_p(File.join(tmpdir, 'db'))
+      File.write(File.join(tmpdir, 'db', 'schema.rb'), 'schema content')
+      File.write(File.join(tmpdir, 'db', 'structure.sql'), 'structure content')
+
+      expected = Digest::SHA256.hexdigest('schema content')
+      result = extractor.send(:schema_sha)
+      expect(result).to eq(expected)
+    end
+
+    it 'returns nil when neither file exists' do
+      result = extractor.send(:schema_sha)
+      expect(result).to be_nil
+    end
+  end
+
   # ── batch_git_data ───────────────────────────────────────────────────
 
   describe '#batch_git_data' do
@@ -396,6 +431,63 @@ RSpec.describe CodebaseIndex::Extractor do
 
     it 'does not include graphql (handled separately)' do
       expect(CodebaseIndex::Extractor::EXTRACTION_DIRECTORIES).not_to include('graphql')
+    end
+  end
+
+  # ── write_graph_analysis ────────────────────────────────────────────
+
+  describe '#write_graph_analysis' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor)  { described_class.new(output_dir: output_dir) }
+
+    before do
+      require 'codebase_index'
+      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+
+      # write_graph_analysis reads dependency_graph.json to compute graph_sha
+      File.write(File.join(output_dir, 'dependency_graph.json'), '{"nodes":{},"edges":[]}')
+
+      require 'active_support'
+      require 'active_support/core_ext/time'
+    end
+
+    after do
+      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+    end
+
+    it 'includes generated_at timestamp' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expect(output).to have_key('generated_at')
+      expect(output['generated_at']).to match(/\d{4}-\d{2}-\d{2}T/)
+    end
+
+    it 'includes graph_sha matching dependency_graph.json content' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expected_sha = Digest::SHA256.hexdigest('{"nodes":{},"edges":[]}')
+      expect(output['graph_sha']).to eq(expected_sha)
+    end
+
+    it 'preserves original analysis data alongside staleness metadata' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: %w[User Post], orphans: ['Legacy'] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expect(output['hubs']).to eq(%w[User Post])
+      expect(output['orphans']).to eq(['Legacy'])
+    end
+
+    it 'does not write when @graph_analysis is nil' do
+      extractor.instance_variable_set(:@graph_analysis, nil)
+      extractor.send(:write_graph_analysis)
+
+      expect(File.exist?(File.join(output_dir, 'graph_analysis.json'))).to be false
     end
   end
 

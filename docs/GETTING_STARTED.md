@@ -23,6 +23,8 @@ end
 bundle install
 ```
 
+> **Docker:** Run `docker compose exec app bundle install` and all subsequent commands through `docker compose exec app ...`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker workflow.
+
 Then run the install generator:
 
 ```bash
@@ -67,6 +69,9 @@ Run a full extraction from your Rails app root:
 
 ```bash
 bundle exec rake codebase_index:extract
+
+# Docker:
+# docker compose exec app bundle exec rake codebase_index:extract
 ```
 
 This will:
@@ -113,7 +118,7 @@ Each unit JSON contains:
 | Field | Description |
 |-------|-------------|
 | `identifier` | Unique name (e.g., `User`, `OrdersController`) |
-| `unit_type` | Category (model, controller, service, job, etc.) |
+| `type` | Category (model, controller, service, job, etc.) |
 | `file_path` | Source file location relative to Rails.root |
 | `source_code` | Annotated source with inlined concerns and schema |
 | `metadata` | Rich structured data (associations, callbacks, routes, etc.) |
@@ -153,6 +158,8 @@ Configure in your AI tool's MCP settings:
 codebase-console-mcp
 ```
 
+> **Docker:** The Index Server runs on the host reading volume-mounted output — use the host path in `.mcp.json`. The Console Server connects to the container via `docker compose exec -i`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for Docker-specific `.mcp.json` examples.
+
 See [MCP_SERVERS.md](MCP_SERVERS.md) for detailed setup instructions.
 
 ## 6. Incremental Updates
@@ -180,9 +187,28 @@ jobs:
           GITHUB_BASE_REF: ${{ github.base_ref }}
 ```
 
+For Docker-based CI, replace the run command with your compose equivalent:
+
+```yaml
+      - name: Update index
+        run: docker compose exec -T app bundle exec rake codebase_index:incremental
+```
+
+## Common First-Run Issues
+
+**Extraction produces 0 units** — Rails booted but `eager_load!` failed. Run `bundle exec rails runner 'Rails.application.eager_load!; puts "OK"'` and look for `NameError`. The most common cause is `app/graphql/` referencing an uninstalled gem.
+
+**"manifest.json not found" from MCP server** — The Index Server path is wrong. It needs the extraction output directory (`tmp/codebase_index`), not the Rails root. Verify with `ls tmp/codebase_index/manifest.json`.
+
+**Console server shows only 9 tools** — Expected behavior in embedded mode (rake task / Docker exec). Use bridge mode for all 31 tools. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md).
+
+For more, see [Troubleshooting](TROUBLESHOOTING.md).
+
 ## Next Steps
 
 - [Configuration Reference](CONFIGURATION_REFERENCE.md) — all options with defaults and examples
 - [MCP Servers](MCP_SERVERS.md) — index server vs console server, tool catalog, setup guides
 - [Backend Matrix](BACKEND_MATRIX.md) — supported database, vector store, and embedding combinations
+- [FAQ](FAQ.md) — common questions about setup, extraction, MCP, Docker
+- [Troubleshooting](TROUBLESHOOTING.md) — symptom → cause → fix for common problems
 - [Coverage Gap Analysis](COVERAGE_GAP_ANALYSIS.md) — what's extracted and what's not (yet)
