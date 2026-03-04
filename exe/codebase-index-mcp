@@ -21,8 +21,9 @@ require_relative '../lib/codebase_index/embedding/indexer'
 
 index_dir = CodebaseIndex::MCP::Bootstrapper.resolve_index_dir(ARGV)
 retriever = CodebaseIndex::MCP::Bootstrapper.build_retriever
+snapshot_store = CodebaseIndex::MCP::Bootstrapper.build_snapshot_store(index_dir)
 
-server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever)
+server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
 
 # Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
 if ENV['MCP_PROTOCOL_VERSION']

@@ -207,6 +207,7 @@ module CodebaseIndex
       @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/codebase_index'))
       @dependency_graph = DependencyGraph.new
       @results = {}
+      @extractors = {}
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -268,6 +269,7 @@ module CodebaseIndex
       write_graph_analysis
       write_manifest
       write_structural_summary
+      capture_snapshot
 
       log_summary
 
@@ -317,6 +319,7 @@ module CodebaseIndex
       write_dependency_graph
       write_manifest
       write_structural_summary
+      capture_snapshot
 
       affected_ids
     end
@@ -377,6 +380,7 @@ module CodebaseIndex
         start_time = Time.current
 
         extractor = extractor_class.new
+        @extractors[type] = extractor
         units = extractor.extract_all
 
         @results[type] = units
@@ -415,7 +419,10 @@ module CodebaseIndex
           elapsed = Time.current - start_time
           Rails.logger.info "[CodebaseIndex] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
 
-          results_mutex.synchronize { @results[type] = units }
+          results_mutex.synchronize do
+            @results[type] = units
+            @extractors[type] = extractor
+          end
         rescue StandardError => e
           Rails.logger.error "[CodebaseIndex] [Thread] #{type} failed: #{e.message}"
           results_mutex.synchronize { @results[type] = [] }
@@ -743,9 +750,10 @@ module CodebaseIndex
         total_units: @results.values.sum(&:size),
         total_chunks: @results.sum { |_, units| units.sum { |u| u.chunks.size } },
 
-        # Git info
-        git_sha: run_git('rev-parse', 'HEAD').presence,
-        git_branch: run_git('rev-parse', '--abbrev-ref', 'HEAD').presence,
+        # Git info — fall back to env vars for Docker/worktree environments
+        # where the git repo may not be directly accessible
+        git_sha: run_git('rev-parse', 'HEAD').presence || ENV['GIT_SHA'].presence,
+        git_branch: run_git('rev-parse', '--abbrev-ref', 'HEAD').presence || ENV['GIT_BRANCH'].presence,
 
         # For change detection
         gemfile_lock_sha: gemfile_lock_sha,
@@ -756,6 +764,51 @@ module CodebaseIndex
         @output_dir.join('manifest.json'),
         json_serialize(manifest)
       )
+    end
+
+    # Capture a temporal snapshot after extraction completes.
+    #
+    # Reads the manifest and computes per-unit content hashes, then delegates
+    # to the SnapshotStore for storage and diff computation. Requires
+    # enable_snapshots and a valid git_sha in the manifest.
+    #
+    # @return [void]
+    def capture_snapshot
+      return unless CodebaseIndex.configuration.enable_snapshots
+
+      manifest_path = @output_dir.join('manifest.json')
+      return unless manifest_path.exist?
+
+      manifest = JSON.parse(File.read(manifest_path))
+      return unless manifest['git_sha']
+
+      require 'sqlite3'
+      require_relative 'db/migrator'
+      require_relative 'temporal/snapshot_store'
+
+      db_path = @output_dir.join('codebase_index.sqlite3')
+      db = SQLite3::Database.new(db_path.to_s)
+      db.results_as_hash = true
+
+      CodebaseIndex::Db::Migrator.new(connection: db).migrate!
+      store = CodebaseIndex::Temporal::SnapshotStore.new(connection: db)
+
+      unit_hashes = @results.flat_map do |type, units|
+        units.map do |unit|
+          {
+            'identifier' => unit.identifier,
+            'type' => type.to_s,
+            'source_hash' => Digest::SHA256.hexdigest(unit.source_code.to_s),
+            'metadata_hash' => Digest::SHA256.hexdigest(unit.metadata.to_json),
+            'dependencies_hash' => Digest::SHA256.hexdigest(unit.dependencies.to_json)
+          }
+        end
+      end
+
+      store.capture(manifest, unit_hashes)
+      Rails.logger.info "[CodebaseIndex] Snapshot captured for #{manifest['git_sha'][0..7]}"
+    rescue StandardError => e
+      Rails.logger.warn "[CodebaseIndex] Snapshot capture failed: #{e.message}"
     end
 
     # Write a compact TOC-style summary of extracted units.
@@ -886,6 +939,16 @@ module CodebaseIndex
       Rails.logger.info "[CodebaseIndex]   Total: #{total} units, #{chunks} chunks"
       Rails.logger.info "[CodebaseIndex]   Output: #{@output_dir}"
       Rails.logger.info '[CodebaseIndex] ═══════════════════════════════════════════'
+
+      all_warnings = @extractors.flat_map do |_type, ext|
+        ext.respond_to?(:warnings) ? ext.warnings : []
+      end
+
+      return if all_warnings.empty?
+
+      Rails.logger.warn '[CodebaseIndex] ───────────────────────────────────────────'
+      Rails.logger.warn "[CodebaseIndex]   Warnings (#{all_warnings.size}):"
+      all_warnings.each { |w| Rails.logger.warn "[CodebaseIndex]     #{w}" }
     end
 
     # ──────────────────────────────────────────────────────────────────────

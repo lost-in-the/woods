@@ -656,4 +656,54 @@ RSpec.describe CodebaseIndex::Extractor do
       expect(content).not_to include('Minor')
     end
   end
+
+  # ── log_summary — warnings ────────────────────────────────────────
+
+  describe '#log_summary' do
+    let(:logger) { double('Logger').as_null_object }
+    let(:output_dir) { File.join(tmpdir, 'output') }
+
+    before do
+      allow(Rails).to receive(:logger).and_return(logger)
+      extractor.instance_variable_set(:@results, {})
+    end
+
+    it 'logs warnings from extractors that respond to :warnings' do
+      mock_extractor = double('MockExtractor')
+      allow(mock_extractor).to receive(:respond_to?).with(:warnings).and_return(true)
+      warning_msg = '[Post] Skipping broken association tags: ' \
+                    'uninitialized constant Tags'
+      allow(mock_extractor).to receive(:warnings).and_return([warning_msg])
+
+      extractor.instance_variable_set(:@extractors, { model: mock_extractor })
+
+      expect(logger).to receive(:warn).with(a_string_including('Warnings (1)'))
+      expect(logger).to receive(:warn).with(a_string_including('Skipping broken association tags'))
+
+      extractor.send(:log_summary)
+    end
+
+    it 'does not log a warnings section when no extractors have warnings' do
+      mock_extractor = double('MockExtractor')
+      allow(mock_extractor).to receive(:respond_to?).with(:warnings).and_return(true)
+      allow(mock_extractor).to receive(:warnings).and_return([])
+
+      extractor.instance_variable_set(:@extractors, { model: mock_extractor })
+
+      expect(logger).not_to receive(:warn)
+
+      extractor.send(:log_summary)
+    end
+
+    it 'skips extractors that do not respond to :warnings' do
+      mock_extractor = double('MockExtractor')
+      allow(mock_extractor).to receive(:respond_to?).with(:warnings).and_return(false)
+
+      extractor.instance_variable_set(:@extractors, { route: mock_extractor })
+
+      expect(logger).not_to receive(:warn)
+
+      extractor.send(:log_summary)
+    end
+  end
 end

@@ -36,8 +36,12 @@ module CodebaseIndex
         (?:after|before)_(?:add|remove)_for_         # collection callbacks
       )/x
 
+      # Warnings collected during extraction (skipped associations, failed models)
+      attr_reader :warnings
+
       def initialize
         @concern_cache = {}
+        @warnings = []
       end
 
       # Extract all ActiveRecord models in the application
@@ -79,6 +83,7 @@ module CodebaseIndex
 
         unit
       rescue StandardError => e
+        @warnings << "Failed to extract model #{model.name}: #{e.message}"
         Rails.logger.error("Failed to extract model #{model.name}: #{e.message}")
         nil
       end
@@ -415,9 +420,11 @@ module CodebaseIndex
         result
       end
 
-      # Extract all associations with full details
+      # Extract all associations with full details.
+      # Broken associations (e.g. missing class_name) are skipped with a warning
+      # instead of aborting the entire model extraction.
       def extract_associations(model)
-        model.reflect_on_all_associations.map do |assoc|
+        model.reflect_on_all_associations.filter_map do |assoc|
           {
             name: assoc.name,
             type: assoc.macro, # :belongs_to, :has_many, :has_one, :has_and_belongs_to_many
@@ -428,6 +435,9 @@ module CodebaseIndex
             foreign_key: assoc.foreign_key,
             inverse_of: assoc.inverse_of&.name
           }
+        rescue StandardError => e
+          @warnings << "[#{model.name}] Skipping broken association #{assoc.name}: #{e.message}"
+          nil
         end
       end
 

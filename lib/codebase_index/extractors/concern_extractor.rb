@@ -25,13 +25,20 @@ module CodebaseIndex
       include SharedUtilityMethods
       include SharedDependencyScanner
 
-      # Directories to scan for concern modules
+      # Canonical concern directories (used as fallback if glob finds nothing).
       CONCERN_DIRECTORIES = %w[
         app/models/concerns
         app/controllers/concerns
       ].freeze
 
       def initialize
+        # Discover all concerns/ directories under app/, including deeply nested ones
+        # like app/models/gateway/stripe/webhook/concerns/.
+        @directories = Dir[Rails.root.join('app/**/concerns')].map { |d| Pathname.new(d) }
+                                                              .select(&:directory?)
+        # Fall back to canonical directories if glob finds nothing.
+        return unless @directories.empty?
+
         @directories = CONCERN_DIRECTORIES.map { |d| Rails.root.join(d) }
                                           .select(&:directory?)
       end
@@ -91,10 +98,11 @@ module CodebaseIndex
         modules = source.scan(/^\s*module\s+([\w:]+)/).flatten
         return modules.last if modules.any?
 
-        # Infer from file path
+        # Infer from file path — strip everything up to and including the first concerns/ dir.
+        # Handles canonical (app/models/concerns/) and nested (app/models/foo/concerns/) paths.
         relative = file_path.sub("#{Rails.root}/", '')
         relative
-          .sub(%r{^app/(models|controllers)/concerns/}, '')
+          .sub(%r{^app/.*?/concerns/}, '')
           .sub('.rb', '')
           .split('/')
           .map { |segment| segment.split('_').map(&:capitalize).join }
