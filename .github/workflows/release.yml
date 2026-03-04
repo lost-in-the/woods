@@ -47,4 +47,3 @@ jobs:
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2
         with:
           generate_release_notes: true
-          files: codebase_index-*.gem
