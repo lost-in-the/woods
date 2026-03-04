@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative 'lib/codebase_index/version'
+
 Gem::Specification.new do |spec|
   spec.name          = 'codebase_index'
-  spec.version       = '0.2.1'
+  spec.version       = CodebaseIndex::VERSION
   spec.authors       = ['Leah Armstrong']
   spec.email         = ['info@leah.wtf']
 

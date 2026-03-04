@@ -34,8 +34,15 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Publish to RubyGems
-        uses: rubygems/release-gem@1c162a739e8b4cb21a676e97b087e8268d8fc40b # v1.1.2
+      - name: Configure RubyGems credentials
+        uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
+        with:
+          gem-server: https://rubygems.org
+          audience: rubygems.org
+      - name: Build gem
+        run: gem build codebase_index.gemspec
+      - name: Push to RubyGems
+        run: gem push codebase_index-*.gem
       - name: Create GitHub Release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2
         with:
