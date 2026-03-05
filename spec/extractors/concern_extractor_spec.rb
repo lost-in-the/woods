@@ -392,5 +392,41 @@ RSpec.describe CodebaseIndex::Extractors::ConcernExtractor do
       job_deps = unit.dependencies.select { |d| d[:type] == :job }
       expect(job_deps.first[:target]).to eq('ProcessingJob')
     end
+
+    it 'gives extended concerns via: :extend' do
+      path = create_file('app/models/concerns/class_methods_provider.rb', <<~RUBY)
+        module ClassMethodsProvider
+          extend ActiveSupport::Concern
+          extend Queryable
+
+          def instance_method
+            "instance"
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      extend_dep = unit.dependencies.find { |d| d[:target] == 'Queryable' }
+      expect(extend_dep).not_to be_nil
+      expect(extend_dep[:via]).to eq(:extend)
+      expect(extend_dep[:type]).to eq(:concern)
+    end
+
+    it 'excludes ActiveSupport::Concern from extend dependencies' do
+      path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
+        module Searchable
+          extend ActiveSupport::Concern
+
+          def search_summary
+            "summary"
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      concern_deps = unit.dependencies.select { |d| d[:type] == :concern }
+      as_concern_dep = concern_deps.find { |d| d[:target] == 'ActiveSupport::Concern' }
+      expect(as_concern_dep).to be_nil
+    end
   end
 end

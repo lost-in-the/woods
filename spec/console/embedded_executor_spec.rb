@@ -419,6 +419,55 @@ RSpec.describe CodebaseIndex::Console::EmbeddedExecutor do
       end
     end
 
+    context 'array-form scope' do
+      let(:user_model) { class_double('User') }
+      let(:scoped) { instance_double('ActiveRecord::Relation') }
+
+      before do
+        stub_const('User', user_model)
+      end
+
+      it 'applies array-form scope for JSON column queries' do
+        allow(user_model).to receive(:where).with("preferences->>'theme' = ?", 'dark').and_return(scoped)
+        allow(scoped).to receive(:count).and_return(7)
+
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => {
+                                             'model' => 'User',
+                                             'scope' => ["preferences->>'theme' = ?", 'dark']
+                                           }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['count']).to eq(7)
+      end
+
+      it 'ignores empty array scope' do
+        allow(user_model).to receive(:count).and_return(42)
+
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => [] }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['count']).to eq(42)
+      end
+
+      it 'ignores non-hash non-array scope' do
+        allow(user_model).to receive(:count).and_return(42)
+
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => 'invalid' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['count']).to eq(42)
+      end
+    end
+
     context 'error handling' do
       it 'wraps StandardError as execution errors' do
         allow(connection).to receive(:transaction).and_raise(StandardError, 'DB gone')
@@ -428,6 +477,130 @@ RSpec.describe CodebaseIndex::Console::EmbeddedExecutor do
         expect(response['ok']).to be false
         expect(response['error']).to eq('DB gone')
         expect(response['error_type']).to eq('execution')
+      end
+    end
+
+    # ── Read tools (sql/query) gated by read_tools_enabled ──────────
+
+    context 'read tools disabled (default)' do
+      it 'returns unsupported error for sql tool' do
+        response = executor.send_request({ 'tool' => 'sql', 'params' => { 'sql' => 'SELECT 1' } })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('unsupported')
+      end
+
+      it 'returns unsupported error for query tool' do
+        response = executor.send_request({
+                                           'tool' => 'query',
+                                           'params' => { 'model' => 'User', 'select' => ['id'] }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('unsupported')
+      end
+    end
+
+    context 'read tools enabled' do
+      subject(:executor_with_read) do
+        described_class.new(
+          model_validator: validator, safe_context: safe_context,
+          connection: connection, read_tools_enabled: true
+        )
+      end
+
+      context 'sql tool' do
+        let(:select_result) do
+          instance_double('ActiveRecord::Result', columns: %w[id], rows: [[1], [2]], count: 2)
+        end
+
+        it 'executes valid SELECT statement' do
+          allow(connection).to receive(:select_all).and_return(select_result)
+
+          response = executor_with_read.send_request({
+                                                       'tool' => 'sql',
+                                                       'params' => { 'sql' => 'SELECT id FROM users' }
+                                                     })
+
+          expect(response['ok']).to be true
+          expect(response['result']['columns']).to eq(%w[id])
+          expect(response['result']['rows']).to eq([[1], [2]])
+        end
+
+        it 'rejects DML statements' do
+          response = executor_with_read.send_request({
+                                                       'tool' => 'sql',
+                                                       'params' => { 'sql' => 'DELETE FROM users' }
+                                                     })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+          expect(response['error']).to match(/DELETE/)
+        end
+
+        it 'applies limit when provided' do
+          allow(connection).to receive(:select_all).and_return(select_result)
+
+          executor_with_read.send_request({
+                                            'tool' => 'sql',
+                                            'params' => { 'sql' => 'SELECT id FROM users', 'limit' => 5 }
+                                          })
+
+          expect(connection).to have_received(:select_all).with(
+            a_string_matching(/LIMIT 5/)
+          )
+        end
+
+        it 'caps limit at 10000' do
+          allow(connection).to receive(:select_all).and_return(select_result)
+
+          executor_with_read.send_request({
+                                            'tool' => 'sql',
+                                            'params' => { 'sql' => 'SELECT id FROM users', 'limit' => 99_999 }
+                                          })
+
+          expect(connection).to have_received(:select_all).with(
+            a_string_matching(/LIMIT 10000/)
+          )
+        end
+      end
+
+      context 'query tool' do
+        let(:user_model) { class_double('User') }
+        let(:relation) { instance_double('ActiveRecord::Relation') }
+        let(:query_result) do
+          instance_double('ActiveRecord::Result', columns: %w[id email], rows: [[1, 'a@b.com']], count: 1)
+        end
+
+        before do
+          stub_const('User', user_model)
+          allow(user_model).to receive(:all).and_return(relation)
+          allow(relation).to receive(:select).and_return(relation)
+          allow(relation).to receive(:limit).and_return(relation)
+          allow(relation).to receive(:to_sql).and_return('SELECT id, email FROM users LIMIT 10000')
+          allow(connection).to receive(:select_all).and_return(query_result)
+        end
+
+        it 'builds and executes structured query' do
+          response = executor_with_read.send_request({
+                                                       'tool' => 'query',
+                                                       'params' => { 'model' => 'User', 'select' => %w[id email] }
+                                                     })
+
+          expect(response['ok']).to be true
+          expect(response['result']['columns']).to eq(%w[id email])
+          expect(response['result']['rows']).to eq([[1, 'a@b.com']])
+        end
+
+        it 'rejects invalid model' do
+          response = executor_with_read.send_request({
+                                                       'tool' => 'query',
+                                                       'params' => { 'model' => 'Hacker', 'select' => ['id'] }
+                                                     })
+
+          expect(response['ok']).to be false
+          expect(response['error']).to match(/Unknown model/)
+        end
       end
     end
   end

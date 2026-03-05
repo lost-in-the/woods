@@ -973,6 +973,31 @@ RSpec.describe CodebaseIndex::MCP::Server do
   end
 
   # ────────────────────────────────────────────────────────────────────
+  # Integer coercion (Issue A: MCP clients may send "2" instead of 2)
+  # ────────────────────────────────────────────────────────────────────
+
+  describe 'integer parameter coercion' do
+    it 'coerces string limit in search tool' do
+      response = call_tool(server, 'search', query: 'o', limit: '1')
+      data = parse_response(response)
+      expect(data['results'].size).to eq(1)
+    end
+
+    it 'coerces string depth in dependencies tool' do
+      response = call_tool(server, 'dependencies', identifier: 'Comment', depth: '1')
+      data = parse_response(response)
+      expect(data['root']).to eq('Comment')
+    end
+
+    it 'coerces string budget in codebase_retrieve tool' do
+      # Without a retriever, the tool returns a fallback message regardless of budget,
+      # but the coercion must not raise on the string value.
+      response = call_tool(server, 'codebase_retrieve', query: 'test', budget: '4000')
+      expect(response_text(response)).to include('Semantic search is not available')
+    end
+  end
+
+  # ────────────────────────────────────────────────────────────────────
   # Helpers
   # ────────────────────────────────────────────────────────────────────
 

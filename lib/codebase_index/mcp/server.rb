@@ -106,6 +106,16 @@ module CodebaseIndex
           value.is_a?(String) ? [value] : value
         end
 
+        # Coerce a value to an Integer. Converts String representations
+        # to Integer; leaves existing Integers and nil unchanged.
+        # MCP clients may send "2" (string) instead of 2 (integer).
+        #
+        # @param value [String, Integer, nil] The input value
+        # @return [Integer, nil]
+        def coerce_integer(value)
+          value.is_a?(String) ? value.to_i : value
+        end
+
         # Apply offset+limit pagination to a single section key within a container hash.
         # Adds `_total`, `_truncated`, and `_offset` metadata keys when truncating.
         #
@@ -166,6 +176,7 @@ module CodebaseIndex
 
         def define_search_tool(server, reader, respond, renderer)
           coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'search',
             description: 'Search code units by pattern. Matches against identifiers by default; can also search source_code and metadata fields.',
@@ -187,6 +198,7 @@ module CodebaseIndex
           ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
             types = coerce.call(types)
             fields = coerce.call(fields)
+            limit = coerce_int.call(limit)
             results = reader.search(
               query,
               types: types,
@@ -203,6 +215,7 @@ module CodebaseIndex
 
         def define_traversal_tool(server, reader, respond, renderer, name:, description:, reader_method:, render_key:)
           coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: name,
             description: description,
@@ -219,6 +232,7 @@ module CodebaseIndex
             }
           ) do |identifier:, server_context:, depth: nil, types: nil|
             types = coerce.call(types)
+            depth = coerce_int.call(depth)
             result = reader.send(reader_method, identifier, depth: depth || 2, types: types)
             if result[:found] == false
               result[:message] =
@@ -249,6 +263,7 @@ module CodebaseIndex
 
         def define_graph_analysis_tool(server, reader, respond, renderer)
           paginate = method(:paginate_section)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'graph_analysis',
             description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, and bridges.',
@@ -264,6 +279,8 @@ module CodebaseIndex
               }
             }
           ) do |server_context:, analysis: nil, limit: nil, offset: nil|
+            limit = coerce_int.call(limit)
+            offset = coerce_int.call(offset)
             data = reader.graph_analysis
             section = analysis || 'all'
             effective_offset = offset || 0
@@ -290,6 +307,7 @@ module CodebaseIndex
 
         def define_pagerank_tool(server, reader, respond, renderer)
           coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'pagerank',
             description: 'Get PageRank importance scores for code units. Higher scores indicate more structurally important nodes.',
@@ -304,6 +322,7 @@ module CodebaseIndex
             }
           ) do |server_context:, limit: nil, types: nil|
             types = coerce.call(types)
+            limit = coerce_int.call(limit)
             scores = reader.dependency_graph.pagerank
             graph_data = reader.raw_graph_data
             nodes = graph_data['nodes'] || {}
@@ -329,6 +348,7 @@ module CodebaseIndex
         end
 
         def define_framework_tool(server, reader, respond, renderer)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'framework',
             description: 'Search Rails framework source units by concept keyword. Matches against identifier, ' \
@@ -342,6 +362,7 @@ module CodebaseIndex
               required: ['keyword']
             }
           ) do |keyword:, server_context:, limit: nil|
+            limit = coerce_int.call(limit)
             results = reader.framework_sources(keyword, limit: limit || 20)
             respond.call(renderer.render(:framework, {
                                            keyword: keyword,
@@ -353,6 +374,7 @@ module CodebaseIndex
 
         def define_recent_changes_tool(server, reader, respond, renderer)
           coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'recent_changes',
             description: 'List recently modified code units sorted by git last_modified timestamp. ' \
@@ -368,6 +390,7 @@ module CodebaseIndex
             }
           ) do |server_context:, limit: nil, types: nil|
             types = coerce.call(types)
+            limit = coerce_int.call(limit)
             results = reader.recent_changes(limit: limit || 10, types: types)
             respond.call(renderer.render(:recent_changes, {
                                            result_count: results.size,
@@ -395,6 +418,7 @@ module CodebaseIndex
         end
 
         def define_retrieve_tool(server, retriever, respond)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'codebase_retrieve',
             description: 'Retrieve relevant codebase context for a natural language query using semantic search. ' \
@@ -408,6 +432,7 @@ module CodebaseIndex
               required: ['query']
             }
           ) do |query:, server_context:, budget: nil|
+            budget = coerce_int.call(budget)
             if retriever
               result = retriever.retrieve(query, budget: budget || 8000)
               respond.call(result.context)
@@ -423,6 +448,7 @@ module CodebaseIndex
         def define_trace_flow_tool(server, reader, index_dir, respond, renderer)
           require_relative '../flow_assembler'
           require_relative '../dependency_graph'
+          coerce_int = method(:coerce_integer)
 
           server.define_tool(
             name: 'trace_flow',
@@ -441,7 +467,7 @@ module CodebaseIndex
               required: ['entry_point']
             }
           ) do |entry_point:, server_context:, depth: nil|
-            max_depth = depth || 3
+            max_depth = coerce_int.call(depth) || 3
             graph = reader.dependency_graph
 
             assembler = CodebaseIndex::FlowAssembler.new(
@@ -457,6 +483,7 @@ module CodebaseIndex
         end
 
         def define_session_trace_tool(server, reader, respond)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'session_trace',
             description: 'Assemble context from a browser session trace (requires session tracer middleware)',
@@ -469,6 +496,8 @@ module CodebaseIndex
               required: ['session_id']
             }
           ) do |session_id:, server_context:, budget: nil, depth: nil|
+            budget = coerce_int.call(budget)
+            depth = coerce_int.call(depth)
             store = CodebaseIndex.configuration.session_store
             next respond.call(JSON.pretty_generate({ error: 'Session tracer not configured' })) unless store
 
@@ -651,6 +680,7 @@ module CodebaseIndex
         end
 
         def define_retrieval_rate_tool(server, feedback_store, respond)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'retrieval_rate',
             description: 'Record a quality rating for a retrieval result (1-5 scale).',
@@ -665,6 +695,7 @@ module CodebaseIndex
           ) do |query:, score:, server_context:, comment: nil|
             next respond.call('Feedback store is not configured.') unless feedback_store
 
+            score = coerce_int.call(score)
             feedback_store.record_rating(query: query, score: score, comment: comment)
             respond.call(JSON.pretty_generate({ recorded: true, type: 'rating', query: query, score: score }))
           end
@@ -740,6 +771,7 @@ module CodebaseIndex
         end
 
         def define_list_snapshots_tool(server, snapshot_store, respond)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'list_snapshots',
             description: 'List temporal snapshots of past extraction runs, optionally filtered by branch.',
@@ -752,6 +784,7 @@ module CodebaseIndex
           ) do |server_context:, limit: nil, branch: nil|
             next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
 
+            limit = coerce_int.call(limit)
             results = snapshot_store.list(limit: limit || 20, branch: branch)
             respond.call(JSON.pretty_generate({ snapshot_count: results.size, snapshots: results }))
           end
@@ -783,6 +816,7 @@ module CodebaseIndex
         end
 
         def define_unit_history_tool(server, snapshot_store, respond)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'unit_history',
             description: 'Show the history of a single unit across extraction snapshots. Tracks when source changed.',
@@ -796,6 +830,7 @@ module CodebaseIndex
           ) do |identifier:, server_context:, limit: nil|
             next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
 
+            limit = coerce_int.call(limit)
             entries = snapshot_store.unit_history(identifier, limit: limit || 20)
             respond.call(JSON.pretty_generate({
                                                 identifier: identifier,

@@ -231,6 +231,34 @@ bundle exec rake codebase_index:console 2>/dev/null
 
 ---
 
+### Parallel tool calls fail together (sibling call failures)
+
+**Symptom:** When an MCP client sends multiple tool calls in parallel and one fails, all sibling calls in the same batch also fail.
+
+**Cause:** This is MCP client behavior, not a server bug. Some clients (including Claude Desktop and Claude Code) batch parallel tool calls into one request. If any call in the batch raises an error, the transport may reject the entire response frame.
+
+**Fix:** There is no server-side fix. Workarounds:
+
+1. **Send one tool call at a time.** If your client supports sequential mode, use it for unreliable calls.
+2. **Validate parameters before calling.** Use `search` to confirm identifiers exist before passing them to `dependencies` or `lookup`.
+3. **Avoid mixing high-risk and low-risk calls.** A `lookup` with a typo will take down a parallel `search` that would have succeeded.
+
+---
+
+### MCP client disconnects mid-session
+
+**Symptom:** The MCP client reports "server disconnected" or "transport closed" during normal use.
+
+**Cause:** Several possible causes — the server process crashed, the stdio transport pipe was broken, or the client's idle timeout expired.
+
+**Fix:**
+
+1. Check server stderr for crash output.
+2. Use `codebase-index-mcp-start` (the self-healing wrapper) instead of `codebase-index-mcp` directly — it restarts the server on crash.
+3. For Docker setups, ensure the container stays running: `docker compose exec -d app tail -f /dev/null` keeps it alive.
+
+---
+
 ### Console queries time out on large tables
 
 **Symptom:** `console_count` or `console_sample` times out with an error mentioning statement timeout.
@@ -522,3 +550,4 @@ config.notion_database_ids = {
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
+| Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |

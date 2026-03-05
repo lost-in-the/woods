@@ -16,9 +16,11 @@ module CodebaseIndex
     class RackMiddleware
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the MCP endpoint (default: '/mcp/console')
-      def initialize(app, path: '/mcp/console')
+      # @param embedded_read_tools [Boolean] Enable sql/query tools in embedded mode (default: false)
+      def initialize(app, path: '/mcp/console', embedded_read_tools: false)
         @app = app
         @path = path
+        @embedded_read_tools = embedded_read_tools
         @mutex = Mutex.new
         @transport = nil
       end
@@ -71,7 +73,8 @@ module CodebaseIndex
           server = Server.build_embedded(
             model_validator: validator,
             safe_context: safe_context,
-            redacted_columns: redacted
+            redacted_columns: redacted,
+            read_tools_enabled: @embedded_read_tools
           )
 
           @transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)

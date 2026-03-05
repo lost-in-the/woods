@@ -164,6 +164,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
 - Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
 - `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."
+- `EmbeddedExecutor` blocks sql/query tools by default. Set `read_tools_enabled: true` (via `embedded_read_tools:` on `RackMiddleware` or `Server.build_embedded`) to enable them. Even when enabled, SqlValidator + SafeContext rollback provide defense-in-depth.
 - `CircuitBreaker` state is per-instance, not global. Each provider/store gets its own breaker. Don't share breaker instances across unrelated components.
 - Embedding dimensions must match between provider and vector store. A mismatch (e.g., switching models) requires full re-index — `IndexValidator` detects this.
 - `PipelineGuard` enforces a 5-minute cooldown on full extraction/embedding runs. Incremental runs are not rate-limited.
