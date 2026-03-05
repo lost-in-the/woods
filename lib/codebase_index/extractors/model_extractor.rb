@@ -237,6 +237,37 @@ module CodebaseIndex
         end
       end
 
+      # Get modules extended specifically in this model (not inherited).
+      #
+      # Extended modules live on the singleton class and add class-level methods.
+      # Ruby builtins (Kernel, PP, etc.) are filtered out by comparing against
+      # Object.singleton_class.included_modules.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @return [Array<Module>] App-defined modules extended by this model
+      def extract_extended_modules(model)
+        app_root = Rails.root.to_s
+        builtin_modules = Object.singleton_class.included_modules.map(&:name).compact.to_set
+
+        model.singleton_class.included_modules.select do |mod|
+          next false unless mod.name
+          next false if builtin_modules.include?(mod.name)
+
+          # Skip obvious non-app modules (from gems/stdlib)
+          if Object.respond_to?(:const_source_location)
+            loc = Object.const_source_location(mod.name)
+            next false if loc && !app_source?(loc.first, app_root)
+          end
+
+          # Include if it's in app/models/concerns or app/controllers/concerns
+          mod.name.include?('Concerns') ||
+            # Or if it's namespaced under the model's parent
+            mod.name.start_with?("#{model.module_parent}::") ||
+            # Or if it's defined within the application
+            defined_in_app?(mod)
+        end
+      end
+
       # Check if a module is defined within the Rails application
       #
       # @param mod [Module] The module to check
@@ -577,6 +608,16 @@ module CodebaseIndex
         rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
           nil
+        end
+
+        # Included concerns add instance-level behavior
+        extract_included_modules(model).each do |mod|
+          deps << { type: :concern, target: mod.name, via: :include }
+        end
+
+        # Extended modules add class-level behavior (not inlined into source)
+        extract_extended_modules(model).each do |mod|
+          deps << { type: :concern, target: mod.name, via: :extend }
         end
 
         # Parse source for service/mailer/job references

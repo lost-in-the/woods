@@ -517,6 +517,87 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
   end
 
+  # ── extract_dependencies (concern tracking) ───────────────────────
+
+  describe '#extract_dependencies (concern via labels)' do
+    let(:app_root) { '/app' }
+    let(:rails_root) { Pathname.new(app_root) }
+
+    before do
+      stub_const('Rails', double('Rails', root: rails_root, logger: double(error: nil)))
+    end
+
+    it 'gives included concerns via: :include' do
+      included_mod = Module.new
+      allow(included_mod).to receive(:name).and_return('Concerns::Searchable')
+
+      model = double('Model',
+                     name: 'Post',
+                     module_parent: Object,
+                     reflect_on_all_associations: [],
+                     included_modules: [included_mod],
+                     singleton_class: double('SC', included_modules: []))
+
+      allow(extractor).to receive(:app_source?).and_return(true)
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(extractor).to receive(:defined_in_app?).and_return(true)
+      allow(extractor).to receive(:source_file_for).and_return(nil)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+      include_dep = deps.find { |d| d[:target] == 'Concerns::Searchable' }
+      expect(include_dep).not_to be_nil
+      expect(include_dep[:via]).to eq(:include)
+      expect(include_dep[:type]).to eq(:concern)
+    end
+
+    it 'gives extended concerns via: :extend' do
+      extended_mod = Module.new
+      allow(extended_mod).to receive(:name).and_return('Concerns::ClassMethods')
+
+      builtin_sc = double('Object SC', included_modules: [])
+      singleton_class_double = double('SC', included_modules: [extended_mod])
+
+      model = double('Model',
+                     name: 'Post',
+                     module_parent: Object,
+                     reflect_on_all_associations: [],
+                     included_modules: [],
+                     singleton_class: singleton_class_double)
+
+      allow(Object).to receive(:singleton_class).and_return(builtin_sc)
+      allow(extractor).to receive(:app_source?).and_return(true)
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(extractor).to receive(:defined_in_app?).and_return(true)
+      allow(extractor).to receive(:source_file_for).and_return(nil)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+      extend_dep = deps.find { |d| d[:target] == 'Concerns::ClassMethods' }
+      expect(extend_dep).not_to be_nil
+      expect(extend_dep[:via]).to eq(:extend)
+      expect(extend_dep[:type]).to eq(:concern)
+    end
+
+    it 'does not leak Ruby builtin modules (e.g., Kernel, PP) as extend deps' do
+      kernel_mod = Kernel
+      singleton_class_double = double('SC', included_modules: [kernel_mod])
+
+      model = double('Model',
+                     name: 'Post',
+                     module_parent: Object,
+                     reflect_on_all_associations: [],
+                     included_modules: [],
+                     singleton_class: singleton_class_double)
+
+      allow(extractor).to receive(:source_file_for).and_return(nil)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+      kernel_dep = deps.find { |d| d[:target] == 'Kernel' }
+      expect(kernel_dep).to be_nil
+    end
+  end
+
   # ── build_callback_effects_chunk ──────────────────────────────────
 
   describe '#build_callback_effects_chunk' do

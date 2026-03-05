@@ -253,6 +253,12 @@ See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for the full bridge setup guide
 
 ---
 
+### Why do my parallel tool calls all fail when only one has a bad argument?
+
+This is an MCP client behavior, not a server bug. Some clients batch parallel tool calls into a single protocol request. If one call in the batch fails (e.g., a typo in an identifier), the transport layer may reject the entire response. There is no server-side fix — the workaround is to validate arguments first (use `search` to confirm identifiers exist) or send calls sequentially when any call is unreliable. See the [Troubleshooting guide](TROUBLESHOOTING.md#parallel-tool-calls-fail-together-sibling-call-failures) for details.
+
+---
+
 ## Docker
 
 ### Does extraction run inside or outside the container?

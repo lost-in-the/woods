@@ -205,12 +205,37 @@ module CodebaseIndex
         source.scan(/^\s*def\s+(\w+[?!=]?)/).flatten.reject { |m| m.start_with?('self.') }
       end
 
-      # Detect other modules included by this concern.
+      # Detect other modules included or extended by this concern (for metadata display).
+      #
+      # Returns all module names found in include/extend calls, excluding
+      # ActiveSupport::Concern itself.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Module names
       def detect_included_modules(source)
         source.scan(/(?:include|extend)\s+([\w:]+)/).flatten
+              .reject { |m| m == 'ActiveSupport::Concern' }
+      end
+
+      # Detect modules explicitly included by this concern.
+      #
+      # Scans for bare +include ModuleName+ calls, excluding ActiveSupport::Concern.
+      #
+      # @param source [String] Ruby source code
+      # @return [Array<String>] Included module names
+      def detect_includes(source)
+        source.scan(/\binclude\s+([\w:]+)/).flatten
+              .reject { |m| m == 'ActiveSupport::Concern' }
+      end
+
+      # Detect modules explicitly extended by this concern.
+      #
+      # Scans for bare +extend ModuleName+ calls, excluding ActiveSupport::Concern.
+      #
+      # @param source [String] Ruby source code
+      # @return [Array<String>] Extended module names
+      def detect_extends(source)
+        source.scan(/\bextend\s+([\w:]+)/).flatten
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 
@@ -245,9 +270,14 @@ module CodebaseIndex
       # @param source [String] Ruby source code
       # @return [Array<Hash>] Dependency hashes
       def extract_dependencies(source)
-        # Other concerns included by this concern
-        deps = detect_included_modules(source).map do |mod|
+        # Concerns included by this concern (add instance-level behavior)
+        deps = detect_includes(source).map do |mod|
           { type: :concern, target: mod, via: :include }
+        end
+
+        # Concerns extended by this concern (add class-level behavior)
+        detect_extends(source).each do |mod|
+          deps << { type: :concern, target: mod, via: :extend }
         end
 
         # Standard dependency scanning

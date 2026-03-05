@@ -56,12 +56,15 @@ module CodebaseIndex
         # @param safe_context [SafeContext] Wraps queries in rolled-back transactions
         # @param redacted_columns [Array<String>] Column names to redact from output
         # @param connection [Object, nil] Database connection for adapter detection
+        # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
         # @return [MCP::Server] Configured server ready for transport
-        def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil)
+        def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil,
+                           read_tools_enabled: false)
           require_relative 'embedded_executor'
 
           executor = EmbeddedExecutor.new(
-            model_validator: model_validator, safe_context: safe_context, connection: connection
+            model_validator: model_validator, safe_context: safe_context,
+            connection: connection, read_tools_enabled: read_tools_enabled
           )
           redact_ctx = if redacted_columns.any?
                          SafeContext.new(connection: nil,
@@ -568,14 +571,34 @@ module CodebaseIndex
         def define_console_tool(server, conn_mgr, name, description, properties:, required: nil,
                                 safe_ctx: nil, renderer: nil, &tool_block)
           bridge_method = method(:send_to_bridge)
+          coerce_method = method(:coerce_integer_args!)
+          integer_keys = integer_property_keys(properties)
           schema = { properties: properties }
           schema[:required] = required if required&.any?
           server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
+            coerce_method.call(args, integer_keys)
             request = tool_block.call(args)
             bridge_method.call(conn_mgr, request.transform_keys(&:to_s), safe_ctx, renderer: renderer)
           end
         end
         # rubocop:enable Metrics/ParameterLists
+
+        # Pre-compute property keys declared as integer in a schema.
+        #
+        # @param properties [Hash] Tool schema properties
+        # @return [Array<Symbol>]
+        def integer_property_keys(properties)
+          properties.select { |_k, v| v[:type] == 'integer' }.keys.map(&:to_sym)
+        end
+
+        # Coerce string values to integers for known integer keys.
+        #
+        # @param args [Hash] Tool arguments (mutated in place)
+        # @param keys [Array<Symbol>] Keys that should be integers
+        # @return [void]
+        def coerce_integer_args!(args, keys)
+          keys.each { |k| args[k] = args[k].to_i if args[k].is_a?(String) }
+        end
 
         # Schema property helpers for concise tool definitions.
         def str_prop(desc)  = { type: 'string', description: desc }

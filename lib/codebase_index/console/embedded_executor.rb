@@ -23,13 +23,23 @@ module CodebaseIndex
 
       TIER1_TOOLS = Bridge::TIER1_TOOLS
 
+      # Tools gated behind the read_tools_enabled flag.
+      # sql/query have existing safety gates (SqlValidator, SafeContext rollback)
+      # but require explicit opt-in for embedded mode.
+      EMBEDDED_READ_TOOLS = %w[sql query].freeze
+
+      MAX_SQL_LIMIT = 10_000
+      MAX_QUERY_LIMIT = 10_000
+
       # @param model_validator [ModelValidator] Validates model/column names
       # @param safe_context [SafeContext] Wraps execution in rolled-back transaction
       # @param connection [Object, nil] Database connection for adapter detection
-      def initialize(model_validator:, safe_context:, connection: nil)
+      # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
+      def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false)
         @model_validator = model_validator
         @safe_context = safe_context
         @connection = connection
+        @read_tools_enabled = read_tools_enabled
       end
 
       # Execute a tool request and return a response hash.
@@ -46,7 +56,7 @@ module CodebaseIndex
         tool = request['tool']
         params = request['params'] || {}
 
-        unless TIER1_TOOLS.include?(tool)
+        unless TIER1_TOOLS.include?(tool) || (@read_tools_enabled && EMBEDDED_READ_TOOLS.include?(tool))
           return { 'ok' => false,
                    'error' => 'Not yet implemented in embedded mode',
                    'error_type' => 'unsupported' }
@@ -72,8 +82,10 @@ module CodebaseIndex
       # @return [Hash] Tool result
       def dispatch(tool, params)
         case tool
-        when 'status'  then handle_status
-        when 'schema'  then handle_schema(params)
+        when 'status' then handle_status
+        when 'schema' then handle_schema(params)
+        when 'sql'    then handle_sql(params)
+        when 'query'  then handle_query(params)
         else
           validate_model!(params)
           send(:"handle_#{tool}", params)
@@ -211,17 +223,86 @@ module CodebaseIndex
         { 'status' => 'ok', 'models' => @model_validator.model_names, 'adapter' => adapter }
       end
 
+      # ── Read tools (sql/query, gated by read_tools_enabled) ────────────
+
+      # Execute validated read-only SQL via ActiveRecord's select_all.
+      #
+      # @param params [Hash] Must contain 'sql'; optional 'limit'
+      # @return [Hash] Columns and rows
+      def handle_sql(params)
+        sql = params['sql']
+        raise ValidationError, 'Missing required parameter: sql' unless sql
+
+        require_relative 'sql_validator'
+        SqlValidator.new.validate!(sql)
+
+        limit = params['limit'] ? [params['limit'].to_i, MAX_SQL_LIMIT].min : nil
+        query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
+        result = active_connection.select_all(query_sql)
+
+        { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
+      rescue SqlValidationError => e
+        raise ValidationError, e.message
+      end
+
+      # Build and execute a structured ActiveRecord query.
+      #
+      # @param params [Hash] Must contain 'model' and 'select'
+      # @return [Hash] Columns and rows
+      def handle_query(params)
+        validate_model!(params)
+        model = resolve_model(params['model'])
+        relation = build_query_relation(model, params)
+        result = active_connection.select_all(relation.to_sql)
+        { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
+      end
+
+      # Build an ActiveRecord relation from structured query parameters.
+      #
+      # @param model [Class] ActiveRecord model class
+      # @param params [Hash] Query parameters (select, joins, scope, group_by, having, order, limit)
+      # @return [ActiveRecord::Relation]
+      def build_query_relation(model, params)
+        relation = apply_query_clauses(model.all, params)
+        limit = params['limit'] ? [params['limit'].to_i, MAX_QUERY_LIMIT].min : MAX_QUERY_LIMIT
+        relation.limit(limit)
+      end
+
+      # Apply select/joins/scope/group/having/order clauses to a relation.
+      #
+      # @param relation [ActiveRecord::Relation]
+      # @param params [Hash]
+      # @return [ActiveRecord::Relation]
+      def apply_query_clauses(relation, params) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        relation = relation.select(params['select']) if params['select']
+        relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
+        relation = apply_scope(relation, params['scope'])
+        relation = relation.group(params['group_by']) if params['group_by']&.any?
+        relation = relation.having(params['having']) if params['having']
+        relation = relation.order(params['order']) if params['order']
+        relation
+      end
+
       # ── Helpers ──────────────────────────────────────────────────────────
 
       # Apply scope conditions (WHERE clauses) to a relation.
       #
+      # Accepts Hash form for simple equality conditions, or Array form
+      # for parameterized SQL (e.g., JSON column queries like
+      # ["preferences->>'theme' = ?", "dark"]).
+      #
       # @param relation [ActiveRecord::Relation, Class] Model or relation
-      # @param scope [Hash, nil] Filter conditions
+      # @param scope [Hash, Array, nil] Filter conditions
       # @return [ActiveRecord::Relation]
       def apply_scope(relation, scope)
-        return relation unless scope.is_a?(Hash) && scope.any?
-
-        relation.where(scope)
+        case scope
+        when Hash
+          scope.any? ? relation.where(scope) : relation
+        when Array
+          scope.any? ? relation.where(*scope) : relation
+        else
+          relation
+        end
       end
 
       # Apply column selection to a relation.
