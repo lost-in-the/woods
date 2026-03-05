@@ -117,15 +117,17 @@ module CodebaseIndex
       end
 
       def index_units(unit_hashes)
-        unit_hashes.to_h do |uh|
+        unit_hashes.filter_map do |uh|
           id = mget(uh, 'identifier')
+          next if id.nil?
+
           [id, {
             unit_type: mget(uh, 'type').to_s,
             source_hash: mget(uh, 'source_hash'),
             metadata_hash: mget(uh, 'metadata_hash'),
             dependencies_hash: mget(uh, 'dependencies_hash')
           }]
-        end
+        end.to_h
       end
 
       def compute_diff(units_a, units_b) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity

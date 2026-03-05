@@ -572,8 +572,11 @@ module CodebaseIndex
       # Extract what this model depends on
       def extract_dependencies(model, source = nil)
         # Associations point to other models
-        deps = model.reflect_on_all_associations.map do |assoc|
+        deps = model.reflect_on_all_associations.filter_map do |assoc|
           { type: :model, target: assoc.class_name, via: :association }
+        rescue NameError => e
+          @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
+          nil
         end
 
         # Parse source for service/mailer/job references
