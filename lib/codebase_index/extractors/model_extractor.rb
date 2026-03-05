@@ -348,6 +348,9 @@ module CodebaseIndex
           table_exists: model.table_exists?,
           column_count: model.table_exists? ? model.columns.size : 0,
           column_names: model.table_exists? ? model.column_names : [],
+          columns: model.table_exists? ? model.columns.map { |col|
+            { 'name' => col.name, 'type' => col.sql_type, 'null' => col.null, 'default' => col.default }
+          } : [],
 
           # ActiveStorage / ActionText
           active_storage_attachments: extract_active_storage_attachments(source),
