@@ -414,6 +414,8 @@ module CodebaseIndex
           start_time = Time.current
 
           extractor = extractor_class.new
+          results_mutex.synchronize { @extractors[type] = extractor }
+
           units = extractor.extract_all
 
           elapsed = Time.current - start_time
@@ -421,7 +423,6 @@ module CodebaseIndex
 
           results_mutex.synchronize do
             @results[type] = units
-            @extractors[type] = extractor
           end
         rescue StandardError => e
           Rails.logger.error "[CodebaseIndex] [Thread] #{type} failed: #{e.message}"
@@ -800,7 +801,7 @@ module CodebaseIndex
       store.capture(manifest, unit_hashes)
       Rails.logger.info "[CodebaseIndex] Snapshot captured for #{manifest['git_sha'][0..7]}"
     rescue StandardError => e
-      Rails.logger.warn "[CodebaseIndex] Snapshot capture failed: #{e.message}"
+      Rails.logger.error "[CodebaseIndex] Snapshot capture failed (#{e.class}): #{e.message}"
     end
 
     # Build a snapshot store, preferring SQLite with JSON file fallback.
@@ -818,6 +819,7 @@ module CodebaseIndex
       Db::Migrator.new(connection: db).migrate!
       Temporal::SnapshotStore.new(connection: db)
     rescue LoadError
+      Rails.logger.info '[CodebaseIndex] sqlite3 gem not available, using JSON snapshot store'
       require_relative 'temporal/json_snapshot_store'
       Temporal::JsonSnapshotStore.new(dir: @output_dir.to_s)
     end

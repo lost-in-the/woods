@@ -8,7 +8,8 @@ module CodebaseIndex
     # ConcernExtractor handles ActiveSupport::Concern module extraction.
     #
     # Concerns are mixins that extend model and controller behavior.
-    # They live in `app/models/concerns/` and `app/controllers/concerns/`.
+    # They live in `app/models/concerns/` and `app/controllers/concerns/`,
+    # as well as nested directories like `app/models/gateway/stripe/concerns/`.
     #
     # We extract:
     # - Module name and namespace
@@ -187,9 +188,9 @@ module CodebaseIndex
       # @param file_path [String] Path to the concern file
       # @return [String] One of "model", "controller", "unknown"
       def detect_concern_scope(file_path)
-        if file_path.include?('app/models/concerns')
+        if file_path.include?('app/models/')
           'model'
-        elsif file_path.include?('app/controllers/concerns')
+        elsif file_path.include?('app/controllers/')
           'controller'
         else
           'unknown'

@@ -217,7 +217,7 @@ RSpec.describe CodebaseIndex::Extractors::ConcernExtractor do
       expect(unit.metadata[:concern_scope]).to eq('controller')
     end
 
-    it 'returns unknown concern_scope for deeply nested paths' do
+    it 'detects model concern_scope for deeply nested paths under app/models/' do
       path = create_file('app/models/gateway/stripe/concerns/refundable.rb', <<~RUBY)
         module Gateway::Stripe::Refundable
           extend ActiveSupport::Concern
@@ -227,7 +227,7 @@ RSpec.describe CodebaseIndex::Extractors::ConcernExtractor do
       RUBY
 
       unit = described_class.new.extract_concern_file(path)
-      expect(unit.metadata[:concern_scope]).to eq('unknown')
+      expect(unit.metadata[:concern_scope]).to eq('model')
     end
 
     it 'detects included modules' do

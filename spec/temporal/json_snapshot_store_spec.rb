@@ -56,6 +56,48 @@ RSpec.describe CodebaseIndex::Temporal::JsonSnapshotStore do
     ]
   end
 
+  # ── snapshot_path validation ──────────────────────────────────────
+
+  describe 'path traversal validation' do
+    it 'rejects git SHAs containing path traversal characters' do
+      expect { store.find('../../../etc/passwd') }.to raise_error(ArgumentError, /Invalid git SHA/)
+    end
+
+    it 'rejects git SHAs with spaces' do
+      expect { store.find('abc 123') }.to raise_error(ArgumentError, /Invalid git SHA/)
+    end
+
+    it 'accepts valid hex git SHAs' do
+      expect(store.find('aaa1111')).to be_nil # not found, but no error
+    end
+
+    it 'accepts uppercase hex git SHAs' do
+      expect(store.find('AAA1111')).to be_nil
+    end
+  end
+
+  # ── corrupt file handling ───────────────────────────────────────
+
+  describe 'corrupt file handling' do
+    it 'skips corrupt JSON files in list without raising' do
+      store.capture(manifest_v1, units_v1)
+      # Write a corrupt file into the snapshots directory
+      File.write(File.join(tmpdir, 'snapshots', 'corrupt.json'), 'not valid json{{{')
+
+      result = store.list
+      expect(result.size).to eq(1)
+      expect(result.first[:git_sha]).to eq('aaa1111')
+    end
+
+    it 'skips corrupt JSON files in unit_history without raising' do
+      store.capture(manifest_v1, units_v1)
+      File.write(File.join(tmpdir, 'snapshots', 'corrupt.json'), '{broken')
+
+      result = store.unit_history('User')
+      expect(result.size).to eq(1)
+    end
+  end
+
   # ── capture ────────────────────────────────────────────────────────
 
   describe '#capture' do
@@ -160,7 +202,7 @@ RSpec.describe CodebaseIndex::Temporal::JsonSnapshotStore do
     end
 
     it 'returns nil for unknown git SHA' do
-      expect(store.find('nonexistent')).to be_nil
+      expect(store.find('dead0000')).to be_nil
     end
   end
 
@@ -198,7 +240,7 @@ RSpec.describe CodebaseIndex::Temporal::JsonSnapshotStore do
     end
 
     it 'returns empty diff for unknown SHAs' do
-      result = store.diff('unknown1', 'unknown2')
+      result = store.diff('dead0001', 'dead0002')
       expect(result[:added]).to eq([])
       expect(result[:modified]).to eq([])
       expect(result[:deleted]).to eq([])

@@ -134,6 +134,104 @@ RSpec.describe CodebaseIndex::Extractor do
     end
   end
 
+  # ── build_snapshot_store ──────────────────────────────────────────────
+
+  describe '#build_snapshot_store' do
+    before do
+      require 'codebase_index'
+      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+    end
+
+    after do
+      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+    end
+
+    it 'falls back to JsonSnapshotStore on LoadError' do
+      allow(extractor).to receive(:require).with('sqlite3').and_raise(LoadError)
+
+      store = extractor.send(:build_snapshot_store)
+      expect(store).to be_a(CodebaseIndex::Temporal::JsonSnapshotStore)
+    end
+  end
+
+  # ── capture_snapshot ────────────────────────────────────────────────
+
+  describe '#capture_snapshot' do
+    before do
+      require 'codebase_index'
+      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+    end
+
+    after do
+      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+    end
+
+    it 'does nothing when enable_snapshots is false' do
+      CodebaseIndex.configuration.enable_snapshots = false
+      expect(extractor).not_to receive(:build_snapshot_store)
+
+      extractor.send(:capture_snapshot)
+    end
+
+    it 'rescues errors without aborting' do
+      CodebaseIndex.configuration.enable_snapshots = true
+
+      # Set up a manifest file
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(output_dir)
+      File.write(File.join(output_dir, 'manifest.json'), '{"git_sha":"abc123"}')
+
+      allow(extractor).to receive(:build_snapshot_store).and_raise(StandardError, 'boom')
+      extractor.instance_variable_set(:@results, {})
+
+      expect { extractor.send(:capture_snapshot) }.not_to raise_error
+    end
+  end
+
+  # ── extract_all_concurrent — warning survival ──────────────────────
+
+  describe '#extract_all_concurrent' do
+    before do
+      require 'codebase_index'
+      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      CodebaseIndex.configuration.concurrent_extraction = true
+    end
+
+    after do
+      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+    end
+
+    it 'preserves extractor instance for warning collection when extract_all fails' do
+      # Create a fake extractor class whose extract_all raises
+      fake_class = Class.new do
+        attr_reader :warnings
+
+        def initialize
+          @warnings = ['pre-existing warning']
+        end
+
+        def extract_all
+          raise StandardError, 'boom'
+        end
+      end
+
+      # Stub EXTRACTORS to only have our fake
+      stub_const('CodebaseIndex::Extractor::EXTRACTORS', { test_type: fake_class })
+
+      # Stub ModelNameCache
+      model_name_cache = double('ModelNameCache')
+      allow(model_name_cache).to receive(:model_names)
+      allow(model_name_cache).to receive(:model_names_regex)
+      stub_const('CodebaseIndex::ModelNameCache', model_name_cache)
+
+      extractor.send(:extract_all_concurrent)
+
+      stored_extractor = extractor.instance_variable_get(:@extractors)[:test_type]
+      expect(stored_extractor).not_to be_nil
+      expect(stored_extractor.warnings).to include('pre-existing warning')
+    end
+  end
+
   # ── json_serialize ───────────────────────────────────────────────────
 
   describe '#json_serialize' do

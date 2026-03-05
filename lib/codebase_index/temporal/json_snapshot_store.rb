@@ -165,6 +165,8 @@ module CodebaseIndex
       end
 
       def snapshot_path(git_sha)
+        raise ArgumentError, "Invalid git SHA: #{git_sha}" unless git_sha.match?(/\A[0-9a-f]+\z/i)
+
         File.join(@dir, "#{git_sha}.json")
       end
 
@@ -180,24 +182,30 @@ module CodebaseIndex
       end
 
       def load_all_summaries
-        Dir.glob(File.join(@dir, '*.json')).map do |path|
+        Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
           data = JSON.parse(File.read(path))
           symbolize_snapshot(data).except(:units)
+        rescue JSON::ParserError => e
+          warn "[CodebaseIndex] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+          nil
         end
       end
 
       def load_all_with_units
-        Dir.glob(File.join(@dir, '*.json')).map do |path|
+        Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
           symbolize_snapshot(JSON.parse(File.read(path)))
+        rescue JSON::ParserError => e
+          warn "[CodebaseIndex] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+          nil
         end
       end
 
       def find_latest
-        files = Dir.glob(File.join(@dir, '*.json'))
-        return nil if files.empty?
+        snapshots = load_all_summaries
+        return nil if snapshots.empty?
 
-        latest_file = files.max_by { |f| File.mtime(f) }
-        symbolize_snapshot(JSON.parse(File.read(latest_file)))
+        latest = snapshots.max_by { |s| s[:extracted_at] || '' }
+        load_snapshot_with_units(latest[:git_sha])
       end
 
       def symbolize_snapshot(data)
