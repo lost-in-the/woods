@@ -595,4 +595,71 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
       expect(chunk).to eq('')
     end
   end
+
+  # ── extract_associations — error resilience ───────────────────────
+
+  describe '#extract_associations' do
+    let(:model) { double('Model', name: 'Post') }
+
+    # rubocop:disable Metrics/AbcSize
+    def make_assoc(name, class_name: name.to_s.classify)
+      a = double("Assoc(#{name})")
+      allow(a).to receive(:name).and_return(name)
+      allow(a).to receive(:macro).and_return(:has_many)
+      allow(a).to receive(:class_name).and_return(class_name)
+      allow(a).to receive(:options).and_return({})
+      allow(a).to receive(:polymorphic?).and_return(false)
+      allow(a).to receive(:foreign_key).and_return("#{name}_id")
+      allow(a).to receive(:inverse_of).and_return(nil)
+      a
+    end
+    # rubocop:enable Metrics/AbcSize
+
+    it 'skips a broken association and returns the rest' do
+      good1 = make_assoc(:comments)
+      broken = make_assoc(:tags)
+      good2 = make_assoc(:likes)
+
+      allow(broken).to receive(:class_name).and_raise(NameError, 'uninitialized constant Tags')
+      allow(model).to receive(:reflect_on_all_associations).and_return([good1, broken, good2])
+
+      results = extractor.send(:extract_associations, model)
+
+      expect(results.size).to eq(2)
+      expect(results.map { |a| a[:name] }).to eq(%i[comments likes])
+    end
+
+    it 'records a warning for each skipped association' do
+      broken = make_assoc(:gadgets)
+      allow(broken).to receive(:class_name).and_raise(NameError, 'uninitialized constant Gadgets')
+      allow(model).to receive(:reflect_on_all_associations).and_return([broken])
+
+      extractor.send(:extract_associations, model)
+
+      expect(extractor.warnings.size).to eq(1)
+      expect(extractor.warnings.first).to include('Post')
+      expect(extractor.warnings.first).to include('gadgets')
+    end
+  end
+
+  # ── warnings ─────────────────────────────────────────────────────
+
+  describe '#warnings' do
+    it 'is empty by default' do
+      expect(extractor.warnings).to eq([])
+    end
+
+    it 'records a warning when extract_model fails' do
+      stub_const('Rails', double('Rails'))
+      allow(Rails).to receive(:logger).and_return(double('Logger').as_null_object)
+
+      model = double('Model', name: 'BrokenModel')
+      allow(extractor).to receive(:source_file_for).and_raise(StandardError, 'bad path')
+
+      extractor.send(:extract_model, model)
+
+      expect(extractor.warnings.size).to eq(1)
+      expect(extractor.warnings.first).to include('BrokenModel')
+    end
+  end
 end

@@ -30,6 +30,44 @@ module CodebaseIndex
         dir
       end
 
+      # Build a snapshot store for temporal tracking.
+      #
+      # Auto-enables when a SQLite database already exists in the index directory,
+      # or when CODEBASE_INDEX_SNAPSHOTS=true is set. The database is created and
+      # migrated automatically. Falls back to JSON file store when SQLite is
+      # unavailable or encounters errors.
+      #
+      # @param index_dir [String] Path to extraction output directory
+      # @return [CodebaseIndex::Temporal::SnapshotStore, CodebaseIndex::Temporal::JsonSnapshotStore, nil]
+      def self.build_snapshot_store(index_dir)
+        db_path = File.join(index_dir, 'codebase_index.sqlite3')
+        enabled = ENV['CODEBASE_INDEX_SNAPSHOTS'] == 'true' ||
+                  CodebaseIndex.configuration.enable_snapshots ||
+                  File.exist?(db_path)
+
+        return nil unless enabled
+
+        begin
+          require 'sqlite3'
+          require_relative '../db/migrator'
+          require_relative '../temporal/snapshot_store'
+
+          db = SQLite3::Database.new(db_path)
+          db.results_as_hash = true
+
+          CodebaseIndex::Db::Migrator.new(connection: db).migrate!
+          CodebaseIndex::Temporal::SnapshotStore.new(connection: db)
+        rescue LoadError
+          warn 'Note: sqlite3 gem not available, using JSON file-based snapshot store.'
+          require_relative '../temporal/json_snapshot_store'
+          CodebaseIndex::Temporal::JsonSnapshotStore.new(dir: index_dir)
+        rescue StandardError => e
+          warn "Note: SQLite snapshot store failed (#{e.class}: #{e.message}), using JSON fallback."
+          require_relative '../temporal/json_snapshot_store'
+          CodebaseIndex::Temporal::JsonSnapshotStore.new(dir: index_dir)
+        end
+      end
+
       # Attempt to build a retriever for semantic search.
       #
       # Auto-configures from environment variables when no explicit configuration

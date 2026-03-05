@@ -77,6 +77,42 @@ RSpec.describe CodebaseIndex::Extractors::ConcernExtractor do
       expect(units.first.namespace).to eq('Billing')
     end
 
+    it 'discovers concerns in deeply nested directories' do
+      create_file('app/models/gateway/stripe/concerns/refundable.rb', <<~RUBY)
+        module Gateway::Stripe::Refundable
+          extend ActiveSupport::Concern
+
+          def refund!
+            # refund logic
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.size).to eq(1)
+      expect(units.first.identifier).to eq('Gateway::Stripe::Refundable')
+      expect(units.first.type).to eq(:concern)
+    end
+
+    it 'discovers concerns in both canonical and nested directories simultaneously' do
+      create_file('app/models/concerns/searchable.rb', <<~RUBY)
+        module Searchable
+          extend ActiveSupport::Concern
+          def search_summary; end
+        end
+      RUBY
+      create_file('app/models/gateway/stripe/concerns/refundable.rb', <<~RUBY)
+        module Gateway::Stripe::Refundable
+          extend ActiveSupport::Concern
+          def refund!; end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      identifiers = units.map(&:identifier)
+      expect(identifiers).to include('Searchable', 'Gateway::Stripe::Refundable')
+    end
+
     it 'skips files that are not concern modules' do
       create_file('app/models/concerns/empty.rb', <<~RUBY)
         # just a comment, no module
@@ -179,6 +215,19 @@ RSpec.describe CodebaseIndex::Extractors::ConcernExtractor do
 
       unit = described_class.new.extract_concern_file(path)
       expect(unit.metadata[:concern_scope]).to eq('controller')
+    end
+
+    it 'detects model concern_scope for deeply nested paths under app/models/' do
+      path = create_file('app/models/gateway/stripe/concerns/refundable.rb', <<~RUBY)
+        module Gateway::Stripe::Refundable
+          extend ActiveSupport::Concern
+
+          def refund!; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.metadata[:concern_scope]).to eq('model')
     end
 
     it 'detects included modules' do

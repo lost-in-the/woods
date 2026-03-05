@@ -8,7 +8,8 @@ module CodebaseIndex
     # ConcernExtractor handles ActiveSupport::Concern module extraction.
     #
     # Concerns are mixins that extend model and controller behavior.
-    # They live in `app/models/concerns/` and `app/controllers/concerns/`.
+    # They live in `app/models/concerns/` and `app/controllers/concerns/`,
+    # as well as nested directories like `app/models/gateway/stripe/concerns/`.
     #
     # We extract:
     # - Module name and namespace
@@ -25,13 +26,20 @@ module CodebaseIndex
       include SharedUtilityMethods
       include SharedDependencyScanner
 
-      # Directories to scan for concern modules
+      # Canonical concern directories (used as fallback if glob finds nothing).
       CONCERN_DIRECTORIES = %w[
         app/models/concerns
         app/controllers/concerns
       ].freeze
 
       def initialize
+        # Discover all concerns/ directories under app/, including deeply nested ones
+        # like app/models/gateway/stripe/webhook/concerns/.
+        @directories = Dir[Rails.root.join('app/**/concerns')].map { |d| Pathname.new(d) }
+                                                              .select(&:directory?)
+        # Fall back to canonical directories if glob finds nothing.
+        return unless @directories.empty?
+
         @directories = CONCERN_DIRECTORIES.map { |d| Rails.root.join(d) }
                                           .select(&:directory?)
       end
@@ -91,10 +99,11 @@ module CodebaseIndex
         modules = source.scan(/^\s*module\s+([\w:]+)/).flatten
         return modules.last if modules.any?
 
-        # Infer from file path
+        # Infer from file path — strip everything up to and including the first concerns/ dir.
+        # Handles canonical (app/models/concerns/) and nested (app/models/foo/concerns/) paths.
         relative = file_path.sub("#{Rails.root}/", '')
         relative
-          .sub(%r{^app/(models|controllers)/concerns/}, '')
+          .sub(%r{^app/.*?/concerns/}, '')
           .sub('.rb', '')
           .split('/')
           .map { |segment| segment.split('_').map(&:capitalize).join }
@@ -179,9 +188,9 @@ module CodebaseIndex
       # @param file_path [String] Path to the concern file
       # @return [String] One of "model", "controller", "unknown"
       def detect_concern_scope(file_path)
-        if file_path.include?('app/models/concerns')
+        if file_path.include?('app/models/')
           'model'
-        elsif file_path.include?('app/controllers/concerns')
+        elsif file_path.include?('app/controllers/')
           'controller'
         else
           'unknown'
