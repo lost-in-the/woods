@@ -22,11 +22,12 @@ require_relative '../lib/codebase_index/embedding/indexer'
 
 index_dir = CodebaseIndex::MCP::Bootstrapper.resolve_index_dir(ARGV)
 retriever = CodebaseIndex::MCP::Bootstrapper.build_retriever
+snapshot_store = CodebaseIndex::MCP::Bootstrapper.build_snapshot_store(index_dir)
 
 port = (ENV['PORT'] || 9292).to_i
 host = ENV['HOST'] || 'localhost'
 
-server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever)
+server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport
 

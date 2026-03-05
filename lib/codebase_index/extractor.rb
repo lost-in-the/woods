@@ -782,16 +782,8 @@ module CodebaseIndex
       manifest = JSON.parse(File.read(manifest_path))
       return unless manifest['git_sha']
 
-      require 'sqlite3'
-      require_relative 'db/migrator'
-      require_relative 'temporal/snapshot_store'
-
-      db_path = @output_dir.join('codebase_index.sqlite3')
-      db = SQLite3::Database.new(db_path.to_s)
-      db.results_as_hash = true
-
-      CodebaseIndex::Db::Migrator.new(connection: db).migrate!
-      store = CodebaseIndex::Temporal::SnapshotStore.new(connection: db)
+      store = build_snapshot_store
+      return unless store
 
       unit_hashes = @results.flat_map do |type, units|
         units.map do |unit|
@@ -809,6 +801,25 @@ module CodebaseIndex
       Rails.logger.info "[CodebaseIndex] Snapshot captured for #{manifest['git_sha'][0..7]}"
     rescue StandardError => e
       Rails.logger.warn "[CodebaseIndex] Snapshot capture failed: #{e.message}"
+    end
+
+    # Build a snapshot store, preferring SQLite with JSON file fallback.
+    #
+    # @return [CodebaseIndex::Temporal::SnapshotStore, CodebaseIndex::Temporal::JsonSnapshotStore, nil]
+    def build_snapshot_store
+      require 'sqlite3'
+      require_relative 'db/migrator'
+      require_relative 'temporal/snapshot_store'
+
+      db_path = @output_dir.join('codebase_index.sqlite3')
+      db = SQLite3::Database.new(db_path.to_s)
+      db.results_as_hash = true
+
+      Db::Migrator.new(connection: db).migrate!
+      Temporal::SnapshotStore.new(connection: db)
+    rescue LoadError
+      require_relative 'temporal/json_snapshot_store'
+      Temporal::JsonSnapshotStore.new(dir: @output_dir.to_s)
     end
 
     # Write a compact TOC-style summary of extracted units.

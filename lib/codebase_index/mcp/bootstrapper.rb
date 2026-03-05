@@ -46,18 +46,23 @@ module CodebaseIndex
 
         return nil unless enabled
 
-        require 'sqlite3'
-        require_relative '../db/migrator'
-        require_relative '../temporal/snapshot_store'
+        begin
+          require 'sqlite3'
+          require_relative '../db/migrator'
+          require_relative '../temporal/snapshot_store'
 
-        db = SQLite3::Database.new(db_path)
-        db.results_as_hash = true
+          db = SQLite3::Database.new(db_path)
+          db.results_as_hash = true
 
-        CodebaseIndex::Db::Migrator.new(connection: db).migrate!
-        CodebaseIndex::Temporal::SnapshotStore.new(connection: db)
-      rescue StandardError => e
-        warn "Note: Snapshots unavailable (#{e.message}). Temporal tools will return errors."
-        nil
+          CodebaseIndex::Db::Migrator.new(connection: db).migrate!
+          CodebaseIndex::Temporal::SnapshotStore.new(connection: db)
+        rescue LoadError
+          require_relative '../temporal/json_snapshot_store'
+          CodebaseIndex::Temporal::JsonSnapshotStore.new(dir: index_dir)
+        rescue StandardError => e
+          warn "Note: Snapshots unavailable (#{e.message}). Temporal tools will return errors."
+          nil
+        end
       end
 
       # Attempt to build a retriever for semantic search.
