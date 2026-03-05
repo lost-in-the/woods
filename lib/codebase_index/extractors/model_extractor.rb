@@ -435,7 +435,7 @@ module CodebaseIndex
             foreign_key: assoc.foreign_key,
             inverse_of: assoc.inverse_of&.name
           }
-        rescue NameError, NoMethodError => e
+        rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association #{assoc.name}: #{e.message}"
           nil
         end
