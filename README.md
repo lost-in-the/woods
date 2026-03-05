@@ -1,55 +1,189 @@
 # CodebaseIndex
 
-A Rails codebase extraction and indexing system designed to provide accurate, version-specific context for AI-assisted development tooling.
+**Your AI coding assistant is guessing about your Rails app. CodebaseIndex gives it the real answers.**
+
+Rails hides enormous amounts of behavior behind conventions, concerns, and runtime magic. When you ask an AI assistant "what callbacks fire when a User saves?" or "what routes map to this controller?", it guesses from training data — and gets it wrong. CodebaseIndex runs *inside* your Rails app, extracts what's actually happening at runtime, and serves that context directly to your AI tools via [MCP](https://modelcontextprotocol.io/).
+
+Works with **Claude Code**, **Cursor**, **Windsurf**, and any MCP-compatible tool.
+
+---
 
 ## The Problem
 
-LLMs working with Rails codebases face a fundamental accuracy gap. Training data contains documentation and examples from many Rails versions, but a production app runs on *one* version. When a developer asks "what options does `has_many` support?" or "what callbacks fire when a record is saved?", the answer depends on their exact Rails version — and generic LLM responses often get it wrong.
+Ask your AI assistant about your Rails app and watch it confidently hallucinate:
 
-Beyond version accuracy, Rails conventions hide enormous amounts of implementation behind "magic." A model file might be 50 lines, but with concerns inlined, schema context, callbacks, validations, and association behavior, the *actual* surface area is 10x that. AI tools that only see the source file miss most of what matters.
+| You ask | What the AI says | What's actually true |
+|---------|-----------------|---------------------|
+| "What callbacks fire when User saves?" | `before_save :set_slug` | 11 callbacks across 4 files, including 3 from concerns |
+| "What routes map to OrdersController?" | Standard REST routes | Custom `POST /checkout`, nested under `/shops/:shop_id` |
+| "What does the checkout flow do?" | Describes `CheckoutService` | Misses that `order.save!` triggers 3 callbacks that enqueue 2 jobs |
 
-CodebaseIndex solves this by:
+The AI isn't bad — it just can't see what Rails is doing. Your 40-line model file has 10x that behavior when you factor in included concerns, schema context, callback chains, validations, and association reflections. Static analysis can't reach any of it.
 
-- **Running inside Rails** to leverage runtime introspection (not just static parsing)
-- **Inlining concerns** directly into model source so the full picture is visible
-- **Prepending schema comments** with column types, indexes, and foreign keys
-- **Mapping routes to controllers** so HTTP → action flow is explicit
-- **Indexing the exact Rails/gem source** for the versions in `Gemfile.lock`
-- **Tracking dependencies** bidirectionally so you can trace impact across the codebase
-- **Enriching with git data** so you know what's actively changing vs. dormant
+**CodebaseIndex fixes this by running inside Rails and extracting what's actually there.**
 
-See [Why CodebaseIndex?](docs/WHY_CODEBASE_INDEX.md) for concrete before/after examples.
+See [Why CodebaseIndex?](docs/WHY_CODEBASE_INDEX.md) for detailed before/after examples.
+
+---
 
 ## Quick Start
 
+Five steps from install to asking questions:
+
 ```bash
-# Add to your Rails app's Gemfile, then:
+# 1. Add to your Rails app's Gemfile
+gem 'codebase_index', group: :development
+
+# 2. Install and configure
 bundle install
 rails generate codebase_index:install
+
+# 3. Extract your codebase (requires Rails to be running)
 bundle exec rake codebase_index:extract
+
+# 4. Verify it worked
 bundle exec rake codebase_index:stats
-# Add the MCP server to .mcp.json (see below) and start asking questions
+
+# 5. Add the MCP server to your AI tool (see "Connect to Your AI Tool" below)
 ```
 
-See [Getting Started](docs/GETTING_STARTED.md) for the full walkthrough including Docker, storage presets, and CI setup.
+After extraction, your AI tool gets accurate, structured context about every model, controller, service, job, route, and more — including all the behavior that Rails hides.
 
-## Installation
+> **Docker?** Run extraction inside the container: `docker compose exec app bundle exec rake codebase_index:extract`. The MCP server runs on the host reading volume-mounted output. See [Docker Setup](docs/DOCKER_SETUP.md).
 
-Add to your Gemfile:
+See [Getting Started](docs/GETTING_STARTED.md) for the full walkthrough including storage presets, CI setup, and common first-run issues.
 
-```ruby
-gem 'codebase_index'
+---
+
+## What Does It Actually Do?
+
+CodebaseIndex boots your Rails app, introspects everything using runtime APIs, and writes structured JSON that your AI tools can read. Here's what that means in practice:
+
+### Concern Inlining
+
+Your `User` model includes `Auditable`, `Searchable`, and `SoftDeletable`. An AI tool reading `app/models/user.rb` sees 40 lines. CodebaseIndex inlines all three concerns directly into the extracted unit — the AI sees the full 200-line behavioral surface area in one block.
+
+### Schema Prepending
+
+Model source gets a header with actual column types, indexes, and foreign keys pulled from the live database. No more guessing whether `name` is a `string` or `text`, or whether there's an index on `email`.
+
+### Route Binding
+
+Controller source gets a route map prepended showing the real HTTP verb + path + constraints for every action. No more assuming standard REST when your app has custom routes and nested resources.
+
+### Dependency Graph
+
+34 extractors build a bidirectional graph: what each unit depends on, and what depends on it. Change a concern and trace every model it touches. Refactor a service and see every controller that calls it. PageRank scoring identifies the most important nodes in your codebase.
+
+### Callback Side-Effect Analysis
+
+`CallbackAnalyzer` detects what actually happens inside callbacks — which columns get written, which jobs get enqueued, which services get called, which mailers fire. This is the #1 source of unexpected bugs in Rails, and the #1 thing AI tools get wrong.
+
+---
+
+## Connect to Your AI Tool
+
+CodebaseIndex ships two MCP servers. Most users only need the **Index Server**.
+
+### Index Server — Reads Pre-Extracted Data (No Rails Required)
+
+27 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. Reads static JSON from disk — fast, no Rails boot needed.
+
+**Claude Code** — add to `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "codebase-index": {
+      "command": "codebase-index-mcp-start",
+      "args": ["./tmp/codebase_index"]
+    }
+  }
+}
 ```
 
-Then:
+> `codebase-index-mcp-start` is a self-healing wrapper that validates the index, checks dependencies, and auto-restarts on failure. Recommended for Claude Code.
 
-```bash
-bundle install
-rails generate codebase_index:install
-rails db:migrate
+**Cursor / Windsurf** — add to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "codebase-index": {
+      "command": "codebase-index-mcp",
+      "args": ["/path/to/your-rails-app/tmp/codebase_index"]
+    }
+  }
+}
 ```
 
-Create a minimal configuration:
+### Console Server — Live Rails Queries (Optional)
+
+31 tools for querying real database records, monitoring job queues, running model diagnostics, and checking schema. Connects to a live Rails process. Every query runs in a rolled-back transaction with SQL validation — safe for development use.
+
+```json
+{
+  "mcpServers": {
+    "codebase-console": {
+      "command": "bundle",
+      "args": ["exec", "rake", "codebase_index:console"],
+      "cwd": "/path/to/your-rails-app"
+    }
+  }
+}
+```
+
+See [MCP Servers](docs/MCP_SERVERS.md) for the full tool catalog and [MCP Tool Cookbook](docs/MCP_TOOL_COOKBOOK.md) for scenario-based examples.
+
+---
+
+## What Gets Extracted
+
+34 extractors cover every major Rails concept:
+
+| Category | What's Extracted | Key Details |
+|----------|-----------------|-------------|
+| **Models** | Schema, associations, validations, scopes, callbacks, enums | Concerns inlined, callback side-effects analyzed |
+| **Controllers** | Actions, filters, permitted params, response formats | Route map prepended, per-action filter chains |
+| **Services & Jobs** | Entry points, dependencies, retry config, queue names | Includes services, interactors, operations, commands |
+| **Views & Components** | ERB templates, Phlex components, ViewComponents | Partial references, slot definitions, prop interfaces |
+| **Routes & Middleware** | Full route table, middleware stack order | Constraint resolution, engine mount points |
+| **GraphQL** | Types, mutations, resolvers, fields | Relay connections, argument definitions |
+| **Background Work** | Jobs, mailers, Action Cable channels, scheduled tasks | Queue configuration, retry policies |
+| **Data Layer** | Migrations, database views, state machines, events | DDL metadata, reversibility, transition graphs |
+| **Testing** | Factories, test-to-source mappings | FactoryBot definitions, spec file associations |
+| **Framework Source** | Rails internals, gem source for exact installed versions | Pinned to your `Gemfile.lock` versions |
+
+See [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) for per-extractor documentation with configuration options and example output.
+
+---
+
+## Use Cases
+
+### For AI-Assisted Development
+
+- **Context-aware code generation** — your AI sees the full model (with concerns, schema, and callbacks) before writing new code
+- **Feature planning** — query the dependency graph to understand blast radius before changing anything
+- **PR context** — compute affected units from a diff and explain downstream impact
+- **Code review** — surface hidden callback side-effects that a reviewer might miss
+- **Onboarding** — new team members ask "how does checkout work?" and get the real execution flow
+
+### For Architecture & Technical Debt
+
+- **Dead code detection** — `GraphAnalyzer` finds orphaned units with no dependents
+- **Hub identification** — find models with 50+ dependents that are bottlenecks
+- **Cycle detection** — circular dependencies surfaced automatically
+- **Migration risk** — DDL metadata shows which pending migrations touch large tables
+- **API surface audit** — every endpoint, its method, path, filters, and permitted params
+- **Callback chain auditing** — the #1 source of Rails bugs, now visible and traceable
+
+---
+
+## Configuration
+
+### Zero-Config Start
+
+The install generator creates a working configuration. The only required option is `output_dir`, which defaults to `tmp/codebase_index`:
 
 ```ruby
 # config/initializers/codebase_index.rb
@@ -58,261 +192,205 @@ CodebaseIndex.configure do |config|
 end
 ```
 
-Or install the gem directly:
+### Storage Presets
 
-```bash
-gem install codebase_index
+For embedding and semantic search, use a preset to configure storage and embedding together:
+
+```ruby
+# Local development — no external services needed
+CodebaseIndex.configure_with_preset(:local)
+
+# PostgreSQL — pgvector + OpenAI embeddings
+CodebaseIndex.configure_with_preset(:postgresql)
+
+# Production scale — Qdrant + OpenAI embeddings
+CodebaseIndex.configure_with_preset(:production)
 ```
 
-> **Requires Rails.** Extraction runs inside a booted Rails application using runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, etc.). The gem cannot extract from source files alone. See [Getting Started](docs/GETTING_STARTED.md) for full setup details.
+### Backend Compatibility
 
-## Target Environment
+CodebaseIndex is backend-agnostic. Your app database, vector store, embedding provider, and job system are all configurable independently:
 
-Designed for Rails applications of any scale, with particular strength in large monoliths:
+| Component | Options |
+|-----------|---------|
+| **App Database** | MySQL, PostgreSQL, SQLite |
+| **Vector Store** | In-memory, pgvector, Qdrant |
+| **Embeddings** | OpenAI, Ollama (local, free) |
+| **Job System** | Sidekiq, Solid Queue, GoodJob, inline |
+| **View Layer** | ERB, Phlex, ViewComponent |
 
-- Any database (MySQL, PostgreSQL, SQLite)
-- Any background job system (Sidekiq, Solid Queue, GoodJob, inline)
-- Any view layer (ERB, Phlex, ViewComponent)
-- Docker or bare metal, CI or manual
-- Continuous or one-shot indexing
+See [Backend Matrix](docs/BACKEND_MATRIX.md) for supported combinations and [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) for every option with defaults.
 
-See [docs/BACKEND_MATRIX.md](docs/BACKEND_MATRIX.md) for supported infrastructure combinations.
+---
 
-## Use Cases
+## Keeping the Index Current
 
-**1. Coding & Debugging** — Primary context for AI coding assistants. Answer "how does our checkout flow work?" with the actual service, model callbacks, controller actions, and framework behavior for the running version.
+### Incremental Updates
 
-**2. Performance Analysis** — Correlate code structure with runtime behavior. Identify models with high write volume and complex callback chains, find N+1-prone association patterns, surface hot code paths.
-
-**3. Deeper Analytics** — Query frequency by scope, error rates by action, background job characteristics. Bridge the gap between code structure and operational data.
-
-**4. Support & Marketing Tooling** — Domain-concept retrieval for non-developers. Map business terms to code paths, surface feature flags, document user-facing behavior.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        CodebaseIndex                                │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐ │
-│  │   Extraction    │───▶│     Storage     │◀───│    Retrieval    │ │
-│  └─────────────────┘    └─────────────────┘    └─────────────────┘ │
-│          │                      │                      │           │
-│          ▼                      ▼                      ▼           │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐ │
-│  │   Extractors    │    │  JSON per unit  │    │ Query Classifier│ │
-│  │  · Model        │    │  Vector Index   │    │ Context Assembly│ │
-│  │  · Controller   │    │  Metadata Index │    │ Result Ranking  │ │
-│  │  · Service      │    │  Dep Graph      │    │                 │ │
-│  │  · Component    │    │                 │    │                 │ │
-│  │  · Rails Source │    │                 │    │                 │ │
-│  └─────────────────┘    └─────────────────┘    └─────────────────┘ │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Extraction Pipeline
-
-Extraction runs inside the Rails application (via rake task) to access runtime introspection — `ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs, etc. This is fundamentally more accurate than static parsing.
-
-**Four phases:**
-
-1. **Extract** — Each extractor produces `ExtractedUnit` objects with source, metadata, and dependencies
-2. **Resolve dependents** — Build reverse dependency edges (who calls what)
-3. **Enrich with git** — Last modified, contributors, change frequency, recent commits
-4. **Write output** — JSON per unit, dependency graph, manifest, structural summary
-
-### Extractors (34)
-
-34 extractors cover every major Rails concept: models (with inlined concerns and schema), controllers (with route context), services, jobs, mailers, GraphQL types/mutations/resolvers, serializers, view components (Phlex and ViewComponent), ERB templates, decorators, concerns, validators, policies, routes, middleware, engines, i18n, Action Cable, rake tasks, migrations, database views, state machines, events, caching patterns, factories, test mappings, and Rails framework source pinned to exact installed versions.
-
-See [docs/EXTRACTOR_REFERENCE.md](docs/EXTRACTOR_REFERENCE.md) for per-extractor documentation with configuration, edge cases, and example output.
-
-### Key Design Decisions
-
-**Concern inlining** — included concerns are embedded directly in the model's source. **Route prepending** — controllers get a route header showing HTTP verb → path → action. **Semantic chunking** — models split by purpose (associations, callbacks, validations), controllers split per-action. **Dependency graph with BFS blast radius** — forward and reverse edges enable change-impact traversal.
-
-## MCP Servers
-
-CodebaseIndex ships two [MCP](https://modelcontextprotocol.io/) servers for integrating with AI development tools (Claude Code, Cursor, Windsurf, etc.).
-
-**Index Server** (27 tools) — Reads pre-extracted data from disk. No Rails boot required. Provides code lookup, dependency traversal, graph analysis, semantic search, pipeline management, feedback collection, and temporal snapshots.
-
-```bash
-codebase-index-mcp /path/to/rails-app/tmp/codebase_index
-```
-
-**Console Server** (31 tools) — Bridges to a live Rails process for database queries, model diagnostics, job monitoring, and guarded operations. All queries run in rolled-back transactions with SQL validation and audit logging.
-
-```bash
-codebase-console-mcp
-```
-
-See [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) for the full tool catalog and setup instructions.
-
-### Claude Code Setup
-
-Add the servers to your project's `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "codebase-index": {
-      "command": "codebase-index-mcp-start",
-      "args": ["/path/to/rails-app/tmp/codebase_index"]
-    },
-    "codebase-console": {
-      "command": "bundle",
-      "args": ["exec", "rake", "codebase_index:console"],
-      "cwd": "/path/to/rails-app"
-    }
-  }
-}
-```
-
-> **Recommended**: Use `codebase-index-mcp-start` instead of `codebase-index-mcp` for Claude Code. It validates the index directory exists, checks for a manifest, ensures dependencies are installed, and restarts automatically on failure.
-
-The **index server** reads from a pre-extracted directory — run `bundle exec rake codebase_index:extract` in your Rails app first.
-
-The **console server** runs embedded inside your Rails app (no config file needed). For Docker setups, see [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md).
-
-## Subsystems
-
-```
-lib/codebase_index/
-├── extractor.rb              # Orchestrator — coordinates all 34 extractors
-├── extracted_unit.rb         # Core value object (the universal currency)
-├── dependency_graph.rb       # Directed graph + PageRank scoring
-├── graph_analyzer.rb         # Structural analysis (orphans, hubs, cycles, bridges)
-├── retriever.rb              # Retrieval orchestrator with degradation tiers
-├── extractors/               # 34 extractors (one per Rails concept)
-├── ast/                      # Prism-based AST layer
-├── ruby_analyzer/            # Static analysis (class, method, dataflow)
-├── chunking/                 # Semantic chunking (type-aware splitting)
-├── embedding/                # Embedding pipeline (OpenAI, Ollama)
-├── storage/                  # Storage backends (pgvector, Qdrant, SQLite)
-├── retrieval/                # Retrieval pipeline (classify, search, rank, assemble)
-├── mcp/                      # MCP Index Server (27 tools)
-├── console/                  # Console MCP Server (31 tools, 4 tiers)
-├── coordination/             # Multi-agent pipeline locking
-├── notion/                   # Notion export
-├── session_tracer/           # Session tracing middleware
-├── temporal/                 # Temporal snapshot system
-└── evaluation/               # Retrieval evaluation harness
-
-exe/
-├── codebase-index-mcp        # Index Server executable (stdio)
-├── codebase-index-mcp-start  # Self-healing MCP wrapper
-├── codebase-index-mcp-http   # Index Server (HTTP/Rack)
-└── codebase-console-mcp      # Console MCP Server executable
-```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full pipeline explanation — extraction phases, dependency graph, retrieval pipeline, storage backends, and semantic chunking.
-
-## Usage
-
-### Full Extraction
-
-```bash
-bundle exec rake codebase_index:extract
-```
-
-### Incremental (CI)
+After the initial extraction, update only changed files — typically 5-10x faster:
 
 ```bash
 bundle exec rake codebase_index:incremental
 ```
 
-Auto-detects GitHub Actions / GitLab CI environment. See [Getting Started](docs/GETTING_STARTED.md) for CI workflow YAML.
+### CI Integration
 
-### Docker
-
-Extraction runs inside the container; the Index Server runs on the host reading volume-mounted output. See [docs/DOCKER_SETUP.md](docs/DOCKER_SETUP.md) for Docker setup, MCP config, and troubleshooting.
-
-```bash
-docker compose exec app bundle exec rake codebase_index:extract
+```yaml
+# .github/workflows/index.yml
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Update index
+        run: bundle exec rake codebase_index:incremental
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
 ```
 
 ### Other Tasks
 
 ```bash
-rake codebase_index:validate          # Check index integrity
-rake codebase_index:stats             # Show unit counts, sizes, graph stats
-rake codebase_index:clean             # Remove index
-rake codebase_index:embed             # Embed all extracted units
-rake codebase_index:embed_incremental # Embed changed units only
-rake codebase_index:flow[EntryPoint]  # Generate execution flow for an entry point
-rake codebase_index:console           # Start console MCP server
-rake codebase_index:notion_sync       # Sync models/columns to Notion databases
+rake codebase_index:validate            # Check index integrity
+rake codebase_index:stats               # Show unit counts and graph stats
+rake codebase_index:clean               # Remove index output
+rake codebase_index:embed               # Embed units for semantic search
+rake codebase_index:embed_incremental   # Embed changed units only
+rake codebase_index:notion_sync         # Sync models/columns to Notion
 ```
 
-See [docs/NOTION_INTEGRATION.md](docs/NOTION_INTEGRATION.md) for Notion export configuration.
+---
 
-### Ruby API
+## How It Works Under the Hood
 
-> **Requires a booted Rails environment.** These methods use runtime introspection and must be called from within a Rails process (console, rake task, initializer).
+```
+Inside your Rails app (rake task):
+  1. Boot Rails, eager-load all application classes
+  2. 34 extractors introspect models, controllers, routes, etc.
+  3. Dependency graph is built with forward + reverse edges
+  4. Git metadata enriches each unit (last modified, contributors, churn)
+  5. JSON output written to tmp/codebase_index/
 
-```ruby
-# Full extraction (output_dir from configuration)
-CodebaseIndex.extract!
-
-# Incremental
-CodebaseIndex.extract_changed!(["app/models/user.rb", "app/services/checkout.rb"])
-
-# Configuration
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join("tmp/codebase_index")
-  config.max_context_tokens = 8000
-  config.include_framework_sources = true
-  config.add_gem "devise", paths: ["lib/devise/models"], priority: :high
-end
+On the host (no Rails needed):
+  6. Embedding pipeline chunks and vectorizes units (optional)
+  7. MCP Index Server reads JSON and answers AI tool queries
 ```
 
-## Output Structure
+### The ExtractedUnit
+
+Everything flows through `ExtractedUnit` — the universal data structure. Each unit carries:
+
+| Field | What It Contains |
+|-------|-----------------|
+| `identifier` | Class name or descriptive key (`"User"`, `"POST /orders"`) |
+| `type` | Category (`:model`, `:controller`, `:service`, `:job`, etc.) |
+| `source_code` | Annotated source with inlined concerns and schema |
+| `metadata` | Structured data — associations, callbacks, routes, fields |
+| `dependencies` | What this unit depends on (forward edges) |
+| `dependents` | What depends on this unit (reverse edges) |
+| `chunks` | Semantic sub-sections for large units |
+| `estimated_tokens` | Token count for LLM context budgeting |
+
+### Output Structure
 
 ```
 tmp/codebase_index/
-├── manifest.json              # Extraction metadata, git SHA, checksums
-├── dependency_graph.json      # Full graph with forward/reverse edges
-├── SUMMARY.md                 # Human-readable structural overview
+├── manifest.json              # Git SHA, timestamps, checksums
+├── dependency_graph.json      # Full graph with PageRank scores
+├── SUMMARY.md                 # Human-readable overview
 ├── models/
 │   ├── _index.json            # Quick lookup index
-│   ├── User.json              # Full extracted unit
+│   ├── User.json              # Full unit with inlined concerns
 │   └── Order.json
 ├── controllers/
-│   ├── _index.json
-│   └── OrdersController.json
+│   └── OrdersController.json  # With route map prepended
 ├── services/
-│   ├── _index.json
 │   └── CheckoutService.json
-├── components/
-│   └── ...
 └── rails_source/
-    └── ...
+    └── ...                    # Framework source for installed versions
 ```
 
-Each unit JSON contains: `identifier`, `type`, `file_path`, `source_code` (annotated), `metadata` (rich structured data), `dependencies`, `dependents`, `chunks` (if applicable), and `estimated_tokens`.
+### Architecture Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                      Rails Application                           │
+│                                                                  │
+│  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
+│  │  Extract   │───>│   Resolve   │───>│   Write JSON         │  │
+│  │ 34 types   │    │   graph +   │    │   per unit           │  │
+│  │            │    │   git data  │    │                      │  │
+│  └────────────┘    └─────────────┘    └──────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+                                               │
+                     ┌─────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                   Host / CI Environment                           │
+│                                                                  │
+│  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
+│  │  Embed     │───>│ Vector Store│    │  MCP Index Server    │  │
+│  │  OpenAI /  │    │ pgvector /  │    │  27 tools            │  │
+│  │  Ollama    │    │ Qdrant      │    │  No Rails required   │  │
+│  └────────────┘    └─────────────┘    └──────────────────────┘  │
+│                                                                  │
+│                              ┌────────────────────────────────┐  │
+│                              │  Console MCP Server            │  │
+│                              │  31 tools, bridges to Rails    │  │
+│                              └────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases, graph internals, retrieval pipeline, and semantic chunking.
+
+---
+
+## Advanced Features
+
+| Feature | What It Does | Guide |
+|---------|-------------|-------|
+| **Semantic Search** | Natural-language queries like "find email validation logic" | [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) |
+| **Temporal Snapshots** | Compare extraction state across git SHAs | [FAQ](docs/FAQ.md#what-are-temporal-snapshots) |
+| **Session Tracing** | Record which code paths fire during a browser session | [FAQ](docs/FAQ.md#what-does-the-session-tracer-do) |
+| **Notion Export** | Sync model/column data to Notion for non-technical stakeholders | [Notion Integration](docs/NOTION_INTEGRATION.md) |
+| **Graph Analysis** | Find orphans, hubs, cycles, bridges in your dependency graph | [Architecture](docs/ARCHITECTURE.md) |
+| **Evaluation Harness** | Measure retrieval precision, recall, and MRR | [Architecture](docs/ARCHITECTURE.md) |
+| **Flow Precomputation** | Per-action request flow maps (controller → model → jobs) | [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) |
+
+---
 
 ## Documentation
 
-| Guide | Purpose |
-|-------|---------|
-| [Getting Started](docs/GETTING_STARTED.md) | Install, configure, extract, inspect |
-| [FAQ](docs/FAQ.md) | Common questions about setup, extraction, MCP, Docker |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Symptom → cause → fix for common problems |
-| [Architecture](docs/ARCHITECTURE.md) | Pipeline stages, dependency graph, retrieval, storage |
-| [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) | What each of the 34 extractors captures |
-| [MCP Servers](docs/MCP_SERVERS.md) | Full tool catalog and setup for Claude Code, Cursor, Windsurf |
-| [MCP Tool Cookbook](docs/MCP_TOOL_COOKBOOK.md) | Scenario-based examples for common tasks |
-| [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) | All options with defaults |
-| [Backend Matrix](docs/BACKEND_MATRIX.md) | Supported infrastructure combinations |
+| Guide | Who It's For | Description |
+|-------|-------------|-------------|
+| [Getting Started](docs/GETTING_STARTED.md) | Everyone | Install, configure, extract, inspect |
+| [FAQ](docs/FAQ.md) | Everyone | Common questions about setup, extraction, MCP, Docker |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Everyone | Symptom → cause → fix |
+| [MCP Servers](docs/MCP_SERVERS.md) | Setup | Full tool catalog for Claude Code, Cursor, Windsurf |
+| [MCP Tool Cookbook](docs/MCP_TOOL_COOKBOOK.md) | Daily use | Scenario-based "how do I..." examples |
+| [Docker Setup](docs/DOCKER_SETUP.md) | Docker users | Container extraction + host MCP server |
+| [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) | Customization | Every option with defaults |
+| [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) | Deep dive | What each of the 34 extractors captures |
+| [Architecture](docs/ARCHITECTURE.md) | Contributors | Pipeline stages, graph internals, retrieval |
+| [Backend Matrix](docs/BACKEND_MATRIX.md) | Infrastructure | Supported database, vector, and embedding combos |
+| [Why CodebaseIndex?](docs/WHY_CODEBASE_INDEX.md) | Evaluation | Detailed before/after comparisons |
+
+---
+
+## Requirements
+
+- Ruby >= 3.0
+- Rails >= 6.1
+
+Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required for basic extraction — embedding and vector search are optional add-ons.
 
 ## Development
 
 ```bash
-bin/setup          # Install dependencies
-bundle exec rake spec      # Run tests
+bin/setup                  # Install dependencies
+bundle exec rake spec      # Run tests (~2500 examples)
 bundle exec rubocop        # Lint
 ```
 
@@ -322,4 +400,4 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/LeahAr
 
 ## License
 
-The gem is available as open source under the terms of the [MIT License](LICENSE.txt).
+Available as open source under the [MIT License](LICENSE.txt).
