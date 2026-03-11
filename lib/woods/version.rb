@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
-  VERSION = '0.3.2'
+module Woods
+  VERSION = '1.0.0'
 end

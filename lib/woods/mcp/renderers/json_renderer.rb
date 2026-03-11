@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module MCP
     module Renderers
       # Passthrough renderer that returns JSON.pretty_generate output.

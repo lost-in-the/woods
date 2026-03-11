@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module CostModel
     # Calculates vector storage requirements based on embedding dimensions
     # and chunk count.

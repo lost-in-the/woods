@@ -2,9 +2,9 @@
 
 require_relative 'node'
 
-module CodebaseIndex
-  class Error < StandardError; end unless defined?(CodebaseIndex::Error)
-  class ExtractionError < Error; end unless defined?(CodebaseIndex::ExtractionError)
+module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
+  class ExtractionError < Error; end unless defined?(Woods::ExtractionError)
   module Ast
     # Parser adapter that normalizes Prism and parser gem ASTs to a common
     # {Ast::Node} structure. Auto-detects parser availability at load time.
@@ -21,7 +21,7 @@ module CodebaseIndex
       #
       # @param source [String] Ruby source code
       # @return [Ast::Node] Root node of the normalized tree
-      # @raise [CodebaseIndex::ExtractionError] if parsing fails
+      # @raise [Woods::ExtractionError] if parsing fails
       def parse(source)
         if prism_available?
           parse_with_prism(source)
@@ -29,7 +29,7 @@ module CodebaseIndex
           parse_with_parser_gem(source)
         end
       rescue StandardError => e
-        raise CodebaseIndex::ExtractionError, "Failed to parse source: #{e.message}"
+        raise Woods::ExtractionError, "Failed to parse source: #{e.message}"
       end
 
       # Check if Prism is available.
@@ -54,7 +54,7 @@ module CodebaseIndex
 
         unless result.success?
           errors = result.errors.map(&:message).join(', ')
-          raise CodebaseIndex::ExtractionError, "Parse error: #{errors}"
+          raise Woods::ExtractionError, "Parse error: #{errors}"
         end
 
         convert_prism_node(result.value, source)
@@ -67,7 +67,7 @@ module CodebaseIndex
         buffer = ::Parser::Source::Buffer.new('(source)', source: source)
         ast = ::Parser::CurrentRuby.parse(buffer.source)
 
-        raise CodebaseIndex::ExtractionError, 'Parse returned nil' unless ast
+        raise Woods::ExtractionError, 'Parse returned nil' unless ast
 
         convert_parser_node(ast, source)
       end

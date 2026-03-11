@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module RubyAnalyzer
     # Shared helper for building fully qualified names from a name and namespace stack.
     module FqnBuilder

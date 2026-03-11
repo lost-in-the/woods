@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/retrieval/search_executor'
-require 'codebase_index/retrieval/query_classifier'
-require 'codebase_index/retrieval/ranker'
-require 'codebase_index/storage/metadata_store'
+require 'woods/retrieval/search_executor'
+require 'woods/retrieval/query_classifier'
+require 'woods/retrieval/ranker'
+require 'woods/storage/metadata_store'
 
-RSpec.describe CodebaseIndex::Retrieval::Ranker do
-  let(:metadata_store) { instance_double(CodebaseIndex::Storage::MetadataStore::Interface) }
+RSpec.describe Woods::Retrieval::Ranker do
+  let(:metadata_store) { instance_double(Woods::Storage::MetadataStore::Interface) }
   let(:ranker) { described_class.new(metadata_store: metadata_store) }
-  let(:classifier) { CodebaseIndex::Retrieval::QueryClassifier.new }
+  let(:classifier) { Woods::Retrieval::QueryClassifier.new }
 
   # Helper to build Candidate structs
   def candidate(identifier:, score:, source: :vector, metadata: {})
-    CodebaseIndex::Retrieval::SearchExecutor::Candidate.new(
+    Woods::Retrieval::SearchExecutor::Candidate.new(
       identifier: identifier,
       score: score,
       source: source,
@@ -23,7 +23,7 @@ RSpec.describe CodebaseIndex::Retrieval::Ranker do
 
   # Helper to build a Classification
   def classification(intent: :understand, scope: :focused, target_type: nil, framework_context: false)
-    CodebaseIndex::Retrieval::QueryClassifier::Classification.new(
+    Woods::Retrieval::QueryClassifier::Classification.new(
       intent: intent,
       scope: scope,
       target_type: target_type,

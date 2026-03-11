@@ -1,32 +1,32 @@
 # frozen_string_literal: true
 
-# lib/tasks/codebase_index.rake
+# lib/tasks/woods.rake
 #
 # Rake tasks for codebase indexing.
 # These can be run manually or integrated into CI pipelines.
 #
 # Usage:
-#   bundle exec rake codebase_index:extract          # Full extraction
-#   bundle exec rake codebase_index:incremental      # Changed files only
-#   bundle exec rake codebase_index:extract_framework # Rails/gem sources only
-#   bundle exec rake codebase_index:validate          # Validate index integrity
-#   bundle exec rake codebase_index:stats             # Show index statistics
-#   bundle exec rake codebase_index:clean             # Remove index
-#   bundle exec rake codebase_index:self_analyze      # Analyze gem's own source
-#   bundle exec rake codebase_index:flow[EntryPoint]  # Generate execution flow
+#   bundle exec rake woods:extract          # Full extraction
+#   bundle exec rake woods:incremental      # Changed files only
+#   bundle exec rake woods:extract_framework # Rails/gem sources only
+#   bundle exec rake woods:validate          # Validate index integrity
+#   bundle exec rake woods:stats             # Show index statistics
+#   bundle exec rake woods:clean             # Remove index
+#   bundle exec rake woods:self_analyze      # Analyze gem's own source
+#   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
 
-namespace :codebase_index do
+namespace :woods do
   desc 'Full extraction of codebase for indexing'
   task extract: :environment do
-    require 'codebase_index/extractor'
+    require 'woods/extractor'
 
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
 
     puts 'Starting full codebase extraction...'
     puts "Output directory: #{output_dir}"
     puts
 
-    extractor = CodebaseIndex::Extractor.new(output_dir: output_dir)
+    extractor = Woods::Extractor.new(output_dir: output_dir)
     results = extractor.extract_all
 
     puts
@@ -41,11 +41,14 @@ namespace :codebase_index do
     puts "Output written to: #{output_dir}"
   end
 
+  desc 'Scan the forest — full extraction (alias for extract)'
+  task scan: :extract
+
   desc 'Incremental extraction based on git changes'
   task incremental: :environment do
-    require 'codebase_index/extractor'
+    require 'woods/extractor'
 
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
 
     # Determine changed files from CI environment or git
     require 'open3'
@@ -107,24 +110,27 @@ namespace :codebase_index do
     changed_files.each { |f| puts "  - #{f}" }
     puts
 
-    extractor = CodebaseIndex::Extractor.new(output_dir: output_dir)
+    extractor = Woods::Extractor.new(output_dir: output_dir)
     affected = extractor.extract_changed(changed_files)
 
     puts
     puts "Re-extracted #{affected.size} affected units."
   end
 
+  desc 'Tend the garden — incremental extraction (alias for incremental)'
+  task tend: :incremental
+
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'
   task extract_framework: :environment do
-    require 'codebase_index/extractors/rails_source_extractor'
+    require 'woods/extractors/rails_source_extractor'
 
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
 
     puts 'Extracting Rails and gem framework sources...'
     puts "Rails version: #{Rails.version}"
     puts
 
-    extractor = CodebaseIndex::Extractors::RailsSourceExtractor.new
+    extractor = Woods::Extractors::RailsSourceExtractor.new
     units = extractor.extract_all
 
     # Write output
@@ -145,7 +151,7 @@ namespace :codebase_index do
 
   desc 'Validate extracted index integrity'
   task validate: :environment do
-    output_dir = Pathname.new(ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
 
     unless output_dir.exist?
       puts "ERROR: Index directory does not exist: #{output_dir}"
@@ -227,9 +233,12 @@ namespace :codebase_index do
     end
   end
 
+  desc 'Vet the data — validate index integrity (alias for validate)'
+  task vet: :validate
+
   desc 'Show index statistics'
   task stats: :environment do
-    output_dir = Pathname.new(ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
 
     unless output_dir.exist?
       puts 'Index directory does not exist. Run extraction first.'
@@ -239,7 +248,7 @@ namespace :codebase_index do
     manifest_path = output_dir.join('manifest.json')
     manifest = manifest_path.exist? ? JSON.parse(File.read(manifest_path)) : {}
 
-    puts 'Codebase Index Statistics'
+    puts 'Woods Index Statistics'
     puts '=' * 50
     puts "  Extracted at:  #{manifest['extracted_at'] || 'unknown'}"
     puts "  Rails version: #{manifest['rails_version'] || 'unknown'}"
@@ -291,9 +300,12 @@ namespace :codebase_index do
     end
   end
 
+  desc 'Take a look — show index statistics (alias for stats)'
+  task look: :stats
+
   desc 'Clean extracted index'
   task clean: :environment do
-    output_dir = Pathname.new(ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
 
     if output_dir.exist?
       puts "Removing #{output_dir}..."
@@ -304,26 +316,29 @@ namespace :codebase_index do
     end
   end
 
+  desc 'Clear the brush — remove index (alias for clean)'
+  task clear: :clean
+
   # Internal debugging tool — hidden from `rails -T`
   task :retrieve, [:query] => :environment do |_t, args|
-    query = args[:query] || raise('Usage: rake codebase_index:retrieve[query]')
+    query = args[:query] || raise('Usage: rake woods:retrieve[query]')
 
-    require 'codebase_index'
-    require 'codebase_index/retriever'
-    require 'codebase_index/embedding/provider'
-    require 'codebase_index/storage/vector_store'
-    require 'codebase_index/storage/metadata_store'
-    require 'codebase_index/storage/graph_store'
-    require 'codebase_index/formatting/human_adapter'
+    require 'woods'
+    require 'woods/retriever'
+    require 'woods/embedding/provider'
+    require 'woods/storage/vector_store'
+    require 'woods/storage/metadata_store'
+    require 'woods/storage/graph_store'
+    require 'woods/formatting/human_adapter'
 
-    config = CodebaseIndex.configuration
+    config = Woods.configuration
 
-    provider = CodebaseIndex::Embedding::Provider::Ollama.new
-    vector_store = CodebaseIndex::Storage::VectorStore::InMemory.new
-    metadata_store = CodebaseIndex::Storage::MetadataStore::SQLite.new
-    graph_store = CodebaseIndex::Storage::GraphStore::Memory.new
+    provider = Woods::Embedding::Provider::Ollama.new
+    vector_store = Woods::Storage::VectorStore::InMemory.new
+    metadata_store = Woods::Storage::MetadataStore::SQLite.new
+    graph_store = Woods::Storage::GraphStore::Memory.new
 
-    retriever = CodebaseIndex::Retriever.new(
+    retriever = Woods::Retriever.new(
       vector_store: vector_store,
       metadata_store: metadata_store,
       graph_store: graph_store,
@@ -332,26 +347,26 @@ namespace :codebase_index do
 
     result = retriever.retrieve(query, budget: config.max_context_tokens)
 
-    formatter = CodebaseIndex::Formatting::HumanAdapter.new
+    formatter = Woods::Formatting::HumanAdapter.new
     puts formatter.format(result)
   end
 
   desc 'Embed all extracted units'
   task embed: :environment do
-    require 'codebase_index'
-    require 'codebase_index/embedding/indexer'
-    require 'codebase_index/embedding/text_preparer'
-    require 'codebase_index/embedding/provider'
-    require 'codebase_index/storage/vector_store'
+    require 'woods'
+    require 'woods/embedding/indexer'
+    require 'woods/embedding/text_preparer'
+    require 'woods/embedding/provider'
+    require 'woods/storage/vector_store'
 
-    config = CodebaseIndex.configuration
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
+    config = Woods.configuration
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
 
-    provider = CodebaseIndex::Embedding::Provider::Ollama.new
-    text_preparer = CodebaseIndex::Embedding::TextPreparer.new
-    vector_store = CodebaseIndex::Storage::VectorStore::InMemory.new
+    provider = Woods::Embedding::Provider::Ollama.new
+    text_preparer = Woods::Embedding::TextPreparer.new
+    vector_store = Woods::Storage::VectorStore::InMemory.new
 
-    indexer = CodebaseIndex::Embedding::Indexer.new(
+    indexer = Woods::Embedding::Indexer.new(
       provider: provider,
       text_preparer: text_preparer,
       vector_store: vector_store,
@@ -368,22 +383,25 @@ namespace :codebase_index do
     puts "  Errors:    #{stats[:errors]}"
   end
 
+  desc 'Nest the data — embed all units (alias for embed)'
+  task nest: :embed
+
   desc 'Embed changed units only (incremental)'
   task embed_incremental: :environment do
-    require 'codebase_index'
-    require 'codebase_index/embedding/indexer'
-    require 'codebase_index/embedding/text_preparer'
-    require 'codebase_index/embedding/provider'
-    require 'codebase_index/storage/vector_store'
+    require 'woods'
+    require 'woods/embedding/indexer'
+    require 'woods/embedding/text_preparer'
+    require 'woods/embedding/provider'
+    require 'woods/storage/vector_store'
 
-    config = CodebaseIndex.configuration
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
+    config = Woods.configuration
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
 
-    provider = CodebaseIndex::Embedding::Provider::Ollama.new
-    text_preparer = CodebaseIndex::Embedding::TextPreparer.new
-    vector_store = CodebaseIndex::Storage::VectorStore::InMemory.new
+    provider = Woods::Embedding::Provider::Ollama.new
+    text_preparer = Woods::Embedding::TextPreparer.new
+    vector_store = Woods::Storage::VectorStore::InMemory.new
 
-    indexer = CodebaseIndex::Embedding::Indexer.new(
+    indexer = Woods::Embedding::Indexer.new(
       provider: provider,
       text_preparer: text_preparer,
       vector_store: vector_store,
@@ -400,18 +418,21 @@ namespace :codebase_index do
     puts "  Errors:    #{stats[:errors]}"
   end
 
+  desc 'Hone the blade — incremental embedding (alias for embed_incremental)'
+  task hone: :embed_incremental
+
   # Internal debugging tool — hidden from `rails -T`
   task :self_analyze do
     require 'digest'
     require 'json'
     require 'fileutils'
-    require 'codebase_index/ruby_analyzer'
-    require 'codebase_index/dependency_graph'
-    require 'codebase_index/graph_analyzer'
-    require 'codebase_index/ruby_analyzer/mermaid_renderer'
+    require 'woods/ruby_analyzer'
+    require 'woods/dependency_graph'
+    require 'woods/graph_analyzer'
+    require 'woods/ruby_analyzer/mermaid_renderer'
 
     gem_root = File.expand_path('../..', __dir__)
-    json_dir = File.join(gem_root, 'tmp', 'codebase_index_self')
+    json_dir = File.join(gem_root, 'tmp', 'woods_self')
     docs_dir = File.join(gem_root, 'docs', 'self-analysis')
     manifest_path = File.join(json_dir, 'manifest.json')
 
@@ -431,17 +452,17 @@ namespace :codebase_index do
     puts 'Running self-analysis on gem source...'
 
     # 2. Run RubyAnalyzer
-    units = CodebaseIndex::RubyAnalyzer.analyze(paths: [File.join(gem_root, 'lib', 'codebase_index')])
+    units = Woods::RubyAnalyzer.analyze(paths: [File.join(gem_root, 'lib', 'woods')])
     puts "  Analyzed #{units.size} units"
 
     # 3. Build DependencyGraph + GraphAnalyzer
-    graph = CodebaseIndex::DependencyGraph.new
+    graph = Woods::DependencyGraph.new
     units.each { |unit| graph.register(unit) }
-    analyzer = CodebaseIndex::GraphAnalyzer.new(graph)
+    analyzer = Woods::GraphAnalyzer.new(graph)
     analysis = analyzer.analyze
     graph_data = graph.to_h
 
-    # 4. Write JSON to tmp/codebase_index_self/
+    # 4. Write JSON to tmp/woods_self/
     FileUtils.mkdir_p(json_dir)
 
     units.each do |unit|
@@ -473,7 +494,7 @@ namespace :codebase_index do
 
     # 5. Render Mermaid to docs/self-analysis/
     FileUtils.mkdir_p(docs_dir)
-    renderer = CodebaseIndex::RubyAnalyzer::MermaidRenderer.new
+    renderer = Woods::RubyAnalyzer::MermaidRenderer.new
 
     File.write(
       File.join(docs_dir, 'architecture.md'),
@@ -503,29 +524,29 @@ namespace :codebase_index do
   desc 'Generate execution flow document for a Rails entry point'
   task :flow, [:entry_point] => :environment do |_t, args|
     require 'json'
-    require 'codebase_index/flow_assembler'
-    require 'codebase_index/dependency_graph'
+    require 'woods/flow_assembler'
+    require 'woods/dependency_graph'
 
     entry_point = args[:entry_point]
     unless entry_point
-      puts 'Usage: rake codebase_index:flow[EntryPoint#method]'
+      puts 'Usage: rake woods:flow[EntryPoint#method]'
       exit 1
     end
 
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', Rails.root.join('tmp/codebase_index'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
     graph_path = File.join(output_dir, 'dependency_graph.json')
 
     unless File.exist?(graph_path)
       puts "ERROR: Dependency graph not found at #{graph_path}"
-      puts 'Run codebase_index:extract first.'
+      puts 'Run woods:extract first.'
       exit 1
     end
 
     graph_data = JSON.parse(File.read(graph_path))
-    graph = CodebaseIndex::DependencyGraph.from_h(graph_data)
+    graph = Woods::DependencyGraph.from_h(graph_data)
 
     max_depth = ENV.fetch('MAX_DEPTH', 5).to_i
-    assembler = CodebaseIndex::FlowAssembler.new(graph: graph, extracted_dir: output_dir)
+    assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: output_dir)
     flow = assembler.assemble(entry_point, max_depth: max_depth)
 
     format = ENV.fetch('FORMAT', 'markdown').downcase
@@ -543,35 +564,35 @@ namespace :codebase_index do
     # Capture stdout before Rails boot to keep MCP protocol clean.
     # Rails boot emits OpenTelemetry, gem warnings, etc. to stdout —
     # MCP client cannot parse these as JSON-RPC.
-    # Global variable passes the fd to exe/codebase-console via load.
-    $codebase_index_protocol_out = $stdout.dup # rubocop:disable Style/GlobalVars
+    # Global variable passes the fd to exe/woods-console via load.
+    $woods_protocol_out = $stdout.dup # rubocop:disable Style/GlobalVars
     $stdout.reopen($stderr)
 
     Rake::Task[:environment].invoke
 
-    load File.expand_path('../../exe/codebase-console', __dir__)
+    load File.expand_path('../../exe/woods-console', __dir__)
   end
 
   desc 'Sync extraction data to Notion databases (Data Models + Columns)'
   task notion_sync: :environment do
-    require 'codebase_index/notion/exporter'
+    require 'woods/notion/exporter'
 
-    config = CodebaseIndex.configuration
+    config = Woods.configuration
     # Env var takes precedence over configured value
     config.notion_api_token = ENV.fetch('NOTION_API_TOKEN', nil) || config.notion_api_token
 
     unless config.notion_api_token
       puts 'ERROR: Notion API token not configured.'
-      puts 'Set NOTION_API_TOKEN env var or configure notion_api_token in CodebaseIndex.configure.'
+      puts 'Set NOTION_API_TOKEN env var or configure notion_api_token in Woods.configure.'
       exit 1
     end
 
-    output_dir = ENV.fetch('CODEBASE_INDEX_OUTPUT', config.output_dir)
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
 
     db_ids = config.notion_database_ids || {}
     if db_ids.empty?
       puts 'ERROR: No Notion database IDs configured.'
-      puts 'Set notion_database_ids in CodebaseIndex.configure:'
+      puts 'Set notion_database_ids in Woods.configure:'
       puts '  config.notion_database_ids = { data_models: "db-uuid", columns: "db-uuid" }'
       exit 1
     end
@@ -581,7 +602,7 @@ namespace :codebase_index do
     puts "  Databases:  #{db_ids.keys.join(', ')}"
     puts
 
-    exporter = CodebaseIndex::Notion::Exporter.new(index_dir: output_dir)
+    exporter = Woods::Notion::Exporter.new(index_dir: output_dir)
     stats = exporter.sync_all
 
     puts 'Sync complete!'
@@ -594,4 +615,7 @@ namespace :codebase_index do
       puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
     end
   end
+
+  desc 'Send findings from the field — sync to Notion (alias for notion_sync)'
+  task send: :notion_sync
 end

@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/bridge'
+require 'woods/console/bridge'
 
-RSpec.describe CodebaseIndex::Console::Bridge do
+RSpec.describe Woods::Console::Bridge do
   let(:registry) do
     {
       'User' => %w[id email name created_at],
       'Post' => %w[id title body user_id]
     }
   end
-  let(:validator) { CodebaseIndex::Console::ModelValidator.new(registry: registry) }
+  let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
   let(:connection) { instance_double('Connection') }
-  let(:safe_context) { CodebaseIndex::Console::SafeContext.new(connection: connection) }
+  let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
   let(:input) { StringIO.new }
   let(:output) { StringIO.new }
 

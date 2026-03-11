@@ -2,7 +2,7 @@
 
 require_relative '../extracted_unit'
 
-module CodebaseIndex
+module Woods
   module RubyAnalyzer
     # Enriches ExtractedUnit objects with runtime trace data.
     #

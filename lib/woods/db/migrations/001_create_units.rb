@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Db
     module Migrations
-      # Creates the codebase_units table for storing extracted unit metadata.
+      # Creates the woods_units table for storing extracted unit metadata.
       module CreateUnits
         VERSION = 1
 
@@ -11,7 +11,7 @@ module CodebaseIndex
         # @return [void]
         def self.up(connection) # rubocop:disable Metrics/MethodLength
           connection.execute(<<~SQL)
-            CREATE TABLE IF NOT EXISTS codebase_units (
+            CREATE TABLE IF NOT EXISTS woods_units (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               unit_type TEXT NOT NULL,
               identifier TEXT NOT NULL,
@@ -26,10 +26,10 @@ module CodebaseIndex
             )
           SQL
           connection.execute(<<~SQL)
-            CREATE INDEX IF NOT EXISTS idx_codebase_units_type ON codebase_units(unit_type)
+            CREATE INDEX IF NOT EXISTS idx_woods_units_type ON woods_units(unit_type)
           SQL
           connection.execute(<<~SQL)
-            CREATE INDEX IF NOT EXISTS idx_codebase_units_file_path ON codebase_units(file_path)
+            CREATE INDEX IF NOT EXISTS idx_woods_units_file_path ON woods_units(file_path)
           SQL
         end
       end

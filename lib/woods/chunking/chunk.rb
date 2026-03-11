@@ -2,7 +2,7 @@
 
 require 'digest'
 
-module CodebaseIndex
+module Woods
   module Chunking
     # A single semantic chunk extracted from an ExtractedUnit.
     #

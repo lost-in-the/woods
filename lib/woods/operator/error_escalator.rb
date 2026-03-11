@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Operator
     # Classifies pipeline errors by severity and suggests remediation.
     #
@@ -30,7 +30,7 @@ module CodebaseIndex
         { class_pattern: /JSON::ParserError/, category: 'corrupt_data',
           remediation: 'Clean index and re-extract' },
         { class_pattern: /ConfigurationError/, category: 'configuration',
-          remediation: 'Review CodebaseIndex configuration' },
+          remediation: 'Review Woods configuration' },
         { class_pattern: /ExtractionError/, category: 'extraction_failure',
           remediation: 'Check extraction logs for specific failure details' }
       ].freeze

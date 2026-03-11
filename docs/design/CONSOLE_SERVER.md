@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The codebase-index MCP server provides structural knowledge: models, associations, routes, dependency graphs, PageRank scores — all from pre-extracted JSON. It has no runtime connection to the Rails application and cannot answer questions about live data, performance, or actual records.
+The woods MCP server provides structural knowledge: models, associations, routes, dependency graphs, PageRank scores — all from pre-extracted JSON. It has no runtime connection to the Rails application and cannot answer questions about live data, performance, or actual records.
 
 The console server closes that gap. It maintains a persistent Rails console session inside the client's environment (Docker, direct process, or SSH) and exposes structured tools for querying live application state. Combined with extraction data, an agent gains a complete picture: how the app is built (structure) and what's happening in it (runtime).
 
@@ -32,7 +32,7 @@ Agent (Claude Code, Cursor, etc.)
   │
   ▼
 ┌─────────────────────────────┐
-│ codebase-console-mcp        │  Host machine — Ruby process
+│ woods-console-mcp        │  Host machine — Ruby process
 │ MCP Server                  │  Validates params, enforces limits,
 │                             │  formats responses, redacts sensitive data
 └─────────────────────────────┘
@@ -56,13 +56,13 @@ Agent (Claude Code, Cursor, etc.)
 └─────────────────────────────┘
 ```
 
-### Relationship to codebase-index
+### Relationship to woods
 
-Same gem, separate executable. Both servers share `CodebaseIndex::` namespace but run independently.
+Same gem, separate executable. Both servers share `Woods::` namespace but run independently.
 
-| | codebase-index | codebase-console |
+| | woods | codebase-console |
 |---|---|---|
-| **Executable** | `exe/codebase-index-mcp` | `exe/codebase-console-mcp` |
+| **Executable** | `exe/woods-mcp` | `exe/woods-console-mcp` |
 | **Data source** | JSON files on disk | Live database via Rails console |
 | **Rails required** | No | Yes (inside bridge) |
 | **Answers** | "What models exist? What are Order's associations?" | "How many orders are pending? What's user #42's status?" |
@@ -104,7 +104,7 @@ The bridge validates model names against `ActiveRecord::Base.descendants`, valid
 console:
   mode: docker
   container: my-rails-app-web-1
-  command: "bundle exec rails runner lib/codebase_index/console/bridge.rb"
+  command: "bundle exec rails runner lib/woods/console/bridge.rb"
 ```
 
 The MCP server spawns `docker exec -i <container> <command>` and communicates over the attached stdin/stdout.
@@ -115,7 +115,7 @@ The MCP server spawns `docker exec -i <container> <command>` and communicates ov
 console:
   mode: direct
   directory: /path/to/rails/app
-  command: "bundle exec rails runner lib/codebase_index/console/bridge.rb"
+  command: "bundle exec rails runner lib/woods/console/bridge.rb"
 ```
 
 For when the Rails app runs on the same machine (local development without Docker).
@@ -127,7 +127,7 @@ console:
   mode: ssh
   host: staging.example.com
   user: deploy
-  command: "cd /var/www/app/current && bundle exec rails runner lib/codebase_index/console/bridge.rb"
+  command: "cd /var/www/app/current && bundle exec rails runner lib/woods/console/bridge.rb"
 ```
 
 For querying staging or production environments. SSH connection is persistent (reused across requests).
@@ -179,7 +179,7 @@ This is the strongest layer — even if all other layers fail, the database reje
 Every bridge request runs inside a rolled-back transaction. Reads succeed; writes are discarded silently.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Console
     class SafeContext
       def execute(tool, params)
@@ -230,7 +230,7 @@ No tool in Tiers 1-3 accepts arbitrary Ruby or SQL strings.
 When writes are needed (e.g., toggling a feature flag), they go through pre-registered actions with human confirmation:
 
 ```ruby
-CodebaseIndex::Console.configure do |config|
+Woods::Console.configure do |config|
   config.register_write_action(
     name: "update_setting",
     model: "Setting",
@@ -992,7 +992,7 @@ For evaluation or local development. No gem dependency in the Rails app — copy
 
 ```bash
 # Copy the bridge script into your Rails app
-cp vendor/codebase_index/console_bridge.rb lib/
+cp vendor/woods/console_bridge.rb lib/
 
 # Start the bridge directly
 bundle exec rails runner lib/console_bridge.rb
@@ -1004,7 +1004,7 @@ Configure the MCP server to connect:
 # Claude Code MCP config
 mcpServers:
   codebase-console:
-    command: exe/codebase-console-mcp
+    command: exe/woods-console-mcp
     args:
       - --mode=direct
       - --directory=/path/to/rails/app
@@ -1018,7 +1018,7 @@ Add the gem to the Rails app's Gemfile for automatic bridge discovery and config
 ```ruby
 # Gemfile
 group :development do
-  gem "codebase_index"
+  gem "woods"
 end
 ```
 
@@ -1026,7 +1026,7 @@ end
 # Claude Code MCP config
 mcpServers:
   codebase-console:
-    command: exe/codebase-console-mcp
+    command: exe/woods-console-mcp
     args:
       - --mode=docker
       - --container=my-rails-app-web-1
@@ -1037,7 +1037,7 @@ The bridge auto-detects the gem and uses its built-in bridge script.
 ### Docker Mode Configuration
 
 ```ruby
-CodebaseIndex::Console.configure do |config|
+Woods::Console.configure do |config|
   config.mode = :docker
   config.container = "my-rails-app-web-1"
   # Or use compose service name:
@@ -1057,7 +1057,7 @@ end
 ### Direct Mode Configuration
 
 ```ruby
-CodebaseIndex::Console.configure do |config|
+Woods::Console.configure do |config|
   config.mode = :direct
   config.rails_root = "/path/to/rails/app"
   config.environment = "development"
@@ -1070,7 +1070,7 @@ end
 ### SSH Mode Configuration
 
 ```ruby
-CodebaseIndex::Console.configure do |config|
+Woods::Console.configure do |config|
   config.mode = :ssh
   config.ssh_host = "staging.example.com"
   config.ssh_user = "deploy"
@@ -1095,13 +1095,13 @@ end
 
 ```ruby
 # Local development, no Docker
-CodebaseIndex::Console.configure_with_preset(:local)
+Woods::Console.configure_with_preset(:local)
 
 # Docker Compose (detects running containers)
-CodebaseIndex::Console.configure_with_preset(:docker)
+Woods::Console.configure_with_preset(:docker)
 
 # Production read-only (strict limits, column redaction)
-CodebaseIndex::Console.configure_with_preset(:production)
+Woods::Console.configure_with_preset(:production)
 ```
 
 ### Connection Lifecycle
@@ -1173,7 +1173,7 @@ CodebaseIndex::Console.configure_with_preset(:production)
 **Goal:** A working console MCP server with safe read-only tools.
 
 **Deliverables:**
-- MCP server executable (`exe/codebase-console-mcp`)
+- MCP server executable (`exe/woods-console-mcp`)
 - Tier 1 tools: `count`, `sample`, `find`, `pluck`, `aggregate`, `association_count`, `schema`, `recent`, `console_status`
 - Safety layers 1-4: read-only connection, transaction rollback, statement timeout, structured tools
 - Column redaction

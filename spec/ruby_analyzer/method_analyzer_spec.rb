@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast'
-require 'codebase_index/ruby_analyzer/method_analyzer'
+require 'woods/ast'
+require 'woods/ruby_analyzer/method_analyzer'
 
-RSpec.describe CodebaseIndex::RubyAnalyzer::MethodAnalyzer do
+RSpec.describe Woods::RubyAnalyzer::MethodAnalyzer do
   subject(:analyzer) { described_class.new }
 
   describe '#analyze' do
@@ -46,7 +46,7 @@ RSpec.describe CodebaseIndex::RubyAnalyzer::MethodAnalyzer do
 
     it 'extracts methods from namespaced classes' do
       source = <<~RUBY
-        module CodebaseIndex
+        module Woods
           class Extractor
             def extract_all
               []
@@ -59,8 +59,8 @@ RSpec.describe CodebaseIndex::RubyAnalyzer::MethodAnalyzer do
 
       expect(units.size).to eq(1)
       unit = units.first
-      expect(unit.identifier).to eq('CodebaseIndex::Extractor#extract_all')
-      expect(unit.namespace).to eq('CodebaseIndex::Extractor')
+      expect(unit.identifier).to eq('Woods::Extractor#extract_all')
+      expect(unit.namespace).to eq('Woods::Extractor')
     end
 
     it 'detects private methods' do

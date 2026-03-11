@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/embedding/text_preparer'
+require 'woods/embedding/text_preparer'
 
-RSpec.describe CodebaseIndex::Embedding::TextPreparer do
+RSpec.describe Woods::Embedding::TextPreparer do
   subject(:preparer) { described_class.new }
 
   let(:unit) do
-    CodebaseIndex::ExtractedUnit.new(
+    Woods::ExtractedUnit.new(
       type: :model,
       identifier: 'User',
       file_path: 'app/models/user.rb'
@@ -49,7 +49,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
 
     context 'with a minimal unit' do
       let(:minimal_unit) do
-        CodebaseIndex::ExtractedUnit.new(
+        Woods::ExtractedUnit.new(
           type: :service,
           identifier: 'PaymentService',
           file_path: 'app/services/payment_service.rb'
@@ -75,7 +75,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
 
     context 'with nil source code' do
       let(:empty_unit) do
-        CodebaseIndex::ExtractedUnit.new(
+        Woods::ExtractedUnit.new(
           type: :job,
           identifier: 'CleanupJob',
           file_path: 'app/jobs/cleanup_job.rb'
@@ -90,7 +90,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
 
     context 'with dependencies containing nil targets' do
       let(:unit_with_nil_deps) do
-        CodebaseIndex::ExtractedUnit.new(
+        Woods::ExtractedUnit.new(
           type: :model,
           identifier: 'Post',
           file_path: 'app/models/post.rb'
@@ -113,7 +113,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
     context 'with more than 10 dependencies' do
       let(:many_deps_unit) do
         deps = (1..15).map { |i| { type: :model, target: "Model#{i}" } }
-        CodebaseIndex::ExtractedUnit.new(
+        Woods::ExtractedUnit.new(
           type: :controller,
           identifier: 'AdminController',
           file_path: 'app/controllers/admin_controller.rb'
@@ -134,7 +134,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
   describe 'token limit enforcement' do
     let(:large_source) { 'x' * 50_000 }
     let(:large_unit) do
-      CodebaseIndex::ExtractedUnit.new(
+      Woods::ExtractedUnit.new(
         type: :model,
         identifier: 'HugeModel',
         file_path: 'app/models/huge_model.rb'
@@ -179,7 +179,7 @@ RSpec.describe CodebaseIndex::Embedding::TextPreparer do
 
     context 'when unit has chunks' do
       let(:chunked_unit) do
-        CodebaseIndex::ExtractedUnit.new(
+        Woods::ExtractedUnit.new(
           type: :model,
           identifier: 'Order',
           file_path: 'app/models/order.rb'

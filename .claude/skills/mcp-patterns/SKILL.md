@@ -1,16 +1,16 @@
 ---
 name: mcp-patterns
-description: Design rules and reference patterns for building MCP servers in CodebaseIndex
+description: Design rules and reference patterns for building MCP servers in Woods
 disable-model-invocation: true
 user-invocable: false
 ---
 # MCP Server Patterns
 
-Design rules and reference implementation for building MCP servers in CodebaseIndex.
+Design rules and reference implementation for building MCP servers in Woods.
 
 ## Reference Implementation
 
-Read `lib/codebase_index/mcp/server.rb` before building any new MCP server or tool. It demonstrates the established patterns:
+Read `lib/woods/mcp/server.rb` before building any new MCP server or tool. It demonstrates the established patterns:
 
 - Server built via `Server.build(...)` class method returning a configured `::MCP::Server`
 - Tools defined inline via `define_<name>_tool` private methods with closures over a reader/context object
@@ -39,6 +39,6 @@ Read `lib/codebase_index/mcp/server.rb` before building any new MCP server or to
 
 1. Read the relevant design doc first (e.g., `docs/design/CONSOLE_SERVER.md`).
 2. Follow the `Server.build` pattern — single entry point, tools as private method definitions.
-3. Create an executable in `exe/` (e.g., `exe/codebase-console-mcp`).
+3. Create an executable in `exe/` (e.g., `exe/woods-console-mcp`).
 4. Spec the server in `spec/mcp/`.
 5. Update `docs/MCP_SERVERS.md` and `docs/design/AGENTIC_STRATEGY.md` with the new server's tools and when agents should use them.

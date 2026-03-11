@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Retrieval
     # SearchExecutor maps a query classification to a retrieval strategy and
     # executes it against the configured stores.

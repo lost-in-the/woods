@@ -3,7 +3,7 @@
 require 'digest'
 require_relative 'cache_store'
 
-module CodebaseIndex
+module Woods
   module Cache
     # Decorator that wraps an embedding provider with cache-through logic.
     #
@@ -55,7 +55,7 @@ module CodebaseIndex
             begin
               @cache_store.write(embedding_key(text), fresh_vectors[i], ttl: @ttl)
             rescue StandardError => e
-              warn("[CodebaseIndex] CachedEmbeddingProvider cache write failed: #{e.message}")
+              warn("[Woods] CachedEmbeddingProvider cache write failed: #{e.message}")
             end
           end
         end
@@ -117,7 +117,7 @@ module CodebaseIndex
     # separately with a longer TTL.
     #
     # @example
-    #   retriever = CodebaseIndex::Retriever.new(...)
+    #   retriever = Woods::Retriever.new(...)
     #   cached = CachedRetriever.new(retriever: retriever, cache_store: store)
     #   cached.retrieve("How does User work?")  # full pipeline + cache
     #   cached.retrieve("How does User work?")  # instant cache hit
@@ -162,7 +162,7 @@ module CodebaseIndex
         begin
           @cache_store.write(key, serialize_result(result), ttl: @context_ttl)
         rescue StandardError => e
-          warn("[CodebaseIndex] CachedRetriever cache write failed: #{e.message}")
+          warn("[Woods] CachedRetriever cache write failed: #{e.message}")
         end
 
         result

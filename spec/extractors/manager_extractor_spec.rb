@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/extractors/manager_extractor'
+require 'woods/extractors/manager_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ManagerExtractor do
+RSpec.describe Woods::Extractors::ManagerExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

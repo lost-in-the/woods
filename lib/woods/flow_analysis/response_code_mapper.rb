@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module FlowAnalysis
     # Maps render/redirect AST nodes to HTTP status codes.
     #

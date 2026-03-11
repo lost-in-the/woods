@@ -1,17 +1,17 @@
-# CodebaseIndex Optimization & Best Practices Review
+# Woods Optimization & Best Practices Review
 
 > **Status as of Feb 2026:** 39 of 43 items resolved. Remaining: #6 (fixture specs — ongoing), #18 (intentionally not memoized), #21 (tiktoken runtime — low priority), #40 (Amplitude — deferred).
 
 ## Context
 
-CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines across 7 extractors). The extraction layer is complete and well-designed. This review identifies **29 items** across performance, security, correctness, coverage, and best practices — prioritized by impact. **Batches 1-4 fully resolved** (items #1-5, #7-11, #15-17) in commit `cab9061`. **Items #12-13 resolved** via shared AST layer (Prism-based `Ast::MethodExtractor` and `Ast::Parser`) in commit `30b6563`. Item #6 is partially resolved (86 gem specs + 87 integration specs; extractor-level fixture specs still needed).
+Woods is a runtime-aware Rails codebase extraction system (~2,700 lines across 7 extractors). The extraction layer is complete and well-designed. This review identifies **29 items** across performance, security, correctness, coverage, and best practices — prioritized by impact. **Batches 1-4 fully resolved** (items #1-5, #7-11, #15-17) in commit `cab9061`. **Items #12-13 resolved** via shared AST layer (Prism-based `Ast::MethodExtractor` and `Ast::Parser`) in commit `30b6563`. Item #6 is partially resolved (86 gem specs + 87 integration specs; extractor-level fixture specs still needed).
 
 ---
 
 ## Critical: Performance
 
 ### 1. ✅ Git Data Extraction — N+1 Shell Commands — RESOLVED
-**Files:** `lib/codebase_index/extractor.rb:191-247`
+**Files:** `lib/woods/extractor.rb:191-247`
 **Resolution:** Replaced per-file subprocess spawns with `batch_git_data` — two git commands total (`git log --all --name-only` + parsing). Commit `cab9061`.
 
 ~~Currently spawns **6-7 shell processes per unit file** (`git log`, `git rev-list`, `git shortlog`). For a codebase with 200 units, that's ~1,400 subprocess spawns — easily the biggest bottleneck.~~
@@ -29,7 +29,7 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ~~Every extractor iterates all `ActiveRecord::Base.descendants` for every unit to find model name references.~~
 
 ### 4. ✅ O(n) Linear `find_unit` in Dependency Resolution — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Resolution:** `resolve_dependents` now builds a `{ identifier => unit }` hash via `index_by` before the loop. Commit `cab9061`.
 
 ~~`resolve_dependents` calls `find_unit` (linear scan) for every dependency of every unit.~~
@@ -39,7 +39,7 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ## Critical: Security
 
 ### 5. ✅ Shell Injection in Git Commands — RESOLVED
-**File:** `lib/codebase_index/extractor.rb:195-197, 214, 224, 235-238`
+**File:** `lib/woods/extractor.rb:195-197, 214, 224, 235-238`
 **Resolution:** Backtick git commands replaced with `Open3.capture2` argument arrays. No shell interpretation, no injection risk.
 
 ~~File paths were string-interpolated into backtick shell commands. A file path containing `"$(rm -rf /)` or backticks would execute arbitrary commands.~~
@@ -60,13 +60,13 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ## High: Correctness Bugs
 
 ### 7. ✅ DependencyGraph Key Mismatch After JSON Round-Trip — RESOLVED
-**File:** `lib/codebase_index/dependency_graph.rb`
+**File:** `lib/woods/dependency_graph.rb`
 **Resolution:** `from_h` now uses `symbolize_node` and `transform_keys` to ensure symbol keys after JSON deserialization. `units_of_type(:model)` works correctly after round-trip.
 
 ~~`@type_index` used symbol keys (`:model`) during extraction, but `from_h` loaded string keys from JSON.~~
 
 ### 8. ✅ Incremental Extraction Doesn't Update Index Files — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Resolution:** `extract_changed` now tracks `affected_types` and calls `regenerate_type_index` for each. Commit `cab9061`.
 
 ~~`extract_changed` re-writes individual unit JSON files and the dependency graph, but skips `_index.json` files.~~
@@ -87,7 +87,7 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ~~17+ instances of bare `rescue` across all extractors caught `Exception`, masking critical failures.~~
 
 ### 11. ✅ Repeated `eager_load!` Calls — RESOLVED
-**Files:** `lib/codebase_index/extractor.rb` (orchestrator), all extractors
+**Files:** `lib/woods/extractor.rb` (orchestrator), all extractors
 **Resolution:** `Rails.application.eager_load!` consolidated to the orchestrator. No longer called redundantly by each individual extractor.
 
 ~~Called 5 times when the orchestrator ran all extractors sequentially.~~
@@ -115,13 +115,13 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ~~`mod.name.include?("Concerns")` matches any module with "Concerns" in its name, including third-party gems. `defined_in_app?` iterates all instance methods checking source locations (expensive).~~
 
 ### 15. ✅ Redundant `extract_public_api`/`extract_dsl_methods` Calls — RESOLVED
-**File:** `lib/codebase_index/extractors/rails_source_extractor.rb`
+**File:** `lib/woods/extractors/rails_source_extractor.rb`
 **Resolution:** `rate_importance` now receives pre-computed metadata instead of re-extracting. Commit `cab9061`.
 
 ~~`rate_importance` calls `extract_public_api(source)` and `extract_dsl_methods(source)` even though the same data was just computed.~~
 
 ### 16. ✅ `JSON.pretty_generate` for All Output — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Resolution:** Added `config.pretty_json` (defaults to `true` for backward compat). `json_serialize` dispatches to `pretty_generate` or `generate` based on config. Commit `cab9061`.
 
 ~~Pretty-printed JSON adds ~30-40% size overhead from whitespace.~~
@@ -131,44 +131,44 @@ CodebaseIndex is a runtime-aware Rails codebase extraction system (~2,700 lines 
 ## Low: Minor Improvements
 
 ### 17. ✅ Cache `git_available?` Result — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Resolution:** Memoized with `defined?(@git_available)` guard. Commit `cab9061`.
 
 ~~Spawns a subprocess every time it's called.~~
 
 ### 18. ⚠️ Memoize `estimated_tokens` — INTENTIONALLY NOT MEMOIZED
-**File:** `lib/codebase_index/extracted_unit.rb`
+**File:** `lib/woods/extracted_unit.rb`
 **Status:** `source_code` and `metadata` are mutable after construction (extractors modify units during the dependency resolution pass). Memoizing `estimated_tokens` would return stale values. The per-call cost is negligible (one division + ceil).
 
 ~~Recalculates on every call.~~
 
 ### 19. ✅ Use Set for Job Deduplication — RESOLVED
-**File:** `lib/codebase_index/extractors/job_extractor.rb`
+**File:** `lib/woods/extractors/job_extractor.rb`
 **Resolution:** Replaced O(n) `units.any?` with a `Set` of seen identifiers for O(1) lookup.
 
 ~~`units.any? { |u| u.identifier == job_class.name }` is O(n) per check.~~
 
 ### 20. ✅ Configuration Validation — RESOLVED
-**File:** `lib/codebase_index.rb:35-58`
+**File:** `lib/woods.rb:35-58`
 **Resolution:** Added `validate!` method with checks for positive integers, valid ranges, and writable paths. Called before extraction runs.
 
 ~~No validation on `max_context_tokens`, `similarity_threshold`, `output_dir`, etc.~~
 
 ### 21. Token Estimation Accuracy
-**File:** `lib/codebase_index/extracted_unit.rb:66-69`
+**File:** `lib/woods/extracted_unit.rb:66-69`
 
 `(length / 4.0).ceil` is a rough heuristic. Ruby code tokenizes differently than natural language.
 
 **Fix:** Consider `tiktoken_ruby` gem for accurate token counting, with the 4-char heuristic as fallback.
 
 ### 22. ✅ Concurrent Extraction — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Resolution:** Added `extract_all_concurrent` with `concurrent_extraction` config flag (default: false). Sequential extraction remains the default for safety.
 
 ~~Extractors run sequentially but are independent.~~
 
 ### 23. ✅ Missing Mailer/Job Types in `re_extract_unit` — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Resolution:** `re_extract_unit` now uses `TYPE_TO_EXTRACTOR_KEY` mapping and handles all types including `:job`, `:mailer`, and GraphQL types. Commit `cab9061`.
 
 ~~The `case` statement for re-extraction only handles `:model`, `:controller`, `:service`, `:component`.~~
@@ -285,7 +285,7 @@ Items identified from the initial MCP server implementation (commits `baa5b85`..
 
 ### 33. ✅ MCP Index Server — HTTP Transport — RESOLVED
 
-**Resolution:** `exe/codebase-index-mcp-http` executable provides HTTP/Rack transport via Rackup. Supports network-accessible retrieval.
+**Resolution:** `exe/woods-mcp-http` executable provides HTTP/Rack transport via Rackup. Supports network-accessible retrieval.
 
 ~~The server only supports stdio transport.~~
 
@@ -303,13 +303,13 @@ Implementation items from the CONSOLE_SERVER.md design document, organized by ph
 
 ### 35. ✅ Console Server — Phase 0: Bridge Protocol — RESOLVED
 
-**Resolution:** Bridge script (`lib/codebase_index/console/bridge.rb`) implemented with JSON-lines protocol, model/column validation against `ActiveRecord::Base.descendants`, and connection manager with Docker exec, direct, and SSH modes.
+**Resolution:** Bridge script (`lib/woods/console/bridge.rb`) implemented with JSON-lines protocol, model/column validation against `ActiveRecord::Base.descendants`, and connection manager with Docker exec, direct, and SSH modes.
 
 ~~Build the JSON-lines bridge script.~~
 
 ### 36. ✅ Console Server — Phase 1: MVP Tools — RESOLVED
 
-**Resolution:** `exe/codebase-console-mcp` executable with 9 Tier 1 tools. Safety layers 1-4 implemented (read-only connection via `SafeContext` transaction rollback, statement timeout, structured validation). Column redaction and result size caps active.
+**Resolution:** `exe/woods-console-mcp` executable with 9 Tier 1 tools. Safety layers 1-4 implemented (read-only connection via `SafeContext` transaction rollback, statement timeout, structured validation). Column redaction and result size caps active.
 
 ~~Implement Tier 1 tools.~~
 
@@ -374,8 +374,8 @@ Requested: add Amplitude as an analytics provider for Tier 3 tools. Amplitude's 
 ## Verification
 
 After each batch:
-1. Run `rake codebase_index:extract` on a real Rails app
-2. Run `rake codebase_index:validate` to verify output integrity
+1. Run `rake woods:extract` on a real Rails app
+2. Run `rake woods:validate` to verify output integrity
 3. Compare output JSON files before/after (should be identical except for timing fields)
-4. Run `rake codebase_index:incremental` with a known changed file
+4. Run `rake woods:incremental` with a known changed file
 5. Verify `_index.json` and `SUMMARY.md` are consistent with unit files

@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-# @see CodebaseIndex
-module CodebaseIndex
-  class Error < StandardError; end unless defined?(CodebaseIndex::Error)
+# @see Woods
+module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
 
   module Console
-    class SqlValidationError < CodebaseIndex::Error; end
+    class SqlValidationError < Woods::Error; end
 
     # Validates SQL strings for read-only safety.
     #

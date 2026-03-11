@@ -33,4 +33,4 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
       - name: Build gem
-        run: gem build codebase_index.gemspec
+        run: gem build woods.gemspec

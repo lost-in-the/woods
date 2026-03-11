@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Db
     # Tracks which schema migrations have been applied.
     #
-    # Uses a simple `codebase_index_schema_migrations` table with a single
+    # Uses a simple `woods_schema_migrations` table with a single
     # `version` column. Works with any database connection that supports
     # `execute` and returns arrays (SQLite3, pg, mysql2).
     #
     # @example
-    #   db = SQLite3::Database.new('codebase_index.db')
+    #   db = SQLite3::Database.new('woods.db')
     #   sv = SchemaVersion.new(connection: db)
     #   sv.ensure_table!
     #   sv.current_version  # => 0
@@ -17,7 +17,7 @@ module CodebaseIndex
     #   sv.current_version  # => 1
     #
     class SchemaVersion
-      TABLE_NAME = 'codebase_index_schema_migrations'
+      TABLE_NAME = 'woods_schema_migrations'
 
       # @param connection [Object] Database connection supporting #execute
       def initialize(connection:)

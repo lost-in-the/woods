@@ -1,4 +1,4 @@
-# CodebaseIndex MCP Tool Cookbook
+# Woods MCP Tool Cookbook
 
 Scenario-based examples showing which tool to use, what parameters to pass, and what you'll get back. Each section answers a natural question you might ask while working in a Rails codebase.
 
@@ -537,7 +537,7 @@ Trigger extraction, then reload the server's in-memory data:
 Run incremental extraction on every push, cache the index between runs:
 
 ```yaml
-# .github/workflows/codebase-index.yml
+# .github/workflows/woods.yml
 name: Update Codebase Index
 
 on:
@@ -561,30 +561,30 @@ jobs:
       - name: Restore index cache
         uses: actions/cache@v4
         with:
-          path: tmp/codebase_index
-          key: codebase-index-${{ github.ref }}-${{ github.sha }}
+          path: tmp/woods
+          key: woods-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
-            codebase-index-${{ github.ref }}-
-            codebase-index-
+            woods-${{ github.ref }}-
+            woods-
 
       - name: Run database migrations
         run: bundle exec rails db:migrate RAILS_ENV=test
 
       - name: Update codebase index
-        run: bundle exec rake codebase_index:incremental
+        run: bundle exec rake woods:incremental
         env:
           RAILS_ENV: test
           GITHUB_BASE_REF: ${{ github.base_ref }}
 
       - name: Validate index
-        run: bundle exec rake codebase_index:validate
+        run: bundle exec rake woods:validate
 ```
 
 For Docker-based CI:
 
 ```yaml
       - name: Update codebase index
-        run: docker compose exec -T app bundle exec rake codebase_index:incremental
+        run: docker compose exec -T app bundle exec rake woods:incremental
 ```
 
 ---

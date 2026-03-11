@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/observability/health_check'
+require 'woods/observability/health_check'
 
-RSpec.describe CodebaseIndex::Observability::HealthCheck do
+RSpec.describe Woods::Observability::HealthCheck do
   let(:vector_store) { instance_double('VectorStore', count: 10) }
   let(:metadata_store) { instance_double('MetadataStore', count: 20) }
   let(:embedding_provider) { instance_double('EmbeddingProvider', embed: [0.1, 0.2, 0.3], dimensions: 1536) }
@@ -146,7 +146,7 @@ RSpec.describe CodebaseIndex::Observability::HealthCheck do
     end
   end
 
-  describe CodebaseIndex::Observability::HealthCheck::HealthStatus do
+  describe Woods::Observability::HealthCheck::HealthStatus do
     it 'is a struct with healthy? and components' do
       status = described_class.new(healthy?: true, components: { vector_store: :ok })
 

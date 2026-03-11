@@ -3,12 +3,12 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'json'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/flow_assembler'
-require 'codebase_index/flow_document'
+require 'woods/dependency_graph'
+require 'woods/flow_assembler'
+require 'woods/flow_document'
 
-RSpec.describe CodebaseIndex::FlowAssembler do
-  let(:graph) { instance_double(CodebaseIndex::DependencyGraph) }
+RSpec.describe Woods::FlowAssembler do
+  let(:graph) { instance_double(Woods::DependencyGraph) }
   let(:extracted_dir) { Dir.mktmpdir('flow_assembler_test') }
 
   after { FileUtils.remove_entry(extracted_dir) }
@@ -54,7 +54,7 @@ RSpec.describe CodebaseIndex::FlowAssembler do
       assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('PostsController#create')
 
-      expect(flow).to be_a(CodebaseIndex::FlowDocument)
+      expect(flow).to be_a(Woods::FlowDocument)
       expect(flow.entry_point).to eq('PostsController#create')
       expect(flow.steps.size).to eq(1)
       expect(flow.steps[0][:unit]).to eq('PostsController#create')

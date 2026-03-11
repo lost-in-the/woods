@@ -3,9 +3,9 @@
 require 'spec_helper'
 require 'stringio'
 require 'json'
-require 'codebase_index/observability/structured_logger'
+require 'woods/observability/structured_logger'
 
-RSpec.describe CodebaseIndex::Observability::StructuredLogger do
+RSpec.describe Woods::Observability::StructuredLogger do
   let(:output) { StringIO.new }
   let(:logger) { described_class.new(output: output) }
 

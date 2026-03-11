@@ -2,7 +2,7 @@
 
 require_relative 'shared'
 
-module CodebaseIndex
+module Woods
   module Notion
     module Mappers
       # Maps individual column metadata to Notion page properties for the Columns database.

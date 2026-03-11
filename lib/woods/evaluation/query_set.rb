@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Evaluation
     # Manages a set of evaluation queries with expected results.
     #
@@ -45,15 +45,15 @@ module CodebaseIndex
       #
       # @param path [String] Path to JSON file
       # @return [QuerySet] Loaded query set
-      # @raise [CodebaseIndex::Error] if the file cannot be read or parsed
+      # @raise [Woods::Error] if the file cannot be read or parsed
       def self.load(path)
         data = JSON.parse(File.read(path))
         queries = data.fetch('queries', []).map { |q| parse_query(q) }
         new(queries: queries)
       rescue JSON::ParserError => e
-        raise CodebaseIndex::Error, "Invalid JSON in query set: #{e.message}"
+        raise Woods::Error, "Invalid JSON in query set: #{e.message}"
       rescue Errno::ENOENT => e
-        raise CodebaseIndex::Error, "Query set file not found: #{e.message}"
+        raise Woods::Error, "Query set file not found: #{e.message}"
       end
 
       # Save this QuerySet to a JSON file.

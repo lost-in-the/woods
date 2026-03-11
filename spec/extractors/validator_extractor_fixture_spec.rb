@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/validator_extractor'
+require 'woods/extractors/validator_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ValidatorExtractor, 'fixture specs' do
+RSpec.describe Woods::Extractors::ValidatorExtractor, 'fixture specs' do
   include_context 'extractor setup'
 
   # ── Custom EachValidator ──────────────────────────────────────────────

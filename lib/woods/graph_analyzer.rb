@@ -2,7 +2,7 @@
 
 require 'set'
 
-module CodebaseIndex
+module Woods
   # GraphAnalyzer computes structural properties of the dependency graph.
   #
   # Given a {DependencyGraph}, it identifies architectural patterns like orphaned
@@ -13,9 +13,9 @@ module CodebaseIndex
   # structural report without mutating anything.
   #
   # @example Basic usage
-  #   graph = CodebaseIndex::DependencyGraph.new
+  #   graph = Woods::DependencyGraph.new
   #   # ... register units ...
-  #   analyzer = CodebaseIndex::GraphAnalyzer.new(graph)
+  #   analyzer = Woods::GraphAnalyzer.new(graph)
   #   report = analyzer.analyze
   #   report[:cycles]  # => [["A", "B", "A"], ...]
   #   report[:hubs]    # => [{ identifier: "User", type: :model, ... }, ...]

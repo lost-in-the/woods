@@ -1,6 +1,6 @@
-# CodebaseIndex Extractor Reference
+# Woods Extractor Reference
 
-CodebaseIndex ships 34 extractors — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships 34 extractors — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
 ---
 
@@ -8,7 +8,7 @@ CodebaseIndex ships 34 extractors — one for each meaningful category of Rails 
 
 ### The Five Phases
 
-A full extraction (`bundle exec rake codebase_index:extract`) runs five phases:
+A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
 Phase 1: Extract     — All 34 extractors run, producing ExtractedUnit objects
@@ -567,8 +567,8 @@ All 34 extractors run during a full extraction. The `config.extractors` array co
 To customize the retrieval scope:
 
 ```ruby
-# config/initializers/codebase_index.rb
-CodebaseIndex.configure do |config|
+# config/initializers/woods.rb
+Woods.configure do |config|
   # Default retrieval scope (13 types)
   config.extractors = %i[
     models controllers services components view_components

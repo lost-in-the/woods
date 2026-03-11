@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast'
-require 'codebase_index/flow_analysis/operation_extractor'
-require 'codebase_index/flow_analysis/response_code_mapper'
-require 'codebase_index/flow_assembler'
-require 'codebase_index/flow_document'
-require 'codebase_index/dependency_graph'
+require 'woods/ast'
+require 'woods/flow_analysis/operation_extractor'
+require 'woods/flow_analysis/response_code_mapper'
+require 'woods/flow_assembler'
+require 'woods/flow_document'
+require 'woods/dependency_graph'
 require 'tmpdir'
 require 'json'
 
 RSpec.describe 'Flow Analysis Pipeline', :integration do
-  let(:parser) { CodebaseIndex::Ast::Parser.new }
-  let(:method_extractor) { CodebaseIndex::Ast::MethodExtractor.new(parser: parser) }
-  let(:operation_extractor) { CodebaseIndex::FlowAnalysis::OperationExtractor.new }
+  let(:parser) { Woods::Ast::Parser.new }
+  let(:method_extractor) { Woods::Ast::MethodExtractor.new(parser: parser) }
+  let(:operation_extractor) { Woods::FlowAnalysis::OperationExtractor.new }
   let(:fixtures_dir) { File.expand_path('../fixtures/integration/ruby_sources', __dir__) }
 
   describe 'OperationExtractor on parsed AST' do
@@ -203,7 +203,7 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
 
   describe 'FlowAssembler end-to-end with real parsing' do
     let(:extracted_dir) { Dir.mktmpdir('flow_pipeline_test') }
-    let(:graph) { CodebaseIndex::DependencyGraph.new }
+    let(:graph) { Woods::DependencyGraph.new }
 
     after { FileUtils.remove_entry(extracted_dir) }
 
@@ -230,14 +230,14 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
       write_unit('PaymentProcessor', source_code: service_source, type: 'service')
 
       # Wire up the dependency graph with real units
-      controller_unit = CodebaseIndex::ExtractedUnit.new(
+      controller_unit = Woods::ExtractedUnit.new(
         type: :controller,
         identifier: 'OrdersController',
         file_path: 'app/controllers/orders_controller.rb'
       )
       controller_unit.dependencies = [{ type: :service, target: 'PaymentProcessor', via: :method_call }]
 
-      service_unit = CodebaseIndex::ExtractedUnit.new(
+      service_unit = Woods::ExtractedUnit.new(
         type: :service,
         identifier: 'PaymentProcessor',
         file_path: 'app/services/payment_processor.rb'
@@ -246,10 +246,10 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
       graph.register(controller_unit)
       graph.register(service_unit)
 
-      assembler = CodebaseIndex::FlowAssembler.new(graph: graph, extracted_dir: extracted_dir)
+      assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('OrdersController#create')
 
-      expect(flow).to be_a(CodebaseIndex::FlowDocument)
+      expect(flow).to be_a(Woods::FlowDocument)
       expect(flow.entry_point).to eq('OrdersController#create')
       expect(flow.steps.size).to be >= 1
 
@@ -273,7 +273,7 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
                    ]
                  })
 
-      assembler = CodebaseIndex::FlowAssembler.new(graph: graph, extracted_dir: extracted_dir)
+      assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('OrdersController#create')
 
       # to_h round-trip
@@ -283,7 +283,7 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
       expect(hash[:generated_at]).to match(/\d{4}-\d{2}-\d{2}/)
 
       # FlowDocument.from_h round-trip
-      restored = CodebaseIndex::FlowDocument.from_h(hash)
+      restored = Woods::FlowDocument.from_h(hash)
       expect(restored.entry_point).to eq(flow.entry_point)
       expect(restored.steps.size).to eq(flow.steps.size)
 
@@ -307,7 +307,7 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
                    ]
                  })
 
-      assembler = CodebaseIndex::FlowAssembler.new(graph: graph, extracted_dir: extracted_dir)
+      assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: extracted_dir)
       flow = assembler.assemble('OrdersController#create')
 
       expect(flow.route).to eq({ verb: 'POST', path: '/orders' })

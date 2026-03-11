@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/tools/tier1'
+require 'woods/console/tools/tier1'
 
-RSpec.describe CodebaseIndex::Console::Tools::Tier1 do
+RSpec.describe Woods::Console::Tools::Tier1 do
   describe '.console_count' do
     it 'builds a count request' do
       result = described_class.console_count(model: 'User')

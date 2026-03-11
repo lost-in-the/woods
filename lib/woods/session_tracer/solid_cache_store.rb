@@ -3,7 +3,7 @@
 require 'json'
 require_relative 'store'
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # SolidCache-backed session store.
     #
@@ -15,8 +15,8 @@ module CodebaseIndex
     #   store.record("abc123", { controller: "OrdersController", action: "create" })
     #
     class SolidCacheStore < Store
-      KEY_PREFIX = 'codebase_index:session:'
-      INDEX_KEY = 'codebase_index:session_index'
+      KEY_PREFIX = 'woods:session:'
+      INDEX_KEY = 'woods:session_index'
 
       # @param cache [ActiveSupport::Cache::Store] A SolidCache (or compatible) cache instance
       # @param expires_in [Integer, nil] Expiry time in seconds (nil = no expiry)

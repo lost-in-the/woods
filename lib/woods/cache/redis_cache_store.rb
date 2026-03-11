@@ -3,7 +3,7 @@
 require 'json'
 require_relative 'cache_store'
 
-module CodebaseIndex
+module Woods
   module Cache
     # Redis-backed cache store using GET/SET with TTL.
     #
@@ -46,7 +46,7 @@ module CodebaseIndex
         delete_silently(key)
         nil
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[CodebaseIndex] RedisCacheStore#read failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#read failed for #{key}: #{e.message}")
         nil
       end
 
@@ -66,7 +66,7 @@ module CodebaseIndex
           @redis.set(key, serialized)
         end
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[CodebaseIndex] RedisCacheStore#write failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#write failed for #{key}: #{e.message}")
         nil
       end
 
@@ -77,7 +77,7 @@ module CodebaseIndex
       def delete(key)
         @redis.del(key)
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[CodebaseIndex] RedisCacheStore#delete failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#delete failed for #{key}: #{e.message}")
         nil
       end
 
@@ -88,11 +88,11 @@ module CodebaseIndex
       def exist?(key)
         @redis.exists?(key)
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[CodebaseIndex] RedisCacheStore#exist? failed for #{key}: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#exist? failed for #{key}: #{e.message}")
         false
       end
 
-      # Clear cached entries by namespace or all codebase_index cache keys.
+      # Clear cached entries by namespace or all woods cache keys.
       #
       # Uses SCAN (not KEYS) to avoid blocking Redis on large keyspaces.
       #
@@ -108,7 +108,7 @@ module CodebaseIndex
           break if cursor == '0'
         end
       rescue ::Redis::BaseError, Errno::ECONNREFUSED, Errno::ECONNRESET => e
-        logger.warn("[CodebaseIndex] RedisCacheStore#clear failed: #{e.message}")
+        logger.warn("[Woods] RedisCacheStore#clear failed: #{e.message}")
         nil
       end
     end

@@ -6,7 +6,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'callback_analyzer'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # ModelExtractor handles ActiveRecord model extraction with:
     # - Inline concern resolution (concerns are embedded, not referenced)

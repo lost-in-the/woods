@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/i18n_extractor'
+require 'woods/extractors/i18n_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::I18nExtractor do
+RSpec.describe Woods::Extractors::I18nExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

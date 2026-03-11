@@ -6,7 +6,7 @@ require_relative '../ast/call_site_extractor'
 require_relative '../extracted_unit'
 require_relative 'fqn_builder'
 
-module CodebaseIndex
+module Woods
   module RubyAnalyzer
     # Extracts method-level units from Ruby source code.
     #

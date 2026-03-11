@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/retrieval/context_assembler'
-require 'codebase_index/formatting/generic_adapter'
+require 'woods/retrieval/context_assembler'
+require 'woods/formatting/generic_adapter'
 
-RSpec.describe CodebaseIndex::Formatting::GenericAdapter do
+RSpec.describe Woods::Formatting::GenericAdapter do
   subject(:adapter) { described_class.new }
 
   let(:sources) do
@@ -16,7 +16,7 @@ RSpec.describe CodebaseIndex::Formatting::GenericAdapter do
   end
 
   let(:assembled_context) do
-    CodebaseIndex::Retrieval::AssembledContext.new(
+    Woods::Retrieval::AssembledContext.new(
       context: "class User < ApplicationRecord\n  has_many :posts\nend",
       tokens_used: 15,
       budget: 8000,
@@ -55,7 +55,7 @@ RSpec.describe CodebaseIndex::Formatting::GenericAdapter do
 
   describe '#format with empty sources' do
     it 'omits the sources section' do
-      empty = CodebaseIndex::Retrieval::AssembledContext.new(
+      empty = Woods::Retrieval::AssembledContext.new(
         context: 'some content',
         tokens_used: 5,
         budget: 8000,
@@ -70,7 +70,7 @@ RSpec.describe CodebaseIndex::Formatting::GenericAdapter do
 
   describe '#format with empty context' do
     it 'still includes the header' do
-      empty = CodebaseIndex::Retrieval::AssembledContext.new(
+      empty = Woods::Retrieval::AssembledContext.new(
         context: '',
         tokens_used: 0,
         budget: 8000,

@@ -3,7 +3,7 @@
 require 'json'
 require 'digest'
 
-module CodebaseIndex
+module Woods
   module Embedding
     # Orchestrates the indexing pipeline: reads extracted units, prepares text,
     # generates embeddings, and stores vectors. Supports full and incremental
@@ -105,7 +105,7 @@ module CodebaseIndex
         store_vectors(items, vectors, checkpoint, stats)
       rescue StandardError => e
         stats[:errors] += items.size
-        raise CodebaseIndex::Error, "Embedding failed: #{e.message}"
+        raise Woods::Error, "Embedding failed: #{e.message}"
       end
 
       def store_vectors(items, vectors, checkpoint, stats)

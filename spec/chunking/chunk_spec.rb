@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/chunking/chunk'
+require 'woods/chunking/chunk'
 
-RSpec.describe CodebaseIndex::Chunking::Chunk do
+RSpec.describe Woods::Chunking::Chunk do
   let(:content) { "class User < ApplicationRecord\n  has_many :posts\nend" }
 
   subject(:chunk) do

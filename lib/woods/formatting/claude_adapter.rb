@@ -2,7 +2,7 @@
 
 require_relative 'base'
 
-module CodebaseIndex
+module Woods
   module Formatting
     # Formats assembled context as XML for Claude models.
     #
@@ -20,7 +20,7 @@ module CodebaseIndex
     class ClaudeAdapter < Base
       # Format assembled context as XML for Claude.
       #
-      # @param assembled_context [CodebaseIndex::Retrieval::AssembledContext]
+      # @param assembled_context [Woods::Retrieval::AssembledContext]
       # @return [String] XML-formatted context
       def format(assembled_context)
         parts = []

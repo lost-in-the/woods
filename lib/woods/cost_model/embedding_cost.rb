@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module CostModel
     # Calculates embedding costs for full-index, incremental, and query-time
     # scenarios using the token-based pricing from {ProviderPricing}.

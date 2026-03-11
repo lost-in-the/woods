@@ -3,18 +3,18 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/chunking/semantic_chunker'
-require 'codebase_index/embedding/text_preparer'
-require 'codebase_index/embedding/indexer'
-require 'codebase_index/storage/vector_store'
+require 'woods/chunking/semantic_chunker'
+require 'woods/embedding/text_preparer'
+require 'woods/embedding/indexer'
+require 'woods/storage/vector_store'
 
 RSpec.describe 'Chunking → Embedding → Storage pipeline', :integration do
   let(:fixture_hashes) { load_fixture_units }
   let(:units) { fixture_hashes.map { |h| build_extracted_unit(h) } }
-  let(:chunker) { CodebaseIndex::Chunking::SemanticChunker.new(threshold: 50) }
-  let(:preparer) { CodebaseIndex::Embedding::TextPreparer.new(max_tokens: 8192) }
-  let(:provider) { CodebaseIndex::Embedding::Provider::Fake.new(dims: 64) }
-  let(:vector_store) { CodebaseIndex::Storage::VectorStore::InMemory.new }
+  let(:chunker) { Woods::Chunking::SemanticChunker.new(threshold: 50) }
+  let(:preparer) { Woods::Embedding::TextPreparer.new(max_tokens: 8192) }
+  let(:provider) { Woods::Embedding::Provider::Fake.new(dims: 64) }
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
 
   describe 'SemanticChunker processes all unit types' do
     it 'produces chunks for each unit with source code' do
@@ -49,7 +49,7 @@ RSpec.describe 'Chunking → Embedding → Storage pipeline', :integration do
     end
 
     it 'returns whole chunks for small units' do
-      large_chunker = CodebaseIndex::Chunking::SemanticChunker.new(threshold: 100_000)
+      large_chunker = Woods::Chunking::SemanticChunker.new(threshold: 100_000)
       comment_unit = units.find { |u| u.identifier == 'Comment' }
       chunks = large_chunker.chunk(comment_unit)
 
@@ -175,7 +175,7 @@ RSpec.describe 'Chunking → Embedding → Storage pipeline', :integration do
   end
 
   describe 'Indexer orchestrates the full pipeline' do
-    let(:output_dir) { Dir.mktmpdir('codebase_index_test') }
+    let(:output_dir) { Dir.mktmpdir('woods_test') }
 
     before do
       fixture_hashes.each do |unit_hash|
@@ -191,7 +191,7 @@ RSpec.describe 'Chunking → Embedding → Storage pipeline', :integration do
     end
 
     it 'indexes all units and stores vectors' do
-      indexer = CodebaseIndex::Embedding::Indexer.new(
+      indexer = Woods::Embedding::Indexer.new(
         provider: provider,
         text_preparer: preparer,
         vector_store: vector_store,
@@ -206,7 +206,7 @@ RSpec.describe 'Chunking → Embedding → Storage pipeline', :integration do
     end
 
     it 'skips unchanged units in incremental mode' do
-      indexer = CodebaseIndex::Embedding::Indexer.new(
+      indexer = Woods::Embedding::Indexer.new(
         provider: provider,
         text_preparer: preparer,
         vector_store: vector_store,

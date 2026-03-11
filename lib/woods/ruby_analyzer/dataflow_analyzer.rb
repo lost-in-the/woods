@@ -3,7 +3,7 @@
 require_relative '../ast/parser'
 require_relative '../ast/call_site_extractor'
 
-module CodebaseIndex
+module Woods
   module RubyAnalyzer
     # Annotates existing ExtractedUnit objects with data transformation metadata.
     #
@@ -65,7 +65,7 @@ module CodebaseIndex
             line: call[:line]
           }
         end
-      rescue CodebaseIndex::ExtractionError
+      rescue Woods::ExtractionError
         []
       end
 

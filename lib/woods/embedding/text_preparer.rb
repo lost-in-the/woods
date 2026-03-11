@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Embedding
     # Prepares ExtractedUnit data for embedding by building context-prefixed text.
     #
@@ -14,7 +14,7 @@ module CodebaseIndex
     # embedding model's context window.
     #
     # @example
-    #   preparer = CodebaseIndex::Embedding::TextPreparer.new(max_tokens: 8192)
+    #   preparer = Woods::Embedding::TextPreparer.new(max_tokens: 8192)
     #   text = preparer.prepare(unit)
     #   chunks = preparer.prepare_chunks(unit)
     class TextPreparer
@@ -30,7 +30,7 @@ module CodebaseIndex
       # Builds a context prefix and appends the unit's source code (or first
       # chunk content for chunked units). Enforces token limits via truncation.
       #
-      # @param unit [CodebaseIndex::ExtractedUnit] the unit to prepare
+      # @param unit [Woods::ExtractedUnit] the unit to prepare
       # @return [String] context-prefixed text ready for embedding
       def prepare(unit)
         prefix = build_prefix(unit)
@@ -45,7 +45,7 @@ module CodebaseIndex
       # full prepared text. For chunked units, each chunk gets the same
       # context prefix prepended.
       #
-      # @param unit [CodebaseIndex::ExtractedUnit] the unit to prepare
+      # @param unit [Woods::ExtractedUnit] the unit to prepare
       # @return [Array<String>] array of context-prefixed texts
       def prepare_chunks(unit)
         return [prepare(unit)] unless unit.chunks&.any?
@@ -61,7 +61,7 @@ module CodebaseIndex
 
       # Build the context prefix for a unit.
       #
-      # @param unit [CodebaseIndex::ExtractedUnit] the unit
+      # @param unit [Woods::ExtractedUnit] the unit
       # @return [String] formatted prefix lines
       def build_prefix(unit)
         lines = []
@@ -86,7 +86,7 @@ module CodebaseIndex
 
       # Select the content to embed for a unit.
       #
-      # @param unit [CodebaseIndex::ExtractedUnit] the unit
+      # @param unit [Woods::ExtractedUnit] the unit
       # @return [String] source code or first chunk content
       def select_content(unit)
         if unit.chunks&.any?

@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/job_extractor'
+require 'woods/extractors/job_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::JobExtractor, 'fixture specs' do
+RSpec.describe Woods::Extractors::JobExtractor, 'fixture specs' do
   include_context 'extractor setup'
 
   # ── Namespaced Jobs ───────────────────────────────────────────────────

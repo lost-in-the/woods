@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/session_tracer/store'
+require 'woods/session_tracer/store'
 
-RSpec.describe CodebaseIndex::SessionTracer::Store do
+RSpec.describe Woods::SessionTracer::Store do
   subject(:store) { described_class.new }
 
   describe 'abstract interface' do

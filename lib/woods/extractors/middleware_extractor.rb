@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Extractors
     # MiddlewareExtractor handles Rack middleware stack extraction via runtime introspection.
     #

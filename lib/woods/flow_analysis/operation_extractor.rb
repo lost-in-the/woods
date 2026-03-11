@@ -5,7 +5,7 @@ require_relative '../ast/node'
 require_relative '../ast/call_site_extractor'
 require_relative 'response_code_mapper'
 
-module CodebaseIndex
+module Woods
   module FlowAnalysis
     # Extracts operations from a method body AST in source line order.
     #

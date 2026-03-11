@@ -5,12 +5,12 @@ require_relative 'cost_model/embedding_cost'
 require_relative 'cost_model/storage_cost'
 require_relative 'cost_model/estimator'
 
-module CodebaseIndex
+module Woods
   # Cost modeling for embedding, storage, and query costs across different
   # backend configurations. Based on the cost analysis in BACKEND_MATRIX.md.
   #
   # @example
-  #   estimate = CodebaseIndex::CostModel::Estimator.new(
+  #   estimate = Woods::CostModel::Estimator.new(
   #     units: 500,
   #     embedding_provider: :openai_small
   #   )

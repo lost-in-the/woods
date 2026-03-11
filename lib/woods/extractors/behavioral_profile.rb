@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Extractors
     # BehavioralProfile introspects resolved Rails.application.config values
     # to produce a single ExtractedUnit summarizing the app's runtime

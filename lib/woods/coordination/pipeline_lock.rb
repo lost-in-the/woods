@@ -3,9 +3,9 @@
 require 'fileutils'
 require 'json'
 
-module CodebaseIndex
+module Woods
   module Coordination
-    class LockError < CodebaseIndex::Error; end
+    class LockError < Woods::Error; end
 
     # File-based lock for preventing concurrent pipeline operations.
     #

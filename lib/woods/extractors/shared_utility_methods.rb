@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Extractors
     # Utility methods shared across multiple extractors.
     #

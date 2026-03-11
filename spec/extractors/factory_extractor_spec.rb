@@ -3,10 +3,10 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/factory_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/factory_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::FactoryExtractor do
+RSpec.describe Woods::Extractors::FactoryExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

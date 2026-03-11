@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Db
     module Migrations
-      # Creates the codebase_snapshots table for temporal index tracking.
+      # Creates the woods_snapshots table for temporal index tracking.
       #
       # Each row represents one extraction run anchored to a git commit SHA.
       # Stores aggregate stats and diff counts vs. the previous snapshot.
@@ -14,7 +14,7 @@ module CodebaseIndex
         # @return [void]
         def self.up(connection) # rubocop:disable Metrics/MethodLength
           connection.execute(<<~SQL)
-            CREATE TABLE IF NOT EXISTS codebase_snapshots (
+            CREATE TABLE IF NOT EXISTS woods_snapshots (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               git_sha TEXT NOT NULL,
               git_branch TEXT,
@@ -33,10 +33,10 @@ module CodebaseIndex
             )
           SQL
           connection.execute(<<~SQL)
-            CREATE INDEX IF NOT EXISTS idx_snapshots_extracted_at ON codebase_snapshots(extracted_at)
+            CREATE INDEX IF NOT EXISTS idx_snapshots_extracted_at ON woods_snapshots(extracted_at)
           SQL
           connection.execute(<<~SQL)
-            CREATE INDEX IF NOT EXISTS idx_snapshots_branch ON codebase_snapshots(git_branch)
+            CREATE INDEX IF NOT EXISTS idx_snapshots_branch ON woods_snapshots(git_branch)
           SQL
         end
       end

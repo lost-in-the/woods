@@ -4,7 +4,7 @@ require 'json'
 require 'fileutils'
 require_relative 'store'
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # File-backed session store using JSONL (one JSON object per line).
     #
@@ -14,7 +14,7 @@ module CodebaseIndex
     # Append-only with file locking for concurrency safety. Zero external dependencies.
     #
     # @example
-    #   store = FileStore.new(base_dir: "tmp/codebase_index/sessions")
+    #   store = FileStore.new(base_dir: "tmp/woods/sessions")
     #   store.record("abc123", { controller: "PostsController", action: "create" })
     #   store.read("abc123") # => [{ "controller" => "PostsController", ... }]
     #

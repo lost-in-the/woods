@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module MCP
     # Base class for rendering MCP tool responses in different output formats.
     #

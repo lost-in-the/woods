@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-# @see CodebaseIndex
-module CodebaseIndex
-  class Error < StandardError; end unless defined?(CodebaseIndex::Error)
+# @see Woods
+module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
 
   module Console
-    class ConfirmationDeniedError < CodebaseIndex::Error; end
+    class ConfirmationDeniedError < Woods::Error; end
 
     # Human-in-the-loop confirmation protocol for Tier 4 tools.
     #

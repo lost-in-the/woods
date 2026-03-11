@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # Abstract store interface for session trace data.
     #

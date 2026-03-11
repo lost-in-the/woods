@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/mcp/server'
+require 'woods'
+require 'woods/dependency_graph'
+require 'woods/mcp/server'
 
-RSpec.describe CodebaseIndex::MCP::Server do
-  let(:fixture_dir) { File.expand_path('../fixtures/codebase_index', __dir__) }
+RSpec.describe Woods::MCP::Server do
+  let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:server) { described_class.build(index_dir: fixture_dir, response_format: :json) }
 
   describe '.build' do
@@ -428,7 +428,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       end
 
       let(:retriever) do
-        instance_double('CodebaseIndex::Retriever').tap do |r|
+        instance_double('Woods::Retriever').tap do |r|
           allow(r).to receive(:retrieve).and_return(mock_result)
         end
       end
@@ -468,7 +468,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     context 'with operator configured' do
       let(:status_reporter) do
-        instance_double('CodebaseIndex::Operator::StatusReporter').tap do |r|
+        instance_double('Woods::Operator::StatusReporter').tap do |r|
           allow(r).to receive(:report).and_return({
                                                     status: :ok,
                                                     extracted_at: '2026-02-15T10:00:00Z',
@@ -506,7 +506,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     context 'with operator configured' do
       let(:guard) do
-        instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+        instance_double('Woods::Operator::PipelineGuard').tap do |g|
           allow(g).to receive(:allow?).with(:extraction).and_return(true)
           allow(g).to receive(:record!).with(:extraction)
         end
@@ -545,7 +545,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     context 'with operator configured' do
       let(:guard) do
-        instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+        instance_double('Woods::Operator::PipelineGuard').tap do |g|
           allow(g).to receive(:allow?).with(:embedding).and_return(true)
           allow(g).to receive(:record!).with(:embedding)
         end
@@ -576,7 +576,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
   describe 'tool: pipeline_extract incremental param' do
     let(:guard) do
-      instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+      instance_double('Woods::Operator::PipelineGuard').tap do |g|
         allow(g).to receive(:allow?).with(:extraction).and_return(true)
         allow(g).to receive(:record!).with(:extraction)
       end
@@ -598,13 +598,13 @@ RSpec.describe CodebaseIndex::MCP::Server do
     let(:extractor_class) { double('ExtractorClass', new: mock_extractor) }
 
     before do
-      stub_const('CodebaseIndex::Extractor', extractor_class)
+      stub_const('Woods::Extractor', extractor_class)
       mock_config = Struct.new(:output_dir).new(fixture_dir)
-      CodebaseIndex.configuration = mock_config
+      Woods.configuration = mock_config
     end
 
     after do
-      CodebaseIndex.configuration = nil
+      Woods.configuration = nil
     end
 
     it 'calls extract_changed when incremental is true' do
@@ -620,7 +620,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
   describe 'tool: pipeline_embed incremental param' do
     let(:guard) do
-      instance_double('CodebaseIndex::Operator::PipelineGuard').tap do |g|
+      instance_double('Woods::Operator::PipelineGuard').tap do |g|
         allow(g).to receive(:allow?).with(:embedding).and_return(true)
         allow(g).to receive(:record!).with(:embedding)
       end
@@ -651,14 +651,14 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     before do
       mock_config = Struct.new(:output_dir).new(fixture_dir)
-      CodebaseIndex.configuration = mock_config
-      allow(CodebaseIndex::Builder).to receive(:new).and_return(mock_builder)
-      stub_const('CodebaseIndex::Embedding::TextPreparer', text_preparer_class)
-      stub_const('CodebaseIndex::Embedding::Indexer', indexer_class)
+      Woods.configuration = mock_config
+      allow(Woods::Builder).to receive(:new).and_return(mock_builder)
+      stub_const('Woods::Embedding::TextPreparer', text_preparer_class)
+      stub_const('Woods::Embedding::Indexer', indexer_class)
     end
 
     after do
-      CodebaseIndex.configuration = nil
+      Woods.configuration = nil
     end
 
     it 'calls index_incremental when incremental is true' do
@@ -675,7 +675,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
   describe 'tool: trace_flow' do
     let(:mock_flow_doc) do
       instance_double(
-        'CodebaseIndex::FlowDocument',
+        'Woods::FlowDocument',
         to_h: {
           entry_point: 'PostsController#create',
           route: { verb: 'POST', path: '/posts' },
@@ -687,13 +687,13 @@ RSpec.describe CodebaseIndex::MCP::Server do
     end
 
     let(:mock_assembler) do
-      instance_double('CodebaseIndex::FlowAssembler').tap do |a|
+      instance_double('Woods::FlowAssembler').tap do |a|
         allow(a).to receive(:assemble).and_return(mock_flow_doc)
       end
     end
 
     before do
-      allow(CodebaseIndex::FlowAssembler).to receive(:new).and_return(mock_assembler)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(mock_assembler)
     end
 
     it 'returns a flow document for a valid entry point' do
@@ -718,7 +718,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
       # server is already built (which calls IndexReader.new once).
       # Verify that calling trace_flow does NOT create another IndexReader.
       server # force build
-      expect(CodebaseIndex::MCP::IndexReader).not_to receive(:new)
+      expect(Woods::MCP::IndexReader).not_to receive(:new)
       call_tool(server, 'trace_flow', entry_point: 'PostsController#create')
     end
 
@@ -731,15 +731,15 @@ RSpec.describe CodebaseIndex::MCP::Server do
   end
 
   describe 'tool: session_trace' do
-    before(:all) { require 'codebase_index/session_tracer/session_flow_assembler' }
+    before(:all) { require 'woods/session_tracer/session_flow_assembler' }
 
     context 'without session store configured' do
       before do
         mock_config = Struct.new(:session_store).new(nil)
-        CodebaseIndex.configuration = mock_config
+        Woods.configuration = mock_config
       end
 
-      after { CodebaseIndex.configuration = nil }
+      after { Woods.configuration = nil }
 
       it 'returns an error when session tracer is not configured' do
         response = call_tool(server, 'session_trace', session_id: 'sess1')
@@ -750,7 +750,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     context 'with session store configured' do
       let(:mock_store) do
-        instance_double('CodebaseIndex::SessionTracer::FileStore').tap do |s|
+        instance_double('Woods::SessionTracer::FileStore').tap do |s|
           allow(s).to receive(:read).with('sess1').and_return([
                                                                 {
                                                                   'method' => 'GET', 'path' => '/posts',
@@ -764,24 +764,24 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
       let(:mock_doc) do
         instance_double(
-          'CodebaseIndex::SessionTracer::SessionFlowDocument',
+          'Woods::SessionTracer::SessionFlowDocument',
           to_markdown: "## Session: sess1\n_Generated at 2026-02-18T00:00:00Z | 1 requests | ~42 tokens_"
         )
       end
 
       let(:mock_assembler) do
-        instance_double('CodebaseIndex::SessionTracer::SessionFlowAssembler').tap do |a|
+        instance_double('Woods::SessionTracer::SessionFlowAssembler').tap do |a|
           allow(a).to receive(:assemble).and_return(mock_doc)
         end
       end
 
       before do
         mock_config = Struct.new(:session_store).new(mock_store)
-        CodebaseIndex.configuration = mock_config
-        allow(CodebaseIndex::SessionTracer::SessionFlowAssembler).to receive(:new).and_return(mock_assembler)
+        Woods.configuration = mock_config
+        allow(Woods::SessionTracer::SessionFlowAssembler).to receive(:new).and_return(mock_assembler)
       end
 
-      after { CodebaseIndex.configuration = nil }
+      after { Woods.configuration = nil }
 
       it 'calls the assembler with session_id and default parameters' do
         call_tool(server, 'session_trace', session_id: 'sess1')
@@ -829,7 +829,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     context 'with feedback store configured' do
       let(:feedback_store) do
-        instance_double('CodebaseIndex::Feedback::Store').tap do |s|
+        instance_double('Woods::Feedback::Store').tap do |s|
           allow(s).to receive(:record_rating)
         end
       end
@@ -868,7 +868,7 @@ RSpec.describe CodebaseIndex::MCP::Server do
 
     context 'with feedback store configured' do
       let(:feedback_store) do
-        instance_double('CodebaseIndex::Feedback::Store').tap do |s|
+        instance_double('Woods::Feedback::Store').tap do |s|
           allow(s).to receive(:ratings).and_return([
                                                      { 'query' => 'test', 'score' => 4,
                                                        'timestamp' => '2026-02-15T10:00:00Z' }

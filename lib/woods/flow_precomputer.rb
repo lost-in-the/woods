@@ -4,7 +4,7 @@ require 'json'
 require 'fileutils'
 require_relative 'flow_assembler'
 
-module CodebaseIndex
+module Woods
   # Orchestrates pre-computation of request flow maps for all controller actions.
   #
   # After the dependency graph is built, FlowPrecomputer iterates controller units,
@@ -13,7 +13,7 @@ module CodebaseIndex
   # @example
   #   precomputer = FlowPrecomputer.new(units: all_units, graph: dep_graph, output_dir: out)
   #   flow_map = precomputer.precompute
-  #   flow_map["OrdersController#create"] #=> "/tmp/codebase_index/flows/OrdersController_create.json"
+  #   flow_map["OrdersController#create"] #=> "/tmp/woods/flows/OrdersController_create.json"
   #
   class FlowPrecomputer
     # Default maximum recursion depth for flow assembly
@@ -87,7 +87,7 @@ module CodebaseIndex
 
       flow_path
     rescue StandardError => e
-      Rails.logger.error("[CodebaseIndex] Flow precompute failed for #{entry_point}: #{e.message}")
+      Rails.logger.error("[Woods] Flow precompute failed for #{entry_point}: #{e.message}")
       nil
     end
 

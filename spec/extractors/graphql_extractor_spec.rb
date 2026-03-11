@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/graphql_extractor'
+require 'woods/extractors/graphql_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::GraphQLExtractor do
+RSpec.describe Woods::Extractors::GraphQLExtractor do
   include_context 'extractor setup'
 
   # ── GraphQL stubs ─────────────────────────────────────────────────────

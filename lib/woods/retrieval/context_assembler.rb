@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Retrieval
     # Transforms ranked search candidates into a token-budgeted context string
     # for LLM consumption.

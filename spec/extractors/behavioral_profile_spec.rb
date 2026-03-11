@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extractors/behavioral_profile'
+require 'woods/extractors/behavioral_profile'
 
-RSpec.describe CodebaseIndex::Extractors::BehavioralProfile do
+RSpec.describe Woods::Extractors::BehavioralProfile do
   let(:logger) { double('Logger', error: nil, warn: nil, debug: nil, info: nil) }
   let(:rails_root) { Pathname.new('/fake/app') }
   let(:rails_app) { double('RailsApp') }
@@ -25,7 +25,7 @@ RSpec.describe CodebaseIndex::Extractors::BehavioralProfile do
   describe '#extract' do
     it 'returns an ExtractedUnit' do
       unit = described_class.new.extract
-      expect(unit).to be_a(CodebaseIndex::ExtractedUnit)
+      expect(unit).to be_a(Woods::ExtractedUnit)
     end
 
     it 'sets type to :configuration' do
@@ -424,7 +424,7 @@ RSpec.describe CodebaseIndex::Extractors::BehavioralProfile do
       allow(rails_config).to receive(:respond_to?).with(:cache_store).and_raise(StandardError, 'boom')
 
       unit = described_class.new.extract
-      expect(unit).to be_a(CodebaseIndex::ExtractedUnit)
+      expect(unit).to be_a(Woods::ExtractedUnit)
       expect(unit.metadata[:database]).to eq({})
     end
 

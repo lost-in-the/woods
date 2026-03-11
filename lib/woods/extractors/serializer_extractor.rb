@@ -3,7 +3,7 @@
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # SerializerExtractor handles extraction of serializers, blueprinters, and decorators.
     #

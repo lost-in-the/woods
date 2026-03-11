@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/tools/tier4'
-require 'codebase_index/console/sql_validator'
-require 'codebase_index/console/audit_logger'
-require 'codebase_index/console/confirmation'
+require 'woods/console/tools/tier4'
+require 'woods/console/sql_validator'
+require 'woods/console/audit_logger'
+require 'woods/console/confirmation'
 
-RSpec.describe CodebaseIndex::Console::Tools::Tier4 do
+RSpec.describe Woods::Console::Tools::Tier4 do
   describe '.console_eval' do
     it 'builds an eval request with default timeout' do
       result = described_class.console_eval(code: 'User.count')
@@ -32,7 +32,7 @@ RSpec.describe CodebaseIndex::Console::Tools::Tier4 do
   end
 
   describe '.console_sql' do
-    let(:validator) { CodebaseIndex::Console::SqlValidator.new }
+    let(:validator) { Woods::Console::SqlValidator.new }
 
     it 'builds a sql request for valid SELECT' do
       result = described_class.console_sql(sql: 'SELECT * FROM users', validator: validator)
@@ -49,13 +49,13 @@ RSpec.describe CodebaseIndex::Console::Tools::Tier4 do
     it 'rejects INSERT via validator' do
       expect do
         described_class.console_sql(sql: 'INSERT INTO users VALUES (1)', validator: validator)
-      end.to raise_error(CodebaseIndex::Console::SqlValidationError)
+      end.to raise_error(Woods::Console::SqlValidationError)
     end
 
     it 'rejects DELETE via validator' do
       expect do
         described_class.console_sql(sql: 'DELETE FROM users', validator: validator)
-      end.to raise_error(CodebaseIndex::Console::SqlValidationError)
+      end.to raise_error(Woods::Console::SqlValidationError)
     end
 
     it 'accepts optional limit' do

@@ -15,11 +15,11 @@ The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live acces
 
 ## Option A: Stdio via Rake (Recommended)
 
-The simplest setup. The `codebase_index:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. All queries run in-process via ActiveRecord — no separate bridge process needed.
+The simplest setup. The `woods:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. All queries run in-process via ActiveRecord — no separate bridge process needed.
 
 ### Prerequisites
 
-1. `gem 'codebase_index'` in your Gemfile
+1. `gem 'woods'` in your Gemfile
 2. `bundle install`
 
 ### How It Works
@@ -38,7 +38,7 @@ The rake task does two things before starting the MCP server:
   "mcpServers": {
     "rails-console": {
       "command": "bundle",
-      "args": ["exec", "rake", "codebase_index:console"],
+      "args": ["exec", "rake", "woods:console"],
       "cwd": "/path/to/your/rails-app"
     }
   }
@@ -52,7 +52,7 @@ The rake task does two things before starting the MCP server:
   "mcpServers": {
     "rails-console": {
       "command": "bundle",
-      "args": ["exec", "rake", "codebase_index:console"],
+      "args": ["exec", "rake", "woods:console"],
       "cwd": "/path/to/your/rails-app"
     }
   }
@@ -67,7 +67,7 @@ MCP client (Claude Code)
   │ spawns via stdio
   │
   ▼
-rake codebase_index:console
+rake woods:console
   │
   ├─ capture $stdout before boot
   ├─ Rake::Task[:environment].invoke  (Rails boots)
@@ -89,7 +89,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
 ### Prerequisites
 
 - Running container with Rails app
-- `codebase_index` gem in the container's Gemfile
+- `woods` gem in the container's Gemfile
 
 ### MCP Client Configuration
 
@@ -103,7 +103,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
       "args": [
         "exec", "-i",
         "your_app_web_1",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -120,7 +120,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
       "args": [
         "exec", "-i",
         "myapp-web-1",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -142,7 +142,7 @@ If your Rails app requires environment variables at boot (credentials, database 
         "exec", "-i",
         "-e", "RAILS_ENV=development",
         "your_app_web_1",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -157,16 +157,16 @@ Mount the console as a Rack middleware endpoint. The MCP client connects over HT
 
 ### Prerequisites
 
-1. `gem 'codebase_index'` in Gemfile
+1. `gem 'woods'` in Gemfile
 2. `bundle install`
 3. A running Rails server accessible to the MCP client
 
 ### Rails Configuration
 
-In an initializer (`config/initializers/codebase_index.rb`):
+In an initializer (`config/initializers/woods.rb`):
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   config.console_mcp_enabled = true
   config.console_mcp_path = '/mcp/console'       # default
   config.console_redacted_columns = %w[password_digest api_key ssn]
@@ -177,7 +177,7 @@ The middleware registers itself automatically via the gem's Railtie when `consol
 
 ```ruby
 # config/application.rb
-config.middleware.use CodebaseIndex::Console::RackMiddleware, path: '/mcp/console'
+config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
 ```
 
 ### MCP Client Configuration
@@ -227,14 +227,14 @@ The HTTP endpoint grants read access to live database data. In production enviro
 
 ## Option D: SSH Remote Bridge
 
-The original bridge architecture for cases where the MCP client cannot spawn a subprocess directly into the Rails environment (remote servers, production-adjacent access, air-gapped apps). The `codebase-console-mcp` binary runs on the client side and connects to a bridge process inside the Rails environment.
+The original bridge architecture for cases where the MCP client cannot spawn a subprocess directly into the Rails environment (remote servers, production-adjacent access, air-gapped apps). The `woods-console-mcp` binary runs on the client side and connects to a bridge process inside the Rails environment.
 
 ### How It Works
 
 ```
 MCP client
   │
-  ├─ spawns: codebase-console-mcp (reads console.yml)
+  ├─ spawns: woods-console-mcp (reads console.yml)
   │
   ▼
 ConnectionManager (on client)
@@ -249,7 +249,7 @@ Bridge process (inside Rails environment)
 
 ### Configuration
 
-Create `~/.codebase_index/console.yml` (or point `CODEBASE_CONSOLE_CONFIG` to any YAML file):
+Create `~/.woods/console.yml` (or point `CODEBASE_CONSOLE_CONFIG` to any YAML file):
 
 ```yaml
 # Direct process (same machine, different process)
@@ -273,7 +273,7 @@ connection:
 Override config path with environment variable:
 
 ```bash
-CODEBASE_CONSOLE_CONFIG=/path/to/console.yml codebase-console-mcp
+CODEBASE_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
 ```
 
 ### MCP Client Configuration
@@ -282,7 +282,7 @@ CODEBASE_CONSOLE_CONFIG=/path/to/console.yml codebase-console-mcp
 {
   "mcpServers": {
     "rails-console": {
-      "command": "codebase-console-mcp",
+      "command": "woods-console-mcp",
       "env": {
         "CODEBASE_CONSOLE_CONFIG": "/path/to/console.yml"
       }
@@ -357,7 +357,7 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 Set these in your Rails initializer:
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   # Enable HTTP/Rack transport. Default: false.
   # Has no effect on stdio (rake) or bridge transports.
   config.console_mcp_enabled = true
@@ -438,15 +438,15 @@ Before any query runs, the model name is checked against the registry built from
 
 - **Rake/Docker:** Check that `cwd` in MCP config points to the Rails app root (where `Rakefile` lives).
 - **HTTP:** Check that the Rails server is running and listening on the expected port. Try `curl http://localhost:3000/mcp/console` — a 200 or 405 means the middleware is mounted.
-- **All modes:** Run `bundle exec rake codebase_index:console` directly in a terminal. It should hang (waiting for MCP protocol input) rather than exit immediately. If it exits, check the error output.
+- **All modes:** Run `bundle exec rake woods:console` directly in a terminal. It should hang (waiting for MCP protocol input) rather than exit immediately. If it exits, check the error output.
 
 ### Rails boot noise breaks MCP protocol
 
 The rake task redirects stdout to stderr before Rails boots specifically to prevent this. If you see JSON parse errors from the MCP client, check:
 
-1. You are using `bundle exec rake codebase_index:console`, not `rails runner exe/codebase-console` directly (the runner path handles this too, but via a different mechanism).
+1. You are using `bundle exec rake woods:console`, not `rails runner exe/codebase-console` directly (the runner path handles this too, but via a different mechanism).
 2. No `puts` or `print` calls run at boot in your initializers before the task can capture stdout.
-3. Try running `bundle exec rake codebase_index:console 2>/dev/null` to isolate — the MCP protocol output goes to stdout, Rails noise goes to stderr.
+3. Try running `bundle exec rake woods:console 2>/dev/null` to isolate — the MCP protocol output goes to stdout, Rails noise goes to stderr.
 
 ### Models not visible to `console_status`
 
@@ -480,4 +480,4 @@ The default statement timeout is 5000ms (5 seconds). If you are hitting timeouts
 console_count(model: "Order", scope: { status: "pending" })
 ```
 
-The timeout is set per-transaction in `SafeContext` and is not currently configurable via `CodebaseIndex.configure`. To change it, pass `timeout_ms:` to `SafeContext.new` directly if you are constructing the server programmatically.
+The timeout is set per-transaction in `SafeContext` and is not currently configurable via `Woods.configure`. To change it, pass `timeout_ms:` to `SafeContext.new` directly if you are constructing the server programmatically.

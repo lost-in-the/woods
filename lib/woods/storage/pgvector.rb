@@ -3,7 +3,7 @@
 require 'json'
 require_relative 'vector_store'
 
-module CodebaseIndex
+module Woods
   module Storage
     module VectorStore
       # PostgreSQL + pgvector adapter for vector storage and similarity search.
@@ -20,7 +20,7 @@ module CodebaseIndex
       class Pgvector # rubocop:disable Metrics/ClassLength
         include Interface
 
-        TABLE = 'codebase_index_vectors'
+        TABLE = 'woods_vectors'
 
         # @param connection [Object] ActiveRecord database connection
         # @param dimensions [Integer] Size of the embedding vectors

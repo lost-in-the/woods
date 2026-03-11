@@ -4,7 +4,7 @@ require 'digest'
 require 'json'
 require 'logger'
 
-module CodebaseIndex
+module Woods
   module Cache
     # Default TTLs (in seconds) for each cache domain.
     #
@@ -27,7 +27,7 @@ module CodebaseIndex
     def self.cache_key(domain, *parts)
       raw = parts.join(':')
       suffix = raw.length > 64 ? Digest::SHA256.hexdigest(raw) : raw
-      "codebase_index:cache:#{domain}:#{suffix}"
+      "woods:cache:#{domain}:#{suffix}"
     end
 
     # Abstract cache store interface.
@@ -99,7 +99,7 @@ module CodebaseIndex
         begin
           write(key, value, ttl: ttl)
         rescue StandardError => e
-          logger.warn("[CodebaseIndex] CacheStore#fetch write failed for #{key}: #{e.message}")
+          logger.warn("[Woods] CacheStore#fetch write failed for #{key}: #{e.message}")
         end
         value
       end
@@ -118,7 +118,7 @@ module CodebaseIndex
       # @param namespace [Symbol, nil] Cache domain, or nil for all entries
       # @return [String]
       def clear_pattern(namespace)
-        namespace ? "codebase_index:cache:#{namespace}:*" : 'codebase_index:cache:*'
+        namespace ? "woods:cache:#{namespace}:*" : 'woods:cache:*'
       end
 
       # Delete a key, silently swallowing any errors.
@@ -223,7 +223,7 @@ module CodebaseIndex
       def clear(namespace: nil)
         @mutex.synchronize do
           if namespace
-            prefix = "codebase_index:cache:#{namespace}:"
+            prefix = "woods:cache:#{namespace}:"
             keys_to_delete = @entries.keys.select { |k| k.start_with?(prefix) }
             keys_to_delete.each { |k| evict_key(k) }
           else

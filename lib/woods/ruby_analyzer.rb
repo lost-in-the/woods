@@ -7,14 +7,14 @@ require_relative 'ruby_analyzer/method_analyzer'
 require_relative 'ruby_analyzer/dataflow_analyzer'
 require_relative 'ruby_analyzer/trace_enricher'
 
-module CodebaseIndex
+module Woods
   # Analyzes plain Ruby source code and produces ExtractedUnit objects.
   #
   # Orchestrates ClassAnalyzer, MethodAnalyzer, DataFlowAnalyzer, and
   # optional TraceEnricher to extract structured data from Ruby files.
   #
   # @example Analyze gem source
-  #   units = CodebaseIndex::RubyAnalyzer.analyze(paths: ["lib/"])
+  #   units = Woods::RubyAnalyzer.analyze(paths: ["lib/"])
   #   units.select { |u| u.type == :ruby_class }.map(&:identifier)
   #
   module RubyAnalyzer
@@ -41,7 +41,7 @@ module CodebaseIndex
 
           units.concat(class_analyzer.analyze(source: source, file_path: file_path))
           units.concat(method_analyzer.analyze(source: source, file_path: file_path))
-        rescue CodebaseIndex::ExtractionError
+        rescue Woods::ExtractionError
           # Skip files that fail to parse
           next
         end

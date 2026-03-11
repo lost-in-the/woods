@@ -10,9 +10,9 @@ This document covers the operational concerns that sit between "it works in deve
 
 ### The Problem
 
-CodebaseIndex needs database tables (`codebase_units`, `codebase_edges`, `codebase_embeddings`) in whatever metadata/graph store the team selects. The question is how those tables get created, how they evolve across versions, and how this works across different environments.
+Woods needs database tables (`woods_units`, `woods_edges`, `woods_embeddings`) in whatever metadata/graph store the team selects. The question is how those tables get created, how they evolve across versions, and how this works across different environments.
 
-This is complicated by the fact that CodebaseIndex:
+This is complicated by the fact that Woods:
 - May or may not run inside a Rails application
 - Supports multiple database backends (MySQL, PostgreSQL, SQLite)
 - May use the application's existing database or a separate one
@@ -26,19 +26,19 @@ Two paths to schema setup, depending on whether you're inside Rails:
 
 ```ruby
 # Install generator creates a migration
-rails generate codebase_index:install
+rails generate woods:install
 
 # Generates:
-# db/migrate/XXXXXX_create_codebase_index_tables.rb
-# config/initializers/codebase_index.rb
+# db/migrate/XXXXXX_create_woods_tables.rb
+# config/initializers/woods.rb
 ```
 
 The generator detects your database adapter and produces the correct migration:
 
 ```ruby
-class CreateCodebaseIndexTables < ActiveRecord::Migration[7.0]
+class CreateWoodsTables < ActiveRecord::Migration[7.0]
   def change
-    create_table :codebase_units, id: false do |t|
+    create_table :woods_units, id: false do |t|
       t.string :id, primary_key: true
       t.string :unit_type, null: false, limit: 50  # model, controller, service, job, mailer, component, graphql_type, graphql_mutation, graphql_resolver, graphql_query, framework_source
       t.string :namespace, limit: 255
@@ -49,28 +49,28 @@ class CreateCodebaseIndexTables < ActiveRecord::Migration[7.0]
       t.timestamps
     end
 
-    add_index :codebase_units, :unit_type
-    add_index :codebase_units, :namespace
+    add_index :woods_units, :unit_type
+    add_index :woods_units, :namespace
 
     # Full-text index (adapter-specific)
     if mysql?
-      execute "ALTER TABLE codebase_units ADD FULLTEXT INDEX idx_fulltext (id, file_path, source_code)"
+      execute "ALTER TABLE woods_units ADD FULLTEXT INDEX idx_fulltext (id, file_path, source_code)"
     elsif postgresql?
       execute <<~SQL
-        CREATE INDEX idx_fulltext ON codebase_units
+        CREATE INDEX idx_fulltext ON woods_units
         USING gin (to_tsvector('english', coalesce(id, '') || ' ' || coalesce(file_path, '') || ' ' || coalesce(source_code, '')))
       SQL
     end
 
-    create_table :codebase_edges, id: false do |t|
+    create_table :woods_edges, id: false do |t|
       t.string :source_id, null: false
       t.string :target_id, null: false
       t.string :relationship, null: false, limit: 50
     end
 
-    add_index :codebase_edges, [:source_id, :target_id, :relationship], unique: true, name: "idx_edges_pk"
-    add_index :codebase_edges, :target_id
-    add_index :codebase_edges, :relationship
+    add_index :woods_edges, [:source_id, :target_id, :relationship], unique: true, name: "idx_edges_pk"
+    add_index :woods_edges, :target_id
+    add_index :woods_edges, :relationship
   end
 
   private
@@ -90,19 +90,19 @@ end
 A second optional migration adds MySQL generated columns for commonly-filtered JSON fields:
 
 ```ruby
-rails generate codebase_index:generated_columns
+rails generate woods:generated_columns
 
 # Generates:
-# db/migrate/XXXXXX_add_codebase_index_generated_columns.rb
+# db/migrate/XXXXXX_add_woods_generated_columns.rb
 ```
 
 ```ruby
-class AddCodebaseIndexGeneratedColumns < ActiveRecord::Migration[7.0]
+class AddWoodsGeneratedColumns < ActiveRecord::Migration[7.0]
   def up
     return unless mysql?
 
     execute <<~SQL
-      ALTER TABLE codebase_units
+      ALTER TABLE woods_units
         ADD COLUMN change_frequency VARCHAR(20) GENERATED ALWAYS AS (
           JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.git.change_frequency'))
         ) STORED,
@@ -121,7 +121,7 @@ class AddCodebaseIndexGeneratedColumns < ActiveRecord::Migration[7.0]
     return unless mysql?
 
     execute <<~SQL
-      ALTER TABLE codebase_units
+      ALTER TABLE woods_units
         DROP INDEX idx_change_freq,
         DROP INDEX idx_importance,
         DROP COLUMN change_frequency,
@@ -138,16 +138,16 @@ For use as a standalone tool or in non-Rails Ruby projects:
 
 ```ruby
 # Rake task handles schema directly
-rake codebase_index:db:setup          # Create tables
-rake codebase_index:db:migrate        # Run pending migrations
-rake codebase_index:db:status         # Show migration status
-rake codebase_index:db:reset          # Drop and recreate
+rake woods:db:setup          # Create tables
+rake woods:db:migrate        # Run pending migrations
+rake woods:db:status         # Show migration status
+rake woods:db:reset          # Drop and recreate
 ```
 
 Internally, these use a lightweight migration system (not ActiveRecord migrations) that reads SQL from versioned files:
 
 ```
-lib/codebase_index/db/
+lib/woods/db/
 ├── migrations/
 │   ├── 001_create_units.rb
 │   ├── 002_create_edges.rb
@@ -163,28 +163,28 @@ lib/codebase_index/db/
 Each migration file is a simple Ruby class:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module DB
     class Migration001CreateUnits < Migration
       def up(conn, adapter)
         case adapter
         when :mysql
           conn.execute <<~SQL
-            CREATE TABLE IF NOT EXISTS codebase_units (
+            CREATE TABLE IF NOT EXISTS woods_units (
               id VARCHAR(255) PRIMARY KEY,
               -- ... MySQL-specific schema
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
           SQL
         when :postgresql
           conn.execute <<~SQL
-            CREATE TABLE IF NOT EXISTS codebase_units (
+            CREATE TABLE IF NOT EXISTS woods_units (
               id TEXT PRIMARY KEY,
               -- ... PostgreSQL-specific schema
             )
           SQL
         when :sqlite
           conn.execute <<~SQL
-            CREATE TABLE IF NOT EXISTS codebase_units (
+            CREATE TABLE IF NOT EXISTS woods_units (
               id TEXT PRIMARY KEY,
               -- ... SQLite-specific schema
             )
@@ -193,7 +193,7 @@ module CodebaseIndex
       end
 
       def down(conn, adapter)
-        conn.execute "DROP TABLE IF EXISTS codebase_units"
+        conn.execute "DROP TABLE IF EXISTS woods_units"
       end
     end
   end
@@ -202,16 +202,16 @@ end
 
 ### Schema Versioning
 
-The gem tracks schema versions in a `codebase_index_schema_migrations` table:
+The gem tracks schema versions in a `woods_schema_migrations` table:
 
 ```sql
-CREATE TABLE codebase_index_schema_migrations (
+CREATE TABLE woods_schema_migrations (
   version VARCHAR(20) PRIMARY KEY,
   applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-This is separate from Rails' `schema_migrations` to avoid conflicts when CodebaseIndex uses the application database.
+This is separate from Rails' `schema_migrations` to avoid conflicts when Woods uses the application database.
 
 ### Vector Store Schema
 
@@ -236,16 +236,16 @@ end
 **pgvector:** Requires the extension to be enabled (needs superuser), then a migration for the embeddings table:
 
 ```ruby
-rails generate codebase_index:pgvector
+rails generate woods:pgvector
 
 # Generates:
-# db/migrate/XXXXXX_create_codebase_embeddings.rb
+# db/migrate/XXXXXX_create_woods_embeddings.rb
 
 class CreateCodebaseEmbeddings < ActiveRecord::Migration[7.0]
   def up
     enable_extension "vector" unless extension_enabled?("vector")
 
-    create_table :codebase_embeddings, id: false do |t|
+    create_table :woods_embeddings, id: false do |t|
       t.string :id, primary_key: true
       t.column :embedding, "vector(1536)"  # Dimension matches embedding provider
       t.jsonb :metadata, null: false, default: {}
@@ -253,13 +253,13 @@ class CreateCodebaseEmbeddings < ActiveRecord::Migration[7.0]
     end
 
     execute <<~SQL
-      CREATE INDEX ON codebase_embeddings
+      CREATE INDEX ON woods_embeddings
       USING hnsw (embedding vector_cosine_ops)
       WITH (m = 16, ef_construction = 64)
     SQL
 
     execute <<~SQL
-      CREATE INDEX ON codebase_embeddings
+      CREATE INDEX ON woods_embeddings
       USING gin (metadata jsonb_path_ops)
     SQL
   end
@@ -276,7 +276,7 @@ end
 The gem should provide a rake task for this:
 
 ```ruby
-rake codebase_index:reindex[new_provider]
+rake woods:reindex[new_provider]
 # 1. Creates new vector storage alongside old
 # 2. Re-embeds everything with new provider
 # 3. Swaps atomically
@@ -288,13 +288,13 @@ rake codebase_index:reindex[new_provider]
 When a new version of the gem adds schema changes:
 
 1. Bump gem version
-2. Run `rails generate codebase_index:install` (idempotent, only generates new migrations)
+2. Run `rails generate woods:install` (idempotent, only generates new migrations)
 3. Run `rails db:migrate`
 
 Or standalone:
 
 1. Bump gem version
-2. Run `rake codebase_index:db:migrate`
+2. Run `rake woods:db:migrate`
 
 Schema migrations are forward-only. Downgrades are not guaranteed (consistent with Rails conventions).
 
@@ -304,7 +304,7 @@ Schema migrations are forward-only. Downgrades are not guaranteed (consistent wi
 
 ### Design Philosophy
 
-CodebaseIndex should never be the reason your application fails. It's a development-time tool that may run alongside production workloads (if using the application database). Errors in indexing or retrieval should degrade gracefully, never crash the host application, and always be observable.
+Woods should never be the reason your application fails. It's a development-time tool that may run alongside production workloads (if using the application database). Errors in indexing or retrieval should degrade gracefully, never crash the host application, and always be observable.
 
 ### Error Categories
 
@@ -348,7 +348,7 @@ Tier 5: Empty result with diagnostic message
 **Circuit breaker for external services:**
 
 ```ruby
-module CodebaseIndex
+module Woods
   class CircuitBreaker
     STATES = %i[closed open half_open].freeze
 
@@ -405,7 +405,7 @@ end
 **Retriever with fallback:**
 
 ```ruby
-module CodebaseIndex
+module Woods
   class Retriever
     def retrieve(query, budget: 8000)
       classification = classify(query)
@@ -480,7 +480,7 @@ end
 **Embedding retry with backoff:**
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     class RetryableProvider
       MAX_RETRIES = 3
@@ -541,14 +541,14 @@ end
 **Stale index detection:**
 
 ```ruby
-module CodebaseIndex
+module Woods
   class IndexValidator
     def validate!
       issues = []
 
       # Check schema version
       current = SchemaVersion.current
-      expected = CodebaseIndex::SCHEMA_VERSION
+      expected = Woods::SCHEMA_VERSION
       if current != expected
         issues << SchemaVersionMismatch.new(current: current, expected: expected)
       end
@@ -592,7 +592,7 @@ end
 When retrieval is degraded, the result object communicates this clearly:
 
 ```ruby
-result = CodebaseIndex.retrieve("how does checkout work?")
+result = Woods.retrieve("how does checkout work?")
 
 result.degraded?           # => true
 result.degradation_reason  # => "Vector search unavailable: Qdrant connection refused"
@@ -615,11 +615,11 @@ result.suggestions
 All operations emit events via a pluggable instrumentation system. The default uses `ActiveSupport::Notifications` when available, falling back to a lightweight internal pub/sub.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Instrumentation
     def self.instrument(event_name, payload = {}, &block)
       if defined?(ActiveSupport::Notifications)
-        ActiveSupport::Notifications.instrument("codebase_index.#{event_name}", payload, &block)
+        ActiveSupport::Notifications.instrument("woods.#{event_name}", payload, &block)
       else
         InternalNotifier.instrument(event_name, payload, &block)
       end
@@ -682,7 +682,7 @@ Every significant operation emits a structured event:
 Every retrieval produces a detailed trace object. This is the primary debugging and evaluation tool:
 
 ```ruby
-module CodebaseIndex
+module Woods
   class RetrievalTrace
     attr_reader :query, :classification, :steps, :started_at, :completed_at
 
@@ -838,7 +838,7 @@ end
 All events are logged in structured format. The default logger writes JSON for machine consumption:
 
 ```ruby
-module CodebaseIndex
+module Woods
   class StructuredLogger
     def initialize(output: $stdout, level: :info)
       @output = output
@@ -851,7 +851,7 @@ module CodebaseIndex
       entry = {
         timestamp: Time.now.iso8601(3),
         level: level,
-        event: "codebase_index.#{event}",
+        event: "woods.#{event}",
         **data
       }
 
@@ -864,13 +864,13 @@ end
 Example log lines:
 
 ```json
-{"timestamp":"2025-02-08T14:30:00.087Z","level":"info","event":"codebase_index.retrieval.vector_search","query":"checkout","candidates":12,"duration_ms":85.3,"store":"qdrant"}
-{"timestamp":"2025-02-08T14:30:00.247Z","level":"info","event":"codebase_index.retrieval.completed","query":"checkout","tokens":6841,"sources":7,"duration_ms":247.3,"degraded":false}
+{"timestamp":"2025-02-08T14:30:00.087Z","level":"info","event":"woods.retrieval.vector_search","query":"checkout","candidates":12,"duration_ms":85.3,"store":"qdrant"}
+{"timestamp":"2025-02-08T14:30:00.247Z","level":"info","event":"woods.retrieval.completed","query":"checkout","tokens":6841,"sources":7,"duration_ms":247.3,"degraded":false}
 ```
 
 ```json
-{"timestamp":"2025-02-08T14:31:15.003Z","level":"warn","event":"codebase_index.storage.circuit_opened","name":"qdrant","failure_count":5,"last_error":"Connection refused - connect(2) for \"localhost\" port 6333"}
-{"timestamp":"2025-02-08T14:31:15.050Z","level":"warn","event":"codebase_index.retrieval.completed","query":"order validation","tokens":2100,"sources":3,"duration_ms":52.1,"degraded":true,"tier":2}
+{"timestamp":"2025-02-08T14:31:15.003Z","level":"warn","event":"woods.storage.circuit_opened","name":"qdrant","failure_count":5,"last_error":"Connection refused - connect(2) for \"localhost\" port 6333"}
+{"timestamp":"2025-02-08T14:31:15.050Z","level":"warn","event":"woods.retrieval.completed","query":"order validation","tokens":2100,"sources":3,"duration_ms":52.1,"degraded":true,"tier":2}
 ```
 
 ### Integration with Existing Observability
@@ -878,8 +878,8 @@ Example log lines:
 **Rails application logger:**
 
 ```ruby
-# config/initializers/codebase_index.rb
-CodebaseIndex.configure do |config|
+# config/initializers/woods.rb
+Woods.configure do |config|
   config.logger = Rails.logger
 end
 ```
@@ -887,33 +887,33 @@ end
 **ActiveSupport::Notifications subscribers:**
 
 ```ruby
-# Subscribe to all CodebaseIndex events
-ActiveSupport::Notifications.subscribe(/^codebase_index\./) do |name, start, finish, id, payload|
+# Subscribe to all Woods events
+ActiveSupport::Notifications.subscribe(/^woods\./) do |name, start, finish, id, payload|
   Rails.logger.info("#{name}: #{payload.to_json}")
 end
 
 # Or specific events
-ActiveSupport::Notifications.subscribe("codebase_index.retrieval.completed") do |*args|
+ActiveSupport::Notifications.subscribe("woods.retrieval.completed") do |*args|
   event = ActiveSupport::Notifications::Event.new(*args)
-  StatsD.timing("codebase_index.retrieval", event.duration)
-  StatsD.increment("codebase_index.retrieval.degraded") if event.payload[:degraded]
+  StatsD.timing("woods.retrieval", event.duration)
+  StatsD.increment("woods.retrieval.degraded") if event.payload[:degraded]
 end
 ```
 
 **Datadog / StatsD:**
 
 ```ruby
-ActiveSupport::Notifications.subscribe("codebase_index.retrieval.completed") do |*args|
+ActiveSupport::Notifications.subscribe("woods.retrieval.completed") do |*args|
   event = ActiveSupport::Notifications::Event.new(*args)
-  StatsD.distribution("codebase_index.retrieval.duration_ms", event.duration * 1000)
-  StatsD.distribution("codebase_index.retrieval.tokens", event.payload[:tokens])
-  StatsD.gauge("codebase_index.retrieval.tier", event.payload[:tier])
+  StatsD.distribution("woods.retrieval.duration_ms", event.duration * 1000)
+  StatsD.distribution("woods.retrieval.tokens", event.payload[:tokens])
+  StatsD.gauge("woods.retrieval.tier", event.payload[:tier])
 end
 
-ActiveSupport::Notifications.subscribe("codebase_index.embedding.batch_completed") do |*args|
+ActiveSupport::Notifications.subscribe("woods.embedding.batch_completed") do |*args|
   event = ActiveSupport::Notifications::Event.new(*args)
-  StatsD.increment("codebase_index.embedding.batches")
-  StatsD.distribution("codebase_index.embedding.cost", event.payload[:cost_estimate])
+  StatsD.increment("woods.embedding.batches")
+  StatsD.distribution("woods.embedding.cost", event.payload[:cost_estimate])
 end
 ```
 
@@ -926,7 +926,7 @@ The JSON log format works directly with Filebeat/Logstash. No parsing rules need
 A health endpoint for monitoring systems:
 
 ```ruby
-module CodebaseIndex
+module Woods
   class HealthCheck
     def check
       results = {}
@@ -963,7 +963,7 @@ module CodebaseIndex
 end
 
 # Rake task
-# rake codebase_index:health
+# rake woods:health
 ```
 
 ### Metrics Dashboard Guidance
@@ -992,7 +992,7 @@ For teams with existing dashboards (Grafana, Datadog, etc.), these are the metri
 
 ## Concurrent Indexing Safety
 
-When CodebaseIndex runs in a shared environment — multiple developers, CI pipelines, and agents all potentially triggering operations — understanding which operations are safe for concurrent access is critical.
+When Woods runs in a shared environment — multiple developers, CI pipelines, and agents all potentially triggering operations — understanding which operations are safe for concurrent access is critical.
 
 ### Operation Safety Matrix
 
@@ -1034,10 +1034,10 @@ No coordination needed. Extraction runs on-demand via rake task. Retrieval reads
 
 **Development (multiple developers, shared database):**
 
-Each developer runs extraction against their own checkout. Extracted JSON lives in `tmp/codebase_index/` (gitignored). No shared write conflicts. If using a shared vector store (e.g., shared Qdrant), namespace embeddings by developer or branch:
+Each developer runs extraction against their own checkout. Extracted JSON lives in `tmp/woods/` (gitignored). No shared write conflicts. If using a shared vector store (e.g., shared Qdrant), namespace embeddings by developer or branch:
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   config.vector_store_collection = "codebase_#{ENV['USER']}"
 end
 ```
@@ -1051,10 +1051,10 @@ Extraction and embedding run sequentially in a CI step. No concurrent writes —
 steps:
   - label: "Update Index"
     command:
-      - bundle exec rake codebase_index:extract
-      - bundle exec rake codebase_index:index
+      - bundle exec rake woods:extract
+      - bundle exec rake woods:index
     concurrency: 1
-    concurrency_group: "codebase-index-update"
+    concurrency_group: "woods-update"
 ```
 
 **Production (agents + CI):**
@@ -1066,7 +1066,7 @@ Use advisory locks (PostgreSQL `pg_advisory_lock` or MySQL `GET_LOCK`) to preven
 Extraction writes JSON files atomically by writing to a temp file and renaming:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module IO
     def self.atomic_write(path, content)
       temp_path = "#{path}.#{Process.pid}.tmp"
@@ -1091,7 +1091,7 @@ SQLite is used for the lightweight development backend. Its concurrency model is
 - For multi-process scenarios (multiple agents in separate processes), WAL mode is required
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     class SqliteAdapter
       def initialize(db_path:)
@@ -1127,7 +1127,7 @@ When source code changes, extraction produces updated JSON. But the embedding la
 After each extraction run, the extractor writes a change manifest alongside the extracted units:
 
 ```ruby
-module CodebaseIndex
+module Woods
   class ChangeManifest
     MANIFEST_FILE = "_change_manifest.json"
 
@@ -1158,7 +1158,7 @@ module CodebaseIndex
     end
 
     def write!
-      CodebaseIndex::IO.atomic_write(
+      Woods::IO.atomic_write(
         @output_dir.join(MANIFEST_FILE).to_s,
         {
           generated_at: Time.now.iso8601,
@@ -1210,7 +1210,7 @@ end
 The manifest uses content hashes to detect actual changes (not just timestamp changes). A unit is "modified" only if its extracted content actually differs:
 
 ```ruby
-module CodebaseIndex
+module Woods
   class ContentHasher
     def hash_unit(unit)
       # Hash the fields that affect embedding: source code, metadata, dependencies
@@ -1234,7 +1234,7 @@ This prevents unnecessary re-embedding when extraction produces identical output
 The embedding pipeline reads the change manifest to determine what work is needed:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     class IncrementalIndexer
       def initialize(pipeline:, output_dir:)
@@ -1250,7 +1250,7 @@ module CodebaseIndex
         if to_embed.any?
           identifiers = to_embed.map { |u| u[:identifier] }
           @pipeline.index_incremental(identifiers)
-          CodebaseIndex.logger.info(
+          Woods.logger.info(
             "Embedded #{identifiers.size} units (#{@manifest.changes[:added].size} added, #{@manifest.changes[:modified].size} modified)"
           )
         end
@@ -1260,7 +1260,7 @@ module CodebaseIndex
         if to_delete.any?
           identifiers = to_delete.map { |u| u[:identifier] }
           @pipeline.delete_embeddings(identifiers)
-          CodebaseIndex.logger.info("Deleted embeddings for #{identifiers.size} removed units")
+          Woods.logger.info("Deleted embeddings for #{identifiers.size} removed units")
         end
 
         # Also delete chunk embeddings for modified units (they'll be re-created)
@@ -1279,7 +1279,7 @@ module CodebaseIndex
       private
 
       def full_reindex!
-        CodebaseIndex.logger.warn("No change manifest found — performing full re-index")
+        Woods.logger.warn("No change manifest found — performing full re-index")
         @pipeline.index_all
       end
     end
@@ -1300,7 +1300,7 @@ Changes can cascade. When a concern is modified, every model that includes it ha
 | Association added/removed | Both models in the association | None |
 
 ```ruby
-module CodebaseIndex
+module Woods
   class TransitiveInvalidator
     def initialize(dependency_graph:, concern_map:)
       @graph = dependency_graph
@@ -1369,7 +1369,7 @@ end
 For real-time development workflows, a file-watcher approach complements the manifest-based approach:
 
 ```ruby
-module CodebaseIndex
+module Woods
   class FileWatcher
     WATCH_PATTERNS = %w[
       app/models/**/*.rb
@@ -1387,9 +1387,9 @@ module CodebaseIndex
         relevant = changed.select { |f| WATCH_PATTERNS.any? { |p| File.fnmatch?(p, f, File::FNM_PATHNAME) } }
         next if relevant.empty?
 
-        CodebaseIndex.extract_incremental(relevant)
+        Woods.extract_incremental(relevant)
         # Embedding follows automatically via change manifest
-        CodebaseIndex.embed_incremental
+        Woods.embed_incremental
       end
 
       listener.start
@@ -1429,7 +1429,7 @@ Requested → Validating → Running → Completed
 ```
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Operator
     class TaskRunner
       def run_extraction(mode:, extractors: nil, dry_run: false)
@@ -1519,7 +1519,7 @@ module CodebaseIndex
         PipelineGuard.new.allow_extraction?(mode)
 
         if extractors
-          unknown = extractors - CodebaseIndex.configuration.available_extractors.map(&:to_s)
+          unknown = extractors - Woods.configuration.available_extractors.map(&:to_s)
           raise ArgumentError, "Unknown extractors: #{unknown.join(', ')}" if unknown.any?
         end
       end
@@ -1543,7 +1543,7 @@ end
 The `pipeline_status` tool returns a snapshot of the current pipeline state without triggering any operations. It reads from the manifest and component health checks:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Operator
     class StatusReporter
       def report
@@ -1636,7 +1636,7 @@ Not all errors can be resolved by an agent. The escalation model defines when an
 | Dimension mismatch | Cannot embed — requires full re-index | Report to human with rake task command |
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Operator
     class ErrorEscalator
       RETRYABLE_ERRORS = [
@@ -1688,9 +1688,9 @@ module CodebaseIndex
       def suggest_human_action(error)
         case error
         when DimensionMismatch
-          "Embedding dimensions changed. Run: bundle exec rake codebase_index:reindex"
+          "Embedding dimensions changed. Run: bundle exec rake woods:reindex"
         when SchemaVersionMismatch
-          "Schema needs migration. Run: bundle exec rake codebase_index:db:migrate"
+          "Schema needs migration. Run: bundle exec rake woods:db:migrate"
         when CircuitOpenError
           "Backend service (#{error.service_name}) is down. Check infrastructure and retry."
         end

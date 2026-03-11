@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-CodebaseIndex extracts **structural dependencies** (what-depends-on-what) as unordered sets. The dependency graph supports traversal (`dependencies_of`, `dependents_of`, `path_between`) and importance scoring via PageRank, but has no concept of **execution order** within methods.
+Woods extracts **structural dependencies** (what-depends-on-what) as unordered sets. The dependency graph supports traversal (`dependencies_of`, `dependents_of`, `path_between`) and importance scoring via PageRank, but has no concept of **execution order** within methods.
 
 Controllers capture routes and filter chains but not response codes or call sequences. Services capture entry points and dependencies but not call ordering. When an agent is asked "what happens when a customer creates a checkout?", it can find all the related units — `CheckoutsController`, `CheckoutFindOrCreate`, `CheckoutWorker` — but not the order in which they execute.
 
@@ -66,12 +66,12 @@ User specifies entry point
 
 | File | Responsibility |
 |---|---|
-| `lib/codebase_index/flow_assembler.rb` | Orchestrator: graph traversal from entry point, calls AST analyzer per unit, assembles ordered steps (~300 lines) |
-| `lib/codebase_index/flow_document.rb` | Value object: holds assembled flow, `to_h` (JSON), `to_markdown` (~120 lines) |
-| `lib/codebase_index/flow_analysis/operation_extractor.rb` | AST traversal: extracts method calls, transactions, responses, conditionals in source order (~400 lines) |
-| `lib/codebase_index/flow_analysis/ast_parser.rb` | Adapter: normalizes Prism (Ruby 3.3+) / parser gem to common interface (~150 lines) |
-| `lib/codebase_index/flow_analysis/response_code_mapper.rb` | Maps render/redirect calls to HTTP status codes via `Rack::Utils` (~50 lines) |
-| `lib/tasks/flow.rake` | Rake task: `codebase_index:flow[CheckoutsController#create]` (~50 lines) |
+| `lib/woods/flow_assembler.rb` | Orchestrator: graph traversal from entry point, calls AST analyzer per unit, assembles ordered steps (~300 lines) |
+| `lib/woods/flow_document.rb` | Value object: holds assembled flow, `to_h` (JSON), `to_markdown` (~120 lines) |
+| `lib/woods/flow_analysis/operation_extractor.rb` | AST traversal: extracts method calls, transactions, responses, conditionals in source order (~400 lines) |
+| `lib/woods/flow_analysis/ast_parser.rb` | Adapter: normalizes Prism (Ruby 3.3+) / parser gem to common interface (~150 lines) |
+| `lib/woods/flow_analysis/response_code_mapper.rb` | Maps render/redirect calls to HTTP status codes via `Rack::Utils` (~50 lines) |
+| `lib/tasks/flow.rake` | Rake task: `woods:flow[CheckoutsController#create]` (~50 lines) |
 
 ### Data Flow
 
@@ -246,7 +246,7 @@ FlowAssembler uses an adapter layer (`AstParser`) that normalizes both Prism and
 ### AstParser Adapter Interface
 
 ```ruby
-module CodebaseIndex
+module Woods
   module FlowAnalysis
     class AstParser
       # Parse Ruby source and return a normalized AST.
@@ -302,7 +302,7 @@ AstNode = Struct.new(
 OperationExtractor walks the normalized AST for a method body and produces an ordered list of operations:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module FlowAnalysis
     class OperationExtractor
       # Extract operations from a method body AST.
@@ -431,7 +431,7 @@ end
 Maps render/redirect calls to HTTP status codes using `Rack::Utils::SYMBOL_TO_STATUS_CODE`:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module FlowAnalysis
     class ResponseCodeMapper
       SYMBOL_TO_STATUS = Rack::Utils::SYMBOL_TO_STATUS_CODE
@@ -505,9 +505,9 @@ FlowAssembler is designed to layer on top of the existing extraction and retriev
 
 | Addition | Purpose |
 |---|---|
-| `lib/codebase_index/flow_assembler.rb` | Orchestrator |
-| `lib/codebase_index/flow_document.rb` | Value object |
-| `lib/codebase_index/flow_analysis/` directory | AST parsing and operation extraction |
+| `lib/woods/flow_assembler.rb` | Orchestrator |
+| `lib/woods/flow_document.rb` | Value object |
+| `lib/woods/flow_analysis/` directory | AST parsing and operation extraction |
 | `lib/tasks/flow.rake` | Rake interface |
 
 ### Retrieval Layer Integration
@@ -535,19 +535,19 @@ This is a future integration point — FlowAssembler works standalone via the ra
 
 ```ruby
 # lib/tasks/flow.rake
-namespace :codebase_index do
+namespace :woods do
   desc "Generate execution flow document for an entry point"
   task :flow, [:entry_point] => :environment do |_t, args|
-    require "codebase_index"
+    require "woods"
 
     entry_point = args[:entry_point]
-    abort "Usage: rake codebase_index:flow[CheckoutsController#create]" unless entry_point
+    abort "Usage: rake woods:flow[CheckoutsController#create]" unless entry_point
 
     # Load extracted data from JSON files on disk
-    output_dir = CodebaseIndex.configuration.output_dir
-    graph = CodebaseIndex::DependencyGraph.load(File.join(output_dir, "dependency_graph.json"))
+    output_dir = Woods.configuration.output_dir
+    graph = Woods::DependencyGraph.load(File.join(output_dir, "dependency_graph.json"))
 
-    assembler = CodebaseIndex::FlowAssembler.new(graph: graph, extracted_dir: output_dir)
+    assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: output_dir)
     flow = assembler.assemble(entry_point)
 
     case ENV.fetch("FORMAT", "markdown")
@@ -564,13 +564,13 @@ Usage:
 
 ```bash
 # Markdown output (default)
-bundle exec rake codebase_index:flow[CheckoutsController#create]
+bundle exec rake woods:flow[CheckoutsController#create]
 
 # JSON output
-FORMAT=json bundle exec rake codebase_index:flow[CheckoutsController#create]
+FORMAT=json bundle exec rake woods:flow[CheckoutsController#create]
 
 # With depth limit
-MAX_DEPTH=3 bundle exec rake codebase_index:flow[CheckoutsController#create]
+MAX_DEPTH=3 bundle exec rake woods:flow[CheckoutsController#create]
 ```
 
 ---
@@ -636,7 +636,7 @@ Before/after action filters are already captured by `ControllerExtractor` in the
 Example spec structure:
 
 ```ruby
-RSpec.describe CodebaseIndex::FlowAnalysis::OperationExtractor do
+RSpec.describe Woods::FlowAnalysis::OperationExtractor do
   describe "#extract" do
     it "extracts method calls in source order" do
       source = <<~RUBY
@@ -731,7 +731,7 @@ The host Rails app has Post, Comment models, controllers, jobs, and a mailer. Ad
 - Markdown formatting polish
 - Documentation updates
 
-**Unlocks:** Developers and agents can generate flow documents on demand via `bundle exec rake codebase_index:flow[entry_point]`.
+**Unlocks:** Developers and agents can generate flow documents on demand via `bundle exec rake woods:flow[entry_point]`.
 
 ---
 

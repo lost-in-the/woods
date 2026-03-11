@@ -3,7 +3,7 @@
 require 'spec_helper'
 
 RSpec.describe 'MCP HTTP Transport' do
-  let(:executable_path) { File.expand_path('../../exe/codebase-index-mcp-http', __dir__) }
+  let(:executable_path) { File.expand_path('../../exe/woods-mcp-http', __dir__) }
 
   describe 'executable' do
     it 'exists' do
@@ -33,11 +33,11 @@ RSpec.describe 'MCP HTTP Transport' do
   end
 
   describe 'gemspec' do
-    let(:gemspec_path) { File.expand_path('../../codebase_index.gemspec', __dir__) }
+    let(:gemspec_path) { File.expand_path('../../woods.gemspec', __dir__) }
 
     it 'includes the HTTP executable in the executables list' do
       content = File.read(gemspec_path)
-      expect(content).to include('codebase-index-mcp-http')
+      expect(content).to include('woods-mcp-http')
     end
   end
 end

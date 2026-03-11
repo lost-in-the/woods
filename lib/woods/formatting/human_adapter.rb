@@ -2,7 +2,7 @@
 
 require_relative 'base'
 
-module CodebaseIndex
+module Woods
   module Formatting
     # Formats assembled context with box-drawing characters for human display.
     #
@@ -21,7 +21,7 @@ module CodebaseIndex
 
       # Format assembled context for human-readable display.
       #
-      # @param assembled_context [CodebaseIndex::Retrieval::AssembledContext]
+      # @param assembled_context [Woods::Retrieval::AssembledContext]
       # @return [String] Box-drawing formatted context
       def format(assembled_context)
         parts = []
@@ -36,7 +36,7 @@ module CodebaseIndex
 
       # Format the box-drawing header.
       #
-      # @param assembled_context [CodebaseIndex::Retrieval::AssembledContext]
+      # @param assembled_context [Woods::Retrieval::AssembledContext]
       # @return [Array<String>]
       def format_header(assembled_context)
         title = 'Codebase Context'

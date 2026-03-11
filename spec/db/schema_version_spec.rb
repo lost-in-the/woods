@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/db/schema_version'
+require 'woods/db/schema_version'
 require 'sqlite3'
 
-RSpec.describe CodebaseIndex::Db::SchemaVersion do
+RSpec.describe Woods::Db::SchemaVersion do
   let(:db) { SQLite3::Database.new(':memory:') }
 
   subject(:schema_version) { described_class.new(connection: db) }
@@ -13,7 +13,7 @@ RSpec.describe CodebaseIndex::Db::SchemaVersion do
     it 'creates the schema_migrations table' do
       schema_version.ensure_table!
       sql = "SELECT name FROM sqlite_master WHERE type='table' " \
-            "AND name='codebase_index_schema_migrations'"
+            "AND name='woods_schema_migrations'"
       result = db.execute(sql)
       expect(result).not_to be_empty
     end
@@ -22,7 +22,7 @@ RSpec.describe CodebaseIndex::Db::SchemaVersion do
       schema_version.ensure_table!
       schema_version.ensure_table!
       sql = "SELECT name FROM sqlite_master WHERE type='table' " \
-            "AND name='codebase_index_schema_migrations'"
+            "AND name='woods_schema_migrations'"
       result = db.execute(sql)
       expect(result.size).to eq(1)
     end

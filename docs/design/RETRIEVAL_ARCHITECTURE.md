@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the retrieval architecture for CodebaseIndex—the system that transforms extracted codebase data into contextually relevant responses for AI-assisted development.
+This document defines the retrieval architecture for Woods—the system that transforms extracted codebase data into contextually relevant responses for AI-assisted development.
 
 The design prioritizes **adaptability**: while the reference implementation targets a large Rails monolith with MySQL/Redis/Sidekiq, the architecture accommodates PostgreSQL, SQLite, Solid Queue, and other variations through pluggable backends.
 
@@ -227,7 +227,7 @@ Does this query need Rails/gem source context?
 
 ```ruby
 # Pseudocode for query classification
-module CodebaseIndex
+module Woods
   module Retrieval
     class QueryClassifier
       def classify(query, context: {})
@@ -353,7 +353,7 @@ Based on classification, the system selects and executes one or more search stra
 **When to use:** Semantic similarity queries, concept-based lookups, exploratory questions.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     module Strategies
       class VectorSearch
@@ -417,7 +417,7 @@ vector_search.search(
 **When to use:** Exact identifier lookups, class/method name searches, grep-style queries.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     module Strategies
       class KeywordSearch
@@ -468,7 +468,7 @@ keyword_search.search(["stripe_customer_id"], filters: { type: :model })
 **When to use:** Dependency tracing, impact analysis, "what uses X" queries.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     module Strategies
       class GraphTraversal
@@ -533,7 +533,7 @@ graph.path_between(from: "Order", to: "Shipment")
 **When to use:** Most queries benefit from combining strategies.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     module Strategies
       class HybridSearch
@@ -632,7 +632,7 @@ end
 **When to use:** Known identifier, pinpoint queries.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     module Strategies
       class DirectLookup
@@ -671,7 +671,7 @@ The retrieval layer defines interfaces for three storage concerns, each with plu
 ### Vector Store Interface
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     module VectorStore
       # Interface that all vector store implementations must satisfy
@@ -716,7 +716,7 @@ end
 #### Implementation: Qdrant
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     module VectorStore
       class Qdrant
@@ -781,13 +781,13 @@ end
 #### Implementation: Pgvector
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     module VectorStore
       class Pgvector
         include Interface
         
-        def initialize(connection_string:, table_name: "codebase_embeddings")
+        def initialize(connection_string:, table_name: "woods_embeddings")
           @conn = PG.connect(connection_string)
           @table = table_name
           ensure_extension
@@ -883,7 +883,7 @@ end
 #### Implementation: SQLite + FAISS (Local/Development)
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     module VectorStore
       class SqliteFaiss
@@ -913,7 +913,7 @@ end
 For structured queries on extracted metadata (not vector similarity).
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     module MetadataStore
       module Interface
@@ -959,7 +959,7 @@ end
 For dependency graph operations.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Storage
     module GraphStore
       module Interface
@@ -1049,7 +1049,7 @@ Extracted Units (JSON)
 ### Embedding Provider Interface
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     module Provider
       module Interface
@@ -1085,7 +1085,7 @@ end
 #### Implementation: OpenAI
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     module Provider
       class OpenAI
@@ -1145,7 +1145,7 @@ end
 #### Implementation: Voyage
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     module Provider
       class Voyage
@@ -1198,7 +1198,7 @@ end
 #### Implementation: Local (Ollama/Nomic)
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     module Provider
       class Ollama
@@ -1240,7 +1240,7 @@ end
 How units are formatted for embedding affects retrieval quality.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     class TextPreparer
       # Prepare a unit for embedding
@@ -1327,7 +1327,7 @@ end
 ### Indexing Pipeline
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Embedding
     class IndexingPipeline
       def initialize(
@@ -1490,7 +1490,7 @@ The context assembler transforms retrieved candidates into a token-budgeted cont
 ### Budget Allocation Strategy
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     class ContextAssembler
       DEFAULT_BUDGET = 8000  # tokens
@@ -1675,7 +1675,7 @@ end
 The structural context provides an always-available overview of the codebase.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     class StructuralContextBuilder
       def initialize(extracted_dir:)
@@ -1765,7 +1765,7 @@ After retrieval, candidates are re-ranked based on multiple signals.
 ### Ranker Implementation
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     class Ranker
       WEIGHTS = {
@@ -1907,7 +1907,7 @@ Initial Retrieval (vector + keyword + graph)
 **Reranker Interface:**
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Retrieval
     module Reranker
       module Interface
@@ -1935,7 +1935,7 @@ end
 **Configuration:**
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   # Enable cross-encoder reranking (default: disabled)
   config.reranker = :cohere          # or :voyage, :local, :none
   config.reranker_api_key = ENV["COHERE_API_KEY"]
@@ -1954,7 +1954,7 @@ Multiple interfaces for different consumption patterns.
 ### Ruby API
 
 ```ruby
-module CodebaseIndex
+module Woods
   class Retriever
     def initialize(config:)
       @config = config
@@ -2037,7 +2037,7 @@ end
 #!/usr/bin/env ruby
 
 require "bundler/setup"
-require "codebase_index"
+require "woods"
 require "optparse"
 
 options = {
@@ -2070,10 +2070,10 @@ query = ARGV.join(" ")
 abort "Usage: codebase <query>" if query.empty?
 
 # Load configuration
-config = CodebaseIndex.configuration
+config = Woods.configuration
 
 # Create retriever
-retriever = CodebaseIndex::Retriever.new(config: config)
+retriever = Woods::Retriever.new(config: config)
 
 # Execute retrieval
 result = retriever.retrieve(query)
@@ -2114,9 +2114,9 @@ end
 namespace :codebase do
   desc "Retrieve context for a query"
   task :retrieve, [:query] => :environment do |t, args|
-    require "codebase_index"
+    require "woods"
     
-    retriever = CodebaseIndex::Retriever.new(config: CodebaseIndex.configuration)
+    retriever = Woods::Retriever.new(config: Woods.configuration)
     result = retriever.retrieve(args[:query])
     
     puts result.context
@@ -2128,13 +2128,13 @@ namespace :codebase do
   
   desc "Index the codebase for retrieval"
   task index: :environment do
-    require "codebase_index"
+    require "woods"
     
-    pipeline = CodebaseIndex::Embedding::IndexingPipeline.new(
-      extracted_dir: CodebaseIndex.configuration.output_dir,
-      vector_store: CodebaseIndex.configuration.vector_store,
-      metadata_store: CodebaseIndex.configuration.metadata_store,
-      embedding_provider: CodebaseIndex.configuration.embedding_provider
+    pipeline = Woods::Embedding::IndexingPipeline.new(
+      extracted_dir: Woods.configuration.output_dir,
+      vector_store: Woods.configuration.vector_store,
+      metadata_store: Woods.configuration.metadata_store,
+      embedding_provider: Woods.configuration.embedding_provider
     )
     
     puts "Indexing codebase..."
@@ -2144,15 +2144,15 @@ namespace :codebase do
   
   desc "Update index for changed files"
   task :index_incremental, [:identifiers] => :environment do |t, args|
-    require "codebase_index"
+    require "woods"
     
     identifiers = args[:identifiers].split(",")
     
-    pipeline = CodebaseIndex::Embedding::IndexingPipeline.new(
-      extracted_dir: CodebaseIndex.configuration.output_dir,
-      vector_store: CodebaseIndex.configuration.vector_store,
-      metadata_store: CodebaseIndex.configuration.metadata_store,
-      embedding_provider: CodebaseIndex.configuration.embedding_provider
+    pipeline = Woods::Embedding::IndexingPipeline.new(
+      extracted_dir: Woods.configuration.output_dir,
+      vector_store: Woods.configuration.vector_store,
+      metadata_store: Woods.configuration.metadata_store,
+      embedding_provider: Woods.configuration.embedding_provider
     )
     
     puts "Updating index for #{identifiers.size} units..."
@@ -2171,7 +2171,7 @@ The system is configured through a central configuration object with sensible de
 ### Configuration Structure
 
 ```ruby
-module CodebaseIndex
+module Woods
   class Configuration
     # Extraction settings
     attr_accessor :output_dir
@@ -2211,7 +2211,7 @@ module CodebaseIndex
 
       @vector_store = :sqlite_faiss
       @vector_store_url = ENV.fetch("QDRANT_URL", "http://localhost:6333")
-      @vector_store_collection = "codebase_index"
+      @vector_store_collection = "woods"
       
       @metadata_store = :sqlite
       @metadata_store_connection = default_metadata_path
@@ -2316,9 +2316,9 @@ module CodebaseIndex
     
     def default_output_dir
       if defined?(Rails)
-        Rails.root.join("tmp/codebase_index").to_s
+        Rails.root.join("tmp/woods").to_s
       else
-        "tmp/codebase_index"
+        "tmp/woods"
       end
     end
     
@@ -2332,11 +2332,11 @@ end
 ### Environment-Based Configuration
 
 ```ruby
-# config/initializers/codebase_index.rb
+# config/initializers/woods.rb
 
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   # Base settings
-  config.output_dir = Rails.root.join("tmp/codebase_index")
+  config.output_dir = Rails.root.join("tmp/woods")
   
   # Environment-specific settings
   case Rails.env
@@ -2368,7 +2368,7 @@ CodebaseIndex.configure do |config|
     # config.metadata_store = :postgresql
     # config.graph_store = :postgresql
     
-    config.metadata_store_connection = ENV.fetch("CODEBASE_INDEX_DATABASE_URL")
+    config.metadata_store_connection = ENV.fetch("WOODS_DATABASE_URL")
     
     config.embedding_provider = :openai
     config.embedding_model = "text-embedding-3-small"
@@ -2386,7 +2386,7 @@ end
 For common setups, provide presets:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Presets
     # Minimal local development setup
     def self.local_development
@@ -2470,9 +2470,9 @@ Based on a production Rails monolith analysis:
 ### Recommended Configuration
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   # Extraction
-  config.output_dir = Rails.root.join("tmp/codebase_index")
+  config.output_dir = Rails.root.join("tmp/woods")
   config.extractors = %i[models controllers services jobs mailers components graphql]
   config.include_framework_sources = true
   
@@ -2532,7 +2532,7 @@ volumes:
 steps:
   - label: "🔍 Update Codebase Index"
     command:
-      - bundle exec rake codebase_index:incremental
+      - bundle exec rake woods:incremental
     if: build.branch == "main"
     soft_fail: true  # Don't block deploys on index failures
 ```

@@ -4,12 +4,12 @@ require 'json'
 require 'open3'
 require 'shellwords'
 
-# @see CodebaseIndex
-module CodebaseIndex
-  class Error < StandardError; end unless defined?(CodebaseIndex::Error)
+# @see Woods
+module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
 
   module Console
-    class ConnectionError < CodebaseIndex::Error; end
+    class ConnectionError < Woods::Error; end
 
     # Manages the bridge process connection via Docker exec, direct spawn, or SSH.
     #
@@ -40,7 +40,7 @@ module CodebaseIndex
       def initialize(config:)
         @config = config
         @mode = config['mode'] || 'direct'
-        @command = config['command'] || 'bundle exec rails runner lib/codebase_index/console/bridge.rb'
+        @command = config['command'] || 'bundle exec rails runner lib/woods/console/bridge.rb'
         @stdin = nil
         @stdout = nil
         @wait_thread = nil

@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/mcp/index_reader'
+require 'woods/dependency_graph'
+require 'woods/mcp/index_reader'
 
-RSpec.describe CodebaseIndex::MCP::IndexReader do
-  let(:fixture_dir) { File.expand_path('../fixtures/codebase_index', __dir__) }
+RSpec.describe Woods::MCP::IndexReader do
+  let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:reader) { described_class.new(fixture_dir) }
 
   describe '#initialize' do
@@ -48,7 +48,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
 
   describe '#dependency_graph' do
     it 'returns a DependencyGraph instance' do
-      expect(reader.dependency_graph).to be_a(CodebaseIndex::DependencyGraph)
+      expect(reader.dependency_graph).to be_a(Woods::DependencyGraph)
     end
 
     it 'has correct edges' do
@@ -359,8 +359,8 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
   describe 'TYPE_DIRS coverage' do
     it 'covers all Extractor::EXTRACTORS keys' do
       # This test prevents future drift between IndexReader and Extractor
-      require 'codebase_index/extractor'
-      extractor_keys = CodebaseIndex::Extractor::EXTRACTORS.keys.map(&:to_s)
+      require 'woods/extractor'
+      extractor_keys = Woods::Extractor::EXTRACTORS.keys.map(&:to_s)
       missing = extractor_keys - described_class::TYPE_DIRS
       expect(missing).to be_empty, "TYPE_DIRS is missing: #{missing.join(', ')}"
     end
@@ -449,7 +449,7 @@ RSpec.describe CodebaseIndex::MCP::IndexReader do
       reader.raw_graph_data
       reader.reload!
       # After reload, all graph accessors still work
-      expect(reader.dependency_graph).to be_a(CodebaseIndex::DependencyGraph)
+      expect(reader.dependency_graph).to be_a(Woods::DependencyGraph)
       expect(reader.graph_analysis).to include('orphans')
       expect(reader.raw_graph_data).to include('nodes')
     end

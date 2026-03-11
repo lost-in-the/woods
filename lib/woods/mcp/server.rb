@@ -6,16 +6,16 @@ require 'set'
 require_relative 'index_reader'
 require_relative 'tool_response_renderer'
 
-module CodebaseIndex
+module Woods
   module MCP
     # Builds an MCP::Server with 27 tools, 2 resources, and 2 resource templates for querying
-    # CodebaseIndex extraction output, managing pipelines, and collecting feedback.
+    # Woods extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
     # No Rails required at runtime — reads JSON files from disk.
     #
     # @example
-    #   server = CodebaseIndex::MCP::Server.build(index_dir: "/path/to/output")
+    #   server = Woods::MCP::Server.build(index_dir: "/path/to/output")
     #   transport = MCP::Server::Transports::StdioTransport.new(server)
     #   transport.open
     #
@@ -24,13 +24,14 @@ module CodebaseIndex
         # Build a configured MCP::Server with all tools and resources.
         #
         # @param index_dir [String] Path to extraction output directory
-        # @param retriever [CodebaseIndex::Retriever, nil] Optional retriever for semantic search
+        # @param retriever [Woods::Retriever, nil] Optional retriever for semantic search
         # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
-        # @param feedback_store [CodebaseIndex::Feedback::Store, nil] Optional feedback store
+        # @param feedback_store [Woods::Feedback::Store, nil] Optional feedback store
         # @return [MCP::Server] Configured server ready for transport
-        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, response_format: nil)
+        def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
+                  response_format: nil)
           reader = IndexReader.new(index_dir)
-          config = CodebaseIndex.configuration
+          config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
           renderer = ToolResponseRenderer.for(format)
           resources = build_resources
@@ -40,8 +41,8 @@ module CodebaseIndex
           respond = method(:text_response)
 
           server = ::MCP::Server.new(
-            name: 'codebase-index',
-            version: CodebaseIndex::VERSION,
+            name: 'woods',
+            version: Woods::VERSION,
             resources: resources,
             resource_templates: resource_templates
           )
@@ -470,7 +471,7 @@ module CodebaseIndex
             max_depth = coerce_int.call(depth) || 3
             graph = reader.dependency_graph
 
-            assembler = CodebaseIndex::FlowAssembler.new(
+            assembler = Woods::FlowAssembler.new(
               graph: graph,
               extracted_dir: index_dir
             )
@@ -498,12 +499,12 @@ module CodebaseIndex
           ) do |session_id:, server_context:, budget: nil, depth: nil|
             budget = coerce_int.call(budget)
             depth = coerce_int.call(depth)
-            store = CodebaseIndex.configuration.session_store
+            store = Woods.configuration.session_store
             next respond.call(JSON.pretty_generate({ error: 'Session tracer not configured' })) unless store
 
             require_relative '../session_tracer/session_flow_assembler'
 
-            assembler = CodebaseIndex::SessionTracer::SessionFlowAssembler.new(
+            assembler = Woods::SessionTracer::SessionFlowAssembler.new(
               store: store, reader: reader
             )
             doc = assembler.assemble(session_id, budget: budget || 8000, depth: depth || 1)
@@ -546,13 +547,13 @@ module CodebaseIndex
             guard&.record!(:extraction)
 
             Thread.new do
-              extractor = CodebaseIndex::Extractor.new(
-                output_dir: CodebaseIndex.configuration.output_dir
+              extractor = Woods::Extractor.new(
+                output_dir: Woods.configuration.output_dir
               )
               incremental ? extractor.extract_changed([]) : extractor.extract_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-              logger.error("[CodebaseIndex] Pipeline extract failed: #{e.message}")
+              logger.error("[Woods] Pipeline extract failed: #{e.message}")
             end
 
             respond.call(JSON.pretty_generate({
@@ -580,12 +581,12 @@ module CodebaseIndex
             guard&.record!(:embedding)
 
             Thread.new do
-              config = CodebaseIndex.configuration
-              builder = CodebaseIndex::Builder.new(config)
+              config = Woods.configuration
+              builder = Woods::Builder.new(config)
               provider = builder.build_embedding_provider
-              text_preparer = CodebaseIndex::Embedding::TextPreparer.new
+              text_preparer = Woods::Embedding::TextPreparer.new
               vector_store = builder.build_vector_store
-              indexer = CodebaseIndex::Embedding::Indexer.new(
+              indexer = Woods::Embedding::Indexer.new(
                 provider: provider,
                 text_preparer: text_preparer,
                 vector_store: vector_store,
@@ -594,7 +595,7 @@ module CodebaseIndex
               incremental ? indexer.index_incremental : indexer.index_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-              logger.error("[CodebaseIndex] Pipeline embed failed: #{e.message}")
+              logger.error("[Woods] Pipeline embed failed: #{e.message}")
             end
 
             respond.call(JSON.pretty_generate({
@@ -754,7 +755,7 @@ module CodebaseIndex
             next respond.call('Feedback store is not configured.') unless feedback_store
 
             require_relative '../feedback/gap_detector'
-            detector = CodebaseIndex::Feedback::GapDetector.new(feedback_store: feedback_store)
+            detector = Woods::Feedback::GapDetector.new(feedback_store: feedback_store)
             issues = detector.detect
             respond.call(JSON.pretty_generate({
                                                 issues_found: issues.size,
@@ -872,17 +873,17 @@ module CodebaseIndex
               properties: {}
             }
           ) do |server_context:|
-            config = CodebaseIndex.configuration
+            config = Woods.configuration
             unless config.notion_api_token
-              next respond.call('Error: notion_api_token is not configured. Set it in CodebaseIndex.configure.')
+              next respond.call('Error: notion_api_token is not configured. Set it in Woods.configure.')
             end
 
             if (config.notion_database_ids || {}).empty?
-              next respond.call('Error: notion_database_ids is not configured. Set it in CodebaseIndex.configure.')
+              next respond.call('Error: notion_database_ids is not configured. Set it in Woods.configure.')
             end
 
             require_relative '../notion/exporter'
-            exporter = CodebaseIndex::Notion::Exporter.new(index_dir: index_dir, reader: reader)
+            exporter = Woods::Notion::Exporter.new(index_dir: index_dir, reader: reader)
             stats = exporter.sync_all
 
             respond.call(JSON.pretty_generate({

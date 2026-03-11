@@ -2,7 +2,7 @@
 
 require_relative '../ast/method_extractor'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # Shared extraction of individual method source code via the AST layer.
     #

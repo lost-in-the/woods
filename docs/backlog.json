@@ -5,7 +5,7 @@
     "severity": "critical",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/codebase_index/extractor.rb"],
+    "files": ["lib/woods/extractor.rb"],
     "description": "EXTRACTORS constant uses plural keys (:models, :controllers) but re_extract_unit looks up by singular type (:model, :controller). Incremental extraction silently fails to find the correct extractor for any unit.",
     "status": "resolved"
   },
@@ -15,7 +15,7 @@
     "severity": "critical",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/codebase_index/extractor.rb"],
+    "files": ["lib/woods/extractor.rb"],
     "description": "The case statement in re_extract_unit only handles :model, :controller, :service, :component. Missing: :job, :mailer, :graphql_type, :graphql_mutation, :graphql_resolver, :graphql_query, :rails_source.",
     "status": "resolved"
   },
@@ -25,7 +25,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/codebase_index/extractors/controller_extractor.rb"],
+    "files": ["lib/woods/extractors/controller_extractor.rb"],
     "description": "Controller discovery uses ApplicationController.descendants, which misses controllers inheriting from ActionController::API. API-only controllers are invisible to extraction.",
     "status": "resolved"
   },
@@ -45,7 +45,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/tasks/codebase_index.rake"],
+    "files": ["lib/tasks/woods.rake"],
     "description": "Incremental rake task scans app/models/, app/controllers/, app/services/, app/components/ but not app/graphql/. GraphQL type changes are never detected.",
     "status": "resolved"
   },
@@ -55,7 +55,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/codebase_index/extractor.rb"],
+    "files": ["lib/woods/extractor.rb"],
     "description": "Full extraction calls eager_load! but incremental path may skip it, meaning newly-added classes won't be found.",
     "status": "resolved"
   },
@@ -65,7 +65,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/codebase_index/extracted_unit.rb"],
+    "files": ["lib/woods/extracted_unit.rb"],
     "description": "The (length / 4.0).ceil heuristic underestimates tokens for Ruby code. Ruby syntax (symbols, do/end, underscored_names) produces more tokens per character than natural language.",
     "status": "resolved"
   },
@@ -75,7 +75,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/codebase_index/extractors/phlex_extractor.rb"],
+    "files": ["lib/woods/extractors/phlex_extractor.rb"],
     "description": "Phlex extractor metadata structure is Phlex-specific. A future ViewComponent extractor needs different metadata patterns.",
     "status": "resolved"
   },
@@ -275,7 +275,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": ["lib/codebase_index/storage/vector_store.rb"],
+    "files": ["lib/woods/storage/vector_store.rb"],
     "description": "Define interface: #store, #search, #delete, #count. In-memory adapter uses hash + cosine similarity. Zero-dependency baseline.",
     "status": "resolved"
   },
@@ -285,7 +285,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": ["lib/codebase_index/storage/metadata_store.rb"],
+    "files": ["lib/woods/storage/metadata_store.rb"],
     "description": "Unit metadata, type indexes, file paths, git data. SQLite for zero-dependency local usage.",
     "status": "resolved"
   },
@@ -295,7 +295,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "storage",
-    "files": ["lib/codebase_index/storage/graph_store.rb"],
+    "files": ["lib/woods/storage/graph_store.rb"],
     "description": "Existing DependencyGraph is the in-memory implementation. Wrap behind interface for future PG/MySQL backends.",
     "status": "resolved"
   },
@@ -305,7 +305,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "embedding",
-    "files": ["lib/codebase_index/embedding/provider.rb"],
+    "files": ["lib/woods/embedding/provider.rb"],
     "description": "Interface: #embed(text), #embed_batch(texts), #dimensions. Ollama first (zero external API cost), OpenAI second.",
     "status": "resolved"
   },
@@ -315,7 +315,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "embedding",
-    "files": ["lib/codebase_index/embedding/text_preparer.rb"],
+    "files": ["lib/woods/embedding/text_preparer.rb"],
     "description": "Per CONTEXT_AND_CHUNKING.md: chunk selection, prefix formatting, token limit enforcement.",
     "status": "resolved"
   },
@@ -325,8 +325,8 @@
     "severity": "high",
     "category": "implementation",
     "layer": "embedding",
-    "files": ["lib/codebase_index/embedding/indexer.rb"],
-    "description": "Reads ExtractedUnit JSON → prepares text → embeds → stores. Full + incremental modes via content_hash. Rake tasks: codebase_index:embed, codebase_index:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
+    "files": ["lib/woods/embedding/indexer.rb"],
+    "description": "Reads ExtractedUnit JSON → prepares text → embeds → stores. Full + incremental modes via content_hash. Rake tasks: woods:embed, woods:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
     "status": "resolved",
     "depends_on": ["B-028", "B-031", "B-032"]
   },
@@ -336,7 +336,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": ["lib/codebase_index/retrieval/query_classifier.rb"],
+    "files": ["lib/woods/retrieval/query_classifier.rb"],
     "description": "Classify by intent (lookup, trace, explain, compare), scope (specific, bounded, broad), depth. Heuristic-based.",
     "status": "resolved"
   },
@@ -346,7 +346,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": ["lib/codebase_index/retrieval/search_executor.rb"],
+    "files": ["lib/woods/retrieval/search_executor.rb"],
     "description": "Maps classification → strategy (vector, keyword, graph, hybrid, direct). Executes against storage backends. Depends on: B-028, B-029, B-030, B-034.",
     "status": "resolved",
     "depends_on": ["B-028", "B-029", "B-030", "B-034"]
@@ -357,7 +357,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "retrieval",
-    "files": ["lib/codebase_index/retrieval/ranker.rb"],
+    "files": ["lib/woods/retrieval/ranker.rb"],
     "description": "Reciprocal Rank Fusion (k=60) for combining multi-strategy results. Incorporates recency, PageRank, type-match signals. Depends on: B-035.",
     "status": "resolved",
     "depends_on": ["B-035"]
@@ -368,7 +368,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": ["lib/codebase_index/retrieval/context_assembler.rb"],
+    "files": ["lib/woods/retrieval/context_assembler.rb"],
     "description": "Token-budgeted assembly: 10% structural, 50% primary, 25% supporting, 15% framework. Source attribution. Depends on: B-036.",
     "status": "resolved",
     "depends_on": ["B-036"]
@@ -379,7 +379,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": ["lib/codebase_index/retriever.rb", "spec/retriever_spec.rb"],
+    "files": ["lib/woods/retriever.rb", "spec/retriever_spec.rb"],
     "description": "Top-level Retriever class wiring classify → search → rank → assemble → format pipeline. Includes RetrievalResult struct and StructuralContextBuilder for 10% structural token budget.",
     "status": "resolved"
   },
@@ -389,7 +389,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "retrieval",
-    "files": ["lib/codebase_index/retriever.rb"],
+    "files": ["lib/woods/retriever.rb"],
     "description": "Private helper in Retriever that queries metadata_store for unit counts by type, generating codebase overview for the structural context budget.",
     "status": "resolved"
   },
@@ -399,7 +399,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "formatting",
-    "files": ["lib/codebase_index/formatting/base.rb", "lib/codebase_index/formatting/claude_adapter.rb"],
+    "files": ["lib/woods/formatting/base.rb", "lib/woods/formatting/claude_adapter.rb"],
     "description": "Abstract Formatting::Base with #format interface and #estimate_tokens helper. ClaudeAdapter outputs XML tags (<codebase-context>, <unit>, <source>) for Claude API/MCP.",
     "status": "resolved"
   },
@@ -409,7 +409,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "formatting",
-    "files": ["lib/codebase_index/formatting/gpt_adapter.rb", "lib/codebase_index/formatting/generic_adapter.rb", "lib/codebase_index/formatting/human_adapter.rb"],
+    "files": ["lib/woods/formatting/gpt_adapter.rb", "lib/woods/formatting/generic_adapter.rb", "lib/woods/formatting/human_adapter.rb"],
     "description": "GPTAdapter (Markdown headers + fenced code), GenericAdapter (plain text with separators), HumanAdapter (box-drawing chars for terminal).",
     "status": "resolved",
     "depends_on": ["B-040"]
@@ -420,7 +420,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": ["lib/codebase_index/storage/pgvector.rb", "spec/storage/pgvector_spec.rb"],
+    "files": ["lib/woods/storage/pgvector.rb", "spec/storage/pgvector_spec.rb"],
     "description": "VectorStore::Pgvector for PostgreSQL teams. HNSW index, parameterized SQL, cosine distance, filter translation to WHERE clauses, ensure_schema! for auto-setup.",
     "status": "resolved"
   },
@@ -430,7 +430,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": ["lib/codebase_index/storage/qdrant.rb", "spec/storage/qdrant_spec.rb"],
+    "files": ["lib/woods/storage/qdrant.rb", "spec/storage/qdrant_spec.rb"],
     "description": "VectorStore::Qdrant via HTTP REST API. Qdrant-format filter translation, collection auto-creation, no gem dependencies.",
     "status": "resolved"
   },
@@ -440,7 +440,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "observability",
-    "files": ["lib/codebase_index/observability/instrumentation.rb", "spec/observability/instrumentation_spec.rb"],
+    "files": ["lib/woods/observability/instrumentation.rb", "spec/observability/instrumentation_spec.rb"],
     "description": "Thin wrapper around ActiveSupport::Notifications with fallback to direct yield when AS unavailable (MCP server without Rails).",
     "status": "resolved"
   },
@@ -450,7 +450,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "observability",
-    "files": ["lib/codebase_index/observability/structured_logger.rb", "spec/observability/structured_logger_spec.rb"],
+    "files": ["lib/woods/observability/structured_logger.rb", "spec/observability/structured_logger_spec.rb"],
     "description": "JSON-line logger for pipeline operations. Supports info/warn/error/debug levels with timestamps and structured data.",
     "status": "resolved"
   },
@@ -460,7 +460,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "observability",
-    "files": ["lib/codebase_index/observability/health_check.rb", "spec/observability/health_check_spec.rb"],
+    "files": ["lib/woods/observability/health_check.rb", "spec/observability/health_check_spec.rb"],
     "description": "Reports system component status (:ok, :error, :not_configured) for vector_store, metadata_store, embedding_provider.",
     "status": "resolved"
   },
@@ -470,7 +470,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "resilience",
-    "files": ["lib/codebase_index/resilience/circuit_breaker.rb", "spec/resilience/circuit_breaker_spec.rb"],
+    "files": ["lib/woods/resilience/circuit_breaker.rb", "spec/resilience/circuit_breaker_spec.rb"],
     "description": "Three-state pattern (closed → open → half_open) protecting external service calls. Configurable threshold and reset_timeout. Raises CircuitOpenError when open.",
     "status": "resolved",
     "depends_on": ["B-038"]
@@ -481,7 +481,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "resilience",
-    "files": ["lib/codebase_index/resilience/retryable_provider.rb", "spec/resilience/retryable_provider_spec.rb"],
+    "files": ["lib/woods/resilience/retryable_provider.rb", "spec/resilience/retryable_provider_spec.rb"],
     "description": "Decorator wrapping Embedding::Provider::Interface with exponential backoff and circuit breaker integration. Never retries CircuitOpenError.",
     "status": "resolved",
     "depends_on": ["B-047"]
@@ -492,7 +492,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "resilience",
-    "files": ["lib/codebase_index/resilience/index_validator.rb", "spec/resilience/index_validator_spec.rb"],
+    "files": ["lib/woods/resilience/index_validator.rb", "spec/resilience/index_validator_spec.rb"],
     "description": "Validates extraction output health: _index.json existence, file references, content hash integrity, stale file detection. Returns ValidationReport.",
     "status": "resolved"
   },
@@ -502,7 +502,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "embedding",
-    "files": ["lib/codebase_index/embedding/openai.rb", "spec/embedding/openai_spec.rb"],
+    "files": ["lib/woods/embedding/openai.rb", "spec/embedding/openai_spec.rb"],
     "description": "Provider::OpenAI supporting text-embedding-3-small (1536d) and text-embedding-3-large (3072d). HTTPS with Bearer auth, batch embedding with index-preservation.",
     "status": "resolved"
   },
@@ -512,7 +512,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "agentic",
-    "files": ["lib/codebase_index/mcp/server.rb", "spec/mcp/server_spec.rb"],
+    "files": ["lib/woods/mcp/server.rb", "spec/mcp/server_spec.rb"],
     "description": "Semantic search tool added to MCP server. Accepts query + optional budget, returns formatted context + source attributions. Graceful degradation when no retriever configured.",
     "status": "resolved",
     "depends_on": ["B-038"]
@@ -523,8 +523,8 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "agentic",
-    "files": ["lib/tasks/codebase_index.rake"],
-    "description": "Three rake tasks: codebase_index:retrieve[query] (CLI retrieval with HumanAdapter), codebase_index:embed (full embedding pipeline), codebase_index:embed_incremental (content_hash-based).",
+    "files": ["lib/tasks/woods.rake"],
+    "description": "Three rake tasks: woods:retrieve[query] (CLI retrieval with HumanAdapter), woods:embed (full embedding pipeline), woods:embed_incremental (content_hash-based).",
     "status": "resolved",
     "depends_on": ["B-038"]
   }

@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/retrieval/context_assembler'
-require 'codebase_index/formatting/base'
+require 'woods/retrieval/context_assembler'
+require 'woods/formatting/base'
 
-RSpec.describe CodebaseIndex::Formatting::Base do
+RSpec.describe Woods::Formatting::Base do
   subject(:adapter) { described_class.new }
 
   let(:assembled_context) do
-    CodebaseIndex::Retrieval::AssembledContext.new(
+    Woods::Retrieval::AssembledContext.new(
       context: 'class User < ApplicationRecord; end',
       tokens_used: 10,
       budget: 8000,

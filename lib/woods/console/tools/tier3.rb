@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Console
     module Tools
       # Tier 3: Analytics tools for monitoring live Rails application state.

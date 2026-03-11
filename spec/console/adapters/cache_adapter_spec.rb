@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/adapters/cache_adapter'
+require 'woods/console/adapters/cache_adapter'
 
-RSpec.describe CodebaseIndex::Console::Adapters::CacheAdapter do
+RSpec.describe Woods::Console::Adapters::CacheAdapter do
   describe '.detect' do
     it 'returns :redis when Redis cache store is configured' do
       stub_const('Rails', double(cache: double(class: double(name: 'ActiveSupport::Cache::RedisCacheStore'))))

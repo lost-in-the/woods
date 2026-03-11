@@ -4,7 +4,7 @@ require_relative 'bridge'
 require_relative 'model_validator'
 require_relative 'safe_context'
 
-module CodebaseIndex
+module Woods
   module Console
     # Drop-in replacement for ConnectionManager + Bridge that executes
     # queries directly via ActiveRecord instead of a separate bridge process.

@@ -1,30 +1,30 @@
 # frozen_string_literal: true
 
-require 'codebase_index'
+require 'woods'
 require_relative 'client'
 require_relative 'mapper'
 require_relative 'rate_limiter'
 
-module CodebaseIndex
+module Woods
   module Notion
-    # Orchestrates syncing CodebaseIndex extraction data to Notion databases.
+    # Orchestrates syncing Woods extraction data to Notion databases.
     #
     # Reads extraction output from disk via IndexReader, maps model and column data
     # to Notion page properties, and pushes via the Notion API. All syncs are idempotent —
     # existing pages are updated, new pages are created.
     #
     # @example
-    #   exporter = Exporter.new(index_dir: "tmp/codebase_index")
+    #   exporter = Exporter.new(index_dir: "tmp/woods")
     #   stats = exporter.sync_all
     #   # => { data_models: 10, columns: 45, errors: [] }
     #
     class Exporter # rubocop:disable Metrics/ClassLength
       # @param index_dir [String] Path to extraction output directory
-      # @param config [Configuration] CodebaseIndex configuration (default: global config)
+      # @param config [Configuration] Woods configuration (default: global config)
       # @param client [Client, nil] Notion API client (auto-created from config if nil)
       # @param reader [Object, nil] IndexReader instance (auto-created from index_dir if nil)
       # @raise [ConfigurationError] if notion_api_token is not configured
-      def initialize(index_dir:, config: CodebaseIndex.configuration, client: nil, reader: nil)
+      def initialize(index_dir:, config: Woods.configuration, client: nil, reader: nil)
         api_token = config.notion_api_token
         raise ConfigurationError, 'notion_api_token is required for Notion export' unless api_token
 
@@ -212,7 +212,7 @@ module CodebaseIndex
       # @return [Object] IndexReader
       def build_reader(index_dir)
         require_relative '../mcp/index_reader'
-        CodebaseIndex::MCP::IndexReader.new(index_dir)
+        Woods::MCP::IndexReader.new(index_dir)
       end
     end
   end

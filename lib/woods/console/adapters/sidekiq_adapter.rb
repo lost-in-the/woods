@@ -2,7 +2,7 @@
 
 require_relative 'job_adapter'
 
-module CodebaseIndex
+module Woods
   module Console
     module Adapters
       # Job backend adapter for Sidekiq.

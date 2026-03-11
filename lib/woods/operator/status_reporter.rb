@@ -3,12 +3,12 @@
 require 'json'
 require 'time'
 
-module CodebaseIndex
+module Woods
   module Operator
     # Reports pipeline status by reading extraction output metadata.
     #
     # @example
-    #   reporter = StatusReporter.new(output_dir: 'tmp/codebase_index')
+    #   reporter = StatusReporter.new(output_dir: 'tmp/woods')
     #   status = reporter.report
     #   status[:status]           # => :ok
     #   status[:staleness_seconds] # => 3600

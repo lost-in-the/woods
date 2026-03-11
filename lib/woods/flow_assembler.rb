@@ -8,7 +8,7 @@ require_relative 'ast/method_extractor'
 require_relative 'flow_analysis/operation_extractor'
 require_relative 'flow_document'
 
-module CodebaseIndex
+module Woods
   # Orchestrates execution flow tracing from an entry point through the dependency graph.
   #
   # Given an entry point (e.g., "PostsController#create"), FlowAssembler:
@@ -20,7 +20,7 @@ module CodebaseIndex
   # 6. Assembles a FlowDocument
   #
   # @example Assembling a flow
-  #   assembler = FlowAssembler.new(graph: graph, extracted_dir: "/tmp/codebase_index")
+  #   assembler = FlowAssembler.new(graph: graph, extracted_dir: "/tmp/woods")
   #   flow = assembler.assemble("PostsController#create", max_depth: 5)
   #   puts flow.to_markdown
   #

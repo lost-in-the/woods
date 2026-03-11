@@ -3,7 +3,7 @@
 require 'set'
 require_relative 'node'
 
-module CodebaseIndex
+module Woods
   module Ast
     # Method names that are too common to be useful in call graphs.
     INSIGNIFICANT_METHODS = Set.new(%w[

@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/job_extractor'
+require 'woods/extractors/job_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::JobExtractor do
+RSpec.describe Woods::Extractors::JobExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

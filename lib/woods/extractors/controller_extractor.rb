@@ -5,7 +5,7 @@ require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # ControllerExtractor handles ActionController extraction with:
     # - Route mapping (which HTTP endpoints hit which actions)
@@ -67,8 +67,8 @@ module CodebaseIndex
 
         unit
       rescue StandardError => e
-        Rails.logger.error("[CodebaseIndex] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
-        Rails.logger.error("[CodebaseIndex]   #{e.backtrace&.first(5)&.join("\n  ")}")
+        Rails.logger.error("[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
+        Rails.logger.error("[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
         nil
       end
 

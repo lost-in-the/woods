@@ -1,18 +1,18 @@
-# CodebaseIndex Architecture
+# Woods Architecture
 
-This doc explains how CodebaseIndex works from the inside — how extraction, storage, retrieval, and the two MCP servers fit together.
+This doc explains how Woods works from the inside — how extraction, storage, retrieval, and the two MCP servers fit together.
 
 ---
 
-## How Does CodebaseIndex Work?
+## How Does Woods Work?
 
-CodebaseIndex runs in three phases across two environments:
+Woods runs in three phases across two environments:
 
 ```
 Inside Rails app (rake task):
   1. Extract — 34 extractors introspect the live Rails environment
   2. Resolve — dependency graph is built and enriched with git data
-  3. Write   — one JSON file per code unit to tmp/codebase_index/
+  3. Write   — one JSON file per code unit to tmp/woods/
 
 On the host / in CI:
   4. Embed  — units are chunked and embedded into a vector store
@@ -36,8 +36,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                                     ▼                    │
 │                            ┌──────────────┐              │
 │                            │ Write JSON   │              │
-│                            │ tmp/codebase │              │
-│                            │  _index/     │              │
+│                            │ tmp/woods/   │              │
 │                            └──────────────┘              │
 └──────────────────────────────────────────────────────────┘
                                      │
@@ -61,7 +60,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 
 ## What Is an ExtractedUnit?
 
-`ExtractedUnit` is the universal currency of CodebaseIndex. Extractors produce them, the dependency graph connects them, the embedding pipeline consumes them, and the retrieval pipeline returns them.
+`ExtractedUnit` is the universal currency of Woods. Extractors produce them, the dependency graph connects them, the embedding pipeline consumes them, and the retrieval pipeline returns them.
 
 Every unit carries:
 
@@ -229,7 +228,7 @@ Units that exceed the budget are truncated to their first semantic chunk. The as
 
 ## What Storage Backends Are Available?
 
-CodebaseIndex uses three independent store abstractions:
+Woods uses three independent store abstractions:
 
 | Store | Purpose | Available Backends |
 |-------|---------|-------------------|
@@ -243,21 +242,21 @@ The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON 
 
 ```ruby
 # Local development (SQLite + in-memory vector)
-CodebaseIndex.configure_with_preset(:local)
+Woods.configure_with_preset(:local)
 
 # PostgreSQL with pgvector
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 
 # Production (Qdrant for vectors, pgvector for metadata)
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 ```
 
 Or wire backends manually:
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   config.vector_store = :qdrant
-  config.vector_store_options = { url: "http://localhost:6333", collection: "codebase" }
+  config.vector_store_options = { url: "http://localhost:6333", collection: "woods" }
   config.metadata_store = :sqlite
   config.embedding_provider = :openai
   config.embedding_model = "text-embedding-3-small"
@@ -270,14 +269,14 @@ end
 
 The two servers have fundamentally different runtime requirements:
 
-### Index Server (`codebase-index-mcp`)
+### Index Server (`woods-mcp`)
 
 **27 tools, 2 resources, 2 templates. Reads pre-extracted JSON. No Rails boot required.**
 
 Starts with a path to the extraction output directory and reads from it:
 
 ```bash
-codebase-index-mcp-start /path/to/rails-app/tmp/codebase_index
+woods-mcp-start /path/to/rails-app/tmp/woods
 ```
 
 Use the Index Server for:
@@ -290,14 +289,14 @@ Use the Index Server for:
 
 The Index Server is safe to run anywhere — it has no database connection and makes no writes to the Rails application.
 
-### Console Server (`codebase-console-mcp`)
+### Console Server (`woods-console-mcp`)
 
 **31 tools, 4 tiers. Bridges to a live Rails process. Runs inside the app.**
 
 Starts via rake task inside the Rails app (or `docker compose exec`):
 
 ```bash
-bundle exec rake codebase_index:console
+bundle exec rake woods:console
 ```
 
 Use the Console Server for:

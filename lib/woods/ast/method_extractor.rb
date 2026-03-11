@@ -3,7 +3,7 @@
 require_relative 'parser'
 require_relative 'node'
 
-module CodebaseIndex
+module Woods
   module Ast
     # Extracts method definitions and their source from Ruby source code.
     #

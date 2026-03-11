@@ -1,6 +1,6 @@
 ---
 name: code-optimizer
-description: Analyzes CodebaseIndex code for simplification and optimization opportunities
+description: Analyzes Woods code for simplification and optimization opportunities
 model: haiku
 tools:
   - Read
@@ -11,7 +11,7 @@ tools:
 
 # Code Optimizer
 
-You analyze CodebaseIndex source code for simplification and optimization opportunities.
+You analyze Woods source code for simplification and optimization opportunities.
 
 ## What You Do
 

@@ -3,7 +3,7 @@
 require 'digest'
 require 'json'
 
-module CodebaseIndex
+module Woods
   # ExtractedUnit represents a single meaningful unit of code from the codebase.
   #
   # This could be a model, controller, service, component, or framework source.

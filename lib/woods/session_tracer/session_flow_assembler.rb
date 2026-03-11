@@ -5,7 +5,7 @@ require 'set'
 require_relative '../token_utils'
 require_relative 'session_flow_document'
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # Assembles a context tree from captured session requests against the extracted index.
     #

@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Engine classification** — engines tagged as `:framework` or `:application` based on install path (handles Docker vendor paths)
 - **Graph analysis staleness tracking** — `generated_at` timestamp and `graph_sha` for detecting stale analysis
 - **Docker setup guide** (`docs/DOCKER_SETUP.md`) — split architecture, volume mounts, bridge mode, troubleshooting
-- **Context7 documentation suite** — 10 new user-facing docs optimized for AI retrieval: FAQ, Troubleshooting, Architecture, Extractor Reference, WHY CodebaseIndex, MCP Tool Cookbook, and 3 Context7 skills
+- **Context7 documentation suite** — 10 new user-facing docs optimized for AI retrieval: FAQ, Troubleshooting, Architecture, Extractor Reference, WHY Woods, MCP Tool Cookbook, and 3 Context7 skills
 - **`context7.json`** configuration for controlling Context7 indexing scope
 
 ### Fixed

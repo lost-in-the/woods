@@ -1,29 +1,29 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# MCP server for querying CodebaseIndex extraction output.
+# MCP server for querying Woods extraction output.
 #
 # Usage:
-#   codebase-index-mcp [INDEX_DIR]
-#   CODEBASE_INDEX_DIR=/path/to/output codebase-index-mcp
+#   woods-mcp [INDEX_DIR]
+#   WOODS_DIR=/path/to/output woods-mcp
 #
 # Reads JSON files from the extraction output directory and exposes
 # them via the Model Context Protocol (stdio transport).
 # Does NOT require Rails — only reads pre-extracted data.
 
-require_relative '../lib/codebase_index'
-require_relative '../lib/codebase_index/dependency_graph'
-require_relative '../lib/codebase_index/graph_analyzer'
-require_relative '../lib/codebase_index/mcp/server'
-require_relative '../lib/codebase_index/mcp/bootstrapper'
-require_relative '../lib/codebase_index/embedding/text_preparer'
-require_relative '../lib/codebase_index/embedding/indexer'
+require_relative '../lib/woods'
+require_relative '../lib/woods/dependency_graph'
+require_relative '../lib/woods/graph_analyzer'
+require_relative '../lib/woods/mcp/server'
+require_relative '../lib/woods/mcp/bootstrapper'
+require_relative '../lib/woods/embedding/text_preparer'
+require_relative '../lib/woods/embedding/indexer'
 
-index_dir = CodebaseIndex::MCP::Bootstrapper.resolve_index_dir(ARGV)
-retriever = CodebaseIndex::MCP::Bootstrapper.build_retriever
-snapshot_store = CodebaseIndex::MCP::Bootstrapper.build_snapshot_store(index_dir)
+index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
+retriever = Woods::MCP::Bootstrapper.build_retriever
+snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
 
-server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
+server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
 
 # Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
 if ENV['MCP_PROTOCOL_VERSION']
