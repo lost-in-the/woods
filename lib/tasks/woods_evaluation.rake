@@ -1,20 +1,20 @@
 # frozen_string_literal: true
 
-# lib/tasks/codebase_index_evaluation.rake
+# lib/tasks/woods_evaluation.rake
 #
 # Rake tasks for evaluating retrieval quality.
 #
 # Usage:
-#   bundle exec rake codebase_index:evaluate                          # Run evaluation
-#   bundle exec rake codebase_index:evaluate:baseline[grep]           # Run baseline comparison
+#   bundle exec rake woods:evaluate                          # Run evaluation
+#   bundle exec rake woods:evaluate:baseline[grep]           # Run baseline comparison
 
-namespace :codebase_index do
+namespace :woods do
   desc 'Run evaluation queries against the retrieval pipeline'
   task evaluate: :environment do
-    require 'codebase_index/retriever'
-    require 'codebase_index/evaluation/query_set'
-    require 'codebase_index/evaluation/evaluator'
-    require 'codebase_index/evaluation/report_generator'
+    require 'woods/retriever'
+    require 'woods/evaluation/query_set'
+    require 'woods/evaluation/evaluator'
+    require 'woods/evaluation/report_generator'
 
     run_evaluation
   end
@@ -22,9 +22,9 @@ namespace :codebase_index do
   namespace :evaluate do
     desc 'Run baseline comparison'
     task :baseline, [:strategy] => :environment do |_t, args|
-      require 'codebase_index/evaluation/query_set'
-      require 'codebase_index/evaluation/baseline_runner'
-      require 'codebase_index/evaluation/metrics'
+      require 'woods/evaluation/query_set'
+      require 'woods/evaluation/baseline_runner'
+      require 'woods/evaluation/metrics'
 
       run_baseline(args)
     end
@@ -37,16 +37,16 @@ def run_evaluation
   budget = ENV.fetch('EVAL_BUDGET', '8000').to_i
 
   puts "Loading query set from: #{query_set_path}"
-  query_set = CodebaseIndex::Evaluation::QuerySet.load(query_set_path)
+  query_set = Woods::Evaluation::QuerySet.load(query_set_path)
   puts "Loaded #{query_set.size} queries — building retriever..."
 
-  evaluator = CodebaseIndex::Evaluation::Evaluator.new(
+  evaluator = Woods::Evaluation::Evaluator.new(
     retriever: build_eval_retriever, query_set: query_set, budget: budget
   )
   report = evaluator.evaluate
 
-  CodebaseIndex::Evaluation::ReportGenerator.new
-                                            .save(report, output_path, metadata: { 'query_set' => query_set_path })
+  Woods::Evaluation::ReportGenerator.new
+                                    .save(report, output_path, metadata: { 'query_set' => query_set_path })
 
   print_eval_report(report, output_path)
 end
@@ -57,11 +57,11 @@ def run_baseline(args)
   limit = ENV.fetch('EVAL_BASELINE_LIMIT', '10').to_i
 
   puts "Loading query set from: #{query_set_path}"
-  query_set = CodebaseIndex::Evaluation::QuerySet.load(query_set_path)
+  query_set = Woods::Evaluation::QuerySet.load(query_set_path)
   puts "Running #{strategy} baseline (limit: #{limit})..."
 
-  runner = CodebaseIndex::Evaluation::BaselineRunner.new(
-    metadata_store: CodebaseIndex.metadata_store
+  runner = Woods::Evaluation::BaselineRunner.new(
+    metadata_store: Woods.metadata_store
   )
 
   totals = compute_baseline_totals(query_set, runner, strategy, limit)
@@ -74,8 +74,8 @@ def compute_baseline_totals(query_set, runner, strategy, limit)
 
   query_set.queries.each do |query|
     results = runner.run(query.query, strategy: strategy, limit: limit)
-    total_mrr += CodebaseIndex::Evaluation::Metrics.mrr(results, query.expected_units)
-    total_recall += CodebaseIndex::Evaluation::Metrics.recall(results, query.expected_units)
+    total_mrr += Woods::Evaluation::Metrics.mrr(results, query.expected_units)
+    total_recall += Woods::Evaluation::Metrics.recall(results, query.expected_units)
   end
 
   { mrr: total_mrr, recall: total_recall }
@@ -104,12 +104,12 @@ end
 
 # Build a retriever for evaluation (requires Rails environment with stores configured).
 #
-# @return [CodebaseIndex::Retriever]
+# @return [Woods::Retriever]
 def build_eval_retriever
-  CodebaseIndex::Retriever.new(
-    vector_store: CodebaseIndex.vector_store,
-    metadata_store: CodebaseIndex.metadata_store,
-    graph_store: CodebaseIndex.graph_store,
-    embedding_provider: CodebaseIndex.embedding_provider
+  Woods::Retriever.new(
+    vector_store: Woods.vector_store,
+    metadata_store: Woods.metadata_store,
+    graph_store: Woods.graph_store,
+    embedding_provider: Woods.embedding_provider
   )
 end

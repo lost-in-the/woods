@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Resilience
     # Raised when the circuit breaker is open and calls are being rejected.
     #
@@ -10,7 +10,7 @@ module CodebaseIndex
     #   rescue CircuitOpenError => e
     #     use_cached_result(text)
     #   end
-    class CircuitOpenError < CodebaseIndex::Error; end
+    class CircuitOpenError < Woods::Error; end
 
     # Circuit breaker pattern for protecting external service calls.
     #

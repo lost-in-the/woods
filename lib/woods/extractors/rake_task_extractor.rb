@@ -3,7 +3,7 @@
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # RakeTaskExtractor handles extraction of custom rake tasks from lib/tasks/.
     #
@@ -24,7 +24,7 @@ module CodebaseIndex
       RAKE_DIRECTORIES = %w[lib/tasks].freeze
 
       # Namespaces to exclude from extraction (this gem's own tasks)
-      EXCLUDED_NAMESPACES = %w[codebase_index].freeze
+      EXCLUDED_NAMESPACES = %w[woods].freeze
 
       def initialize
         @directories = RAKE_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
@@ -259,7 +259,7 @@ module CodebaseIndex
 
       # Check if a task name falls under an excluded namespace.
       #
-      # @param full_name [String] e.g. "codebase_index:extract"
+      # @param full_name [String] e.g. "woods:extract"
       # @return [Boolean]
       def excluded_namespace?(full_name)
         EXCLUDED_NAMESPACES.any? { |ns| full_name.start_with?("#{ns}:") }

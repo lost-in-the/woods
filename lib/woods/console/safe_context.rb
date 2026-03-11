@@ -7,7 +7,7 @@ unless defined?(ActiveRecord::Rollback)
   end
 end
 
-module CodebaseIndex
+module Woods
   module Console
     # Wraps tool execution in a rolled-back transaction with statement timeout.
     #

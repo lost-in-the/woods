@@ -2,7 +2,7 @@
 
 require_relative '../dependency_graph'
 
-module CodebaseIndex
+module Woods
   module Storage
     # GraphStore provides an interface for querying code unit relationships.
     #
@@ -10,7 +10,7 @@ module CodebaseIndex
     # its methods. The {Memory} adapter wraps the existing {DependencyGraph}.
     #
     # @example Using the memory adapter
-    #   store = CodebaseIndex::Storage::GraphStore::Memory.new
+    #   store = Woods::Storage::GraphStore::Memory.new
     #   store.register(unit)
     #   store.dependencies_of("User")
     #
@@ -67,7 +67,7 @@ module CodebaseIndex
 
       # In-memory graph store wrapping the existing DependencyGraph.
       #
-      # Delegates all operations to {CodebaseIndex::DependencyGraph}, providing
+      # Delegates all operations to {Woods::DependencyGraph}, providing
       # a consistent storage interface.
       #
       # @example

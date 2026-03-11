@@ -6,10 +6,10 @@ require 'time'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/rake_task_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/rake_task_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::RakeTaskExtractor do
+RSpec.describe Woods::Extractors::RakeTaskExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────
@@ -266,9 +266,9 @@ RSpec.describe CodebaseIndex::Extractors::RakeTaskExtractor do
       end
     end
 
-    it 'excludes codebase_index namespace tasks' do
-      path = create_file('lib/tasks/codebase_index.rake', <<~RAKE)
-        namespace :codebase_index do
+    it 'excludes woods namespace tasks' do
+      path = create_file('lib/tasks/woods.rake', <<~RAKE)
+        namespace :woods do
           task :extract do
             puts "extracting"
           end

@@ -1,31 +1,31 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/db/migrator'
+require 'woods/db/migrator'
 require 'sqlite3'
 
-RSpec.describe CodebaseIndex::Db::Migrator do
+RSpec.describe Woods::Db::Migrator do
   let(:db) { SQLite3::Database.new(':memory:') }
 
   subject(:migrator) { described_class.new(connection: db) }
 
   describe '#migrate!' do
-    it 'creates codebase_units table' do
+    it 'creates woods_units table' do
       migrator.migrate!
       tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").flatten
-      expect(tables).to include('codebase_units')
+      expect(tables).to include('woods_units')
     end
 
-    it 'creates codebase_edges table' do
+    it 'creates woods_edges table' do
       migrator.migrate!
       tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").flatten
-      expect(tables).to include('codebase_edges')
+      expect(tables).to include('woods_edges')
     end
 
-    it 'creates codebase_embeddings table' do
+    it 'creates woods_embeddings table' do
       migrator.migrate!
       tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").flatten
-      expect(tables).to include('codebase_embeddings')
+      expect(tables).to include('woods_embeddings')
     end
 
     it 'records applied versions' do
@@ -61,11 +61,11 @@ RSpec.describe CodebaseIndex::Db::Migrator do
     end
   end
 
-  describe 'codebase_units schema' do
+  describe 'woods_units schema' do
     before { migrator.migrate! }
 
     it 'has expected columns' do
-      columns = db.execute('PRAGMA table_info(codebase_units)').map { |c| c[1] }
+      columns = db.execute('PRAGMA table_info(woods_units)').map { |c| c[1] }
       expect(columns).to include(
         'id', 'unit_type', 'identifier', 'namespace',
         'file_path', 'source_code', 'source_hash', 'metadata'
@@ -74,7 +74,7 @@ RSpec.describe CodebaseIndex::Db::Migrator do
 
     it 'enforces unique identifier' do
       insert_sql = <<~SQL.chomp
-        INSERT INTO codebase_units (unit_type, identifier, file_path)
+        INSERT INTO woods_units (unit_type, identifier, file_path)
         VALUES ('model', 'User', 'app/models/user.rb')
       SQL
       db.execute(insert_sql)
@@ -84,11 +84,11 @@ RSpec.describe CodebaseIndex::Db::Migrator do
     end
   end
 
-  describe 'codebase_edges schema' do
+  describe 'woods_edges schema' do
     before { migrator.migrate! }
 
     it 'has expected columns' do
-      columns = db.execute('PRAGMA table_info(codebase_edges)').map { |c| c[1] }
+      columns = db.execute('PRAGMA table_info(woods_edges)').map { |c| c[1] }
       expect(columns).to include('id', 'source_id', 'target_id', 'relationship', 'via')
     end
   end

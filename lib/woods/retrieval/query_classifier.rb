@@ -2,7 +2,7 @@
 
 require 'set'
 
-module CodebaseIndex
+module Woods
   module Retrieval
     # Classifies natural language queries to determine retrieval strategy.
     #

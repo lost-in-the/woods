@@ -2,7 +2,7 @@
 
 require_relative 'metrics'
 
-module CodebaseIndex
+module Woods
   module Evaluation
     # Runs evaluation queries through a Retriever and scores results
     # against ground truth annotations.
@@ -25,7 +25,7 @@ module CodebaseIndex
 
       METRIC_KEYS = %i[precision_at5 precision_at10 recall mrr context_completeness token_efficiency].freeze
 
-      # @param retriever [CodebaseIndex::Retriever] Configured retriever instance
+      # @param retriever [Woods::Retriever] Configured retriever instance
       # @param query_set [QuerySet] Set of evaluation queries with ground truth
       # @param budget [Integer] Token budget per query
       def initialize(retriever:, query_set:, budget: 8000)

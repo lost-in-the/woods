@@ -1,9 +1,9 @@
 ---
-name: codebase-index-mcp-config
-description: Generate correct .mcp.json configuration for CodebaseIndex in any environment
+name: woods-mcp-config
+description: Generate correct .mcp.json configuration for Woods in any environment
 ---
 
-# CodebaseIndex MCP Configuration
+# Woods MCP Configuration
 
 Use this guide to produce a correct `.mcp.json` for your environment. Answer the environment detection questions first, then use the matching template.
 
@@ -38,19 +38,19 @@ The Index Server runs as a host process reading local files. The Console Server 
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     },
     "rails-console": {
       "command": "bundle",
-      "args": ["exec", "rake", "codebase_index:console"],
+      "args": ["exec", "rake", "woods:console"],
       "cwd": "/absolute/path/to/your/rails-app"
     }
   }
 }
 ```
 
-`codebase-index-mcp-start` is a self-healing wrapper that validates `manifest.json` before starting and auto-installs missing dependencies. Use it instead of `codebase-index-mcp` for local development.
+`woods-mcp-start` is a self-healing wrapper that validates `manifest.json` before starting and auto-installs missing dependencies. Use it instead of `woods-mcp` for local development.
 
 `cwd` must be an **absolute path** to the Rails app root (where `Rakefile` lives). Relative paths are not supported for `cwd`.
 
@@ -64,15 +64,15 @@ The Index Server reads volume-mounted output on the host. The Console Server run
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     },
     "rails-console": {
       "command": "docker",
       "args": [
         "exec", "-i",
         "your_app_web_1",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -93,9 +93,9 @@ Docker Compose generates names like `<project>-<service>-<index>` (e.g., `myapp-
 
 ### Docker — Bridge Console (all 31 tools)
 
-For Tier 2–4 tools, use the bridge architecture. The `codebase-console-mcp` binary runs on the host and communicates with the container via JSON-lines over stdio.
+For Tier 2–4 tools, use the bridge architecture. The `woods-console-mcp` binary runs on the host and communicates with the container via JSON-lines over stdio.
 
-First, create `~/.codebase_index/console.yml`:
+First, create `~/.woods/console.yml`:
 
 ```yaml
 connection:
@@ -110,13 +110,13 @@ Then configure the MCP client:
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     },
     "rails-console": {
-      "command": "codebase-console-mcp",
+      "command": "woods-console-mcp",
       "env": {
-        "CODEBASE_CONSOLE_CONFIG": "/Users/yourname/.codebase_index/console.yml"
+        "CODEBASE_CONSOLE_CONFIG": "/Users/yourname/.woods/console.yml"
       }
     }
   }
@@ -137,7 +137,7 @@ If you use `docker compose` (v2), use this form instead of `docker exec`:
       "args": [
         "compose", "-f", "/absolute/path/to/docker-compose.yml",
         "exec", "-i", "web",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -156,8 +156,8 @@ When the Console Server runs as a Rack middleware endpoint instead of a subproce
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     },
     "rails-console": {
       "type": "streamable-http",
@@ -176,7 +176,7 @@ Requires `config.console_mcp_enabled = true` in your initializer. See [CONSOLE_M
 For Rails apps running on a remote server or in a staging environment:
 
 ```yaml
-# ~/.codebase_index/console.yml
+# ~/.woods/console.yml
 connection:
   mode: ssh
   host: app.example.com
@@ -188,13 +188,13 @@ connection:
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["/local/path/to/extracted/tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["/local/path/to/extracted/tmp/woods"]
     },
     "rails-console": {
-      "command": "codebase-console-mcp",
+      "command": "woods-console-mcp",
       "env": {
-        "CODEBASE_CONSOLE_CONFIG": "/Users/yourname/.codebase_index/console.yml"
+        "CODEBASE_CONSOLE_CONFIG": "/Users/yourname/.woods/console.yml"
       }
     }
   }
@@ -216,7 +216,7 @@ The Index Server takes a path to the extraction output directory, not the Rails 
 "args": ["/path/to/your/rails-app"]
 
 # Correct — points to extraction output
-"args": ["/path/to/your/rails-app/tmp/codebase_index"]
+"args": ["/path/to/your/rails-app/tmp/woods"]
 ```
 
 **Container path instead of host path**
@@ -225,10 +225,10 @@ The Index Server runs on the host and cannot access container paths:
 
 ```
 # Wrong — container-internal path
-"args": ["/app/tmp/codebase_index"]
+"args": ["/app/tmp/woods"]
 
 # Correct — host path to volume-mounted output
-"args": ["./tmp/codebase_index"]
+"args": ["./tmp/woods"]
 ```
 
 **Missing `-i` flag for docker exec**

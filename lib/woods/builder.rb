@@ -9,19 +9,19 @@ require_relative 'storage/graph_store'
 require_relative 'embedding/provider'
 require_relative 'embedding/openai'
 
-module CodebaseIndex
+module Woods
   # Builder reads a {Configuration} and instantiates the appropriate adapters,
   # returning a fully wired {Retriever} ready for use.
   #
   # Named presets are provided for common deployment scenarios. All presets can
-  # be further customized with a block passed to {CodebaseIndex.configure_with_preset}.
+  # be further customized with a block passed to {Woods.configure_with_preset}.
   #
   # @example Using a preset
-  #   CodebaseIndex.configure_with_preset(:local)
-  #   result = CodebaseIndex.retrieve("How does the User model work?")
+  #   Woods.configure_with_preset(:local)
+  #   result = Woods.retrieve("How does the User model work?")
   #
   # @example Using a preset with block customization
-  #   CodebaseIndex.configure_with_preset(:production) do |config|
+  #   Woods.configure_with_preset(:production) do |config|
   #     config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
   #     config.vector_store_options = { url: ENV['QDRANT_URL'], collection: 'myapp' }
   #   end
@@ -68,7 +68,7 @@ module CodebaseIndex
     end
 
     # @param config [Configuration] Configuration to read adapter types from
-    def initialize(config = CodebaseIndex.configuration)
+    def initialize(config = Woods.configuration)
       @config = config
     end
 

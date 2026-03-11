@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Extractors
     # RailsSourceExtractor indexes selected parts of the Rails framework
     # and key gems for version-specific accuracy.

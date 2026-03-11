@@ -1,8 +1,8 @@
 ---
 paths:
-  - "lib/codebase_index/storage/**/*.rb"
-  - "lib/codebase_index/retrieval/**/*.rb"
-  - "lib/codebase_index/embedding/**/*.rb"
+  - "lib/woods/storage/**/*.rb"
+  - "lib/woods/retrieval/**/*.rb"
+  - "lib/woods/embedding/**/*.rb"
 ---
 # Storage & Retrieval Layer Conventions
 

@@ -4,16 +4,16 @@ require 'spec_helper'
 require 'json'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index'
-require 'codebase_index/evaluation/evaluator'
-require 'codebase_index/evaluation/report_generator'
+require 'woods'
+require 'woods/evaluation/evaluator'
+require 'woods/evaluation/report_generator'
 
-RSpec.describe CodebaseIndex::Evaluation::ReportGenerator do
+RSpec.describe Woods::Evaluation::ReportGenerator do
   let(:generator) { described_class.new }
 
   let(:query_results) do
     [
-      CodebaseIndex::Evaluation::Evaluator::QueryResult.new(
+      Woods::Evaluation::Evaluator::QueryResult.new(
         query: 'How does User model work?',
         expected_units: %w[User UserConcern],
         retrieved_units: %w[User UserConcern Post],
@@ -27,7 +27,7 @@ RSpec.describe CodebaseIndex::Evaluation::ReportGenerator do
         },
         tokens_used: 500
       ),
-      CodebaseIndex::Evaluation::Evaluator::QueryResult.new(
+      Woods::Evaluation::Evaluator::QueryResult.new(
         query: 'Trace order creation',
         expected_units: %w[Order OrdersController],
         retrieved_units: %w[Order Product],
@@ -58,7 +58,7 @@ RSpec.describe CodebaseIndex::Evaluation::ReportGenerator do
   end
 
   let(:report) do
-    CodebaseIndex::Evaluation::Evaluator::EvaluationReport.new(
+    Woods::Evaluation::Evaluator::EvaluationReport.new(
       results: query_results,
       aggregates: aggregates
     )

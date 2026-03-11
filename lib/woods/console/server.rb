@@ -13,7 +13,7 @@ require_relative 'audit_logger'
 require_relative 'confirmation'
 require_relative 'console_response_renderer'
 
-module CodebaseIndex
+module Woods
   module Console
     # Console MCP Server — queries live Rails application state.
     #
@@ -21,7 +21,7 @@ module CodebaseIndex
     # via JSON-lines over stdio. Exposes Tier 1-4 tools (read-only, domain, analytics, guarded) through MCP.
     #
     # @example
-    #   server = CodebaseIndex::Console::Server.build(config: config)
+    #   server = Woods::Console::Server.build(config: config)
     #   transport = MCP::Server::Transports::StdioTransport.new(server)
     #   transport.open
     #
@@ -123,8 +123,8 @@ module CodebaseIndex
         # @return [MCP::Server]
         def build_server(conn_mgr, safe_ctx)
           server = ::MCP::Server.new(
-            name: 'codebase-console',
-            version: defined?(CodebaseIndex::VERSION) ? CodebaseIndex::VERSION : '0.1.0'
+            name: 'woods-console',
+            version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0'
           )
 
           renderer = build_console_renderer
@@ -178,8 +178,8 @@ module CodebaseIndex
         end
 
         def build_console_renderer
-          format = if CodebaseIndex.respond_to?(:configuration)
-                     CodebaseIndex.configuration&.context_format || :markdown
+          format = if Woods.respond_to?(:configuration)
+                     Woods.configuration&.context_format || :markdown
                    else
                      :markdown
                    end

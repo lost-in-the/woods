@@ -4,7 +4,7 @@ require 'spec_helper'
 
 RSpec.describe 'Pgvector generator template' do
   let(:template_path) do
-    File.expand_path('../../lib/generators/codebase_index/templates/add_pgvector_to_codebase_index.rb.erb', __dir__)
+    File.expand_path('../../lib/generators/woods/templates/add_pgvector_to_woods.rb.erb', __dir__)
   end
 
   it 'template file exists' do
@@ -17,9 +17,9 @@ RSpec.describe 'Pgvector generator template' do
     expect(content).to include('vector')
   end
 
-  it 'adds vector column to codebase_embeddings' do
+  it 'adds vector column to woods_embeddings' do
     content = File.read(template_path)
-    expect(content).to include('codebase_embeddings')
+    expect(content).to include('woods_embeddings')
     expect(content).to include('embedding_vector')
   end
 
@@ -31,7 +31,7 @@ end
 
 RSpec.describe 'Pgvector generator class' do
   let(:generator_path) do
-    File.expand_path('../../lib/generators/codebase_index/pgvector_generator.rb', __dir__)
+    File.expand_path('../../lib/generators/woods/pgvector_generator.rb', __dir__)
   end
 
   it 'generator file exists' do

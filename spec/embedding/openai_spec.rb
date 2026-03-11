@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/embedding/provider'
-require 'codebase_index/embedding/openai'
+require 'woods'
+require 'woods/embedding/provider'
+require 'woods/embedding/openai'
 
-RSpec.describe CodebaseIndex::Embedding::Provider::OpenAI do
+RSpec.describe Woods::Embedding::Provider::OpenAI do
   subject(:provider) { described_class.new(api_key: 'test-key') }
 
   let(:single_embedding) { [0.1, 0.2, 0.3, 0.4, 0.5] }
@@ -149,17 +149,17 @@ RSpec.describe CodebaseIndex::Embedding::Provider::OpenAI do
       allow(error_500_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
     end
 
-    it 'raises CodebaseIndex::Error on 429 response' do
+    it 'raises Woods::Error on 429 response' do
       allow(http_double).to receive(:request).and_return(error_429_response)
       expect { provider.embed('text') }.to raise_error(
-        CodebaseIndex::Error, /OpenAI API error: 429 rate limit exceeded/
+        Woods::Error, /OpenAI API error: 429 rate limit exceeded/
       )
     end
 
-    it 'raises CodebaseIndex::Error on 500 response' do
+    it 'raises Woods::Error on 500 response' do
       allow(http_double).to receive(:request).and_return(error_500_response)
       expect { provider.embed('text') }.to raise_error(
-        CodebaseIndex::Error, /OpenAI API error: 500 internal server error/
+        Woods::Error, /OpenAI API error: 500 internal server error/
       )
     end
   end

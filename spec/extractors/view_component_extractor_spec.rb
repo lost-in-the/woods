@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'set'
-require 'codebase_index/extractors/view_component_extractor'
+require 'woods/extractors/view_component_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ViewComponentExtractor do
+RSpec.describe Woods::Extractors::ViewComponentExtractor do
   # ── Test helpers ────────────────────────────────────────────────────────
 
   let(:rails_root) { Pathname.new('/rails') }
@@ -15,7 +15,7 @@ RSpec.describe CodebaseIndex::Extractors::ViewComponentExtractor do
 
   before do
     stub_const('Rails', double('Rails', root: rails_root, logger: logger))
-    stub_const('CodebaseIndex::ModelNameCache', double('ModelNameCache', model_names_regex: /\b(?:User|Post)\b/))
+    stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names_regex: /\b(?:User|Post)\b/))
 
     allow(File).to receive(:exist?) { |path| file_system.key?(path.to_s) }
     allow(File).to receive(:read) { |path| file_system.fetch(path.to_s, '') }
@@ -191,7 +191,7 @@ RSpec.describe CodebaseIndex::Extractors::ViewComponentExtractor do
         extractor = described_class.new
         unit = extractor.extract_component(component_class)
 
-        expect(unit).to be_a(CodebaseIndex::ExtractedUnit)
+        expect(unit).to be_a(Woods::ExtractedUnit)
         expect(unit.type).to eq(:view_component)
         expect(unit.identifier).to eq('AlertComponent')
       end

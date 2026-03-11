@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/configuration_extractor'
+require 'woods/extractors/configuration_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ConfigurationExtractor do
+RSpec.describe Woods::Extractors::ConfigurationExtractor do
   include_context 'extractor setup'
 
   # Stub Rails.application for BehavioralProfile integration

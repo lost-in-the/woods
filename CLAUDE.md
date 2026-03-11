@@ -1,4 +1,4 @@
-# CodebaseIndex
+# Woods
 
 Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
 
@@ -13,13 +13,14 @@ bundle exec rubocop -a                            # Lint + autofix
 bundle exec rubocop --auto-gen-config             # Update .rubocop_todo.yml
 
 # In a host Rails app (extraction requires Rails boot)
-bundle exec rake codebase_index:extract           # Full extraction
-bundle exec rake codebase_index:incremental       # Changed files only
-bundle exec rake codebase_index:extract_framework # Rails/gem sources
-bundle exec rake codebase_index:validate          # Index integrity check
-bundle exec rake codebase_index:stats             # Show extraction stats
-bundle exec rake codebase_index:clean             # Remove index output
-bundle exec rake codebase_index:notion_sync       # Sync models/columns to Notion
+bundle exec rake woods:extract           # Full extraction
+bundle exec rake woods:incremental       # Changed files only
+bundle exec rake woods:extract_framework # Rails/gem sources
+bundle exec rake woods:validate          # Index integrity check
+bundle exec rake woods:stats             # Show extraction stats
+bundle exec rake woods:clean             # Remove index output
+bundle exec rake woods:notion_sync       # Sync models/columns to Notion
+# Woods-themed aliases: woods:grow (extract), woods:trail (stats), woods:map (validate)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
@@ -28,8 +29,8 @@ bundle exec rake codebase_index:notion_sync       # Sync models/columns to Notio
 
 ```
 lib/
-├── codebase_index.rb                    # Module interface, Configuration, entry point
-├── codebase_index/
+├── woods.rb                             # Module interface, Configuration, entry point
+├── woods/
 │   ├── extractor.rb                     # Orchestrator — coordinates all extractors
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
@@ -61,14 +62,14 @@ lib/
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   └── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
-├── generators/codebase_index/           # Rails generators (install, pgvector)
+├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
-│   └── codebase_index.rake              # Rake task definitions
+│   └── woods.rake                       # Rake task definitions
 exe/
-├── codebase-index-mcp                   # MCP Index Server executable (stdio)
-├── codebase-index-mcp-start             # Self-healing MCP wrapper
-├── codebase-index-mcp-http              # MCP Index Server executable (HTTP/Rack)
-└── codebase-console-mcp                 # Console MCP Server executable
+├── woods-mcp                            # MCP Index Server executable (stdio)
+├── woods-mcp-start                      # Self-healing MCP wrapper
+├── woods-mcp-http                       # MCP Index Server executable (HTTP/Rack)
+└── woods-console-mcp                    # Console MCP Server executable
 ```
 
 ## Key Design Decisions
@@ -90,7 +91,7 @@ exe/
 - Use `Rails.root.join()` for paths, never string concatenation
 - JSON output uses string keys, snake_case
 - Token estimation: `(string.length / 4.0).ceil` — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md.
-- Error handling: raise `CodebaseIndex::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
+- Error handling: raise `Woods::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
 
 ## Testing
 

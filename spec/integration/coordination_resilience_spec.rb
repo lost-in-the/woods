@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/coordination/pipeline_lock'
-require 'codebase_index/resilience/circuit_breaker'
-require 'codebase_index/resilience/retryable_provider'
-require 'codebase_index/operator/pipeline_guard'
-require 'codebase_index/embedding/provider'
+require 'woods'
+require 'woods/coordination/pipeline_lock'
+require 'woods/resilience/circuit_breaker'
+require 'woods/resilience/retryable_provider'
+require 'woods/operator/pipeline_guard'
+require 'woods/embedding/provider'
 require 'tmpdir'
 
 RSpec.describe 'Coordination + Resilience Integration', :integration do
@@ -18,7 +18,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
   describe 'PipelineLock' do
     let(:lock) do
-      CodebaseIndex::Coordination::PipelineLock.new(
+      Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'extraction', stale_timeout: 2
       )
     end
@@ -32,7 +32,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
     it 'prevents double acquisition' do
       lock.acquire
-      second_lock = CodebaseIndex::Coordination::PipelineLock.new(
+      second_lock = Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'extraction', stale_timeout: 2
       )
 
@@ -63,13 +63,13 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
     it 'raises LockError when lock is already held' do
       lock.acquire
 
-      second_lock = CodebaseIndex::Coordination::PipelineLock.new(
+      second_lock = Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'extraction', stale_timeout: 2
       )
 
       expect do
         second_lock.with_lock { 'should not run' }
-      end.to raise_error(CodebaseIndex::Coordination::LockError)
+      end.to raise_error(Woods::Coordination::LockError)
     end
 
     it 'detects and replaces stale locks' do
@@ -78,17 +78,17 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
       lock_path = File.join(tmpdir, 'extraction.lock')
       FileUtils.touch(lock_path, mtime: Time.now - 10)
 
-      new_lock = CodebaseIndex::Coordination::PipelineLock.new(
+      new_lock = Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'extraction', stale_timeout: 2
       )
       expect(new_lock.acquire).to be true
     end
 
     it 'allows independent locks with different names' do
-      extract_lock = CodebaseIndex::Coordination::PipelineLock.new(
+      extract_lock = Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'extraction', stale_timeout: 2
       )
-      embed_lock = CodebaseIndex::Coordination::PipelineLock.new(
+      embed_lock = Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'embedding', stale_timeout: 2
       )
 
@@ -104,7 +104,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
   describe 'CircuitBreaker' do
     let(:breaker) do
-      CodebaseIndex::Resilience::CircuitBreaker.new(threshold: 3, reset_timeout: 1)
+      Woods::Resilience::CircuitBreaker.new(threshold: 3, reset_timeout: 1)
     end
 
     it 'starts in closed state' do
@@ -136,7 +136,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
       expect do
         breaker.call { 'should not run' }
-      end.to raise_error(CodebaseIndex::Resilience::CircuitOpenError)
+      end.to raise_error(Woods::Resilience::CircuitOpenError)
     end
 
     it 'transitions to half_open after reset_timeout' do
@@ -196,7 +196,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
     let(:flaky_provider) do
       counter = call_count
       Class.new do
-        include CodebaseIndex::Embedding::Provider::Interface
+        include Woods::Embedding::Provider::Interface
 
         define_method(:dimensions) { 3 }
         define_method(:model_name) { 'flaky-test' }
@@ -215,11 +215,11 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
     end
 
     let(:breaker) do
-      CodebaseIndex::Resilience::CircuitBreaker.new(threshold: 5, reset_timeout: 60)
+      Woods::Resilience::CircuitBreaker.new(threshold: 5, reset_timeout: 60)
     end
 
     let(:retryable) do
-      CodebaseIndex::Resilience::RetryableProvider.new(
+      Woods::Resilience::RetryableProvider.new(
         provider: flaky_provider,
         max_retries: 3,
         circuit_breaker: breaker
@@ -243,7 +243,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
     it 'raises CircuitOpenError when circuit is open' do
       always_fail = Class.new do
-        include CodebaseIndex::Embedding::Provider::Interface
+        include Woods::Embedding::Provider::Interface
 
         define_method(:embed) { |_text| raise StandardError, 'always fail' }
         define_method(:embed_batch) { |texts| texts.map { |t| embed(t) } }
@@ -251,8 +251,8 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
         define_method(:model_name) { 'fail-provider' }
       end.new
 
-      open_breaker = CodebaseIndex::Resilience::CircuitBreaker.new(threshold: 2, reset_timeout: 60)
-      retryable_fail = CodebaseIndex::Resilience::RetryableProvider.new(
+      open_breaker = Woods::Resilience::CircuitBreaker.new(threshold: 2, reset_timeout: 60)
+      retryable_fail = Woods::Resilience::RetryableProvider.new(
         provider: always_fail,
         max_retries: 1,
         circuit_breaker: open_breaker
@@ -269,7 +269,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
       expect do
         retryable_fail.embed('should not work')
-      end.to raise_error(CodebaseIndex::Resilience::CircuitOpenError)
+      end.to raise_error(Woods::Resilience::CircuitOpenError)
     end
   end
 
@@ -277,7 +277,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
   describe 'PipelineGuard' do
     let(:guard) do
-      CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
+      Woods::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
     end
 
     it 'allows first operation' do
@@ -313,7 +313,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
     it 'persists state across instances' do
       guard.record!(:extraction)
 
-      new_guard = CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
+      new_guard = Woods::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
       expect(new_guard.allow?(:extraction)).to be false
     end
   end
@@ -322,10 +322,10 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
   describe 'PipelineLock + PipelineGuard coordination' do
     it 'protects a pipeline run with both lock and guard' do
-      lock = CodebaseIndex::Coordination::PipelineLock.new(
+      lock = Woods::Coordination::PipelineLock.new(
         lock_dir: tmpdir, name: 'extract', stale_timeout: 60
       )
-      guard = CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 1)
+      guard = Woods::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 1)
 
       # Guard allows
       expect(guard.allow?(:extraction)).to be true

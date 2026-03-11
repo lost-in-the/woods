@@ -4,7 +4,7 @@ Sync your Rails application's data model documentation to Notion databases, maki
 
 ## What Gets Synced
 
-CodebaseIndex extracts your Rails application via runtime introspection and pushes structured data to two Notion databases:
+Woods extracts your Rails application via runtime introspection and pushes structured data to two Notion databases:
 
 **Data Models Database** — One page per ActiveRecord model:
 - Table name, model class name, file path
@@ -73,11 +73,11 @@ Open each database in Notion, click the `...` menu → "Connections" → add you
 
 Each database URL contains its ID: `https://notion.so/{workspace}/{database_id}?v=...`
 
-### 5. Configure CodebaseIndex
+### 5. Configure Woods
 
 ```ruby
-# config/initializers/codebase_index.rb
-CodebaseIndex.configure do |config|
+# config/initializers/woods.rb
+Woods.configure do |config|
   config.notion_api_token = Rails.application.credentials.dig(:notion, :api_token)
   config.notion_database_ids = {
     data_models: 'your-data-models-database-id',
@@ -98,16 +98,16 @@ export NOTION_API_TOKEN=secret_...
 
 ```bash
 # Extract everything from the Rails app, then push to Notion
-bundle exec rake codebase_index:extract
-bundle exec rake codebase_index:notion_sync
+bundle exec rake woods:extract
+bundle exec rake woods:notion_sync
 ```
 
 ### Post-Migration Sync
 
 ```bash
 # Re-extract changed files after a migration, then sync
-bundle exec rake codebase_index:incremental
-bundle exec rake codebase_index:notion_sync
+bundle exec rake woods:incremental
+bundle exec rake woods:notion_sync
 ```
 
 ### Buildkite CI Integration
@@ -118,8 +118,8 @@ Add to your `pipeline.yml`:
 steps:
   - label: ":database: Extract & Sync to Notion"
     command: |
-      bundle exec rake codebase_index:extract
-      bundle exec rake codebase_index:notion_sync
+      bundle exec rake woods:extract
+      bundle exec rake woods:notion_sync
     if: build.branch == "main" && build.state == "passed"
     soft_fail: true
     env:
@@ -132,8 +132,8 @@ For post-migration syncs only:
 steps:
   - label: ":database: Sync Schema to Notion"
     command: |
-      bundle exec rake codebase_index:incremental
-      bundle exec rake codebase_index:notion_sync
+      bundle exec rake woods:incremental
+      bundle exec rake woods:notion_sync
     if: |
       build.message =~ /migrate/i ||
       build.env("FORCE_SCHEMA_SYNC") == "true"
@@ -156,7 +156,7 @@ If using the MCP Index Server, the `notion_sync` tool is available:
 Only sync Data Models (skip Columns):
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   config.notion_database_ids = { data_models: 'db-uuid' }
   # columns key omitted → column sync is skipped
 end
@@ -202,7 +202,7 @@ class NotionDeploySyncJob < ApplicationJob
   def perform(payload)
     build = payload["build"]
     # Use your own NotionClient to create a Deploys page
-    # This is outside CodebaseIndex's scope
+    # This is outside Woods's scope
   end
 end
 ```

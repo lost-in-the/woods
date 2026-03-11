@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   # Shared token estimation utility.
   #
   # Uses project convention: (string.length / 4.0).ceil

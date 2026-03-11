@@ -3,7 +3,7 @@
 require_relative '../embedding/provider'
 require_relative 'circuit_breaker'
 
-module CodebaseIndex
+module Woods
   module Resilience
     # Wraps an embedding provider with retry logic and optional circuit breaker.
     #
@@ -24,7 +24,7 @@ module CodebaseIndex
     #   )
     #   vector = retryable.embed("some text")
     class RetryableProvider
-      include CodebaseIndex::Embedding::Provider::Interface
+      include Woods::Embedding::Provider::Interface
 
       # @param provider [#embed, #embed_batch, #dimensions, #model_name] The underlying embedding provider
       # @param max_retries [Integer] Maximum number of retry attempts

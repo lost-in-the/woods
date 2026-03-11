@@ -4,7 +4,7 @@ require 'json'
 require_relative 'model_validator'
 require_relative 'safe_context'
 
-module CodebaseIndex
+module Woods
   module Console
     # JSON-lines protocol bridge between MCP server and Rails environment.
     #

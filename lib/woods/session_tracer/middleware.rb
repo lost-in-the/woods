@@ -2,7 +2,7 @@
 
 require 'time'
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # Rack middleware that captures request metadata for session tracing.
     #
@@ -14,7 +14,7 @@ module CodebaseIndex
     #
     # @example Inserting into a Rails middleware stack
     #   app.middleware.insert_after ActionDispatch::Session::CookieStore,
-    #                               CodebaseIndex::SessionTracer::Middleware
+    #                               Woods::SessionTracer::Middleware
     #
     class Middleware
       # @param app [#call] The downstream Rack application

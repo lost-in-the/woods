@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/retrieval/query_classifier'
+require 'woods/retrieval/query_classifier'
 
-RSpec.describe CodebaseIndex::Retrieval::QueryClassifier do
+RSpec.describe Woods::Retrieval::QueryClassifier do
   subject(:classifier) { described_class.new }
 
   describe '#classify' do
     it 'returns a Classification struct with all expected fields' do
       result = classifier.classify('How does authentication work?')
 
-      expect(result).to be_a(CodebaseIndex::Retrieval::QueryClassifier::Classification)
+      expect(result).to be_a(Woods::Retrieval::QueryClassifier::Classification)
       expect(result).to respond_to(:intent, :scope, :target_type, :framework_context, :keywords)
     end
   end

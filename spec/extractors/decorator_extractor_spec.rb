@@ -4,10 +4,10 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/decorator_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/decorator_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::DecoratorExtractor do
+RSpec.describe Woods::Extractors::DecoratorExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

@@ -1,20 +1,20 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast/parser'
+require 'woods/ast/parser'
 
-RSpec.describe CodebaseIndex::Ast::Parser do
+RSpec.describe Woods::Ast::Parser do
   subject(:parser) { described_class.new }
 
   describe '#parse' do
     it 'parses valid Ruby source' do
       root = parser.parse('x = 1')
 
-      expect(root).to be_a(CodebaseIndex::Ast::Node)
+      expect(root).to be_a(Woods::Ast::Node)
     end
 
     it 'raises ExtractionError for invalid syntax' do
-      expect { parser.parse('def foo(') }.to raise_error(CodebaseIndex::ExtractionError)
+      expect { parser.parse('def foo(') }.to raise_error(Woods::ExtractionError)
     end
 
     it 'parses multi-class files' do
@@ -161,14 +161,14 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
     describe 'const nodes' do
       it 'uses method_name for constant name and receiver for parent' do
-        root = parser.parse('CodebaseIndex::Extractor')
+        root = parser.parse('Woods::Extractor')
         const_nodes = root.find_all(:const)
 
         # The top-level const path node
         path_node = const_nodes.find { |n| n.method_name == 'Extractor' }
 
         expect(path_node).not_to be_nil
-        expect(path_node.receiver).to eq('CodebaseIndex')
+        expect(path_node.receiver).to eq('Woods')
         expect(path_node.method_name).to eq('Extractor')
       end
 
@@ -229,7 +229,7 @@ RSpec.describe CodebaseIndex::Ast::Parser do
 
         # First child is condition
         condition = if_node.children[0]
-        expect(condition).to be_a(CodebaseIndex::Ast::Node)
+        expect(condition).to be_a(Woods::Ast::Node)
       end
 
       it 'handles if without else' do

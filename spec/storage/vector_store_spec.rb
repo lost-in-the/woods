@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/storage/vector_store'
+require 'woods/storage/vector_store'
 
-RSpec.describe CodebaseIndex::Storage::VectorStore do
-  describe CodebaseIndex::Storage::VectorStore::SearchResult do
+RSpec.describe Woods::Storage::VectorStore do
+  describe Woods::Storage::VectorStore::SearchResult do
     it 'stores id, score, and metadata' do
       result = described_class.new(id: 'doc1', score: 0.95, metadata: { type: 'model' })
 
@@ -17,7 +17,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore do
   describe 'Interface contract' do
     let(:dummy_class) do
       Class.new do
-        include CodebaseIndex::Storage::VectorStore::Interface
+        include Woods::Storage::VectorStore::Interface
       end
     end
 
@@ -44,7 +44,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore do
     end
   end
 
-  describe CodebaseIndex::Storage::VectorStore::InMemory do
+  describe Woods::Storage::VectorStore::InMemory do
     let(:store) { described_class.new }
 
     describe '#store and #count' do

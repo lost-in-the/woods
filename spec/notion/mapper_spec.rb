@@ -1,20 +1,20 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/notion/mapper'
+require 'woods/notion/mapper'
 
-RSpec.describe CodebaseIndex::Notion::Mapper do
+RSpec.describe Woods::Notion::Mapper do
   describe '.for' do
     it 'returns ModelMapper for model type' do
-      expect(described_class.for('model')).to be_a(CodebaseIndex::Notion::Mappers::ModelMapper)
+      expect(described_class.for('model')).to be_a(Woods::Notion::Mappers::ModelMapper)
     end
 
     it 'returns ColumnMapper for column type' do
-      expect(described_class.for('column')).to be_a(CodebaseIndex::Notion::Mappers::ColumnMapper)
+      expect(described_class.for('column')).to be_a(Woods::Notion::Mappers::ColumnMapper)
     end
 
     it 'returns MigrationMapper for migration type' do
-      expect(described_class.for('migration')).to be_a(CodebaseIndex::Notion::Mappers::MigrationMapper)
+      expect(described_class.for('migration')).to be_a(Woods::Notion::Mappers::MigrationMapper)
     end
 
     it 'returns nil for unsupported types' do

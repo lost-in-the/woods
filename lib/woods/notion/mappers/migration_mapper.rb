@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Notion
     module Mappers
       # Extracts latest migration dates per table from migration ExtractedUnits.

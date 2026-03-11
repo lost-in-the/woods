@@ -2,7 +2,7 @@
 
 require_relative '../model_name_cache'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # Common dependency scanning patterns shared across extractors.
     #

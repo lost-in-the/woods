@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   # Caches ActiveRecord model names and builds a precompiled regex
   # for scanning source code for model references.
   #
@@ -8,10 +8,10 @@ module CodebaseIndex
   # Invalidated per extraction run (call .reset! before a new run).
   #
   # @example
-  #   CodebaseIndex::ModelNameCache.model_names
+  #   Woods::ModelNameCache.model_names
   #   # => ["User", "Order", "Product", ...]
   #
-  #   CodebaseIndex::ModelNameCache.model_names_regex
+  #   Woods::ModelNameCache.model_names_regex
   #   # => /\b(?:User|Order|Product|...)\b/
   #
   module ModelNameCache

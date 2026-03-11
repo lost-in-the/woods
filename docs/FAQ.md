@@ -4,27 +4,27 @@
 
 ## General
 
-### Does CodebaseIndex work without Rails?
+### Does Woods work without Rails?
 
-No — CodebaseIndex requires a booted Rails environment for extraction. It uses runtime introspection APIs (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) that only exist inside a running Rails application. Static analysis of source files alone cannot produce the accurate, inlined output that CodebaseIndex generates. The MCP Index Server does *not* require Rails — it reads pre-extracted JSON from disk — but the extraction step itself always does.
-
----
-
-### What Rails versions does CodebaseIndex support?
-
-CodebaseIndex supports Rails 6.1 and newer, with Ruby 3.0 or newer. It is tested against Rails 7.x and 8.x. Rails 6.0 and earlier are not supported because the gem relies on Zeitwerk autoloading and several reflection APIs introduced in 6.1.
+No — Woods requires a booted Rails environment for extraction. It uses runtime introspection APIs (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) that only exist inside a running Rails application. Static analysis of source files alone cannot produce the accurate, inlined output that Woods generates. The MCP Index Server does *not* require Rails — it reads pre-extracted JSON from disk — but the extraction step itself always does.
 
 ---
 
-### Does CodebaseIndex work with MySQL?
+### What Rails versions does Woods support?
 
-Yes — MySQL, PostgreSQL, and SQLite are all supported equally as application databases. CodebaseIndex extraction uses ActiveRecord's database-agnostic reflection APIs and never issues raw SQL during extraction. The only backend-specific requirement is pgvector, which is PostgreSQL-only and optional. All other storage backends (SQLite metadata store, Qdrant, in-memory) work identically with MySQL and PostgreSQL. See [BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.
+Woods supports Rails 6.1 and newer, with Ruby 3.0 or newer. It is tested against Rails 7.x and 8.x. Rails 6.0 and earlier are not supported because the gem relies on Zeitwerk autoloading and several reflection APIs introduced in 6.1.
 
 ---
 
-### How large a codebase can CodebaseIndex handle?
+### Does Woods work with MySQL?
 
-CodebaseIndex has been tested on applications with 200+ models and 500+ extractable units. Extraction time scales roughly linearly with codebase size — a mid-size app (50-100 models) takes 10-30 seconds. Very large applications benefit from disabling `include_framework_sources` and using incremental mode for subsequent runs.
+Yes — MySQL, PostgreSQL, and SQLite are all supported equally as application databases. Woods extraction uses ActiveRecord's database-agnostic reflection APIs and never issues raw SQL during extraction. The only backend-specific requirement is pgvector, which is PostgreSQL-only and optional. All other storage backends (SQLite metadata store, Qdrant, in-memory) work identically with MySQL and PostgreSQL. See [BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.
+
+---
+
+### How large a codebase can Woods handle?
+
+Woods has been tested on applications with 200+ models and 500+ extractable units. Extraction time scales roughly linearly with codebase size — a mid-size app (50-100 models) takes 10-30 seconds. Very large applications benefit from disabling `include_framework_sources` and using incremental mode for subsequent runs.
 
 ---
 
@@ -34,7 +34,7 @@ No. Extraction is entirely read-only. It uses ActiveRecord reflection APIs (`col
 
 ---
 
-### Can I run CodebaseIndex in production?
+### Can I run Woods in production?
 
 Extraction is designed for development and CI environments — it requires a fully booted Rails environment and takes 10-30 seconds. The MCP servers are read-only development tools. Running extraction in production is technically possible but not recommended. The common pattern is to extract in CI and publish the JSON output as a build artifact.
 
@@ -42,23 +42,23 @@ Extraction is designed for development and CI environments — it requires a ful
 
 ## Setup
 
-### How do I install CodebaseIndex?
+### How do I install Woods?
 
 Add the gem to your Gemfile and run the install generator:
 
 ```ruby
 # Gemfile
 group :development do
-  gem 'codebase_index'
+  gem 'woods'
 end
 ```
 
 ```bash
 bundle install
-bundle exec rails generate codebase_index:install
+bundle exec rails generate woods:install
 ```
 
-The generator creates `config/initializers/codebase_index.rb` with default configuration. For Docker projects, run these commands through `docker compose exec app`. See [GETTING_STARTED.md](GETTING_STARTED.md) for the full setup walkthrough.
+The generator creates `config/initializers/woods.rb` with default configuration. For Docker projects, run these commands through `docker compose exec app`. See [GETTING_STARTED.md](GETTING_STARTED.md) for the full setup walkthrough.
 
 ---
 
@@ -67,44 +67,44 @@ The generator creates `config/initializers/codebase_index.rb` with default confi
 The only required option is `output_dir`, which has a sensible default:
 
 ```ruby
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join('tmp/codebase_index')  # default
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')  # default
 end
 ```
 
-With just this, you can run `rake codebase_index:extract` and get full extraction output. Embedding and vector storage require additional configuration — see [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md).
+With just this, you can run `rake woods:extract` and get full extraction output. Embedding and vector storage require additional configuration — see [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md).
 
 ---
 
 ### How do I set up the MCP server for Claude Code?
 
-Use the `codebase-index-mcp-start` wrapper, which validates the index and restarts on failure:
+Use the `woods-mcp-start` wrapper, which validates the index and restarts on failure:
 
 ```json
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["/path/to/your-rails-app/tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["/path/to/your-rails-app/tmp/woods"]
     }
   }
 }
 ```
 
-Add this to `.mcp.json` in your Rails app root (for project-scoped config) or to `claude_desktop_config.json` (for global config). Run `rake codebase_index:extract` first to generate the index. See [MCP_SERVERS.md](MCP_SERVERS.md) for the full setup guide.
+Add this to `.mcp.json` in your Rails app root (for project-scoped config) or to `claude_desktop_config.json` (for global config). Run `rake woods:extract` first to generate the index. See [MCP_SERVERS.md](MCP_SERVERS.md) for the full setup guide.
 
 ---
 
 ### How do I set up the MCP server for Cursor?
 
-Use `codebase-index-mcp` (without the `-start` wrapper, which is Claude Code-specific):
+Use `woods-mcp` (without the `-start` wrapper, which is Claude Code-specific):
 
 ```json
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp",
-      "args": ["/path/to/your-rails-app/tmp/codebase_index"]
+      "command": "woods-mcp",
+      "args": ["/path/to/your-rails-app/tmp/woods"]
     }
   }
 }
@@ -116,14 +116,14 @@ Add this to `.cursor/mcp.json` in your project. See [MCP_SERVERS.md](MCP_SERVERS
 
 ### How do I set up the MCP server for Windsurf?
 
-The setup is the same as Cursor — use `codebase-index-mcp` (not the `-start` wrapper):
+The setup is the same as Cursor — use `woods-mcp` (not the `-start` wrapper):
 
 ```json
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp",
-      "args": ["/path/to/your-rails-app/tmp/codebase_index"]
+      "command": "woods-mcp",
+      "args": ["/path/to/your-rails-app/tmp/woods"]
     }
   }
 }
@@ -135,15 +135,15 @@ Add this to your Windsurf MCP configuration file. The Index Server is transport-
 
 ## Extraction
 
-### What does CodebaseIndex extract?
+### What does Woods extract?
 
-CodebaseIndex extracts 34 types of units from a Rails application. The default extraction set includes models (with inlined concerns and schema), controllers, services, view components, jobs, mailers, GraphQL types/mutations/queries, serializers, managers, policies, validators, and Rails framework source. Additional extractors are available for state machines, events, decorators, database views, rake tasks, Action Cable channels, and more. See [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for the full extractor list.
+Woods extracts 34 types of units from a Rails application. The default extraction set includes models (with inlined concerns and schema), controllers, services, view components, jobs, mailers, GraphQL types/mutations/queries, serializers, managers, policies, validators, and Rails framework source. Additional extractors are available for state machines, events, decorators, database views, rake tasks, Action Cable channels, and more. See [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for the full extractor list.
 
 ---
 
-### Why does CodebaseIndex inline concerns?
+### Why does Woods inline concerns?
 
-When a model includes a concern, the behavior defined in that concern is part of the model's effective API — callbacks fire, validations run, scopes are available. A tool that reports only what's in `app/models/user.rb` misses everything defined in included concerns. CodebaseIndex inlines concern source directly into each unit's `source_code` field so the full behavioral picture is in one place. This is the key differentiator from file-level tools.
+When a model includes a concern, the behavior defined in that concern is part of the model's effective API — callbacks fire, validations run, scopes are available. A tool that reports only what's in `app/models/user.rb` misses everything defined in included concerns. Woods inlines concern source directly into each unit's `source_code` field so the full behavioral picture is in one place. This is the key differentiator from file-level tools.
 
 ---
 
@@ -152,10 +152,10 @@ When a model includes a concern, the behavior defined in that concern is part of
 Use incremental mode, which re-extracts only files that have changed since the last run:
 
 ```bash
-bundle exec rake codebase_index:incremental
+bundle exec rake woods:incremental
 
 # Docker:
-docker compose exec app bundle exec rake codebase_index:incremental
+docker compose exec app bundle exec rake woods:incremental
 ```
 
 Incremental mode is ideal for CI pipelines and local development workflows. It is typically 5-10× faster than a full extraction. Note that some unit types (routes, middleware, engines) require full extraction to update — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for details.
@@ -167,8 +167,8 @@ Incremental mode is ideal for CI pipelines and local development workflows. It i
 Configure an embedding provider, then run the embed task:
 
 ```ruby
-# config/initializers/codebase_index.rb
-CodebaseIndex.configure do |config|
+# config/initializers/woods.rb
+Woods.configure do |config|
   # OpenAI (cloud)
   config.embedding_provider = :openai
   config.embedding_model = 'text-embedding-3-small'
@@ -181,7 +181,7 @@ end
 ```
 
 ```bash
-bundle exec rake codebase_index:embed
+bundle exec rake woods:embed
 ```
 
 After embedding, the `codebase_retrieve` MCP tool supports natural-language queries ranked by semantic similarity. See [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for vector storage options.
@@ -193,7 +193,7 @@ After embedding, the `codebase_retrieve` MCP tool supports natural-language quer
 Unit types that don't map to individual files — routes, middleware, engines, scheduled jobs, state machines, events, and factories — are extracted by introspecting the entire application at once rather than a single file. There's no way to incrementally update them by watching one file change. When any of these types change, run a full extraction:
 
 ```bash
-bundle exec rake codebase_index:extract
+bundle exec rake woods:extract
 ```
 
 ---
@@ -214,7 +214,7 @@ The Index Server reads pre-extracted JSON from disk and does not require Rails. 
 
 ### Why do I only see 9 console tools instead of 31?
 
-You're using the embedded console mode (launched via `rake codebase_index:console` or `docker compose exec ... rake codebase_index:console`). Embedded mode intentionally exposes only the 9 Tier 1 read-only tools (count, sample, find, pluck, aggregate, association_count, schema, recent, status). To access all 31 tools across all 4 tiers, use the bridge architecture. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) Option D for bridge setup.
+You're using the embedded console mode (launched via `rake woods:console` or `docker compose exec ... rake woods:console`). Embedded mode intentionally exposes only the 9 Tier 1 read-only tools (count, sample, find, pluck, aggregate, association_count, schema, recent, status). To access all 31 tools across all 4 tiers, use the bridge architecture. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) Option D for bridge setup.
 
 ---
 
@@ -226,9 +226,9 @@ The Console Server implements multiple safety layers. Every query runs inside a 
 
 ### How do I get access to all 31 console tools?
 
-Switch from the embedded mode (Tier 1 only) to the bridge architecture (all 4 tiers). The bridge runs `codebase-console-mcp` on the host and connects to a bridge process inside the Rails environment.
+Switch from the embedded mode (Tier 1 only) to the bridge architecture (all 4 tiers). The bridge runs `woods-console-mcp` on the host and connects to a bridge process inside the Rails environment.
 
-1. Create `~/.codebase_index/console.yml`:
+1. Create `~/.woods/console.yml`:
 
 ```yaml
 connection:
@@ -243,7 +243,7 @@ connection:
 {
   "mcpServers": {
     "codebase-console": {
-      "command": "codebase-console-mcp"
+      "command": "woods-console-mcp"
     }
   }
 }
@@ -269,7 +269,7 @@ Extraction runs **inside** the container — it requires Rails to be booted. The
 HOST                           CONTAINER
 ─────────────────              ──────────────────
 Index Server (reads JSON) ◀── volume mount ─── rake extract (writes JSON)
-codebase-console-mcp      ──── docker exec ──▶  rake console (queries Rails)
+woods-console-mcp      ──── docker exec ──▶  rake console (queries Rails)
 ```
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker architecture guide.
@@ -284,14 +284,14 @@ The Index Server is looking at the wrong path — specifically the container-int
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]    ✓ host path
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]    ✓ host path
     }
   }
 }
 ```
 
-Do not use `/app/tmp/codebase_index` (the container path) — the host process cannot access it. Verify with `ls ./tmp/codebase_index/manifest.json` on the host.
+Do not use `/app/tmp/woods` (the container path) — the host process cannot access it. Verify with `ls ./tmp/woods/manifest.json` on the host.
 
 ---
 
@@ -305,7 +305,7 @@ For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose 
     "codebase-console": {
       "command": "docker",
       "args": ["compose", "exec", "-i", "app",
-               "bundle", "exec", "rake", "codebase_index:console"]
+               "bundle", "exec", "rake", "woods:console"]
     }
   }
 }
@@ -317,9 +317,9 @@ The `-i` flag is required to keep stdin attached for MCP protocol communication.
 
 ## Storage and Embeddings
 
-### What storage backends does CodebaseIndex support?
+### What storage backends does Woods support?
 
-CodebaseIndex supports three vector storage backends and two metadata backends:
+Woods supports three vector storage backends and two metadata backends:
 
 | Backend | Type | Use case |
 |---------|------|----------|
@@ -332,7 +332,7 @@ All backends work with both MySQL and PostgreSQL application databases. pgvector
 
 ---
 
-### What embedding providers does CodebaseIndex support?
+### What embedding providers does Woods support?
 
 Two embedding providers are supported:
 
@@ -358,19 +358,19 @@ Presets configure storage and embedding together with a single call:
 
 ```ruby
 # No external services — in-memory vectors, SQLite metadata, Ollama embeddings
-CodebaseIndex.configure_with_preset(:local)
+Woods.configure_with_preset(:local)
 
 # PostgreSQL + OpenAI — pgvector vectors, SQLite metadata, OpenAI embeddings
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 
 # Production scale — Qdrant vectors, SQLite metadata, OpenAI embeddings
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 ```
 
 Presets can be overridden with a block:
 
 ```ruby
-CodebaseIndex.configure_with_preset(:local) do |config|
+Woods.configure_with_preset(:local) do |config|
   config.max_context_tokens = 16000
   config.embedding_model = 'mxbai-embed-large'
 end
@@ -385,8 +385,8 @@ Start with `:local` for zero-dependency development and upgrade to `:postgresql`
 Switching embedding models requires a full re-index. The new model produces vectors with different dimensions or a different embedding space, making old and new vectors incompatible for similarity search. `IndexValidator` detects dimension mismatches before queries fail and logs a warning. Re-index with:
 
 ```bash
-bundle exec rake codebase_index:extract
-bundle exec rake codebase_index:embed
+bundle exec rake woods:extract
+bundle exec rake woods:embed
 ```
 
 ---
@@ -395,7 +395,7 @@ bundle exec rake codebase_index:embed
 
 ### How does semantic search work?
 
-When you run `rake codebase_index:embed`, CodebaseIndex generates embedding vectors for each extracted unit and stores them in your configured vector store. The `codebase_retrieve` MCP tool accepts a natural-language query, embeds the query using the same provider, and finds the most semantically similar units using cosine similarity. Results are re-ranked using Reciprocal Rank Fusion (RRF) that combines semantic similarity with PageRank importance scores, then assembled into a formatted context block within your configured token budget.
+When you run `rake woods:embed`, Woods generates embedding vectors for each extracted unit and stores them in your configured vector store. The `codebase_retrieve` MCP tool accepts a natural-language query, embeds the query using the same provider, and finds the most semantically similar units using cosine similarity. Results are re-ranked using Reciprocal Rank Fusion (RRF) that combines semantic similarity with PageRank importance scores, then assembled into a formatted context block within your configured token budget.
 
 ---
 
@@ -442,7 +442,7 @@ Session tracing is disabled by default. To enable it:
 
 ```ruby
 config.session_tracer_enabled = true
-config.session_store = CodebaseIndex::SessionTracer::FileStore.new(
+config.session_store = Woods::SessionTracer::FileStore.new(
   Rails.root.join('tmp/session_traces')
 )
 ```
@@ -466,7 +466,7 @@ jobs:
         with:
           fetch-depth: 2
       - name: Update index
-        run: bundle exec rake codebase_index:incremental
+        run: bundle exec rake woods:incremental
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
 ```
@@ -475,7 +475,7 @@ For Docker-based CI:
 
 ```yaml
       - name: Update index
-        run: docker compose exec -T app bundle exec rake codebase_index:incremental
+        run: docker compose exec -T app bundle exec rake woods:incremental
 ```
 
 ---
@@ -486,10 +486,10 @@ Two rake tasks validate index integrity:
 
 ```bash
 # Check integrity (no Rails required)
-bundle exec rake codebase_index:validate
+bundle exec rake woods:validate
 
 # Show unit counts and extraction stats
-bundle exec rake codebase_index:stats
+bundle exec rake woods:stats
 ```
 
 The `pipeline_status` MCP tool also reports the last extraction time, unit counts, and whether the index is stale relative to the current git HEAD.
@@ -516,7 +516,7 @@ Then add it to the extractors list:
 config.extractors += [:my_extractor]
 ```
 
-The extractor must be accessible at boot time. See the existing extractors in `lib/codebase_index/extractors/` for the interface and conventions.
+The extractor must be accessible at boot time. See the existing extractors in `lib/woods/extractors/` for the interface and conventions.
 
 ---
 

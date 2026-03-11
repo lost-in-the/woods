@@ -5,7 +5,7 @@ require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
 require_relative 'retrieval/context_assembler'
 
-module CodebaseIndex
+module Woods
   # Retriever orchestrates the full retrieval pipeline: classify, execute,
   # rank, and assemble context from a natural language query.
   #
@@ -19,7 +19,7 @@ module CodebaseIndex
   # by type) that is prepended to the assembled context.
   #
   # @example
-  #   retriever = CodebaseIndex::Retriever.new(
+  #   retriever = Woods::Retriever.new(
   #     vector_store: vector_store,
   #     metadata_store: metadata_store,
   #     graph_store: graph_store,

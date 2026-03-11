@@ -1,6 +1,6 @@
-# Contributing to CodebaseIndex
+# Contributing to Woods
 
-Thank you for your interest in contributing to CodebaseIndex!
+Thank you for your interest in contributing to Woods!
 
 ## Bug Reports
 
@@ -33,8 +33,8 @@ Open an issue describing:
 ## Development Setup
 
 ```bash
-git clone https://github.com/LeahArmstrong/codebase_index.git
-cd codebase_index
+git clone https://github.com/lost-in-the/woods.git
+cd woods
 bin/setup
 bundle exec rake spec    # Run tests
 bundle exec rubocop      # Check style
@@ -42,7 +42,7 @@ bundle exec rubocop      # Check style
 
 ## Testing
 
-CodebaseIndex has two test suites:
+Woods has two test suites:
 
 - **Gem unit specs** (`spec/`): Run with `bundle exec rake spec`. No Rails boot required.
 - **Integration specs**: Run inside a host Rails app to test real extraction.
@@ -58,7 +58,7 @@ All new features need tests. Bug fixes should include a regression test.
 
 ## Runtime Introspection Requirement
 
-CodebaseIndex uses runtime introspection, not static parsing. If your feature requires access to Rails internals (ActiveRecord reflections, route introspection, etc.), it must run inside a booted Rails environment. Unit tests should use mocks/stubs; integration tests should run in a real Rails app.
+Woods uses runtime introspection, not static parsing. If your feature requires access to Rails internals (ActiveRecord reflections, route introspection, etc.), it must run inside a booted Rails environment. Unit tests should use mocks/stubs; integration tests should run in a real Rails app.
 
 ## License
 

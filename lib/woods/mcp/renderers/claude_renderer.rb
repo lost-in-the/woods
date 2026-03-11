@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module MCP
     module Renderers
       # Renders MCP tool responses as Markdown wrapped in XML boundary tags.

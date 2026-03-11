@@ -3,7 +3,7 @@
 require 'net/http'
 require 'json'
 
-module CodebaseIndex
+module Woods
   module Embedding
     # Interface and adapters for embedding providers.
     #
@@ -57,7 +57,7 @@ module CodebaseIndex
       # Ollama instance (default: localhost:11434) with the specified model pulled.
       #
       # @example
-      #   provider = CodebaseIndex::Embedding::Provider::Ollama.new
+      #   provider = Woods::Embedding::Provider::Ollama.new
       #   vector = provider.embed("class User < ApplicationRecord; end")
       #   vectors = provider.embed_batch(["text1", "text2"])
       class Ollama
@@ -78,7 +78,7 @@ module CodebaseIndex
         #
         # @param text [String] the text to embed
         # @return [Array<Float>] the embedding vector
-        # @raise [CodebaseIndex::Error] if the API returns an error
+        # @raise [Woods::Error] if the API returns an error
         def embed(text)
           response = post_request({ model: @model, input: text })
           response['embeddings'].first
@@ -88,7 +88,7 @@ module CodebaseIndex
         #
         # @param texts [Array<String>] the texts to embed
         # @return [Array<Array<Float>>] array of embedding vectors
-        # @raise [CodebaseIndex::Error] if the API returns an error
+        # @raise [Woods::Error] if the API returns an error
         def embed_batch(texts)
           response = post_request({ model: @model, input: texts })
           response['embeddings']
@@ -116,14 +116,14 @@ module CodebaseIndex
         #
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
-        # @raise [CodebaseIndex::Error] if the API returns a non-success status
+        # @raise [Woods::Error] if the API returns a non-success status
         def post_request(body)
           request = Net::HTTP::Post.new(@uri.path, 'Content-Type' => 'application/json')
           request.body = body.to_json
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise CodebaseIndex::Error, "Ollama API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Ollama API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)
@@ -133,10 +133,10 @@ module CodebaseIndex
           begin
             response = http_client.request(request)
           rescue StandardError => retry_error
-            raise CodebaseIndex::Error, "Ollama API error (retry failed): #{retry_error.message}"
+            raise Woods::Error, "Ollama API error (retry failed): #{retry_error.message}"
           end
           unless response.is_a?(Net::HTTPSuccess)
-            raise CodebaseIndex::Error, "Ollama API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Ollama API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)

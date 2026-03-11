@@ -4,7 +4,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'behavioral_profile'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # ConfigurationExtractor handles Rails configuration file extraction.
     #

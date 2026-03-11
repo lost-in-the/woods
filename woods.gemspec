@@ -1,22 +1,22 @@
 # frozen_string_literal: true
 
-require_relative 'lib/codebase_index/version'
+require_relative 'lib/woods/version'
 
 Gem::Specification.new do |spec|
-  spec.name          = 'codebase_index'
-  spec.version       = CodebaseIndex::VERSION
+  spec.name          = 'woods'
+  spec.version       = Woods::VERSION
   spec.authors       = ['Leah Armstrong']
   spec.email         = ['info@leah.wtf']
 
   spec.summary       = 'Rails codebase extraction and indexing for AI-assisted development'
   spec.description   = <<~DESC
-    CodebaseIndex extracts structured data from Rails applications for use in
+    Woods extracts structured data from Rails applications for use in
     AI-assisted development tooling. It provides version-specific context by
     running inside Rails to leverage runtime introspection, inlining concerns,
     mapping routes to controllers, and indexing the exact Rails/gem source
     versions in use.
   DESC
-  spec.homepage      = 'https://github.com/LeahArmstrong/codebase_index'
+  spec.homepage      = 'https://github.com/lost-in-the/woods'
   spec.license       = 'MIT'
 
   spec.required_ruby_version = '>= 3.0.0'
@@ -39,8 +39,8 @@ Gem::Specification.new do |spec|
     'CODE_OF_CONDUCT.md'
   ]
   spec.bindir = 'exe'
-  spec.executables = %w[codebase-index-mcp codebase-index-mcp-start codebase-console-mcp codebase-console
-                        codebase-index-mcp-http]
+  spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
+                        woods-mcp-http]
   spec.require_paths = ['lib']
 
   # Runtime dependencies

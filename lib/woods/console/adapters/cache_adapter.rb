@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Console
     module Adapters
       # Cache adapter that auto-detects the active cache store.

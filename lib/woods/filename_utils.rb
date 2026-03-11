@@ -2,7 +2,7 @@
 
 require 'digest'
 
-module CodebaseIndex
+module Woods
   # Shared filename helpers for converting unit identifiers to safe filenames.
   #
   # Used by Extractor (writing) and IndexValidator (reading) to ensure

@@ -2,7 +2,7 @@
 
 require_relative 'chunk'
 
-module CodebaseIndex
+module Woods
   module Chunking
     # Shared method-detection patterns used by ModelChunker and ControllerChunker.
     METHOD_PATTERN = /^\s*def\s+/

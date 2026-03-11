@@ -2,7 +2,7 @@
 
 require 'yaml'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # ScheduledJobExtractor handles scheduled/recurring job configuration extraction.
     #

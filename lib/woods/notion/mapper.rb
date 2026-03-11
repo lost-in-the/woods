@@ -5,7 +5,7 @@ require_relative 'mappers/model_mapper'
 require_relative 'mappers/column_mapper'
 require_relative 'mappers/migration_mapper'
 
-module CodebaseIndex
+module Woods
   module Notion
     # Dispatcher for Notion mappers. Returns the appropriate mapper for a unit type.
     #

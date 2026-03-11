@@ -4,7 +4,7 @@ Benchmarking the heuristic `(string.length / 3.5).ceil` against tiktoken tokeniz
 
 ## Methodology
 
-- **Corpus**: 19 Ruby source files from `lib/codebase_index/` (1.4 KB to 33.4 KB), including extractors, retrieval pipeline, MCP servers, and utility modules
+- **Corpus**: 19 Ruby source files from `lib/woods/` (1.4 KB to 33.4 KB), including extractors, retrieval pipeline, MCP servers, and utility modules
 - **Reference tokenizer**: tiktoken_ruby 0.0.15.1 with cl100k_base (GPT-4) and o200k_base (GPT-4o)
 - **Heuristic under test**: `(content.length / 3.5).ceil` — the current divisor used across the gem
 - **Content analysis**: Additional breakdown of code-only vs. comment/YARD lines across 20 files
@@ -106,11 +106,11 @@ The overestimation affects these gem components:
 
 All instances of the 3.5 divisor in the codebase:
 
-- `lib/codebase_index/extracted_unit.rb:71-72,98,101` — `estimated_tokens`, chunking
-- `lib/codebase_index/chunking/chunk.rb:43` — `token_count`
-- `lib/codebase_index/embedding/text_preparer.rb:104,107` — `enforce_token_limit`
-- `lib/codebase_index/retrieval/context_assembler.rb:216,225` — truncation, `estimate_tokens`
-- `lib/codebase_index/formatting/base.rb:36` — `estimate_tokens`
+- `lib/woods/extracted_unit.rb:71-72,98,101` — `estimated_tokens`, chunking
+- `lib/woods/chunking/chunk.rb:43` — `token_count`
+- `lib/woods/embedding/text_preparer.rb:104,107` — `enforce_token_limit`
+- `lib/woods/retrieval/context_assembler.rb:216,225` — truncation, `estimate_tokens`
+- `lib/woods/formatting/base.rb:36` — `estimate_tokens`
 
 ## Reproducing This Benchmark
 

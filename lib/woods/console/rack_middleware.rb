@@ -2,7 +2,7 @@
 
 require 'json'
 
-module CodebaseIndex
+module Woods
   module Console
     # Rack middleware that serves the embedded console MCP server over HTTP.
     #
@@ -11,7 +11,7 @@ module CodebaseIndex
     # safety under Puma.
     #
     # @example In config/application.rb or an initializer:
-    #   config.middleware.use CodebaseIndex::Console::RackMiddleware, path: '/mcp/console'
+    #   config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
     #
     class RackMiddleware
       # @param app [#call] The next Rack app in the middleware stack
@@ -48,7 +48,7 @@ module CodebaseIndex
         @mutex.synchronize do
           return @transport if @transport
 
-          require 'codebase_index/console/server'
+          require 'woods/console/server'
 
           Rails.application.eager_load!
 
@@ -63,7 +63,7 @@ module CodebaseIndex
 
           validator = ModelValidator.new(registry: registry)
 
-          config = CodebaseIndex.configuration
+          config = Woods.configuration
           redacted = Array(config.console_redacted_columns)
 
           # Each HTTP request gets its own connection from the pool.

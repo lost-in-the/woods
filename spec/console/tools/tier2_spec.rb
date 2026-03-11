@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/tools/tier2'
+require 'woods/console/tools/tier2'
 
-RSpec.describe CodebaseIndex::Console::Tools::Tier2 do
+RSpec.describe Woods::Console::Tools::Tier2 do
   describe '.console_diagnose_model' do
     it 'builds a diagnose_model request' do
       result = described_class.console_diagnose_model(model: 'User')

@@ -1,6 +1,6 @@
-# Troubleshooting CodebaseIndex
+# Troubleshooting Woods
 
-This guide covers the most common problems encountered when installing, extracting, and using CodebaseIndex. Each section follows the pattern: **symptom → cause → fix**.
+This guide covers the most common problems encountered when installing, extracting, and using Woods. Each section follows the pattern: **symptom → cause → fix**.
 
 ---
 
@@ -8,16 +8,16 @@ This guide covers the most common problems encountered when installing, extracti
 
 ### Extraction produces empty or incomplete output
 
-**Symptom:** Running `rake codebase_index:extract` completes without errors but produces fewer units than expected, or only some model types appear.
+**Symptom:** Running `rake woods:extract` completes without errors but produces fewer units than expected, or only some model types appear.
 
-**Cause:** `eager_load!` failed silently partway through loading your application. Zeitwerk processes directories alphabetically — if a directory early in the alphabet (e.g., `app/graphql/`) fails to load due to a missing gem, Zeitwerk aborts that pass and never reaches `app/models/`. CodebaseIndex detects this and falls back to per-directory loading, but some units may still be missing.
+**Cause:** `eager_load!` failed silently partway through loading your application. Zeitwerk processes directories alphabetically — if a directory early in the alphabet (e.g., `app/graphql/`) fails to load due to a missing gem, Zeitwerk aborts that pass and never reaches `app/models/`. Woods detects this and falls back to per-directory loading, but some units may still be missing.
 
 **Fix:**
 
 1. Check for `NameError` or `LoadError` in the extraction output:
 
 ```bash
-bundle exec rake codebase_index:extract 2>&1 | grep -i "error\|uninitialized"
+bundle exec rake woods:extract 2>&1 | grep -i "error\|uninitialized"
 ```
 
 2. Either install the missing gem(s) referenced in the error, or exclude the problem directory from eager loading:
@@ -35,19 +35,19 @@ config.eager_load_paths -= [Rails.root.join('app/graphql')]
 
 **Symptom:** Running a rake task fails immediately with `NameError: uninitialized constant Rails` or a similar error about ActiveRecord, ApplicationRecord, or other Rails constants.
 
-**Cause:** Extraction requires a booted Rails environment. CodebaseIndex uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) — these APIs do not exist outside a running Rails app.
+**Cause:** Extraction requires a booted Rails environment. Woods uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) — these APIs do not exist outside a running Rails app.
 
 **Fix:** Always run extraction rake tasks inside your Rails app:
 
 ```bash
 # Correct — run from Rails app root
-bundle exec rake codebase_index:extract
+bundle exec rake woods:extract
 
 # Docker — run inside container
-docker compose exec app bundle exec rake codebase_index:extract
+docker compose exec app bundle exec rake woods:extract
 ```
 
-CodebaseIndex cannot extract from source files alone. It is not a static analysis tool.
+Woods cannot extract from source files alone. It is not a static analysis tool.
 
 ---
 
@@ -68,7 +68,7 @@ config.include_framework_sources = false
 For subsequent runs, use incremental mode instead of full extraction:
 
 ```bash
-bundle exec rake codebase_index:incremental
+bundle exec rake woods:incremental
 ```
 
 Incremental extraction only re-extracts files that changed since the last run. It skips unchanged units and is typically 5-10× faster.
@@ -92,7 +92,7 @@ Incremental extraction only re-extracts files that changed since the last run. I
 ls app/decorators/ app/state_machines/ 2>/dev/null
 
 # Check extraction output for that type
-ls tmp/codebase_index/decorators/ tmp/codebase_index/state_machines/ 2>/dev/null
+ls tmp/woods/decorators/ tmp/woods/state_machines/ 2>/dev/null
 ```
 
 Note: `config.extractors` controls the **retrieval scope** (which types appear in search results), not which extractors run during extraction. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
@@ -101,7 +101,7 @@ Note: `config.extractors` controls the **retrieval scope** (which types appear i
 
 ### Incremental extraction misses changes to routes, middleware, or engines
 
-**Symptom:** After changing your routes file or adding a middleware, running `rake codebase_index:incremental` doesn't update those units.
+**Symptom:** After changing your routes file or adding a middleware, running `rake woods:incremental` doesn't update those units.
 
 **Cause:** Some unit types do not map to individual files and cannot be incrementally updated. The following types require a full extraction to update:
 
@@ -116,7 +116,7 @@ Note: `config.extractors` controls the **retrieval scope** (which types appear i
 **Fix:** Run a full extraction when these types change:
 
 ```bash
-bundle exec rake codebase_index:extract
+bundle exec rake woods:extract
 ```
 
 ---
@@ -125,7 +125,7 @@ bundle exec rake codebase_index:extract
 
 **Symptom:** Units have `last_modified_at: null` or `change_frequency: 0` in the JSON output.
 
-**Cause:** The git repository is a shallow clone (common in CI with `fetch-depth: 1`). CodebaseIndex uses `git log` to compute change frequency — a shallow clone has no history to analyze.
+**Cause:** The git repository is a shallow clone (common in CI with `fetch-depth: 1`). Woods uses `git log` to compute change frequency — a shallow clone has no history to analyze.
 
 **Fix:** Fetch at least two commits:
 
@@ -142,7 +142,7 @@ bundle exec rake codebase_index:extract
 
 ### "No manifest.json" error when starting the Index Server
 
-**Symptom:** `codebase-index-mcp-start` exits with an error like `No manifest.json found at /path/to/...` even though extraction completed.
+**Symptom:** `woods-mcp-start` exits with an error like `No manifest.json found at /path/to/...` even though extraction completed.
 
 **Cause:** The Index Server is using the container-internal path rather than the host-side path to the volume-mounted output. The server runs on the host and cannot access container filesystem paths.
 
@@ -152,8 +152,8 @@ bundle exec rake codebase_index:extract
 {
   "mcpServers": {
     "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     }
   }
 }
@@ -162,7 +162,7 @@ bundle exec rake codebase_index:extract
 Verify the output is accessible from the host:
 
 ```bash
-ls ./tmp/codebase_index/manifest.json
+ls ./tmp/woods/manifest.json
 ```
 
 If this fails, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
@@ -180,20 +180,20 @@ If this fails, your Docker volume mount is not configured correctly. See [DOCKER
 1. Check stderr for errors:
 
 ```bash
-codebase-index-mcp-start ./tmp/codebase_index 2>&1
+woods-mcp-start ./tmp/woods 2>&1
 ```
 
 2. Ensure the gem's executables are installed:
 
 ```bash
 bundle install
-which codebase-index-mcp-start
+which woods-mcp-start
 ```
 
 3. For the Console Server, run the rake task directly to see error output:
 
 ```bash
-bundle exec rake codebase_index:console
+bundle exec rake woods:console
 # Should hang waiting for MCP protocol input — if it exits, check the error
 ```
 
@@ -203,12 +203,12 @@ bundle exec rake codebase_index:console
 
 **Symptom:** Tools like `console_diagnose_model`, `console_eval`, or `console_sql` return an error saying they are unsupported.
 
-**Cause:** The embedded console mode — launched via `rake codebase_index:console` or `docker compose exec ... rake codebase_index:console` — only exposes the 9 Tier 1 read-only tools. Tiers 2-4 require the bridge architecture.
+**Cause:** The embedded console mode — launched via `rake woods:console` or `docker compose exec ... rake woods:console` — only exposes the 9 Tier 1 read-only tools. Tiers 2-4 require the bridge architecture.
 
 **Fix:** Switch to the bridge setup. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) Option D for configuration. Briefly:
 
-1. Create `~/.codebase_index/console.yml` with your connection mode
-2. Update `.mcp.json` to use `codebase-console-mcp` instead of `docker exec ... rake`
+1. Create `~/.woods/console.yml` with your connection mode
+2. Update `.mcp.json` to use `woods-console-mcp` instead of `docker exec ... rake`
 
 ---
 
@@ -216,7 +216,7 @@ bundle exec rake codebase_index:console
 
 **Symptom:** The MCP client reports protocol errors, malformed JSON, or unexpected tokens.
 
-**Cause:** Rails boot emits output to stdout (OpenTelemetry notices, gem warnings, initializer `puts` calls). The `codebase_index:console` rake task redirects stdout to stderr before Rails boots, but custom initializers that print output before this capture can break the MCP protocol.
+**Cause:** Rails boot emits output to stdout (OpenTelemetry notices, gem warnings, initializer `puts` calls). The `woods:console` rake task redirects stdout to stderr before Rails boots, but custom initializers that print output before this capture can break the MCP protocol.
 
 **Fix:**
 
@@ -225,7 +225,7 @@ bundle exec rake codebase_index:console
 3. Test by running the rake task and isolating streams:
 
 ```bash
-bundle exec rake codebase_index:console 2>/dev/null
+bundle exec rake woods:console 2>/dev/null
 # MCP protocol output (stdout) should be valid JSON-RPC
 ```
 
@@ -254,7 +254,7 @@ bundle exec rake codebase_index:console 2>/dev/null
 **Fix:**
 
 1. Check server stderr for crash output.
-2. Use `codebase-index-mcp-start` (the self-healing wrapper) instead of `codebase-index-mcp` directly — it restarts the server on crash.
+2. Use `woods-mcp-start` (the self-healing wrapper) instead of `woods-mcp` directly — it restarts the server on crash.
 3. For Docker setups, ensure the container stays running: `docker compose exec -d app tail -f /dev/null` keeps it alive.
 
 ---
@@ -285,8 +285,8 @@ console_sample(model: "Order", scope: { created_at: { gte: "2025-01-01" } })
 **Fix:** Run a full re-index to regenerate all embeddings with the new model:
 
 ```bash
-bundle exec rake codebase_index:extract
-bundle exec rake codebase_index:embed
+bundle exec rake woods:extract
+bundle exec rake woods:embed
 ```
 
 `IndexValidator` detects the dimension mismatch and will warn you before queries fail. If you see the warning, re-index before the mismatch causes runtime errors.
@@ -305,7 +305,7 @@ For 401 — set the API key:
 
 ```bash
 export OPENAI_API_KEY=sk-...
-bundle exec rake codebase_index:embed
+bundle exec rake woods:embed
 ```
 
 Or configure it in your initializer:
@@ -350,10 +350,10 @@ config.embedding_options = { base_url: 'http://localhost:11434' }
 CREATE EXTENSION vector;
 ```
 
-Then run the CodebaseIndex pgvector generator if you haven't already:
+Then run the Woods pgvector generator if you haven't already:
 
 ```bash
-bundle exec rails generate codebase_index:pgvector
+bundle exec rails generate woods:pgvector
 bundle exec rails db:migrate
 ```
 
@@ -374,7 +374,7 @@ docker run -p 6333:6333 qdrant/qdrant
 Or update your `vector_store_options` to point at the correct host/port:
 
 ```ruby
-config.vector_store_options = { url: 'http://localhost:6333', collection: 'codebase_index' }
+config.vector_store_options = { url: 'http://localhost:6333', collection: 'woods' }
 ```
 
 ---
@@ -388,7 +388,7 @@ config.vector_store_options = { url: 'http://localhost:6333', collection: 'codeb
 **Fix:** Use one extraction process at a time, or switch to a pgvector backend that supports concurrent access:
 
 ```ruby
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 ```
 
 ---
@@ -397,9 +397,9 @@ CodebaseIndex.configure_with_preset(:postgresql)
 
 ### Extraction output not visible on the host
 
-**Symptom:** `ls tmp/codebase_index/manifest.json` fails on the host after successful extraction in the container.
+**Symptom:** `ls tmp/woods/manifest.json` fails on the host after successful extraction in the container.
 
-**Cause:** The extraction output directory (`tmp/codebase_index/`) inside the container is not volume-mounted to the host.
+**Cause:** The extraction output directory (`tmp/woods/`) inside the container is not volume-mounted to the host.
 
 **Fix:** Add a volume mount to your `docker-compose.yml`:
 
@@ -407,10 +407,10 @@ CodebaseIndex.configure_with_preset(:postgresql)
 services:
   app:
     volumes:
-      - .:/app    # Full app mount — output lands at ./tmp/codebase_index/
+      - .:/app    # Full app mount — output lands at ./tmp/woods/
 ```
 
-Then re-run extraction. Verify on the host with `ls tmp/codebase_index/manifest.json`.
+Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`.
 
 ---
 
@@ -428,7 +428,7 @@ Then re-run extraction. Verify on the host with `ls tmp/codebase_index/manifest.
     "codebase-console": {
       "command": "docker",
       "args": ["compose", "exec", "-i", "app",
-               "bundle", "exec", "rake", "codebase_index:console"]
+               "bundle", "exec", "rake", "woods:console"]
     }
   }
 }
@@ -454,15 +454,15 @@ Update the container name in your configuration to match exactly.
 
 ### Path confusion: Index Server uses container path
 
-**Symptom:** Index Server starts but fails to load units, or `codebase-index-mcp-start` reports a missing manifest.
+**Symptom:** Index Server starts but fails to load units, or `woods-mcp-start` reports a missing manifest.
 
-**Cause:** The `.mcp.json` is pointing at the container-internal path (e.g., `/app/tmp/codebase_index`) instead of the host path.
+**Cause:** The `.mcp.json` is pointing at the container-internal path (e.g., `/app/tmp/woods`) instead of the host path.
 
-**Fix:** Use the host path in `.mcp.json`. With a standard `.:/app` volume mount, the output is at `./tmp/codebase_index` on the host:
+**Fix:** Use the host path in `.mcp.json`. With a standard `.:/app` volume mount, the output is at `./tmp/woods` on the host:
 
 ```json
-"args": ["./tmp/codebase_index"]    ✓ host path
-"args": ["/app/tmp/codebase_index"]  ✗ container path — Index Server cannot read this
+"args": ["./tmp/woods"]    ✓ host path
+"args": ["/app/tmp/woods"]  ✗ container path — Index Server cannot read this
 ```
 
 ---
@@ -471,7 +471,7 @@ Update the container name in your configuration to match exactly.
 
 ### 401 Unauthorized from Notion API
 
-**Symptom:** `rake codebase_index:notion_sync` fails with a 401 error.
+**Symptom:** `rake woods:notion_sync` fails with a 401 error.
 
 **Cause:** The Notion API token is missing or invalid.
 
@@ -479,7 +479,7 @@ Update the container name in your configuration to match exactly.
 
 ```bash
 export NOTION_API_TOKEN=secret_...
-bundle exec rake codebase_index:notion_sync
+bundle exec rake woods:notion_sync
 ```
 
 Or configure it in your initializer:
@@ -516,7 +516,7 @@ config.notion_database_ids = {
 
 **Cause:** The Notion database schema doesn't match the expected property structure. This happens when the database was created manually with different property names or types.
 
-**Fix:** Use the CodebaseIndex-generated database template. Re-create the database or update its properties to match the expected schema. Check the error message for which property name caused the mismatch.
+**Fix:** Use the Woods-generated database template. Re-create the database or update its properties to match the expected schema. Check the error message for which property name caused the mismatch.
 
 ---
 

@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extracted_unit'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/metadata_store'
-require 'codebase_index/storage/graph_store'
-require 'codebase_index/retriever'
-require 'codebase_index/formatting/claude_adapter'
-require 'codebase_index/formatting/gpt_adapter'
-require 'codebase_index/formatting/human_adapter'
-require 'codebase_index/formatting/generic_adapter'
+require 'woods/extracted_unit'
+require 'woods/dependency_graph'
+require 'woods/storage/vector_store'
+require 'woods/storage/metadata_store'
+require 'woods/storage/graph_store'
+require 'woods/retriever'
+require 'woods/formatting/claude_adapter'
+require 'woods/formatting/gpt_adapter'
+require 'woods/formatting/human_adapter'
+require 'woods/formatting/generic_adapter'
 
 RSpec.describe 'Retrieval + Formatting Integration', :integration do
   # ── Fake Embedding Provider ──────────────────────────────────────
@@ -20,7 +20,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
   let(:embedding_provider) do
     dims = dimensions
     Class.new do
-      include CodebaseIndex::Embedding::Provider::Interface
+      include Woods::Embedding::Provider::Interface
 
       define_method(:dimensions) { dims }
       define_method(:model_name) { 'fake-test' }
@@ -40,9 +40,9 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   # ── Store Setup ──────────────────────────────────────────────────
 
-  let(:vector_store) { CodebaseIndex::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { CodebaseIndex::Storage::MetadataStore::SQLite.new(':memory:') }
-  let(:graph_store) { CodebaseIndex::Storage::GraphStore::Memory.new }
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
 
   # ── Fixture Data ─────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
   # ── Retriever ────────────────────────────────────────────────────
 
   let(:retriever) do
-    CodebaseIndex::Retriever.new(
+    Woods::Retriever.new(
       vector_store: vector_store,
       metadata_store: metadata_store,
       graph_store: graph_store,
@@ -90,7 +90,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   # Build an AssembledContext from retrieval result for formatting
   let(:assembled_context) do
-    CodebaseIndex::Retrieval::AssembledContext.new(
+    Woods::Retrieval::AssembledContext.new(
       context: retrieval_result.context,
       tokens_used: retrieval_result.tokens_used,
       budget: retrieval_result.budget,
@@ -101,7 +101,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   # ── ClaudeAdapter ────────────────────────────────────────────────
 
-  describe CodebaseIndex::Formatting::ClaudeAdapter do
+  describe Woods::Formatting::ClaudeAdapter do
     let(:adapter) { described_class.new }
 
     it 'produces XML-formatted output' do
@@ -153,7 +153,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   # ── GptAdapter ───────────────────────────────────────────────────
 
-  describe CodebaseIndex::Formatting::GptAdapter do
+  describe Woods::Formatting::GptAdapter do
     let(:adapter) { described_class.new }
 
     it 'produces Markdown-formatted output' do
@@ -187,7 +187,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   # ── HumanAdapter ─────────────────────────────────────────────────
 
-  describe CodebaseIndex::Formatting::HumanAdapter do
+  describe Woods::Formatting::HumanAdapter do
     let(:adapter) { described_class.new }
 
     it 'produces box-drawing formatted output' do
@@ -222,7 +222,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   # ── GenericAdapter ───────────────────────────────────────────────
 
-  describe CodebaseIndex::Formatting::GenericAdapter do
+  describe Woods::Formatting::GenericAdapter do
     let(:adapter) { described_class.new }
 
     it 'produces plain text output' do
@@ -257,10 +257,10 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
   describe 'cross-adapter consistency' do
     let(:adapters) do
       [
-        CodebaseIndex::Formatting::ClaudeAdapter.new,
-        CodebaseIndex::Formatting::GptAdapter.new,
-        CodebaseIndex::Formatting::HumanAdapter.new,
-        CodebaseIndex::Formatting::GenericAdapter.new
+        Woods::Formatting::ClaudeAdapter.new,
+        Woods::Formatting::GptAdapter.new,
+        Woods::Formatting::HumanAdapter.new,
+        Woods::Formatting::GenericAdapter.new
       ]
     end
 
@@ -285,7 +285,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
   describe 'Retriever with formatter callback' do
     it 'applies a formatter to the context' do
-      formatted_retriever = CodebaseIndex::Retriever.new(
+      formatted_retriever = Woods::Retriever.new(
         vector_store: vector_store,
         metadata_store: metadata_store,
         graph_store: graph_store,
@@ -302,7 +302,7 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
   # ── Helpers ──────────────────────────────────────────────────────
 
   def build_unit(type:, identifier:, file_path:, source_code:, metadata: {}, dependencies: [])
-    unit = CodebaseIndex::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
+    unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
     unit.source_code = source_code
     unit.metadata = metadata
     unit.dependencies = dependencies

@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'json'
-require 'codebase_index/session_tracer/redis_store'
+require 'woods/session_tracer/redis_store'
 
 # Minimal in-memory Redis mock for unit testing.
 # Implements only the subset of Redis commands used by RedisStore.
@@ -59,7 +59,7 @@ end
 # Pretend Redis is defined so RedisStore doesn't raise
 Redis = MockRedis unless defined?(Redis)
 
-RSpec.describe CodebaseIndex::SessionTracer::RedisStore do
+RSpec.describe Woods::SessionTracer::RedisStore do
   let(:redis) { MockRedis.new }
   let(:store) { described_class.new(redis: redis) }
 

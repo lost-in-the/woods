@@ -8,9 +8,9 @@ RSpec.shared_context 'extractor setup' do
   let(:logger) { double('Logger', error: nil, warn: nil, debug: nil, info: nil) }
 
   before do
-    @_real_model_name_cache = CodebaseIndex::ModelNameCache
+    @_real_model_name_cache = Woods::ModelNameCache
     stub_const('Rails', double('Rails', root: rails_root, logger: logger))
-    stub_const('CodebaseIndex::ModelNameCache', double('ModelNameCache', model_names_regex: /(?!)/, reset!: nil))
+    stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names_regex: /(?!)/, reset!: nil))
   end
 
   after do

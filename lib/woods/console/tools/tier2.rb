@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Console
     module Tools
       # Tier 2: Domain-aware tools for querying live Rails data.

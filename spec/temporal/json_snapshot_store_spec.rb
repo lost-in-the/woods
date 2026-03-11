@@ -3,9 +3,9 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/temporal/json_snapshot_store'
+require 'woods/temporal/json_snapshot_store'
 
-RSpec.describe CodebaseIndex::Temporal::JsonSnapshotStore do
+RSpec.describe Woods::Temporal::JsonSnapshotStore do
   let(:tmpdir) { Dir.mktmpdir }
 
   after { FileUtils.remove_entry(tmpdir) }

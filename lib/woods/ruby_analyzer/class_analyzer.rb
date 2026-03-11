@@ -4,7 +4,7 @@ require_relative '../ast/parser'
 require_relative '../extracted_unit'
 require_relative 'fqn_builder'
 
-module CodebaseIndex
+module Woods
   module RubyAnalyzer
     # Extracts class and module definitions from Ruby source code using the AST layer.
     #

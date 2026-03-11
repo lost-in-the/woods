@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/adapters/good_job_adapter'
+require 'woods/console/adapters/good_job_adapter'
 
-RSpec.describe CodebaseIndex::Console::Adapters::GoodJobAdapter do
+RSpec.describe Woods::Console::Adapters::GoodJobAdapter do
   subject(:adapter) { described_class.new }
 
   describe '.available?' do

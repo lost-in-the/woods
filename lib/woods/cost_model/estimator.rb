@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module CostModel
     # Unified cost estimator that combines embedding, storage, and query costs
     # into a single breakdown for a given configuration.

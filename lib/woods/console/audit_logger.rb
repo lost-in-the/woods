@@ -3,7 +3,7 @@
 require 'json'
 require 'fileutils'
 
-module CodebaseIndex
+module Woods
   module Console
     # Logs all Tier 4 tool invocations to a JSONL file.
     #

@@ -3,7 +3,7 @@
 require_relative '../mcp/tool_response_renderer'
 require_relative '../mcp/renderers/json_renderer'
 
-module CodebaseIndex
+module Woods
   module Console
     # Renders Console MCP tool responses with smart auto-detection of data shape.
     #

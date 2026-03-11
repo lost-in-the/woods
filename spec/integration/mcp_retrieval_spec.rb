@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/extracted_unit'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/metadata_store'
-require 'codebase_index/storage/graph_store'
-require 'codebase_index/retriever'
-require 'codebase_index/mcp/server'
-require 'codebase_index/flow_assembler'
+require 'woods'
+require 'woods/extracted_unit'
+require 'woods/dependency_graph'
+require 'woods/storage/vector_store'
+require 'woods/storage/metadata_store'
+require 'woods/storage/graph_store'
+require 'woods/retriever'
+require 'woods/mcp/server'
+require 'woods/flow_assembler'
 
 RSpec.describe 'MCP Retrieval Tools Integration', :integration do
-  let(:fixture_dir) { File.expand_path('../fixtures/codebase_index', __dir__) }
+  let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
 
   # ── Fake Embedding Provider ──────────────────────────────────────
 
@@ -21,7 +21,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   let(:embedding_provider) do
     dims = dimensions
     Class.new do
-      include CodebaseIndex::Embedding::Provider::Interface
+      include Woods::Embedding::Provider::Interface
 
       define_method(:dimensions) { dims }
       define_method(:model_name) { 'fake-test' }
@@ -41,9 +41,9 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
 
   # ── Store Setup ──────────────────────────────────────────────────
 
-  let(:vector_store) { CodebaseIndex::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { CodebaseIndex::Storage::MetadataStore::SQLite.new(':memory:') }
-  let(:graph_store) { CodebaseIndex::Storage::GraphStore::Memory.new }
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
 
   # ── Fixture Data ─────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   # ── Retriever ────────────────────────────────────────────────────
 
   let(:retriever) do
-    CodebaseIndex::Retriever.new(
+    Woods::Retriever.new(
       vector_store: vector_store,
       metadata_store: metadata_store,
       graph_store: graph_store,
@@ -98,7 +98,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   # ── MCP Server with real retriever ───────────────────────────────
 
   let(:server) do
-    CodebaseIndex::MCP::Server.build(
+    Woods::MCP::Server.build(
       index_dir: fixture_dir,
       retriever: retriever,
       response_format: :json
@@ -177,7 +177,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   describe 'tool: trace_flow' do
     let(:mock_flow_doc) do
       instance_double(
-        'CodebaseIndex::FlowDocument',
+        'Woods::FlowDocument',
         to_h: {
           entry_point: 'PostsController#create',
           route: { verb: 'POST', path: '/posts' },
@@ -191,13 +191,13 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
     end
 
     let(:mock_assembler) do
-      instance_double('CodebaseIndex::FlowAssembler').tap do |a|
+      instance_double('Woods::FlowAssembler').tap do |a|
         allow(a).to receive(:assemble).and_return(mock_flow_doc)
       end
     end
 
     before do
-      allow(CodebaseIndex::FlowAssembler).to receive(:new).and_return(mock_assembler)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(mock_assembler)
     end
 
     it 'returns a flow document for a valid entry point' do
@@ -242,7 +242,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   describe 'retrieve then trace workflow' do
     let(:mock_flow_doc) do
       instance_double(
-        'CodebaseIndex::FlowDocument',
+        'Woods::FlowDocument',
         to_h: {
           entry_point: 'PostsController#create',
           route: { verb: 'POST', path: '/posts' },
@@ -254,13 +254,13 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
     end
 
     let(:mock_assembler) do
-      instance_double('CodebaseIndex::FlowAssembler').tap do |a|
+      instance_double('Woods::FlowAssembler').tap do |a|
         allow(a).to receive(:assemble).and_return(mock_flow_doc)
       end
     end
 
     before do
-      allow(CodebaseIndex::FlowAssembler).to receive(:new).and_return(mock_assembler)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(mock_assembler)
     end
 
     it 'can retrieve context then trace a flow from the same server' do
@@ -279,7 +279,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
   # ── Helpers ──────────────────────────────────────────────────────
 
   def build_unit(type:, identifier:, file_path:, source_code:, metadata: {}, dependencies: [])
-    unit = CodebaseIndex::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
+    unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
     unit.source_code = source_code
     unit.metadata = metadata
     unit.dependencies = dependencies

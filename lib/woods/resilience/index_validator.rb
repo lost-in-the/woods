@@ -3,7 +3,7 @@
 require 'json'
 require_relative '../filename_utils'
 
-module CodebaseIndex
+module Woods
   module Resilience
     # Validates the integrity of a codebase index output directory.
     #
@@ -14,11 +14,11 @@ module CodebaseIndex
     # - No stale unit files exist that aren't listed in the index
     #
     # @example
-    #   validator = IndexValidator.new(index_dir: "tmp/codebase_index")
+    #   validator = IndexValidator.new(index_dir: "tmp/woods")
     #   report = validator.validate
     #   puts report.errors if !report.valid?
     class IndexValidator
-      include CodebaseIndex::FilenameUtils
+      include Woods::FilenameUtils
 
       # Report produced by {#validate}.
       #

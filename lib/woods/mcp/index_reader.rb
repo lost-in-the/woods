@@ -6,7 +6,7 @@ require 'json'
 require 'pathname'
 require 'set'
 
-module CodebaseIndex
+module Woods
   module MCP
     # Reads extraction output from disk for the MCP server.
     #
@@ -14,7 +14,7 @@ module CodebaseIndex
     # Builds an identifier index from _index.json files for fast lookups.
     #
     # @example
-    #   reader = IndexReader.new("/path/to/codebase_index")
+    #   reader = IndexReader.new("/path/to/woods")
     #   reader.find_unit("Post")      # => Hash (full unit data)
     #   reader.list_units(type: "model") # => Array<Hash>
     #
@@ -80,11 +80,11 @@ module CodebaseIndex
         end
       end
 
-      # @return [CodebaseIndex::DependencyGraph] Graph loaded from disk
+      # @return [Woods::DependencyGraph] Graph loaded from disk
       def dependency_graph
         @dependency_graph ||= begin
           data = parse_json('dependency_graph.json')
-          CodebaseIndex::DependencyGraph.from_h(data)
+          Woods::DependencyGraph.from_h(data)
         end
       end
 

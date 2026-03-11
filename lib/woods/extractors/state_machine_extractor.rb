@@ -3,7 +3,7 @@
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # StateMachineExtractor scans app/models for state machine DSL definitions.
     #

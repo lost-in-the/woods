@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Evaluation
     # Runs simple baseline strategies for comparison against the full
     # retrieval pipeline.

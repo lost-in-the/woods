@@ -9,11 +9,11 @@ require 'active_support/core_ext/time'
 require 'active_support/core_ext/enumerable'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
-require 'codebase_index'
-require 'codebase_index/extractor'
+require 'woods'
+require 'woods/extractor'
 
-RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
-  let(:tmpdir) { Dir.mktmpdir('codebase_index_test') }
+RSpec.describe Woods::Extractor, 'concurrent extraction' do
+  let(:tmpdir) { Dir.mktmpdir('woods_test') }
   let(:rails_root) { Pathname.new(tmpdir) }
   let(:output_dir) { File.join(tmpdir, 'output') }
   let(:extractor) { described_class.new(output_dir: output_dir) }
@@ -34,21 +34,21 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
 
   after do
     FileUtils.rm_rf(tmpdir)
-    CodebaseIndex.configuration = CodebaseIndex::Configuration.new
-    CodebaseIndex::ModelNameCache.reset!
+    Woods.configuration = Woods::Configuration.new
+    Woods::ModelNameCache.reset!
   end
 
   # ── Configuration defaults ──────────────────────────────────────────
 
   describe 'concurrent_extraction config flag' do
     it 'defaults to false' do
-      config = CodebaseIndex::Configuration.new
+      config = Woods::Configuration.new
       expect(config.concurrent_extraction).to be false
     end
 
     it 'can be set to true' do
-      CodebaseIndex.configure { |c| c.concurrent_extraction = true }
-      expect(CodebaseIndex.configuration.concurrent_extraction).to be true
+      Woods.configure { |c| c.concurrent_extraction = true }
+      expect(Woods.configuration.concurrent_extraction).to be true
     end
   end
 
@@ -56,12 +56,12 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
 
   describe 'extraction parity' do
     let(:fake_units) do
-      user = CodebaseIndex::ExtractedUnit.new(
+      user = Woods::ExtractedUnit.new(
         identifier: 'User', type: :model, file_path: '/app/models/user.rb'
       )
       user.source_code = 'class User; end'
 
-      auth = CodebaseIndex::ExtractedUnit.new(
+      auth = Woods::ExtractedUnit.new(
         identifier: 'AuthService', type: :service, file_path: '/app/services/auth.rb'
       )
       auth.source_code = 'class AuthService; end'
@@ -70,18 +70,18 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
     end
 
     before do
-      CodebaseIndex::Extractor::EXTRACTORS.each do |type, klass|
+      Woods::Extractor::EXTRACTORS.each do |type, klass|
         extractor_double = instance_double(klass, extract_all: fake_units.fetch(type, []))
         allow(klass).to receive(:new).and_return(extractor_double)
       end
 
-      allow(CodebaseIndex::ModelNameCache).to receive(:model_names).and_return([])
-      allow(CodebaseIndex::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return([])
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
     end
 
     it 'produces the same unit identifiers in both modes' do
       # Sequential
-      CodebaseIndex.configure { |c| c.concurrent_extraction = false }
+      Woods.configure { |c| c.concurrent_extraction = false }
       sequential_results = extractor.extract_all
       sequential_ids = sequential_results.values.flatten.map(&:identifier).sort
 
@@ -90,7 +90,7 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
       allow(concurrent_extractor).to receive(:safe_eager_load!)
       allow(concurrent_extractor).to receive(:git_available?).and_return(false)
 
-      CodebaseIndex.configure { |c| c.concurrent_extraction = true }
+      Woods.configure { |c| c.concurrent_extraction = true }
       concurrent_results = concurrent_extractor.extract_all
       concurrent_ids = concurrent_results.values.flatten.map(&:identifier).sort
 
@@ -98,7 +98,7 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
     end
 
     it 'registers all units in the dependency graph when concurrent' do
-      CodebaseIndex.configure { |c| c.concurrent_extraction = true }
+      Woods.configure { |c| c.concurrent_extraction = true }
       extractor.extract_all
 
       graph = extractor.dependency_graph
@@ -113,25 +113,25 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
 
   describe 'ModelNameCache pre-computation' do
     before do
-      CodebaseIndex::Extractor::EXTRACTORS.each_value do |klass|
+      Woods::Extractor::EXTRACTORS.each_value do |klass|
         allow(klass).to receive(:new).and_return(double(extract_all: []))
       end
     end
 
     it 'warms ModelNameCache before spawning threads in concurrent mode' do
-      CodebaseIndex.configure { |c| c.concurrent_extraction = true }
+      Woods.configure { |c| c.concurrent_extraction = true }
 
       cache_warmed_at = nil
       first_thread_at = nil
 
-      allow(CodebaseIndex::ModelNameCache).to receive(:model_names) do
+      allow(Woods::ModelNameCache).to receive(:model_names) do
         cache_warmed_at ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
         []
       end
-      allow(CodebaseIndex::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
 
       # Track when the first thread-spawned extractor runs
-      CodebaseIndex::Extractor::EXTRACTORS.each_value do |klass|
+      Woods::Extractor::EXTRACTORS.each_value do |klass|
         extractor_double = double(extract_all: [])
         allow(extractor_double).to receive(:extract_all) do
           first_thread_at ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -152,14 +152,14 @@ RSpec.describe CodebaseIndex::Extractor, 'concurrent extraction' do
 
   describe 'concurrent error isolation' do
     before do
-      allow(CodebaseIndex::ModelNameCache).to receive(:model_names).and_return([])
-      allow(CodebaseIndex::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return([])
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
     end
 
     it 'isolates extractor failures without crashing other threads' do
-      CodebaseIndex.configure { |c| c.concurrent_extraction = true }
+      Woods.configure { |c| c.concurrent_extraction = true }
 
-      CodebaseIndex::Extractor::EXTRACTORS.each do |type, klass|
+      Woods::Extractor::EXTRACTORS.each do |type, klass|
         if type == :models
           bad_extractor = double('BadExtractor')
           allow(bad_extractor).to receive(:extract_all).and_raise(StandardError, 'boom')

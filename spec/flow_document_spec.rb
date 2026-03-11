@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/flow_document'
+require 'woods/flow_document'
 
-RSpec.describe CodebaseIndex::FlowDocument do
+RSpec.describe Woods::FlowDocument do
   let(:steps) do
     [
       {

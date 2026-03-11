@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Observability
     # Probes configured components and reports overall system health.
     #

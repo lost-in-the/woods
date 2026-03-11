@@ -3,10 +3,10 @@
 require 'json'
 require 'net/http'
 require 'uri'
-require 'codebase_index'
+require 'woods'
 require_relative 'rate_limiter'
 
-module CodebaseIndex
+module Woods
   module Notion
     # Thin wrapper around the Notion REST API (v2022-06-28).
     #
@@ -124,7 +124,7 @@ module CodebaseIndex
       # @param path [String] API path (appended to BASE_URL)
       # @param body [Hash, nil] Request body
       # @return [Hash] Parsed JSON response
-      # @raise [CodebaseIndex::Error] on non-success responses (after retries for 429)
+      # @raise [Woods::Error] on non-success responses (after retries for 429)
       def request(method, path, body = nil)
         retries = 0
 
@@ -147,14 +147,14 @@ module CodebaseIndex
       # Execute HTTP with rate limiting and network error retry.
       #
       # @return [Net::HTTPResponse]
-      # @raise [CodebaseIndex::Error] on persistent network failures
+      # @raise [Woods::Error] on persistent network failures
       def execute_with_retry(method, path, body)
         attempts = 0
         begin
           @rate_limiter.throttle { execute_http(method, path, body) }
         rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
           attempts += 1
-          raise CodebaseIndex::Error, "Network error after #{attempts} retries: #{e.message}" if attempts >= MAX_RETRIES
+          raise Woods::Error, "Network error after #{attempts} retries: #{e.message}" if attempts >= MAX_RETRIES
 
           sleep(2**attempts)
           retry
@@ -163,7 +163,7 @@ module CodebaseIndex
 
       # Raise a descriptive error from a non-success Notion response.
       #
-      # @raise [CodebaseIndex::Error]
+      # @raise [Woods::Error]
       def raise_api_error(response)
         parsed = begin
           JSON.parse(response.body)
@@ -171,7 +171,7 @@ module CodebaseIndex
           { 'message' => "Unparseable response body: #{response.body&.slice(0, 200)}" }
         end
         message = parsed['message'] || 'Unknown error'
-        raise CodebaseIndex::Error, "Notion API error #{response.code}: #{message}"
+        raise Woods::Error, "Notion API error #{response.code}: #{message}"
       end
 
       # Perform the raw HTTP request.

@@ -2,12 +2,12 @@
 
 require 'spec_helper'
 
-RSpec.describe CodebaseIndex::GraphAnalyzer do
-  let(:graph) { CodebaseIndex::DependencyGraph.new }
+RSpec.describe Woods::GraphAnalyzer do
+  let(:graph) { Woods::DependencyGraph.new }
   let(:analyzer) { described_class.new(graph) }
 
   def make_unit(type:, identifier:, file_path: nil, dependencies: [])
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: file_path || "/app/#{identifier.underscore}.rb"

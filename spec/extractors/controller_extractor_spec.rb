@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'set'
-require 'codebase_index/extractors/controller_extractor'
+require 'woods/extractors/controller_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ControllerExtractor do
+RSpec.describe Woods::Extractors::ControllerExtractor do
   # ── Test doubles ──────────────────────────────────────────────────────
   #
   # Mock ActionFilter: an object with an @actions ivar (Set of strings),

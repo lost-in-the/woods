@@ -2,7 +2,7 @@
 
 require 'set'
 
-module CodebaseIndex
+module Woods
   module RubyAnalyzer
     # Renders Mermaid-format diagrams from extracted units, dependency graphs,
     # and graph analysis data.

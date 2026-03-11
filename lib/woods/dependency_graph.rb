@@ -3,7 +3,7 @@
 require 'set'
 require 'json'
 
-module CodebaseIndex
+module Woods
   # DependencyGraph tracks relationships between code units for:
   # 1. Understanding what depends on what
   # 2. Computing "blast radius" for incremental re-indexing

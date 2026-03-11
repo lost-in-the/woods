@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/middleware_extractor'
+require 'woods/extractors/middleware_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::MiddlewareExtractor do
+RSpec.describe Woods::Extractors::MiddlewareExtractor do
   let(:logger) { double('Logger', error: nil, warn: nil, debug: nil, info: nil) }
 
   def build_middleware(name:, args: [])

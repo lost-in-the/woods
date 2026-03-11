@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Observability
     # Lightweight instrumentation wrapper that delegates to ActiveSupport::Notifications
     # when available, and falls back to a simple yield otherwise.
     #
     # @example
-    #   Instrumentation.instrument('codebase_index.extraction', unit: 'User') do
+    #   Instrumentation.instrument('woods.extraction', unit: 'User') do
     #     extract_unit(user_model)
     #   end
     #
@@ -18,7 +18,7 @@ module CodebaseIndex
       # Delegates to ActiveSupport::Notifications.instrument when available.
       # Otherwise, yields the block directly.
       #
-      # @param event [String] Event name (e.g., 'codebase_index.extraction')
+      # @param event [String] Event name (e.g., 'woods.extraction')
       # @param payload [Hash] Additional data to include with the event
       # @yield [payload] The block to instrument
       # @return [Object] The return value of the block

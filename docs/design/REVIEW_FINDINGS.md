@@ -26,14 +26,14 @@ Date: 2026-02-09
 ## Critical Code Bugs
 
 ### B-001: ✅ EXTRACTORS key mismatch breaks incremental extraction — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Severity:** Critical
 **Resolution:** `TYPE_TO_EXTRACTOR_KEY` mapping handles all types. Incremental extraction path is fully functional.
 
 ~~The `EXTRACTORS` constant uses plural type keys but `re_extract_unit` looks up by singular type.~~
 
 ### B-002: ✅ Missing types in `re_extract_unit` — RESOLVED
-**File:** `lib/codebase_index/extractor.rb`
+**File:** `lib/woods/extractor.rb`
 **Severity:** Critical
 **Resolution:** `re_extract_unit` uses `TYPE_TO_EXTRACTOR_KEY` mapping covering all 24 extractor types including jobs, mailers, GraphQL types, and rails_source.
 
@@ -44,21 +44,21 @@ Date: 2026-02-09
 ## High Code Bugs
 
 ### B-003: API controllers silently omitted — RESOLVED
-**File:** `lib/codebase_index/extractors/controller_extractor.rb:30`
+**File:** `lib/woods/extractors/controller_extractor.rb:30`
 **Severity:** High
 **Resolution:** Fixed in prior commits. Controller discovery now includes both `ApplicationController.descendants` and `ActionController::API.descendants`, covering API-only controllers.
 
 ~~Controller discovery uses `ApplicationController.descendants`, which misses controllers inheriting from `ActionController::API`.~~
 
 ### B-004: Config `extractors` default missing types — RESOLVED
-**File:** `lib/codebase_index.rb:47`
+**File:** `lib/woods.rb:47`
 **Severity:** High
 **Resolution:** Fixed in prior commits. Default `extractors` config now includes all shipped extractors: `:models`, `:controllers`, `:services`, `:components`, `:jobs`, `:mailers`, `:graphql`, `:rails_source`.
 
 ~~The default `extractors` config only lists 4 types.~~
 
 ### B-005: Missing `app/graphql/` in incremental file patterns — RESOLVED
-**File:** `lib/tasks/codebase_index.rake`
+**File:** `lib/tasks/woods.rake`
 **Severity:** High
 **Resolution:** Fixed in prior commits. Incremental file patterns now include `app/graphql/`, `app/jobs/`, and `app/mailers/` alongside the original directories.
 
@@ -75,13 +75,13 @@ Date: 2026-02-09
 ~~Full extraction calls `Rails.application.eager_load!` but the incremental path may skip this.~~
 
 ### B-007: Token estimation bias for Ruby code
-**File:** `lib/codebase_index/extracted_unit.rb:66-69`
+**File:** `lib/woods/extracted_unit.rb:66-69`
 **Severity:** Medium
 
 The `(length / 4.0).ceil` heuristic underestimates token counts for Ruby code by approximately 15-25%. Ruby's syntax (symbols, do/end blocks, method_names_with_underscores) produces more tokens per character than natural language. This affects token budget allocation and chunking decisions.
 
 ### B-008: ViewComponent metadata uses Phlex-specific patterns — ADDRESSED
-**File:** `lib/codebase_index/extractors/phlex_extractor.rb`
+**File:** `lib/woods/extractors/phlex_extractor.rb`
 **Severity:** Medium
 **Status:** Addressed in this session. A separate `ViewComponentExtractor` was added with ViewComponent-specific metadata patterns (slots, template paths, preview classes), keeping Phlex and ViewComponent extraction independent.
 

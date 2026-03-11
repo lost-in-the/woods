@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/controller_extractor'
+require 'woods/extractors/controller_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ControllerExtractor, 'fixture specs' do
+RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
   # ── Helper to build a fake controller class with source file ──────────
 
   let(:tmp_dir) { Dir.mktmpdir }

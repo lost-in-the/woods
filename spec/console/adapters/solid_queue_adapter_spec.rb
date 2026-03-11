@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/adapters/solid_queue_adapter'
+require 'woods/console/adapters/solid_queue_adapter'
 
-RSpec.describe CodebaseIndex::Console::Adapters::SolidQueueAdapter do
+RSpec.describe Woods::Console::Adapters::SolidQueueAdapter do
   subject(:adapter) { described_class.new }
 
   describe '.available?' do

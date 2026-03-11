@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast/parser'
-require 'codebase_index/ast/method_extractor'
-require 'codebase_index/flow_analysis/operation_extractor'
+require 'woods/ast/parser'
+require 'woods/ast/method_extractor'
+require 'woods/flow_analysis/operation_extractor'
 
-RSpec.describe CodebaseIndex::FlowAnalysis::OperationExtractor do
+RSpec.describe Woods::FlowAnalysis::OperationExtractor do
   subject(:extractor) { described_class.new }
 
-  let(:parser) { CodebaseIndex::Ast::Parser.new }
-  let(:method_extractor) { CodebaseIndex::Ast::MethodExtractor.new(parser: parser) }
+  let(:parser) { Woods::Ast::Parser.new }
+  let(:method_extractor) { Woods::Ast::MethodExtractor.new(parser: parser) }
 
   def extract_method_ops(source, method_name)
     method_node = method_extractor.extract_method(source, method_name)

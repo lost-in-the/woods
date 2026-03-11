@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'pathname'
-require 'codebase_index/extractors/rails_source_extractor'
+require 'woods/extractors/rails_source_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::RailsSourceExtractor do
+RSpec.describe Woods::Extractors::RailsSourceExtractor do
   include_context 'extractor setup'
 
   before do

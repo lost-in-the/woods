@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Feedback
     # Detects patterns in retrieval feedback that suggest coverage gaps.
     #

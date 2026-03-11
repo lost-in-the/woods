@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Storage
     # VectorStore provides an interface for storing and searching embedding vectors.
     #
@@ -8,7 +8,7 @@ module CodebaseIndex
     # its methods. The {InMemory} adapter is provided for development and testing.
     #
     # @example Using the in-memory adapter
-    #   store = CodebaseIndex::Storage::VectorStore::InMemory.new
+    #   store = Woods::Storage::VectorStore::InMemory.new
     #   store.store("User", [0.1, 0.2, 0.3], { type: "model" })
     #   results = store.search([0.1, 0.2, 0.3], limit: 5)
     #

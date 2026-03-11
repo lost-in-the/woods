@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/notion/mappers/migration_mapper'
+require 'woods/notion/mappers/migration_mapper'
 
-RSpec.describe CodebaseIndex::Notion::Mappers::MigrationMapper do
+RSpec.describe Woods::Notion::Mappers::MigrationMapper do
   subject(:mapper) { described_class.new }
 
   let(:migration_units) do

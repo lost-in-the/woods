@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/session_tracer/middleware'
-require 'codebase_index/session_tracer/store'
+require 'woods/session_tracer/middleware'
+require 'woods/session_tracer/store'
 
-RSpec.describe CodebaseIndex::SessionTracer::Middleware do
-  let(:store) { instance_double(CodebaseIndex::SessionTracer::Store) }
+RSpec.describe Woods::SessionTracer::Middleware do
+  let(:store) { instance_double(Woods::SessionTracer::Store) }
   let(:inner_app) { ->(_env) { [200, { 'Content-Type' => 'text/html' }, ['OK']] } }
   let(:middleware) { described_class.new(inner_app, store: store, exclude_paths: ['/assets', '/health']) }
 

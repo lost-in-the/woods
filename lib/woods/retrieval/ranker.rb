@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Retrieval
     # Ranks search candidates using weighted signal scoring and diversity adjustment.
     #

@@ -3,7 +3,7 @@
 require 'net/http'
 require 'json'
 
-module CodebaseIndex
+module Woods
   module Embedding
     module Provider
       # OpenAI adapter for cloud embeddings via the OpenAI HTTP API.
@@ -12,7 +12,7 @@ module CodebaseIndex
       # OpenAI API key.
       #
       # @example
-      #   provider = CodebaseIndex::Embedding::Provider::OpenAI.new(api_key: ENV['OPENAI_API_KEY'])
+      #   provider = Woods::Embedding::Provider::OpenAI.new(api_key: ENV['OPENAI_API_KEY'])
       #   vector = provider.embed("class User < ApplicationRecord; end")
       #   vectors = provider.embed_batch(["text1", "text2"])
       class OpenAI
@@ -36,7 +36,7 @@ module CodebaseIndex
         #
         # @param text [String] the text to embed
         # @return [Array<Float>] the embedding vector
-        # @raise [CodebaseIndex::Error] if the API returns an error
+        # @raise [Woods::Error] if the API returns an error
         def embed(text)
           response = post_request({ model: @model, input: text })
           response['data'].first['embedding']
@@ -48,7 +48,7 @@ module CodebaseIndex
         #
         # @param texts [Array<String>] the texts to embed
         # @return [Array<Array<Float>>] array of embedding vectors
-        # @raise [CodebaseIndex::Error] if the API returns an error
+        # @raise [Woods::Error] if the API returns an error
         def embed_batch(texts)
           response = post_request({ model: @model, input: texts })
           response['data']
@@ -79,7 +79,7 @@ module CodebaseIndex
         #
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
-        # @raise [CodebaseIndex::Error] if the API returns a non-success status
+        # @raise [Woods::Error] if the API returns a non-success status
         def post_request(body)
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'
@@ -89,7 +89,7 @@ module CodebaseIndex
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise CodebaseIndex::Error, "OpenAI API error: #{response.code} #{response.body}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)
@@ -98,7 +98,7 @@ module CodebaseIndex
           @http_client = nil
           response = http_client.request(request)
           unless response.is_a?(Net::HTTPSuccess)
-            raise CodebaseIndex::Error, "OpenAI API error: #{response.code} #{response.body}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)

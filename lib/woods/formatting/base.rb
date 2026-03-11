@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Formatting
     # Abstract base class for formatting adapters.
     #
@@ -19,7 +19,7 @@ module CodebaseIndex
     class Base
       # Format an assembled context for output.
       #
-      # @param _assembled_context [CodebaseIndex::Retrieval::AssembledContext]
+      # @param _assembled_context [Woods::Retrieval::AssembledContext]
       # @return [String] Formatted output
       # @raise [NotImplementedError] if not overridden by subclass
       def format(_assembled_context)

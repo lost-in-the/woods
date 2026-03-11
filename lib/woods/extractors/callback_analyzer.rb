@@ -4,7 +4,7 @@ require 'set'
 require_relative '../ast/parser'
 require_relative '../flow_analysis/operation_extractor'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # Analyzes callback method bodies to detect side effects.
     #

@@ -2,7 +2,7 @@
 
 source 'https://rubygems.org'
 
-# Specify your gem's dependencies in codebase_index.gemspec
+# Specify your gem's dependencies in woods.gemspec
 gemspec
 
 group :development, :test do

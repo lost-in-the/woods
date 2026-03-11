@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-RSpec.describe CodebaseIndex::ExtractedUnit do
+RSpec.describe Woods::ExtractedUnit do
   subject(:unit) do
     described_class.new(
       type: :model,

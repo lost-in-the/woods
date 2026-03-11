@@ -1,8 +1,8 @@
-# CodebaseIndex: Proposal & Deep Plan
+# Woods: Proposal & Deep Plan
 
 ## Executive Summary
 
-CodebaseIndex is a framework-aware extraction and retrieval system for Rails applications. It uses runtime introspection—not static parsing—to produce semantically rich, version-accurate representations of a codebase that can be consumed by LLMs, agentic coding tools, analytics pipelines, and human developers.
+Woods is a framework-aware extraction and retrieval system for Rails applications. It uses runtime introspection—not static parsing—to produce semantically rich, version-accurate representations of a codebase that can be consumed by LLMs, agentic coding tools, analytics pipelines, and human developers.
 
 The extraction layer is complete. This document proposes the retrieval, embedding, storage, and integration layers needed to make extracted data useful across multiple consumption patterns.
 
@@ -34,7 +34,7 @@ Both modes share a deeper problem: they treat code as text. A Rails codebase isn
 
 ---
 
-## What CodebaseIndex Does
+## What Woods Does
 
 ### Extraction (Complete)
 
@@ -85,7 +85,7 @@ The system should be useful immediately with minimal setup and scale to sophisti
 
 | Level | Setup | What You Get |
 |-------|-------|-------------|
-| **Zero-config** | `rake codebase_index:extract` | JSON files on disk, greppable, readable |
+| **Zero-config** | `rake woods:extract` | JSON files on disk, greppable, readable |
 | **Local search** | Add SQLite + FAISS | Semantic search, no external services |
 | **Production** | Add vector store + embedding API | Full retrieval with CI integration |
 | **Advanced** | Add graph DB + custom rankers | Cross-repo tracing, personalized ranking |
@@ -226,7 +226,7 @@ Each backend type satisfies a Ruby module interface:
 
 ```ruby
 # All vector stores implement:
-CodebaseIndex::Storage::VectorStore::Interface
+Woods::Storage::VectorStore::Interface
   #upsert(id:, vector:, metadata:)
   #upsert_batch(items)
   #search(vector:, filters:, limit:)
@@ -234,21 +234,21 @@ CodebaseIndex::Storage::VectorStore::Interface
   #delete_by_filter(filters)
 
 # All metadata stores implement:
-CodebaseIndex::Storage::MetadataStore::Interface
+Woods::Storage::MetadataStore::Interface
   #upsert(id:, metadata:)
   #find(id)
   #search_keywords(keywords:, fields:, filters:, limit:)
   #query(filters:, limit:)
 
 # All embedding providers implement:
-CodebaseIndex::Embedding::Provider::Interface
+Woods::Embedding::Provider::Interface
   #embed(text)
   #embed_batch(texts)
   #dimensions
   #model_name
 
 # All graph stores implement:
-CodebaseIndex::Storage::GraphStore::Interface
+Woods::Storage::GraphStore::Interface
   #register(id:, type:, edges:)
   #dependencies_of(id)
   #dependents_of(id)
@@ -265,7 +265,7 @@ The system is designed for AI agents as primary consumers. See `AGENTIC_STRATEGY
 
 ### Tool-Use Interface
 
-An agent interacting with CodebaseIndex has access to these tools:
+An agent interacting with Woods has access to these tools:
 
 ```
 codebase_retrieve(query)              — Semantic retrieval with auto-classification
@@ -326,7 +326,7 @@ Before implementation, the system should be evaluated against these criteria:
 
 ### Baseline Comparisons
 
-Compare CodebaseIndex retrieval against:
+Compare Woods retrieval against:
 
 - **Naive RAG** — Chunk files by line count, embed, search. No runtime introspection.
 - **File-level retrieval** — Return whole files matching keywords. No chunking.
@@ -352,7 +352,7 @@ The hypothesis is that runtime-aware extraction + semantic chunking + dependency
 - Implement OpenAI embedding provider
 - Build text preparation pipeline (format units for embedding)
 - Build indexing pipeline (extract → prepare → embed → store)
-- Rake tasks: `codebase_index:embed`, `codebase_index:embed_incremental`
+- Rake tasks: `woods:embed`, `woods:embed_incremental`
 
 **Deliverable:** Given extracted JSON, produce a searchable vector index with metadata.
 
@@ -366,14 +366,14 @@ The hypothesis is that runtime-aware extraction + semantic chunking + dependency
 - Implement context assembler with token budgeting
 - Build structural context builder
 
-**Deliverable:** `CodebaseIndex::Retriever.retrieve("how does checkout work?")` returns token-budgeted context with source attribution.
+**Deliverable:** `Woods::Retriever.retrieve("how does checkout work?")` returns token-budgeted context with source attribution.
 
 ### Phase 3: Interface Layer
 
 **Goal:** Make retrieval accessible.
 
 - CLI tool (`bin/codebase retrieve "query"`)
-- Rake tasks (`codebase_index:retrieve["query"]`)
+- Rake tasks (`woods:retrieve["query"]`)
 - Ruby API for in-app consumption
 - JSON output format for tool integration
 
@@ -435,26 +435,26 @@ The hypothesis is that runtime-aware extraction + semantic chunking + dependency
 ### Minimal Setup
 
 ```ruby
-CodebaseIndex.configure do |config|
-  config.output_dir = "tmp/codebase_index"
+Woods.configure do |config|
+  config.output_dir = "tmp/woods"
 end
 
 # Extract
-CodebaseIndex.extract!
+Woods.extract!
 
 # Index (uses SQLite + FAISS defaults)
-CodebaseIndex.index!
+Woods.index!
 
 # Retrieve
-result = CodebaseIndex.retrieve("how does order processing work?")
+result = Woods.retrieve("how does order processing work?")
 puts result.context
 ```
 
 ### Production Setup (MySQL)
 
 ```ruby
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join("tmp/codebase_index")
+Woods.configure do |config|
+  config.output_dir = Rails.root.join("tmp/woods")
 
   # Vector store (MySQL has no native vector extension — use Qdrant)
   config.vector_store = :qdrant
@@ -483,8 +483,8 @@ end
 ### Production Setup (PostgreSQL)
 
 ```ruby
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join("tmp/codebase_index")
+Woods.configure do |config|
+  config.output_dir = Rails.root.join("tmp/woods")
 
   # Vector store (pgvector keeps everything in one database)
   config.vector_store = :pgvector
@@ -516,20 +516,20 @@ end
 
 ```ruby
 # Zero external dependencies
-CodebaseIndex.configure_with_preset(:local)
+Woods.configure_with_preset(:local)
 
 # MySQL + Qdrant (classic Rails: MySQL/Percona + Sidekiq + Docker)
-CodebaseIndex.configure_with_preset(:mysql)
+Woods.configure_with_preset(:mysql)
 
 # PostgreSQL + pgvector (Rails 8 / Solid suite style)
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 
 # PostgreSQL + Qdrant
-CodebaseIndex.configure_with_preset(:postgresql_qdrant)
+Woods.configure_with_preset(:postgresql_qdrant)
 
 # Self-hosted, no external APIs (works with either database)
-CodebaseIndex.configure_with_preset(:self_hosted)             # defaults to PostgreSQL
-CodebaseIndex.configure_with_preset(:self_hosted, db: :mysql)  # MySQL variant
+Woods.configure_with_preset(:self_hosted)             # defaults to PostgreSQL
+Woods.configure_with_preset(:self_hosted, db: :mysql)  # MySQL variant
 ```
 
 ---

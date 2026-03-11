@@ -2,7 +2,7 @@
 
 require 'json'
 
-module CodebaseIndex
+module Woods
   # Value object representing an assembled execution flow trace.
   #
   # Contains an ordered list of steps from an entry point through the dependency graph,

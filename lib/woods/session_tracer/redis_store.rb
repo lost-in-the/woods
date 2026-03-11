@@ -3,11 +3,11 @@
 require 'json'
 require_relative 'store'
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # Redis-backed session store using Lists.
     #
-    # Each session is stored as a Redis List keyed `codebase_index:session:{id}`.
+    # Each session is stored as a Redis List keyed `woods:session:{id}`.
     # RPUSH per request for append-only ordering. Native TTL for automatic cleanup.
     #
     # Requires the `redis` gem at runtime.
@@ -17,8 +17,8 @@ module CodebaseIndex
     #   store.record("abc123", { controller: "OrdersController", action: "create" })
     #
     class RedisStore < Store
-      KEY_PREFIX = 'codebase_index:session:'
-      SESSIONS_KEY = 'codebase_index:sessions'
+      KEY_PREFIX = 'woods:session:'
+      SESSIONS_KEY = 'woods:sessions'
 
       # @param redis [Redis] A Redis client instance
       # @param ttl [Integer, nil] Time-to-live in seconds for session keys (nil = no expiry)

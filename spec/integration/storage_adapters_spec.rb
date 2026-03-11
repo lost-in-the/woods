@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/metadata_store'
-require 'codebase_index/storage/graph_store'
+require 'woods/storage/vector_store'
+require 'woods/storage/metadata_store'
+require 'woods/storage/graph_store'
 
 RSpec.describe 'Storage adapters working together', :integration do
   let(:fixture_hashes) { load_fixture_units }
   let(:units) { fixture_hashes.map { |h| build_extracted_unit(h) } }
-  let(:vector_store) { CodebaseIndex::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { CodebaseIndex::Storage::MetadataStore::SQLite.new(':memory:') }
-  let(:graph_store) { CodebaseIndex::Storage::GraphStore::Memory.new }
-  let(:provider) { CodebaseIndex::Embedding::Provider::Fake.new(dims: 64) }
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
+  let(:provider) { Woods::Embedding::Provider::Fake.new(dims: 64) }
 
   before do
     populate_stores(units, vector_store: vector_store, metadata_store: metadata_store,

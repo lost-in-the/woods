@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/cost_model'
+require 'woods/cost_model'
 
-RSpec.describe CodebaseIndex::CostModel::Estimator do
+RSpec.describe Woods::CostModel::Estimator do
   subject(:estimator) do
     described_class.new(
       units: 500,

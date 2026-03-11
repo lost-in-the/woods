@@ -4,7 +4,7 @@ require 'json'
 require 'time'
 require 'digest'
 
-module CodebaseIndex
+module Woods
   module Temporal
     # JSON-file-based snapshot store for temporal tracking without SQLite.
     #
@@ -16,7 +16,7 @@ module CodebaseIndex
     # tools work identically.
     #
     # @example
-    #   store = JsonSnapshotStore.new(dir: '/app/tmp/codebase_index')
+    #   store = JsonSnapshotStore.new(dir: '/app/tmp/woods')
     #   store.capture(manifest, unit_hashes)
     #   store.list                    # => [{ git_sha: "abc123", ... }]
     #   store.diff("abc123", "def456") # => { added: [...], modified: [...], deleted: [...] }
@@ -188,7 +188,7 @@ module CodebaseIndex
           data = JSON.parse(File.read(path))
           symbolize_snapshot(data).except(:units)
         rescue JSON::ParserError => e
-          warn "[CodebaseIndex] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+          warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
           nil
         end
       end
@@ -197,7 +197,7 @@ module CodebaseIndex
         Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
           symbolize_snapshot(JSON.parse(File.read(path)))
         rescue JSON::ParserError => e
-          warn "[CodebaseIndex] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+          warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
           nil
         end
       end

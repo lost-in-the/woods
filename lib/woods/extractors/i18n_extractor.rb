@@ -2,7 +2,7 @@
 
 require 'yaml'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # I18nExtractor handles internationalization locale file extraction.
     #

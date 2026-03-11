@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# CodebaseIndex - Rails Codebase Indexing and Retrieval
+# Woods - Rails Codebase Indexing and Retrieval
 #
 # A system for extracting, indexing, and retrieving context from Rails codebases
 # to enable AI-assisted development, debugging, and analytics.
@@ -8,22 +8,22 @@
 # ## Quick Start
 #
 #   # Extract codebase
-#   CodebaseIndex.extract!
+#   Woods.extract!
 #
 #   # Or via rake
-#   bundle exec rake codebase_index:extract
+#   bundle exec rake woods:extract
 #
 # ## Configuration
 #
-#   CodebaseIndex.configure do |config|
-#     config.output_dir = Rails.root.join("tmp/codebase_index")
+#   Woods.configure do |config|
+#     config.output_dir = Rails.root.join("tmp/woods")
 #     config.max_context_tokens = 8000
 #     config.include_framework_sources = true
 #   end
 #
-require_relative 'codebase_index/version'
+require_relative 'woods/version'
 
-module CodebaseIndex
+module Woods
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class ExtractionError < Error; end
@@ -75,9 +75,9 @@ module CodebaseIndex
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
     end
 
-    # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/codebase_index
+    # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods
     def output_dir
-      @output_dir ||= defined?(Rails) && Rails.root ? Rails.root.join('tmp/codebase_index') : 'tmp/codebase_index'
+      @output_dir ||= defined?(Rails) && Rails.root ? Rails.root.join('tmp/woods') : 'tmp/woods'
     end
 
     # @param value [Object] Must respond to #to_s
@@ -216,7 +216,7 @@ module CodebaseIndex
     # @param output_dir [String] Override output directory
     # @return [Hash] Extraction results
     def extract!(output_dir: nil)
-      require_relative 'codebase_index/extractor'
+      require_relative 'woods/extractor'
 
       dir = output_dir || configuration.output_dir
       extractor = Extractor.new(output_dir: dir)
@@ -228,7 +228,7 @@ module CodebaseIndex
     # @param changed_files [Array<String>] List of changed files
     # @return [Array<String>] Re-extracted unit identifiers
     def extract_changed!(changed_files)
-      require_relative 'codebase_index/extractor'
+      require_relative 'woods/extractor'
 
       extractor = Extractor.new(output_dir: configuration.output_dir)
       extractor.extract_changed(changed_files)
@@ -239,8 +239,8 @@ module CodebaseIndex
   configure
 end
 
-require_relative 'codebase_index/builder'
-require_relative 'codebase_index/cost_model'
-require_relative 'codebase_index/cache/cache_store'
-require_relative 'codebase_index/cache/cache_middleware'
-require_relative 'codebase_index/railtie' if defined?(Rails::Railtie)
+require_relative 'woods/builder'
+require_relative 'woods/cost_model'
+require_relative 'woods/cache/cache_store'
+require_relative 'woods/cache/cache_middleware'
+require_relative 'woods/railtie' if defined?(Rails::Railtie)

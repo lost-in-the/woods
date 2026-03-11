@@ -2,7 +2,7 @@
 
 require_relative 'shared_utility_methods'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # EngineExtractor handles Rails engine and mountable gem extraction via runtime introspection.
     #

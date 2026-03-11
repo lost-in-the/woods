@@ -7,7 +7,7 @@ require_relative 'migrations/003_create_embeddings'
 require_relative 'migrations/004_create_snapshots'
 require_relative 'migrations/005_create_snapshot_units'
 
-module CodebaseIndex
+module Woods
   module Db
     # Runs schema migrations against a database connection.
     #
@@ -16,7 +16,7 @@ module CodebaseIndex
     # constant and a `.up(connection)` class method.
     #
     # @example
-    #   db = SQLite3::Database.new('codebase_index.db')
+    #   db = SQLite3::Database.new('woods.db')
     #   migrator = Migrator.new(connection: db)
     #   migrator.migrate!  # => [1, 2, 3]
     #

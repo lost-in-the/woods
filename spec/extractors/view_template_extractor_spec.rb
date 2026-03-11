@@ -4,10 +4,10 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/view_template_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/view_template_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ViewTemplateExtractor do
+RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   include_context 'extractor setup'
 
   describe '#extract_all' do
@@ -245,7 +245,7 @@ RSpec.describe CodebaseIndex::Extractors::ViewTemplateExtractor do
     it 'extracts a single template file' do
       file_path = File.join(tmp_dir, 'app/views/users/edit.html.erb')
       unit = described_class.new.extract_view_template_file(file_path)
-      expect(unit).to be_a(CodebaseIndex::ExtractedUnit)
+      expect(unit).to be_a(Woods::ExtractedUnit)
       expect(unit.identifier).to eq('users/edit.html.erb')
     end
 

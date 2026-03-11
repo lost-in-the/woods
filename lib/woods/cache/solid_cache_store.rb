@@ -3,7 +3,7 @@
 require 'json'
 require_relative 'cache_store'
 
-module CodebaseIndex
+module Woods
   module Cache
     # SolidCache-backed (or any ActiveSupport::Cache::Store) cache store.
     #
@@ -41,7 +41,7 @@ module CodebaseIndex
         delete_silently(key)
         nil
       rescue StandardError => e
-        logger.warn("[CodebaseIndex] SolidCacheStore#read failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#read failed for #{key}: #{e.message}")
         nil
       end
 
@@ -58,7 +58,7 @@ module CodebaseIndex
         opts = effective_ttl ? { expires_in: effective_ttl } : {}
         @cache.write(key, serialized, **opts)
       rescue StandardError => e
-        logger.warn("[CodebaseIndex] SolidCacheStore#write failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#write failed for #{key}: #{e.message}")
         nil
       end
 
@@ -69,7 +69,7 @@ module CodebaseIndex
       def delete(key)
         @cache.delete(key)
       rescue StandardError => e
-        logger.warn("[CodebaseIndex] SolidCacheStore#delete failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#delete failed for #{key}: #{e.message}")
         nil
       end
 
@@ -80,11 +80,11 @@ module CodebaseIndex
       def exist?(key)
         @cache.exist?(key)
       rescue StandardError => e
-        logger.warn("[CodebaseIndex] SolidCacheStore#exist? failed for #{key}: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#exist? failed for #{key}: #{e.message}")
         false
       end
 
-      # Clear cached entries by namespace or all codebase_index cache keys.
+      # Clear cached entries by namespace or all woods cache keys.
       #
       # Uses `delete_matched` if the underlying cache supports it (Redis, Memcached).
       # Falls back to a no-op if pattern deletion is not available (some backends
@@ -96,14 +96,14 @@ module CodebaseIndex
         pattern = clear_pattern(namespace)
 
         unless @cache.respond_to?(:delete_matched)
-          logger.warn("[CodebaseIndex] Cache#clear(namespace: #{namespace.inspect}) is a no-op: " \
+          logger.warn("[Woods] Cache#clear(namespace: #{namespace.inspect}) is a no-op: " \
                       "backend #{@cache.class} does not support delete_matched")
           return
         end
 
         @cache.delete_matched(pattern)
       rescue StandardError => e
-        logger.warn("[CodebaseIndex] SolidCacheStore#clear failed: #{e.message}")
+        logger.warn("[Woods] SolidCacheStore#clear failed: #{e.message}")
         nil
       end
     end

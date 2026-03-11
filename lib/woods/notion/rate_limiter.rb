@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Notion
     # Thread-safe rate limiter for Notion API (3 requests/second default).
     #

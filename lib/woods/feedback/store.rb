@@ -3,7 +3,7 @@
 require 'json'
 require 'fileutils'
 
-module CodebaseIndex
+module Woods
   module Feedback
     # Append-only JSONL file for retrieval feedback: ratings and gap reports.
     #

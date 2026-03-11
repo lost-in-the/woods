@@ -2,7 +2,7 @@
 
 require 'json'
 
-module CodebaseIndex
+module Woods
   module SessionTracer
     # Value object representing an assembled session flow trace.
     #

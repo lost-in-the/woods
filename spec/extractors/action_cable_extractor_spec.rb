@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extracted_unit'
-require 'codebase_index/extractors/action_cable_extractor'
+require 'woods/extracted_unit'
+require 'woods/extractors/action_cable_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ActionCableExtractor do
+RSpec.describe Woods::Extractors::ActionCableExtractor do
   subject(:extractor) { described_class.new }
 
   before do
-    stub_const('CodebaseIndex::ModelNameCache',
+    stub_const('Woods::ModelNameCache',
                double('ModelNameCache', model_names_regex: /\b(?:User|Post|Room)\b/))
     stub_rails_root('/rails')
   end

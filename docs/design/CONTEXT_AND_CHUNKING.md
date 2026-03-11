@@ -168,7 +168,7 @@ The indexing pipeline tracks chunk checksums to only re-embed chunks whose conte
 ```ruby
 # content_hash and source_hash are already computed by the extraction layer.
 # The indexing pipeline compares against stored checksums:
-module CodebaseIndex
+module Woods
   class ChunkChecksummer
     def needs_reembedding?(chunk)
       # chunk.content_hash is set by ExtractedUnit#build_default_chunks (SHA256)
@@ -293,7 +293,7 @@ PaymentGateway → StripeService (delegates), PaymentLog (writes)
 Different LLMs prefer different formats. The context formatter uses an adapter pattern:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Formatting
     class Adapter
       def format(assembled_context)
@@ -380,7 +380,7 @@ end
 ### Configuration
 
 ```ruby
-CodebaseIndex.configure do |config|
+Woods.configure do |config|
   # Auto-detect from environment, or set explicitly:
   config.context_format = :claude    # XML-structured
   config.context_format = :gpt      # Markdown
@@ -470,7 +470,7 @@ end
 
 ### Formatting for Agent Tool Responses
 
-When CodebaseIndex serves as an MCP tool, the formatted context is returned as a tool result. In this case, the format should be optimized for the agent's model:
+When Woods serves as an MCP tool, the formatted context is returned as a tool result. In this case, the format should be optimized for the agent's model:
 
 ```ruby
 # MCP tool response

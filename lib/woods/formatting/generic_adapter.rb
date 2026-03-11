@@ -2,7 +2,7 @@
 
 require_relative 'base'
 
-module CodebaseIndex
+module Woods
   module Formatting
     # Formats assembled context as plain text for generic LLM consumption.
     #
@@ -20,7 +20,7 @@ module CodebaseIndex
     class GenericAdapter < Base
       # Format assembled context as plain text.
       #
-      # @param assembled_context [CodebaseIndex::Retrieval::AssembledContext]
+      # @param assembled_context [Woods::Retrieval::AssembledContext]
       # @return [String] Plain text formatted context
       def format(assembled_context)
         parts = []

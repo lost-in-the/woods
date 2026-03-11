@@ -4,7 +4,7 @@ require 'json'
 require 'fileutils'
 require 'time'
 
-module CodebaseIndex
+module Woods
   module Operator
     # Rate limiter for pipeline operations using file-based state.
     #

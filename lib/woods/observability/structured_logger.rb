@@ -3,7 +3,7 @@
 require 'json'
 require 'time'
 
-module CodebaseIndex
+module Woods
   module Observability
     # Structured JSON logger that writes one JSON object per line.
     #

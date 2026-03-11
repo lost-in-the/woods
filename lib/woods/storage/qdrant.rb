@@ -5,7 +5,7 @@ require 'json'
 require 'uri'
 require_relative 'vector_store'
 
-module CodebaseIndex
+module Woods
   module Storage
     module VectorStore
       # Qdrant adapter for vector storage and similarity search via HTTP API.
@@ -147,13 +147,13 @@ module CodebaseIndex
         # @param path [String] API path
         # @param body [Hash, nil] Request body
         # @return [Hash] Parsed JSON response
-        # @raise [CodebaseIndex::Error] if the API returns a non-success status
+        # @raise [Woods::Error] if the API returns a non-success status
         def request(method, path, body = nil)
           req = build_request(method, path, body)
           response = http_client.request(req)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise CodebaseIndex::Error, "Qdrant API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Qdrant API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)
@@ -162,7 +162,7 @@ module CodebaseIndex
           @http_client = nil
           response = http_client.request(req)
           unless response.is_a?(Net::HTTPSuccess)
-            raise CodebaseIndex::Error, "Qdrant API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Qdrant API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)

@@ -3,10 +3,10 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/test_mapping_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/test_mapping_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::TestMappingExtractor do
+RSpec.describe Woods::Extractors::TestMappingExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

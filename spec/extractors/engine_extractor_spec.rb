@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extracted_unit'
-require 'codebase_index/extractors/engine_extractor'
+require 'woods/extracted_unit'
+require 'woods/extractors/engine_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::EngineExtractor do
+RSpec.describe Woods::Extractors::EngineExtractor do
   subject(:extractor) { described_class.new }
 
   describe '#extract_all' do

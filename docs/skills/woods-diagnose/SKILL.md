@@ -1,9 +1,9 @@
 ---
-name: codebase-index-diagnose
-description: Systematic troubleshooting for CodebaseIndex — diagnose extraction, MCP, embedding, and storage issues
+name: woods-diagnose
+description: Systematic troubleshooting for Woods — diagnose extraction, MCP, embedding, and storage issues
 ---
 
-# CodebaseIndex Diagnosis Workflow
+# Woods Diagnosis Workflow
 
 Work through these steps in order. Most problems are caught by Step 1 or Step 2.
 
@@ -11,7 +11,7 @@ Work through these steps in order. Most problems are caught by Step 1 or Step 2.
 
 ## Step 1: Verify Rails Boots
 
-CodebaseIndex requires a booted Rails environment. If Rails can't boot, extraction produces no output.
+Woods requires a booted Rails environment. If Rails can't boot, extraction produces no output.
 
 ```bash
 bundle exec rails runner 'puts Rails.version'
@@ -38,14 +38,14 @@ If you see `NameError` mentioning a graphql or other gem, that directory is fail
 ## Step 2: Check Extraction Output
 
 ```bash
-ls -la tmp/codebase_index/
-cat tmp/codebase_index/manifest.json
+ls -la tmp/woods/
+cat tmp/woods/manifest.json
 ```
 
 **If `manifest.json` is missing:** Extraction never completed. Run it and watch for errors:
 
 ```bash
-bundle exec rake codebase_index:extract 2>&1 | tee /tmp/extraction.log
+bundle exec rake woods:extract 2>&1 | tee /tmp/extraction.log
 ```
 
 Look for `ExtractionError` or `NameError` lines in the output.
@@ -57,7 +57,7 @@ Look for `ExtractionError` or `NameError` lines in the output.
 Validate index integrity:
 
 ```bash
-bundle exec rake codebase_index:validate
+bundle exec rake woods:validate
 ```
 
 ---
@@ -67,27 +67,27 @@ bundle exec rake codebase_index:validate
 Test the Index Server directly:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | codebase-index-mcp-start ./tmp/codebase_index
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | woods-mcp-start ./tmp/woods
 ```
 
 **Expected:** A JSON response with a `tools` array containing 27+ entries.
 
-**If you get "manifest.json not found":** The path is wrong. Check that `./tmp/codebase_index/manifest.json` exists and that you're running from the Rails app root.
+**If you get "manifest.json not found":** The path is wrong. Check that `./tmp/woods/manifest.json` exists and that you're running from the Rails app root.
 
 **If you get no response at all:** The binary may not be in your PATH. Try:
 
 ```bash
-which codebase-index-mcp-start
+which woods-mcp-start
 # If missing:
-gem install codebase_index
+gem install woods
 # or if using Bundler:
-bundle exec codebase-index-mcp-start ./tmp/codebase_index
+bundle exec woods-mcp-start ./tmp/woods
 ```
 
 Test the Console Server:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | bundle exec rake codebase_index:console
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | bundle exec rake woods:console
 ```
 
 **Expected:** JSON tool list, then the process hangs (waiting for more input). Press Ctrl+C.
@@ -95,7 +95,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | bundle exec 
 **If it exits immediately:** Run without piped input to see the error:
 
 ```bash
-bundle exec rake codebase_index:console
+bundle exec rake woods:console
 ```
 
 ---
@@ -106,7 +106,7 @@ If `codebase_retrieve` returns "Embedding provider is not available":
 
 ```bash
 bundle exec rails runner '
-  config = CodebaseIndex.configuration
+  config = Woods.configuration
   puts "Provider: #{config.embedding_provider.inspect}"
   puts "Model: #{config.embedding_model.inspect}"
   puts "Vector store: #{config.vector_store.inspect}"
@@ -120,8 +120,8 @@ bundle exec rails runner '
 **Dimension mismatch:** If you switched embedding models after initial indexing, you need a full re-index:
 
 ```bash
-bundle exec rake codebase_index:extract   # re-extract to reset unit files
-bundle exec rake codebase_index:embed     # re-embed all units
+bundle exec rake woods:extract   # re-extract to reset unit files
+bundle exec rake woods:embed     # re-embed all units
 ```
 
 `IndexValidator` will detect dimension mismatches and log an error on startup.
@@ -150,7 +150,7 @@ tools/list returns empty or error?
   ├─ Index Server path wrong?
   │   └─ Verify manifest.json exists at the path provided
   ├─ Binary not found?
-  │   └─ gem install codebase_index or use bundle exec
+  │   └─ gem install woods or use bundle exec
   └─ Console Server exits immediately?
       └─ Run without pipe to see error; check Rails boot + cwd setting
 ```

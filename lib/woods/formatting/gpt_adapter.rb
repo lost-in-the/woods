@@ -2,7 +2,7 @@
 
 require_relative 'base'
 
-module CodebaseIndex
+module Woods
   module Formatting
     # Formats assembled context as Markdown for GPT models.
     #
@@ -20,7 +20,7 @@ module CodebaseIndex
     class GptAdapter < Base
       # Format assembled context as Markdown for GPT.
       #
-      # @param assembled_context [CodebaseIndex::Retrieval::AssembledContext]
+      # @param assembled_context [Woods::Retrieval::AssembledContext]
       # @return [String] Markdown-formatted context
       def format(assembled_context)
         parts = []

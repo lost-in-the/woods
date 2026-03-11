@@ -48,14 +48,14 @@ require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
 
-module CodebaseIndex
+module Woods
   # Extractor is the main orchestrator for codebase extraction.
   #
   # It coordinates all individual extractors, builds the dependency graph,
   # enriches with git data, and outputs structured JSON for the indexing pipeline.
   #
   # @example Full extraction
-  #   extractor = Extractor.new(output_dir: "tmp/codebase_index")
+  #   extractor = Extractor.new(output_dir: "tmp/woods")
   #   results = extractor.extract_all
   #
   # @example Incremental extraction (for CI)
@@ -204,7 +204,7 @@ module CodebaseIndex
     attr_reader :output_dir, :dependency_graph
 
     def initialize(output_dir: nil)
-      @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/codebase_index'))
+      @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/woods'))
       @dependency_graph = DependencyGraph.new
       @results = {}
       @extractors = {}
@@ -225,14 +225,14 @@ module CodebaseIndex
       safe_eager_load!
 
       # Phase 1: Extract all units
-      if CodebaseIndex.configuration.concurrent_extraction
+      if Woods.configuration.concurrent_extraction
         extract_all_concurrent
       else
         extract_all_sequential
       end
 
       # Phase 1.5: Deduplicate results
-      Rails.logger.info '[CodebaseIndex] Deduplicating results...'
+      Rails.logger.info '[Woods] Deduplicating results...'
       deduplicate_results
 
       # Rebuild graph from deduped results — Phase 1 registered all units including
@@ -241,29 +241,29 @@ module CodebaseIndex
       @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
 
       # Phase 2: Resolve dependents (reverse dependencies)
-      Rails.logger.info '[CodebaseIndex] Resolving dependents...'
+      Rails.logger.info '[Woods] Resolving dependents...'
       resolve_dependents
 
       # Phase 3: Graph analysis (PageRank, structural metrics)
-      Rails.logger.info '[CodebaseIndex] Analyzing dependency graph...'
+      Rails.logger.info '[Woods] Analyzing dependency graph...'
       @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
 
       # Phase 3.5: Precompute request flows (opt-in)
-      if CodebaseIndex.configuration.precompute_flows
-        Rails.logger.info '[CodebaseIndex] Precomputing request flows...'
+      if Woods.configuration.precompute_flows
+        Rails.logger.info '[Woods] Precomputing request flows...'
         precompute_flows
       end
 
       # Phase 4: Enrich with git data
-      Rails.logger.info '[CodebaseIndex] Enriching with git data...'
+      Rails.logger.info '[Woods] Enriching with git data...'
       enrich_with_git_data
 
       # Phase 4.5: Normalize file_path to relative paths
-      Rails.logger.info '[CodebaseIndex] Normalizing file paths...'
+      Rails.logger.info '[Woods] Normalizing file paths...'
       normalize_file_paths
 
       # Phase 5: Write output
-      Rails.logger.info '[CodebaseIndex] Writing output...'
+      Rails.logger.info '[Woods] Writing output...'
       write_results
       write_dependency_graph
       write_graph_analysis
@@ -302,7 +302,7 @@ module CodebaseIndex
 
       # Compute affected units
       affected_ids = @dependency_graph.affected_by(absolute_files)
-      Rails.logger.info "[CodebaseIndex] #{changed_files.size} changed files affect #{affected_ids.size} units"
+      Rails.logger.info "[Woods] #{changed_files.size} changed files affect #{affected_ids.size} units"
 
       # Re-extract affected units
       affected_types = Set.new
@@ -339,8 +339,8 @@ module CodebaseIndex
     def safe_eager_load!
       Rails.application.eager_load!
     rescue NameError => e
-      Rails.logger.warn "[CodebaseIndex] eager_load! hit NameError: #{e.message}"
-      Rails.logger.warn '[CodebaseIndex] Falling back to per-directory eager loading'
+      Rails.logger.warn "[Woods] eager_load! hit NameError: #{e.message}"
+      Rails.logger.warn '[Woods] Falling back to per-directory eager loading'
       eager_load_extraction_directories
     end
 
@@ -361,11 +361,11 @@ module CodebaseIndex
             Dir.glob(dir.join('**/*.rb')).each do |file|
               require file
             rescue NameError, LoadError => e
-              Rails.logger.warn "[CodebaseIndex] Skipped #{file}: #{e.message}"
+              Rails.logger.warn "[Woods] Skipped #{file}: #{e.message}"
             end
           end
         rescue NameError, LoadError => e
-          Rails.logger.warn "[CodebaseIndex] Failed to eager load app/#{subdir}/: #{e.message}"
+          Rails.logger.warn "[Woods] Failed to eager load app/#{subdir}/: #{e.message}"
         end
       end
     end
@@ -376,7 +376,7 @@ module CodebaseIndex
 
     def extract_all_sequential
       EXTRACTORS.each do |type, extractor_class|
-        Rails.logger.info "[CodebaseIndex] Extracting #{type}..."
+        Rails.logger.info "[Woods] Extracting #{type}..."
         start_time = Time.current
 
         extractor = extractor_class.new
@@ -386,7 +386,7 @@ module CodebaseIndex
         @results[type] = units
 
         elapsed = Time.current - start_time
-        Rails.logger.info "[CodebaseIndex] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+        Rails.logger.info "[Woods] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
 
         # Register in dependency graph
         units.each { |unit| @dependency_graph.register(unit) }
@@ -410,7 +410,7 @@ module CodebaseIndex
       results_mutex = Mutex.new
       threads = EXTRACTORS.map do |type, extractor_class|
         Thread.new do
-          Rails.logger.info "[CodebaseIndex] [Thread] Extracting #{type}..."
+          Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
           start_time = Time.current
 
           extractor = extractor_class.new
@@ -419,13 +419,13 @@ module CodebaseIndex
           units = extractor.extract_all
 
           elapsed = Time.current - start_time
-          Rails.logger.info "[CodebaseIndex] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+          Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
 
           results_mutex.synchronize do
             @results[type] = units
           end
         rescue StandardError => e
-          Rails.logger.error "[CodebaseIndex] [Thread] #{type} failed: #{e.message}"
+          Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
           results_mutex.synchronize { @results[type] = [] }
         end
       end
@@ -485,7 +485,7 @@ module CodebaseIndex
         deduped = units.uniq(&:identifier)
         dropped = units.size - deduped.size
 
-        Rails.logger.warn "[CodebaseIndex] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
+        Rails.logger.warn "[Woods] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
 
         @results[type] = deduped
       end
@@ -499,9 +499,9 @@ module CodebaseIndex
       all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
       flow_map = precomputer.precompute
-      Rails.logger.info "[CodebaseIndex] Precomputed #{flow_map.size} request flows"
+      Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
     rescue StandardError => e
-      Rails.logger.error "[CodebaseIndex] Flow precomputation failed: #{e.message}"
+      Rails.logger.error "[Woods] Flow precomputation failed: #{e.message}"
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -775,7 +775,7 @@ module CodebaseIndex
     #
     # @return [void]
     def capture_snapshot
-      return unless CodebaseIndex.configuration.enable_snapshots
+      return unless Woods.configuration.enable_snapshots
 
       manifest_path = @output_dir.join('manifest.json')
       return unless manifest_path.exist?
@@ -799,27 +799,27 @@ module CodebaseIndex
       end
 
       store.capture(manifest, unit_hashes)
-      Rails.logger.info "[CodebaseIndex] Snapshot captured for #{manifest['git_sha'][0..7]}"
+      Rails.logger.info "[Woods] Snapshot captured for #{manifest['git_sha'][0..7]}"
     rescue StandardError => e
-      Rails.logger.error "[CodebaseIndex] Snapshot capture failed (#{e.class}): #{e.message}"
+      Rails.logger.error "[Woods] Snapshot capture failed (#{e.class}): #{e.message}"
     end
 
     # Build a snapshot store, preferring SQLite with JSON file fallback.
     #
-    # @return [CodebaseIndex::Temporal::SnapshotStore, CodebaseIndex::Temporal::JsonSnapshotStore, nil]
+    # @return [Woods::Temporal::SnapshotStore, Woods::Temporal::JsonSnapshotStore, nil]
     def build_snapshot_store
       require 'sqlite3'
       require_relative 'db/migrator'
       require_relative 'temporal/snapshot_store'
 
-      db_path = @output_dir.join('codebase_index.sqlite3')
+      db_path = @output_dir.join('woods.sqlite3')
       db = SQLite3::Database.new(db_path.to_s)
       db.results_as_hash = true
 
       Db::Migrator.new(connection: db).migrate!
       Temporal::SnapshotStore.new(connection: db)
     rescue LoadError
-      Rails.logger.info '[CodebaseIndex] sqlite3 gem not available, using JSON snapshot store'
+      Rails.logger.info '[Woods] sqlite3 gem not available, using JSON snapshot store'
       require_relative 'temporal/json_snapshot_store'
       Temporal::JsonSnapshotStore.new(dir: @output_dir.to_s)
     end
@@ -931,7 +931,7 @@ module CodebaseIndex
     end
 
     def json_serialize(data)
-      if CodebaseIndex.configuration.pretty_json
+      if Woods.configuration.pretty_json
         JSON.pretty_generate(data)
       else
         JSON.generate(data)
@@ -942,16 +942,16 @@ module CodebaseIndex
       total = @results.values.sum(&:size)
       chunks = @results.sum { |_, units| units.sum { |u| u.chunks.size } }
 
-      Rails.logger.info '[CodebaseIndex] ═══════════════════════════════════════════'
-      Rails.logger.info '[CodebaseIndex] Extraction Complete'
-      Rails.logger.info '[CodebaseIndex] ═══════════════════════════════════════════'
+      Rails.logger.info '[Woods] ═══════════════════════════════════════════'
+      Rails.logger.info '[Woods] Extraction Complete'
+      Rails.logger.info '[Woods] ═══════════════════════════════════════════'
       @results.each do |type, units|
-        Rails.logger.info "[CodebaseIndex]   #{type}: #{units.size} units"
+        Rails.logger.info "[Woods]   #{type}: #{units.size} units"
       end
-      Rails.logger.info '[CodebaseIndex] ───────────────────────────────────────────'
-      Rails.logger.info "[CodebaseIndex]   Total: #{total} units, #{chunks} chunks"
-      Rails.logger.info "[CodebaseIndex]   Output: #{@output_dir}"
-      Rails.logger.info '[CodebaseIndex] ═══════════════════════════════════════════'
+      Rails.logger.info '[Woods] ───────────────────────────────────────────'
+      Rails.logger.info "[Woods]   Total: #{total} units, #{chunks} chunks"
+      Rails.logger.info "[Woods]   Output: #{@output_dir}"
+      Rails.logger.info '[Woods] ═══════════════════════════════════════════'
 
       all_warnings = @extractors.flat_map do |_type, ext|
         ext.respond_to?(:warnings) ? ext.warnings : []
@@ -959,9 +959,9 @@ module CodebaseIndex
 
       return if all_warnings.empty?
 
-      Rails.logger.warn '[CodebaseIndex] ───────────────────────────────────────────'
-      Rails.logger.warn "[CodebaseIndex]   Warnings (#{all_warnings.size}):"
-      all_warnings.each { |w| Rails.logger.warn "[CodebaseIndex]     #{w}" }
+      Rails.logger.warn '[Woods] ───────────────────────────────────────────'
+      Rails.logger.warn "[Woods]   Warnings (#{all_warnings.size}):"
+      all_warnings.each { |w| Rails.logger.warn "[Woods]     #{w}" }
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -971,7 +971,7 @@ module CodebaseIndex
     def re_extract_unit(unit_id, affected_types: nil)
       # Framework source only changes on version updates
       if unit_id.start_with?('rails/') || unit_id.start_with?('gems/')
-        Rails.logger.debug "[CodebaseIndex] Skipping framework re-extraction for #{unit_id}"
+        Rails.logger.debug "[Woods] Skipping framework re-extraction for #{unit_id}"
         return
       end
 
@@ -1022,7 +1022,7 @@ module CodebaseIndex
         json_serialize(unit.to_h)
       )
 
-      Rails.logger.info "[CodebaseIndex] Re-extracted #{unit_id}"
+      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
     end
   end
 end

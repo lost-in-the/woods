@@ -2,7 +2,7 @@
 
 require 'json'
 
-module CodebaseIndex
+module Woods
   module Evaluation
     # Generates JSON reports from evaluation results.
     #
@@ -58,7 +58,7 @@ module CodebaseIndex
       def build_metadata(extra)
         {
           'generated_at' => Time.now.iso8601,
-          'version' => defined?(CodebaseIndex::VERSION) ? CodebaseIndex::VERSION : 'unknown'
+          'version' => defined?(Woods::VERSION) ? Woods::VERSION : 'unknown'
         }.merge(extra.transform_keys(&:to_s))
       end
 

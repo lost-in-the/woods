@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extractors/model_extractor'
+require 'woods/extractors/model_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
+RSpec.describe Woods::Extractors::ModelExtractor do
   let(:extractor) { described_class.new }
 
   # ── habtm_join_model? ─────────────────────────────────────────────
@@ -206,7 +206,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
         end
       RUBY
 
-      unit = CodebaseIndex::ExtractedUnit.new(
+      unit = Woods::ExtractedUnit.new(
         type: :model,
         identifier: 'User',
         file_path: 'app/models/user.rb'
@@ -225,7 +225,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
 
     it 'skips enrichment when source is nil' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.metadata = {
         callbacks: [{ type: :before_save, filter: 'foo', kind: :before, conditions: {} }]
       }
@@ -237,7 +237,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
 
     it 'skips enrichment when callbacks are empty' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.source_code = 'class User; end'
       unit.metadata = { callbacks: [], column_names: %w[email] }
 
@@ -251,7 +251,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
 
   describe '#build_callbacks_chunk' do
     it 'includes side-effect annotations in chunk text' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.metadata = {
         callbacks: [
           {
@@ -270,7 +270,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
 
     it 'omits annotations when no side effects detected' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.metadata = {
         callbacks: [
           {
@@ -289,7 +289,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
 
     it 'handles callbacks without side_effects key gracefully' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.metadata = {
         callbacks: [
           { type: :before_save, filter: 'legacy_callback', kind: :before, conditions: {} }
@@ -602,7 +602,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
 
   describe '#build_callback_effects_chunk' do
     it 'groups callbacks by lifecycle phase with side-effect narrative' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'Order', file_path: 'app/models/order.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Order', file_path: 'app/models/order.rb')
       unit.metadata = {
         callbacks: [
           {
@@ -633,7 +633,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
 
     it 'excludes callbacks with no side effects' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.metadata = {
         callbacks: [
           {
@@ -659,7 +659,7 @@ RSpec.describe CodebaseIndex::Extractors::ModelExtractor do
     end
 
     it 'returns empty string when no callbacks have side effects' do
-      unit = CodebaseIndex::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.metadata = {
         callbacks: [
           {

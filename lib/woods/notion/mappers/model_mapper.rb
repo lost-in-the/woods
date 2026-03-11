@@ -2,7 +2,7 @@
 
 require_relative 'shared'
 
-module CodebaseIndex
+module Woods
   module Notion
     module Mappers
       # Maps a model ExtractedUnit to Notion page properties for the Data Models database.

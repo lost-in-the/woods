@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-# @see CodebaseIndex
-module CodebaseIndex
-  class Error < StandardError; end unless defined?(CodebaseIndex::Error)
+# @see Woods
+module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
 
   module Console
-    class ValidationError < CodebaseIndex::Error; end
+    class ValidationError < Woods::Error; end
 
     # Validates model names and column names against the Rails schema.
     #

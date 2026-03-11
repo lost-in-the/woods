@@ -3,7 +3,7 @@
 require 'json'
 require 'time'
 
-module CodebaseIndex
+module Woods
   module Temporal
     # SnapshotStore captures and queries temporal snapshots of extraction runs.
     #
@@ -43,7 +43,7 @@ module CodebaseIndex
         upsert_snapshot(manifest, git_sha, unit_hashes.size)
 
         snapshot_id = fetch_snapshot_id(git_sha)
-        @db.execute('DELETE FROM codebase_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
+        @db.execute('DELETE FROM woods_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
         insert_unit_hashes(snapshot_id, unit_hashes)
 
         update_diff_stats(snapshot_id, previous)
@@ -58,12 +58,12 @@ module CodebaseIndex
       def list(limit: 20, branch: nil)
         rows = if branch
                  @db.execute(
-                   'SELECT * FROM codebase_snapshots WHERE git_branch = ? ORDER BY extracted_at DESC LIMIT ?',
+                   'SELECT * FROM woods_snapshots WHERE git_branch = ? ORDER BY extracted_at DESC LIMIT ?',
                    [branch, limit]
                  )
                else
                  @db.execute(
-                   'SELECT * FROM codebase_snapshots ORDER BY extracted_at DESC LIMIT ?',
+                   'SELECT * FROM woods_snapshots ORDER BY extracted_at DESC LIMIT ?',
                    [limit]
                  )
                end
@@ -76,7 +76,7 @@ module CodebaseIndex
       # @param git_sha [String]
       # @return [Hash, nil] Snapshot metadata or nil if not found
       def find(git_sha)
-        row = @db.get_first_row('SELECT * FROM codebase_snapshots WHERE git_sha = ?', [git_sha])
+        row = @db.get_first_row('SELECT * FROM woods_snapshots WHERE git_sha = ?', [git_sha])
         return nil unless row
 
         row_to_hash(row)
@@ -108,8 +108,8 @@ module CodebaseIndex
         rows = @db.execute(<<~SQL, [identifier, limit])
           SELECT su.source_hash, su.metadata_hash, su.dependencies_hash, su.unit_type,
                  s.git_sha, s.extracted_at, s.git_branch
-          FROM codebase_snapshot_units su
-          JOIN codebase_snapshots s ON s.id = su.snapshot_id
+          FROM woods_snapshot_units su
+          JOIN woods_snapshots s ON s.id = su.snapshot_id
           WHERE su.identifier = ?
           ORDER BY s.extracted_at DESC
           LIMIT ?
@@ -180,7 +180,7 @@ module CodebaseIndex
           mget(manifest, 'schema_sha')
         ]
         @db.execute(<<~SQL, params)
-          INSERT OR REPLACE INTO codebase_snapshots
+          INSERT OR REPLACE INTO woods_snapshots
             (git_sha, git_branch, extracted_at, rails_version, ruby_version,
              total_units, unit_counts, gemfile_lock_sha, schema_sha)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -195,7 +195,7 @@ module CodebaseIndex
       def update_diff_stats(snapshot_id, previous)
         diff_stats = compute_diff_stats(snapshot_id, previous)
         @db.execute(
-          'UPDATE codebase_snapshots SET units_added = ?, units_modified = ?, units_deleted = ? WHERE id = ?',
+          'UPDATE woods_snapshots SET units_added = ?, units_modified = ?, units_deleted = ? WHERE id = ?',
           [diff_stats[:added], diff_stats[:modified], diff_stats[:deleted], snapshot_id]
         )
       end
@@ -204,7 +204,7 @@ module CodebaseIndex
       #
       # @return [Hash, nil]
       def find_latest
-        row = @db.get_first_row('SELECT * FROM codebase_snapshots ORDER BY extracted_at DESC LIMIT 1')
+        row = @db.get_first_row('SELECT * FROM woods_snapshots ORDER BY extracted_at DESC LIMIT 1')
         return nil unless row
 
         row_to_hash(row)
@@ -215,7 +215,7 @@ module CodebaseIndex
       # @param git_sha [String]
       # @return [Integer, nil]
       def fetch_snapshot_id(git_sha)
-        @db.get_first_value('SELECT id FROM codebase_snapshots WHERE git_sha = ?', [git_sha])
+        @db.get_first_value('SELECT id FROM woods_snapshots WHERE git_sha = ?', [git_sha])
       end
 
       # Insert per-unit hash records for a snapshot.
@@ -225,7 +225,7 @@ module CodebaseIndex
       # @return [void]
       def insert_unit_hashes(snapshot_id, unit_hashes)
         sql = <<~SQL
-          INSERT INTO codebase_snapshot_units
+          INSERT INTO woods_snapshot_units
             (snapshot_id, identifier, unit_type, source_hash, metadata_hash, dependencies_hash)
           VALUES (?, ?, ?, ?, ?, ?)
         SQL
@@ -254,7 +254,7 @@ module CodebaseIndex
       def load_snapshot_units(snapshot_id)
         sql = <<~SQL
           SELECT identifier, unit_type, source_hash, metadata_hash, dependencies_hash
-          FROM codebase_snapshot_units WHERE snapshot_id = ?
+          FROM woods_snapshot_units WHERE snapshot_id = ?
         SQL
         rows = @db.execute(sql, [snapshot_id])
 

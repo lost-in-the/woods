@@ -2,7 +2,7 @@
 
 require 'json'
 
-module CodebaseIndex
+module Woods
   module Storage
     # MetadataStore provides an interface for storing and querying unit metadata.
     #
@@ -10,7 +10,7 @@ module CodebaseIndex
     # its methods. The {SQLite} adapter is provided for local persistence.
     #
     # @example Using the SQLite adapter
-    #   store = CodebaseIndex::Storage::MetadataStore::SQLite.new(":memory:")
+    #   store = Woods::Storage::MetadataStore::SQLite.new(":memory:")
     #   store.store("User", { type: "model", file_path: "app/models/user.rb" })
     #   store.find("User")
     #

@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in CodebaseIndex
+about: Report a bug in Woods
 title: ''
 labels: bug
 assignees: ''
@@ -29,5 +29,5 @@ What actually happened. Include error messages and stack traces if applicable.
 - Ruby version:
 - Rails version:
 - Database adapter:
-- CodebaseIndex version:
+- Woods version:
 - OS:

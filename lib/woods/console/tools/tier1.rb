@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module CodebaseIndex
+module Woods
   module Console
     module Tools
       # Tier 1: MVP read-only tools for querying live Rails data.
