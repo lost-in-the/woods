@@ -327,6 +327,9 @@ module Woods
           callbacks: extract_callbacks(model),
           scopes: extract_scopes(model, source),
           enums: extract_enums(model),
+          inlined_concerns: extract_included_modules(model)
+            .select { |mod| mod.name && concern_source(mod) }
+            .map { |mod| mod.name.demodulize },
 
           # API surface
           class_methods: model.methods(false).sort,

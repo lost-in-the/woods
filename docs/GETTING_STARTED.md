@@ -198,6 +198,107 @@ For Docker-based CI, replace the run command with your compose equivalent:
         run: docker compose exec -T app bundle exec rake woods:incremental
 ```
 
+## Custom Boot Requirements
+
+Woods requires Rails to boot successfully before extraction can run. If your app needs specific environment variables, credentials, or a custom boot sequence, set them up first.
+
+### Environment Variables
+
+Set any required env vars before running `rake woods:extract`:
+
+```bash
+# Verify Rails boots cleanly
+RAILS_MASTER_KEY=your-key DATABASE_URL=your-url bundle exec rails runner 'puts :OK'
+
+# Then extract with the same env vars
+RAILS_MASTER_KEY=your-key DATABASE_URL=your-url bundle exec rake woods:extract
+```
+
+Common variables that extraction may need:
+
+| Variable | Why | Notes |
+|----------|-----|-------|
+| `RAILS_MASTER_KEY` | Decrypt credentials | Or place `config/master.key` in the app |
+| `DATABASE_URL` | Database connection | Extraction reads schema from the live database |
+| `REDIS_URL` | If Rails config requires Redis at boot | Cache store, Action Cable, etc. |
+| `SECRET_KEY_BASE` | Some apps require this to boot | Set to any string for extraction |
+
+### Docker Extraction
+
+Inside Docker, env vars are typically set in `docker-compose.yml` or `.env`. Run extraction through compose:
+
+```bash
+docker compose exec app bundle exec rake woods:extract
+```
+
+The MCP Index Server runs on the **host**, reading volume-mounted output. Use the host-side path in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
+    }
+  }
+}
+```
+
+### CI Extraction
+
+In CI, set env vars in your workflow and use the `test` or `development` Rails environment:
+
+```yaml
+- name: Extract codebase
+  run: bundle exec rake woods:extract
+  env:
+    RAILS_ENV: test
+    RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
+```
+
+### Conditional Configuration
+
+Use environment checks in the initializer to adapt extraction behavior:
+
+```ruby
+# config/initializers/woods.rb
+Woods.configure do |config|
+  config.output_dir = ENV.fetch('WOODS_OUTPUT_DIR', Rails.root.join('tmp/woods'))
+
+  # CI: subset of extractors for faster builds
+  config.extractors = %i[models controllers services] if ENV['CI']
+
+  # Choose embedding provider based on available credentials
+  if ENV['OPENAI_API_KEY']
+    config.embedding_provider = :openai
+    config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
+  else
+    config.embedding_provider = :ollama
+    config.embedding_options = { base_url: ENV.fetch('OLLAMA_URL', 'http://localhost:11434') }
+  end
+end
+```
+
+### Troubleshooting Boot Failures
+
+If extraction fails, isolate the problem:
+
+```bash
+# 1. Does Rails boot?
+bundle exec rails runner 'puts :OK'
+
+# 2. Does eager loading work? (extraction needs this)
+bundle exec rails runner 'Rails.application.eager_load!; puts "Loaded #{ActiveRecord::Base.descendants.count} models"'
+
+# 3. If step 2 fails with NameError, which directory causes it?
+bundle exec rails runner 'Rails.autoloaders.main.dirs.each { |d| puts d }'
+```
+
+The most common boot failures are `NameError` from `app/graphql/` referencing an uninstalled gem, or missing credentials. Woods falls back to per-directory loading when `eager_load!` fails, but some models may be missed.
+
+---
+
 ## Common First-Run Issues
 
 **Extraction produces 0 units** — Rails booted but `eager_load!` failed. Run `bundle exec rails runner 'Rails.application.eager_load!; puts "OK"'` and look for `NameError`. The most common cause is `app/graphql/` referencing an uninstalled gem.

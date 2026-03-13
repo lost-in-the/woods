@@ -8,7 +8,7 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 27 | 31 |
+| **Tools** | 26 | 31 |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
@@ -96,7 +96,7 @@ Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
-### Tools (27)
+### Tools (26)
 
 #### Core Query (6)
 

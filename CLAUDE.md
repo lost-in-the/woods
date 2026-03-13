@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (33 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
 
 ## Commands
 
@@ -20,7 +20,7 @@ bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
 bundle exec rake woods:clean             # Remove index output
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
-# Woods-themed aliases: woods:grow (extract), woods:trail (stats), woods:map (validate)
+# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
@@ -39,7 +39,7 @@ lib/
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
 │   ├── filename_utils.rb               # Safe filename generation
-│   ├── extractors/                      # 34 extractors + callback_analyzer + behavioral_profile
+│   ├── extractors/                      # 33 extractors + callback_analyzer + behavioral_profile
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -49,7 +49,7 @@ lib/
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
-│   ├── mcp/                             # MCP Index Server (27 tools, 2 resources, 2 templates)
+│   ├── mcp/                             # MCP Index Server (26 tools, 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
