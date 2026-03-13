@@ -92,13 +92,19 @@ end  # 4 lines — the AI guesses what these concerns add
 #   validates :email, presence: true
 # end
 #
-# --- Concern: Auditable (app/models/concerns/auditable.rb) ---
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Auditable                                            │
+# └─────────────────────────────────────────────────────────────────────┘
 #   def audit_trail; AuditLog.create!(auditable: self); end
 #   after_save :audit_trail
+# ─────────────────────────── End Auditable ───────────────────────────
 #
-# --- Concern: Searchable (app/models/concerns/searchable.rb) ---
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Searchable                                           │
+# └─────────────────────────────────────────────────────────────────────┘
 #   scope :search, ->(q) { where("name ILIKE ?", "%#{q}%") }
 #   after_commit :reindex_search
+# ─────────────────────────── End Searchable ───────────────────────────
 ```
 
 **Schema prepending.** Model source gets a schema header with column types, indexes, and
@@ -108,10 +114,10 @@ foreign keys pulled live from the database. No more confusing `string` vs `text`
 **Route-to-controller binding.** Controller source gets a route block prepended showing
 exactly which HTTP verbs and paths map to which actions. URL → code is always explicit.
 
-**Dependency graph.** 34 extractors build a bidirectional graph: what each unit depends on,
+**Dependency graph.** 33 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
-**Two MCP servers.** The Index Server (27 tools) reads pre-extracted JSON from disk — no
+**Two MCP servers.** The Index Server (26 tools) reads pre-extracted JSON from disk — no
 Rails boot needed. The Console Server (31 tools) bridges to a live Rails process for
 database queries, job inspection, and model diagnostics.
 
