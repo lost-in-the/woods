@@ -104,6 +104,69 @@ To find only which jobs depend on `User`:
 
 ---
 
+### "Which controller handles POST /checkout?"
+
+**Tool:** `search` (Index Server)
+
+```json
+{
+  "query": "/checkout",
+  "types": ["route"],
+  "limit": 5
+}
+```
+
+**What you'll get:** Route units matching `/checkout` with the bound controller and action:
+
+```json
+[
+  {
+    "type": "route",
+    "identifier": "POST /checkout",
+    "metadata": { "controller": "orders", "action": "create", "route_name": "checkout" }
+  }
+]
+```
+
+**Follow up** — look up the controller for full source with filters and route context:
+
+```json
+{
+  "tool": "lookup",
+  "params": { "identifier": "OrdersController", "include_source": true }
+}
+```
+
+---
+
+### "What jobs does CheckoutService trigger?"
+
+**Tool:** `dependencies` (Index Server)
+
+```json
+{
+  "identifier": "CheckoutService",
+  "depth": 2,
+  "types": ["job"]
+}
+```
+
+**What you'll get:** All job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks:
+
+```json
+{
+  "root": "CheckoutService",
+  "results": [
+    { "identifier": "OrderConfirmationJob", "type": "job", "path": ["CheckoutService", "Order", "OrderConfirmationJob"] },
+    { "identifier": "InventoryReserveJob", "type": "job", "path": ["CheckoutService", "LineItem", "InventoryReserveJob"] }
+  ]
+}
+```
+
+This traces through the dependency graph: `CheckoutService` calls `Order#save!`, which triggers `after_commit :send_confirmation`, which enqueues `OrderConfirmationJob`. Without the graph, you'd need to manually follow callbacks across multiple files.
+
+---
+
 ### "What changed recently?"
 
 **Tool:** `recent_changes` (Index Server)
