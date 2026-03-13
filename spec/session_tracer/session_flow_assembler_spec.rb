@@ -3,16 +3,16 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'json'
-require 'codebase_index/session_tracer/session_flow_assembler'
-require 'codebase_index/session_tracer/file_store'
-require 'codebase_index/mcp/index_reader'
-require 'codebase_index/dependency_graph'
+require 'woods/session_tracer/session_flow_assembler'
+require 'woods/session_tracer/file_store'
+require 'woods/mcp/index_reader'
+require 'woods/dependency_graph'
 
-RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
+RSpec.describe Woods::SessionTracer::SessionFlowAssembler do
   let(:base_dir) { Dir.mktmpdir('session_assembler_store') }
   let(:index_dir) { Dir.mktmpdir('session_assembler_index') }
-  let(:store) { CodebaseIndex::SessionTracer::FileStore.new(base_dir: base_dir) }
-  let(:graph) { CodebaseIndex::DependencyGraph.new }
+  let(:store) { Woods::SessionTracer::FileStore.new(base_dir: base_dir) }
+  let(:graph) { Woods::DependencyGraph.new }
 
   after do
     FileUtils.remove_entry(base_dir)
@@ -21,7 +21,7 @@ RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
 
   # Helper to write unit JSON into the index directory structure
   def write_index_unit(identifier, type:, source_code:, dependencies: [])
-    type_dir = CodebaseIndex::MCP::IndexReader::TYPE_TO_DIR[type]
+    type_dir = Woods::MCP::IndexReader::TYPE_TO_DIR[type]
     dir = File.join(index_dir, type_dir)
     FileUtils.mkdir_p(dir)
 
@@ -44,7 +44,7 @@ RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
   # Helper to write _index.json files
   def write_index_files(units_by_type)
     units_by_type.each do |type, identifiers|
-      type_dir = CodebaseIndex::MCP::IndexReader::TYPE_TO_DIR[type]
+      type_dir = Woods::MCP::IndexReader::TYPE_TO_DIR[type]
       dir = File.join(index_dir, type_dir)
       FileUtils.mkdir_p(dir)
 
@@ -133,7 +133,7 @@ RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
   describe '#assemble' do
     before { setup_basic_index }
 
-    let(:reader) { CodebaseIndex::MCP::IndexReader.new(index_dir) }
+    let(:reader) { Woods::MCP::IndexReader.new(index_dir) }
     let(:assembler) { described_class.new(store: store, reader: reader) }
 
     it 'produces a SessionFlowDocument' do
@@ -141,7 +141,7 @@ RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
 
       doc = assembler.assemble('sess1')
 
-      expect(doc).to be_a(CodebaseIndex::SessionTracer::SessionFlowDocument)
+      expect(doc).to be_a(Woods::SessionTracer::SessionFlowDocument)
       expect(doc.session_id).to eq('sess1')
     end
 
@@ -303,7 +303,7 @@ RSpec.describe CodebaseIndex::SessionTracer::SessionFlowAssembler do
       it 'round-trips through JSON serialization' do
         doc = assembler.assemble('sess1', depth: 1)
         json = JSON.generate(doc.to_h)
-        restored = CodebaseIndex::SessionTracer::SessionFlowDocument.from_h(JSON.parse(json))
+        restored = Woods::SessionTracer::SessionFlowDocument.from_h(JSON.parse(json))
 
         expect(restored.session_id).to eq('sess1')
         expect(restored.steps.size).to eq(1)

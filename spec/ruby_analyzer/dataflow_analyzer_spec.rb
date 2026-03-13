@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast'
-require 'codebase_index/ruby_analyzer/dataflow_analyzer'
+require 'woods/ast'
+require 'woods/ruby_analyzer/dataflow_analyzer'
 
-RSpec.describe CodebaseIndex::RubyAnalyzer::DataFlowAnalyzer do
+RSpec.describe Woods::RubyAnalyzer::DataFlowAnalyzer do
   subject(:analyzer) { described_class.new }
 
   def make_unit(identifier:, source_code:, type: :ruby_method)
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: '/app/test.rb'

@@ -5,10 +5,10 @@ require 'json'
 require 'digest'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index'
-require 'codebase_index/resilience/index_validator'
+require 'woods'
+require 'woods/resilience/index_validator'
 
-RSpec.describe CodebaseIndex::Resilience::IndexValidator do
+RSpec.describe Woods::Resilience::IndexValidator do
   let(:tmp_dir) { Dir.mktmpdir }
 
   after { FileUtils.rm_rf(tmp_dir) }
@@ -197,7 +197,7 @@ RSpec.describe CodebaseIndex::Resilience::IndexValidator do
 
   describe 'ValidationReport' do
     it 'is a Struct with valid?, warnings, and errors' do
-      report = CodebaseIndex::Resilience::IndexValidator::ValidationReport.new(
+      report = Woods::Resilience::IndexValidator::ValidationReport.new(
         valid?: true,
         warnings: ['some warning'],
         errors: []

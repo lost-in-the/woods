@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extractors/phlex_extractor'
+require 'woods/extractors/phlex_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::PhlexExtractor do
+RSpec.describe Woods::Extractors::PhlexExtractor do
   let(:rails_root) { Pathname.new('/rails') }
   let(:logger) { double('Logger', error: nil) }
 
   before do
     stub_const('Rails', double('Rails', root: rails_root, logger: logger))
-    stub_const('CodebaseIndex::ModelNameCache', double('ModelNameCache', model_names_regex: /\b(?:User|Post)\b/))
+    stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names_regex: /\b(?:User|Post)\b/))
     allow(File).to receive(:exist?) { false }
     allow(File).to receive(:read) { '' }
   end

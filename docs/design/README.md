@@ -10,7 +10,7 @@ These were written during the early architecture phase before all subsystems wer
 |----------|--------|--------------|
 | **OPTIMIZATION_BACKLOG.md** | 39/43 resolved | 43 items with severity ratings. Remaining: #6 (fixture specs), #18 (intentional), #21 (tiktoken), #40 (Amplitude). |
 | **REVIEW_FINDINGS.md** | All critical/high resolved | Code audit: 13 bugs (B-001 to B-013), doc accuracy, cross-doc contradictions. B-007 partially addressed, B-011 deferred by design. |
-| **AGENTIC_STRATEGY.md** | Reference | How AI agents should use CodebaseIndex: task-type to retrieval-pattern mapping, budget awareness, tool-use interface. |
+| **AGENTIC_STRATEGY.md** | Reference | How AI agents should use Woods: task-type to retrieval-pattern mapping, budget awareness, tool-use interface. |
 | **RETRIEVAL_ARCHITECTURE.md** | Implemented | Full retrieval pipeline design: query classification, hybrid search, RRF ranking, context assembly. |
 | **OPERATIONS.md** | Implemented | Deployment, monitoring, error handling, pipeline management patterns. |
 | **CONTEXT_AND_CHUNKING.md** | Implemented | Semantic chunking strategy, token budget allocation, chunk boundary rules. |

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/model_name_cache'
+require 'woods/model_name_cache'
 
-RSpec.describe CodebaseIndex::ModelNameCache do
+RSpec.describe Woods::ModelNameCache do
   after do
     described_class.reset!
   end

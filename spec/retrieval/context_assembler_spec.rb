@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/retrieval/search_executor'
-require 'codebase_index/retrieval/query_classifier'
-require 'codebase_index/retrieval/context_assembler'
-require 'codebase_index/storage/metadata_store'
+require 'woods/retrieval/search_executor'
+require 'woods/retrieval/query_classifier'
+require 'woods/retrieval/context_assembler'
+require 'woods/storage/metadata_store'
 
-RSpec.describe CodebaseIndex::Retrieval::ContextAssembler do
-  let(:metadata_store) { instance_double(CodebaseIndex::Storage::MetadataStore::Interface) }
+RSpec.describe Woods::Retrieval::ContextAssembler do
+  let(:metadata_store) { instance_double(Woods::Storage::MetadataStore::Interface) }
   let(:budget) { 8000 }
   let(:assembler) { described_class.new(metadata_store: metadata_store, budget: budget) }
 
   def candidate(identifier:, score:, source: :vector, metadata: {})
-    CodebaseIndex::Retrieval::SearchExecutor::Candidate.new(
+    Woods::Retrieval::SearchExecutor::Candidate.new(
       identifier: identifier,
       score: score,
       source: source,
@@ -21,7 +21,7 @@ RSpec.describe CodebaseIndex::Retrieval::ContextAssembler do
   end
 
   def classification(intent: :understand, scope: :focused, target_type: nil, framework_context: false)
-    CodebaseIndex::Retrieval::QueryClassifier::Classification.new(
+    Woods::Retrieval::QueryClassifier::Classification.new(
       intent: intent,
       scope: scope,
       target_type: target_type,
@@ -56,7 +56,7 @@ RSpec.describe CodebaseIndex::Retrieval::ContextAssembler do
     it 'returns an AssembledContext struct' do
       result = assembler.assemble(candidates: [], classification: classification)
 
-      expect(result).to be_a(CodebaseIndex::Retrieval::AssembledContext)
+      expect(result).to be_a(Woods::Retrieval::AssembledContext)
       expect(result).to respond_to(:context, :tokens_used, :budget, :sources, :sections)
     end
 

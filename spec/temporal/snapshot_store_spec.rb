@@ -2,14 +2,14 @@
 
 require 'spec_helper'
 require 'sqlite3'
-require 'codebase_index/db/migrator'
-require 'codebase_index/temporal/snapshot_store'
+require 'woods/db/migrator'
+require 'woods/temporal/snapshot_store'
 
-RSpec.describe CodebaseIndex::Temporal::SnapshotStore do
+RSpec.describe Woods::Temporal::SnapshotStore do
   let(:db) do
     d = SQLite3::Database.new(':memory:')
     d.results_as_hash = true
-    CodebaseIndex::Db::Migrator.new(connection: d).migrate!
+    Woods::Db::Migrator.new(connection: d).migrate!
     d
   end
 
@@ -70,14 +70,14 @@ RSpec.describe CodebaseIndex::Temporal::SnapshotStore do
 
     it 'stores per-unit records linked to snapshot' do
       store.capture(manifest_v1, units_v1)
-      count = db.get_first_value('SELECT COUNT(*) FROM codebase_snapshot_units')
+      count = db.get_first_value('SELECT COUNT(*) FROM woods_snapshot_units')
       expect(count).to eq(3)
     end
 
     it 'is idempotent — same git SHA overwrites cleanly' do
       store.capture(manifest_v1, units_v1)
       store.capture(manifest_v1, units_v1)
-      count = db.get_first_value('SELECT COUNT(*) FROM codebase_snapshots')
+      count = db.get_first_value('SELECT COUNT(*) FROM woods_snapshots')
       expect(count).to eq(1)
     end
 
@@ -159,8 +159,8 @@ RSpec.describe CodebaseIndex::Temporal::SnapshotStore do
 
     it 'returns empty array when no snapshots exist' do
       empty_store = described_class.new(connection: db)
-      db.execute('DELETE FROM codebase_snapshot_units')
-      db.execute('DELETE FROM codebase_snapshots')
+      db.execute('DELETE FROM woods_snapshot_units')
+      db.execute('DELETE FROM woods_snapshots')
       expect(empty_store.list).to eq([])
     end
   end

@@ -2,9 +2,9 @@
 
 require 'rspec'
 require 'active_support/core_ext/string/inflections'
-require 'codebase_index/extracted_unit'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/graph_analyzer'
+require 'woods/extracted_unit'
+require 'woods/dependency_graph'
+require 'woods/graph_analyzer'
 
 Dir[File.join(__dir__, 'support', '**', '*.rb')].each { |f| require f }
 
@@ -24,8 +24,6 @@ RSpec.configure do |config|
   Kernel.srand config.seed
 
   config.after(:each) do
-    if defined?(CodebaseIndex::ModelNameCache) && CodebaseIndex::ModelNameCache.respond_to?(:reset!)
-      CodebaseIndex::ModelNameCache.reset!
-    end
+    Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
   end
 end

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast'
-require 'codebase_index/ruby_analyzer/class_analyzer'
+require 'woods/ast'
+require 'woods/ruby_analyzer/class_analyzer'
 
-RSpec.describe CodebaseIndex::RubyAnalyzer::ClassAnalyzer do
+RSpec.describe Woods::RubyAnalyzer::ClassAnalyzer do
   subject(:analyzer) { described_class.new }
 
   describe '#analyze' do
@@ -51,7 +51,7 @@ RSpec.describe CodebaseIndex::RubyAnalyzer::ClassAnalyzer do
 
     it 'extracts a namespaced class' do
       source = <<~RUBY
-        module CodebaseIndex
+        module Woods
           class Extractor
             def extract_all
               []
@@ -63,8 +63,8 @@ RSpec.describe CodebaseIndex::RubyAnalyzer::ClassAnalyzer do
       units = analyzer.analyze(source: source, file_path: '/lib/extractor.rb')
 
       class_unit = units.find { |u| u.type == :ruby_class }
-      expect(class_unit.identifier).to eq('CodebaseIndex::Extractor')
-      expect(class_unit.namespace).to eq('CodebaseIndex')
+      expect(class_unit.identifier).to eq('Woods::Extractor')
+      expect(class_unit.namespace).to eq('Woods')
     end
 
     it 'extracts a module' do

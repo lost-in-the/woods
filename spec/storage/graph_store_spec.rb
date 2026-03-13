@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/storage/graph_store'
+require 'woods/storage/graph_store'
 
-RSpec.describe CodebaseIndex::Storage::GraphStore do
+RSpec.describe Woods::Storage::GraphStore do
   describe 'Interface contract' do
     let(:dummy_class) do
       Class.new do
-        include CodebaseIndex::Storage::GraphStore::Interface
+        include Woods::Storage::GraphStore::Interface
       end
     end
 
@@ -34,12 +34,12 @@ RSpec.describe CodebaseIndex::Storage::GraphStore do
     end
   end
 
-  describe CodebaseIndex::Storage::GraphStore::Memory do
+  describe Woods::Storage::GraphStore::Memory do
     let(:store) { described_class.new }
 
     # Helper to create a minimal ExtractedUnit
     def make_unit(type:, identifier:, file_path: nil, dependencies: [])
-      unit = CodebaseIndex::ExtractedUnit.new(
+      unit = Woods::ExtractedUnit.new(
         type: type,
         identifier: identifier,
         file_path: file_path || "/app/#{identifier.underscore}.rb"
@@ -167,7 +167,7 @@ RSpec.describe CodebaseIndex::Storage::GraphStore do
 
     describe 'wrapping an existing DependencyGraph' do
       it 'delegates to the provided graph' do
-        graph = CodebaseIndex::DependencyGraph.new
+        graph = Woods::DependencyGraph.new
         graph.register(make_unit(type: :model, identifier: 'User'))
 
         store = described_class.new(graph)

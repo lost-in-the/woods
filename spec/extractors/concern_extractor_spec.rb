@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/concern_extractor'
+require 'woods/extractors/concern_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ConcernExtractor do
+RSpec.describe Woods::Extractors::ConcernExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

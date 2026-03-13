@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a new feature for CodebaseIndex
+about: Suggest a new feature for Woods
 title: ''
 labels: enhancement
 assignees: ''

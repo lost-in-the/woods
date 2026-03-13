@@ -11,7 +11,7 @@ tools:
 
 # Use Case Explorer
 
-You identify what CodebaseIndex is missing — both in what it extracts and how the extracted data could be used.
+You identify what Woods is missing — both in what it extracts and how the extracted data could be used.
 
 ## Two Modes
 
@@ -20,7 +20,7 @@ You identify what CodebaseIndex is missing — both in what it extracts and how 
 Analyze a host Rails app's structure against the current extractors to find uncovered patterns.
 
 **Process:**
-1. Read the list of extractors in `lib/codebase_index/extractors/`.
+1. Read the list of extractors in `lib/woods/extractors/`.
 2. Read extraction output (if available) to see what was captured.
 3. Scan the host app's `app/` directory structure for patterns not covered by any extractor.
 4. Check for common Rails patterns: decorators, presenters, form objects, query objects, value objects, concerns used as mixins vs. standalone modules, initializers with significant configuration.
@@ -33,7 +33,7 @@ Analyze a host Rails app's structure against the current extractors to find unco
 
 ### 2. Untapped Uses for Extracted Data
 
-Given what CodebaseIndex already extracts, brainstorm what AI-assisted workflows it could power beyond the ones already designed.
+Given what Woods already extracts, brainstorm what AI-assisted workflows it could power beyond the ones already designed.
 
 **Process:**
 1. Read `docs/design/AGENTIC_STRATEGY.md` for currently planned use cases.

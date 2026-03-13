@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/metadata_store'
-require 'codebase_index/storage/graph_store'
-require 'codebase_index/retrieval/query_classifier'
-require 'codebase_index/retrieval/search_executor'
+require 'woods/storage/vector_store'
+require 'woods/storage/metadata_store'
+require 'woods/storage/graph_store'
+require 'woods/retrieval/query_classifier'
+require 'woods/retrieval/search_executor'
 
-RSpec.describe CodebaseIndex::Retrieval::SearchExecutor do
-  let(:vector_store) { CodebaseIndex::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { CodebaseIndex::Storage::MetadataStore::SQLite.new(':memory:') }
-  let(:graph_store) { CodebaseIndex::Storage::GraphStore::Memory.new }
-  let(:classifier) { CodebaseIndex::Retrieval::QueryClassifier.new }
+RSpec.describe Woods::Retrieval::SearchExecutor do
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
+  let(:classifier) { Woods::Retrieval::QueryClassifier.new }
 
   # Stub embedding provider that returns a fixed vector for any input
   let(:embedding_provider) do
@@ -45,7 +45,7 @@ RSpec.describe CodebaseIndex::Retrieval::SearchExecutor do
                          })
 
     # Graph store
-    unit = CodebaseIndex::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
+    unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
     unit.dependencies = dependencies
     graph_store.register(unit)
   end
@@ -309,9 +309,9 @@ RSpec.describe CodebaseIndex::Retrieval::SearchExecutor do
   end
 
   describe 'empty store behavior' do
-    let(:empty_vector) { CodebaseIndex::Storage::VectorStore::InMemory.new }
-    let(:empty_metadata) { CodebaseIndex::Storage::MetadataStore::SQLite.new(':memory:') }
-    let(:empty_graph) { CodebaseIndex::Storage::GraphStore::Memory.new }
+    let(:empty_vector) { Woods::Storage::VectorStore::InMemory.new }
+    let(:empty_metadata) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+    let(:empty_graph) { Woods::Storage::GraphStore::Memory.new }
 
     let(:empty_executor) do
       described_class.new(

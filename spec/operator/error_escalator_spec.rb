@@ -3,9 +3,9 @@
 require 'spec_helper'
 require 'timeout'
 require 'net/http'
-require 'codebase_index/operator/error_escalator'
+require 'woods/operator/error_escalator'
 
-RSpec.describe CodebaseIndex::Operator::ErrorEscalator do
+RSpec.describe Woods::Operator::ErrorEscalator do
   subject(:escalator) { described_class.new }
 
   describe '#classify' do

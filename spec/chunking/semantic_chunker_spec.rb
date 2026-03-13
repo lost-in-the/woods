@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/chunking/semantic_chunker'
-require 'codebase_index/extracted_unit'
+require 'woods/chunking/semantic_chunker'
+require 'woods/extracted_unit'
 
-RSpec.describe CodebaseIndex::Chunking::SemanticChunker do
+RSpec.describe Woods::Chunking::SemanticChunker do
   subject(:chunker) { described_class.new }
 
   let(:small_unit) do
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: :model,
       identifier: 'Tag',
       file_path: 'app/models/tag.rb'
@@ -19,7 +19,7 @@ RSpec.describe CodebaseIndex::Chunking::SemanticChunker do
   end
 
   let(:large_model_unit) do
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: :model,
       identifier: 'User',
       file_path: 'app/models/user.rb'
@@ -86,7 +86,7 @@ RSpec.describe CodebaseIndex::Chunking::SemanticChunker do
   end
 
   let(:controller_unit) do
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: :controller,
       identifier: 'PostsController',
       file_path: 'app/controllers/posts_controller.rb'
@@ -238,7 +238,7 @@ RSpec.describe CodebaseIndex::Chunking::SemanticChunker do
 
     context 'with a service (generic unit)' do
       let(:service_unit) do
-        unit = CodebaseIndex::ExtractedUnit.new(
+        unit = Woods::ExtractedUnit.new(
           type: :service,
           identifier: 'PaymentProcessor',
           file_path: 'app/services/payment_processor.rb'
@@ -257,7 +257,7 @@ RSpec.describe CodebaseIndex::Chunking::SemanticChunker do
 
     context 'with nil source_code' do
       it 'returns empty array' do
-        unit = CodebaseIndex::ExtractedUnit.new(
+        unit = Woods::ExtractedUnit.new(
           type: :model,
           identifier: 'Empty',
           file_path: 'app/models/empty.rb'
@@ -274,7 +274,7 @@ RSpec.describe CodebaseIndex::Chunking::SemanticChunker do
     it 'respects the custom threshold' do
       chunks = chunker.chunk(small_unit)
       # With threshold of 50 tokens, even small units might stay whole
-      expect(chunks).to all(be_a(CodebaseIndex::Chunking::Chunk))
+      expect(chunks).to all(be_a(Woods::Chunking::Chunk))
     end
   end
 end

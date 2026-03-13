@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/storage/metadata_store'
+require 'woods/storage/metadata_store'
 
-RSpec.describe CodebaseIndex::Storage::MetadataStore do
+RSpec.describe Woods::Storage::MetadataStore do
   describe 'Interface contract' do
     let(:dummy_class) do
       Class.new do
-        include CodebaseIndex::Storage::MetadataStore::Interface
+        include Woods::Storage::MetadataStore::Interface
       end
     end
 
@@ -38,7 +38,7 @@ RSpec.describe CodebaseIndex::Storage::MetadataStore do
     end
   end
 
-  describe CodebaseIndex::Storage::MetadataStore::SQLite do
+  describe Woods::Storage::MetadataStore::SQLite do
     let(:store) { described_class.new(':memory:') }
 
     describe '#store and #count' do

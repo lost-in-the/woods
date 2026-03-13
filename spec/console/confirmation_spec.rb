@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/confirmation'
+require 'woods/console/confirmation'
 
-RSpec.describe CodebaseIndex::Console::Confirmation do
+RSpec.describe Woods::Console::Confirmation do
   describe '#request_confirmation' do
     context 'when auto-approved' do
       subject(:confirmation) { described_class.new(mode: :auto_approve) }
@@ -28,7 +28,7 @@ RSpec.describe CodebaseIndex::Console::Confirmation do
             description: 'Execute: dangerous_code',
             params: { code: 'dangerous_code' }
           )
-        end.to raise_error(CodebaseIndex::Console::ConfirmationDeniedError, /denied/i)
+        end.to raise_error(Woods::Console::ConfirmationDeniedError, /denied/i)
       end
     end
 
@@ -62,7 +62,7 @@ RSpec.describe CodebaseIndex::Console::Confirmation do
             description: 'test',
             params: {}
           )
-        end.to raise_error(CodebaseIndex::Console::ConfirmationDeniedError)
+        end.to raise_error(Woods::Console::ConfirmationDeniedError)
       end
 
       it 'raises if no callback provided in callback mode' do
@@ -88,7 +88,7 @@ RSpec.describe CodebaseIndex::Console::Confirmation do
 
       begin
         confirmation.request_confirmation(tool: 'eval', description: 'test', params: {})
-      rescue CodebaseIndex::Console::ConfirmationDeniedError
+      rescue Woods::Console::ConfirmationDeniedError
         # expected
       end
 

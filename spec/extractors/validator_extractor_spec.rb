@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/extractors/validator_extractor'
+require 'woods/extractors/validator_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ValidatorExtractor do
+RSpec.describe Woods::Extractors::ValidatorExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

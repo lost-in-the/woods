@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/safe_context'
+require 'woods/console/safe_context'
 
-RSpec.describe CodebaseIndex::Console::SafeContext do
+RSpec.describe Woods::Console::SafeContext do
   let(:connection) { instance_double('Connection') }
 
   before do

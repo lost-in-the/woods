@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/server'
+require 'woods/console/server'
 
-RSpec.describe CodebaseIndex::Console::Server do
+RSpec.describe Woods::Console::Server do
   let(:config) do
     { 'mode' => 'direct', 'command' => 'echo test' }
   end
@@ -83,7 +83,7 @@ RSpec.describe CodebaseIndex::Console::Server do
 
   describe 'redaction via SafeContext' do
     let(:conn_mgr) do
-      instance_double(CodebaseIndex::Console::ConnectionManager).tap do |m|
+      instance_double(Woods::Console::ConnectionManager).tap do |m|
         allow(m).to receive(:send_request).and_return(
           'ok' => true,
           'result' => { 'name' => 'Alice', 'ssn' => '123-45-6789', 'email' => 'alice@example.com' }
@@ -92,7 +92,7 @@ RSpec.describe CodebaseIndex::Console::Server do
     end
 
     before do
-      allow(CodebaseIndex::Console::ConnectionManager).to receive(:new).and_return(conn_mgr)
+      allow(Woods::Console::ConnectionManager).to receive(:new).and_return(conn_mgr)
     end
 
     it 'builds successfully when no redacted_columns configured' do
@@ -101,7 +101,7 @@ RSpec.describe CodebaseIndex::Console::Server do
     end
 
     it 'applies SafeContext redaction to Hash results' do
-      safe_ctx = CodebaseIndex::Console::SafeContext.new(
+      safe_ctx = Woods::Console::SafeContext.new(
         connection: nil,
         redacted_columns: %w[ssn]
       )
@@ -113,7 +113,7 @@ RSpec.describe CodebaseIndex::Console::Server do
     end
 
     it 'applies SafeContext redaction to Array of Hashes' do
-      safe_ctx = CodebaseIndex::Console::SafeContext.new(
+      safe_ctx = Woods::Console::SafeContext.new(
         connection: nil,
         redacted_columns: %w[password]
       )
@@ -127,7 +127,7 @@ RSpec.describe CodebaseIndex::Console::Server do
     end
 
     it 'passes through non-Hash non-Array results unchanged' do
-      safe_ctx = CodebaseIndex::Console::SafeContext.new(
+      safe_ctx = Woods::Console::SafeContext.new(
         connection: nil,
         redacted_columns: %w[ssn]
       )

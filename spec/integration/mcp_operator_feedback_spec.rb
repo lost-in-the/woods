@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/mcp/server'
-require 'codebase_index/operator/pipeline_guard'
-require 'codebase_index/operator/status_reporter'
-require 'codebase_index/feedback/store'
-require 'codebase_index/feedback/gap_detector'
+require 'woods'
+require 'woods/mcp/server'
+require 'woods/operator/pipeline_guard'
+require 'woods/operator/status_reporter'
+require 'woods/feedback/store'
+require 'woods/feedback/gap_detector'
 require 'tmpdir'
 require 'json'
 
 RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
-  let(:fixture_dir) { File.expand_path('../fixtures/codebase_index', __dir__) }
+  let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:tmpdir) { Dir.mktmpdir('mcp_operator_test') }
 
   after { FileUtils.rm_rf(tmpdir) }
@@ -19,26 +19,26 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
   # ── Real PipelineGuard ──────────────────────────────────────────
 
   let(:guard) do
-    CodebaseIndex::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
+    Woods::Operator::PipelineGuard.new(state_dir: tmpdir, cooldown: 60)
   end
 
   # ── Real StatusReporter ─────────────────────────────────────────
 
   let(:status_reporter) do
-    CodebaseIndex::Operator::StatusReporter.new(output_dir: fixture_dir)
+    Woods::Operator::StatusReporter.new(output_dir: fixture_dir)
   end
 
   # ── Real FeedbackStore ──────────────────────────────────────────
 
   let(:feedback_path) { File.join(tmpdir, 'feedback.jsonl') }
-  let(:feedback_store) { CodebaseIndex::Feedback::Store.new(path: feedback_path) }
+  let(:feedback_store) { Woods::Feedback::Store.new(path: feedback_path) }
 
   # ── MCP Server ──────────────────────────────────────────────────
 
   let(:operator) { { pipeline_guard: guard, status_reporter: status_reporter } }
 
   let(:server) do
-    CodebaseIndex::MCP::Server.build(
+    Woods::MCP::Server.build(
       index_dir: fixture_dir,
       operator: operator,
       feedback_store: feedback_store

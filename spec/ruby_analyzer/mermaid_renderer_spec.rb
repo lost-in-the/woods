@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ruby_analyzer/mermaid_renderer'
+require 'woods/ruby_analyzer/mermaid_renderer'
 
-RSpec.describe CodebaseIndex::RubyAnalyzer::MermaidRenderer do
+RSpec.describe Woods::RubyAnalyzer::MermaidRenderer do
   subject(:renderer) { described_class.new }
 
   def make_unit(type:, identifier:, file_path: nil, dependencies: [], metadata: {})
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: file_path || "/app/#{identifier.underscore}.rb"

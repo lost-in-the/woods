@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'tmpdir'
-require 'codebase_index/operator/pipeline_guard'
+require 'woods/operator/pipeline_guard'
 
-RSpec.describe CodebaseIndex::Operator::PipelineGuard do
+RSpec.describe Woods::Operator::PipelineGuard do
   let(:state_dir) { Dir.mktmpdir }
 
   after { FileUtils.rm_rf(state_dir) }

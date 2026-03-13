@@ -4,11 +4,11 @@ require 'spec_helper'
 require 'pathname'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/extractor'
+require 'woods/extractor'
 
-RSpec.describe CodebaseIndex::Extractor do
+RSpec.describe Woods::Extractor do
   # Use a real tmpdir so Pathname#exist? works without stubs.
-  let(:tmpdir) { Dir.mktmpdir('codebase_index_test') }
+  let(:tmpdir) { Dir.mktmpdir('woods_test') }
   let(:rails_root) { Pathname.new(tmpdir) }
 
   before do
@@ -138,19 +138,19 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe '#build_snapshot_store' do
     before do
-      require 'codebase_index'
-      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
     end
 
     after do
-      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+      Woods.configuration = Woods::Configuration.new
     end
 
     it 'falls back to JsonSnapshotStore on LoadError' do
       allow(extractor).to receive(:require).with('sqlite3').and_raise(LoadError)
 
       store = extractor.send(:build_snapshot_store)
-      expect(store).to be_a(CodebaseIndex::Temporal::JsonSnapshotStore)
+      expect(store).to be_a(Woods::Temporal::JsonSnapshotStore)
     end
   end
 
@@ -158,23 +158,23 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe '#capture_snapshot' do
     before do
-      require 'codebase_index'
-      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
     end
 
     after do
-      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+      Woods.configuration = Woods::Configuration.new
     end
 
     it 'does nothing when enable_snapshots is false' do
-      CodebaseIndex.configuration.enable_snapshots = false
+      Woods.configuration.enable_snapshots = false
       expect(extractor).not_to receive(:build_snapshot_store)
 
       extractor.send(:capture_snapshot)
     end
 
     it 'rescues errors without aborting' do
-      CodebaseIndex.configuration.enable_snapshots = true
+      Woods.configuration.enable_snapshots = true
 
       # Set up a manifest file
       output_dir = File.join(tmpdir, 'output')
@@ -192,13 +192,13 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe '#extract_all_concurrent' do
     before do
-      require 'codebase_index'
-      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
-      CodebaseIndex.configuration.concurrent_extraction = true
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
+      Woods.configuration.concurrent_extraction = true
     end
 
     after do
-      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+      Woods.configuration = Woods::Configuration.new
     end
 
     it 'preserves extractor instance for warning collection when extract_all fails' do
@@ -216,13 +216,13 @@ RSpec.describe CodebaseIndex::Extractor do
       end
 
       # Stub EXTRACTORS to only have our fake
-      stub_const('CodebaseIndex::Extractor::EXTRACTORS', { test_type: fake_class })
+      stub_const('Woods::Extractor::EXTRACTORS', { test_type: fake_class })
 
       # Stub ModelNameCache
       model_name_cache = double('ModelNameCache')
       allow(model_name_cache).to receive(:model_names)
       allow(model_name_cache).to receive(:model_names_regex)
-      stub_const('CodebaseIndex::ModelNameCache', model_name_cache)
+      stub_const('Woods::ModelNameCache', model_name_cache)
 
       extractor.send(:extract_all_concurrent)
 
@@ -236,22 +236,22 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe '#json_serialize' do
     before do
-      require 'codebase_index'
-      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
     end
 
     after do
-      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+      Woods.configuration = Woods::Configuration.new
     end
 
     it 'returns pretty JSON when pretty_json is true' do
-      CodebaseIndex.configuration.pretty_json = true
+      Woods.configuration.pretty_json = true
       output = extractor.send(:json_serialize, { key: 'value' })
       expect(output).to include("\n")
     end
 
     it 'returns compact JSON when pretty_json is false' do
-      CodebaseIndex.configuration.pretty_json = false
+      Woods.configuration.pretty_json = false
       output = extractor.send(:json_serialize, { key: 'value' })
       expect(output).not_to include("\n")
     end
@@ -344,7 +344,7 @@ RSpec.describe CodebaseIndex::Extractor do
       allow(graph).to receive(:to_h).and_return({ nodes: { 'User' => node } })
 
       extractor_double = double('ModelExtractor')
-      allow(CodebaseIndex::Extractors::ModelExtractor).to receive(:new).and_return(extractor_double)
+      allow(Woods::Extractors::ModelExtractor).to receive(:new).and_return(extractor_double)
 
       # constantize raises NameError (no Rails env) — that's fine, it just returns nil
       # The important thing is no error from the format check itself
@@ -356,7 +356,7 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe '#deduplicate_results' do
     def make_unit(type:, identifier:)
-      CodebaseIndex::ExtractedUnit.new(
+      Woods::ExtractedUnit.new(
         type: type,
         identifier: identifier,
         file_path: "/app/#{type}s/#{identifier}.rb"
@@ -468,7 +468,7 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe '#normalize_file_paths' do
     def make_unit(file_path)
-      CodebaseIndex::ExtractedUnit.new(
+      Woods::ExtractedUnit.new(
         type: :model,
         identifier: 'User',
         file_path: file_path
@@ -519,16 +519,16 @@ RSpec.describe CodebaseIndex::Extractor do
 
   describe 'EXTRACTION_DIRECTORIES' do
     it 'is a frozen array' do
-      expect(CodebaseIndex::Extractor::EXTRACTION_DIRECTORIES).to be_frozen
+      expect(Woods::Extractor::EXTRACTION_DIRECTORIES).to be_frozen
     end
 
     it 'includes core extraction targets' do
-      dirs = CodebaseIndex::Extractor::EXTRACTION_DIRECTORIES
+      dirs = Woods::Extractor::EXTRACTION_DIRECTORIES
       expect(dirs).to include('models', 'controllers', 'services', 'jobs', 'mailers')
     end
 
     it 'does not include graphql (handled separately)' do
-      expect(CodebaseIndex::Extractor::EXTRACTION_DIRECTORIES).not_to include('graphql')
+      expect(Woods::Extractor::EXTRACTION_DIRECTORIES).not_to include('graphql')
     end
   end
 
@@ -539,8 +539,8 @@ RSpec.describe CodebaseIndex::Extractor do
     let(:extractor)  { described_class.new(output_dir: output_dir) }
 
     before do
-      require 'codebase_index'
-      CodebaseIndex.configuration ||= CodebaseIndex::Configuration.new
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
       FileUtils.mkdir_p(output_dir)
 
       # write_graph_analysis reads dependency_graph.json to compute graph_sha
@@ -551,7 +551,7 @@ RSpec.describe CodebaseIndex::Extractor do
     end
 
     after do
-      CodebaseIndex.configuration = CodebaseIndex::Configuration.new
+      Woods.configuration = Woods::Configuration.new
     end
 
     it 'includes generated_at timestamp' do
@@ -606,7 +606,7 @@ RSpec.describe CodebaseIndex::Extractor do
     end
 
     def make_unit(type:, identifier:, namespace: nil, chunks: [])
-      unit = CodebaseIndex::ExtractedUnit.new(
+      unit = Woods::ExtractedUnit.new(
         type: type,
         identifier: identifier,
         file_path: "/app/#{type}s/#{identifier.downcase.tr('::', '/')}.rb"

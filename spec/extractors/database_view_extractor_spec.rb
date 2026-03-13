@@ -4,10 +4,10 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/string/inflections'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/database_view_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/database_view_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::DatabaseViewExtractor do
+RSpec.describe Woods::Extractors::DatabaseViewExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

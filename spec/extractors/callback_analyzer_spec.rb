@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extractors/callback_analyzer'
+require 'woods/extractors/callback_analyzer'
 
-RSpec.describe CodebaseIndex::Extractors::CallbackAnalyzer do
+RSpec.describe Woods::Extractors::CallbackAnalyzer do
   let(:column_names) { %w[email name status role] }
 
   def build_analyzer(source, columns: column_names)

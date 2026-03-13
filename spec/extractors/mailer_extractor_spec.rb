@@ -6,9 +6,9 @@ require 'tmpdir'
 require 'fileutils'
 require 'digest'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/mailer_extractor'
+require 'woods/extractors/mailer_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::MailerExtractor do
+RSpec.describe Woods::Extractors::MailerExtractor do
   include_context 'extractor setup'
 
   # ── Test doubles ──────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ RSpec.describe CodebaseIndex::Extractors::MailerExtractor do
     it 'produces an ExtractedUnit with correct type and identifier' do
       unit = described_class.new.extract_mailer(mailer)
 
-      expect(unit).to be_a(CodebaseIndex::ExtractedUnit)
+      expect(unit).to be_a(Woods::ExtractedUnit)
       expect(unit.type).to eq(:mailer)
       expect(unit.identifier).to eq('UserMailer')
     end

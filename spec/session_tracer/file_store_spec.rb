@@ -3,9 +3,9 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'json'
-require 'codebase_index/session_tracer/file_store'
+require 'woods/session_tracer/file_store'
 
-RSpec.describe CodebaseIndex::SessionTracer::FileStore do
+RSpec.describe Woods::SessionTracer::FileStore do
   let(:base_dir) { Dir.mktmpdir('file_store_test') }
   let(:store) { described_class.new(base_dir: base_dir) }
 

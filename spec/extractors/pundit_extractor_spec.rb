@@ -5,9 +5,9 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/extractors/pundit_extractor'
+require 'woods/extractors/pundit_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::PunditExtractor do
+RSpec.describe Woods::Extractors::PunditExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

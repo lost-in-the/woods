@@ -15,169 +15,169 @@ Metrics/BlockLength:
     - 'spec/**/*'
     - 'lib/tasks/**/*'
     - '*.gemspec'
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
   AllowedMethods:
     - 'refine'
 
 Metrics/ModuleLength:
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/ClassLength:
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/MethodLength:
   Max: 20
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/AbcSize:
   Max: 25
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/CyclomaticComplexity:
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/PerceivedComplexity:
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/BlockNesting:
   Exclude:
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 Metrics/ParameterLists:
   Exclude:
     - 'spec/**/*'
-    - 'lib/codebase_index/ast/**/*'
-    - 'lib/codebase_index/extractors/**/*'
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/retrieval/**/*'
-    - 'lib/codebase_index/flow_*.rb'
-    - 'lib/codebase_index/flow_analysis/**/*'
-    - 'lib/codebase_index/ruby_analyzer/**/*'
-    - 'lib/codebase_index/extractor.rb'
-    - 'lib/codebase_index/extracted_unit.rb'
-    - 'lib/codebase_index/dependency_graph.rb'
-    - 'lib/codebase_index/graph_analyzer.rb'
+    - 'lib/woods/ast/**/*'
+    - 'lib/woods/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/retrieval/**/*'
+    - 'lib/woods/flow_*.rb'
+    - 'lib/woods/flow_analysis/**/*'
+    - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/extractor.rb'
+    - 'lib/woods/extracted_unit.rb'
+    - 'lib/woods/dependency_graph.rb'
+    - 'lib/woods/graph_analyzer.rb'
 
 # MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars
 Layout/LineLength:
   Exclude:
-    - 'lib/codebase_index/mcp/**/*'
-    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/woods/mcp/**/*'
+    - 'lib/woods/extractors/**/*'
     - 'lib/tasks/**/*'
 
 # Short param names are conventional in comparison/math methods
 Naming/MethodParameterName:
   Exclude:
-    - 'lib/codebase_index/ruby_analyzer/trace_enricher.rb'
-    - 'lib/codebase_index/flow_assembler.rb'
+    - 'lib/woods/ruby_analyzer/trace_enricher.rb'
+    - 'lib/woods/flow_assembler.rb'
 
 # Renaming predicate methods would break callers
 Naming/PredicateMethod:
   Exclude:
-    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/woods/extractors/**/*'
 
 # Safe navigation chains in extractors reflect optional DB metadata
 Style/SafeNavigationChainLength:
   Exclude:
-    - 'lib/codebase_index/extractors/**/*'
+    - 'lib/woods/extractors/**/*'
 
 # GraphQL classification methods intentionally enumerate all types
 Lint/DuplicateBranch:
   Exclude:
-    - 'lib/codebase_index/extractors/graphql_extractor.rb'
+    - 'lib/woods/extractors/graphql_extractor.rb'
 
 # MCP gem requires `server_context:` keyword in tool blocks for dispatch.
 # The parameter is unused in most handlers but must be present.
 Lint/UnusedBlockArgument:
   Exclude:
-    - 'lib/codebase_index/mcp/server.rb'
-    - 'lib/codebase_index/console/server.rb'
+    - 'lib/woods/mcp/server.rb'
+    - 'lib/woods/console/server.rb'
 
 # Top-level module docs already in CLAUDE.md/README
 Style/Documentation:

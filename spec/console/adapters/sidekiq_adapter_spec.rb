@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/adapters/sidekiq_adapter'
+require 'woods/console/adapters/sidekiq_adapter'
 
-RSpec.describe CodebaseIndex::Console::Adapters::SidekiqAdapter do
+RSpec.describe Woods::Console::Adapters::SidekiqAdapter do
   subject(:adapter) { described_class.new }
 
   describe '.available?' do

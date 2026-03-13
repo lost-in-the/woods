@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/cost_model/storage_cost'
+require 'woods/cost_model/storage_cost'
 
-RSpec.describe CodebaseIndex::CostModel::StorageCost do
+RSpec.describe Woods::CostModel::StorageCost do
   describe '#bytes_per_vector' do
     it 'calculates for 1536 dimensions' do
       calc = described_class.new(dimensions: 1536)

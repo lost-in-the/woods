@@ -3,19 +3,19 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'json'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/flow_precomputer'
+require 'woods/dependency_graph'
+require 'woods/flow_precomputer'
 
-RSpec.describe CodebaseIndex::FlowPrecomputer do
+RSpec.describe Woods::FlowPrecomputer do
   let(:output_dir) { Dir.mktmpdir('flow_precomputer_test') }
-  let(:graph) { CodebaseIndex::DependencyGraph.new }
+  let(:graph) { Woods::DependencyGraph.new }
 
   after { FileUtils.remove_entry(output_dir) }
 
   # ── Helper ───────────────────────────────────────────────────────────
 
   def make_unit(type:, identifier:, file_path:, metadata: {}, source_code: '', dependencies: [])
-    unit = CodebaseIndex::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
+    unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
     unit.metadata = metadata
     unit.source_code = source_code
     unit.dependencies = dependencies
@@ -291,10 +291,10 @@ RSpec.describe CodebaseIndex::FlowPrecomputer do
       graph.register(controller)
 
       # Stub FlowAssembler to raise only for the broken action
-      assembler_double = instance_double(CodebaseIndex::FlowAssembler)
-      allow(CodebaseIndex::FlowAssembler).to receive(:new).and_return(assembler_double)
+      assembler_double = instance_double(Woods::FlowAssembler)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler_double)
 
-      ok_flow = CodebaseIndex::FlowDocument.new(
+      ok_flow = Woods::FlowDocument.new(
         entry_point: 'BadController#ok',
         steps: [{ unit: 'BadController#ok', type: 'controller', operations: [] }]
       )
@@ -331,10 +331,10 @@ RSpec.describe CodebaseIndex::FlowPrecomputer do
       write_unit_json(controller)
       graph.register(controller)
 
-      assembler_double = instance_double(CodebaseIndex::FlowAssembler)
-      allow(CodebaseIndex::FlowAssembler).to receive(:new).and_return(assembler_double)
+      assembler_double = instance_double(Woods::FlowAssembler)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler_double)
 
-      flow = CodebaseIndex::FlowDocument.new(
+      flow = Woods::FlowDocument.new(
         entry_point: 'DeepController#go',
         steps: []
       )

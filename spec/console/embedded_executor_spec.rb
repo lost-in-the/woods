@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/embedded_executor'
+require 'woods/console/embedded_executor'
 
-RSpec.describe CodebaseIndex::Console::EmbeddedExecutor do
+RSpec.describe Woods::Console::EmbeddedExecutor do
   let(:registry) do
     {
       'User' => %w[id email name created_at updated_at],
       'Post' => %w[id title body user_id created_at]
     }
   end
-  let(:validator) { CodebaseIndex::Console::ModelValidator.new(registry: registry) }
+  let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
   let(:connection) { instance_double('Connection') }
-  let(:safe_context) { CodebaseIndex::Console::SafeContext.new(connection: connection) }
+  let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
   subject(:executor) do
     described_class.new(model_validator: validator, safe_context: safe_context, connection: connection)

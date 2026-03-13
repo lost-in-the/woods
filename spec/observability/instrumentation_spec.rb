@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/observability/instrumentation'
+require 'woods/observability/instrumentation'
 
-RSpec.describe CodebaseIndex::Observability::Instrumentation do
+RSpec.describe Woods::Observability::Instrumentation do
   describe '.instrument' do
     context 'when ActiveSupport::Notifications is available' do
       before do
@@ -21,9 +21,9 @@ RSpec.describe CodebaseIndex::Observability::Instrumentation do
           block&.call(payload)
         end
 
-        result = described_class.instrument('codebase_index.extraction', { unit: 'User' }) { 42 }
+        result = described_class.instrument('woods.extraction', { unit: 'User' }) { 42 }
 
-        expect(called_with[:event]).to eq('codebase_index.extraction')
+        expect(called_with[:event]).to eq('woods.extraction')
         expect(called_with[:payload]).to eq({ unit: 'User' })
         expect(result).to eq(42)
       end

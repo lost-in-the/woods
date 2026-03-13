@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/shared_dependency_scanner'
+require 'woods/model_name_cache'
+require 'woods/extractors/shared_dependency_scanner'
 
-RSpec.describe CodebaseIndex::Extractors::SharedDependencyScanner do
+RSpec.describe Woods::Extractors::SharedDependencyScanner do
   # Create a test class that includes the module so we can call its methods.
   let(:test_class) do
     Class.new do
-      include CodebaseIndex::Extractors::SharedDependencyScanner
+      include Woods::Extractors::SharedDependencyScanner
     end
   end
 
@@ -16,12 +16,12 @@ RSpec.describe CodebaseIndex::Extractors::SharedDependencyScanner do
 
   before do
     # Stub ModelNameCache so tests don't require a Rails environment.
-    allow(CodebaseIndex::ModelNameCache).to receive(:model_names_regex)
+    allow(Woods::ModelNameCache).to receive(:model_names_regex)
       .and_return(/\b(?:User|Post)\b/)
   end
 
   after do
-    CodebaseIndex::ModelNameCache.reset!
+    Woods::ModelNameCache.reset!
   end
 
   # ── #scan_model_dependencies ────────────────────────────────────

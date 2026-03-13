@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/notion/rate_limiter'
+require 'woods/notion/rate_limiter'
 
-RSpec.describe CodebaseIndex::Notion::RateLimiter do
+RSpec.describe Woods::Notion::RateLimiter do
   subject(:limiter) { described_class.new(requests_per_second: requests_per_second) }
 
   let(:requests_per_second) { 3 }

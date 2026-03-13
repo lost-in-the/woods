@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/embedding/provider'
-require 'codebase_index/resilience/circuit_breaker'
-require 'codebase_index/resilience/retryable_provider'
+require 'woods'
+require 'woods/embedding/provider'
+require 'woods/resilience/circuit_breaker'
+require 'woods/resilience/retryable_provider'
 
-RSpec.describe CodebaseIndex::Resilience::RetryableProvider do
+RSpec.describe Woods::Resilience::RetryableProvider do
   let(:mock_provider) do
     instance_double(
-      CodebaseIndex::Embedding::Provider::Ollama,
+      Woods::Embedding::Provider::Ollama,
       dimensions: 384,
       model_name: 'test-model'
     )
@@ -117,7 +117,7 @@ RSpec.describe CodebaseIndex::Resilience::RetryableProvider do
   end
 
   describe 'circuit breaker integration' do
-    let(:circuit_breaker) { CodebaseIndex::Resilience::CircuitBreaker.new(threshold: 2, reset_timeout: 0.1) }
+    let(:circuit_breaker) { Woods::Resilience::CircuitBreaker.new(threshold: 2, reset_timeout: 0.1) }
 
     subject(:retryable_with_cb) do
       described_class.new(provider: mock_provider, max_retries: 3, circuit_breaker: circuit_breaker)
@@ -139,7 +139,7 @@ RSpec.describe CodebaseIndex::Resilience::RetryableProvider do
       it 'raises CircuitOpenError without retrying' do
         expect do
           retryable_with_cb.embed('test')
-        end.to raise_error(CodebaseIndex::Resilience::CircuitOpenError)
+        end.to raise_error(Woods::Resilience::CircuitOpenError)
       end
     end
 
@@ -154,7 +154,7 @@ RSpec.describe CodebaseIndex::Resilience::RetryableProvider do
 
   describe 'Interface compliance' do
     it 'includes the Provider::Interface module' do
-      expect(described_class.ancestors).to include(CodebaseIndex::Embedding::Provider::Interface)
+      expect(described_class.ancestors).to include(Woods::Embedding::Provider::Interface)
     end
   end
 end

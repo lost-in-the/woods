@@ -1,28 +1,28 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/mcp/tool_response_renderer'
-require 'codebase_index/mcp/renderers/markdown_renderer'
-require 'codebase_index/mcp/renderers/claude_renderer'
-require 'codebase_index/mcp/renderers/plain_renderer'
-require 'codebase_index/mcp/renderers/json_renderer'
+require 'woods/mcp/tool_response_renderer'
+require 'woods/mcp/renderers/markdown_renderer'
+require 'woods/mcp/renderers/claude_renderer'
+require 'woods/mcp/renderers/plain_renderer'
+require 'woods/mcp/renderers/json_renderer'
 
-RSpec.describe CodebaseIndex::MCP::ToolResponseRenderer do
+RSpec.describe Woods::MCP::ToolResponseRenderer do
   describe '.for' do
     it 'returns a MarkdownRenderer for :markdown' do
-      expect(described_class.for(:markdown)).to be_a(CodebaseIndex::MCP::Renderers::MarkdownRenderer)
+      expect(described_class.for(:markdown)).to be_a(Woods::MCP::Renderers::MarkdownRenderer)
     end
 
     it 'returns a ClaudeRenderer for :claude' do
-      expect(described_class.for(:claude)).to be_a(CodebaseIndex::MCP::Renderers::ClaudeRenderer)
+      expect(described_class.for(:claude)).to be_a(Woods::MCP::Renderers::ClaudeRenderer)
     end
 
     it 'returns a PlainRenderer for :plain' do
-      expect(described_class.for(:plain)).to be_a(CodebaseIndex::MCP::Renderers::PlainRenderer)
+      expect(described_class.for(:plain)).to be_a(Woods::MCP::Renderers::PlainRenderer)
     end
 
     it 'returns a JsonRenderer for :json' do
-      expect(described_class.for(:json)).to be_a(CodebaseIndex::MCP::Renderers::JsonRenderer)
+      expect(described_class.for(:json)).to be_a(Woods::MCP::Renderers::JsonRenderer)
     end
 
     it 'raises ArgumentError for unknown format' do
@@ -47,7 +47,7 @@ RSpec.describe CodebaseIndex::MCP::ToolResponseRenderer do
 
   # ── JSON Renderer ──────────────────────────────────────────────────
 
-  describe CodebaseIndex::MCP::Renderers::JsonRenderer do
+  describe Woods::MCP::Renderers::JsonRenderer do
     let(:renderer) { described_class.new }
 
     it 'returns pretty-printed JSON for any data' do
@@ -65,7 +65,7 @@ RSpec.describe CodebaseIndex::MCP::ToolResponseRenderer do
 
   # ── Markdown Renderer ──────────────────────────────────────────────
 
-  describe CodebaseIndex::MCP::Renderers::MarkdownRenderer do
+  describe Woods::MCP::Renderers::MarkdownRenderer do
     let(:renderer) { described_class.new }
 
     describe '#render_lookup' do
@@ -235,7 +235,7 @@ RSpec.describe CodebaseIndex::MCP::ToolResponseRenderer do
 
   # ── Claude Renderer ────────────────────────────────────────────────
 
-  describe CodebaseIndex::MCP::Renderers::ClaudeRenderer do
+  describe Woods::MCP::Renderers::ClaudeRenderer do
     let(:renderer) { described_class.new }
 
     it 'wraps lookup in XML tags with attributes' do
@@ -303,7 +303,7 @@ RSpec.describe CodebaseIndex::MCP::ToolResponseRenderer do
 
   # ── Plain Renderer ─────────────────────────────────────────────────
 
-  describe CodebaseIndex::MCP::Renderers::PlainRenderer do
+  describe Woods::MCP::Renderers::PlainRenderer do
     let(:renderer) { described_class.new }
 
     it 'renders lookup with text dividers' do

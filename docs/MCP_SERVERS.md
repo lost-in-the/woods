@@ -1,6 +1,6 @@
 # MCP Servers
 
-CodebaseIndex ships two MCP (Model Context Protocol) servers that integrate with AI development tools like Claude Code, Cursor, and Windsurf.
+Woods ships two MCP (Model Context Protocol) servers that integrate with AI development tools like Claude Code, Cursor, and Windsurf.
 
 ## Overview
 
@@ -10,7 +10,7 @@ CodebaseIndex ships two MCP (Model Context Protocol) servers that integrate with
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
 | **Tools** | 27 | 31 |
 | **Transport** | Stdio (default), HTTP | Stdio |
-| **Data source** | `tmp/codebase_index/` output | Live database + application state |
+| **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
 
 ## Choosing the Right Tool
@@ -36,19 +36,19 @@ For detailed examples with parameters and expected output, see [MCP Tool Cookboo
 
 ## Index Server
 
-The Index Server reads pre-extracted data from disk and serves it via MCP. No Rails boot required — it works with the JSON output from `rake codebase_index:extract`.
+The Index Server reads pre-extracted data from disk and serves it via MCP. No Rails boot required — it works with the JSON output from `rake woods:extract`.
 
 ### Setup
 
 ```bash
 # Start with stdio transport (default for MCP clients)
-codebase-index-mcp /path/to/rails-app/tmp/codebase_index
+woods-mcp /path/to/rails-app/tmp/woods
 
 # Or use the self-healing wrapper (installs deps, validates index)
-codebase-index-mcp-start /path/to/rails-app/tmp/codebase_index
+woods-mcp-start /path/to/rails-app/tmp/woods
 
 # HTTP transport (for shared/remote access)
-codebase-index-mcp-http /path/to/rails-app/tmp/codebase_index
+woods-mcp-http /path/to/rails-app/tmp/woods
 ```
 
 ### Claude Code Configuration
@@ -56,9 +56,9 @@ codebase-index-mcp-http /path/to/rails-app/tmp/codebase_index
 ```json
 {
   "mcpServers": {
-    "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["/path/to/rails-app/tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp-start",
+      "args": ["/path/to/rails-app/tmp/woods"]
     }
   }
 }
@@ -69,9 +69,9 @@ codebase-index-mcp-http /path/to/rails-app/tmp/codebase_index
 ```json
 {
   "mcpServers": {
-    "codebase": {
-      "command": "codebase-index-mcp",
-      "args": ["/path/to/rails-app/tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp",
+      "args": ["/path/to/rails-app/tmp/woods"]
     }
   }
 }
@@ -84,15 +84,15 @@ The Index Server runs on the **host**, not inside Docker. It reads static JSON f
 ```json
 {
   "mcpServers": {
-    "codebase": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     }
   }
 }
 ```
 
-Do **not** use the container path (e.g., `/app/tmp/codebase_index`) — the server cannot access it. The `codebase-index-mcp-start` wrapper validates the directory and `manifest.json` before starting.
+Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot access it. The `woods-mcp-start` wrapper validates the directory and `manifest.json` before starting.
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
@@ -193,7 +193,7 @@ The Console Server connects to a live Rails application and provides database qu
 ### Setup
 
 ```bash
-codebase-console-mcp
+woods-console-mcp
 ```
 
 The console server uses a bridge architecture to communicate with a Rails process. Configure the connection in `console.yml`:

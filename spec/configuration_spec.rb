@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
+require 'woods'
 
-RSpec.describe CodebaseIndex::Configuration do
+RSpec.describe Woods::Configuration do
   subject(:config) { described_class.new }
 
   describe 'default values' do
@@ -91,12 +91,12 @@ RSpec.describe CodebaseIndex::Configuration do
 
     it 'raises on invalid format' do
       expect { config.context_format = :xml }.to raise_error(
-        CodebaseIndex::ConfigurationError, /context_format must be one of/
+        Woods::ConfigurationError, /context_format must be one of/
       )
     end
 
     it 'raises on string format' do
-      expect { config.context_format = 'markdown' }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.context_format = 'markdown' }.to raise_error(Woods::ConfigurationError)
     end
   end
 
@@ -107,23 +107,23 @@ RSpec.describe CodebaseIndex::Configuration do
     end
 
     it 'raises on nil' do
-      expect { config.max_context_tokens = nil }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.max_context_tokens = nil }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on negative integer' do
-      expect { config.max_context_tokens = -1 }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.max_context_tokens = -1 }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on zero' do
-      expect { config.max_context_tokens = 0 }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.max_context_tokens = 0 }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on float' do
-      expect { config.max_context_tokens = 1.5 }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.max_context_tokens = 1.5 }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on string' do
-      expect { config.max_context_tokens = '8000' }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.max_context_tokens = '8000' }.to raise_error(Woods::ConfigurationError)
     end
   end
 
@@ -149,15 +149,15 @@ RSpec.describe CodebaseIndex::Configuration do
     end
 
     it 'raises on negative value' do
-      expect { config.similarity_threshold = -0.1 }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.similarity_threshold = -0.1 }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on value greater than 1.0' do
-      expect { config.similarity_threshold = 1.1 }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.similarity_threshold = 1.1 }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on non-numeric string' do
-      expect { config.similarity_threshold = 'high' }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.similarity_threshold = 'high' }.to raise_error(Woods::ConfigurationError)
     end
   end
 
@@ -168,15 +168,15 @@ RSpec.describe CodebaseIndex::Configuration do
     end
 
     it 'raises on non-array' do
-      expect { config.extractors = :models }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.extractors = :models }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on array of strings' do
-      expect { config.extractors = %w[models controllers] }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.extractors = %w[models controllers] }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on mixed array' do
-      expect { config.extractors = [:models, 'controllers'] }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.extractors = [:models, 'controllers'] }.to raise_error(Woods::ConfigurationError)
     end
   end
 
@@ -192,15 +192,15 @@ RSpec.describe CodebaseIndex::Configuration do
     end
 
     it 'raises on nil' do
-      expect { config.pretty_json = nil }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.pretty_json = nil }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on string' do
-      expect { config.pretty_json = 'true' }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.pretty_json = 'true' }.to raise_error(Woods::ConfigurationError)
     end
 
     it 'raises on integer' do
-      expect { config.pretty_json = 1 }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.pretty_json = 1 }.to raise_error(Woods::ConfigurationError)
     end
   end
 
@@ -211,41 +211,41 @@ RSpec.describe CodebaseIndex::Configuration do
     end
 
     it 'raises on nil' do
-      expect { config.output_dir = nil }.to raise_error(CodebaseIndex::ConfigurationError)
+      expect { config.output_dir = nil }.to raise_error(Woods::ConfigurationError)
     end
   end
 
-  describe 'CodebaseIndex.configure' do
-    before { CodebaseIndex.configuration = nil }
+  describe 'Woods.configure' do
+    before { Woods.configuration = nil }
 
-    after { CodebaseIndex.configuration = nil }
+    after { Woods.configuration = nil }
 
     it 'yields the configuration' do
-      CodebaseIndex.configure do |c|
+      Woods.configure do |c|
         c.max_context_tokens = 4000
       end
 
-      expect(CodebaseIndex.configuration.max_context_tokens).to eq(4000)
+      expect(Woods.configuration.max_context_tokens).to eq(4000)
     end
 
     it 'raises on invalid values in configure block' do
       expect do
-        CodebaseIndex.configure do |c|
+        Woods.configure do |c|
           c.max_context_tokens = -1
         end
-      end.to raise_error(CodebaseIndex::ConfigurationError)
+      end.to raise_error(Woods::ConfigurationError)
     end
 
     it 'uses CONFIG_MUTEX for thread safety' do
-      expect(CodebaseIndex::CONFIG_MUTEX).to be_a(Mutex)
+      expect(Woods::CONFIG_MUTEX).to be_a(Mutex)
     end
 
     it 'does not corrupt configuration under concurrent access' do
-      CodebaseIndex.configuration = nil
+      Woods.configuration = nil
 
       threads = 10.times.map do |i|
         Thread.new do
-          CodebaseIndex.configure do |c|
+          Woods.configure do |c|
             c.max_context_tokens = 1000 + i
           end
         end
@@ -253,16 +253,16 @@ RSpec.describe CodebaseIndex::Configuration do
       threads.each(&:join)
 
       # Configuration should be set and valid (one thread won the race)
-      expect(CodebaseIndex.configuration).not_to be_nil
-      expect(CodebaseIndex.configuration.max_context_tokens).to be_a(Integer)
-      expect(CodebaseIndex.configuration.max_context_tokens).to be_positive
+      expect(Woods.configuration).not_to be_nil
+      expect(Woods.configuration.max_context_tokens).to be_a(Integer)
+      expect(Woods.configuration.max_context_tokens).to be_positive
     end
 
     it 'is reentrant — nested configure calls do not deadlock' do
       # Mutexes in Ruby are not reentrant by default; confirm we don't call
       # configure recursively (this documents the intended usage boundary)
       expect do
-        CodebaseIndex.configure do |c|
+        Woods.configure do |c|
           c.max_context_tokens = 2000
         end
       end.not_to raise_error

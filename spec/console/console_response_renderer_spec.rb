@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/console_response_renderer'
+require 'woods/console/console_response_renderer'
 
-RSpec.describe CodebaseIndex::Console::ConsoleResponseRenderer do
+RSpec.describe Woods::Console::ConsoleResponseRenderer do
   let(:renderer) { described_class.new }
 
   describe '#render_default' do
@@ -65,7 +65,7 @@ RSpec.describe CodebaseIndex::Console::ConsoleResponseRenderer do
   end
 end
 
-RSpec.describe CodebaseIndex::Console::JsonConsoleRenderer do
+RSpec.describe Woods::Console::JsonConsoleRenderer do
   let(:renderer) { described_class.new }
 
   describe '#render_default' do

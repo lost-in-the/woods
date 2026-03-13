@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/notion/mappers/column_mapper'
+require 'woods/notion/mappers/column_mapper'
 
-RSpec.describe CodebaseIndex::Notion::Mappers::ColumnMapper do
+RSpec.describe Woods::Notion::Mappers::ColumnMapper do
   subject(:mapper) { described_class.new }
 
   let(:string_column) do

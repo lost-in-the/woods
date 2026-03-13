@@ -1,6 +1,6 @@
-# CodebaseIndex: Use Cases & Feature Gap Analysis
+# Woods: Use Cases & Feature Gap Analysis
 
-Comprehensive evaluation of CodebaseIndex's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 32 extractors, the retrieval pipeline, both MCP servers (27 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
+Comprehensive evaluation of Woods's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 32 extractors, the retrieval pipeline, both MCP servers (27 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
 
 ---
 
@@ -107,7 +107,7 @@ Starting from any unit, traverse forward dependencies ("what does Order depend o
 ### Category E: Pipeline & Operations
 
 **E1. Incremental Extraction**
-Git-aware incremental extraction (`codebase_index:incremental`) re-extracts only changed files, using content hashing to skip unchanged units. This supports CI integration where the index is updated on every merge.
+Git-aware incremental extraction (`woods:incremental`) re-extracts only changed files, using content hashing to skip unchanged units. This supports CI integration where the index is updated on every merge.
 
 **E2. Embedding Pipeline Management**
 `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, and `pipeline_repair` MCP tools provide full pipeline lifecycle management. `PipelineGuard` rate-limits operations (5-minute cooldown). `CircuitBreaker` protects against embedding provider failures.

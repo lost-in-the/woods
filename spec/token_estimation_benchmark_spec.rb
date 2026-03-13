@@ -4,7 +4,7 @@ require 'spec_helper'
 
 RSpec.describe 'Token estimation accuracy', :benchmark do
   let(:source_files) do
-    Dir[File.expand_path('../lib/codebase_index/**/*.rb', __dir__)]
+    Dir[File.expand_path('../lib/woods/**/*.rb', __dir__)]
       .reject { |f| f.end_with?('/version.rb') }
       .sort_by { |f| File.size(f) }
   end

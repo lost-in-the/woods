@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'codebase_index/extracted_unit'
+require 'woods/extracted_unit'
 
 module IntegrationHelpers
   FIXTURE_PATH = File.expand_path('../fixtures/integration/extracted_units.json', __dir__)
@@ -16,9 +16,9 @@ module IntegrationHelpers
   # Convert a raw hash (string keys) into an ExtractedUnit instance.
   #
   # @param hash [Hash] unit data from JSON
-  # @return [CodebaseIndex::ExtractedUnit]
+  # @return [Woods::ExtractedUnit]
   def build_extracted_unit(hash) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: hash['type'].to_sym,
       identifier: hash['identifier'],
       file_path: hash['file_path']
@@ -34,11 +34,11 @@ module IntegrationHelpers
 
   # Populate all three store types from an array of ExtractedUnit instances.
   #
-  # @param units [Array<CodebaseIndex::ExtractedUnit>]
-  # @param vector_store [CodebaseIndex::Storage::VectorStore::Interface]
-  # @param metadata_store [CodebaseIndex::Storage::MetadataStore::Interface]
-  # @param graph_store [CodebaseIndex::Storage::GraphStore::Memory]
-  # @param provider [CodebaseIndex::Embedding::Provider::Interface]
+  # @param units [Array<Woods::ExtractedUnit>]
+  # @param vector_store [Woods::Storage::VectorStore::Interface]
+  # @param metadata_store [Woods::Storage::MetadataStore::Interface]
+  # @param graph_store [Woods::Storage::GraphStore::Memory]
+  # @param provider [Woods::Embedding::Provider::Interface]
   def populate_stores(units, vector_store:, metadata_store:, graph_store:, provider:)
     units.each do |unit|
       # Metadata store

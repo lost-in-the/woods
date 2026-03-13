@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/audit_logger'
+require 'woods/console/audit_logger'
 require 'tmpdir'
 require 'json'
 
-RSpec.describe CodebaseIndex::Console::AuditLogger do
+RSpec.describe Woods::Console::AuditLogger do
   let(:log_dir) { Dir.mktmpdir }
   let(:log_path) { File.join(log_dir, 'audit.jsonl') }
 

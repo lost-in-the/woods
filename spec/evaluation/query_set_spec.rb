@@ -3,10 +3,10 @@
 require 'spec_helper'
 require 'json'
 require 'tmpdir'
-require 'codebase_index'
-require 'codebase_index/evaluation/query_set'
+require 'woods'
+require 'woods/evaluation/query_set'
 
-RSpec.describe CodebaseIndex::Evaluation::QuerySet do
+RSpec.describe Woods::Evaluation::QuerySet do
   let(:sample_queries) do
     [
       described_class::Query.new(
@@ -185,16 +185,16 @@ RSpec.describe CodebaseIndex::Evaluation::QuerySet do
       expect(loaded.queries.map(&:query)).to eq(query_set.queries.map(&:query))
     end
 
-    it 'raises CodebaseIndex::Error for missing file' do
+    it 'raises Woods::Error for missing file' do
       expect { described_class.load('/nonexistent/file.json') }
-        .to raise_error(CodebaseIndex::Error, /file not found/i)
+        .to raise_error(Woods::Error, /file not found/i)
     end
 
-    it 'raises CodebaseIndex::Error for invalid JSON' do
+    it 'raises Woods::Error for invalid JSON' do
       File.write(json_path, 'not valid json{{{')
 
       expect { described_class.load(json_path) }
-        .to raise_error(CodebaseIndex::Error, /Invalid JSON/i)
+        .to raise_error(Woods::Error, /Invalid JSON/i)
     end
 
     it 'handles missing optional fields with defaults' do

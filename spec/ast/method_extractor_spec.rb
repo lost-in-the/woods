@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast/method_extractor'
+require 'woods/ast/method_extractor'
 
-RSpec.describe CodebaseIndex::Ast::MethodExtractor do
+RSpec.describe Woods::Ast::MethodExtractor do
   subject(:extractor) { described_class.new }
 
   describe '#extract_method' do

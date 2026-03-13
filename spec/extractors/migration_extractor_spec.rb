@@ -3,9 +3,9 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/extractors/migration_extractor'
+require 'woods/extractors/migration_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::MigrationExtractor do
+RSpec.describe Woods::Extractors::MigrationExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

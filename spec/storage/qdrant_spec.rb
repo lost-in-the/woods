@@ -3,11 +3,11 @@
 require 'spec_helper'
 require 'json'
 require 'net/http'
-require 'codebase_index'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/qdrant'
+require 'woods'
+require 'woods/storage/vector_store'
+require 'woods/storage/qdrant'
 
-RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
+RSpec.describe Woods::Storage::VectorStore::Qdrant do
   let(:store) { described_class.new(url: 'http://localhost:6333', collection: 'test_collection') }
   let(:http) { instance_double(Net::HTTP) }
 
@@ -74,7 +74,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
       allow(http).to receive(:request).and_return(response)
 
-      expect { store.store('doc1', [0.1], {}) }.to raise_error(CodebaseIndex::Error, /Qdrant API error/)
+      expect { store.store('doc1', [0.1], {}) }.to raise_error(Woods::Error, /Qdrant API error/)
     end
   end
 
@@ -144,7 +144,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
     it 'returns an array of SearchResult objects' do
       results = store.search([0.1, 0.2, 0.3], limit: 10)
 
-      expect(results).to all(be_a(CodebaseIndex::Storage::VectorStore::SearchResult))
+      expect(results).to all(be_a(Woods::Storage::VectorStore::SearchResult))
       expect(results.size).to eq(2)
     end
 
@@ -277,7 +277,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Qdrant do
 
   describe 'Interface compliance' do
     it 'includes VectorStore::Interface' do
-      expect(described_class.ancestors).to include(CodebaseIndex::Storage::VectorStore::Interface)
+      expect(described_class.ancestors).to include(Woods::Storage::VectorStore::Interface)
     end
   end
 

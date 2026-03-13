@@ -6,9 +6,9 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
-require 'codebase_index/extractors/route_extractor'
+require 'woods/extractors/route_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::RouteExtractor do
+RSpec.describe Woods::Extractors::RouteExtractor do
   let(:logger) { double('Logger', error: nil, warn: nil, debug: nil, info: nil) }
 
   # Build a mock route object

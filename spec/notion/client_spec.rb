@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/notion/client'
+require 'woods/notion/client'
 
-RSpec.describe CodebaseIndex::Notion::Client do
+RSpec.describe Woods::Notion::Client do
   subject(:client) { described_class.new(api_token: api_token, rate_limiter: rate_limiter) }
 
   let(:api_token) { 'secret_test_token_123' }
-  let(:rate_limiter) { instance_double(CodebaseIndex::Notion::RateLimiter) }
+  let(:rate_limiter) { instance_double(Woods::Notion::RateLimiter) }
 
   before do
     allow(rate_limiter).to receive(:throttle).and_yield
@@ -219,7 +219,7 @@ RSpec.describe CodebaseIndex::Notion::Client do
 
       expect do
         client.create_page(database_id: 'db', properties: {})
-      end.to raise_error(CodebaseIndex::Error, /400.*Invalid request/)
+      end.to raise_error(Woods::Error, /400.*Invalid request/)
     end
 
     it 'raises on 401 Unauthorized' do
@@ -230,7 +230,7 @@ RSpec.describe CodebaseIndex::Notion::Client do
 
       expect do
         client.create_page(database_id: 'db', properties: {})
-      end.to raise_error(CodebaseIndex::Error, /401/)
+      end.to raise_error(Woods::Error, /401/)
     end
 
     it 'retries on 429 Too Many Requests' do
@@ -280,7 +280,7 @@ RSpec.describe CodebaseIndex::Notion::Client do
 
       expect do
         client.create_page(database_id: 'db', properties: {})
-      end.to raise_error(CodebaseIndex::Error, /429/)
+      end.to raise_error(Woods::Error, /429/)
     end
   end
 end
