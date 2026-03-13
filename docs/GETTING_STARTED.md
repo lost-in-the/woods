@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through installing CodebaseIndex, running your first extraction, and inspecting the output.
+This guide walks you through installing Woods, running your first extraction, and inspecting the output.
 
 ## Prerequisites
 
@@ -10,12 +10,12 @@ This guide walks you through installing CodebaseIndex, running your first extrac
 
 ## 1. Install the Gem
 
-Add CodebaseIndex to your Rails app's Gemfile:
+Add Woods to your Rails app's Gemfile:
 
 ```ruby
 # Gemfile
 group :development do
-  gem 'codebase_index'
+  gem 'woods'
 end
 ```
 
@@ -28,21 +28,21 @@ bundle install
 Then run the install generator:
 
 ```bash
-bundle exec rails generate codebase_index:install
+bundle exec rails generate woods:install
 ```
 
-This creates `config/initializers/codebase_index.rb` with default configuration.
+This creates `config/initializers/woods.rb` with default configuration.
 
-> **Important:** CodebaseIndex requires a booted Rails environment for extraction. It uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) to produce accurate output. It cannot extract from source files alone.
+> **Important:** Woods requires a booted Rails environment for extraction. It uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) to produce accurate output. It cannot extract from source files alone.
 
 ## 2. Configure
 
 The generated initializer provides sensible defaults. Here's a minimal configuration:
 
 ```ruby
-# config/initializers/codebase_index.rb
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join('tmp/codebase_index')
+# config/initializers/woods.rb
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
 end
 ```
 
@@ -54,13 +54,13 @@ For quick setup, use a named preset:
 
 ```ruby
 # In-memory vectors, SQLite metadata, Ollama embeddings (no external services)
-CodebaseIndex.configure_with_preset(:local)
+Woods.configure_with_preset(:local)
 
 # pgvector + OpenAI embeddings (PostgreSQL required)
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 
 # Qdrant + OpenAI embeddings (production-scale)
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 ```
 
 ## 3. Extract
@@ -68,10 +68,11 @@ CodebaseIndex.configure_with_preset(:production)
 Run a full extraction from your Rails app root:
 
 ```bash
-bundle exec rake codebase_index:extract
+bundle exec rake woods:extract
+# Alias: woods:scan
 
 # Docker:
-# docker compose exec app bundle exec rake codebase_index:extract
+# docker compose exec app bundle exec rake woods:extract
 ```
 
 This will:
@@ -79,7 +80,7 @@ This will:
 2. Run each enabled extractor (models, controllers, services, jobs, etc.)
 3. Build the dependency graph with forward and reverse edges
 4. Enrich units with git metadata (last modified, contributors, change frequency)
-5. Write JSON output to `tmp/codebase_index/`
+5. Write JSON output to `tmp/woods/`
 
 Extraction time depends on your codebase size. A typical mid-size Rails app (50-100 models) takes 10-30 seconds.
 
@@ -89,16 +90,18 @@ After extraction, explore the output directory:
 
 ```bash
 # Overview
-bundle exec rake codebase_index:stats
+bundle exec rake woods:stats
+# Alias: woods:look
 
 # Check integrity
-bundle exec rake codebase_index:validate
+bundle exec rake woods:validate
+# Alias: woods:vet
 ```
 
 The output directory structure:
 
 ```
-tmp/codebase_index/
+tmp/woods/
 ├── manifest.json              # Extraction metadata, git SHA, unit counts
 ├── dependency_graph.json      # Full graph with forward/reverse edges + PageRank
 ├── SUMMARY.md                 # Human-readable structural overview
@@ -129,13 +132,13 @@ Each unit JSON contains:
 
 ## 5. Connect to an AI Tool
 
-CodebaseIndex ships two MCP servers for integrating with AI development tools.
+Woods ships two MCP servers for integrating with AI development tools.
 
 ### Index Server (reads pre-extracted data)
 
 ```bash
 # Start the MCP server pointing at your extraction output
-codebase-index-mcp tmp/codebase_index
+woods-mcp tmp/woods
 ```
 
 Configure in your AI tool's MCP settings:
@@ -143,9 +146,9 @@ Configure in your AI tool's MCP settings:
 ```json
 {
   "mcpServers": {
-    "codebase": {
-      "command": "codebase-index-mcp",
-      "args": ["/path/to/your-rails-app/tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp",
+      "args": ["/path/to/your-rails-app/tmp/woods"]
     }
   }
 }
@@ -155,7 +158,7 @@ Configure in your AI tool's MCP settings:
 
 ```bash
 # Start the console MCP server
-codebase-console-mcp
+woods-console-mcp
 ```
 
 > **Docker:** The Index Server runs on the host reading volume-mounted output — use the host path in `.mcp.json`. The Console Server connects to the container via `docker compose exec -i`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for Docker-specific `.mcp.json` examples.
@@ -167,7 +170,8 @@ See [MCP_SERVERS.md](MCP_SERVERS.md) for detailed setup instructions.
 After the initial extraction, use incremental mode to update only changed files:
 
 ```bash
-bundle exec rake codebase_index:incremental
+bundle exec rake woods:incremental
+# Alias: woods:tend
 ```
 
 This is ideal for CI pipelines:
@@ -182,7 +186,7 @@ jobs:
         with:
           fetch-depth: 2
       - name: Update index
-        run: bundle exec rake codebase_index:incremental
+        run: bundle exec rake woods:incremental
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
 ```
@@ -191,14 +195,14 @@ For Docker-based CI, replace the run command with your compose equivalent:
 
 ```yaml
       - name: Update index
-        run: docker compose exec -T app bundle exec rake codebase_index:incremental
+        run: docker compose exec -T app bundle exec rake woods:incremental
 ```
 
 ## Common First-Run Issues
 
 **Extraction produces 0 units** — Rails booted but `eager_load!` failed. Run `bundle exec rails runner 'Rails.application.eager_load!; puts "OK"'` and look for `NameError`. The most common cause is `app/graphql/` referencing an uninstalled gem.
 
-**"manifest.json not found" from MCP server** — The Index Server path is wrong. It needs the extraction output directory (`tmp/codebase_index`), not the Rails root. Verify with `ls tmp/codebase_index/manifest.json`.
+**"manifest.json not found" from MCP server** — The Index Server path is wrong. It needs the extraction output directory (`tmp/woods`), not the Rails root. Verify with `ls tmp/woods/manifest.json`.
 
 **Console server shows only 9 tools** — Expected behavior in embedded mode (rake task / Docker exec). Use bridge mode for all 31 tools. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md).
 

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/evaluation/baseline_runner'
+require 'woods'
+require 'woods/evaluation/baseline_runner'
 
-RSpec.describe CodebaseIndex::Evaluation::BaselineRunner do
+RSpec.describe Woods::Evaluation::BaselineRunner do
   let(:all_identifiers) do
     %w[User UserConcern Post Comment Order OrdersController Product
        SessionsController AuthService UserMailer OrderCreator]

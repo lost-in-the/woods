@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/cost_model/provider_pricing'
-require 'codebase_index/cost_model/embedding_cost'
+require 'woods/cost_model/provider_pricing'
+require 'woods/cost_model/embedding_cost'
 
-RSpec.describe CodebaseIndex::CostModel::EmbeddingCost do
+RSpec.describe Woods::CostModel::EmbeddingCost do
   subject(:calc) { described_class.new(provider: :openai_small) }
 
   describe '#full_index_cost' do

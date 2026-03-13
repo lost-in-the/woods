@@ -1,0 +1,37 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# MCP server for querying Woods extraction output over HTTP.
+#
+# Usage:
+#   woods-mcp-http [INDEX_DIR]
+#   WOODS_DIR=/path/to/output woods-mcp-http
+#
+# Reads JSON files from the extraction output directory and exposes
+# them via the Model Context Protocol (Streamable HTTP transport).
+# Requires the `rackup` gem and a Rack-compatible server (e.g., puma).
+
+require 'rackup'
+require_relative '../lib/woods'
+require_relative '../lib/woods/dependency_graph'
+require_relative '../lib/woods/graph_analyzer'
+require_relative '../lib/woods/mcp/server'
+require_relative '../lib/woods/mcp/bootstrapper'
+require_relative '../lib/woods/embedding/text_preparer'
+require_relative '../lib/woods/embedding/indexer'
+
+index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
+retriever = Woods::MCP::Bootstrapper.build_retriever
+snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
+
+port = (ENV['PORT'] || 9292).to_i
+host = ENV['HOST'] || 'localhost'
+
+server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+server.transport = transport
+
+app = proc { |env| transport.handle_request(Rack::Request.new(env)) }
+
+warn "Woods MCP HTTP server starting on http://#{host}:#{port}"
+Rackup::Handler.default.run(app, Port: port, Host: host)

@@ -2,11 +2,11 @@
 
 require 'spec_helper'
 require 'json'
-require 'codebase_index/ruby_analyzer/trace_enricher'
+require 'woods/ruby_analyzer/trace_enricher'
 
-RSpec.describe CodebaseIndex::RubyAnalyzer::TraceEnricher do
+RSpec.describe Woods::RubyAnalyzer::TraceEnricher do
   def make_unit(identifier:, type: :ruby_method)
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: '/app/greeter.rb'

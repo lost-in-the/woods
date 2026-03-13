@@ -1,6 +1,6 @@
-# CodebaseIndex Coverage Gap Analysis: Technical Review
+# Woods Coverage Gap Analysis: Technical Review
 
-We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. CodebaseIndex currently covers 32 extractors producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates, migrations, ActionCable channels, scheduled jobs, rake tasks, state machines, events, decorators, database views, caching patterns, factories, test mappings, and Rails source. Extraction also includes behavioral enrichment: callback side-effect analysis, a behavioral profile of resolved `Rails.application.config` values, and optional pre-computed request flow maps. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
+We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. Woods currently covers 32 extractors producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates, migrations, ActionCable channels, scheduled jobs, rake tasks, state machines, events, decorators, database views, caching patterns, factories, test mappings, and Rails source. Extraction also includes behavioral enrichment: callback side-effect analysis, a behavioral profile of resolved `Rails.application.config` values, and optional pre-computed request flow maps. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
 
 ## Implementation Status
 
@@ -31,16 +31,16 @@ The existing extractor infrastructure — `SharedDependencyScanner`, `SharedUtil
 
 We examined:
 
-- All 13 existing extractors in `lib/codebase_index/extractors/` to understand the interface contract
-- The orchestrator at `lib/codebase_index/extractor.rb` (lines 43-79) for `EXTRACTORS`, `TYPE_TO_EXTRACTOR_KEY`, `CLASS_BASED`, and `FILE_BASED` dispatch maps
-- `SharedDependencyScanner` at `lib/codebase_index/extractors/shared_dependency_scanner.rb` for dependency infrastructure
-- `DependencyGraph` at `lib/codebase_index/dependency_graph.rb` for graph integration requirements
-- `QueryClassifier` at `lib/codebase_index/retrieval/query_classifier.rb` for retrieval integration
+- All 13 existing extractors in `lib/woods/extractors/` to understand the interface contract
+- The orchestrator at `lib/woods/extractor.rb` (lines 43-79) for `EXTRACTORS`, `TYPE_TO_EXTRACTOR_KEY`, `CLASS_BASED`, and `FILE_BASED` dispatch maps
+- `SharedDependencyScanner` at `lib/woods/extractors/shared_dependency_scanner.rb` for dependency infrastructure
+- `DependencyGraph` at `lib/woods/dependency_graph.rb` for graph integration requirements
+- `QueryClassifier` at `lib/woods/retrieval/query_classifier.rb` for retrieval integration
 - The `EXTRACTION_DIRECTORIES` constant (extractor.rb, line 46-63) for the current eager-load fallback scope
-- The MCP server at `lib/codebase_index/mcp/server.rb` for tool surface area
+- The MCP server at `lib/woods/mcp/server.rb` for tool surface area
 - Existing docs in `docs/` for architectural constraints
 
-Each gap was evaluated for: (a) concrete use-case frequency, (b) whether the information is available elsewhere or uniquely requires CodebaseIndex's runtime introspection, and (c) implementation effort given the existing extractor contract.
+Each gap was evaluated for: (a) concrete use-case frequency, (b) whether the information is available elsewhere or uniquely requires Woods's runtime introspection, and (c) implementation effort given the existing extractor contract.
 
 ---
 
@@ -52,7 +52,7 @@ Each gap was evaluated for: (a) concrete use-case frequency, (b) whether the inf
 
 **1. View Templates (ERB/HAML/Slim)**
 
-This is the single biggest gap for day-to-day work. When debugging why a page renders incorrectly, you need the controller action, the template, the partials it renders, and the helpers it calls. CodebaseIndex gives you the controller but drops you at the edge of the rendering layer.
+This is the single biggest gap for day-to-day work. When debugging why a page renders incorrectly, you need the controller action, the template, the partials it renders, and the helpers it calls. Woods gives you the controller but drops you at the edge of the rendering layer.
 
 Concrete scenario: "Why does the users/show page show stale data?" requires tracing from `UsersController#show` through `app/views/users/show.html.erb` into `_profile_card.html.erb` into `_avatar.html.erb`. Without view extraction, you have controller context but no rendering context.
 
@@ -69,7 +69,7 @@ Routes are currently embedded as metadata in controller extraction (via `build_r
 
 Concrete scenario: "What happens when someone hits `POST /api/v2/webhooks/stripe`?" Today you need to know the controller name first, then look it up. With route units, you could search by path pattern.
 
-Concrete scenario: "Why is `/admin/reports/:id` returning 404?" Namespace routing (engines, scope blocks, constraints) is the #1 source of routing confusion. A route-level extractor would capture constraints, scopes, and middleware — context currently invisible to CodebaseIndex.
+Concrete scenario: "Why is `/admin/reports/:id` returning 404?" Namespace routing (engines, scope blocks, constraints) is the #1 source of routing confusion. A route-level extractor would capture constraints, scopes, and middleware — context currently invisible to Woods.
 
 **Effort:** Small (8-12 hours). `Rails.application.routes.routes` provides everything via runtime introspection. The data is already partially computed by `ControllerExtractor#build_routes_map`.
 **Dependencies:** None new. Extends the existing runtime introspection pattern.
@@ -214,7 +214,7 @@ What makes this feasible: YAML files have a trivial parse structure. The extract
 
 **5. Pundit Authorization Policies**
 
-CodebaseIndex extracts generic "policy" classes (business rule classes), but does not specifically extract Pundit authorization policies — the most common authorization pattern in Rails. For AI code generation, authorization context is critical: "Add an admin-only endpoint" requires knowing the app's authorization pattern, existing policy classes, and how policies map to controllers.
+Woods extracts generic "policy" classes (business rule classes), but does not specifically extract Pundit authorization policies — the most common authorization pattern in Rails. For AI code generation, authorization context is critical: "Add an admin-only endpoint" requires knowing the app's authorization pattern, existing policy classes, and how policies map to controllers.
 
 Concrete scenario: AI generates a controller action without authorization because it does not know the app uses Pundit. Or it generates `authorize @post` when the app's convention is `authorize @post, :admin_update?` with custom policy methods.
 
@@ -242,7 +242,7 @@ Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily g
 
 ### What Didn't Make the Cut (and Why)
 
-**Stimulus/Hotwire JavaScript** (Perspective 1, #5): Valuable but requires JavaScript/TypeScript parsing — a fundamentally different toolchain from Ruby. The ROI is lower than Ruby-side gaps because CodebaseIndex's core strength is runtime introspection, which does not apply to frontend assets. If the tool expands to frontend, this should be a separate extraction pipeline, not bolted onto the Ruby extractors.
+**Stimulus/Hotwire JavaScript** (Perspective 1, #5): Valuable but requires JavaScript/TypeScript parsing — a fundamentally different toolchain from Ruby. The ROI is lower than Ruby-side gaps because Woods's core strength is runtime introspection, which does not apply to frontend assets. If the tool expands to frontend, this should be a separate extraction pipeline, not bolted onto the Ruby extractors.
 
 **Database migrations** (Perspective 2, #5): **Now Done.** `MigrationExtractor` scans `db/migrate/*.rb`, extracting DDL metadata (tables, columns, indexes, references), reversibility, risk indicators (data migrations, raw SQL), and model dependencies via table name classification. 55 specs.
 
@@ -258,7 +258,7 @@ Ranked by: (1) how many perspectives value it, (2) unique value (cannot easily g
 
 ## Gotchas
 
-- **View template parsing is not Prism.** The existing AST layer (`lib/codebase_index/ast/`) is Prism-based and handles Ruby source. ERB/HAML/Slim templates require dedicated parsers (`erubi` for ERB, `haml` gem for HAML, `slim` gem for Slim). Each template engine is a separate dependency and parsing path. This is why views are ranked #3 despite highest unique value — the implementation cost is discontinuous with other extractors.
+- **View template parsing is not Prism.** The existing AST layer (`lib/woods/ast/`) is Prism-based and handles Ruby source. ERB/HAML/Slim templates require dedicated parsers (`erubi` for ERB, `haml` gem for HAML, `slim` gem for Slim). Each template engine is a separate dependency and parsing path. This is why views are ranked #3 despite highest unique value — the implementation cost is discontinuous with other extractors.
 
 - **Concern extraction changes the dependency graph semantics.** Today, model units have dependencies on other models, services, jobs, etc. Adding concern units means models would depend on concerns, and concerns would depend on models. This creates a new class of edges in the graph. `GraphAnalyzer`'s hub/cycle detection would need testing against this new topology to ensure the metrics remain meaningful.
 

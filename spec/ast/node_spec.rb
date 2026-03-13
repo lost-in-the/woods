@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast/node'
+require 'woods/ast/node'
 
-RSpec.describe CodebaseIndex::Ast::Node do
+RSpec.describe Woods::Ast::Node do
   describe 'struct initialization' do
     it 'creates a node with keyword arguments' do
       node = described_class.new(
@@ -126,10 +126,10 @@ RSpec.describe CodebaseIndex::Ast::Node do
     end
 
     it 'reconstructs const nodes' do
-      node = described_class.new(type: :const, children: [], line: 1, receiver: 'CodebaseIndex',
+      node = described_class.new(type: :const, children: [], line: 1, receiver: 'Woods',
                                  method_name: 'Extractor')
 
-      expect(node.to_source).to eq('CodebaseIndex::Extractor')
+      expect(node.to_source).to eq('Woods::Extractor')
     end
 
     it 'reconstructs def nodes' do

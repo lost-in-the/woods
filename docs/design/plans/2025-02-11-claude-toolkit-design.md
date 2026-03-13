@@ -1,4 +1,4 @@
-# Claude Toolkit Design for CodebaseIndex
+# Claude Toolkit Design for Woods
 
 ## Problem
 
@@ -21,10 +21,10 @@ Rules are path-triggered and load automatically when touching relevant files.
 
 | Rule | Trigger paths | Purpose |
 |---|---|---|
-| `extractors.md` | `lib/codebase_index/extractors/**/*.rb` | Extractor interface conventions |
+| `extractors.md` | `lib/woods/extractors/**/*.rb` | Extractor interface conventions |
 | `docs.md` | `docs/**/*.md` | Documentation conventions (dual-DB, tables, cross-refs) |
-| `storage-retrieval.md` | `lib/codebase_index/storage/**/*.rb`, `retrieval/**/*.rb`, `embedding/**/*.rb` | Storage/retrieval layer conventions |
-| `integration-testing.md` | `lib/codebase_index/extractors/**/*.rb`, `spec/**/*_spec.rb` | Host app validation workflow (local + Docker) |
+| `storage-retrieval.md` | `lib/woods/storage/**/*.rb`, `retrieval/**/*.rb`, `embedding/**/*.rb` | Storage/retrieval layer conventions |
+| `integration-testing.md` | `lib/woods/extractors/**/*.rb`, `spec/**/*_spec.rb` | Host app validation workflow (local + Docker) |
 
 ### Layer 2: Skills (reusable instruction sets)
 

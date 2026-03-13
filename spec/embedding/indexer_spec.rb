@@ -2,19 +2,19 @@
 
 require 'spec_helper'
 require 'fileutils'
-require 'codebase_index'
-require 'codebase_index/embedding/indexer'
-require 'codebase_index/embedding/text_preparer'
-require 'codebase_index/embedding/provider'
+require 'woods'
+require 'woods/embedding/indexer'
+require 'woods/embedding/text_preparer'
+require 'woods/embedding/provider'
 
-RSpec.describe CodebaseIndex::Embedding::Indexer do
+RSpec.describe Woods::Embedding::Indexer do
   let(:output_dir) { '/tmp/claude/indexer_test' }
 
   let(:provider) do
     instance_double('Provider', embed: [0.1, 0.2], embed_batch: [[0.1, 0.2], [0.3, 0.4]])
   end
 
-  let(:text_preparer) { CodebaseIndex::Embedding::TextPreparer.new }
+  let(:text_preparer) { Woods::Embedding::TextPreparer.new }
 
   let(:vector_store) do
     instance_double('VectorStore', store: nil, store_batch: nil, delete: nil, count: 0)
@@ -222,15 +222,15 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
       allow(provider).to receive(:embed_batch).and_raise(StandardError, 'connection refused')
     end
 
-    it 'raises CodebaseIndex::Error on provider failure' do
+    it 'raises Woods::Error on provider failure' do
       expect { indexer.index_all }.to raise_error(
-        CodebaseIndex::Error, /Embedding failed: connection refused/
+        Woods::Error, /Embedding failed: connection refused/
       )
     end
 
     it 'includes the error message in the raised exception' do
       expect { indexer.index_all }.to raise_error(
-        CodebaseIndex::Error, /connection refused/
+        Woods::Error, /connection refused/
       )
     end
 
@@ -244,7 +244,7 @@ RSpec.describe CodebaseIndex::Embedding::Indexer do
 
       expect do
         indexer.send(:embed_and_store, items, checkpoint, stats)
-      end.to raise_error(CodebaseIndex::Error, /network timeout/)
+      end.to raise_error(Woods::Error, /network timeout/)
 
       expect(stats[:errors]).to eq(1)
     end

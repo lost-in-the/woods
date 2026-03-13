@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'tmpdir'
-require 'codebase_index/feedback/store'
+require 'woods/feedback/store'
 
-RSpec.describe CodebaseIndex::Feedback::Store do
+RSpec.describe Woods::Feedback::Store do
   let(:feedback_dir) { Dir.mktmpdir }
   let(:feedback_path) { File.join(feedback_dir, 'feedback.jsonl') }
 

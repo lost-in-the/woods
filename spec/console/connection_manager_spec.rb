@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/connection_manager'
+require 'woods/console/connection_manager'
 
-RSpec.describe CodebaseIndex::Console::ConnectionManager do
+RSpec.describe Woods::Console::ConnectionManager do
   let(:config) do
     { 'mode' => 'direct', 'command' => 'echo ok' }
   end
@@ -65,19 +65,19 @@ RSpec.describe CodebaseIndex::Console::ConnectionManager do
     it 'raises for docker mode without container' do
       docker_config = { 'mode' => 'docker' }
       m = described_class.new(config: docker_config)
-      expect { m.connect! }.to raise_error(CodebaseIndex::Console::ConnectionError, /container/)
+      expect { m.connect! }.to raise_error(Woods::Console::ConnectionError, /container/)
     end
 
     it 'raises for ssh mode without host' do
       ssh_config = { 'mode' => 'ssh' }
       m = described_class.new(config: ssh_config)
-      expect { m.connect! }.to raise_error(CodebaseIndex::Console::ConnectionError, /host/)
+      expect { m.connect! }.to raise_error(Woods::Console::ConnectionError, /host/)
     end
 
     it 'raises for unknown mode' do
       bad_config = { 'mode' => 'carrier_pigeon' }
       m = described_class.new(config: bad_config)
-      expect { m.connect! }.to raise_error(CodebaseIndex::Console::ConnectionError, /Unknown connection mode/)
+      expect { m.connect! }.to raise_error(Woods::Console::ConnectionError, /Unknown connection mode/)
     end
   end
 

@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast'
-require 'codebase_index/ruby_analyzer/class_analyzer'
-require 'codebase_index/ruby_analyzer/method_analyzer'
-require 'codebase_index/ruby_analyzer/dataflow_analyzer'
+require 'woods/ast'
+require 'woods/ruby_analyzer/class_analyzer'
+require 'woods/ruby_analyzer/method_analyzer'
+require 'woods/ruby_analyzer/dataflow_analyzer'
 
 RSpec.describe 'Static Analysis Pipeline', :integration do
-  let(:parser) { CodebaseIndex::Ast::Parser.new }
-  let(:class_analyzer) { CodebaseIndex::RubyAnalyzer::ClassAnalyzer.new(parser: parser) }
-  let(:method_analyzer) { CodebaseIndex::RubyAnalyzer::MethodAnalyzer.new(parser: parser) }
-  let(:dataflow_analyzer) { CodebaseIndex::RubyAnalyzer::DataFlowAnalyzer.new(parser: parser) }
+  let(:parser) { Woods::Ast::Parser.new }
+  let(:class_analyzer) { Woods::RubyAnalyzer::ClassAnalyzer.new(parser: parser) }
+  let(:method_analyzer) { Woods::RubyAnalyzer::MethodAnalyzer.new(parser: parser) }
+  let(:dataflow_analyzer) { Woods::RubyAnalyzer::DataFlowAnalyzer.new(parser: parser) }
 
   let(:fixtures_dir) { File.expand_path('../fixtures/integration/ruby_sources', __dir__) }
 

@@ -1,49 +1,49 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ruby_analyzer'
+require 'woods/ruby_analyzer'
 
-RSpec.describe CodebaseIndex::RubyAnalyzer do
+RSpec.describe Woods::RubyAnalyzer do
   describe '.analyze' do
     it 'returns an array of ExtractedUnit objects' do
-      path = File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__)
+      path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       units = described_class.analyze(paths: [path])
 
       expect(units).to be_an(Array)
       expect(units).not_to be_empty
-      expect(units).to all(be_a(CodebaseIndex::ExtractedUnit))
+      expect(units).to all(be_a(Woods::ExtractedUnit))
     end
 
     it 'produces class units' do
-      path = File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__)
+      path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       units = described_class.analyze(paths: [path])
 
       class_units = units.select { |u| u.type == :ruby_class }
       expect(class_units).not_to be_empty
-      expect(class_units.map(&:identifier)).to include('CodebaseIndex::ExtractedUnit')
+      expect(class_units.map(&:identifier)).to include('Woods::ExtractedUnit')
     end
 
     it 'produces module units' do
-      path = File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__)
+      path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       units = described_class.analyze(paths: [path])
 
       module_units = units.select { |u| u.type == :ruby_module }
-      expect(module_units.map(&:identifier)).to include('CodebaseIndex')
+      expect(module_units.map(&:identifier)).to include('Woods')
     end
 
     it 'produces method units' do
-      path = File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__)
+      path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       units = described_class.analyze(paths: [path])
 
       method_units = units.select { |u| u.type == :ruby_method }
       expect(method_units).not_to be_empty
       identifiers = method_units.map(&:identifier)
-      expect(identifiers).to include('CodebaseIndex::ExtractedUnit#to_h')
-      expect(identifiers).to include('CodebaseIndex::ExtractedUnit#estimated_tokens')
+      expect(identifiers).to include('Woods::ExtractedUnit#to_h')
+      expect(identifiers).to include('Woods::ExtractedUnit#estimated_tokens')
     end
 
     it 'annotates units with data transformations' do
-      path = File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__)
+      path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       units = described_class.analyze(paths: [path])
 
       # At least some units should have data_transformations metadata
@@ -52,15 +52,15 @@ RSpec.describe CodebaseIndex::RubyAnalyzer do
     end
 
     it 'accepts trace_data for enrichment' do
-      path = File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__)
+      path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       trace_data = [
-        { 'class_name' => 'CodebaseIndex::ExtractedUnit', 'method_name' => 'to_h',
+        { 'class_name' => 'Woods::ExtractedUnit', 'method_name' => 'to_h',
           'event' => 'call', 'caller_class' => 'Test', 'caller_method' => 'run' }
       ]
 
       units = described_class.analyze(paths: [path], trace_data: trace_data)
 
-      to_h_unit = units.find { |u| u.identifier == 'CodebaseIndex::ExtractedUnit#to_h' }
+      to_h_unit = units.find { |u| u.identifier == 'Woods::ExtractedUnit#to_h' }
       expect(to_h_unit.metadata[:trace]).to be_a(Hash)
     end
 
@@ -77,25 +77,25 @@ RSpec.describe CodebaseIndex::RubyAnalyzer do
     end
 
     it 'discovers .rb files from directories' do
-      dir = File.expand_path('../lib/codebase_index/ast', __dir__)
+      dir = File.expand_path('../lib/woods/ast', __dir__)
       units = described_class.analyze(paths: [dir])
 
       expect(units).not_to be_empty
       # Should have found classes from ast directory files
       identifiers = units.map(&:identifier)
-      expect(identifiers).to include('CodebaseIndex::Ast::Parser')
+      expect(identifiers).to include('Woods::Ast::Parser')
     end
 
     it 'processes multiple files' do
       paths = [
-        File.expand_path('../lib/codebase_index/extracted_unit.rb', __dir__),
-        File.expand_path('../lib/codebase_index/dependency_graph.rb', __dir__)
+        File.expand_path('../lib/woods/extracted_unit.rb', __dir__),
+        File.expand_path('../lib/woods/dependency_graph.rb', __dir__)
       ]
       units = described_class.analyze(paths: paths)
 
       identifiers = units.map(&:identifier)
-      expect(identifiers).to include('CodebaseIndex::ExtractedUnit')
-      expect(identifiers).to include('CodebaseIndex::DependencyGraph')
+      expect(identifiers).to include('Woods::ExtractedUnit')
+      expect(identifiers).to include('Woods::DependencyGraph')
     end
   end
 end

@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in CodebaseIndex, please report it responsibly.
+If you discover a security vulnerability in Woods, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
@@ -36,7 +36,7 @@ Instead, email **info@leah.wtf** with:
 
 ## Security Considerations
 
-CodebaseIndex runs inside your Rails application and has access to:
+Woods runs inside your Rails application and has access to:
 
 - **Application source code** — extracted and written to the output directory as JSON
 - **Database schema** — column names, types, indexes, and foreign keys (no row data)
@@ -45,7 +45,7 @@ CodebaseIndex runs inside your Rails application and has access to:
 
 ### Output Directory
 
-Extracted data is written to `tmp/codebase_index/` by default. This directory contains your application's source code and schema in structured JSON format. Treat it with the same sensitivity as your source code — do not expose it to untrusted parties.
+Extracted data is written to `tmp/woods/` by default. This directory contains your application's source code and schema in structured JSON format. Treat it with the same sensitivity as your source code — do not expose it to untrusted parties.
 
 ### Console Server
 

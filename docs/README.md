@@ -1,6 +1,6 @@
-# CodebaseIndex Documentation
+# Woods Documentation
 
-CodebaseIndex is a Ruby gem that extracts structured data from Rails applications for AI-assisted development. Unlike file-level tools, it uses **runtime introspection** — booting the Rails app and querying `ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs — to produce version-accurate representations with inlined concerns, resolved callback chains, and schema-aware associations.
+Woods is a Ruby gem that extracts structured data from Rails applications for AI-assisted development. Unlike file-level tools, it uses **runtime introspection** — booting the Rails app and querying `ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs — to produce version-accurate representations with inlined concerns, resolved callback chains, and schema-aware associations.
 
 ## Current State
 
@@ -18,10 +18,10 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [DOCKER_SETUP.md](DOCKER_SETUP.md) | Docker-specific guide — split architecture, volume mounts, path translation, MCP config |
 | [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) | Console MCP server setup — stdio, Docker, HTTP/Rack, SSH bridge, tool tiers, safety model |
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
-| [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/codebase-index-mcp-http`) |
+| [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/woods-mcp-http`) |
 | [FAQ.md](FAQ.md) | Frequently asked questions — general, setup, extraction, MCP servers, Docker, storage |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix for extraction, MCP, embedding, storage, Docker, and Notion problems |
-| [WHY_CODEBASE_INDEX.md](WHY_CODEBASE_INDEX.md) | What CodebaseIndex is, why it exists, before/after examples |
+| [WHY_WOODS.md](WHY_WOODS.md) | What Woods is, why it exists, before/after examples |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline stages, ExtractedUnit, dependency graph, retrieval, storage backends, MCP servers |
 | [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 34 extractors captures, edge cases, example output |
 | [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
@@ -34,7 +34,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [TOKEN_BENCHMARK.md](TOKEN_BENCHMARK.md) | Token estimation benchmark — tiktoken comparison, divisor calibration |
 | [USE_CASES_AND_FEATURE_GAPS.md](USE_CASES_AND_FEATURE_GAPS.md) | 37 use cases across 4 categories with implementation status |
 | [NOTION_INTEGRATION.md](NOTION_INTEGRATION.md) | Sync codebase data to Notion databases (Data Models + Columns schemas) |
-| [self-analysis/](self-analysis/) | CodebaseIndex analyzed by itself — extraction output, quality audit |
+| [self-analysis/](self-analysis/) | Woods analyzed by itself — extraction output, quality audit |
 
 Historical design documents from the build phase are in [design/](design/) (see [design/README.md](design/README.md)).
 

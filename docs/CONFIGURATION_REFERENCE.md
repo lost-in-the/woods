@@ -1,10 +1,10 @@
 # Configuration Reference
 
-All configuration is done via the `CodebaseIndex.configure` block, typically in `config/initializers/codebase_index.rb`.
+All configuration is done via the `Woods.configure` block, typically in `config/initializers/woods.rb`.
 
 ```ruby
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join('tmp/codebase_index')
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
   config.max_context_tokens = 8000
   # ...
 end
@@ -14,7 +14,7 @@ end
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `output_dir` | Pathname/String | `Rails.root.join('tmp/codebase_index')` | Directory where extracted data is written |
+| `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | Directory where extracted data is written |
 | `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | List of enabled extractors (see [Extractors](#extractors) below) |
 | `pretty_json` | Boolean | `true` | Format extracted JSON with indentation |
 | `max_context_tokens` | Integer | `8000` | Maximum tokens for retrieval context windows |
@@ -75,7 +75,7 @@ config.vector_store_options = {
 Requires the pgvector extension. Run the generator to create migrations:
 
 ```bash
-bundle exec rails generate codebase_index:pgvector
+bundle exec rails generate woods:pgvector
 bundle exec rails db:migrate
 ```
 
@@ -85,7 +85,7 @@ bundle exec rails db:migrate
 config.vector_store = :qdrant
 config.vector_store_options = {
   url: 'http://localhost:6333',
-  collection: 'codebase_index',
+  collection: 'woods',
   dimensions: 1536
 }
 ```
@@ -95,7 +95,7 @@ config.vector_store_options = {
 ```ruby
 config.metadata_store = :sqlite
 config.metadata_store_options = {
-  database: Rails.root.join('tmp/codebase_index/metadata.sqlite3').to_s
+  database: Rails.root.join('tmp/woods/metadata.sqlite3').to_s
 }
 ```
 
@@ -105,22 +105,22 @@ For quick setup, use named presets that configure storage + embedding together:
 
 ```ruby
 # Local development — no external services needed
-CodebaseIndex.configure_with_preset(:local)
+Woods.configure_with_preset(:local)
 # → in_memory vectors, SQLite metadata, in_memory graph, Ollama embeddings
 
 # PostgreSQL — requires pgvector extension and OpenAI API key
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 # → pgvector vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 
 # Production — requires Qdrant server and OpenAI API key
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 # → Qdrant vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 ```
 
 Presets can be overridden:
 
 ```ruby
-CodebaseIndex.configure_with_preset(:local) do |config|
+Woods.configure_with_preset(:local) do |config|
   config.max_context_tokens = 16000
   config.embedding_model = 'mxbai-embed-large'
 end
@@ -144,7 +144,7 @@ end
 
 ```ruby
 config.session_tracer_enabled = true
-config.session_store = CodebaseIndex::SessionTracer::FileStore.new(
+config.session_store = Woods::SessionTracer::FileStore.new(
   Rails.root.join('tmp/session_traces')
 )
 config.session_exclude_paths = ['/health', '/metrics', '/assets']

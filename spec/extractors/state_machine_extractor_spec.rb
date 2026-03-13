@@ -6,12 +6,12 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/shared_utility_methods'
-require 'codebase_index/extractors/shared_dependency_scanner'
-require 'codebase_index/extractors/state_machine_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/shared_utility_methods'
+require 'woods/extractors/shared_dependency_scanner'
+require 'woods/extractors/state_machine_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::StateMachineExtractor do
+RSpec.describe Woods::Extractors::StateMachineExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

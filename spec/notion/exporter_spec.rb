@@ -2,13 +2,13 @@
 
 require 'spec_helper'
 require 'securerandom'
-require 'codebase_index/notion/exporter'
+require 'woods/notion/exporter'
 
-RSpec.describe CodebaseIndex::Notion::Exporter do
+RSpec.describe Woods::Notion::Exporter do
   subject(:exporter) { described_class.new(index_dir: index_dir, config: config, client: client, reader: reader) }
 
-  let(:index_dir) { '/tmp/test_codebase_index' }
-  let(:client) { instance_double(CodebaseIndex::Notion::Client) }
+  let(:index_dir) { '/tmp/test_woods' }
+  let(:client) { instance_double(Woods::Notion::Client) }
   let(:config) do
     double(
       'Configuration',
@@ -98,7 +98,7 @@ RSpec.describe CodebaseIndex::Notion::Exporter do
       bad_config = double('Configuration', notion_api_token: nil, notion_database_ids: {})
       expect do
         described_class.new(index_dir: index_dir, config: bad_config, reader: reader)
-      end.to raise_error(CodebaseIndex::ConfigurationError, /notion_api_token/)
+      end.to raise_error(Woods::ConfigurationError, /notion_api_token/)
     end
 
     it 'succeeds with valid config' do

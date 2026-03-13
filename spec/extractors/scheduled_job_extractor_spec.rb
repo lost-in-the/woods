@@ -5,10 +5,10 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/scheduled_job_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/scheduled_job_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::ScheduledJobExtractor do
+RSpec.describe Woods::Extractors::ScheduledJobExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

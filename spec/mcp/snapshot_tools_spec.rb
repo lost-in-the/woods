@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/mcp/server'
+require 'woods'
+require 'woods/dependency_graph'
+require 'woods/mcp/server'
 
 RSpec.describe 'Snapshot MCP tools' do
-  let(:fixture_dir) { File.expand_path('../fixtures/codebase_index', __dir__) }
+  let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
 
   # Helpers (same as server_spec.rb)
   def call_tool(server, tool_name, **args)
@@ -28,7 +28,7 @@ RSpec.describe 'Snapshot MCP tools' do
   # ── Without snapshot store ────────────────────────────────────────
 
   describe 'without snapshot store configured' do
-    let(:server) { CodebaseIndex::MCP::Server.build(index_dir: fixture_dir) }
+    let(:server) { Woods::MCP::Server.build(index_dir: fixture_dir) }
 
     it 'list_snapshots returns not configured message' do
       response = call_tool(server, 'list_snapshots')
@@ -55,11 +55,11 @@ RSpec.describe 'Snapshot MCP tools' do
 
   describe 'with snapshot store configured' do
     let(:snapshot_store) do
-      instance_double('CodebaseIndex::Temporal::SnapshotStore')
+      instance_double('Woods::Temporal::SnapshotStore')
     end
 
     let(:server) do
-      CodebaseIndex::MCP::Server.build(index_dir: fixture_dir, snapshot_store: snapshot_store)
+      Woods::MCP::Server.build(index_dir: fixture_dir, snapshot_store: snapshot_store)
     end
 
     describe 'tool: list_snapshots' do

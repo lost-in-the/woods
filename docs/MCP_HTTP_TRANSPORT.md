@@ -29,7 +29,7 @@ The gem includes example servers (`examples/http_server.rb`, `examples/streamabl
 
 ```ruby
 # Build the MCP server (same as stdio)
-server = CodebaseIndex::MCP::Server.build(index_dir: index_dir)
+server = Woods::MCP::Server.build(index_dir: index_dir)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport
 
@@ -60,25 +60,25 @@ end
 
 This provides non-streaming Streamable HTTP transport (POST-only, no SSE).
 
-## Implementation for CodebaseIndex
+## Implementation for Woods
 
 ### Option A: Standalone HTTP Executable (Recommended)
 
-Add `exe/codebase-index-mcp-http` alongside the existing stdio executable:
+Add `exe/woods-mcp-http` alongside the existing stdio executable:
 
 ```ruby
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
 require "rackup"
-require_relative "../lib/codebase_index"
-require_relative "../lib/codebase_index/mcp/server"
+require_relative "../lib/woods"
+require_relative "../lib/woods/mcp/server"
 # ... other requires ...
 
-index_dir = ARGV[0] || ENV["CODEBASE_INDEX_DIR"] || Dir.pwd
+index_dir = ARGV[0] || ENV["WOODS_DIR"] || Dir.pwd
 port = (ENV["PORT"] || 9292).to_i
 
-server = CodebaseIndex::MCP::Server.build(index_dir: index_dir, retriever: retriever)
+server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport
 
@@ -95,8 +95,8 @@ Rackup::Handler.get("puma").run(app, Port: port, Host: "localhost")
 A Rack middleware that mounts the MCP server at a configurable path:
 
 ```ruby
-# lib/codebase_index/mcp/rack_middleware.rb
-module CodebaseIndex
+# lib/woods/mcp/rack_middleware.rb
+module Woods
   module MCP
     class RackMiddleware
       def initialize(app, index_dir:, path: "/mcp")
@@ -123,12 +123,12 @@ end
 
 ### Option C: Combined Executable with Transport Flag
 
-A single `codebase-index-mcp` executable that supports both transports:
+A single `woods-mcp` executable that supports both transports:
 
 ```
-codebase-index-mcp                     # stdio (default, backward compatible)
-codebase-index-mcp --http              # HTTP on port 9292
-codebase-index-mcp --http --port 8080  # HTTP on custom port
+woods-mcp                     # stdio (default, backward compatible)
+woods-mcp --http              # HTTP on port 9292
+woods-mcp --http --port 8080  # HTTP on custom port
 ```
 
 **Complexity**: Low — add CLI flag parsing to existing exe.
@@ -145,7 +145,7 @@ codebase-index-mcp --http --port 8080  # HTTP on custom port
 ### Implementation Effort
 
 - **Effort**: ~1 hour
-- **Files changed**: 1 new (`exe/codebase-index-mcp-http`), 1 modified (`codebase_index.gemspec` to register the new executable)
+- **Files changed**: 1 new (`exe/woods-mcp-http`), 1 modified (`woods.gemspec` to register the new executable)
 - **Test coverage**: The existing `spec/mcp/server_spec.rb` covers all tool behavior; transport-level testing would be integration-only (Rack test with mock requests)
 
 ### MCP Ecosystem Context

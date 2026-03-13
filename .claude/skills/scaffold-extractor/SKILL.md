@@ -1,6 +1,6 @@
 ---
 name: scaffold-extractor
-description: Generates boilerplate for a new CodebaseIndex extractor and its spec
+description: Generates boilerplate for a new Woods extractor and its spec
 argument-hint: "[extractor-name]"
 allowed-tools: Read, Write, Glob, Grep
 ---
@@ -17,8 +17,8 @@ If `$ARGUMENTS` is empty, ask the user what to name the extractor.
 ## Steps
 
 1. **Read conventions** — Read `.claude/rules/extractors.md` for the interface contract.
-2. **Check for conflicts** — Glob `lib/codebase_index/extractors/*_extractor.rb` to ensure the name isn't taken.
-3. **Create the extractor** at `lib/codebase_index/extractors/$ARGUMENTS_extractor.rb` using the template below.
+2. **Check for conflicts** — Glob `lib/woods/extractors/*_extractor.rb` to ensure the name isn't taken.
+3. **Create the extractor** at `lib/woods/extractors/$ARGUMENTS_extractor.rb` using the template below.
 4. **Create the spec** at `spec/extractors/$ARGUMENTS_extractor_spec.rb` using the spec template below.
 5. **Report** — Show the user what was created and what they need to do next (register in `extractor.rb`, add to CLAUDE.md if needed).
 
@@ -30,7 +30,7 @@ If `$ARGUMENTS` is empty, ask the user what to name the extractor.
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
-module CodebaseIndex
+module Woods
   module Extractors
     # {Name}Extractor extracts {description} from Rails applications.
     #
@@ -95,12 +95,12 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'codebase_index/model_name_cache'
-require 'codebase_index/extractors/shared_utility_methods'
-require 'codebase_index/extractors/shared_dependency_scanner'
-require 'codebase_index/extractors/{type}_extractor'
+require 'woods/model_name_cache'
+require 'woods/extractors/shared_utility_methods'
+require 'woods/extractors/shared_dependency_scanner'
+require 'woods/extractors/{type}_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::{Name}Extractor do
+RSpec.describe Woods::Extractors::{Name}Extractor do
   include_context 'extractor setup'
 
   describe '#initialize' do

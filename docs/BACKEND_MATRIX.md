@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document provides deep analysis of every backend option CodebaseIndex supports, with tradeoffs, performance characteristics, and guidance for selecting the right combination for a given environment.
+This document provides deep analysis of every backend option Woods supports, with tradeoffs, performance characteristics, and guidance for selecting the right combination for a given environment.
 
 The goal is that an agent or developer reading this document can make an informed backend selection without external research.
 
@@ -43,7 +43,7 @@ config.vector_store_connection = ENV["VECTOR_DATABASE_URL"]
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE codebase_embeddings (
+CREATE TABLE woods_embeddings (
   id TEXT PRIMARY KEY,
   embedding vector(1536),
   metadata JSONB NOT NULL DEFAULT '{}',
@@ -52,12 +52,12 @@ CREATE TABLE codebase_embeddings (
 );
 
 -- HNSW index (preferred for < 1M vectors)
-CREATE INDEX ON codebase_embeddings
+CREATE INDEX ON woods_embeddings
   USING hnsw (embedding vector_cosine_ops)
   WITH (m = 16, ef_construction = 64);
 
 -- GIN index on metadata for filtered queries
-CREATE INDEX ON codebase_embeddings
+CREATE INDEX ON woods_embeddings
   USING gin (metadata jsonb_path_ops);
 ```
 
@@ -98,7 +98,7 @@ CREATE INDEX ON codebase_embeddings
 ```ruby
 config.vector_store = :qdrant
 config.vector_store_url = ENV.fetch("QDRANT_URL", "http://localhost:6333")
-config.vector_store_collection = "codebase_index"
+config.vector_store_collection = "woods"
 ```
 
 **Docker Compose:**
@@ -160,7 +160,7 @@ volumes:
 config.vector_store = :pinecone
 config.vector_store_api_key = ENV["PINECONE_API_KEY"]
 config.vector_store_environment = "us-east-1"
-config.vector_store_index = "codebase-index"
+config.vector_store_index = "woods"
 ```
 
 **When to use:** Cloud-native teams, no ops capacity for self-hosting, data sensitivity is not a concern.
@@ -361,7 +361,7 @@ SELECT * FROM deps;
 
 **Schema:**
 ```sql
-CREATE TABLE codebase_units (
+CREATE TABLE woods_units (
   id VARCHAR(255) PRIMARY KEY,
   unit_type VARCHAR(50) NOT NULL,
   namespace VARCHAR(255),
@@ -395,20 +395,20 @@ CREATE TABLE codebase_units (
 ```sql
 -- Full-text search across identifiers and source
 SELECT id, MATCH(id, file_path, source_code) AGAINST('checkout payment' IN BOOLEAN MODE) AS relevance
-FROM codebase_units
+FROM woods_units
 WHERE MATCH(id, file_path, source_code) AGAINST('checkout payment' IN BOOLEAN MODE)
 ORDER BY relevance DESC
 LIMIT 20;
 
 -- JSON-based method name search
-SELECT id FROM codebase_units
+SELECT id FROM woods_units
 WHERE JSON_CONTAINS(
   JSON_EXTRACT(metadata, '$.method_names'),
   '"process_payment"'
 );
 
 -- Multi-value filter on metadata
-SELECT id FROM codebase_units
+SELECT id FROM woods_units
 WHERE unit_type IN ('model', 'service')
   AND change_frequency IN ('hot', 'active')
   AND JSON_OVERLAPS(
@@ -419,7 +419,7 @@ WHERE unit_type IN ('model', 'service')
 
 **Graph traversal (MySQL 8.0+ recursive CTEs):**
 ```sql
-CREATE TABLE codebase_edges (
+CREATE TABLE woods_edges (
   source_id VARCHAR(255) NOT NULL,
   target_id VARCHAR(255) NOT NULL,
   relationship VARCHAR(50) NOT NULL,
@@ -431,11 +431,11 @@ CREATE TABLE codebase_edges (
 -- Forward dependency traversal
 WITH RECURSIVE deps AS (
   SELECT target_id, relationship, 1 AS depth
-  FROM codebase_edges
+  FROM woods_edges
   WHERE source_id = 'Order'
   UNION ALL
   SELECT e.target_id, e.relationship, d.depth + 1
-  FROM codebase_edges e
+  FROM woods_edges e
   INNER JOIN deps d ON e.source_id = d.target_id
   WHERE d.depth < 3
 )
@@ -447,11 +447,11 @@ ORDER BY min_depth;
 -- Reverse: who depends on Order?
 WITH RECURSIVE dependents AS (
   SELECT source_id, relationship, 1 AS depth
-  FROM codebase_edges
+  FROM woods_edges
   WHERE target_id = 'Order'
   UNION ALL
   SELECT e.source_id, e.relationship, d.depth + 1
-  FROM codebase_edges e
+  FROM woods_edges e
   INNER JOIN dependents d ON e.target_id = d.source_id
   WHERE d.depth < 3
 )
@@ -532,7 +532,7 @@ Loads `dependency_graph.json` into a Ruby hash structure. Supports BFS traversal
 Same pattern as PostgreSQL — stores edges in a table, traverses with recursive queries. MySQL 8.0 introduced recursive CTEs (`WITH RECURSIVE`), making this viable for MySQL-primary stacks.
 
 ```sql
-CREATE TABLE codebase_edges (
+CREATE TABLE woods_edges (
   source_id VARCHAR(255) NOT NULL,
   target_id VARCHAR(255) NOT NULL,
   relationship VARCHAR(50) NOT NULL,
@@ -544,10 +544,10 @@ CREATE TABLE codebase_edges (
 -- Forward traversal
 WITH RECURSIVE deps AS (
   SELECT target_id, 1 AS depth
-  FROM codebase_edges WHERE source_id = 'Order'
+  FROM woods_edges WHERE source_id = 'Order'
   UNION ALL
   SELECT e.target_id, d.depth + 1
-  FROM codebase_edges e
+  FROM woods_edges e
   INNER JOIN deps d ON e.source_id = d.target_id
   WHERE d.depth < 3
 )
@@ -566,14 +566,14 @@ FROM deps GROUP BY target_id ORDER BY min_depth;
 Stores edges in a table, traverses with recursive queries. PostgreSQL's CTE optimizer is more mature, with better query planning for deep recursive traversals. Suitable for up to ~50000 nodes.
 
 ```sql
-CREATE TABLE codebase_edges (
+CREATE TABLE woods_edges (
   source_id TEXT NOT NULL,
   target_id TEXT NOT NULL,
   relationship TEXT NOT NULL,
   PRIMARY KEY (source_id, target_id, relationship)
 );
 
-CREATE INDEX ON codebase_edges (target_id);  -- For reverse traversal
+CREATE INDEX ON woods_edges (target_id);  -- For reverse traversal
 ```
 
 ### Neo4j (Advanced)
@@ -591,14 +591,14 @@ Indexing can be triggered synchronously (rake task, inline) or asynchronously (b
 ### Sidekiq
 
 ```ruby
-class CodebaseIndexJob
+class WoodsJob
   include Sidekiq::Job
   sidekiq_options queue: :low, retry: 2
 
   def perform(mode = "full")
     case mode
-    when "full" then CodebaseIndex.index!
-    when "incremental" then CodebaseIndex.index_incremental!
+    when "full" then Woods.index!
+    when "incremental" then Woods.index_incremental!
     end
   end
 end
@@ -607,14 +607,14 @@ end
 ### Solid Queue (Rails 8)
 
 ```ruby
-class CodebaseIndexJob < ApplicationJob
+class WoodsJob < ApplicationJob
   queue_as :low_priority
-  limits_concurrency to: 1, key: "codebase_index"
+  limits_concurrency to: 1, key: "woods"
 
   def perform(mode = "full")
     case mode
-    when "full" then CodebaseIndex.index!
-    when "incremental" then CodebaseIndex.index_incremental!
+    when "full" then Woods.index!
+    when "incremental" then Woods.index_incremental!
     end
   end
 end
@@ -623,7 +623,7 @@ end
 ### GoodJob
 
 ```ruby
-class CodebaseIndexJob < ApplicationJob
+class WoodsJob < ApplicationJob
   queue_as :utility
   retry_on StandardError, wait: :polynomially_longer, attempts: 3
 
@@ -637,7 +637,7 @@ end
 
 ```ruby
 # No job system needed
-CodebaseIndex.index!
+Woods.index!
 ```
 
 The key point: the indexing pipeline itself is agnostic to job system. It's a synchronous Ruby operation. The job wrapper is just scheduling and concurrency control.
@@ -649,7 +649,7 @@ The key point: the indexing pipeline itself is agnostic to job system. It's a sy
 ### Starter (Zero Dependencies)
 
 ```ruby
-CodebaseIndex.configure_with_preset(:local)
+Woods.configure_with_preset(:local)
 # Vector: InMemory VectorStore
 # Metadata: SQLite
 # Graph: In-memory
@@ -663,7 +663,7 @@ CodebaseIndex.configure_with_preset(:local)
 ### Rails 8 Standard
 
 ```ruby
-CodebaseIndex.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql)
 # Vector: pgvector
 # Metadata: SQLite
 # Graph: In-memory
@@ -678,7 +678,7 @@ CodebaseIndex.configure_with_preset(:postgresql)
 
 ```ruby
 # Note: :mysql preset is not yet implemented. Use :production preset + manual config
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory
@@ -693,7 +693,7 @@ CodebaseIndex.configure_with_preset(:production)
 
 ```ruby
 # Note: :docker preset is not yet implemented. Use :production preset (Qdrant + SQLite + OpenAI)
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory
@@ -709,7 +709,7 @@ CodebaseIndex.configure_with_preset(:production)
 ```ruby
 # Note: :self_hosted preset is not yet implemented.
 # Use :production preset with Ollama as embedding provider via manual config.
-CodebaseIndex.configure_with_preset(:production)
+Woods.configure_with_preset(:production)
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory

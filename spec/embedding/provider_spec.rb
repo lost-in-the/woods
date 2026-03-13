@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/embedding/provider'
+require 'woods'
+require 'woods/embedding/provider'
 
-RSpec.describe CodebaseIndex::Embedding::Provider do
-  describe CodebaseIndex::Embedding::Provider::Interface do
+RSpec.describe Woods::Embedding::Provider do
+  describe Woods::Embedding::Provider::Interface do
     let(:dummy_class) do
-      Class.new { include CodebaseIndex::Embedding::Provider::Interface }
+      Class.new { include Woods::Embedding::Provider::Interface }
     end
     let(:instance) { dummy_class.new }
 
@@ -28,7 +28,7 @@ RSpec.describe CodebaseIndex::Embedding::Provider do
     end
   end
 
-  describe CodebaseIndex::Embedding::Provider::Ollama do
+  describe Woods::Embedding::Provider::Ollama do
     subject(:provider) { described_class.new }
 
     let(:single_embedding) { [0.1, 0.2, 0.3, 0.4, 0.5] }
@@ -124,9 +124,9 @@ RSpec.describe CodebaseIndex::Embedding::Provider do
         allow(http_double).to receive(:request).and_return(error_response)
       end
 
-      it 'raises CodebaseIndex::Error on non-200 response' do
+      it 'raises Woods::Error on non-200 response' do
         expect { provider.embed('text') }.to raise_error(
-          CodebaseIndex::Error, /Ollama API error: 500 model not found/
+          Woods::Error, /Ollama API error: 500 model not found/
         )
       end
     end

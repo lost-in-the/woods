@@ -3,9 +3,9 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'json'
-require 'codebase_index/operator/status_reporter'
+require 'woods/operator/status_reporter'
 
-RSpec.describe CodebaseIndex::Operator::StatusReporter do
+RSpec.describe Woods::Operator::StatusReporter do
   let(:output_dir) { Dir.mktmpdir }
 
   after { FileUtils.rm_rf(output_dir) }

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/pgvector'
+require 'woods/storage/vector_store'
+require 'woods/storage/pgvector'
 
-RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
+RSpec.describe Woods::Storage::VectorStore::Pgvector do
   let(:connection) { instance_double('ActiveRecord::ConnectionAdapters::AbstractAdapter') }
   let(:store) { described_class.new(connection: connection, dimensions: 3) }
 
@@ -21,7 +21,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
       store.ensure_schema!
 
       expect(connection).to have_received(:execute).with(/CREATE EXTENSION IF NOT EXISTS vector/)
-      expect(connection).to have_received(:execute).with(/CREATE TABLE IF NOT EXISTS codebase_index_vectors/)
+      expect(connection).to have_received(:execute).with(/CREATE TABLE IF NOT EXISTS woods_vectors/)
       expect(connection).to have_received(:execute).with(/CREATE INDEX IF NOT EXISTS/)
     end
 
@@ -41,7 +41,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
 
       store.store('doc1', [0.1, 0.2, 0.3], { type: 'model' })
 
-      expect(connection).to have_received(:execute).with(/INSERT INTO codebase_index_vectors/)
+      expect(connection).to have_received(:execute).with(/INSERT INTO woods_vectors/)
       expect(connection).to have_received(:execute).with(/ON CONFLICT \(id\) DO UPDATE/)
     end
 
@@ -70,7 +70,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
       store.store_batch(entries)
 
       expect(connection).to have_received(:execute).once
-      expect(connection).to have_received(:execute).with(/INSERT INTO codebase_index_vectors/)
+      expect(connection).to have_received(:execute).with(/INSERT INTO woods_vectors/)
     end
 
     it 'includes all entries in the VALUES clause' do
@@ -127,7 +127,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
     it 'returns an array of SearchResult objects' do
       results = store.search([0.1, 0.2, 0.3], limit: 5)
 
-      expect(results).to all(be_a(CodebaseIndex::Storage::VectorStore::SearchResult))
+      expect(results).to all(be_a(Woods::Storage::VectorStore::SearchResult))
     end
 
     it 'converts distance to similarity score' do
@@ -170,7 +170,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
 
       store.delete('doc1')
 
-      expect(connection).to have_received(:execute).with(/DELETE FROM codebase_index_vectors WHERE id = /)
+      expect(connection).to have_received(:execute).with(/DELETE FROM woods_vectors WHERE id = /)
     end
   end
 
@@ -182,7 +182,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
       store.delete_by_filter({ type: 'model' })
 
       expect(connection).to have_received(:execute)
-        .with(/DELETE FROM codebase_index_vectors WHERE metadata->>'type' = 'model'/)
+        .with(/DELETE FROM woods_vectors WHERE metadata->>'type' = 'model'/)
     end
 
     it 'handles multiple filters' do
@@ -206,7 +206,7 @@ RSpec.describe CodebaseIndex::Storage::VectorStore::Pgvector do
 
   describe 'Interface compliance' do
     it 'includes VectorStore::Interface' do
-      expect(described_class.ancestors).to include(CodebaseIndex::Storage::VectorStore::Interface)
+      expect(described_class.ancestors).to include(Woods::Storage::VectorStore::Interface)
     end
   end
 

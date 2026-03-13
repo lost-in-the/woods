@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/cache/cache_store'
-require 'codebase_index/cache/cache_middleware'
-require 'codebase_index/cache/redis_cache_store'
-require 'codebase_index/cache/solid_cache_store'
+require 'woods'
+require 'woods/cache/cache_store'
+require 'woods/cache/cache_middleware'
+require 'woods/cache/redis_cache_store'
+require 'woods/cache/solid_cache_store'
 
 RSpec.shared_examples 'a CacheStore' do
   describe '#write and #read' do
@@ -85,7 +85,7 @@ end
 
 # ── InMemory ───────────────────────────────────────────────────────────
 
-RSpec.describe CodebaseIndex::Cache::InMemory do
+RSpec.describe Woods::Cache::InMemory do
   subject(:store) { described_class.new(max_entries: 5) }
 
   include_examples 'a CacheStore'
@@ -137,18 +137,18 @@ RSpec.describe CodebaseIndex::Cache::InMemory do
 
   describe '#clear' do
     it 'clears all entries when no namespace given' do
-      store.write('codebase_index:cache:embeddings:a', 'v1')
-      store.write('codebase_index:cache:context:b', 'v2')
+      store.write('woods:cache:embeddings:a', 'v1')
+      store.write('woods:cache:context:b', 'v2')
       store.clear
       expect(store.size).to eq(0)
     end
 
     it 'clears only matching namespace' do
-      store.write('codebase_index:cache:embeddings:a', 'v1')
-      store.write('codebase_index:cache:context:b', 'v2')
+      store.write('woods:cache:embeddings:a', 'v1')
+      store.write('woods:cache:context:b', 'v2')
       store.clear(namespace: :embeddings)
-      expect(store.read('codebase_index:cache:embeddings:a')).to be_nil
-      expect(store.read('codebase_index:cache:context:b')).to eq('v2')
+      expect(store.read('woods:cache:embeddings:a')).to be_nil
+      expect(store.read('woods:cache:context:b')).to eq('v2')
     end
   end
 
@@ -185,17 +185,17 @@ end
 
 # ── Cache.cache_key ────────────────────────────────────────────────────
 
-RSpec.describe CodebaseIndex::Cache do
+RSpec.describe Woods::Cache do
   describe '.cache_key' do
     it 'builds a namespaced key' do
       key = described_class.cache_key(:embeddings, 'abc123')
-      expect(key).to eq('codebase_index:cache:embeddings:abc123')
+      expect(key).to eq('woods:cache:embeddings:abc123')
     end
 
     it 'hashes long keys with SHA256' do
       long_part = 'x' * 100
       key = described_class.cache_key(:context, long_part)
-      expect(key).to start_with('codebase_index:cache:context:')
+      expect(key).to start_with('woods:cache:context:')
       # The suffix should be a SHA256 hex digest (64 chars)
       suffix = key.split(':').last
       expect(suffix.length).to eq(64)
@@ -203,15 +203,15 @@ RSpec.describe CodebaseIndex::Cache do
 
     it 'concatenates multiple parts' do
       key = described_class.cache_key(:context, 'query', '8000')
-      expect(key).to eq('codebase_index:cache:context:query:8000')
+      expect(key).to eq('woods:cache:context:query:8000')
     end
   end
 end
 
 # ── CachedEmbeddingProvider ────────────────────────────────────────────
 
-RSpec.describe CodebaseIndex::Cache::CachedEmbeddingProvider do
-  let(:cache_store) { CodebaseIndex::Cache::InMemory.new }
+RSpec.describe Woods::Cache::CachedEmbeddingProvider do
+  let(:cache_store) { Woods::Cache::InMemory.new }
   let(:provider) do
     instance_double('EmbeddingProvider',
                     dimensions: 768,
@@ -310,10 +310,10 @@ end
 
 # ── CachedRetriever ────────────────────────────────────────────────────
 
-RSpec.describe CodebaseIndex::Cache::CachedRetriever do
-  let(:cache_store) { CodebaseIndex::Cache::InMemory.new }
+RSpec.describe Woods::Cache::CachedRetriever do
+  let(:cache_store) { Woods::Cache::InMemory.new }
   let(:retrieval_result) do
-    CodebaseIndex::Retriever::RetrievalResult.new(
+    Woods::Retriever::RetrievalResult.new(
       context: '## User (model)\nclass User < ApplicationRecord\nend',
       sources: %w[User],
       classification: nil,
@@ -323,7 +323,7 @@ RSpec.describe CodebaseIndex::Cache::CachedRetriever do
       trace: nil
     )
   end
-  let(:retriever) { instance_double(CodebaseIndex::Retriever) }
+  let(:retriever) { instance_double(Woods::Retriever) }
   let(:cached_retriever) do
     described_class.new(retriever: retriever, cache_store: cache_store, context_ttl: 900)
   end
@@ -355,11 +355,11 @@ RSpec.describe CodebaseIndex::Cache::CachedRetriever do
     end
 
     it 'caches different queries independently' do
-      result_a = CodebaseIndex::Retriever::RetrievalResult.new(
+      result_a = Woods::Retriever::RetrievalResult.new(
         context: 'A', sources: [], classification: nil,
         strategy: :vector, tokens_used: 10, budget: 8000, trace: nil
       )
-      result_b = CodebaseIndex::Retriever::RetrievalResult.new(
+      result_b = Woods::Retriever::RetrievalResult.new(
         context: 'B', sources: [], classification: nil,
         strategy: :keyword, tokens_used: 20, budget: 8000, trace: nil
       )
@@ -374,11 +374,11 @@ RSpec.describe CodebaseIndex::Cache::CachedRetriever do
     end
 
     it 'treats different budgets as different cache keys' do
-      result_small = CodebaseIndex::Retriever::RetrievalResult.new(
+      result_small = Woods::Retriever::RetrievalResult.new(
         context: 'small', sources: [], classification: nil,
         strategy: :vector, tokens_used: 5, budget: 2000, trace: nil
       )
-      result_large = CodebaseIndex::Retriever::RetrievalResult.new(
+      result_large = Woods::Retriever::RetrievalResult.new(
         context: 'large', sources: [], classification: nil,
         strategy: :vector, tokens_used: 50, budget: 16_000, trace: nil
       )
@@ -397,7 +397,7 @@ end
 
 # ── RedisCacheStore ────────────────────────────────────────────────────
 
-RSpec.describe CodebaseIndex::Cache::RedisCacheStore do
+RSpec.describe Woods::Cache::RedisCacheStore do
   # Stub Redis classes so specs don't require the redis gem
   before do
     stub_const('Redis::BaseError', Class.new(StandardError)) unless defined?(Redis::BaseError)
@@ -478,7 +478,7 @@ end
 
 # ── SolidCacheStore ───────────────────────────────────────────────────
 
-RSpec.describe CodebaseIndex::Cache::SolidCacheStore do
+RSpec.describe Woods::Cache::SolidCacheStore do
   let(:cache_double) { instance_double('ActiveSupport::Cache::Store') }
   let(:store) { described_class.new(cache: cache_double) }
 
@@ -553,21 +553,21 @@ end
 
 # ── DEFAULT_TTLS ───────────────────────────────────────────────────────
 
-RSpec.describe 'CodebaseIndex::Cache::DEFAULT_TTLS' do
+RSpec.describe 'Woods::Cache::DEFAULT_TTLS' do
   it 'defines all expected domains' do
-    expect(CodebaseIndex::Cache::DEFAULT_TTLS.keys).to contain_exactly(
+    expect(Woods::Cache::DEFAULT_TTLS.keys).to contain_exactly(
       :embeddings, :metadata, :structural, :search, :context
     )
   end
 
   it 'has positive integer values for all domains' do
-    CodebaseIndex::Cache::DEFAULT_TTLS.each_value do |ttl|
+    Woods::Cache::DEFAULT_TTLS.each_value do |ttl|
       expect(ttl).to be_a(Integer)
       expect(ttl).to be > 0
     end
   end
 
   it 'is frozen' do
-    expect(CodebaseIndex::Cache::DEFAULT_TTLS).to be_frozen
+    expect(Woods::Cache::DEFAULT_TTLS).to be_frozen
   end
 end

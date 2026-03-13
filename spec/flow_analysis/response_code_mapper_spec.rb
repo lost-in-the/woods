@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/flow_analysis/response_code_mapper'
+require 'woods/flow_analysis/response_code_mapper'
 
-RSpec.describe CodebaseIndex::FlowAnalysis::ResponseCodeMapper do
+RSpec.describe Woods::FlowAnalysis::ResponseCodeMapper do
   describe '.resolve_method' do
     context 'with explicit status kwarg' do
       it 'resolves symbol status from arguments' do

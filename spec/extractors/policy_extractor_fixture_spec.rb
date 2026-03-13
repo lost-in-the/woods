@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/extractors/policy_extractor'
+require 'woods/extractors/policy_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::PolicyExtractor, 'fixture specs' do
+RSpec.describe Woods::Extractors::PolicyExtractor, 'fixture specs' do
   include_context 'extractor setup'
 
   # ── Pundit-Style Policy ───────────────────────────────────────────────

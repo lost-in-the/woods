@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/resilience/circuit_breaker'
+require 'woods'
+require 'woods/resilience/circuit_breaker'
 
-RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
+RSpec.describe Woods::Resilience::CircuitBreaker do
   subject(:breaker) { described_class.new(threshold: 3, reset_timeout: 0.1) }
 
   describe '#initialize' do
@@ -82,7 +82,7 @@ RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
         block_called = false
         expect do
           breaker.call { block_called = true }
-        end.to raise_error(CodebaseIndex::Resilience::CircuitOpenError)
+        end.to raise_error(Woods::Resilience::CircuitOpenError)
         expect(block_called).to be false
       end
 
@@ -123,8 +123,8 @@ RSpec.describe CodebaseIndex::Resilience::CircuitBreaker do
   end
 
   describe 'CircuitOpenError' do
-    it 'is a subclass of CodebaseIndex::Error' do
-      expect(CodebaseIndex::Resilience::CircuitOpenError).to be < CodebaseIndex::Error
+    it 'is a subclass of Woods::Error' do
+      expect(Woods::Resilience::CircuitOpenError).to be < Woods::Error
     end
   end
 

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/tools/tier3'
+require 'woods/console/tools/tier3'
 
-RSpec.describe CodebaseIndex::Console::Tools::Tier3 do
+RSpec.describe Woods::Console::Tools::Tier3 do
   describe '.console_slow_endpoints' do
     it 'builds a slow_endpoints request with defaults' do
       result = described_class.console_slow_endpoints

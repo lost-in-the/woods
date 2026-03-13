@@ -1,13 +1,13 @@
 ---
 paths:
-  - "lib/codebase_index/extractors/**/*.rb"
+  - "lib/woods/extractors/**/*.rb"
 ---
 # Extractor Conventions
 
 Every extractor follows this structure:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Extractors
     class FooExtractor
       def initialize

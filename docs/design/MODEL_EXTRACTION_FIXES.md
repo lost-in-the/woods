@@ -97,7 +97,7 @@ All changes verified against the host app (Post + Comment models, 3 controllers,
 - **Unit tests:** 162 examples, 0 failures
 - **Integration tests:** 87 examples, 0 failures
 - **Rake extraction:** 129 units, 20 chunks (was 16 — gained 4 model chunks)
-- **Validation:** `codebase_index:validate` passes
+- **Validation:** `woods:validate` passes
 
 ---
 

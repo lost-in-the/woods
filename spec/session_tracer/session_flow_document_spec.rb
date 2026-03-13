@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'json'
-require 'codebase_index/session_tracer/session_flow_document'
+require 'woods/session_tracer/session_flow_document'
 
-RSpec.describe CodebaseIndex::SessionTracer::SessionFlowDocument do
+RSpec.describe Woods::SessionTracer::SessionFlowDocument do
   let(:steps) do
     [
       {

@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'json'
-require 'codebase_index/session_tracer/solid_cache_store'
+require 'woods/session_tracer/solid_cache_store'
 
 # Minimal in-memory cache mock compatible with ActiveSupport::Cache::Store interface.
 # Implements read/write/delete/exist? used by SolidCacheStore.
@@ -32,7 +32,7 @@ class MockCache
   end
 end
 
-RSpec.describe CodebaseIndex::SessionTracer::SolidCacheStore do
+RSpec.describe Woods::SessionTracer::SolidCacheStore do
   let(:cache) { MockCache.new }
   let(:store) { described_class.new(cache: cache) }
 

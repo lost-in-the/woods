@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/ast/parser'
-require 'codebase_index/ast/call_site_extractor'
+require 'woods/ast/parser'
+require 'woods/ast/call_site_extractor'
 
-RSpec.describe CodebaseIndex::Ast::CallSiteExtractor do
+RSpec.describe Woods::Ast::CallSiteExtractor do
   subject(:extractor) { described_class.new }
 
-  let(:parser) { CodebaseIndex::Ast::Parser.new }
+  let(:parser) { Woods::Ast::Parser.new }
 
   describe '#extract' do
     it 'extracts basic method calls' do

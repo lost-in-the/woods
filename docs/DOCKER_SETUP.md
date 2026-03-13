@@ -1,28 +1,28 @@
 # Docker Setup Guide
 
-This guide covers running CodebaseIndex in a Dockerized Rails application — extraction, MCP server configuration, and troubleshooting.
+This guide covers running Woods in a Dockerized Rails application — extraction, MCP server configuration, and troubleshooting.
 
 ## Architecture Overview
 
-CodebaseIndex has a split architecture: extraction requires a booted Rails environment (runs inside the container), but the two MCP servers have different runtime needs.
+Woods has a split architecture: extraction requires a booted Rails environment (runs inside the container), but the two MCP servers have different runtime needs.
 
 ```
 HOST                                    CONTAINER
 ─────────────────────────────           ──────────────────────
 Index Server (27 tools)                 Rails App
-  reads JSON from disk                    bundle exec rake codebase_index:extract
-  no Rails needed                           writes to tmp/codebase_index/
+  reads JSON from disk                    bundle exec rake woods:extract
+  no Rails needed                           writes to tmp/woods/
         ▲                                         │
         └──── volume mount ◀──────────────────────┘
 
 Console Server — two modes:
 
-  Embedded (9 tools)                    rake codebase_index:console
+  Embedded (9 tools)                    rake woods:console
   MCP client spawns via                   boots Rails, runs MCP in-process
   docker exec -i ────────────────────▶    Tier 1 read-only tools only
 
   Bridge (31 tools)
-  codebase-console-mcp on host          bridge.rb inside container
+  woods-console-mcp on host          bridge.rb inside container
   connects via docker exec -i ────────▶  evaluates queries in Rails console
   all 4 tiers                             rolled-back transactions
 ```
@@ -36,7 +36,7 @@ Console Server — two modes:
 ```ruby
 # Gemfile
 group :development do
-  gem 'codebase_index'
+  gem 'woods'
 end
 ```
 
@@ -47,10 +47,10 @@ docker compose exec app bundle install
 ### 2. Run the install generator
 
 ```bash
-docker compose exec app bundle exec rails generate codebase_index:install
+docker compose exec app bundle exec rails generate woods:install
 ```
 
-This creates `config/initializers/codebase_index.rb` with default configuration.
+This creates `config/initializers/woods.rb` with default configuration.
 
 ### 3. Run migrations
 
@@ -60,11 +60,11 @@ docker compose exec app bundle exec rails db:migrate
 
 ### 4. Configure
 
-Edit `config/initializers/codebase_index.rb` inside the container (or on the host if the app directory is volume-mounted):
+Edit `config/initializers/woods.rb` inside the container (or on the host if the app directory is volume-mounted):
 
 ```ruby
-CodebaseIndex.configure do |config|
-  config.output_dir = Rails.root.join('tmp/codebase_index')
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
 end
 ```
 
@@ -74,13 +74,13 @@ Run extraction inside the container:
 
 ```bash
 # Full extraction
-docker compose exec app bundle exec rake codebase_index:extract
+docker compose exec app bundle exec rake woods:extract
 
 # Incremental (changed files only)
-docker compose exec app bundle exec rake codebase_index:incremental
+docker compose exec app bundle exec rake woods:incremental
 
 # Framework/gem sources only
-docker compose exec app bundle exec rake codebase_index:extract_framework
+docker compose exec app bundle exec rake woods:extract_framework
 ```
 
 ### Volume Mount Requirement
@@ -91,9 +91,9 @@ The extraction output must be accessible on the host for the Index Server to rea
 services:
   app:
     volumes:
-      - .:/app                    # Full app mount — output lands at ./tmp/codebase_index/
+      - .:/app                    # Full app mount — output lands at ./tmp/woods/
       # OR mount just the output:
-      # - ./tmp/codebase_index:/app/tmp/codebase_index
+      # - ./tmp/woods:/app/tmp/woods
 ```
 
 ### Verify Output on Host
@@ -101,7 +101,7 @@ services:
 After extraction, confirm the output is visible from the host:
 
 ```bash
-ls tmp/codebase_index/manifest.json
+ls tmp/woods/manifest.json
 ```
 
 If this file doesn't exist on the host, your volume mount isn't configured correctly.
@@ -112,8 +112,8 @@ When configuring paths, use the **host path** for the Index Server and the **con
 
 | Context | Path | Example |
 |---------|------|---------|
-| Rake tasks (inside container) | Container path | `/app/tmp/codebase_index` |
-| Index Server (on host) | Host path | `./tmp/codebase_index` or `/home/dev/my-app/tmp/codebase_index` |
+| Rake tasks (inside container) | Container path | `/app/tmp/woods` |
+| Index Server (on host) | Host path | `./tmp/woods` or `/home/dev/my-app/tmp/woods` |
 | `.mcp.json` Index Server arg | Host path | Same as above |
 
 ## Index Server Setup
@@ -123,7 +123,7 @@ The Index Server runs on the host — it reads JSON files, not Rails. Point it a
 ### Start manually
 
 ```bash
-codebase-index-mcp-start ./tmp/codebase_index
+woods-mcp-start ./tmp/woods
 ```
 
 ### `.mcp.json` configuration
@@ -131,17 +131,17 @@ codebase-index-mcp-start ./tmp/codebase_index
 ```json
 {
   "mcpServers": {
-    "codebase-index": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     }
   }
 }
 ```
 
-The `codebase-index-mcp-start` wrapper validates the index directory, checks for `manifest.json`, ensures dependencies are installed, and restarts on failure. Use it instead of `codebase-index-mcp` directly.
+The `woods-mcp-start` wrapper validates the index directory, checks for `manifest.json`, ensures dependencies are installed, and restarts on failure. Use it instead of `woods-mcp` directly.
 
-> **Common mistake:** Using the container path (`/app/tmp/codebase_index`) in `.mcp.json`. The Index Server runs on the host — it needs the host-side path to the volume-mounted output.
+> **Common mistake:** Using the container path (`/app/tmp/woods`) in `.mcp.json`. The Index Server runs on the host — it needs the host-side path to the volume-mounted output.
 
 ## Console Server Setup
 
@@ -151,7 +151,7 @@ The Console Server queries live Rails state. There are two modes with different 
 
 | | Embedded | Bridge |
 |---|---|---|
-| **Where it runs** | Inside container via `docker exec -i` | `codebase-console-mcp` on host, bridge inside container |
+| **Where it runs** | Inside container via `docker exec -i` | `woods-console-mcp` on host, bridge inside container |
 | **Config needed** | None (just `.mcp.json`) | `console.yml` + `.mcp.json` |
 | **Tools available** | 9 (Tier 1 — read-only) | 31 (all 4 tiers) |
 | **Setup complexity** | Minimal | Moderate |
@@ -164,11 +164,11 @@ The MCP client spawns `docker exec -i` directly. The container boots Rails and r
 ```json
 {
   "mcpServers": {
-    "codebase-console": {
+    "woods-console": {
       "command": "docker",
       "args": [
         "compose", "exec", "-i", "app",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -182,11 +182,11 @@ If you use `docker exec` (not `docker compose exec`), provide the exact containe
 ```json
 {
   "mcpServers": {
-    "codebase-console": {
+    "woods-console": {
       "command": "docker",
       "args": [
         "exec", "-i", "my_app_web_1",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -195,12 +195,12 @@ If you use `docker exec` (not `docker compose exec`), provide the exact containe
 
 ### Option 2: Bridge (all 31 tools)
 
-The `codebase-console-mcp` binary runs on the host and connects to a bridge process inside the container via `docker exec -i`. This enables all 4 tool tiers: read-only, domain-aware, analytics, and guarded operations.
+The `woods-console-mcp` binary runs on the host and connects to a bridge process inside the container via `docker exec -i`. This enables all 4 tool tiers: read-only, domain-aware, analytics, and guarded operations.
 
 **Step 1: Create `console.yml`**
 
 ```yaml
-# ~/.codebase_index/console.yml
+# ~/.woods/console.yml
 mode: docker
 container: my_app_web_1
 ```
@@ -218,20 +218,20 @@ For Docker Compose, names follow the pattern `<project>-<service>-<number>` (e.g
 ```json
 {
   "mcpServers": {
-    "codebase-console": {
-      "command": "codebase-console-mcp"
+    "woods-console": {
+      "command": "woods-console-mcp"
     }
   }
 }
 ```
 
-The bridge reads `~/.codebase_index/console.yml` by default. To use a different path:
+The bridge reads `~/.woods/console.yml` by default. To use a different path:
 
 ```json
 {
   "mcpServers": {
-    "codebase-console": {
-      "command": "codebase-console-mcp",
+    "woods-console": {
+      "command": "woods-console-mcp",
       "env": {
         "CODEBASE_CONSOLE_CONFIG": "/path/to/console.yml"
       }
@@ -247,15 +247,15 @@ Both servers configured together for a Docker environment:
 ```json
 {
   "mcpServers": {
-    "codebase-index": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     },
-    "codebase-console": {
+    "woods-console": {
       "command": "docker",
       "args": [
         "compose", "exec", "-i", "app",
-        "bundle", "exec", "rake", "codebase_index:console"
+        "bundle", "exec", "rake", "woods:console"
       ]
     }
   }
@@ -267,12 +267,12 @@ This uses the embedded console (9 tools). To use the bridge (31 tools), replace 
 ```json
 {
   "mcpServers": {
-    "codebase-index": {
-      "command": "codebase-index-mcp-start",
-      "args": ["./tmp/codebase_index"]
+    "woods": {
+      "command": "woods-mcp-start",
+      "args": ["./tmp/woods"]
     },
-    "codebase-console": {
-      "command": "codebase-console-mcp"
+    "woods-console": {
+      "command": "woods-console-mcp"
     }
   }
 }
@@ -284,17 +284,17 @@ Which tasks need Docker and which don't:
 
 | Task | Needs Rails? | Run via |
 |------|---|---|
-| `codebase_index:extract` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:incremental` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:extract_framework` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:embed` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:embed_incremental` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:console` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:flow[EntryPoint]` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:notion_sync` | Yes | `docker compose exec app bundle exec rake ...` |
-| `codebase_index:validate` | No | Host or container |
-| `codebase_index:stats` | No | Host or container |
-| `codebase_index:clean` | No | Host or container |
+| `woods:extract` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:incremental` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:extract_framework` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:embed` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:embed_incremental` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:console` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:flow[EntryPoint]` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:notion_sync` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:validate` | No | Host or container |
+| `woods:stats` | No | Host or container |
+| `woods:clean` | No | Host or container |
 
 ## Container Name Discovery
 
@@ -314,7 +314,7 @@ The project name defaults to the directory name of the `docker-compose.yml` file
 
 ### Extraction output not visible on host
 
-**Symptom:** `ls tmp/codebase_index/manifest.json` fails on the host after extraction.
+**Symptom:** `ls tmp/woods/manifest.json` fails on the host after extraction.
 
 **Fix:** Ensure your `docker-compose.yml` volume-mounts the app directory:
 
@@ -358,17 +358,17 @@ Then re-run extraction.
 
 ```
 # Wrong (container path):
-"args": ["/app/tmp/codebase_index"]
+"args": ["/app/tmp/woods"]
 
 # Right (host path):
-"args": ["./tmp/codebase_index"]
+"args": ["./tmp/woods"]
 ```
 
 ### Rails boot noise breaks MCP protocol
 
 **Symptom:** MCP client shows JSON parse errors.
 
-**Fix:** The `codebase_index:console` rake task redirects stdout to stderr before Rails boots. If you still see issues, check for `puts` or `print` calls in your initializers that run before the task captures stdout.
+**Fix:** The `woods:console` rake task redirects stdout to stderr before Rails boots. If you still see issues, check for `puts` or `print` calls in your initializers that run before the task captures stdout.
 
 ### Tier 2-4 tools return "unsupported in embedded mode"
 

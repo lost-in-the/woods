@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/cost_model/provider_pricing'
+require 'woods/cost_model/provider_pricing'
 
-RSpec.describe CodebaseIndex::CostModel::ProviderPricing do
+RSpec.describe Woods::CostModel::ProviderPricing do
   describe '.cost_per_million' do
     it 'returns $0.02 for openai_small' do
       expect(described_class.cost_per_million(:openai_small)).to eq(0.02)

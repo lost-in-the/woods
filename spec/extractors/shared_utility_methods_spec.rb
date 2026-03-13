@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extractors/shared_utility_methods'
+require 'woods/extractors/shared_utility_methods'
 
-RSpec.describe CodebaseIndex::Extractors::SharedUtilityMethods do
+RSpec.describe Woods::Extractors::SharedUtilityMethods do
   # Create a test class that includes the module so we can call its methods.
   let(:test_class) do
     Class.new do
-      include CodebaseIndex::Extractors::SharedUtilityMethods
+      include Woods::Extractors::SharedUtilityMethods
     end
   end
 

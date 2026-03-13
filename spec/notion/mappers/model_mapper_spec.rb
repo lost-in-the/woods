@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/notion/mappers/model_mapper'
+require 'woods/notion/mappers/model_mapper'
 
-RSpec.describe CodebaseIndex::Notion::Mappers::ModelMapper do
+RSpec.describe Woods::Notion::Mappers::ModelMapper do
   subject(:mapper) { described_class.new }
 
   let(:full_unit_data) do

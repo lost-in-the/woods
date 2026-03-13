@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/evaluation/metrics'
+require 'woods'
+require 'woods/evaluation/metrics'
 
-RSpec.describe CodebaseIndex::Evaluation::Metrics do
+RSpec.describe Woods::Evaluation::Metrics do
   describe '.precision_at_k' do
     it 'returns 1.0 when all top-k are relevant' do
       retrieved = %w[A B C D E]

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/console/model_validator'
+require 'woods/console/model_validator'
 
-RSpec.describe CodebaseIndex::Console::ModelValidator do
+RSpec.describe Woods::Console::ModelValidator do
   let(:registry) do
     {
       'User' => %w[id email name created_at],
@@ -21,12 +21,12 @@ RSpec.describe CodebaseIndex::Console::ModelValidator do
 
     it 'raises ValidationError for unknown models' do
       expect { validator.validate_model!('Hacker') }
-        .to raise_error(CodebaseIndex::Console::ValidationError, /Unknown model: Hacker/)
+        .to raise_error(Woods::Console::ValidationError, /Unknown model: Hacker/)
     end
 
     it 'lists available models in error message' do
       expect { validator.validate_model!('Nope') }
-        .to raise_error(CodebaseIndex::Console::ValidationError, /Available: Post, User/)
+        .to raise_error(Woods::Console::ValidationError, /Available: Post, User/)
     end
   end
 
@@ -37,17 +37,17 @@ RSpec.describe CodebaseIndex::Console::ModelValidator do
 
     it 'raises ValidationError for unknown columns' do
       expect { validator.validate_column!('User', 'password') }
-        .to raise_error(CodebaseIndex::Console::ValidationError, /Unknown column 'password' on User/)
+        .to raise_error(Woods::Console::ValidationError, /Unknown column 'password' on User/)
     end
 
     it 'lists available columns in error message' do
       expect { validator.validate_column!('User', 'foo') }
-        .to raise_error(CodebaseIndex::Console::ValidationError, /Available: created_at, email, id, name/)
+        .to raise_error(Woods::Console::ValidationError, /Available: created_at, email, id, name/)
     end
 
     it 'raises ValidationError for unknown model first' do
       expect { validator.validate_column!('Bogus', 'id') }
-        .to raise_error(CodebaseIndex::Console::ValidationError, /Unknown model: Bogus/)
+        .to raise_error(Woods::Console::ValidationError, /Unknown model: Bogus/)
     end
   end
 
@@ -58,7 +58,7 @@ RSpec.describe CodebaseIndex::Console::ModelValidator do
 
     it 'raises on the first invalid column' do
       expect { validator.validate_columns!('User', %w[email bad_col]) }
-        .to raise_error(CodebaseIndex::Console::ValidationError, /Unknown column 'bad_col'/)
+        .to raise_error(Woods::Console::ValidationError, /Unknown column 'bad_col'/)
     end
   end
 
@@ -75,7 +75,7 @@ RSpec.describe CodebaseIndex::Console::ModelValidator do
 
     it 'raises for unknown models' do
       expect { validator.columns_for('Nope') }
-        .to raise_error(CodebaseIndex::Console::ValidationError)
+        .to raise_error(Woods::Console::ValidationError)
     end
   end
 end

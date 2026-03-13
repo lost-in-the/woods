@@ -1,23 +1,23 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/evaluation/query_set'
-require 'codebase_index/evaluation/evaluator'
+require 'woods'
+require 'woods/evaluation/query_set'
+require 'woods/evaluation/evaluator'
 
-RSpec.describe CodebaseIndex::Evaluation::Evaluator do
-  let(:retriever) { instance_double('CodebaseIndex::Retriever') }
+RSpec.describe Woods::Evaluation::Evaluator do
+  let(:retriever) { instance_double('Woods::Retriever') }
 
   let(:queries) do
     [
-      CodebaseIndex::Evaluation::QuerySet::Query.new(
+      Woods::Evaluation::QuerySet::Query.new(
         query: 'How does User model work?',
         expected_units: %w[User UserConcern],
         intent: :lookup,
         scope: :specific,
         tags: %w[model]
       ),
-      CodebaseIndex::Evaluation::QuerySet::Query.new(
+      Woods::Evaluation::QuerySet::Query.new(
         query: 'Trace order creation',
         expected_units: %w[Order OrdersController],
         intent: :trace,
@@ -27,7 +27,7 @@ RSpec.describe CodebaseIndex::Evaluation::Evaluator do
     ]
   end
 
-  let(:query_set) { CodebaseIndex::Evaluation::QuerySet.new(queries: queries) }
+  let(:query_set) { Woods::Evaluation::QuerySet.new(queries: queries) }
 
   let(:result_struct) do
     Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget,
@@ -182,7 +182,7 @@ RSpec.describe CodebaseIndex::Evaluation::Evaluator do
   end
 
   describe 'with empty query set' do
-    let(:empty_query_set) { CodebaseIndex::Evaluation::QuerySet.new(queries: []) }
+    let(:empty_query_set) { Woods::Evaluation::QuerySet.new(queries: []) }
     let(:empty_evaluator) { described_class.new(retriever: retriever, query_set: empty_query_set) }
 
     it 'returns empty results' do
@@ -225,7 +225,7 @@ RSpec.describe CodebaseIndex::Evaluation::Evaluator do
 
       allow(retriever).to receive(:retrieve).and_return(string_key_result)
 
-      simple_qs = CodebaseIndex::Evaluation::QuerySet.new(queries: [queries.first])
+      simple_qs = Woods::Evaluation::QuerySet.new(queries: [queries.first])
       simple_eval = described_class.new(retriever: retriever, query_set: simple_qs)
       report = simple_eval.evaluate
 
@@ -244,7 +244,7 @@ RSpec.describe CodebaseIndex::Evaluation::Evaluator do
 
       allow(retriever).to receive(:retrieve).and_return(nil_sources_result)
 
-      simple_qs = CodebaseIndex::Evaluation::QuerySet.new(queries: [queries.first])
+      simple_qs = Woods::Evaluation::QuerySet.new(queries: [queries.first])
       simple_eval = described_class.new(retriever: retriever, query_set: simple_qs)
       report = simple_eval.evaluate
 

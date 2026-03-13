@@ -1,20 +1,20 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index'
-require 'codebase_index/retriever'
+require 'woods'
+require 'woods/retriever'
 
-RSpec.describe CodebaseIndex::Retriever do
+RSpec.describe Woods::Retriever do
   let(:vector_store) { instance_double('VectorStore') }
   let(:metadata_store) { instance_double('MetadataStore') }
   let(:graph_store) { instance_double('GraphStore') }
   let(:embedding_provider) { instance_double('EmbeddingProvider') }
   let(:formatter) { nil }
 
-  let(:classifier_double) { instance_double(CodebaseIndex::Retrieval::QueryClassifier) }
-  let(:executor_double) { instance_double(CodebaseIndex::Retrieval::SearchExecutor) }
-  let(:ranker_double) { instance_double(CodebaseIndex::Retrieval::Ranker) }
-  let(:assembler_double) { instance_double(CodebaseIndex::Retrieval::ContextAssembler) }
+  let(:classifier_double) { instance_double(Woods::Retrieval::QueryClassifier) }
+  let(:executor_double) { instance_double(Woods::Retrieval::SearchExecutor) }
+  let(:ranker_double) { instance_double(Woods::Retrieval::Ranker) }
+  let(:assembler_double) { instance_double(Woods::Retrieval::ContextAssembler) }
 
   let(:retriever) do
     described_class.new(
@@ -27,7 +27,7 @@ RSpec.describe CodebaseIndex::Retriever do
   end
 
   let(:classification) do
-    CodebaseIndex::Retrieval::QueryClassifier::Classification.new(
+    Woods::Retrieval::QueryClassifier::Classification.new(
       intent: :understand,
       scope: :focused,
       target_type: :model,
@@ -38,14 +38,14 @@ RSpec.describe CodebaseIndex::Retriever do
 
   let(:candidates) do
     [
-      CodebaseIndex::Retrieval::SearchExecutor::Candidate.new(
+      Woods::Retrieval::SearchExecutor::Candidate.new(
         identifier: 'User', score: 0.9, source: :vector, metadata: { type: 'model' }
       )
     ]
   end
 
   let(:execution_result) do
-    CodebaseIndex::Retrieval::SearchExecutor::ExecutionResult.new(
+    Woods::Retrieval::SearchExecutor::ExecutionResult.new(
       candidates: candidates,
       strategy: :vector,
       query: 'How does the User model work?'
@@ -55,7 +55,7 @@ RSpec.describe CodebaseIndex::Retriever do
   let(:ranked_candidates) { candidates }
 
   let(:assembled_context) do
-    CodebaseIndex::Retrieval::AssembledContext.new(
+    Woods::Retrieval::AssembledContext.new(
       context: '## User (model)\nclass User < ApplicationRecord; end',
       tokens_used: 120,
       budget: 8000,
@@ -65,10 +65,10 @@ RSpec.describe CodebaseIndex::Retriever do
   end
 
   before do
-    allow(CodebaseIndex::Retrieval::QueryClassifier).to receive(:new).and_return(classifier_double)
-    allow(CodebaseIndex::Retrieval::SearchExecutor).to receive(:new).and_return(executor_double)
-    allow(CodebaseIndex::Retrieval::Ranker).to receive(:new).and_return(ranker_double)
-    allow(CodebaseIndex::Retrieval::ContextAssembler).to receive(:new).and_return(assembler_double)
+    allow(Woods::Retrieval::QueryClassifier).to receive(:new).and_return(classifier_double)
+    allow(Woods::Retrieval::SearchExecutor).to receive(:new).and_return(executor_double)
+    allow(Woods::Retrieval::Ranker).to receive(:new).and_return(ranker_double)
+    allow(Woods::Retrieval::ContextAssembler).to receive(:new).and_return(assembler_double)
 
     allow(classifier_double).to receive(:classify).and_return(classification)
     allow(executor_double).to receive(:execute).and_return(execution_result)
@@ -85,7 +85,7 @@ RSpec.describe CodebaseIndex::Retriever do
     it 'returns a RetrievalResult' do
       result = retriever.retrieve('How does the User model work?')
 
-      expect(result).to be_a(CodebaseIndex::Retriever::RetrievalResult)
+      expect(result).to be_a(Woods::Retriever::RetrievalResult)
     end
 
     it 'includes context from assembler' do
@@ -203,7 +203,7 @@ RSpec.describe CodebaseIndex::Retriever do
 
   describe 'RetrievalResult' do
     it 'has all expected fields' do
-      result = CodebaseIndex::Retriever::RetrievalResult.new(
+      result = Woods::Retriever::RetrievalResult.new(
         context: 'some context',
         sources: [],
         classification: classification,
@@ -216,7 +216,7 @@ RSpec.describe CodebaseIndex::Retriever do
     end
 
     it 'supports keyword initialization' do
-      result = CodebaseIndex::Retriever::RetrievalResult.new(
+      result = Woods::Retriever::RetrievalResult.new(
         context: 'test',
         sources: [{ identifier: 'User' }],
         classification: classification,
@@ -235,7 +235,7 @@ RSpec.describe CodebaseIndex::Retriever do
 
   describe 'RetrievalTrace' do
     it 'has all expected fields' do
-      trace = CodebaseIndex::Retriever::RetrievalTrace.new(
+      trace = Woods::Retriever::RetrievalTrace.new(
         classification: classification,
         strategy: :vector,
         candidate_count: 5,
@@ -257,7 +257,7 @@ RSpec.describe CodebaseIndex::Retriever do
     it 'populates trace on retrieval result' do
       result = retriever.retrieve('How does the User model work?')
 
-      expect(result.trace).to be_a(CodebaseIndex::Retriever::RetrievalTrace)
+      expect(result.trace).to be_a(Woods::Retriever::RetrievalTrace)
       expect(result.trace.strategy).to eq(:vector)
       expect(result.trace.candidate_count).to eq(1)
       expect(result.trace.ranked_count).to eq(1)

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'digest'
-require 'codebase_index/embedding/provider'
+require 'woods/embedding/provider'
 
-module CodebaseIndex
+module Woods
   module Embedding
     module Provider
       # Deterministic embedding provider for testing.

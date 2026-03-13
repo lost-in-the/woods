@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
-require 'codebase_index/extractors/serializer_extractor'
+require 'woods/extractors/serializer_extractor'
 
-RSpec.describe CodebaseIndex::Extractors::SerializerExtractor do
+RSpec.describe Woods::Extractors::SerializerExtractor do
   include_context 'extractor setup'
 
   # ── Initialization ───────────────────────────────────────────────────

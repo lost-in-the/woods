@@ -2,10 +2,10 @@
 
 require 'spec_helper'
 require 'tmpdir'
-require 'codebase_index'
-require 'codebase_index/coordination/pipeline_lock'
+require 'woods'
+require 'woods/coordination/pipeline_lock'
 
-RSpec.describe CodebaseIndex::Coordination::PipelineLock do
+RSpec.describe Woods::Coordination::PipelineLock do
   let(:lock_dir) { Dir.mktmpdir }
 
   after { FileUtils.rm_rf(lock_dir) }
@@ -66,7 +66,7 @@ RSpec.describe CodebaseIndex::Coordination::PipelineLock do
       other_lock = described_class.new(lock_dir: lock_dir, name: 'extraction')
       expect do
         other_lock.with_lock { 'work' }
-      end.to raise_error(CodebaseIndex::Coordination::LockError)
+      end.to raise_error(Woods::Coordination::LockError)
     end
   end
 

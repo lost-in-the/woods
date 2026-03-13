@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines how AI agents should interact with CodebaseIndex. It serves as both a design specification for the tool-use interface and a reference guide that agents can consult when deciding how to retrieve codebase context.
+This document defines how AI agents should interact with Woods. It serves as both a design specification for the tool-use interface and a reference guide that agents can consult when deciding how to retrieve codebase context.
 
 The key insight: an agent's retrieval strategy should vary based on what it's trying to accomplish. A debugging task needs different context than an implementation task. This document maps task types to retrieval patterns.
 
@@ -12,7 +12,7 @@ The key insight: an agent's retrieval strategy should vary based on what it's tr
 
 ### 1. Retrieve, Don't Guess
 
-When an agent has access to CodebaseIndex, it should retrieve before answering any codebase-specific question. Even if the agent has seen the code in a previous turn, the index may contain richer context (inlined concerns, dependency graph, framework source).
+When an agent has access to Woods, it should retrieve before answering any codebase-specific question. Even if the agent has seen the code in a previous turn, the index may contain richer context (inlined concerns, dependency graph, framework source).
 
 ### 2. Start Narrow, Expand As Needed
 
@@ -520,11 +520,11 @@ Each source includes a `relevance_score` so the agent can assess confidence:
 
 ## MCP Server Design
 
-For agent frameworks that support MCP (Model Context Protocol), CodebaseIndex exposes itself as an MCP server:
+For agent frameworks that support MCP (Model Context Protocol), Woods exposes itself as an MCP server:
 
 ```json
 {
-  "name": "codebase-index",
+  "name": "woods",
   "version": "1.0.0",
   "description": "Rails codebase extraction and retrieval",
   "tools": [
@@ -654,7 +654,7 @@ Agent (Claude Code, Cursor, etc.)
   │
   ▼
 ┌──────────────────┐
-│ CodebaseIndex    │  Retriever, stores, embedding provider
+│ Woods    │  Retriever, stores, embedding provider
 │ Retrieval Core   │
 └──────────────────┘
 ```
@@ -796,7 +796,7 @@ The preceding sections cover agents as *consumers* of the index — querying, re
 
 ### Why Agents Need Operator Capabilities
 
-A fully autonomous coding agent should be able to notice that its index is stale, trigger a re-extraction, verify the results, and resume its coding task — all without human intervention. Today's design requires a human to run `rake codebase_index:extract` and `rake codebase_index:index`. Operator tools close this gap.
+A fully autonomous coding agent should be able to notice that its index is stale, trigger a re-extraction, verify the results, and resume its coding task — all without human intervention. Today's design requires a human to run `rake woods:extract` and `rake woods:index`. Operator tools close this gap.
 
 ### Operator Tool Interface
 
@@ -971,7 +971,7 @@ When an agent encounters a retrieval that returns empty or degraded results, it 
 5. If dimensions mismatch:
    Agent reports to human: "Embedding dimensions changed
    (stored: 1536, provider: 1024). A full re-index is
-   required. Run: rake codebase_index:reindex"
+   required. Run: rake woods:reindex"
 ```
 
 ### Recovery Patterns
@@ -993,12 +993,12 @@ Operator tools have higher blast radius than retrieval tools. Safety constraints
 
 1. **Extraction is read-only for source files.** It reads Ruby source and writes JSON output. It cannot modify application code.
 2. **Embedding writes to the vector store only.** It cannot modify extracted JSON or application data.
-3. **Repair operations are scoped.** `codebase_repair` only touches CodebaseIndex data, never application tables.
+3. **Repair operations are scoped.** `codebase_repair` only touches Woods data, never application tables.
 4. **Dry-run by default for destructive operations.** `codebase_extract(mode: "full", dry_run: true)` previews what would change without executing.
 5. **Rate-limited pipeline triggers.** An agent cannot trigger full extraction more than once per 5 minutes to prevent runaway loops.
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Operator
     class PipelineGuard
       COOLDOWN_SECONDS = 300  # 5 minutes between full runs
@@ -1034,15 +1034,15 @@ end
 
 ## Multi-Agent Coordination
 
-When multiple agents work on the same codebase simultaneously — for example, one agent investigating a bug while another implements a feature — they share the same CodebaseIndex. This section designs the coordination model for concurrent agent access.
+When multiple agents work on the same codebase simultaneously — for example, one agent investigating a bug while another implements a feature — they share the same Woods. This section designs the coordination model for concurrent agent access.
 
 ### Shared State Model
 
-CodebaseIndex state consists of three layers with different concurrency characteristics:
+Woods state consists of three layers with different concurrency characteristics:
 
 | State Layer | Storage | Read Safety | Write Safety |
 |-------------|---------|-------------|--------------|
-| Extracted JSON | File system (`tmp/codebase_index/**/*.json`) | Safe — files are immutable between extractions | Unsafe — concurrent extractions can produce partial state |
+| Extracted JSON | File system (`tmp/woods/**/*.json`) | Safe — files are immutable between extractions | Unsafe — concurrent extractions can produce partial state |
 | Vector embeddings | Vector store (Qdrant/pgvector/FAISS) | Safe — vector stores handle concurrent reads | Backend-dependent — Qdrant is safe, FAISS is not |
 | Metadata | Database (MySQL/PostgreSQL/SQLite) | Safe — standard database reads | Safe with transactions — databases handle concurrent writes |
 | Dependency graph | In-memory (loaded from JSON) | Safe — each agent loads its own copy | N/A — graph is rebuilt on extraction, not updated in place |
@@ -1068,10 +1068,10 @@ Two agents both try to run extraction or embedding simultaneously. This must be 
 Extraction and embedding operations acquire an advisory lock before proceeding. The lock mechanism depends on the runtime environment:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Coordination
     class PipelineLock
-      LOCK_FILE = "tmp/codebase_index/.pipeline.lock"
+      LOCK_FILE = "tmp/woods/.pipeline.lock"
 
       # File-based lock (works everywhere, including development)
       def acquire!(operation:, timeout: 30)
@@ -1110,7 +1110,7 @@ module CodebaseIndex
         @lock_file.rewind
         @lock_file.truncate(0)
         @lock_file.write({
-          agent: CodebaseIndex.current_agent_id,
+          agent: Woods.current_agent_id,
           operation: operation,
           started_at: Time.now.iso8601,
           pid: Process.pid
@@ -1136,7 +1136,7 @@ For database-backed deployments, advisory locks provide stronger guarantees:
 
 ```ruby
 # PostgreSQL advisory lock
-module CodebaseIndex
+module Woods
   module Coordination
     class PostgresAdvisoryLock
       LOCK_ID = 0x436F6465  # "Code" in hex
@@ -1162,10 +1162,10 @@ end
 
 ```ruby
 # MySQL advisory lock
-module CodebaseIndex
+module Woods
   module Coordination
     class MysqlAdvisoryLock
-      LOCK_NAME = "codebase_index_pipeline"
+      LOCK_NAME = "woods_pipeline"
 
       def acquire!(operation:, timeout: 30)
         result = ActiveRecord::Base.connection.execute(
@@ -1197,9 +1197,9 @@ File watchers trigger incremental extraction whenever source files change. Agent
 
 ```ruby
 # Triggered by file system watcher (e.g., Listen gem)
-CodebaseIndex::Watcher.on_change do |changed_files|
-  CodebaseIndex.extract_incremental(changed_files)
-  CodebaseIndex.embed_incremental(changed_identifiers)
+Woods::Watcher.on_change do |changed_files|
+  Woods.extract_incremental(changed_files)
+  Woods.embed_incremental(changed_identifiers)
 end
 ```
 
@@ -1229,7 +1229,7 @@ Agent B: notes in its output: "Based on index from commit abc123, 3 commits behi
 
 ### Token Budget Coordination
 
-When multiple agents share a context window (e.g., in a multi-agent orchestration framework), they must negotiate token budget allocation. CodebaseIndex supports partitioned budgets:
+When multiple agents share a context window (e.g., in a multi-agent orchestration framework), they must negotiate token budget allocation. Woods supports partitioned budgets:
 
 ```ruby
 # Each agent requests a portion of the total budget
@@ -1241,7 +1241,7 @@ result_b = retriever.retrieve("payment types", budget: 3000)   # Agent B: 3000 t
 structural = retriever.structural_context  # ~800 tokens, shared across agents
 ```
 
-The orchestration framework is responsible for dividing the total context budget among agents. CodebaseIndex respects whatever budget it's given per-request and does not coordinate across requests itself.
+The orchestration framework is responsible for dividing the total context budget among agents. Woods respects whatever budget it's given per-request and does not coordinate across requests itself.
 
 ---
 
@@ -1351,7 +1351,7 @@ tools:
 Feedback is stored in a lightweight JSON log alongside the index output. This keeps it co-located with the index and avoids additional infrastructure:
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Feedback
     class Store
       FEEDBACK_DIR = "feedback"
@@ -1369,7 +1369,7 @@ module CodebaseIndex
           missing: missing,
           notes: notes,
           timestamp: Time.now.iso8601,
-          agent_id: CodebaseIndex.current_agent_id
+          agent_id: Woods.current_agent_id
         })
       end
 
@@ -1381,7 +1381,7 @@ module CodebaseIndex
           expected_type: expected_type,
           expected_identifier: expected_identifier,
           timestamp: Time.now.iso8601,
-          agent_id: CodebaseIndex.current_agent_id
+          agent_id: Woods.current_agent_id
         })
       end
 
@@ -1422,7 +1422,7 @@ Beyond explicit agent reports, the system can detect gaps automatically:
 | Truncation rate | High percentage of results truncated | Units are too large, chunking would improve retrieval |
 
 ```ruby
-module CodebaseIndex
+module Woods
   module Feedback
     class GapDetector
       def analyze(feedback_store:, retrieval_logs:)

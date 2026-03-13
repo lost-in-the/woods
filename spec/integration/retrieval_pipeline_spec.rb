@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'codebase_index/extracted_unit'
-require 'codebase_index/dependency_graph'
-require 'codebase_index/storage/vector_store'
-require 'codebase_index/storage/metadata_store'
-require 'codebase_index/storage/graph_store'
-require 'codebase_index/retriever'
+require 'woods/extracted_unit'
+require 'woods/dependency_graph'
+require 'woods/storage/vector_store'
+require 'woods/storage/metadata_store'
+require 'woods/storage/graph_store'
+require 'woods/retriever'
 
 RSpec.describe 'Retrieval Pipeline Integration', :integration do
   # ── Fake Embedding Provider ──────────────────────────────────────
@@ -18,7 +18,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
   let(:embedding_provider) do
     dims = dimensions
     Class.new do
-      include CodebaseIndex::Embedding::Provider::Interface
+      include Woods::Embedding::Provider::Interface
 
       define_method(:dimensions) { dims }
       define_method(:model_name) { 'fake-test' }
@@ -39,9 +39,9 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
 
   # ── Store Setup ──────────────────────────────────────────────────
 
-  let(:vector_store) { CodebaseIndex::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { CodebaseIndex::Storage::MetadataStore::SQLite.new(':memory:') }
-  let(:graph_store) { CodebaseIndex::Storage::GraphStore::Memory.new }
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
 
   # ── Fixture Data ─────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
   # ── Retriever Setup ──────────────────────────────────────────────
 
   let(:retriever) do
-    CodebaseIndex::Retriever.new(
+    Woods::Retriever.new(
       vector_store: vector_store,
       metadata_store: metadata_store,
       graph_store: graph_store,
@@ -114,7 +114,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
     it 'returns a RetrievalResult for a model query' do
       result = retriever.retrieve('How does the User model work?')
 
-      expect(result).to be_a(CodebaseIndex::Retriever::RetrievalResult)
+      expect(result).to be_a(Woods::Retriever::RetrievalResult)
       expect(result.context).to be_a(String)
       expect(result.context).not_to be_empty
       expect(result.sources).to be_an(Array)
@@ -127,7 +127,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
     it 'includes a retrieval trace' do
       result = retriever.retrieve('How does the User model work?')
 
-      expect(result.trace).to be_a(CodebaseIndex::Retriever::RetrievalTrace)
+      expect(result.trace).to be_a(Woods::Retriever::RetrievalTrace)
       expect(result.trace.candidate_count).to be_positive
       expect(result.trace.ranked_count).to be_positive
       expect(result.trace.elapsed_ms).to be_a(Numeric)
@@ -263,7 +263,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
   # ── Helpers ──────────────────────────────────────────────────────
 
   def build_unit(type:, identifier:, file_path:, source_code:, metadata: {}, dependencies: [])
-    unit = CodebaseIndex::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
+    unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
     unit.source_code = source_code
     unit.metadata = metadata
     unit.dependencies = dependencies

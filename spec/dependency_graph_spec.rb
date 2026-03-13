@@ -3,12 +3,12 @@
 require 'spec_helper'
 require 'json'
 
-RSpec.describe CodebaseIndex::DependencyGraph do
+RSpec.describe Woods::DependencyGraph do
   let(:graph) { described_class.new }
 
   # Helper to create a minimal ExtractedUnit-like object
   def make_unit(type:, identifier:, file_path: nil, dependencies: [])
-    unit = CodebaseIndex::ExtractedUnit.new(
+    unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: file_path || "/app/#{identifier.underscore}.rb"
