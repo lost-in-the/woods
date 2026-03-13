@@ -65,6 +65,33 @@ Woods boots your Rails app, introspects everything using runtime APIs, and write
 
 Your `User` model includes `Auditable`, `Searchable`, and `SoftDeletable`. An AI tool reading `app/models/user.rb` sees 40 lines. Woods inlines all three concerns directly into the extracted unit — the AI sees the full 200-line behavioral surface area in one block.
 
+```ruby
+# What your AI sees (app/models/user.rb) — 4 lines:
+class User < ApplicationRecord
+  include Auditable
+  include Searchable
+end
+
+# What Woods produces — full source with schema + inlined concerns:
+# == Schema Information
+# email    :string           not null
+# name     :string
+#
+# class User < ApplicationRecord
+#   include Auditable
+#   include Searchable
+#   validates :email, presence: true, uniqueness: true
+#   ...
+# end
+#
+# --- Concern: Auditable (app/models/concerns/auditable.rb) ---
+#   def audit_trail ...
+# --- Concern: Searchable (app/models/concerns/searchable.rb) ---
+#   scope :search, ->(q) { where("name ILIKE ?", "%#{q}%") }
+```
+
+The `metadata[:inlined_concerns]` array lists which concerns were resolved, so retrieval can filter by concern inclusion.
+
 ### Schema Prepending
 
 Model source gets a header with actual column types, indexes, and foreign keys pulled from the live database. No more guessing whether `name` is a `string` or `text`, or whether there's an index on `email`.
@@ -80,6 +107,106 @@ Controller source gets a route map prepended showing the real HTTP verb + path +
 ### Callback Side-Effect Analysis
 
 `CallbackAnalyzer` detects what actually happens inside callbacks — which columns get written, which jobs get enqueued, which services get called, which mailers fire. This is the #1 source of unexpected bugs in Rails, and the #1 thing AI tools get wrong.
+
+---
+
+## Examples
+
+### Extracted Model with Schema and Associations
+
+After extraction, each model is a self-contained JSON file with schema, associations, validations, and inlined concern source:
+
+```json
+{
+  "type": "model",
+  "identifier": "Order",
+  "file_path": "app/models/order.rb",
+  "source_code": "# == Schema Information\n# id         :bigint  not null, pk\n# user_id    :bigint  not null, fk\n# status     :string  default(\"pending\")\n# total_cents :integer\n#\nclass Order < ApplicationRecord\n  belongs_to :user\n  has_many :line_items\n  validates :status, inclusion: { in: %w[pending paid shipped] }\n  ...\nend\n\n# --- Concern: Auditable ---\nmodule Auditable\n  ...\nend",
+  "metadata": {
+    "associations": [
+      { "type": "belongs_to", "name": "user", "model": "User" },
+      { "type": "has_many", "name": "line_items", "model": "LineItem" }
+    ],
+    "validations": [
+      { "attribute": "status", "kind": "inclusion", "in": ["pending", "paid", "shipped"] }
+    ],
+    "enums": { "status": { "pending": 0, "active": 1, "shipped": 2 } },
+    "scopes": [{ "name": "active", "source": "-> { where(status: :active) }" }],
+    "inlined_concerns": ["Auditable"]
+  },
+  "dependencies": [
+    { "type": "model", "target": "User", "via": "belongs_to" },
+    { "type": "model", "target": "LineItem", "via": "has_many" }
+  ]
+}
+```
+
+### Callback Chain with Side-Effects
+
+Woods resolves the full callback chain in execution order and detects side-effects — which columns get written, which jobs get enqueued, which mailers fire:
+
+```json
+"callbacks": [
+  { "type": "before_validation", "method": "normalize_email" },
+  { "type": "before_save", "method": "set_slug",
+    "side_effects": { "columns_written": ["slug"] } },
+  { "type": "after_commit", "method": "send_welcome", "on": ["create"],
+    "side_effects": { "jobs_enqueued": ["WelcomeEmailJob"], "mailers_triggered": ["UserMailer"] } }
+]
+```
+
+Side-effects are detected by `CallbackAnalyzer`, which scans callback method bodies for patterns like `self.col =` (column writes), `perform_later` (job enqueues), and `deliver_later` (mailer triggers). This is the #1 thing AI tools get wrong about Rails models.
+
+### Route-to-Controller Lookup
+
+Every route becomes its own `ExtractedUnit` with the controller and action bound from the live routing table:
+
+```json
+{
+  "type": "route",
+  "identifier": "POST /checkout",
+  "metadata": {
+    "controller": "orders",
+    "action": "create",
+    "route_name": "checkout"
+  }
+}
+```
+
+To find which controller handles a URL, use the MCP `search` tool:
+
+```json
+{ "tool": "search", "params": { "query": "/checkout", "types": ["route"] } }
+```
+
+This returns all matching route units with their controller and action — no guessing about custom routes, nested resources, or engine mount points.
+
+### Finding Jobs Enqueued by a Service
+
+Use the MCP `dependencies` tool to trace what a service triggers:
+
+```json
+{ "tool": "dependencies", "params": { "identifier": "CheckoutService", "depth": 2, "types": ["job"] } }
+```
+
+Returns all job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks (e.g., `CheckoutService` → `Order` → `OrderConfirmationJob`).
+
+### Runtime-Generated Method Detection
+
+Because Woods runs inside the booted Rails process, it captures every method Rails generates dynamically — enum predicates, association builders, attribute accessors, and scope methods that static analysis tools cannot see:
+
+```json
+{
+  "identifier": "Order",
+  "metadata": {
+    "enums": { "status": { "pending": 0, "active": 1, "shipped": 2 } },
+    "scopes": [{ "name": "active", "source": "-> { where(status: :active) }" }],
+    "associations": [{ "type": "has_many", "name": "line_items", "model": "LineItem" }]
+  }
+}
+```
+
+Static tools miss `status_active?`, `status_pending?`, `build_line_item`, `create_line_item!`, and dynamically registered scopes. Woods captures all of these because it queries the runtime class via `instance_methods(false)` after Rails has processed every DSL declaration.
 
 ---
 
@@ -222,6 +349,26 @@ Woods is backend-agnostic. Your app database, vector store, embedding provider, 
 | **View Layer** | ERB, Phlex, ViewComponent |
 
 See [Backend Matrix](docs/BACKEND_MATRIX.md) for supported combinations and [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) for every option with defaults.
+
+### Environment-Specific Configuration
+
+```ruby
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
+
+  # CI: only extract models and controllers for faster builds
+  config.extractors = %i[models controllers] if ENV['CI']
+
+  # Environment-conditional embedding provider
+  if ENV['OPENAI_API_KEY']
+    config.embedding_provider = :openai
+    config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
+  else
+    config.embedding_provider = :ollama
+    config.embedding_options = { base_url: 'http://localhost:11434' }
+  end
+end
+```
 
 ---
 

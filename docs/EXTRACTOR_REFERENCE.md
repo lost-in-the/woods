@@ -53,6 +53,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
+- **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically — enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
 
 **Edge cases:**
 - STI subclasses are extracted separately from their parent (each has its own identifier)
@@ -74,7 +75,10 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
       { "type": "has_many", "name": "line_items", "model": "LineItem" }
     ],
     "callbacks": [
-      { "type": "after_commit", "method": "send_confirmation_email", "on": ["create"] }
+      { "type": "before_save", "method": "calculate_total",
+        "side_effects": { "columns_written": ["total_cents"] } },
+      { "type": "after_commit", "method": "send_confirmation_email", "on": ["create"],
+        "side_effects": { "jobs_enqueued": ["OrderConfirmationJob"], "mailers_triggered": ["OrderMailer"] } }
     ],
     "validations": [
       { "attribute": "status", "kind": "inclusion", "in": ["pending", "paid", "shipped"] }
