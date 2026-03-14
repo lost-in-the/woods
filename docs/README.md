@@ -4,7 +4,7 @@ Woods is a Ruby gem that extracts structured data from Rails applications for AI
 
 ## Current State
 
-All major layers are implemented: 33 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (26-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
+All major layers are implemented: 34 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
 
 What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remaining coverage work (HAML/Slim expansion, configuration semantic parsing, Stimulus/Hotwire).
 
@@ -23,7 +23,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix for extraction, MCP, embedding, storage, Docker, and Notion problems |
 | [WHY_WOODS.md](WHY_WOODS.md) | What Woods is, why it exists, before/after examples |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline stages, ExtractedUnit, dependency graph, retrieval, storage backends, MCP servers |
-| [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 33 extractors captures, edge cases, example output |
+| [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 34 extractors captures, edge cases, example output |
 | [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
 
 ## Reference

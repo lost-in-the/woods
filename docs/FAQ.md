@@ -208,7 +208,7 @@ A mid-size Rails app (50-100 models, typical controller and service layer) takes
 
 ### What's the difference between the Index Server and the Console Server?
 
-The Index Server reads pre-extracted JSON from disk and does not require Rails. It provides 26 tools for querying extracted codebase structure, dependency graphs, semantic search, and temporal snapshots. The Console Server connects to a live Rails application and provides 31 tools for querying real database records, running diagnostics, and monitoring job queues. Use the Index Server for structural/architectural questions; use the Console Server for live data and runtime diagnostics.
+The Index Server reads pre-extracted JSON from disk and does not require Rails. It provides 27 tools for querying extracted codebase structure, dependency graphs, semantic search, and temporal snapshots. The Console Server connects to a live Rails application and provides 31 tools for querying real database records, running diagnostics, and monitoring job queues. Use the Index Server for structural/architectural questions; use the Console Server for live data and runtime diagnostics.
 
 ---
 

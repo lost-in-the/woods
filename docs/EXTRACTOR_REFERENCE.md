@@ -1,6 +1,6 @@
 # Woods Extractor Reference
 
-Woods ships 33 extractors — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships 34 extractors — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
 ---
 
@@ -11,7 +11,7 @@ Woods ships 33 extractors — one for each meaningful category of Rails code. Th
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract     — All 33 extractors run, producing ExtractedUnit objects
+Phase 1: Extract     — All 34 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe    — Duplicate identifiers are dropped (engines can double-register routes)
 Phase 2: Resolve     — Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Graph       — PageRank + structural analysis (orphans, hubs, cycles, bridges)
@@ -566,7 +566,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ## How Do I Enable or Disable Extractors?
 
-All 33 extractors run during a full extraction. The `config.extractors` array controls which unit types are considered by the *retrieval pipeline* (embedding and search scope), not which extractors run during extraction.
+All 34 extractors run during a full extraction. The `config.extractors` array controls which unit types are considered by the *retrieval pipeline* (embedding and search scope), not which extractors run during extraction.
 
 To customize the retrieval scope:
 

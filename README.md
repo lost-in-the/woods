@@ -109,7 +109,7 @@ Controller source gets a route map prepended showing the real HTTP verb + path +
 
 ### Dependency Graph
 
-33 extractors build a bidirectional graph: what each unit depends on, and what depends on it. Change a concern and trace every model it touches. Refactor a service and see every controller that calls it. PageRank scoring identifies the most important nodes in your codebase.
+34 extractors build a bidirectional graph: what each unit depends on, and what depends on it. Change a concern and trace every model it touches. Refactor a service and see every controller that calls it. PageRank scoring identifies the most important nodes in your codebase.
 
 ### Callback Side-Effect Analysis
 
@@ -239,7 +239,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 ### Index Server — Reads Pre-Extracted Data (No Rails Required)
 
-26 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. Reads static JSON from disk — fast, no Rails boot needed.
+27 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. Reads static JSON from disk — fast, no Rails boot needed.
 
 **Claude Code** — add to `.mcp.json` in your project root:
 
@@ -291,7 +291,7 @@ See [MCP Servers](docs/MCP_SERVERS.md) for the full tool catalog and [MCP Tool C
 
 ## What Gets Extracted
 
-33 extractors cover every major Rails concept:
+34 extractors cover every major Rails concept:
 
 | Category | What's Extracted | Key Details |
 |----------|-----------------|-------------|
@@ -441,7 +441,7 @@ rake woods:notion_sync         # Sync models/columns to Notion (alias: woods:sen
 ```
 Inside your Rails app (rake task):
   1. Boot Rails, eager-load all application classes
-  2. 33 extractors introspect models, controllers, routes, etc.
+  2. 34 extractors introspect models, controllers, routes, etc.
   3. Dependency graph is built with forward + reverse edges
   4. Git metadata enriches each unit (last modified, contributors, churn)
   5. JSON output written to tmp/woods/
@@ -505,7 +505,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Embed     │───>│ Vector Store│    │  MCP Index Server    │  │
-│  │  OpenAI /  │    │ pgvector /  │    │  26 tools            │  │
+│  │  OpenAI /  │    │ pgvector /  │    │  27 tools            │  │
 │  │  Ollama    │    │ Qdrant      │    │  No Rails required   │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 │                                                                  │
@@ -545,7 +545,7 @@ See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases
 | [MCP Tool Cookbook](docs/MCP_TOOL_COOKBOOK.md) | Daily use | Scenario-based "how do I..." examples |
 | [Docker Setup](docs/DOCKER_SETUP.md) | Docker users | Container extraction + host MCP server |
 | [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) | Customization | Every option with defaults |
-| [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) | Deep dive | What each of the 33 extractors captures |
+| [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) | Deep dive | What each of the 34 extractors captures |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Pipeline stages, graph internals, retrieval |
 | [Backend Matrix](docs/BACKEND_MATRIX.md) | Infrastructure | Supported database, vector, and embedding combos |
 | [Why Woods?](docs/WHY_CODEBASE_INDEX.md) | Evaluation | Detailed before/after comparisons |
