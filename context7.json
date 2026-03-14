@@ -11,7 +11,7 @@
   ],
   "rules": [
     "Install: add `gem 'woods', group: :development` to Gemfile, run `bundle install`, then `rails generate woods:install` to create the initializer at config/initializers/woods.rb.",
-    "Extract: `bundle exec rake woods:extract` (alias: woods:scan) boots Rails and runs all 33 extractors. Docker: `docker compose exec app bundle exec rake woods:extract`. Output goes to tmp/woods/.",
+    "Extract: `bundle exec rake woods:extract` (alias: woods:scan) boots Rails and runs all 34 extractors. Docker: `docker compose exec app bundle exec rake woods:extract`. Output goes to tmp/woods/.",
     "Incremental update: `bundle exec rake woods:incremental` (alias: woods:tend) re-extracts only changed files — 5-10x faster than full extraction.",
     "MCP Index Server setup: add to .mcp.json: {\"mcpServers\": {\"woods\": {\"command\": \"woods-mcp-start\", \"args\": [\"./tmp/woods\"]}}}. No Rails boot needed — reads static JSON.",
     "MCP Console Server setup: add to .mcp.json: {\"mcpServers\": {\"woods-console\": {\"command\": \"bundle\", \"args\": [\"exec\", \"rake\", \"woods:console\"], \"cwd\": \"/path/to/rails-app\"}}}. Bridges to live Rails process.",

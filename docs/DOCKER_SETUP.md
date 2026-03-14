@@ -9,7 +9,7 @@ Woods has a split architecture: extraction requires a booted Rails environment (
 ```
 HOST                                    CONTAINER
 ─────────────────────────────           ──────────────────────
-Index Server (26 tools)                 Rails App
+Index Server (27 tools)                 Rails App
   reads JSON from disk                    bundle exec rake woods:extract
   no Rails needed                           writes to tmp/woods/
         ▲                                         │
