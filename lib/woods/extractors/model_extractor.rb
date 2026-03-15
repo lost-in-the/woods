@@ -327,6 +327,9 @@ module Woods
           callbacks: extract_callbacks(model),
           scopes: extract_scopes(model, source),
           enums: extract_enums(model),
+          inlined_concerns: extract_included_modules(model)
+            .select { |mod| mod.name && concern_source(mod) }
+            .map { |mod| mod.name.demodulize },
 
           # API surface
           class_methods: model.methods(false).sort,
@@ -611,7 +614,7 @@ module Woods
       def extract_dependencies(model, source = nil)
         # Associations point to other models
         deps = model.reflect_on_all_associations.filter_map do |assoc|
-          { type: :model, target: assoc.class_name, via: :association }
+          { type: :model, target: assoc.class_name, via: assoc.macro }
         rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
           nil

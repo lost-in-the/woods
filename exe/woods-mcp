@@ -19,6 +19,10 @@ require_relative '../lib/woods/mcp/bootstrapper'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
+# Suppress json-schema MultiJSON deprecation notice that would pollute stderr
+# during MCP stdio transport. The notice fires when multi_json is in the bundle.
+JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Validator.respond_to?(:use_multi_json=)
+
 index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
 retriever = Woods::MCP::Bootstrapper.build_retriever
 snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)

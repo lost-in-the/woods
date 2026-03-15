@@ -74,6 +74,39 @@ middleware, and more.
 the model unit. When an AI asks about `User`, it gets `User` + `Auditable` + `Searchable`
 in one context block — not three separate lookups.
 
+```ruby
+# What an AI sees without Woods (app/models/user.rb):
+class User < ApplicationRecord
+  include Auditable
+  include Searchable
+end  # 4 lines — the AI guesses what these concerns add
+
+# What Woods produces (User.json source_code field):
+# == Schema Information
+# email    :string           not null
+# name     :string
+#
+# class User < ApplicationRecord
+#   include Auditable
+#   include Searchable
+#   validates :email, presence: true
+# end
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Auditable                                            │
+# └─────────────────────────────────────────────────────────────────────┘
+#   def audit_trail; AuditLog.create!(auditable: self); end
+#   after_save :audit_trail
+# ─────────────────────────── End Auditable ───────────────────────────
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Searchable                                           │
+# └─────────────────────────────────────────────────────────────────────┘
+#   scope :search, ->(q) { where("name ILIKE ?", "%#{q}%") }
+#   after_commit :reindex_search
+# ─────────────────────────── End Searchable ───────────────────────────
+```
+
 **Schema prepending.** Model source gets a schema header with column types, indexes, and
 foreign keys pulled live from the database. No more confusing `string` vs `text` vs
 `integer` guesses.
