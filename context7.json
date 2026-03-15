@@ -3,7 +3,7 @@
   "projectTitle": "Woods",
   "description": "Ruby gem that extracts structured data from Rails apps via runtime introspection. Inlines concerns, resolves callbacks, builds dependency graphs. Two MCP servers.",
   "folders": [],
-  "excludeFolders": ["lib", "spec", "exe", ".claude", "_project-resources", "docs/design", "docs/self-analysis", "docs/skills"],
+  "excludeFolders": ["lib", "spec", "exe", ".claude", "_project-resources", "docs/design", "docs/self-analysis"],
   "excludeFiles": [
     "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md",
     "CONTRIBUTING.md", "docs/TOKEN_BENCHMARK.md"

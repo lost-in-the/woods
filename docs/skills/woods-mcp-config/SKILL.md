@@ -116,7 +116,7 @@ Then configure the MCP client:
     "rails-console": {
       "command": "woods-console-mcp",
       "env": {
-        "CODEBASE_CONSOLE_CONFIG": "/Users/yourname/.woods/console.yml"
+        "WOODS_CONSOLE_CONFIG": "/Users/yourname/.woods/console.yml"
       }
     }
   }
@@ -194,7 +194,7 @@ connection:
     "rails-console": {
       "command": "woods-console-mcp",
       "env": {
-        "CODEBASE_CONSOLE_CONFIG": "/Users/yourname/.woods/console.yml"
+        "WOODS_CONSOLE_CONFIG": "/Users/yourname/.woods/console.yml"
       }
     }
   }
