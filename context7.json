@@ -1,29 +1,23 @@
 {
-  "url": "https://context7.com/lost-in-the/woods",
-  "public_key": "pk_lHvYkoK2DwC8Cbj0p10kg",
+  "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "Woods",
-  "description": "Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Serves context via MCP servers for Claude Code, Cursor, and Windsurf.",
-  "folders": ["docs"],
+  "description": "Ruby gem that extracts structured data from Rails apps via runtime introspection. Inlines concerns, resolves callbacks, builds dependency graphs. Two MCP servers.",
+  "folders": [],
   "excludeFolders": ["lib", "spec", "exe", ".claude", "_project-resources", "docs/design", "docs/self-analysis", "docs/skills"],
   "excludeFiles": [
     "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md",
     "CONTRIBUTING.md", "docs/TOKEN_BENCHMARK.md"
   ],
   "rules": [
-    "Install: add `gem 'woods', group: :development` to Gemfile, run `bundle install`, then `rails generate woods:install` to create the initializer at config/initializers/woods.rb.",
-    "Extract: `bundle exec rake woods:extract` (alias: woods:scan) boots Rails and runs all 34 extractors. Docker: `docker compose exec app bundle exec rake woods:extract`. Output goes to tmp/woods/.",
-    "Incremental update: `bundle exec rake woods:incremental` (alias: woods:tend) re-extracts only changed files — 5-10x faster than full extraction.",
-    "MCP Index Server setup: add to .mcp.json: {\"mcpServers\": {\"woods\": {\"command\": \"woods-mcp-start\", \"args\": [\"./tmp/woods\"]}}}. No Rails boot needed — reads static JSON.",
-    "MCP Console Server setup: add to .mcp.json: {\"mcpServers\": {\"woods-console\": {\"command\": \"bundle\", \"args\": [\"exec\", \"rake\", \"woods:console\"], \"cwd\": \"/path/to/rails-app\"}}}. Bridges to live Rails process.",
-    "Look up any unit by name: MCP tool `lookup` with `identifier` and `include_source: true`. Returns full source with inlined concerns, schema header, associations, callbacks, and validations as structured JSON.",
-    "List callbacks for a model: MCP tool `lookup` returns `metadata.callbacks` array with type, filter, kind, conditions (if/unless), and side_effects (columns_written, jobs_enqueued, services_called, mailers_triggered, database_reads, operations) in execution order.",
-    "Find which controller handles a route: MCP tool `search` with `query: \"/checkout\"` and `types: [\"route\"]`. Returns route units with controller, action, and route_name in metadata.",
-    "Concern inlining: model source_code includes all `include`d concerns in ASCII box format (`# ┌───┐ │ Included from: Name │ └───┘`). The `metadata.inlined_concerns` array lists resolved concern names.",
-    "Find jobs enqueued by a service: MCP tool `dependencies` with `identifier: \"CheckoutService\"`, `depth: 2`, `types: [\"job\"]`. Traces through model callbacks to find indirectly triggered jobs.",
-    "Runtime-generated methods: because extraction runs inside a booted Rails process, `instance_methods(false)` captures enum predicates, association builders, attribute accessors, and scope methods that static tools miss. These appear in metadata.enums, metadata.scopes, and metadata.associations.",
-    "Custom boot requirements: extraction needs Rails to boot successfully. Set required env vars (RAILS_MASTER_KEY, DATABASE_URL, REDIS_URL) before running rake woods:extract. Use `rails runner 'puts :OK'` to verify boot.",
-    "Storage presets for quick setup: Woods.configure_with_preset(:local) for no external services, :postgresql for pgvector + OpenAI, :production for Qdrant + OpenAI.",
-    "Woods is backend-agnostic: works with MySQL, PostgreSQL, SQLite (app DB); in-memory, pgvector, Qdrant (vector store); OpenAI, Ollama (embeddings); Sidekiq, Solid Queue, GoodJob (jobs).",
-    "Graph analysis: MCP tool `graph_analysis` with analysis: \"orphans\" finds dead code, \"cycles\" finds circular deps, \"bridges\" finds structural bottlenecks, \"hubs\" finds high-connectivity nodes. MCP tool `pagerank` ranks units by structural importance."
+    "Install: add `gem 'woods', group: :development` to Gemfile, run `bundle install`, then `rails generate woods:install` to create the initializer.",
+    "Extract: `bundle exec rake woods:extract` boots Rails and runs all 34 extractors. Docker: `docker compose exec app bundle exec rake woods:extract`.",
+    "MCP Index Server: add to .mcp.json: {\"mcpServers\": {\"woods\": {\"command\": \"woods-mcp-start\", \"args\": [\"./tmp/woods\"]}}}. No Rails boot needed.",
+    "Look up any unit: MCP tool `lookup` with `identifier` and `include_source: true`. Returns source with inlined concerns, schema header, callbacks.",
+    "List callbacks: MCP tool `lookup` returns `metadata.callbacks` array with type, filter, kind, conditions, and side_effects in execution order.",
+    "Find route handler: MCP tool `search` with `query: \"/checkout\"` and `types: [\"route\"]`. Returns route units with controller and action.",
+    "Concern inlining: model source_code includes all included concerns inline. The `metadata.inlined_concerns` array lists resolved concern names.",
+    "Find enqueued jobs: MCP tool `dependencies` with `identifier`, `depth: 2`, `types: [\"job\"]`. Traces through callbacks to find triggered jobs.",
+    "Runtime methods: extraction inside a booted Rails process captures enum predicates, association builders, and scope methods that static tools miss.",
+    "Graph analysis: MCP tool `graph_analysis` with analysis: \"orphans\", \"cycles\", \"bridges\", or \"hubs\". MCP tool `pagerank` ranks by importance."
   ]
 }
