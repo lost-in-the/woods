@@ -20,7 +20,7 @@ bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
 bundle exec rake woods:clean             # Remove index output
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
-# Woods-themed aliases: woods:grow (extract), woods:trail (stats), woods:map (validate)
+# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.

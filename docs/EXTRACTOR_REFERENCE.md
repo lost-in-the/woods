@@ -49,10 +49,11 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)
 - Inlines concerns: all `include FooConcern` references are resolved and the concern source is appended to `source_code`. Inlined concern names are recorded in `metadata[:inlined_concerns]`
-- Extracts all 13 callback types: `before_validation`, `after_validation`, `before_save`, `around_save`, `after_save`, `before_create`, `after_create`, `before_update`, `after_update`, `before_destroy`, `after_destroy`, `after_commit`, `after_rollback`
+- Extracts all 19 callback types: `before_validation`, `after_validation`, `before_save`, `after_save`, `around_save`, `before_create`, `after_create`, `around_create`, `before_update`, `after_update`, `around_update`, `before_destroy`, `after_destroy`, `around_destroy`, `after_commit`, `after_rollback`, `after_initialize`, `after_find`, `after_touch`
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
+- **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically — enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
 
 **Edge cases:**
 - STI subclasses are extracted separately from their parent (each has its own identifier)
@@ -67,17 +68,20 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
   "identifier": "Order",
   "file_path": "app/models/order.rb",
   "namespace": null,
-  "source_code": "# == Schema Information\n# id :bigint\n# user_id :bigint\n# status :string\n# total_cents :integer\n#\nclass Order < ApplicationRecord\n  belongs_to :user\n  has_many :line_items\n  ...\nend\n\n# --- Concern: Auditable ---\nmodule Auditable\n  ...\nend",
+  "source_code": "# == Schema Information\n# id :bigint\n# user_id :bigint\n# status :string\n# total_cents :integer\n#\nclass Order < ApplicationRecord\n  belongs_to :user\n  has_many :line_items\n  ...\nend\n\n# ┌───────────────────────────────────────────────────────────────────┐\n# │ Included from: Auditable                                          │\n# └───────────────────────────────────────────────────────────────────┘\n#   module Auditable\n#     ...\n#   end\n# ──────────────────────── End Auditable ────────────────────────────",
   "metadata": {
     "associations": [
-      { "type": "belongs_to", "name": "user", "model": "User" },
-      { "type": "has_many", "name": "line_items", "model": "LineItem" }
+      { "type": "belongs_to", "name": "user", "target": "User" },
+      { "type": "has_many", "name": "line_items", "target": "LineItem" }
     ],
     "callbacks": [
-      { "type": "after_commit", "method": "send_confirmation_email", "on": ["create"] }
+      { "type": "before_save", "filter": "calculate_total", "kind": "before", "conditions": {},
+        "side_effects": { "columns_written": ["total_cents"], "jobs_enqueued": [], "services_called": [], "mailers_triggered": [], "database_reads": [], "operations": [] } },
+      { "type": "after_commit", "filter": "send_confirmation_email", "kind": "after", "conditions": {},
+        "side_effects": { "columns_written": [], "jobs_enqueued": ["OrderConfirmationJob"], "services_called": [], "mailers_triggered": ["OrderMailer"], "database_reads": [], "operations": [] } }
     ],
     "validations": [
-      { "attribute": "status", "kind": "inclusion", "in": ["pending", "paid", "shipped"] }
+      { "attribute": "status", "type": "inclusion", "options": { "in": ["pending", "paid", "shipped"] }, "conditions": {} }
     ],
     "inlined_concerns": ["Auditable"]
   },
@@ -642,10 +646,10 @@ If the host app is a git repo, the following are added to `metadata[:git]` after
   "identifier": "User",
   "file_path": "app/models/user.rb",
   "namespace": null,
-  "source_code": "# == Schema Information\n# id :bigint not null, pk\n# email :string not null\n# created_at :datetime\n#\nclass User < ApplicationRecord\n  has_many :orders\n  validates :email, presence: true, uniqueness: true\nend\n\n# --- Concern: Searchable ---\nmodule Searchable\n  extend ActiveSupport::Concern\n  ...\nend",
+  "source_code": "# == Schema Information\n# id :bigint not null, pk\n# email :string not null\n# created_at :datetime\n#\nclass User < ApplicationRecord\n  has_many :orders\n  validates :email, presence: true, uniqueness: true\nend\n\n# ┌───────────────────────────────────────────────────────────────────┐\n# │ Included from: Searchable                                         │\n# └───────────────────────────────────────────────────────────────────┘\n#   module Searchable\n#     extend ActiveSupport::Concern\n#     ...\n#   end\n# ──────────────────────── End Searchable ───────────────────────────",
   "metadata": {
-    "associations": [{ "type": "has_many", "name": "orders", "model": "Order" }],
-    "validations": [{ "attribute": "email", "kind": "presence" }, { "attribute": "email", "kind": "uniqueness" }],
+    "associations": [{ "type": "has_many", "name": "orders", "target": "Order" }],
+    "validations": [{ "attribute": "email", "type": "presence", "options": {}, "conditions": {} }, { "attribute": "email", "type": "uniqueness", "options": {}, "conditions": {} }],
     "callbacks": [],
     "scopes": [],
     "inlined_concerns": ["Searchable"],
