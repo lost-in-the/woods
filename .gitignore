@@ -31,6 +31,9 @@ tmp/
 .claude/settings.local.json
 .claude/backlog.json
 
+# Context7 API helper (contains op references)
+bin/context7
+
 # Grove (worktree manager)
 .grove/state.json
 .grove/state.json.bak
