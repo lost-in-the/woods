@@ -459,12 +459,15 @@ Everything flows through `ExtractedUnit` — the universal data structure. Each 
 |-------|-----------------|
 | `identifier` | Class name or descriptive key (`"User"`, `"POST /orders"`) |
 | `type` | Category (`:model`, `:controller`, `:service`, `:job`, etc.) |
+| `file_path` | Source file location relative to Rails root |
+| `namespace` | Module namespace (`"Admin"`, `nil` for top-level) |
 | `source_code` | Annotated source with inlined concerns and schema |
 | `metadata` | Structured data — associations, callbacks, routes, fields |
 | `dependencies` | What this unit depends on (forward edges) |
 | `dependents` | What depends on this unit (reverse edges) |
 | `chunks` | Semantic sub-sections for large units |
-| `estimated_tokens` | Token count for LLM context budgeting |
+| `extracted_at` | ISO 8601 timestamp of extraction |
+| `source_hash` | SHA-256 digest for change detection |
 
 ### Output Structure
 

@@ -614,7 +614,7 @@ module Woods
       def extract_dependencies(model, source = nil)
         # Associations point to other models
         deps = model.reflect_on_all_associations.filter_map do |assoc|
-          { type: :model, target: assoc.class_name, via: :association }
+          { type: :model, target: assoc.class_name, via: assoc.macro }
         rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
           nil
