@@ -65,6 +65,40 @@ Woods boots your Rails app, introspects everything using runtime APIs, and write
 
 Your `User` model includes `Auditable`, `Searchable`, and `SoftDeletable`. An AI tool reading `app/models/user.rb` sees 40 lines. Woods inlines all three concerns directly into the extracted unit — the AI sees the full 200-line behavioral surface area in one block.
 
+```ruby
+# What your AI sees (app/models/user.rb) — 4 lines:
+class User < ApplicationRecord
+  include Auditable
+  include Searchable
+end
+
+# What Woods produces — full source with schema + inlined concerns:
+# == Schema Information
+# email    :string           not null
+# name     :string
+#
+# class User < ApplicationRecord
+#   include Auditable
+#   include Searchable
+#   validates :email, presence: true, uniqueness: true
+#   ...
+# end
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Auditable                                            │
+# └─────────────────────────────────────────────────────────────────────┘
+#   def audit_trail ...
+# ─────────────────────────── End Auditable ───────────────────────────
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Searchable                                           │
+# └─────────────────────────────────────────────────────────────────────┘
+#   scope :search, ->(q) { where("name ILIKE ?", "%#{q}%") }
+# ─────────────────────────── End Searchable ───────────────────────────
+```
+
+The `metadata[:inlined_concerns]` array lists which concerns were resolved, so retrieval can filter by concern inclusion.
+
 ### Schema Prepending
 
 Model source gets a header with actual column types, indexes, and foreign keys pulled from the live database. No more guessing whether `name` is a `string` or `text`, or whether there's an index on `email`.
@@ -80,6 +114,122 @@ Controller source gets a route map prepended showing the real HTTP verb + path +
 ### Callback Side-Effect Analysis
 
 `CallbackAnalyzer` detects what actually happens inside callbacks — which columns get written, which jobs get enqueued, which services get called, which mailers fire. This is the #1 source of unexpected bugs in Rails, and the #1 thing AI tools get wrong.
+
+---
+
+## Examples
+
+### Extracted Model with Schema and Associations
+
+After extraction, each model is a self-contained JSON file with schema, associations, validations, and inlined concern source:
+
+```json
+{
+  "type": "model",
+  "identifier": "Order",
+  "file_path": "app/models/order.rb",
+  "source_code": "# == Schema Information\n# id         :bigint  not null, pk\n# user_id    :bigint  not null, fk\n# status     :string  default(\"pending\")\n# total_cents :integer\n#\nclass Order < ApplicationRecord\n  belongs_to :user\n  has_many :line_items\n  validates :status, inclusion: { in: %w[pending paid shipped] }\n  ...\nend\n\n# ┌───────────────────────────────────────────────────────────────────┐\n# │ Included from: Auditable                                          │\n# └───────────────────────────────────────────────────────────────────┘\n#   module Auditable\n#     ...\n#   end\n# ──────────────────────── End Auditable ────────────────────────────",
+  "metadata": {
+    "associations": [
+      { "type": "belongs_to", "name": "user", "target": "User" },
+      { "type": "has_many", "name": "line_items", "target": "LineItem" }
+    ],
+    "validations": [
+      { "attribute": "status", "type": "inclusion", "options": { "in": ["pending", "paid", "shipped"] } }
+    ],
+    "enums": { "status": { "pending": 0, "active": 1, "shipped": 2 } },
+    "scopes": [{ "name": "active", "source": "-> { where(status: :active) }" }],
+    "inlined_concerns": ["Auditable"]
+  },
+  "dependencies": [
+    { "type": "model", "target": "User", "via": "belongs_to" },
+    { "type": "model", "target": "LineItem", "via": "has_many" }
+  ]
+}
+```
+
+### Callback Chain with Side-Effects
+
+Woods resolves the full callback chain in execution order and detects side-effects — which columns get written, which jobs get enqueued, which mailers fire:
+
+```json
+"callbacks": [
+  { "type": "before_validation", "filter": "normalize_email", "kind": "before", "conditions": {} },
+  { "type": "before_save", "filter": "set_slug", "kind": "before", "conditions": {},
+    "side_effects": { "columns_written": ["slug"], "jobs_enqueued": [], "services_called": [], "mailers_triggered": [], "database_reads": [], "operations": [] } },
+  { "type": "after_commit", "filter": "send_welcome", "kind": "after", "conditions": {},
+    "side_effects": { "columns_written": [], "jobs_enqueued": ["WelcomeEmailJob"], "services_called": [], "mailers_triggered": ["UserMailer"], "database_reads": [], "operations": [] } }
+]
+```
+
+Side-effects are detected by `CallbackAnalyzer`, which scans callback method bodies for patterns like `self.col =` (column writes), `perform_later` (job enqueues), and `deliver_later` (mailer triggers). This is the #1 thing AI tools get wrong about Rails models.
+
+### Route-to-Controller Lookup
+
+Every route becomes its own `ExtractedUnit` with the controller and action bound from the live routing table:
+
+```json
+{
+  "type": "route",
+  "identifier": "POST /checkout",
+  "metadata": {
+    "controller": "orders",
+    "action": "create",
+    "route_name": "checkout"
+  }
+}
+```
+
+To find which controller handles a URL, use the MCP `search` tool:
+
+```json
+{ "tool": "search", "params": { "query": "/checkout", "types": ["route"] } }
+```
+
+This returns all matching route units with their controller and action — no guessing about custom routes, nested resources, or engine mount points.
+
+### Looking Up a Model's Full Structure
+
+Use the MCP `lookup` tool to get a model's complete JSON representation — schema, associations, validations, callbacks, and inlined concerns in one call:
+
+```json
+{ "tool": "lookup", "params": { "identifier": "Order", "include_source": true } }
+```
+
+Returns the full `ExtractedUnit` JSON shown in the example above, including `source_code` (with schema header and inlined concerns), `metadata` (associations, callbacks, validations, enums, scopes), `dependencies`, and `dependents`.
+
+To get just the structured metadata without source code:
+
+```json
+{ "tool": "lookup", "params": { "identifier": "Order", "include_source": false, "sections": ["metadata"] } }
+```
+
+### Finding Jobs Enqueued by a Service
+
+Use the MCP `dependencies` tool to trace what a service triggers:
+
+```json
+{ "tool": "dependencies", "params": { "identifier": "CheckoutService", "depth": 2, "types": ["job"] } }
+```
+
+Returns all job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks (e.g., `CheckoutService` → `Order` → `OrderConfirmationJob`).
+
+### Runtime-Generated Method Detection
+
+Because Woods runs inside the booted Rails process, it captures every method Rails generates dynamically — enum predicates, association builders, attribute accessors, and scope methods that static analysis tools cannot see:
+
+```json
+{
+  "identifier": "Order",
+  "metadata": {
+    "enums": { "status": { "pending": 0, "active": 1, "shipped": 2 } },
+    "scopes": [{ "name": "active", "source": "-> { where(status: :active) }" }],
+    "associations": [{ "type": "has_many", "name": "line_items", "target": "LineItem" }]
+  }
+}
+```
+
+Static tools miss `status_active?`, `status_pending?`, `build_line_item`, `create_line_item!`, and dynamically registered scopes. Woods captures all of these because it queries the runtime class via `instance_methods(false)` after Rails has processed every DSL declaration.
 
 ---
 
@@ -223,6 +373,26 @@ Woods is backend-agnostic. Your app database, vector store, embedding provider, 
 
 See [Backend Matrix](docs/BACKEND_MATRIX.md) for supported combinations and [Configuration Reference](docs/CONFIGURATION_REFERENCE.md) for every option with defaults.
 
+### Environment-Specific Configuration
+
+```ruby
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
+
+  # CI: only extract models and controllers for faster builds
+  config.extractors = %i[models controllers] if ENV['CI']
+
+  # Environment-conditional embedding provider
+  if ENV['OPENAI_API_KEY']
+    config.embedding_provider = :openai
+    config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
+  else
+    config.embedding_provider = :ollama
+    config.embedding_options = { base_url: 'http://localhost:11434' }
+  end
+end
+```
+
 ---
 
 ## Keeping the Index Current
@@ -289,12 +459,15 @@ Everything flows through `ExtractedUnit` — the universal data structure. Each 
 |-------|-----------------|
 | `identifier` | Class name or descriptive key (`"User"`, `"POST /orders"`) |
 | `type` | Category (`:model`, `:controller`, `:service`, `:job`, etc.) |
+| `file_path` | Source file location relative to Rails root |
+| `namespace` | Module namespace (`"Admin"`, `nil` for top-level) |
 | `source_code` | Annotated source with inlined concerns and schema |
 | `metadata` | Structured data — associations, callbacks, routes, fields |
 | `dependencies` | What this unit depends on (forward edges) |
 | `dependents` | What depends on this unit (reverse edges) |
 | `chunks` | Semantic sub-sections for large units |
-| `estimated_tokens` | Token count for LLM context budgeting |
+| `extracted_at` | ISO 8601 timestamp of extraction |
+| `source_hash` | SHA-256 digest for change detection |
 
 ### Output Structure
 
@@ -323,7 +496,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Extract   │───>│   Resolve   │───>│   Write JSON         │  │
-│  │ 34 types   │    │   graph +   │    │   per unit           │  │
+│  │ 33 types   │    │   graph +   │    │   per unit           │  │
 │  │            │    │   git data  │    │                      │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘

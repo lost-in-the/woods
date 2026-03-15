@@ -17,6 +17,10 @@ require_relative '../lib/woods/console/server'
 config_path = ENV.fetch('WOODS_CONSOLE_CONFIG', File.expand_path('~/.woods/console.yml'))
 config = File.exist?(config_path) ? YAML.safe_load_file(config_path) : {}
 
+# Suppress json-schema MultiJSON deprecation notice that would pollute stderr
+# during MCP stdio transport. The notice fires when multi_json is in the bundle.
+JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Validator.respond_to?(:use_multi_json=)
+
 server = Woods::Console::Server.build(config: config)
 transport = MCP::Server::Transports::StdioTransport.new(server)
 transport.open
