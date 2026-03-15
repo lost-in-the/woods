@@ -10,6 +10,48 @@ Woods.configure do |config|
 end
 ```
 
+## Common Configuration Patterns
+
+### CI-Only Extraction (Subset of Extractors)
+
+```ruby
+Woods.configure do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
+
+  # In CI, only extract models and controllers for faster builds
+  config.extractors = %i[models controllers services] if ENV['CI']
+end
+```
+
+### Docker Extraction with Environment-Based Paths
+
+```ruby
+Woods.configure do |config|
+  # Inside Docker, /app is the Rails root
+  config.output_dir = ENV.fetch('WOODS_OUTPUT_DIR', Rails.root.join('tmp/woods'))
+end
+```
+
+### Environment-Conditional Embedding Provider
+
+```ruby
+Woods.configure do |config|
+  # Use OpenAI in production/CI where the API key is set,
+  # fall back to Ollama for local development (free, no API key needed)
+  if ENV['OPENAI_API_KEY']
+    config.embedding_provider = :openai
+    config.embedding_model = 'text-embedding-3-small'
+    config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
+  else
+    config.embedding_provider = :ollama
+    config.embedding_model = 'nomic-embed-text'
+    config.embedding_options = { base_url: ENV.fetch('OLLAMA_URL', 'http://localhost:11434') }
+  end
+end
+```
+
+---
+
 ## Core Options
 
 | Option | Type | Default | Description |

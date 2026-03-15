@@ -33,7 +33,35 @@ Returns the manifest (unit counts by type, git SHA, extraction timestamp) plus t
 }
 ```
 
-**What you'll get:** Full annotated source with inlined concerns, schema comments, associations, callbacks, and validations — everything needed to understand the model without opening the file.
+**Example response:**
+
+```json
+{
+  "identifier": "User",
+  "type": "model",
+  "file_path": "app/models/user.rb",
+  "source_code": "# == Schema Information\n# id :bigint not null, pk\n# email :string not null\n# name :string\n# created_at :datetime\n#\nclass User < ApplicationRecord\n  has_many :orders\n  validates :email, presence: true, uniqueness: true\n  ...\nend\n\n# ┌───────────────────────────────────────────────────────────────────┐\n# │ Included from: Searchable                                         │\n# └───────────────────────────────────────────────────────────────────┘\n#   module Searchable\n#     ...\n#   end\n# ──────────────────────── End Searchable ───────────────────────────",
+  "metadata": {
+    "associations": [
+      { "type": "has_many", "name": "orders", "target": "Order" }
+    ],
+    "validations": [
+      { "attribute": "email", "type": "presence", "options": {}, "conditions": {} },
+      { "attribute": "email", "type": "uniqueness", "options": {}, "conditions": {} }
+    ],
+    "callbacks": [],
+    "inlined_concerns": ["Searchable"],
+    "enums": {},
+    "scopes": []
+  },
+  "dependencies": [
+    { "type": "model", "target": "Order", "via": "has_many" }
+  ],
+  "dependents": [
+    { "type": "controller", "identifier": "UsersController" }
+  ]
+}
+```
 
 To focus on just associations and callbacks without the full source:
 
@@ -43,6 +71,109 @@ To focus on just associations and callbacks without the full source:
   "include_source": false,
   "sections": ["metadata", "dependencies"]
 }
+```
+
+---
+
+### "What callbacks fire when Order saves?"
+
+**Tool:** `lookup` (Index Server)
+
+```json
+{
+  "identifier": "Order",
+  "include_source": false,
+  "sections": ["metadata"]
+}
+```
+
+**Example response** — `metadata.callbacks` contains the resolved callback chain in execution order, including callbacks inherited from concerns. Side-effects show what each callback actually does:
+
+```json
+{
+  "identifier": "Order",
+  "type": "model",
+  "metadata": {
+    "callbacks": [
+      { "type": "before_validation", "filter": "normalize_status", "kind": "before", "conditions": {} },
+      { "type": "before_save", "filter": "calculate_total", "kind": "before", "conditions": {},
+        "side_effects": { "columns_written": ["total_cents"], "jobs_enqueued": [], "services_called": [], "mailers_triggered": [], "database_reads": [], "operations": [] } },
+      { "type": "before_save", "filter": "set_slug", "kind": "before", "conditions": {},
+        "side_effects": { "columns_written": ["slug"], "jobs_enqueued": [], "services_called": [], "mailers_triggered": [], "database_reads": [], "operations": [] } },
+      { "type": "after_save", "filter": "reserve_stock", "kind": "after", "conditions": {},
+        "side_effects": { "columns_written": [], "jobs_enqueued": ["InventoryReserveJob"], "services_called": [], "mailers_triggered": [], "database_reads": [], "operations": [] } },
+      { "type": "after_commit", "filter": "send_confirmation_email", "kind": "after", "conditions": {},
+        "side_effects": { "columns_written": [], "jobs_enqueued": ["OrderConfirmationJob"], "services_called": [], "mailers_triggered": ["OrderMailer"], "database_reads": [], "operations": [] } },
+      { "type": "after_commit", "filter": "audit_trail", "kind": "after", "conditions": {},
+        "side_effects": { "columns_written": [], "jobs_enqueued": [], "services_called": ["AuditService"], "mailers_triggered": [], "database_reads": [], "operations": [] } }
+    ],
+    "inlined_concerns": ["Auditable"]
+  }
+}
+```
+
+Callbacks from included concerns (like `audit_trail` from `Auditable`) are resolved and included in the chain. The `side_effects` hash is populated by `CallbackAnalyzer`, which scans callback method bodies for patterns like `self.col =` (column writes), `perform_later` (job enqueues), and `deliver_later` (mailer triggers).
+
+---
+
+### "Show me User with all concerns inlined"
+
+**Tool:** `lookup` (Index Server)
+
+```json
+{
+  "identifier": "User",
+  "include_source": true
+}
+```
+
+**What you'll get:** The `source_code` field contains the model source with all included concerns appended inline. This is the key feature — your AI tool sees the full behavioral surface area in one block:
+
+```
+# == Schema Information
+# id         :bigint           not null, pk
+# email      :string           not null
+# name       :string
+# created_at :datetime
+#
+class User < ApplicationRecord
+  include Auditable
+  include Searchable
+  validates :email, presence: true, uniqueness: true
+  has_many :orders
+end
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Auditable                                            │
+# └─────────────────────────────────────────────────────────────────────┘
+#   module Auditable
+#     extend ActiveSupport::Concern
+#     included do
+#       after_save :audit_trail
+#     end
+#     def audit_trail
+#       AuditLog.create!(auditable: self)
+#     end
+#   end
+# ─────────────────────────── End Auditable ───────────────────────────
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Included from: Searchable                                           │
+# └─────────────────────────────────────────────────────────────────────┘
+#   module Searchable
+#     extend ActiveSupport::Concern
+#     included do
+#       scope :search, ->(q) { where("name ILIKE ?", "%#{q}%") }
+#       after_commit :reindex_search
+#     end
+#   end
+# ─────────────────────────── End Searchable ───────────────────────────
+```
+
+The `metadata.inlined_concerns` array lists which concerns were resolved:
+
+```json
+{ "inlined_concerns": ["Auditable", "Searchable"] }
 ```
 
 ---
@@ -100,7 +231,138 @@ To find only which jobs depend on `User`:
 }
 ```
 
-**What you'll get:** Controllers whose identifiers or source code match `payment` (case-insensitive regex). Search `source_code` when you want semantic matches, not just naming matches.
+**Example response:**
+
+```json
+[
+  {
+    "identifier": "PaymentsController",
+    "type": "controller",
+    "file_path": "app/controllers/payments_controller.rb",
+    "metadata": {
+      "actions": ["create", "show", "webhook"],
+      "routes": [
+        { "verb": "POST", "path": "/payments", "action": "create" },
+        { "verb": "POST", "path": "/payments/webhook", "action": "webhook" }
+      ]
+    }
+  }
+]
+```
+
+Search `source_code` when you want semantic matches, not just naming matches.
+
+---
+
+### "Which controller handles POST /checkout?"
+
+**Tool:** `search` (Index Server)
+
+```json
+{
+  "query": "/checkout",
+  "types": ["route"],
+  "limit": 5
+}
+```
+
+**What you'll get:** Route units matching `/checkout` with the bound controller and action:
+
+```json
+[
+  {
+    "type": "route",
+    "identifier": "POST /checkout",
+    "metadata": { "controller": "orders", "action": "create", "route_name": "checkout" }
+  }
+]
+```
+
+**Follow up** — look up the controller for full source with filters and route context:
+
+```json
+{
+  "tool": "lookup",
+  "params": { "identifier": "OrdersController", "include_source": true }
+}
+```
+
+---
+
+### "What jobs does CheckoutService trigger?"
+
+**Tool:** `dependencies` (Index Server)
+
+```json
+{
+  "identifier": "CheckoutService",
+  "depth": 2,
+  "types": ["job"]
+}
+```
+
+**What you'll get:** All job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks:
+
+```json
+{
+  "root": "CheckoutService",
+  "results": [
+    { "identifier": "OrderConfirmationJob", "type": "job", "path": ["CheckoutService", "Order", "OrderConfirmationJob"] },
+    { "identifier": "InventoryReserveJob", "type": "job", "path": ["CheckoutService", "LineItem", "InventoryReserveJob"] }
+  ]
+}
+```
+
+This traces through the dependency graph: `CheckoutService` calls `Order#save!`, which triggers `after_commit :send_confirmation`, which enqueues `OrderConfirmationJob`. Without the graph, you'd need to manually follow callbacks across multiple files.
+
+---
+
+### "What methods does Rails generate on Order at runtime?"
+
+**Tool:** `lookup` (Index Server)
+
+```json
+{
+  "identifier": "Order",
+  "include_source": false,
+  "sections": ["metadata"]
+}
+```
+
+Because Woods runs inside a booted Rails process, it captures every method Rails generates dynamically — things static analysis tools cannot see. The metadata shows these in structured form:
+
+**Example response (relevant sections):**
+
+```json
+{
+  "identifier": "Order",
+  "type": "model",
+  "metadata": {
+    "enums": {
+      "status": { "pending": 0, "active": 1, "shipped": 2, "cancelled": 3 }
+    },
+    "scopes": [
+      { "name": "active", "source": "-> { where(status: :active) }" },
+      { "name": "recent", "source": "-> { where('created_at > ?', 30.days.ago) }" }
+    ],
+    "associations": [
+      { "type": "belongs_to", "name": "user", "target": "User" },
+      { "type": "has_many", "name": "line_items", "target": "LineItem" }
+    ]
+  }
+}
+```
+
+From this metadata, you can infer every runtime-generated method:
+
+| Source | Generated Methods |
+|--------|------------------|
+| `enum status:` | `status_pending?`, `status_active?`, `status_shipped?`, `status_cancelled?`, `pending!`, `active!`, `shipped!`, `cancelled!` |
+| `scope :active` | `Order.active` |
+| `belongs_to :user` | `user`, `user=`, `build_user`, `create_user`, `create_user!`, `reload_user` |
+| `has_many :line_items` | `line_items`, `line_items=`, `line_item_ids`, `line_item_ids=`, `build`, `create`, `create!` on the association |
+
+Static tools miss all of these because they only exist after Rails processes the DSL declarations at boot time. Woods captures them because it queries the runtime class via `instance_methods(false)` after Rails has finished loading.
 
 ---
 
