@@ -1,12 +1,11 @@
 {
-  "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "Woods",
   "description": "Ruby gem that extracts structured data from Rails apps via runtime introspection. Inlines concerns, resolves callbacks, builds dependency graphs. Two MCP servers.",
   "folders": [],
   "excludeFolders": ["lib", "spec", "exe", ".claude", "_project-resources", "docs/design", "docs/self-analysis"],
   "excludeFiles": [
     "CODE_OF_CONDUCT.md", "SECURITY.md", "CHANGELOG.md",
-    "CONTRIBUTING.md", "docs/TOKEN_BENCHMARK.md"
+    "CONTRIBUTING.md", "TOKEN_BENCHMARK.md"
   ],
   "rules": [
     "Install: add `gem 'woods', group: :development` to Gemfile, run `bundle install`, then `rails generate woods:install` to create the initializer.",
