@@ -43,6 +43,7 @@ module Woods
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :notion_api_token, :notion_database_ids,
+                  :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
                 :cache_enabled
@@ -70,6 +71,9 @@ module Woods
       @console_redacted_columns = []
       @notion_api_token = nil
       @notion_database_ids = {}
+      @unblocked_api_token = nil
+      @unblocked_collection_id = nil
+      @unblocked_repo_url = nil
       @cache_enabled = false
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
