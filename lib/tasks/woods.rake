@@ -618,4 +618,58 @@ namespace :woods do
 
   desc 'Send findings from the field — sync to Notion (alias for notion_sync)'
   task send: :notion_sync
+
+  desc 'Sync extraction data to Unblocked collection (Documents API)'
+  task unblocked_sync: :environment do
+    require 'woods/unblocked/exporter'
+
+    config = Woods.configuration
+    config.unblocked_api_token = ENV.fetch('UNBLOCKED_API_TOKEN', nil) || config.unblocked_api_token
+    config.unblocked_collection_id = ENV.fetch('UNBLOCKED_COLLECTION_ID', nil) || config.unblocked_collection_id
+    config.unblocked_repo_url = ENV.fetch('UNBLOCKED_REPO_URL', nil) || config.unblocked_repo_url
+
+    unless config.unblocked_api_token
+      puts 'ERROR: Unblocked API token not configured.'
+      puts 'Set UNBLOCKED_API_TOKEN env var or configure unblocked_api_token in Woods.configure.'
+      exit 1
+    end
+
+    unless config.unblocked_collection_id
+      puts 'ERROR: Unblocked collection ID not configured.'
+      puts 'Set UNBLOCKED_COLLECTION_ID env var or configure unblocked_collection_id in Woods.configure.'
+      exit 1
+    end
+
+    unless config.unblocked_repo_url
+      puts 'ERROR: Repository URL not configured.'
+      puts 'Set UNBLOCKED_REPO_URL env var or configure unblocked_repo_url in Woods.configure.'
+      puts 'Example: https://github.com/your-org/your-repo'
+      exit 1
+    end
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+
+    puts 'Syncing extraction data to Unblocked...'
+    puts "  Output dir:     #{output_dir}"
+    puts "  Collection:     #{config.unblocked_collection_id}"
+    puts "  Repo URL:       #{config.unblocked_repo_url}"
+    puts
+
+    exporter = Woods::Unblocked::Exporter.new(index_dir: output_dir)
+    stats = exporter.sync_all
+
+    puts
+    puts 'Sync complete!'
+    puts "  Documents synced:   #{stats[:synced]}"
+    puts "  Documents skipped:  #{stats[:skipped]}"
+
+    if stats[:errors].any?
+      puts "  Errors:             #{stats[:errors].size}"
+      stats[:errors].first(5).each { |e| puts "    - #{e}" }
+      puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+    end
+  end
+
+  desc 'Relay findings to Unblocked (alias for unblocked_sync)'
+  task relay: :unblocked_sync
 end

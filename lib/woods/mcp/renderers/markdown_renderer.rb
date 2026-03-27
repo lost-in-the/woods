@@ -165,6 +165,67 @@ module Woods
           lines.join("\n").rstrip
         end
 
+        # ── domain_clusters ────────────────────────────────────────
+
+        # @param data [Hash] Domain cluster data with :clusters and :total
+        # @return [String] Markdown domain cluster overview
+        def render_domain_clusters(data, **)
+          clusters = fetch_key(data, :clusters) || []
+          total = fetch_key(data, :total) || clusters.size
+          lines = []
+          lines << '## Domain Clusters'
+          lines << ''
+          lines << "#{total} domains detected."
+          lines << ''
+
+          clusters.each do |cluster|
+            name = cluster[:name] || cluster['name']
+            member_count = cluster[:member_count] || cluster['member_count'] || 0
+            hub = cluster[:hub] || cluster['hub']
+            lines << "### #{name} (#{member_count} units)"
+            lines << ''
+            lines << "**Hub:** #{hub}" if hub
+            lines << ''
+
+            # Type breakdown
+            types = cluster[:types] || cluster['types']
+            if types.is_a?(Hash) && types.any?
+              type_parts = types.sort_by { |_, count| -count }.map { |type, count| "#{count} #{type}s" }
+              lines << "**Types:** #{type_parts.join(', ')}"
+            end
+
+            # Entry points
+            entry_points = cluster[:entry_points] || cluster['entry_points'] || []
+            lines << "**Entry points:** #{entry_points.first(10).join(', ')}" if entry_points.any?
+
+            # Members (show first 15)
+            members = cluster[:members] || cluster['members'] || []
+            if members.any?
+              lines << ''
+              lines << '**Members:**'
+              members.first(15).each { |m| lines << "- #{m}" }
+              lines << "- _... and #{members.size - 15} more_" if members.size > 15
+            end
+
+            # Boundary edges (show first 10)
+            boundaries = cluster[:boundary_edges] || cluster['boundary_edges'] || []
+            if boundaries.any?
+              lines << ''
+              lines << '**Boundary connections:**'
+              boundaries.first(10).each do |edge|
+                from = edge[:from] || edge['from']
+                to = edge[:to] || edge['to']
+                via = edge[:via] || edge['via']
+                lines << "- #{from} → #{to} (#{via})"
+              end
+            end
+
+            lines << ''
+          end
+
+          lines.join("\n").rstrip
+        end
+
         # ── pagerank ────────────────────────────────────────────────
 
         # @param data [Hash] PageRank data with :total_nodes and :results

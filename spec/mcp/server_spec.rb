@@ -14,16 +14,16 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 27 tools' do
+    it 'registers 28 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(27)
+      expect(tools.size).to eq(28)
     end
 
     it 'registers expected tool names' do
       tools = server.instance_variable_get(:@tools)
       expect(tools.keys).to contain_exactly(
         'lookup', 'search', 'dependencies', 'dependents',
-        'structure', 'graph_analysis', 'pagerank', 'framework',
+        'structure', 'graph_analysis', 'domain_clusters', 'pagerank', 'framework',
         'recent_changes', 'reload', 'codebase_retrieve',
         'trace_flow', 'session_trace',
         'pipeline_extract', 'pipeline_embed', 'pipeline_status',
