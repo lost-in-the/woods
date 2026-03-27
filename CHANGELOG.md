@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-27
+
+### Added
+
+- **Unblocked Documents API exporter** — sync extraction data to an Unblocked collection for code review and Q&A context
+  - `Woods::Unblocked::Client` — REST client with retry and daily budget rate limiting
+  - `Woods::Unblocked::DocumentBuilder` — type-specific Markdown formatters optimized for review context (blast radius, entry points, associations, side effects)
+  - `Woods::Unblocked::Exporter` — full/partial sync orchestrator with priority ordering
+  - `Woods::Unblocked::RateLimiter` — daily budget tracking (1000 calls/day)
+  - New rake tasks: `woods:unblocked_sync` (alias: `woods:relay`)
+  - New config: `unblocked_api_token`, `unblocked_collection_id`, `unblocked_repo_url`
+  - Integration guide: `docs/UNBLOCKED_INTEGRATION.md`
+- **Domain cluster detection** in `GraphAnalyzer` — groups code units into semantic domains using namespace prefixes and graph connectivity
+  - `GraphAnalyzer#domain_clusters` — hybrid namespace + graph clustering with hub identification, entry point detection, and boundary edge mapping
+  - New MCP tool: `domain_clusters` with `min_size` and `types` filters
+  - New renderer: `render_domain_clusters` in MarkdownRenderer
+
 ## [0.3.1] - 2026-03-04
 
 ### Fixed
