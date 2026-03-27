@@ -20,7 +20,9 @@ module Woods
       # @param daily_budget [Integer] Maximum API calls per day
       # @param warn_io [IO] Where to write warnings (default: $stderr)
       def initialize(daily_budget: DEFAULT_BUDGET, warn_io: $stderr)
-        raise ArgumentError, 'daily_budget must be positive' unless daily_budget.is_a?(Integer) && daily_budget.positive?
+        unless daily_budget.is_a?(Integer) && daily_budget.positive?
+          raise ArgumentError, 'daily_budget must be positive'
+        end
 
         @daily_budget = daily_budget
         @calls_today = 0

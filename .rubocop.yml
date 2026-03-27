@@ -26,6 +26,7 @@ Metrics/BlockLength:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
   AllowedMethods:
     - 'refine'
 
@@ -42,6 +43,7 @@ Metrics/ModuleLength:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/ClassLength:
   Exclude:
@@ -56,6 +58,7 @@ Metrics/ClassLength:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/MethodLength:
   Max: 20
@@ -71,6 +74,7 @@ Metrics/MethodLength:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/AbcSize:
   Max: 25
@@ -86,6 +90,7 @@ Metrics/AbcSize:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/CyclomaticComplexity:
   Exclude:
@@ -100,6 +105,7 @@ Metrics/CyclomaticComplexity:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/PerceivedComplexity:
   Exclude:
@@ -114,6 +120,7 @@ Metrics/PerceivedComplexity:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/BlockNesting:
   Exclude:
@@ -128,6 +135,7 @@ Metrics/BlockNesting:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 Metrics/ParameterLists:
   Exclude:
@@ -143,6 +151,7 @@ Metrics/ParameterLists:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/unblocked/**/*'
 
 # MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars
 Layout/LineLength:
@@ -167,10 +176,12 @@ Style/SafeNavigationChainLength:
   Exclude:
     - 'lib/woods/extractors/**/*'
 
-# GraphQL classification methods intentionally enumerate all types
+# GraphQL classification and document builder type dispatch intentionally
+# enumerate all types with shared fallback branches
 Lint/DuplicateBranch:
   Exclude:
     - 'lib/woods/extractors/graphql_extractor.rb'
+    - 'lib/woods/unblocked/document_builder.rb'
 
 # MCP gem requires `server_context:` keyword in tool blocks for dispatch.
 # The parameter is unused in most handlers but must be present.
