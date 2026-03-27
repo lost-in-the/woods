@@ -245,7 +245,6 @@ module Woods
       # ── GraphQL formatting ───────────────────────────────────────────
 
       def build_graphql_body(unit)
-        meta = unit['metadata'] || {}
         sections = []
 
         sections << "# #{unit['identifier']} (#{unit['type']})"

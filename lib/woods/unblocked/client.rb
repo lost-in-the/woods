@@ -96,7 +96,7 @@ module Woods
 
           if response.code == '429' && retries < MAX_RETRIES
             retries += 1
-            wait_time = (response['Retry-After'] || retries * 2).to_f
+            wait_time = (response['Retry-After'] || (retries * 2)).to_f
             sleep(wait_time)
             next
           end
