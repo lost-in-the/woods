@@ -196,9 +196,7 @@ module Woods
 
             # Entry points
             entry_points = cluster[:entry_points] || cluster['entry_points'] || []
-            if entry_points.any?
-              lines << "**Entry points:** #{entry_points.first(10).join(', ')}"
-            end
+            lines << "**Entry points:** #{entry_points.first(10).join(', ')}" if entry_points.any?
 
             # Members (show first 15)
             members = cluster[:members] || cluster['members'] || []
