@@ -49,11 +49,11 @@ module Woods
       # @return [Hash] { "id" => "document-uuid" }
       def put_document(collection_id:, title:, body:, uri:)
         request(:put, 'documents', {
-          collectionId: collection_id,
-          title: title,
-          body: body,
-          uri: uri
-        })
+                  collectionId: collection_id,
+                  title: title,
+                  body: body,
+                  uri: uri
+                })
       end
 
       # Create a new collection.

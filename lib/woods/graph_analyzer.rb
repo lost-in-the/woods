@@ -242,7 +242,7 @@ module Woods
     end
 
     # Seed initial clusters from namespace prefixes.
-    def seed_namespace_clusters(filtered_ids, nodes)
+    def seed_namespace_clusters(filtered_ids, _nodes)
       clusters = {}
 
       filtered_ids.each do |id|
@@ -258,7 +258,7 @@ module Woods
     end
 
     # Assign units with no namespace prefix to their most-connected cluster.
-    def assign_orphaned_units(clusters, filtered_ids, nodes)
+    def assign_orphaned_units(clusters, filtered_ids, _nodes)
       return if clusters.empty?
 
       unassigned = filtered_ids.select { |id| cluster_prefix(id).nil? }

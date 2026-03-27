@@ -86,6 +86,7 @@ Metrics/AbcSize:
     - 'lib/woods/flow_*.rb'
     - 'lib/woods/flow_analysis/**/*'
     - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods.rb'
     - 'lib/woods/extractor.rb'
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'

@@ -118,9 +118,9 @@ module Woods
 
         # Blast radius assessment
         if deps.size > 50
-          lines << "**High blast radius** — changes here affect many parts of the codebase"
+          lines << '**High blast radius** — changes here affect many parts of the codebase'
         elsif deps.size > 20
-          lines << "**Moderate blast radius** — changes may ripple to dependent code"
+          lines << '**Moderate blast radius** — changes may ripple to dependent code'
         end
 
         lines.join("\n")
@@ -134,7 +134,7 @@ module Woods
 
         return nil if controllers.empty? && graphql.empty?
 
-        lines = ["## Entry Points"]
+        lines = ['## Entry Points']
         lines << "**Controllers:** #{controllers.map { |c| c['identifier'] }.join(', ')}" if controllers.any?
         lines << "**GraphQL:** #{graphql.map { |g| g['identifier'] }.join(', ')}" if graphql.any?
         lines << "**Jobs:** #{jobs.map { |j| j['identifier'] }.join(', ')}" if jobs.any?
@@ -152,14 +152,10 @@ module Woods
         end
 
         scopes = meta['scopes']
-        if scopes.is_a?(Array) && scopes.any?
-          parts << "**Scopes:** #{scopes.map { |s| s['name'] }.join(', ')}"
-        end
+        parts << "**Scopes:** #{scopes.map { |s| s['name'] }.join(', ')}" if scopes.is_a?(Array) && scopes.any?
 
         concerns = meta['inlined_concerns']
-        if concerns.is_a?(Array) && concerns.any?
-          parts << "**Concerns:** #{concerns.join(', ')}"
-        end
+        parts << "**Concerns:** #{concerns.join(', ')}" if concerns.is_a?(Array) && concerns.any?
 
         callbacks = meta['callbacks']
         if callbacks.is_a?(Array) && callbacks.any?
@@ -168,7 +164,7 @@ module Woods
 
         return nil if parts.empty?
 
-        (["## Schema Highlights"] + parts).join("\n")
+        (['## Schema Highlights'] + parts).join("\n")
       end
 
       def model_side_effects(unit)
@@ -178,7 +174,7 @@ module Woods
 
         return nil if jobs.empty? && mailers.empty?
 
-        lines = ["## Side Effects"]
+        lines = ['## Side Effects']
         lines << "**Jobs:** #{jobs.map { |j| j['identifier'] }.join(', ')}" if jobs.any?
         lines << "**Mailers:** #{mailers.map { |m| m['identifier'] }.join(', ')}" if mailers.any?
 
@@ -195,9 +191,7 @@ module Woods
         sections << "**File:** `#{unit['file_path']}`"
 
         ancestors = meta['ancestors']
-        if ancestors.is_a?(Array) && ancestors.size > 1
-          sections << "**Inherits:** #{ancestors[1..3]&.join(' → ')}"
-        end
+        sections << "**Inherits:** #{ancestors[1..3]&.join(' → ')}" if ancestors.is_a?(Array) && ancestors.size > 1
 
         sections << controller_routes(meta)
         sections << controller_dependencies(unit)
@@ -210,7 +204,7 @@ module Woods
         routes = meta['routes']
         return nil unless routes.is_a?(Hash) && routes.any?
 
-        lines = ["## Routes"]
+        lines = ['## Routes']
         routes.each do |action, route_list|
           next unless route_list.is_a?(Array)
 
