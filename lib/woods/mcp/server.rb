@@ -61,6 +61,7 @@ module Woods
                                 render_key: :dependents)
           define_structure_tool(server, reader, respond, renderer)
           define_graph_analysis_tool(server, reader, respond, renderer)
+          define_domain_clusters_tool(server, reader, respond, renderer)
           define_pagerank_tool(server, reader, respond, renderer)
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
@@ -303,6 +304,39 @@ module Woods
                      end
 
             respond.call(renderer.render(:graph_analysis, result))
+          end
+        end
+
+        def define_domain_clusters_tool(server, reader, respond, renderer)
+          coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
+          server.define_tool(
+            name: 'domain_clusters',
+            description: 'Group code units into semantic domains by namespace and graph connectivity. ' \
+                         'Returns clusters with hub nodes, entry points, boundary edges, and type breakdowns. ' \
+                         'Useful for understanding architectural domains and blast radius.',
+            input_schema: {
+              properties: {
+                min_size: {
+                  type: 'integer',
+                  description: 'Minimum units per cluster before merging into neighbors (default: 3)'
+                },
+                types: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Filter to these unit types (default: all). Example: ["model", "service", "job"]'
+                }
+              }
+            }
+          ) do |server_context:, min_size: nil, types: nil|
+            min_size = coerce_int.call(min_size) || 3
+            types = coerce.call(types)
+
+            graph = reader.dependency_graph
+            analyzer = Woods::GraphAnalyzer.new(graph)
+
+            clusters = analyzer.domain_clusters(min_size: min_size, types: types)
+
+            respond.call(renderer.render(:domain_clusters, { clusters: clusters, total: clusters.size }))
           end
         end
 

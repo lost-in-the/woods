@@ -154,6 +154,52 @@ module Woods
         end
     end
 
+    # Group units into semantic domains using namespace prefixes and graph connectivity.
+    #
+    # Strategy:
+    # 1. Seed clusters from top-level namespace prefixes (e.g., ShippingProfile::*, Order::*)
+    # 2. Assign unnamespaced units to their most-connected cluster
+    # 3. Merge small clusters (< min_size) into their most-connected neighbor
+    # 4. For each cluster, identify the hub (highest PageRank) and entry points
+    # 5. Compute boundary edges between clusters
+    #
+    # @param min_size [Integer] Minimum units per cluster before merging (default: 3)
+    # @param types [Array<String>, nil] Filter to these unit types (default: all)
+    # @return [Array<Hash>] Clusters sorted by member count descending.
+    #   Each hash: { name:, hub:, members:, member_count:, entry_points:, boundary_edges:, types: }
+    def domain_clusters(min_size: 3, types: nil)
+      nodes = graph_nodes
+      return [] if nodes.empty?
+
+      # Filter by types if specified
+      filtered_ids = if types
+                       type_set = types.map(&:to_s)
+                       nodes.select { |_, meta| type_set.include?(meta[:type].to_s) }.keys
+                     else
+                       nodes.keys
+                     end
+
+      return [] if filtered_ids.empty?
+
+      # Step 1: Seed clusters from namespace prefixes
+      clusters = seed_namespace_clusters(filtered_ids, nodes)
+
+      # Step 2: Assign unnamespaced/root units to most-connected cluster
+      assign_orphaned_units(clusters, filtered_ids, nodes)
+
+      # Step 3: Merge small clusters
+      merge_small_clusters(clusters, min_size)
+
+      # Step 4: Enrich each cluster with hub, entry points, boundary edges
+      pagerank_scores = @graph.pagerank
+      enrich_clusters(clusters, nodes, pagerank_scores)
+
+      # Sort by member count descending
+      clusters.values
+              .select { |c| c[:members].any? }
+              .sort_by { |c| -c[:member_count] }
+    end
+
     # Full analysis report combining all structural metrics.
     #
     # @return [Hash] Complete analysis with :orphans, :dead_ends, :hubs,
@@ -181,6 +227,171 @@ module Woods
     end
 
     private
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Domain Cluster Helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Extract the top-level namespace prefix for clustering.
+    # "ShippingProfile::Setting" => "ShippingProfile"
+    # "Order::Transactions::Refund" => "Order"
+    # "Account" => nil (no namespace)
+    def cluster_prefix(identifier)
+      parts = identifier.to_s.split('::')
+      parts.size > 1 ? parts.first : nil
+    end
+
+    # Seed initial clusters from namespace prefixes.
+    def seed_namespace_clusters(filtered_ids, nodes)
+      clusters = {}
+
+      filtered_ids.each do |id|
+        prefix = cluster_prefix(id)
+        next unless prefix
+
+        clusters[prefix] ||= { name: prefix, members: [], member_set: Set.new }
+        clusters[prefix][:members] << id
+        clusters[prefix][:member_set].add(id)
+      end
+
+      clusters
+    end
+
+    # Assign units with no namespace prefix to their most-connected cluster.
+    def assign_orphaned_units(clusters, filtered_ids, nodes)
+      return if clusters.empty?
+
+      unassigned = filtered_ids.select { |id| cluster_prefix(id).nil? }
+
+      unassigned.each do |id|
+        best_cluster = find_most_connected_cluster(id, clusters)
+        next unless best_cluster
+
+        clusters[best_cluster][:members] << id
+        clusters[best_cluster][:member_set].add(id)
+      end
+    end
+
+    # Find which cluster a unit has the most connections to.
+    def find_most_connected_cluster(identifier, clusters)
+      connections = Hash.new(0)
+
+      # Check forward edges (dependencies)
+      @graph.dependencies_of(identifier).each do |dep|
+        clusters.each do |name, cluster|
+          connections[name] += 1 if cluster[:member_set].include?(dep)
+        end
+      end
+
+      # Check reverse edges (dependents)
+      @graph.dependents_of(identifier).each do |dep|
+        clusters.each do |name, cluster|
+          connections[name] += 1 if cluster[:member_set].include?(dep)
+        end
+      end
+
+      return nil if connections.empty?
+
+      connections.max_by { |_, count| count }.first
+    end
+
+    # Merge clusters smaller than min_size into their most-connected neighbor.
+    def merge_small_clusters(clusters, min_size)
+      loop do
+        small = clusters.select { |_, c| c[:members].size < min_size }
+        break if small.empty?
+
+        # Merge the smallest cluster first
+        name, cluster = small.min_by { |_, c| c[:members].size }
+
+        # Find which other cluster this one connects to most
+        target = find_merge_target(cluster, clusters, name)
+
+        if target
+          clusters[target][:members].concat(cluster[:members])
+          cluster[:members].each { |id| clusters[target][:member_set].add(id) }
+        end
+
+        clusters.delete(name)
+      end
+    end
+
+    # Find the best cluster to merge into (most cross-cluster edges).
+    def find_merge_target(cluster, all_clusters, exclude_name)
+      connections = Hash.new(0)
+
+      cluster[:members].each do |id|
+        (@graph.dependencies_of(id) + @graph.dependents_of(id)).each do |connected|
+          all_clusters.each do |name, other|
+            next if name == exclude_name
+
+            connections[name] += 1 if other[:member_set].include?(connected)
+          end
+        end
+      end
+
+      return nil if connections.empty?
+
+      connections.max_by { |_, count| count }.first
+    end
+
+    # Enrich clusters with hub, entry points, boundary edges, and type breakdown.
+    def enrich_clusters(clusters, nodes, pagerank_scores)
+      clusters.each_value do |cluster|
+        members = cluster[:members]
+        member_set = cluster[:member_set]
+
+        # Hub: highest PageRank within the cluster
+        hub_id = members.max_by { |id| pagerank_scores[id] || 0 }
+        cluster[:hub] = hub_id
+
+        # Entry points: controllers and GraphQL resolvers in the cluster's dependents
+        entry_types = %w[controller graphql_resolver graphql_mutation graphql_query]
+        entry_points = Set.new
+        members.each do |id|
+          @graph.dependents_of(id).each do |dep|
+            meta = nodes[dep]
+            entry_points.add(dep) if meta && entry_types.include?(meta[:type].to_s)
+          end
+        end
+        cluster[:entry_points] = entry_points.to_a
+
+        # Boundary edges: connections that cross cluster boundaries
+        boundary = []
+        members.each do |id|
+          @graph.dependencies_of(id).each do |dep|
+            next if member_set.include?(dep)
+
+            dep_meta = nodes[dep]
+            next unless dep_meta
+
+            boundary << { from: id, to: dep, via: 'dependency' }
+          end
+
+          @graph.dependents_of(id).each do |dep|
+            next if member_set.include?(dep)
+
+            dep_meta = nodes[dep]
+            next unless dep_meta
+
+            boundary << { from: dep, to: id, via: 'dependent' }
+          end
+        end
+        # Deduplicate and limit boundary edges
+        cluster[:boundary_edges] = boundary.uniq { |e| [e[:from], e[:to]] }.first(20)
+
+        # Type breakdown
+        type_counts = members.each_with_object(Hash.new(0)) do |id, counts|
+          meta = nodes[id]
+          counts[meta[:type].to_s] += 1 if meta
+        end
+        cluster[:types] = type_counts
+
+        # Final shape
+        cluster[:member_count] = members.size
+        cluster.delete(:member_set) # Internal tracking, not part of output
+      end
+    end
 
     # ──────────────────────────────────────────────────────────────────────
     # Graph Accessors
