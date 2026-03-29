@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Svelte Flow visualization** — interactive graph visualization of dependencies, domain clusters, and request execution flows
+  - `Woods::SvelteFlow::Transformer` — orchestrates conversion of graph data to Svelte Flow node/edge format
+  - `Woods::SvelteFlow::Layout` — server-side DAG layout using Kahn's algorithm with PageRank tiebreaking
+  - `Woods::SvelteFlow::NodeBuilder` — maps graph nodes to Svelte Flow nodes with type coloring, hub/bridge/orphan badges
+  - `Woods::SvelteFlow::EdgeBuilder` — maps graph edges with cycle marking, boundary animations, and flow step connections
+  - `Woods::SvelteFlow::Exporter` — reads extraction output and writes Svelte Flow JSON files
+  - `Woods::SvelteFlow::RackMiddleware` — serves interactive visualization page and JSON API endpoints
+  - Pre-built canvas-based frontend with three views: Dependencies, Flows, Clusters
+  - New rake tasks: `woods:svelte_flow_export` (alias: `woods:map`)
+  - New config: `svelte_flow_enabled`, `svelte_flow_path`
+  - Integration guide: `docs/SVELTE_FLOW_VISUALIZATION.md`
+
 ## [1.2.0] - 2026-03-27
 
 ### Added
