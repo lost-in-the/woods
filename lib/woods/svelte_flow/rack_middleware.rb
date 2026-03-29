@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'json'
+require_relative 'transformer'
+require_relative '../dependency_graph'
+require_relative '../graph_analyzer'
 
 module Woods
   module SvelteFlow
@@ -128,7 +131,7 @@ module Woods
       #
       # @param entry_point_key [String] URL-encoded entry point identifier
       # @return [Array] Rack response triple
-      def serve_flow_json(entry_point_key)
+      def serve_flow_json(entry_point_key) # rubocop:disable Metrics/CyclomaticComplexity
         transformer = ensure_transformer
         return service_unavailable unless transformer
 
@@ -146,6 +149,8 @@ module Woods
         flow_doc = JSON.parse(File.read(flow_path))
         data = transformer.flow_data(flow_doc)
         json_response(data)
+      rescue JSON::ParserError, Errno::ENOENT
+        not_found
       end
 
       # Serve a static asset file.
@@ -191,6 +196,8 @@ module Woods
           end
 
           @transformer
+        rescue JSON::ParserError, Errno::ENOENT
+          nil
         end
       end
 

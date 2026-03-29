@@ -181,7 +181,8 @@ module Woods
       # @param identifier [String] Entry point identifier
       # @return [String] Safe filename with .json extension
       def safe_filename(identifier)
-        "#{identifier.gsub('::', '__').gsub('#', '_')}.json"
+        safe = identifier.gsub('::', '__').gsub('#', '_').gsub(/[^a-zA-Z0-9_\-.]/, '_')
+        "#{safe}.json"
       end
 
       # Write JSON data to a file in the output directory.

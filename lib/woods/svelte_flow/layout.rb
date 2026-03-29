@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module Woods
   module SvelteFlow
     # Computes x/y positions for Svelte Flow nodes using layered DAG layout.
