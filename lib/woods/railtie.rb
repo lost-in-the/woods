@@ -34,5 +34,17 @@ module Woods
         )
       end
     end
+
+    initializer 'woods.svelte_flow' do |app|
+      config = Woods.configuration
+      if config.svelte_flow_enabled
+        require 'woods/svelte_flow/rack_middleware'
+
+        app.middleware.use(
+          Woods::SvelteFlow::RackMiddleware,
+          path: config.svelte_flow_path
+        )
+      end
+    end
   end
 end
