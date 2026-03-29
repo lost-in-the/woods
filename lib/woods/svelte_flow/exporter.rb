@@ -6,6 +6,7 @@ require 'fileutils'
 require_relative 'transformer'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
+require_relative '../filename_utils'
 
 module Woods
   module SvelteFlow
@@ -20,6 +21,7 @@ module Woods
     #   # => { nodes: 42, edges: 87, flows: 5, output_dir: "tmp/woods/svelte_flow" }
     #
     class Exporter # rubocop:disable Metrics/ClassLength
+      include FilenameUtils
       # @param index_dir [String] Path to Woods extraction output directory
       # @param output_dir [String, nil] Output directory (defaults to index_dir/svelte_flow)
       def initialize(index_dir:, output_dir: nil)
@@ -174,15 +176,6 @@ module Woods
         JSON.parse(File.read(path))
       rescue JSON::ParserError
         nil
-      end
-
-      # Generate a collision-safe filename from an identifier.
-      #
-      # @param identifier [String] Entry point identifier
-      # @return [String] Safe filename with .json extension
-      def safe_filename(identifier)
-        safe = identifier.gsub('::', '__').gsub('#', '_').gsub(/[^a-zA-Z0-9_\-.]/, '_')
-        "#{safe}.json"
       end
 
       # Write JSON data to a file in the output directory.

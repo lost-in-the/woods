@@ -226,11 +226,12 @@ module Woods
       end
 
       # Generate a URL-safe key from an entry point identifier.
+      # Matches the base name logic of FilenameUtils.safe_filename (without .json extension).
       #
       # @param identifier [String]
       # @return [String]
       def safe_key(identifier)
-        identifier.gsub('::', '__').gsub('#', '_')
+        identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
       end
 
       # Return a JSON response.
