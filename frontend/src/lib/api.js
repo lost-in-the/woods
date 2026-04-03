@@ -6,7 +6,3 @@ export async function fetchJSON(endpoint) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
-
-export function safeKey(identifier) {
-  return identifier.replace(/::/g, '__').replace(/[^a-zA-Z0-9_-]/g, '_');
-}

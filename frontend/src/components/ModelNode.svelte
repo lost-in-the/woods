@@ -44,7 +44,7 @@
   </div>
 
   {#each columns as col, i}
-    <div class="column-row" class:first={i === 0}>
+    <div class="column-row">
       <span class="col-icon">{columnIcon(col)}</span>
       <span class="col-name">{col.name}</span>
       <span class="col-type">{col.type || ''}</span>
@@ -113,10 +113,6 @@
     gap: 4px;
     padding: 2px 10px;
     font-size: 10px;
-    border-top: 1px solid var(--border-subtle);
-  }
-
-  .column-row.first {
     border-top: 1px solid var(--border-subtle);
   }
 

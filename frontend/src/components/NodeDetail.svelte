@@ -23,9 +23,9 @@
   const columns = $derived(d.columns || []);
 
   function columnIcon(col) {
-    if (col.primaryKey) return '\u{1F511}';
-    if (col.foreignKey) return '\u{1F517}';
-    if (col.required) return '\u25C6';
+    if (col.primary) return '\u{1F511}';
+    if (col.foreign) return '\u{1F517}';
+    if (!col.nullable) return '\u25C6';
     return '\u25C7';
   }
 </script>

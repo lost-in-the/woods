@@ -17,7 +17,7 @@
   let clusterEdges = $state.raw([]);
   let clusters = $state.raw([]);
   let loading = $state(true);
-  let focusNodeId = $state(null);
+  let focusNodeId = $state(null); // { id, t } object for uniqueness
 
   // Bidirectional adjacency set for the active node
   const adjacencySet = $derived.by(() => {
@@ -177,8 +177,7 @@
 
   function handleSelectUnit(id) {
     activeNodeId = id;
-    // Bump focusNodeId to trigger pan — use a fresh object to re-trigger even for the same id
-    focusNodeId = id;
+    focusNodeId = { id, t: Date.now() };
   }
 
   function handleToggleVisibility(id) {
