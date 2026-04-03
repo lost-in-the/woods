@@ -65,7 +65,7 @@
     loadFlow(event.target.value);
   }
 
-  function handleNodeClick(_event, node) {
+  function handleNodeClick({ node }) {
     onNodeSelect?.(node);
   }
 
