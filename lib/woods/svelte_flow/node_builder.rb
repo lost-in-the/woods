@@ -20,7 +20,7 @@ module Woods
     #   )
     #   builder.build  # => [{ "id" => "User", "type" => "model", "position" => ..., "data" => ... }]
     #
-    class NodeBuilder
+    class NodeBuilder # rubocop:disable Metrics/ClassLength
       # Svelte Flow node types mapped from Woods unit types.
       # Unknown types fall back to "default".
       UNIT_TYPE_MAP = {
@@ -55,9 +55,9 @@ module Woods
       # and pass through unchanged after size-stripping.
       COLUMN_TYPE_ALIASES = {
         'character varying' => 'varchar',
-        'double precision'  => 'float8',
+        'double precision' => 'float8',
         'timestamp without time zone' => 'timestamp',
-        'timestamp with time zone'    => 'timestamptz'
+        'timestamp with time zone' => 'timestamptz'
       }.freeze
 
       # @param nodes [Hash<String, Hash>] Graph nodes: identifier => { type:, file_path:, namespace: }
@@ -67,7 +67,8 @@ module Woods
       # @param unit_metadata [Hash<String, Hash>] Raw unit metadata keyed by identifier
       # @param forward_edges [Hash<String, Array<String>>] Outgoing dependency edges per identifier
       # @param reverse_edges [Hash<String, Set<String>>] Incoming dependent edges per identifier
-      def initialize(nodes:, positions:, pagerank: {}, analysis: {}, unit_metadata: {}, forward_edges: {}, reverse_edges: {})
+      def initialize(nodes:, positions:, pagerank: {}, analysis: {}, # rubocop:disable Metrics/ParameterLists
+                     unit_metadata: {}, forward_edges: {}, reverse_edges: {})
         @nodes = nodes
         @positions = positions
         @pagerank = pagerank
@@ -95,30 +96,30 @@ module Woods
       # @param identifier [String] Unit identifier
       # @param meta [Hash] Node metadata with :type, :file_path, :namespace
       # @return [Hash] Svelte Flow node object
-      def build_node(identifier, meta)
+      def build_node(identifier, meta) # rubocop:disable Metrics
         unit_type = (meta[:type] || meta['type'])&.to_sym
         position = @positions[identifier] || { 'x' => 0, 'y' => 0 }
 
         data = {
-          'label'           => identifier,
-          'unitType'        => unit_type.to_s,
-          'filePath'        => meta[:file_path] || meta['file_path'],
-          'namespace'       => meta[:namespace] || meta['namespace'],
-          'pagerank'        => @pagerank[identifier] || 0,
-          'isHub'           => @hub_ids.include?(identifier),
-          'isBridge'        => @bridge_ids.include?(identifier),
-          'isOrphan'        => @orphan_ids.include?(identifier),
+          'label' => identifier,
+          'unitType' => unit_type.to_s,
+          'filePath' => meta[:file_path] || meta['file_path'],
+          'namespace' => meta[:namespace] || meta['namespace'],
+          'pagerank' => @pagerank[identifier] || 0,
+          'isHub' => @hub_ids.include?(identifier),
+          'isBridge' => @bridge_ids.include?(identifier),
+          'isOrphan' => @orphan_ids.include?(identifier),
           'dependencyCount' => (@forward_edges[identifier] || []).size,
-          'dependentCount'  => (@reverse_edges[identifier]&.size || 0)
+          'dependentCount' => @reverse_edges[identifier]&.size || 0
         }
 
         enrich_node_data(data, identifier, unit_type)
 
         {
-          'id'       => identifier,
-          'type'     => UNIT_TYPE_MAP.fetch(unit_type, 'default'),
+          'id' => identifier,
+          'type' => UNIT_TYPE_MAP.fetch(unit_type, 'default'),
           'position' => position,
-          'data'     => data
+          'data' => data
         }
       end
 
@@ -148,7 +149,7 @@ module Woods
       #
       # @param metadata [Hash] Model metadata containing 'columns', 'primary_key', 'associations'
       # @return [Array<Hash>]
-      def build_columns(metadata)
+      def build_columns(metadata) # rubocop:disable Metrics
         columns = metadata['columns'] || metadata[:columns] || []
         primary_key = metadata['primary_key'] || metadata[:primary_key]
         fk_set = extract_foreign_keys(metadata)
@@ -160,10 +161,10 @@ module Woods
           null_val = col.key?('null') ? col['null'] : col[:null]
 
           {
-            'name'     => name,
-            'type'     => normalize_column_type(raw_type),
-            'primary'  => name == primary_key,
-            'foreign'  => fk_set.include?(name),
+            'name' => name,
+            'type' => normalize_column_type(raw_type),
+            'primary' => name == primary_key,
+            'foreign' => fk_set.include?(name),
             'nullable' => null_val != false
           }
         end
@@ -199,7 +200,7 @@ module Woods
       # @param metadata [Hash]
       # @param file_path [String, nil]
       # @return [Array<String>]
-      def build_attributes(unit_type, metadata, file_path)
+      def build_attributes(unit_type, metadata, file_path) # rubocop:disable Metrics
         case unit_type
         when :controller, :mailer
           actions = metadata['actions'] || metadata[:actions]
@@ -230,7 +231,7 @@ module Woods
         return [] unless file_path
 
         # Strip everything before app/ so callers get a relative app-root path
-        trimmed = file_path.sub(/\A.*?(app\/)/, '\1')
+        trimmed = file_path.sub(%r{\A.*?(app/)}, '\1')
         [trimmed]
       end
 

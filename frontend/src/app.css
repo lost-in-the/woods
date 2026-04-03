@@ -341,15 +341,20 @@ body {
 
 .node-active {
   border: 2px solid var(--highlight) !important;
-  box-shadow: 0 0 12px var(--highlight-glow);
+  box-shadow: 0 0 20px var(--highlight-glow);
 }
 
 .node-highlighted {
   border: 1px solid var(--highlight) !important;
-  box-shadow: 0 0 8px var(--highlight-glow-subtle);
+  box-shadow: 0 0 12px var(--highlight-glow-subtle);
 }
 
 .node-dimmed {
+  border-color: rgba(71, 85, 105, 0.5) !important;
+  opacity: 1;
+}
+
+.node-dimmed > * {
   opacity: 0.4;
 }
 

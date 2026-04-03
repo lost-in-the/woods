@@ -65,10 +65,16 @@ RSpec.describe Woods::SvelteFlow::Transformer do
         'route' => { 'verb' => 'POST', 'path' => '/users' },
         'max_depth' => 5,
         'steps' => [
-          { 'unit' => 'UsersController#create', 'type' => 'controller', 'file_path' => 'app/controllers/users_controller.rb',
-            'operations' => [{ 'type' => 'call', 'target' => 'UserService', 'method' => 'call', 'line' => 10 }] },
-          { 'unit' => 'UserService', 'type' => 'service', 'file_path' => 'app/services/user_service.rb',
-            'operations' => [{ 'type' => 'call', 'target' => 'User', 'method' => 'create!', 'line' => 5 }] }
+          { 'unit' => 'UsersController#create', 'type' => 'controller',
+            'file_path' => 'app/controllers/users_controller.rb',
+            'operations' => [
+              { 'type' => 'call', 'target' => 'UserService', 'method' => 'call', 'line' => 10 }
+            ] },
+          { 'unit' => 'UserService', 'type' => 'service',
+            'file_path' => 'app/services/user_service.rb',
+            'operations' => [
+              { 'type' => 'call', 'target' => 'User', 'method' => 'create!', 'line' => 5 }
+            ] }
         ]
       }
     end
@@ -109,8 +115,11 @@ RSpec.describe Woods::SvelteFlow::Transformer do
     it 'deduplicates nodes for repeated units' do
       doc = {
         'entry_point' => 'A',
-        'steps' => [{ 'unit' => 'A', 'type' => 'x', 'operations' => [] }, { 'unit' => 'B', 'type' => 'y', 'operations' => [] },
-                    { 'unit' => 'A', 'type' => 'x', 'operations' => [] }]
+        'steps' => [
+          { 'unit' => 'A', 'type' => 'x', 'operations' => [] },
+          { 'unit' => 'B', 'type' => 'y', 'operations' => [] },
+          { 'unit' => 'A', 'type' => 'x', 'operations' => [] }
+        ]
       }
       result = subject.flow_data(doc)
       ids = result['nodes'].map { |n| n['id'] }

@@ -8,8 +8,9 @@
   import { getLayoutedElements } from '../lib/layout.js';
   import ModelNode from './ModelNode.svelte';
   import CompactNode from './CompactNode.svelte';
+  import FocusNode from './FocusNode.svelte';
 
-  let { nodes, edges, loading, onNodeSelect, onCanvasClick } = $props();
+  let { nodes, edges, loading, onNodeSelect, onCanvasClick, focusNodeId } = $props();
 
   let layoutedNodes = $state.raw([]);
   let layoutedEdges = $state.raw([]);
@@ -52,6 +53,7 @@
       <Controls />
       <MiniMap />
       <Background />
+      <FocusNode nodeId={focusNodeId} />
     </SvelteFlow>
   {/if}
 </div>

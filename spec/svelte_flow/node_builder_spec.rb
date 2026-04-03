@@ -149,7 +149,8 @@ RSpec.describe Woods::SvelteFlow::NodeBuilder do
       end
 
       let(:reverse_edges) do
-        { 'User' => Set.new(%w[UsersController UserService]), 'Post' => Set.new(['User']), 'Comment' => Set.new(['User']) }
+        { 'User' => Set.new(%w[UsersController UserService]), 'Post' => Set.new(['User']),
+          'Comment' => Set.new(['User']) }
       end
 
       subject do

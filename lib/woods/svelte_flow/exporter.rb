@@ -22,6 +22,7 @@ module Woods
     #
     class Exporter # rubocop:disable Metrics/ClassLength
       include FilenameUtils
+
       # @param index_dir [String] Path to Woods extraction output directory
       # @param output_dir [String, nil] Output directory (defaults to index_dir/svelte_flow)
       def initialize(index_dir:, output_dir: nil)
@@ -164,7 +165,7 @@ module Woods
       # and extracts identifier + metadata for NodeBuilder enrichment.
       #
       # @return [Hash<String, Hash>] identifier => unit data hash
-      def load_unit_metadata
+      def load_unit_metadata # rubocop:disable Metrics
         metadata = {}
 
         Dir.glob(File.join(@index_dir, '*')).each do |type_dir|
@@ -176,11 +177,12 @@ module Woods
             next if File.basename(unit_file) == '_index.json'
 
             unit_data = JSON.parse(File.read(unit_file))
-            identifier = unit_data['identifier'] || unit_data[:identifier]
+            identifier = unit_data['identifier']
             next unless identifier
 
             metadata[identifier.to_s] = unit_data
-          rescue JSON::ParserError
+          rescue JSON::ParserError => e
+            warn "Woods::SvelteFlow::Exporter: skipping malformed JSON at #{unit_file}: #{e.message}"
             next
           end
         end

@@ -11,12 +11,13 @@
   let filterText = $state('');
   let collapsedTypes = $state(new Set());
 
-  let allNodes = $state([]);
-  let allEdges = $state([]);
-  let clusterNodes = $state([]);
-  let clusterEdges = $state([]);
-  let clusters = $state([]);
+  let allNodes = $state.raw([]);
+  let allEdges = $state.raw([]);
+  let clusterNodes = $state.raw([]);
+  let clusterEdges = $state.raw([]);
+  let clusters = $state.raw([]);
   let loading = $state(true);
+  let focusNodeId = $state(null);
 
   // Bidirectional adjacency set for the active node
   const adjacencySet = $derived.by(() => {
@@ -62,6 +63,7 @@
           style: connected
             ? 'stroke: #22c55e; stroke-width: 2px'
             : 'opacity: 0.3',
+          zIndex: connected ? 10 : 0,
         };
       });
   });
@@ -175,6 +177,8 @@
 
   function handleSelectUnit(id) {
     activeNodeId = id;
+    // Bump focusNodeId to trigger pan — use a fresh object to re-trigger even for the same id
+    focusNodeId = id;
   }
 
   function handleToggleVisibility(id) {
@@ -269,6 +273,7 @@
       nodes={visibleNodes}
       edges={visibleEdges}
       {loading}
+      {focusNodeId}
       onNodeSelect={handleNodeSelect}
       onCanvasClick={handleCanvasClick}
     />
@@ -277,6 +282,7 @@
       nodes={visibleNodes}
       edges={visibleEdges}
       {loading}
+      {focusNodeId}
       onNodeSelect={handleNodeSelect}
       onCanvasClick={handleCanvasClick}
     />

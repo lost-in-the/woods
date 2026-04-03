@@ -29,7 +29,7 @@ module Woods
       # Convert the full dependency graph into Svelte Flow format.
       #
       # @return [Hash] { "nodes" => Array, "edges" => Array }
-      def dependency_graph_data # rubocop:disable Metrics/MethodLength
+      def dependency_graph_data # rubocop:disable Metrics
         graph_data = @graph.to_h
         nodes = graph_data[:nodes] || graph_data['nodes'] || {}
         edges = graph_data[:edges] || graph_data['edges'] || {}

@@ -220,6 +220,22 @@ RSpec.describe Woods::SvelteFlow::Exporter do
       expect(metadata).not_to have_key('fake2')
     end
 
+    it 'skips unit files with no identifier key' do
+      no_id_dir = File.join(tmpdir, 'service')
+      FileUtils.mkdir_p(no_id_dir)
+      File.write(
+        File.join(no_id_dir, 'orphan.json'),
+        JSON.generate('type' => 'service', 'metadata' => {})
+      )
+
+      exporter = described_class.new(index_dir: tmpdir)
+      metadata = exporter.send(:load_unit_metadata)
+
+      expect(metadata).to have_key('User')
+      expect(metadata).not_to have_key(nil)
+      expect(metadata.size).to eq(1)
+    end
+
     it 'handles malformed JSON gracefully' do
       bad_dir = File.join(tmpdir, 'service')
       FileUtils.mkdir_p(bad_dir)
