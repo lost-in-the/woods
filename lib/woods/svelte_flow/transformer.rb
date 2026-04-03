@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require_relative 'layout'
 require_relative 'node_builder'
 require_relative 'edge_builder'
 
@@ -37,8 +36,7 @@ module Woods
         analysis = build_analysis
         cycle_edges = build_cycle_edge_set(analysis[:cycles] || [])
 
-        layout = Layout.new(edges: edges, pagerank: pagerank_scores)
-        positions = layout.compute
+        positions = {}
 
         node_builder = NodeBuilder.new(
           nodes: nodes,
@@ -66,20 +64,24 @@ module Woods
       # @return [Hash] { "nodes" => Array, "edges" => Array, "metadata" => Hash }
       def flow_data(flow_data) # rubocop:disable Metrics
         steps = flow_data[:steps] || flow_data['steps'] || []
-        positions = Layout.flow_positions(steps)
 
-        flow_nodes = steps.filter_map do |step|
+        flow_nodes = []
+        seen = Set.new
+        step_index = 0
+
+        steps.each do |step|
           unit = step[:unit] || step['unit']
           next unless unit
+          next if seen.include?(unit)
 
-          pos = positions[unit] || { 'x' => 0, 'y' => 0 }
+          seen.add(unit)
           step_type = step[:type] || step['type']
           operations = step[:operations] || step['operations'] || []
 
-          {
+          flow_nodes << {
             'id' => unit,
             'type' => 'flow_step',
-            'position' => pos,
+            'position' => { 'x' => 0, 'y' => step_index * 150 },
             'data' => {
               'label' => unit,
               'stepType' => step_type.to_s,
@@ -88,12 +90,13 @@ module Woods
               'operations' => summarize_operations(operations)
             }
           }
+          step_index += 1
         end
 
         flow_edges = EdgeBuilder.flow_edges(steps)
 
         {
-          'nodes' => flow_nodes.uniq { |n| n['id'] },
+          'nodes' => flow_nodes,
           'edges' => flow_edges,
           'metadata' => {
             'entryPoint' => flow_data[:entry_point] || flow_data['entry_point'],
@@ -115,7 +118,6 @@ module Woods
         nodes = graph_data[:nodes] || graph_data['nodes'] || {}
         pagerank_scores = @graph.pagerank
 
-        positions = Layout.cluster_positions(clusters, edges: edges, pagerank: pagerank_scores)
         analysis = build_analysis
 
         # Build nodes only for members that appear in clusters
@@ -124,7 +126,7 @@ module Woods
 
         node_builder = NodeBuilder.new(
           nodes: cluster_nodes,
-          positions: positions,
+          positions: {},
           pagerank: pagerank_scores,
           analysis: analysis
         )
