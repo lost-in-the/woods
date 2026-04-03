@@ -197,8 +197,9 @@ module Woods
             graph_data = JSON.parse(File.read(graph_path))
             graph = DependencyGraph.from_h(graph_data)
             analyzer = GraphAnalyzer.new(graph)
+            unit_metadata = load_unit_metadata(output_dir)
 
-            @transformer = Transformer.new(graph: graph, analyzer: analyzer)
+            @transformer = Transformer.new(graph: graph, analyzer: analyzer, unit_metadata: unit_metadata)
             @manifest_mtime = current_mtime
           end
 
@@ -206,6 +207,36 @@ module Woods
         rescue JSON::ParserError, Errno::ENOENT
           nil
         end
+      end
+
+      # Load per-unit metadata from extraction output type directories.
+      # Scans each type subdirectory for individual unit JSON files and extracts
+      # identifier + metadata for NodeBuilder enrichment (columns, attributes).
+      #
+      # @param output_dir [String] Path to the extraction output directory
+      # @return [Hash<String, Hash>] identifier => unit data hash
+      def load_unit_metadata(output_dir) # rubocop:disable Metrics
+        metadata = {}
+
+        Dir.glob(File.join(output_dir, '*')).each do |type_dir|
+          next unless File.directory?(type_dir)
+          next if File.basename(type_dir) == 'svelte_flow'
+          next if File.basename(type_dir) == 'flows'
+
+          Dir.glob(File.join(type_dir, '*.json')).each do |unit_file|
+            next if File.basename(unit_file) == '_index.json'
+
+            unit_data = JSON.parse(File.read(unit_file))
+            identifier = unit_data['identifier']
+            next unless identifier
+
+            metadata[identifier.to_s] = unit_data
+          rescue JSON::ParserError
+            next
+          end
+        end
+
+        metadata
       end
 
       # Load the flow index from the extraction output.
