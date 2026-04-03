@@ -58,6 +58,15 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
       # Should serve based on basename only, so this returns 404
       expect(status).to eq(404)
     end
+
+    it 'injects the mount path into served HTML' do
+      status, _headers, body = middleware.call(mock_env('/woods/visualize/'))
+      next unless status == 200
+
+      html = body.first
+      expect(html).to include('content="/woods/visualize"')
+      expect(html).not_to include('{{BASE_PATH}}')
+    end
   end
 
   describe 'custom mount path' do

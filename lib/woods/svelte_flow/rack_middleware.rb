@@ -87,14 +87,17 @@ module Woods
         end
       end
 
-      # Serve the main HTML page.
+      # Serve the main HTML page with mount path injected into placeholders.
       #
       # @return [Array] Rack response triple
       def serve_html
         html_path = File.join(ASSETS_DIR, 'index.html')
         return not_found unless File.exist?(html_path)
 
-        [200, { 'content-type' => 'text/html' }, [File.read(html_path)]]
+        html = File.read(html_path)
+        html = html.gsub('{{BASE_PATH}}', @path)
+
+        [200, { 'content-type' => 'text/html' }, [html]]
       end
 
       # Serve the dependency graph as Svelte Flow JSON.
