@@ -61,14 +61,14 @@ RSpec.describe Woods::SvelteFlow::Transformer do
   describe '#flow_data' do
     let(:flow_doc) do
       {
-        entry_point: 'UsersController#create',
-        route: { verb: 'POST', path: '/users' },
-        max_depth: 5,
-        steps: [
-          { unit: 'UsersController#create', type: 'controller', file_path: 'app/controllers/users_controller.rb',
-            operations: [{ type: 'call', target: 'UserService', method: 'call', line: 10 }] },
-          { unit: 'UserService', type: 'service', file_path: 'app/services/user_service.rb',
-            operations: [{ type: 'call', target: 'User', method: 'create!', line: 5 }] }
+        'entry_point' => 'UsersController#create',
+        'route' => { 'verb' => 'POST', 'path' => '/users' },
+        'max_depth' => 5,
+        'steps' => [
+          { 'unit' => 'UsersController#create', 'type' => 'controller', 'file_path' => 'app/controllers/users_controller.rb',
+            'operations' => [{ 'type' => 'call', 'target' => 'UserService', 'method' => 'call', 'line' => 10 }] },
+          { 'unit' => 'UserService', 'type' => 'service', 'file_path' => 'app/services/user_service.rb',
+            'operations' => [{ 'type' => 'call', 'target' => 'User', 'method' => 'create!', 'line' => 5 }] }
         ]
       }
     end
@@ -97,7 +97,7 @@ RSpec.describe Woods::SvelteFlow::Transformer do
 
     it 'includes metadata about the flow' do
       expect(result['metadata']['entryPoint']).to eq('UsersController#create')
-      expect(result['metadata']['route']).to eq({ verb: 'POST', path: '/users' })
+      expect(result['metadata']['route']).to eq({ 'verb' => 'POST', 'path' => '/users' })
     end
 
     it 'includes operation summaries in node data' do
@@ -108,9 +108,9 @@ RSpec.describe Woods::SvelteFlow::Transformer do
 
     it 'deduplicates nodes for repeated units' do
       doc = {
-        entry_point: 'A',
-        steps: [{ unit: 'A', type: 'x', operations: [] }, { unit: 'B', type: 'y', operations: [] },
-                { unit: 'A', type: 'x', operations: [] }]
+        'entry_point' => 'A',
+        'steps' => [{ 'unit' => 'A', 'type' => 'x', 'operations' => [] }, { 'unit' => 'B', 'type' => 'y', 'operations' => [] },
+                    { 'unit' => 'A', 'type' => 'x', 'operations' => [] }]
       }
       result = subject.flow_data(doc)
       ids = result['nodes'].map { |n| n['id'] }
@@ -139,12 +139,55 @@ RSpec.describe Woods::SvelteFlow::Transformer do
 
     it 'includes flow documents when provided' do
       flow = {
-        entry_point: 'TestController#index',
-        steps: [{ unit: 'TestController#index', type: 'controller', operations: [] }]
+        'entry_point' => 'TestController#index',
+        'steps' => [{ 'unit' => 'TestController#index', 'type' => 'controller', 'operations' => [] }]
       }
       result = subject.full_export(flow_documents: [flow])
 
       expect(result['flows']).to have_key('TestController#index')
+    end
+  end
+
+  describe '#dependency_graph_data with unit metadata' do
+    let(:unit_metadata) do
+      {
+        'User' => {
+          'metadata' => {
+            'primary_key' => 'id',
+            'columns' => [
+              { 'name' => 'id', 'type' => 'bigint', 'null' => false },
+              { 'name' => 'name', 'type' => 'varchar', 'null' => false }
+            ],
+            'associations' => []
+          }
+        },
+        'UsersController' => {
+          'metadata' => {
+            'actions' => %w[index show]
+          }
+        }
+      }
+    end
+
+    subject { described_class.new(graph: graph, analyzer: analyzer, unit_metadata: unit_metadata) }
+
+    let(:result) { subject.dependency_graph_data }
+
+    it 'includes columns on model nodes' do
+      user = result['nodes'].find { |n| n['id'] == 'User' }
+      expect(user['data']['columns']).to be_an(Array)
+      expect(user['data']['columns'].first['name']).to eq('id')
+    end
+
+    it 'includes attributes on controller nodes' do
+      controller = result['nodes'].find { |n| n['id'] == 'UsersController' }
+      expect(controller['data']['attributes']).to eq(%w[index show])
+    end
+
+    it 'includes dependency counts on all nodes' do
+      user = result['nodes'].find { |n| n['id'] == 'User' }
+      expect(user['data']).to have_key('dependencyCount')
+      expect(user['data']).to have_key('dependentCount')
     end
   end
 

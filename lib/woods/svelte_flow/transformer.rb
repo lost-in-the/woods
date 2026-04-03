@@ -19,9 +19,11 @@ module Woods
     class Transformer # rubocop:disable Metrics/ClassLength
       # @param graph [DependencyGraph] The dependency graph
       # @param analyzer [GraphAnalyzer] Graph analyzer for structural enrichment
-      def initialize(graph:, analyzer:)
+      # @param unit_metadata [Hash<String, Hash>] Raw unit metadata keyed by identifier (optional)
+      def initialize(graph:, analyzer:, unit_metadata: {})
         @graph = graph
         @analyzer = analyzer
+        @unit_metadata = unit_metadata
       end
 
       # Convert the full dependency graph into Svelte Flow format.
@@ -31,6 +33,7 @@ module Woods
         graph_data = @graph.to_h
         nodes = graph_data[:nodes] || graph_data['nodes'] || {}
         edges = graph_data[:edges] || graph_data['edges'] || {}
+        reverse = graph_data[:reverse] || graph_data['reverse'] || {}
         pagerank_scores = @graph.pagerank
 
         analysis = build_analysis
@@ -42,7 +45,10 @@ module Woods
           nodes: nodes,
           positions: positions,
           pagerank: pagerank_scores,
-          analysis: analysis
+          analysis: analysis,
+          unit_metadata: @unit_metadata,
+          forward_edges: edges,
+          reverse_edges: reverse
         )
 
         valid_ids = Set.new(nodes.keys)
@@ -63,20 +69,20 @@ module Woods
       # @param flow_data [Hash] Serialized FlowDocument (from FlowDocument#to_h or JSON)
       # @return [Hash] { "nodes" => Array, "edges" => Array, "metadata" => Hash }
       def flow_data(flow_data) # rubocop:disable Metrics
-        steps = flow_data[:steps] || flow_data['steps'] || []
+        steps = flow_data['steps'] || []
 
         flow_nodes = []
         seen = Set.new
         step_index = 0
 
         steps.each do |step|
-          unit = step[:unit] || step['unit']
+          unit = step['unit']
           next unless unit
           next if seen.include?(unit)
 
           seen.add(unit)
-          step_type = step[:type] || step['type']
-          operations = step[:operations] || step['operations'] || []
+          step_type = step['type']
+          operations = step['operations'] || []
 
           flow_nodes << {
             'id' => unit,
@@ -85,7 +91,7 @@ module Woods
             'data' => {
               'label' => unit,
               'stepType' => step_type.to_s,
-              'filePath' => step[:file_path] || step['file_path'],
+              'filePath' => step['file_path'],
               'operationCount' => operations.size,
               'operations' => summarize_operations(operations)
             }
@@ -99,9 +105,9 @@ module Woods
           'nodes' => flow_nodes,
           'edges' => flow_edges,
           'metadata' => {
-            'entryPoint' => flow_data[:entry_point] || flow_data['entry_point'],
-            'route' => flow_data[:route] || flow_data['route'],
-            'maxDepth' => flow_data[:max_depth] || flow_data['max_depth']
+            'entryPoint' => flow_data['entry_point'],
+            'route' => flow_data['route'],
+            'maxDepth' => flow_data['max_depth']
           }
         }
       end
@@ -115,6 +121,7 @@ module Woods
 
         graph_data = @graph.to_h
         edges = graph_data[:edges] || graph_data['edges'] || {}
+        reverse = graph_data[:reverse] || graph_data['reverse'] || {}
         nodes = graph_data[:nodes] || graph_data['nodes'] || {}
         pagerank_scores = @graph.pagerank
 
@@ -128,7 +135,10 @@ module Woods
           nodes: cluster_nodes,
           positions: {},
           pagerank: pagerank_scores,
-          analysis: analysis
+          analysis: analysis,
+          unit_metadata: @unit_metadata,
+          forward_edges: edges,
+          reverse_edges: reverse
         )
 
         # Collect all boundary edges across clusters
@@ -173,7 +183,7 @@ module Woods
         }
 
         flow_documents.each do |doc|
-          entry = doc[:entry_point] || doc['entry_point']
+          entry = doc['entry_point']
           result['flows'][entry] = flow_data(doc) if entry
         end
 
@@ -212,12 +222,11 @@ module Woods
       # @return [Array<Hash>] Simplified operation summaries
       def summarize_operations(operations)
         operations.map do |op|
-          type = (op[:type] || op['type']).to_s
           {
-            'type' => type,
-            'target' => op[:target] || op['target'],
-            'method' => op[:method] || op['method'],
-            'line' => op[:line] || op['line']
+            'type' => op['type'].to_s,
+            'target' => op['target'],
+            'method' => op['method'],
+            'line' => op['line']
           }
         end
       end
