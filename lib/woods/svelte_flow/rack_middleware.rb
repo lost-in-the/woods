@@ -28,6 +28,7 @@ module Woods
     #
     class RackMiddleware # rubocop:disable Metrics/ClassLength
       ASSETS_DIR = File.expand_path('assets', __dir__)
+      BUILD_DIR = File.join(ASSETS_DIR, 'build')
 
       CONTENT_TYPES = {
         '.html' => 'text/html',
@@ -163,7 +164,10 @@ module Woods
       def serve_asset(filename)
         # Prevent directory traversal
         safe_name = File.basename(filename)
-        asset_path = File.join(ASSETS_DIR, safe_name)
+
+        # Check build directory first, then assets root
+        asset_path = File.join(BUILD_DIR, safe_name)
+        asset_path = File.join(ASSETS_DIR, safe_name) unless File.exist?(asset_path)
         return not_found unless File.exist?(asset_path)
 
         ext = File.extname(safe_name)
