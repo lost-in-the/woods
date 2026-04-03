@@ -112,5 +112,108 @@ RSpec.describe Woods::SvelteFlow::NodeBuilder do
       result = builder.build
       expect(result.first['position']).to eq({ 'x' => 0, 'y' => 0 })
     end
+
+    context 'with unit metadata' do
+      let(:unit_metadata) do
+        {
+          'User' => {
+            'type' => 'model',
+            'metadata' => {
+              'primary_key' => 'id',
+              'columns' => [
+                { 'name' => 'id', 'type' => 'bigint', 'null' => false },
+                { 'name' => 'account_id', 'type' => 'bigint', 'null' => false },
+                { 'name' => 'name', 'type' => 'character varying(255)', 'null' => false },
+                { 'name' => 'email', 'type' => 'character varying(255)', 'null' => true }
+              ],
+              'associations' => [
+                { 'name' => 'account', 'macro' => 'belongs_to', 'foreign_key' => 'account_id' }
+              ]
+            }
+          },
+          'UsersController' => {
+            'type' => 'controller',
+            'metadata' => {
+              'actions' => %w[index show create update destroy]
+            }
+          },
+          'UserService' => {
+            'type' => 'service',
+            'metadata' => {}
+          }
+        }
+      end
+
+      let(:forward_edges) do
+        { 'User' => %w[Post Comment], 'UsersController' => ['User'], 'UserService' => ['User'] }
+      end
+
+      let(:reverse_edges) do
+        { 'User' => Set.new(%w[UsersController UserService]), 'Post' => Set.new(['User']), 'Comment' => Set.new(['User']) }
+      end
+
+      subject do
+        described_class.new(
+          nodes: nodes,
+          positions: positions,
+          pagerank: pagerank,
+          analysis: analysis,
+          unit_metadata: unit_metadata,
+          forward_edges: forward_edges,
+          reverse_edges: reverse_edges
+        )
+      end
+
+      it 'includes columns array on model nodes' do
+        user_node = subject.build.find { |n| n['id'] == 'User' }
+        columns = user_node['data']['columns']
+
+        expect(columns).to be_an(Array)
+        expect(columns.size).to eq(4)
+        expect(columns.first).to include('name' => 'id', 'type' => 'bigint', 'primary' => true, 'nullable' => false)
+      end
+
+      it 'marks foreign key columns' do
+        user_node = subject.build.find { |n| n['id'] == 'User' }
+        fk_col = user_node['data']['columns'].find { |c| c['name'] == 'account_id' }
+        expect(fk_col['foreign']).to be true
+      end
+
+      it 'marks nullable columns' do
+        user_node = subject.build.find { |n| n['id'] == 'User' }
+        email_col = user_node['data']['columns'].find { |c| c['name'] == 'email' }
+        expect(email_col['nullable']).to be true
+      end
+
+      it 'includes attributes array on controller nodes' do
+        controller_node = subject.build.find { |n| n['id'] == 'UsersController' }
+        expect(controller_node['data']['attributes']).to eq(%w[index show create update destroy])
+      end
+
+      it 'includes file path as attributes fallback for service nodes' do
+        service_node = subject.build.find { |n| n['id'] == 'UserService' }
+        expect(service_node['data']['attributes']).to eq(['app/services/user_service.rb'])
+      end
+
+      it 'does not include columns on non-model nodes' do
+        controller_node = subject.build.find { |n| n['id'] == 'UsersController' }
+        expect(controller_node['data']).not_to have_key('columns')
+      end
+
+      it 'includes dependencyCount from forward edges' do
+        user_node = subject.build.find { |n| n['id'] == 'User' }
+        expect(user_node['data']['dependencyCount']).to eq(2)
+      end
+
+      it 'includes dependentCount from reverse edges' do
+        user_node = subject.build.find { |n| n['id'] == 'User' }
+        expect(user_node['data']['dependentCount']).to eq(2)
+      end
+
+      it 'defaults counts to 0 when no edges exist' do
+        service_node = subject.build.find { |n| n['id'] == 'UserService' }
+        expect(service_node['data']['dependentCount']).to eq(0)
+      end
+    end
   end
 end
