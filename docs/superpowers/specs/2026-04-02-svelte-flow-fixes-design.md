@@ -1,110 +1,239 @@
 # Svelte Flow Visualization Fixes
 
-**Date**: 2026-04-02
+**Date**: 2026-04-02 (updated 2026-04-03)
 **Branch**: `claude/add-svelte-flow-visualization-GbLbD`
-**Goal**: Fix integration bugs preventing the Svelte Flow visualization from working in a real Rails app (admin, 6,317 units).
+**Goal**: Fix integration bugs and replace the hand-rolled canvas renderer with actual Svelte Flow + dagre, making the visualization functional in a real Rails app (admin, 6,317 units).
 
 ## Context
 
-The Svelte Flow feature has solid architecture (Transformer, Exporter, NodeBuilder, EdgeBuilder, Layout, RackMiddleware) with 80 passing specs. However, four bugs at integration boundaries prevent it from functioning when mounted in a Rails app, and the layout algorithm produces unusable output at scale.
+The Svelte Flow feature has solid backend architecture (Transformer, Exporter, NodeBuilder, EdgeBuilder, RackMiddleware) with 80 passing specs. However:
 
-## Fixes
+1. Four bugs at integration boundaries prevent it from functioning when mounted in a Rails app.
+2. The hand-rolled vanilla JS canvas renderer reimplements (poorly) what Svelte Flow provides out of the box: zoom, pan, node interaction, edge routing.
+3. The Ruby `Layout` class produces unusable output at scale — layers become skyscrapers.
+
+**Decision**: Replace the vanilla JS frontend with a pre-built Svelte Flow + dagre app. Svelte is a compiler (not a runtime), so the compiled output is ~120-140KB of vanilla JS with zero framework overhead. The gem continues to ship pre-built assets with no Node.js or build step required for end users. Layout computation moves to dagre (client-side), which handles hierarchical DAG layout with proper edge crossing minimization.
+
+## Architecture Change
+
+### What stays
+- `rack_middleware.rb` — serves HTML, API endpoints, static assets (with base-path fix)
+- `transformer.rb` — orchestrates graph/flow/cluster data into node+edge format
+- `node_builder.rb` — converts dependency graph nodes to Svelte Flow node objects
+- `edge_builder.rb` — converts dependency graph edges to Svelte Flow edge objects
+- `exporter.rb` — reads extraction output, writes Svelte Flow JSON files
+- All existing Ruby specs
+
+### What changes
+- `assets/index.html` — updated with `{{BASE_PATH}}` placeholders (hand-maintained, not Vite-generated — the middleware gsubs these at serve time)
+- `assets/app.js` — **replaced** with pre-built Svelte Flow + dagre bundle (Vite output)
+- `assets/app.css` — **replaced** with pre-built Svelte Flow styles (Vite output)
+
+### What's added
+- `frontend/` — Svelte project directory (source for pre-built assets)
+  - `package.json` — @xyflow/svelte, @dagrejs/dagre, vite, svelte
+  - `src/App.svelte` — main visualization component
+  - `src/lib/` — layout helpers, node/edge components, API client
+  - `vite.config.js` — builds to `lib/woods/svelte_flow/assets/`
+- Build script: `cd frontend && npm run build` (gem development only)
+
+### What's removed
+- `layout.rb` — replaced by dagre client-side layout
+- `spec/svelte_flow/layout_spec.rb` — no longer needed
+
+### Gem impact
+- **No new Ruby dependencies** — gemspec unchanged
+- **No build step for gem users** — compiled assets ship with the gem
+- **Asset size**: ~15KB (current) → ~120-140KB (Svelte Flow + dagre compiled). Acceptable for a visualization feature.
+- `frontend/` directory is excluded from the gemspec's `files` list (development only)
+
+## Fixes (Ruby side)
 
 ### Fix 1: Base-path injection in serve_html
 
-**Problem**: `index.html` ships with hardcoded empty values for the base path meta tag and relative asset URLs. The middleware serves the file as-is, so the JS fetches `/api/graph` instead of `/woods/visualize/api/graph`, and assets resolve to wrong paths.
+**Problem**: `index.html` ships with hardcoded empty base path and relative asset URLs. The middleware serves the file as-is, so JS fetches `/api/graph` instead of `/woods/visualize/api/graph`.
 
-**Solution**: Use `{{BASE_PATH}}` placeholders in `index.html` for the meta tag, CSS link, and JS script. `serve_html` performs a single `gsub('{{BASE_PATH}}', @path)` before returning the HTML.
+**Solution**: Use `{{BASE_PATH}}` placeholders in `index.html`. `serve_html` performs `gsub('{{BASE_PATH}}', @path)` before returning.
 
-**Files**:
-- `lib/woods/svelte_flow/rack_middleware.rb` — update `serve_html` to gsub placeholders
-- `lib/woods/svelte_flow/assets/index.html` — replace hardcoded paths with `{{BASE_PATH}}`
+**Files**: `rack_middleware.rb`, `assets/index.html`
 
 ### Fix 2: JS safeKey mismatch
 
-**Problem**: `app.js` only replaces `::` and `#` when building flow URL keys. Ruby's `safe_key` replaces all non-alphanumeric chars except `_` and `-`. Entry points with dots, spaces, or other special chars produce different keys, causing 404s on flow lookups.
+**Problem**: JS only replaces `::` and `#` when building flow URL keys. Ruby replaces all non-alphanumeric chars except `_` and `-`.
 
-**Solution**: Replace the JS safeKey logic with a regex that mirrors Ruby exactly:
+**Solution**: Svelte app's safeKey function mirrors the Ruby regex exactly:
 ```js
-const safeKey = entryPoint.replace(/::/g, '__').replace(/[^a-zA-Z0-9_-]/g, '_');
+identifier.replace(/::/g, '__').replace(/[^a-zA-Z0-9_-]/g, '_')
 ```
 
-**Files**:
-- `lib/woods/svelte_flow/assets/app.js` — fix safeKey regex (1 line)
+**Files**: `frontend/src/lib/api.js` (compiled into app.js)
 
 ### Fix 3: Layout drops sink-only nodes
 
-**Problem**: `Layout#initialize` derives `@node_ids` from `edges.keys`, missing nodes that only appear as targets. These nodes get no computed position and pile up at origin (0, 0).
+**Problem**: Ruby `Layout` derived node IDs from edge keys only, missing target-only nodes.
 
-**Solution**: Add optional `node_ids` parameter. Default behavior collects all IDs from both edge keys and edge values. Transformer passes `nodes.keys` explicitly.
+**Solution**: This is now moot — dagre receives all nodes explicitly (the API sends the full node list). Dagre positions every node it's told about, regardless of edge connectivity. No Ruby change needed.
 
-**Files**:
-- `lib/woods/svelte_flow/layout.rb` — add `node_ids` param, add `collect_all_node_ids`
-- `lib/woods/svelte_flow/transformer.rb` — pass `nodes.keys` to Layout
+## Frontend (Svelte Flow app)
 
-### Fix 4: Layout orientation and large-graph handling
+### Svelte project structure
 
-**Problem**: The current layout places topological layers left-to-right, with nodes within each layer stacked vertically. At 6,317 units, layers with hundreds of nodes produce columns tens of thousands of pixels tall — unusable skyscrapers.
+```
+frontend/
+├── package.json
+├── vite.config.js
+├── src/
+│   ├── App.svelte              # Root — tabs, data fetching, error states
+│   ├── main.js                 # Entry point, mounts App
+│   ├── lib/
+│   │   ├── api.js              # fetchJSON, safeKey, basePath detection
+│   │   ├── layout.js           # dagre layout wrapper (TB direction)
+│   │   ├── nodeTypes.js        # Custom node type components registry
+│   │   └── theme.js            # Color mapping by unit type
+│   ├── components/
+│   │   ├── GraphView.svelte    # SvelteFlow + dagre for dependency graph
+│   │   ├── FlowView.svelte     # SvelteFlow for sequential execution flows
+│   │   ├── ClusterView.svelte  # SvelteFlow + dagre for domain clusters
+│   │   ├── NodeDetail.svelte   # Sidebar with node metadata
+│   │   └── WoodsNode.svelte    # Custom node component (type badge, hub/bridge markers)
+│   └── app.css                 # Dark theme styles
+```
 
-**Solution**: Flip layout to top-to-bottom orientation. Layers become horizontal rows, nodes within each layer spread horizontally. Horizontal overflow is natural for scrolling.
+### Key implementation details
 
-Four sub-improvements:
+**Layout (layout.js)**: Thin wrapper around dagre:
+```js
+import dagre from '@dagrejs/dagre';
 
-1. **Axis swap**: Layer index maps to y (rows), position within layer maps to x (columns). Constants renamed: `LAYER_SPACING_Y` (vertical gap between rows) and `NODE_SPACING_X` (horizontal gap within rows).
+export function getLayoutedElements(nodes, edges, direction = 'TB') {
+  const g = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: direction, nodesep: 60, ranksep: 120 });
 
-2. **Barycenter ordering within layers**: Instead of alphabetical sort, order nodes by the average position of their connected neighbors in adjacent layers. Minimizes edge crossings (standard Sugiyama step 2).
+  nodes.forEach(node => {
+    g.setNode(node.id, { width: 172, height: 44 });
+  });
 
-3. **Dynamic spacing**: Compress horizontal spacing for large layers. Floor at 60px to remain clickable. Full spacing (NODE_SPACING_X) for layers with <= 20 nodes.
+  edges.forEach(edge => {
+    g.setEdge(edge.source, edge.target);
+  });
 
-4. **Vertical centering**: Center each row around the midpoint of the widest row, keeping cross-layer edges more vertical and reducing visual spread.
+  dagre.layout(g);
 
-**Not included** (out of scope for this fix pass):
-- Type-based sub-grouping within layers (can add later if the barycenter ordering isn't sufficient)
-- Force-directed layout (wrong tool for a DAG)
-- Node filtering/collapsing (frontend feature)
-- Canvas virtualization (6K rectangles is within canvas budget)
+  return nodes.map(node => {
+    const pos = g.node(node.id);
+    return {
+      ...node,
+      position: { x: pos.x - 172 / 2, y: pos.y - 44 / 2 },
+      targetPosition: 'top',
+      sourcePosition: 'bottom',
+    };
+  });
+}
+```
 
-**Scope of axis swap**: Only affects `#compute` (the dependency graph layout) and `assign_positions`/`assign_layers`. The class methods `flow_positions` (vertical sequential — already uses y-axis correctly) and `cluster_positions` (grid-based with explicit offsets) are not changed.
+**API client (api.js)**: Reads base path from meta tag, fetches from middleware endpoints:
+```js
+const basePath = document.querySelector('meta[name="woods-base-path"]')?.content || '';
 
-**Frontend impact**: `app.js` draws edges from `src.position.x + srcW` to `tgt.position.x` (right side to left side of nodes). With top-to-bottom layout, edges should connect bottom of source to top of target instead. `drawEdges` needs to swap its anchor points:
-- Source anchor: bottom-center of node (`x + w/2, y + h`)
-- Target anchor: top-center of node (`x + w/2, y`)
-- Bezier control points adjust accordingly for smoothstep edges
+export async function fetchJSON(endpoint) {
+  const res = await fetch(`${basePath}/api/${endpoint}`);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
 
-**Files**:
-- `lib/woods/svelte_flow/layout.rb` — axis swap, barycenter, dynamic spacing, centering
-- `lib/woods/svelte_flow/assets/app.js` — edge anchor points for top-to-bottom flow
+export function safeKey(identifier) {
+  return identifier.replace(/::/g, '__').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+```
 
-### Specs
+**Vite config**: Builds a single IIFE bundle targeting the gem's assets directory:
+```js
+export default {
+  build: {
+    outDir: '../lib/woods/svelte_flow/assets',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: 'app.js',
+        assetFileNames: 'app.css',
+      },
+    },
+  },
+};
+```
 
-New and updated specs covering:
-- Base-path injection in served HTML (middleware spec)
-- Sink-only nodes get positions (layout spec)
-- Barycenter ordering reduces naive crossings vs alphabetical (layout spec)
-- Large layer dynamic spacing (layout spec)
-- Row centering (layout spec)
-- safeKey parity between JS regex and Ruby regex (can only be verified manually or via a shared test fixture)
+### Features carried forward from current app.js
+- Three tabs: Dependencies, Flows, Clusters
+- Node selection with sidebar detail panel
+- Unit type color coding (model, controller, service, job, etc.)
+- Hub/Bridge badges on nodes
+- Cycle edges highlighted in red
+- Stats bar (node count, edge count, cluster count)
+- Flow selector dropdown
+- Auto-fit view on data load
+
+### Features gained from Svelte Flow
+- Proper edge routing (smoothstep, bezier) with arrow markers
+- Built-in minimap
+- Built-in controls (zoom in/out, fit view, lock)
+- Proper node drag-and-drop
+- Edge labels
+- Animated edges (for cycle/boundary markers)
+- Proper handle positions (source bottom, target top for TB layout)
+
+## Specs
+
+### Updated Ruby specs
+- `rack_middleware_spec.rb` — add test for base-path injection in served HTML
+- Existing transformer, node_builder, edge_builder, exporter specs remain unchanged
+
+### Removed
+- `layout_spec.rb` — Layout class removed, dagre handles this client-side
+
+### Not adding
+- Frontend JS tests — the Svelte app is small (~200 lines of source) and verified by manual browser testing in admin. Adding a JS test framework to a Ruby gem is more complexity than it's worth at this stage.
+
+## Build Workflow
+
+For gem developers modifying the frontend:
+
+```bash
+cd frontend
+npm install          # first time only
+npm run dev          # dev server with hot reload (optional, for rapid iteration)
+npm run build        # production build → lib/woods/svelte_flow/assets/
+cd ..
+bundle exec rake spec  # verify Ruby specs still pass
+gem build woods.gemspec  # package gem with updated assets
+```
+
+The compiled assets (`app.js`, `app.css`, `index.html`) are committed to git. The `frontend/node_modules/` directory is gitignored.
 
 ## Test Plan
 
-1. Run gem specs — all existing + new specs pass
-2. `gem build woods.gemspec` — produces `.gem` file
-3. Copy to host-woods worktree, `bundle update woods`
-4. Enable `svelte_flow_enabled = true` in admin Woods initializer
-5. Run extraction if needed (`rake woods:extract`)
-6. Start Rails server, navigate to `/woods/visualize`
-7. Verify:
-   - [ ] Page loads (HTML, CSS, JS all resolve)
-   - [ ] Dependencies tab shows graph with positioned nodes
-   - [ ] Nodes are clickable, sidebar shows details
-   - [ ] Zoom/pan works
-   - [ ] Clusters tab loads domain clusters
-   - [ ] Flows tab loads (if `precompute_flows` was enabled)
+1. `cd frontend && npm run build` — verify clean build
+2. `bundle exec rake spec` — all Ruby specs pass
+3. `gem build woods.gemspec` — produces `.gem` file
+4. Copy gem to host-woods worktree, `bundle update woods`
+5. Enable `svelte_flow_enabled = true` in admin Woods initializer
+6. Verify extraction output exists (`tmp/woods/manifest.json`)
+7. Start Rails server, navigate to `/woods/visualize`
+8. Verify:
+   - [ ] Page loads — HTML, CSS, JS all resolve correctly
+   - [ ] Dependencies tab renders graph with dagre layout (top-to-bottom)
+   - [ ] Nodes are clickable — sidebar shows type, file path, PageRank, hub/bridge status
+   - [ ] Zoom/pan/fit-view controls work
+   - [ ] Minimap renders
+   - [ ] Clusters tab loads domain clusters with grouped layout
+   - [ ] Flows tab loads flow index (if `precompute_flows` enabled)
+   - [ ] Flow selector switches between entry points
    - [ ] No console errors in browser devtools
+   - [ ] Layout handles 6K+ nodes without skyscrapers
 
-## Not Fixing
+## Not Fixing (out of scope)
 
 - **Cache headers on assets** — premature for dev-only tool
 - **collision_safe_filename for flow exports** — flow index handles lookups correctly
-- **MCP tools for svelte flow** — separate feature, not needed for functionality
-- **Canvas hitTest O(n)** — acceptable at this scale
+- **MCP tools for svelte flow** — separate feature, can add later
+- **Node filtering/collapsing for large graphs** — future enhancement if dagre layout proves insufficient at scale
+- **Frontend test suite** — verified manually for now
