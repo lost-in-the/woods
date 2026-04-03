@@ -5,67 +5,46 @@
     MiniMap,
     Background,
   } from '@xyflow/svelte';
-  import { fetchJSON } from '../lib/api.js';
   import { getLayoutedElements } from '../lib/layout.js';
-  import WoodsNode from './WoodsNode.svelte';
+  import ModelNode from './ModelNode.svelte';
+  import CompactNode from './CompactNode.svelte';
 
-  let { onNodeSelect } = $props();
+  let { nodes, edges, loading, onNodeSelect, onCanvasClick } = $props();
 
-  let nodes = $state.raw([]);
-  let edges = $state.raw([]);
-  let loading = $state(true);
-  let error = $state(null);
+  let layoutedNodes = $state.raw([]);
+  let layoutedEdges = $state.raw([]);
 
-  const nodeTypes = { woods: WoodsNode };
+  const nodeTypes = { model: ModelNode, compact: CompactNode };
 
-  async function load() {
-    loading = true;
-    error = null;
-    try {
-      const data = await fetchJSON('graph');
-      const rawNodes = (data.nodes || []).map((n) => ({
-        ...n,
-        type: 'woods',
-        position: n.position || { x: 0, y: 0 },
-      }));
-      const rawEdges = (data.edges || []).map((e) => ({
-        ...e,
-        style: e.data?.isCycle
-          ? 'stroke: #ef4444; stroke-width: 2px'
-          : undefined,
-        animated: e.data?.isCycle || e.animated || false,
-      }));
+  const layout = $derived.by(() => {
+    if (!nodes || nodes.length === 0) return { nodes: [], edges: [] };
+    return getLayoutedElements(nodes, edges, 'TB');
+  });
 
-      const laid = getLayoutedElements(rawNodes, rawEdges, 'TB');
-      nodes = laid.nodes;
-      edges = laid.edges;
-    } catch (e) {
-      error = e.message;
-    }
-    loading = false;
-  }
+  $effect(() => {
+    layoutedNodes = layout.nodes;
+    layoutedEdges = layout.edges;
+  });
 
   function handleNodeClick({ node }) {
     onNodeSelect?.(node);
   }
 
-  load();
+  function handlePaneClick() {
+    onCanvasClick?.();
+  }
 </script>
 
 <div class="flow-container">
   {#if loading}
     <div class="loading-overlay">Loading graph...</div>
-  {:else if error}
-    <div class="error-overlay">
-      <div>Error loading graph</div>
-      <div style="font-size:12px;color:#94a3b8">{error}</div>
-    </div>
   {:else}
     <SvelteFlow
-      bind:nodes
-      bind:edges
+      bind:nodes={layoutedNodes}
+      bind:edges={layoutedEdges}
       {nodeTypes}
       onnodeclick={handleNodeClick}
+      onpaneclick={handlePaneClick}
       fitView
       minZoom={0.05}
       maxZoom={2}
