@@ -167,4 +167,70 @@ RSpec.describe Woods::SvelteFlow::Exporter do
       end
     end
   end
+
+  describe '#load_unit_metadata' do
+    before do
+      # Create a mock type directory with unit files
+      model_dir = File.join(tmpdir, 'model')
+      FileUtils.mkdir_p(model_dir)
+
+      unit_data = {
+        'type' => 'model',
+        'identifier' => 'User',
+        'metadata' => {
+          'primary_key' => 'id',
+          'columns' => [{ 'name' => 'id', 'type' => 'bigint', 'null' => false }],
+          'associations' => []
+        }
+      }
+      File.write(File.join(model_dir, 'User_abcd1234.json'), JSON.generate(unit_data))
+
+      # Write an _index.json that should be skipped
+      File.write(File.join(model_dir, '_index.json'), JSON.generate([{ 'identifier' => 'User' }]))
+    end
+
+    it 'loads metadata from type directory unit files' do
+      exporter = described_class.new(index_dir: tmpdir)
+      metadata = exporter.send(:load_unit_metadata)
+
+      expect(metadata).to have_key('User')
+      expect(metadata['User']['metadata']['columns']).to be_an(Array)
+    end
+
+    it 'skips _index.json files' do
+      exporter = described_class.new(index_dir: tmpdir)
+      metadata = exporter.send(:load_unit_metadata)
+
+      # Only the unit file should be loaded, not the index
+      expect(metadata.size).to eq(1)
+    end
+
+    it 'skips svelte_flow and flows directories' do
+      # Create directories that should be skipped
+      FileUtils.mkdir_p(File.join(tmpdir, 'svelte_flow'))
+      File.write(File.join(tmpdir, 'svelte_flow', 'not_a_unit.json'), '{"identifier":"fake"}')
+
+      FileUtils.mkdir_p(File.join(tmpdir, 'flows'))
+      File.write(File.join(tmpdir, 'flows', 'not_a_unit.json'), '{"identifier":"fake2"}')
+
+      exporter = described_class.new(index_dir: tmpdir)
+      metadata = exporter.send(:load_unit_metadata)
+
+      expect(metadata).not_to have_key('fake')
+      expect(metadata).not_to have_key('fake2')
+    end
+
+    it 'handles malformed JSON gracefully' do
+      bad_dir = File.join(tmpdir, 'service')
+      FileUtils.mkdir_p(bad_dir)
+      File.write(File.join(bad_dir, 'bad_service.json'), 'not valid json{{{')
+
+      exporter = described_class.new(index_dir: tmpdir)
+      metadata = exporter.send(:load_unit_metadata)
+
+      # Should still have User from model dir, bad file skipped
+      expect(metadata).to have_key('User')
+      expect(metadata.size).to eq(1)
+    end
+  end
 end
