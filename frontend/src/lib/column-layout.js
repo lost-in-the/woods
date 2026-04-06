@@ -46,11 +46,22 @@ export function layoutColumns(nodes, columnMap, centerNodeId) {
   const sortedCols = [...columns.keys()].sort((a, b) => a - b);
   const minCol = sortedCols[0] || 0;
 
+  // Find center column index for direction-based handle placement
+  const centerCol = 0;
+
   // Position each column
   const positioned = [];
   for (const colIndex of sortedCols) {
     const colNodes = columns.get(colIndex);
     const xOffset = (colIndex - minCol) * (COLUMN_WIDTH + COLUMN_GAP);
+
+    // Handle positions face toward center:
+    // Left column nodes → handles on RIGHT (toward center)
+    // Right column nodes → handles on LEFT (toward center)
+    // Center → default (left target, right source)
+    const isLeft = colIndex < centerCol;
+    const isRight = colIndex > centerCol;
+    const handleSide = isLeft ? 'right' : isRight ? 'left' : null;
 
     let yOffset = HEADER_HEIGHT; // leave room for column header
 
@@ -59,8 +70,8 @@ export function layoutColumns(nodes, columnMap, centerNodeId) {
       positioned.push({
         ...node,
         position: { x: xOffset, y: yOffset },
-        sourcePosition: 'right',
-        targetPosition: 'left',
+        sourcePosition: handleSide || 'right',
+        targetPosition: handleSide || 'left',
         style: node.id === centerNodeId
           ? `border-color: #22c55e; box-shadow: 0 0 20px rgba(34, 197, 94, 0.15);`
           : undefined,

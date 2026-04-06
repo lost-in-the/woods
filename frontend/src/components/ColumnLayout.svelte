@@ -37,16 +37,36 @@
     }));
   });
 
+  // Only show edges connected to the center node to avoid inter-neighbor spaghetti.
+  // Route through FK/PK column handles on center for Liam ERD-style connections.
   const visibleEdges = $derived.by(() => {
+    const centerNode = allNodes.find((n) => n.id === centerNodeId);
+    const centerColumns = centerNode?.data?.columns || [];
+
     return allEdges
       .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
-      .map((e) => ({
-        ...e,
-        style: e.data?.isCycle
-          ? 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;'
-          : 'stroke: #475569; stroke-width: 1.5px',
-        animated: false,
-      }));
+      .filter((e) => e.source === centerNodeId || e.target === centerNodeId)
+      .map((e) => {
+        const edge = {
+          ...e,
+          style: e.data?.isCycle
+            ? 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;'
+            : 'stroke: #475569; stroke-width: 1.5px',
+          animated: false,
+        };
+
+        if (e.source === centerNodeId) {
+          // Center depends on target → route through FK column on center's left side
+          const fkCol = findFkColumn(centerColumns, e.target);
+          if (fkCol) edge.sourceHandle = `col-left-${fkCol.name}`;
+        } else {
+          // Source depends on center → route to center's PK column on right side
+          const pkCol = centerColumns.find((c) => c.primary);
+          if (pkCol) edge.targetHandle = `col-right-${pkCol.name}`;
+        }
+
+        return edge;
+      });
   });
 
   // Compute column assignments and layout
@@ -66,6 +86,20 @@
     layoutedNodes = layoutColumns(visibleNodes, columnMap, centerNodeId);
     layoutedEdges = visibleEdges;
   });
+
+  /**
+   * Find the FK column on the center node that matches a target model name.
+   * e.g., target "Country" → column "country_id", target "PlanPrice" → "plan_price_id"
+   */
+  function findFkColumn(columns, targetId) {
+    const snake = targetId
+      .replace(/::/g, '/')
+      .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+      .toLowerCase()
+      .replace(/\//g, '_');
+    const fkName = snake + '_id';
+    return columns.find((c) => c.name === fkName);
+  }
 
   function handleNodeClick({ node }) {
     onNodeSelect?.(node);
