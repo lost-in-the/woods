@@ -86,7 +86,7 @@
         type="target"
         position={Position.Left}
         id={`${data.label}-${col.name}`}
-        style="top: auto; left: -4px; width: 8px; height: 8px; background: {col.foreign ? COLORS.edgeActive : 'transparent'}; border: none;"
+        style="top: auto; left: -4px; width: 8px; height: 8px; background: transparent; border: none;"
       />
       <span class="col-icon">{columnIcon(col)}</span>
       <span class="col-name">{col.name}</span>
@@ -95,7 +95,7 @@
         type="source"
         position={Position.Right}
         id={`${data.label}-${col.name}`}
-        style="top: auto; right: -4px; width: 8px; height: 8px; background: {col.primary ? COLORS.edgeActive : 'transparent'}; border: none;"
+        style="top: auto; right: -4px; width: 8px; height: 8px; background: transparent; border: none;"
       />
     </div>
   {/each}
