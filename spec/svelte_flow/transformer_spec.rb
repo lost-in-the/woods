@@ -200,6 +200,87 @@ RSpec.describe Woods::SvelteFlow::Transformer do
     end
   end
 
+  describe '#dependency_graph_data with association metadata' do
+    let(:unit_metadata) do
+      {
+        'User' => {
+          'type' => 'model',
+          'metadata' => {
+            'primary_key' => 'id',
+            'columns' => [
+              { 'name' => 'id', 'type' => 'bigint', 'null' => false }
+            ],
+            'associations' => [
+              {
+                'type' => 'has_many',
+                'target' => 'Post',
+                'foreign_key' => 'user_id',
+                'through' => nil,
+                'polymorphic' => false
+              }
+            ]
+          }
+        },
+        'Post' => {
+          'type' => 'model',
+          'metadata' => {
+            'primary_key' => 'id',
+            'columns' => [
+              { 'name' => 'id', 'type' => 'bigint', 'null' => false },
+              { 'name' => 'user_id', 'type' => 'bigint', 'null' => false }
+            ],
+            'associations' => [
+              {
+                'type' => 'belongs_to',
+                'target' => 'User',
+                'foreign_key' => 'user_id',
+                'through' => nil,
+                'polymorphic' => false
+              }
+            ]
+          }
+        },
+        'UsersController' => {
+          'type' => 'controller',
+          'metadata' => {
+            'actions' => %w[index show]
+          }
+        }
+      }
+    end
+
+    subject { described_class.new(graph: graph, analyzer: analyzer, unit_metadata: unit_metadata) }
+
+    let(:result) { subject.dependency_graph_data }
+
+    it 'produces association-type edges for model-to-model relationships' do
+      assoc_edges = result['edges'].select { |e| e['type'] == 'association' }
+      expect(assoc_edges).not_to be_empty
+    end
+
+    it 'includes ERD data fields on association edges' do
+      assoc_edge = result['edges'].find { |e| e['type'] == 'association' }
+      expect(assoc_edge['data']).to have_key('via')
+      expect(assoc_edge['data']).to have_key('foreignKey')
+      expect(assoc_edge['data']).to have_key('sourceHandle')
+      expect(assoc_edge['data']).to have_key('targetHandle')
+    end
+
+    it 'does not duplicate model-to-model edges as default type' do
+      # User→Post relationship should only appear as association, not also as default
+      user_post_default = result['edges'].select do |e|
+        e['source'] == 'Post' && e['target'] == 'User' && e['type'] == 'default'
+      end
+      expect(user_post_default).to be_empty
+    end
+
+    it 'keeps non-model edges as default type' do
+      controller_edges = result['edges'].select { |e| e['source'] == 'UsersController' }
+      expect(controller_edges).not_to be_empty
+      expect(controller_edges.all? { |e| e['type'] == 'default' }).to be true
+    end
+  end
+
   private
 
   def register_unit(graph, identifier, type, file_path, dependencies)

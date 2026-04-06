@@ -2,6 +2,7 @@
 
 require_relative 'node_builder'
 require_relative 'edge_builder'
+require_relative 'association_edge_builder'
 
 module Woods
   module SvelteFlow
@@ -53,16 +54,41 @@ module Woods
           reverse_edges: reverse
         )
 
+        # Build association edges for model↔model relationships
+        assoc_builder = AssociationEdgeBuilder.new(
+          unit_metadata: @unit_metadata,
+          cycle_edges: cycle_edges
+        )
+        association_edges = assoc_builder.build
+
+        # Collect model↔model pairs that AssociationEdgeBuilder handles
+        # so EdgeBuilder skips them (avoids duplicate edges)
+        model_ids = Set.new
+        @unit_metadata.each do |id, meta|
+          unit_type = (meta['type'] || meta[:type])&.to_s
+          model_ids.add(id) if unit_type == 'model'
+        end
+
+        exclude_pairs = Set.new
+        edges.each do |source, targets|
+          next unless model_ids.include?(source)
+
+          targets.each do |target|
+            exclude_pairs.add([source, target]) if model_ids.include?(target)
+          end
+        end
+
         valid_ids = Set.new(nodes.keys)
         edge_builder = EdgeBuilder.new(
           edges: edges,
           valid_node_ids: valid_ids,
-          cycle_edges: cycle_edges
+          cycle_edges: cycle_edges,
+          exclude_pairs: exclude_pairs
         )
 
         {
           'nodes' => node_builder.build,
-          'edges' => edge_builder.build
+          'edges' => association_edges + edge_builder.build
         }
       end
 

@@ -23,10 +23,12 @@ module Woods
       # @param edges [Hash<String, Array<String>>] Forward edges: source => [targets]
       # @param valid_node_ids [Set<String>] Set of node IDs that exist in the graph
       # @param cycle_edges [Set<Array<String>>] Set of [source, target] pairs that form cycles
-      def initialize(edges:, valid_node_ids:, cycle_edges: Set.new)
+      # @param exclude_pairs [Set<Array<String>>] Set of [source, target] pairs to skip
+      def initialize(edges:, valid_node_ids:, cycle_edges: Set.new, exclude_pairs: Set.new)
         @edges = edges
         @valid_node_ids = valid_node_ids
         @cycle_edges = cycle_edges
+        @exclude_pairs = exclude_pairs
       end
 
       # Build Svelte Flow edge objects for all dependency edges.
@@ -40,6 +42,7 @@ module Woods
 
           targets.each do |target|
             next unless @valid_node_ids.include?(target)
+            next if @exclude_pairs.include?([source, target])
 
             result << build_dependency_edge(source, target)
           end
