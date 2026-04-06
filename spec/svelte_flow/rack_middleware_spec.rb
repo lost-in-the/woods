@@ -83,13 +83,30 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
     end
 
     context 'when node is not found in graph' do
-      it 'returns 404 Not Found' do
-        config = double('config', output_dir: '/nonexistent')
-        allow(Woods).to receive(:configuration).and_return(config)
+      let(:fixture_dir) { Dir.mktmpdir }
+      let(:graph_data) do
+        {
+          'nodes' => { 'Account' => { 'type' => 'model' } },
+          'edges' => {},
+          'reverse' => {},
+          'pagerank' => { 'Account' => 0.016 }
+        }
+      end
 
+      before do
+        File.write(File.join(fixture_dir, 'manifest.json'), JSON.generate({ 'version' => 1 }))
+        File.write(File.join(fixture_dir, 'dependency_graph.json'), JSON.generate(graph_data))
+
+        config = double('config', output_dir: fixture_dir)
+        allow(Woods).to receive(:configuration).and_return(config)
+      end
+
+      after { FileUtils.rm_rf(fixture_dir) }
+
+      it 'returns 404 Not Found' do
         env = mock_env('/woods/visualize/api/graph/neighbors?node=NonExistent&depth=1')
         status, _headers, _body = middleware.call(env)
-        expect(status).to eq(503)
+        expect(status).to eq(404)
       end
     end
 
