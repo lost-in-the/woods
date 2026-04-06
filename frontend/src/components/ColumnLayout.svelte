@@ -49,14 +49,17 @@
         const via = e.data?.via;
         const isAssociation = e.type === 'association';
 
-        // Edge style — association edges use a visible color, others are subtle
+        // Edge style — association edges use a visible color, others are subtle.
+        // Note: isCycle from the dependency graph flags bidirectional association pairs
+        // (has_many + belongs_to), which are expected in ERD views — only apply dashed
+        // style to non-association cycle edges.
         let style = '';
-        if (e.data?.isCycle) {
-          style = 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;';
-        } else if (e.data?.through) {
+        if (isAssociation && e.data?.through) {
           style = 'stroke: #64748b; stroke-width: 1px; opacity: 0.5;';
         } else if (isAssociation) {
           style = 'stroke: #64748b; stroke-width: 1.5px;';
+        } else if (e.data?.isCycle) {
+          style = 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;';
         } else {
           style = 'stroke: #475569; stroke-width: 1px;';
         }

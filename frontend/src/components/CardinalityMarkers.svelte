@@ -34,10 +34,12 @@
     const flowContainer = el.closest('.svelte-flow');
     if (!flowContainer) return false;
 
-    // SvelteFlow renders edges in this SVG — markers must live here
-    const edgeSvg = flowContainer.querySelector('svg.svelte-flow__edges');
-    if (!edgeSvg) return false;
-    if (edgeSvg.querySelector('#marker-bar')) return true; // already injected
+    // SvelteFlow renders built-in markers in this SVG — custom markers must live here
+    // too, because each edge gets its own svg.svelte-flow__edge-wrapper and cross-SVG
+    // marker references are unreliable.
+    const markerSvg = flowContainer.querySelector('svg.svelte-flow__marker');
+    if (!markerSvg) return false;
+    if (markerSvg.querySelector('#marker-bar')) return true; // already injected
 
     const color = '#94a3b8';
     const defs = document.createElementNS(NS, 'defs');
@@ -59,7 +61,7 @@
       ])
     );
 
-    edgeSvg.prepend(defs);
+    markerSvg.prepend(defs);
     return true;
   }
 
