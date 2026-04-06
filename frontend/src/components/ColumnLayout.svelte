@@ -90,7 +90,7 @@
       {nodeTypes}
       onnodeclick={handleNodeClick}
       onpaneclick={handlePaneClick}
-      fitView
+      defaultViewport={{ x: 50, y: 50, zoom: 0.85 }}
       minZoom={0.1}
       maxZoom={2}
     >

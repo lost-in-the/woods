@@ -1,9 +1,16 @@
 /**
  * Graph state management for the bidirectional column explorer.
  *
- * Operates on raw graph data (nodes hash, edges adjacency list, reverse adjacency list)
- * and produces the set of visible node IDs based on center + expansions.
+ * Edge convention: source → target means "source depends on target".
+ * So forward edges (source = nodeId) point to dependencies (LEFT columns),
+ * and reverse edges (target = nodeId) point to dependents (RIGHT columns).
+ *
+ * Visual layout:
+ *   ← Dependencies (parents)  |  Center  |  Dependents (children) →
+ *   things center depends on  |          |  things that depend on center
  */
+
+const MAX_INITIAL_NEIGHBORS = 20;
 
 /**
  * Get the forward dependencies of a node, grouped by relationship type.
@@ -14,15 +21,10 @@
  */
 export function getGroupedDependencies(nodeId, allNodes, allEdges) {
   const groups = {};
-  const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
-  const centerNode = nodeMap.get(nodeId);
 
   for (const edge of allEdges) {
     if (edge.source !== nodeId) continue;
-    const targetNode = nodeMap.get(edge.target);
-    if (!targetNode) continue;
 
-    // Determine relationship type from edge data or association metadata
     const via = edge.data?.via || 'dependency';
     if (!groups[via]) groups[via] = [];
     groups[via].push(edge.target);
@@ -40,12 +42,9 @@ export function getGroupedDependencies(nodeId, allNodes, allEdges) {
  */
 export function getGroupedDependents(nodeId, allNodes, allEdges) {
   const groups = {};
-  const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
 
   for (const edge of allEdges) {
     if (edge.target !== nodeId) continue;
-    const sourceNode = nodeMap.get(edge.source);
-    if (!sourceNode) continue;
 
     const via = edge.data?.via || 'dependency';
     if (!groups[via]) groups[via] = [];
@@ -56,7 +55,26 @@ export function getGroupedDependents(nodeId, allNodes, allEdges) {
 }
 
 /**
+ * Pick the top N neighbors by PageRank from a list of node IDs.
+ * @param {Array<string>} neighborIds
+ * @param {Map<string, Object>} nodeMap - id => node
+ * @param {number} max
+ * @returns {Array<string>}
+ */
+function topByPageRank(neighborIds, nodeMap, max) {
+  return neighborIds
+    .map((id) => ({ id, rank: nodeMap.get(id)?.data?.pagerank || 0 }))
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, max)
+    .map((x) => x.id);
+}
+
+/**
  * Compute the set of visible node IDs based on center node and expanded branches.
+ *
+ * Initial view: center + top N neighbors per direction (by PageRank).
+ * Expanded branches add more nodes beyond the initial set.
+ *
  * @param {string} centerNodeId
  * @param {Map<string, Set<string>>} expandedBranches - nodeId => Set('left'|'right')
  * @param {Array} allNodes
@@ -67,24 +85,39 @@ export function getGroupedDependents(nodeId, allNodes, allEdges) {
 export function computeVisibleNodes(centerNodeId, expandedBranches, allNodes, allEdges, hiddenNodeIds) {
   if (!centerNodeId) return new Set();
 
+  const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
   const visible = new Set([centerNodeId]);
 
-  // Depth 1: direct neighbors of center
+  // Depth 1: direct neighbors of center, limited to top N per direction
+  // Left = dependencies (things center depends on): edge.source === center
+  const leftNeighbors = [];
+  // Right = dependents (things that depend on center): edge.target === center
+  const rightNeighbors = [];
+
   for (const edge of allEdges) {
-    if (edge.source === centerNodeId) visible.add(edge.target);
-    if (edge.target === centerNodeId) visible.add(edge.source);
+    if (edge.source === centerNodeId) leftNeighbors.push(edge.target);
+    if (edge.target === centerNodeId) rightNeighbors.push(edge.source);
+  }
+
+  for (const id of topByPageRank(leftNeighbors, nodeMap, MAX_INITIAL_NEIGHBORS)) {
+    visible.add(id);
+  }
+  for (const id of topByPageRank(rightNeighbors, nodeMap, MAX_INITIAL_NEIGHBORS)) {
+    visible.add(id);
   }
 
   // Expanded branches: for each expanded node, add its neighbors in the expanded direction
+  // "left" expansion = show more dependencies (forward edges from this node)
+  // "right" expansion = show more dependents (reverse edges to this node)
   for (const [nodeId, directions] of expandedBranches) {
-    if (!visible.has(nodeId)) continue; // only expand visible nodes
+    if (!visible.has(nodeId)) continue;
 
-    if (directions.has('right')) {
+    if (directions.has('left')) {
       for (const edge of allEdges) {
         if (edge.source === nodeId) visible.add(edge.target);
       }
     }
-    if (directions.has('left')) {
+    if (directions.has('right')) {
       for (const edge of allEdges) {
         if (edge.target === nodeId) visible.add(edge.source);
       }
@@ -117,7 +150,8 @@ export function expandRecursive(startNodeId, direction, allEdges, maxDepth = 5) 
     for (const nodeId of frontier) {
       const neighbors = [];
 
-      if (direction === 'right') {
+      if (direction === 'left') {
+        // Left = dependencies: forward edges from this node
         for (const edge of allEdges) {
           if (edge.source === nodeId && !visited.has(edge.target)) {
             visited.add(edge.target);
@@ -125,6 +159,7 @@ export function expandRecursive(startNodeId, direction, allEdges, maxDepth = 5) 
           }
         }
       } else {
+        // Right = dependents: reverse edges to this node
         for (const edge of allEdges) {
           if (edge.target === nodeId && !visited.has(edge.source)) {
             visited.add(edge.source);
@@ -148,7 +183,11 @@ export function expandRecursive(startNodeId, direction, allEdges, maxDepth = 5) 
 
 /**
  * Determine which column (depth level) each visible node belongs to.
- * Center = 0, left neighbors = -1, right neighbors = +1, etc.
+ *
+ * Center = 0.
+ * Dependencies (forward edges, things center depends on) = negative columns (LEFT).
+ * Dependents (reverse edges, things that depend on center) = positive columns (RIGHT).
+ *
  * @param {string} centerNodeId
  * @param {Set<string>} visibleNodeIds
  * @param {Array} allEdges
@@ -165,21 +204,21 @@ export function assignColumns(centerNodeId, visibleNodeIds, allEdges, expandedBr
   while (queue.length > 0) {
     const { id, col } = queue.shift();
 
-    // Right (forward dependencies)
+    // Forward edges (source = id): dependencies go LEFT (negative columns)
     for (const edge of allEdges) {
       if (edge.source === id && visibleNodeIds.has(edge.target) && !visited.has(edge.target)) {
         visited.add(edge.target);
-        const nextCol = col + 1;
+        const nextCol = col - 1;
         columns.set(edge.target, nextCol);
         queue.push({ id: edge.target, col: nextCol });
       }
     }
 
-    // Left (reverse dependencies / dependents)
+    // Reverse edges (target = id): dependents go RIGHT (positive columns)
     for (const edge of allEdges) {
       if (edge.target === id && visibleNodeIds.has(edge.source) && !visited.has(edge.source)) {
         visited.add(edge.source);
-        const nextCol = col - 1;
+        const nextCol = col + 1;
         columns.set(edge.source, nextCol);
         queue.push({ id: edge.source, col: nextCol });
       }
@@ -199,8 +238,10 @@ export function assignColumns(centerNodeId, visibleNodeIds, allEdges, expandedBr
  * @returns {boolean}
  */
 export function hasMoreInDirection(nodeId, direction, allEdges, visibleNodeIds) {
-  if (direction === 'right') {
+  if (direction === 'left') {
+    // Left = more dependencies (forward edges from this node not yet visible)
     return allEdges.some((e) => e.source === nodeId && !visibleNodeIds.has(e.target));
   }
+  // Right = more dependents (reverse edges to this node not yet visible)
   return allEdges.some((e) => e.target === nodeId && !visibleNodeIds.has(e.source));
 }
