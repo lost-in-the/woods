@@ -4,14 +4,18 @@ require 'spec_helper'
 require 'woods'
 require 'woods/svelte_flow/rack_middleware'
 require 'rack'
+require 'tmpdir'
+require 'fileutils'
 
 RSpec.describe Woods::SvelteFlow::RackMiddleware do
   let(:inner_app) { ->(_env) { [200, { 'content-type' => 'text/plain' }, ['inner app']] } }
   let(:middleware) { described_class.new(inner_app, path: '/woods/visualize') }
 
-  def mock_env(path, method: 'GET')
+  def mock_env(url, method: 'GET')
+    path, query = url.split('?', 2)
     {
       'PATH_INFO' => path,
+      'QUERY_STRING' => query || '',
       'REQUEST_METHOD' => method,
       'rack.input' => StringIO.new
     }
@@ -66,6 +70,78 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
       html = body.first
       expect(html).to include('content="/woods/visualize"')
       expect(html).not_to include('{{BASE_PATH}}')
+    end
+  end
+
+  describe 'GET /api/graph/neighbors' do
+    context 'when node parameter is missing' do
+      it 'returns 400 Bad Request' do
+        env = mock_env('/woods/visualize/api/graph/neighbors')
+        status, _headers, _body = middleware.call(env)
+        expect(status).to eq(400)
+      end
+    end
+
+    context 'when node is not found in graph' do
+      it 'returns 404 Not Found' do
+        config = double('config', output_dir: '/nonexistent')
+        allow(Woods).to receive(:configuration).and_return(config)
+
+        env = mock_env('/woods/visualize/api/graph/neighbors?node=NonExistent&depth=1')
+        status, _headers, _body = middleware.call(env)
+        expect(status).to eq(503)
+      end
+    end
+
+    context 'when node exists' do
+      let(:fixture_dir) { Dir.mktmpdir }
+      let(:graph_data) do
+        {
+          'nodes' => { 'Account' => { 'type' => 'model' }, 'Order' => { 'type' => 'model' } },
+          'edges' => { 'Account' => ['Order'] },
+          'reverse' => { 'Order' => ['Account'] },
+          'pagerank' => { 'Account' => 0.016, 'Order' => 0.012 }
+        }
+      end
+
+      before do
+        File.write(File.join(fixture_dir, 'manifest.json'), JSON.generate({ 'version' => 1 }))
+        File.write(File.join(fixture_dir, 'dependency_graph.json'), JSON.generate(graph_data))
+
+        config = double('config', output_dir: fixture_dir)
+        allow(Woods).to receive(:configuration).and_return(config)
+      end
+
+      after { FileUtils.rm_rf(fixture_dir) }
+
+      it 'returns the node and its neighbors at depth 1' do
+        env = mock_env('/woods/visualize/api/graph/neighbors?node=Account&depth=1')
+        status, headers, body = middleware.call(env)
+        expect(status).to eq(200)
+        expect(headers['content-type']).to eq('application/json')
+
+        data = JSON.parse(body.first)
+        expect(data).to have_key('nodes')
+        expect(data).to have_key('edges')
+        expect(data['nodes']).to be_an(Array)
+        node_ids = data['nodes'].map { |n| n['id'] }
+        expect(node_ids).to include('Account')
+      end
+
+      it 'defaults depth to 1 when not specified' do
+        env = mock_env('/woods/visualize/api/graph/neighbors?node=Account')
+        status, _headers, body = middleware.call(env)
+        expect(status).to eq(200)
+        data = JSON.parse(body.first)
+        expect(data['nodes']).to be_an(Array)
+      end
+
+      it 'includes highest_pagerank in response' do
+        env = mock_env('/woods/visualize/api/graph/neighbors?node=Account&depth=1')
+        _status, _headers, body = middleware.call(env)
+        data = JSON.parse(body.first)
+        expect(data).to have_key('highest_pagerank')
+      end
     end
   end
 

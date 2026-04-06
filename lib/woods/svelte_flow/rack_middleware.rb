@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'set'
 require_relative 'transformer'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
@@ -69,7 +70,7 @@ module Woods
       # @param sub_path [String] Path after the mount point
       # @param env [Hash] Rack environment
       # @return [Array] Rack response triple
-      def route_request(sub_path, _env)
+      def route_request(sub_path, env)
         case sub_path
         when '/'
           serve_html
@@ -79,6 +80,8 @@ module Woods
           serve_clusters_json
         when '/api/flows'
           serve_flows_index
+        when '/api/graph/neighbors'
+          serve_neighbors_json(env)
         when %r{\A/api/flows/(.+)\z}
           serve_flow_json(Regexp.last_match(1))
         when %r{\A/assets/(.+)\z}
@@ -270,6 +273,163 @@ module Woods
       # @return [String]
       def safe_key(identifier)
         identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+      end
+
+      # Serve a subgraph scoped to a node's neighborhood at a given BFS depth.
+      # Enables progressive loading instead of fetching the full graph upfront.
+      #
+      # @param env [Hash] Rack environment (reads QUERY_STRING for node and depth params)
+      # @return [Array] Rack response triple
+      def serve_neighbors_json(env) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+        query = Rack::Utils.parse_query(env['QUERY_STRING'] || '')
+        node_id = query['node']
+        return bad_request('Missing required parameter: node') unless node_id&.strip&.length&.positive?
+
+        depth = [(query['depth'] || '1').to_i, 5].min
+        depth = 1 if depth < 1
+
+        transformer = ensure_transformer
+        return service_unavailable unless transformer
+
+        graph = transformer.instance_variable_get(:@graph)
+        return not_found unless graph.node_exists?(node_id)
+
+        graph_data = graph.to_h
+        nodes = graph_data[:nodes] || graph_data['nodes'] || {}
+        edges = graph_data[:edges] || graph_data['edges'] || {}
+        reverse = graph_data[:reverse] || graph_data['reverse'] || {}
+
+        visited = collect_neighborhood(node_id, depth, edges: edges, reverse: reverse)
+
+        scoped_nodes, scoped_forward, scoped_reverse = build_scoped_graph(visited, nodes: nodes, edges: edges,
+                                                                                   reverse: reverse)
+
+        pagerank_scores = graph.pagerank
+        highest_pagerank = pagerank_scores.max_by { |_k, v| v }&.first
+
+        analyzer = transformer.instance_variable_get(:@analyzer)
+        unit_metadata = transformer.instance_variable_get(:@unit_metadata)
+
+        node_builder = NodeBuilder.new(
+          nodes: scoped_nodes,
+          positions: {},
+          pagerank: pagerank_scores,
+          analysis: build_neighbor_analysis(analyzer),
+          unit_metadata: unit_metadata || {},
+          forward_edges: scoped_forward,
+          reverse_edges: scoped_reverse
+        )
+
+        cycle_edges = build_neighbor_cycle_edges(analyzer, visited)
+
+        edge_builder = EdgeBuilder.new(
+          edges: scoped_forward,
+          valid_node_ids: visited,
+          cycle_edges: cycle_edges
+        )
+
+        data = {
+          'nodes' => node_builder.build,
+          'edges' => edge_builder.build,
+          'highest_pagerank' => highest_pagerank
+        }
+
+        json_response(data)
+      end
+
+      # BFS from node_id up to depth hops, traversing both forward and reverse edges.
+      #
+      # @param node_id [String]
+      # @param depth [Integer]
+      # @param edges [Hash<String, Array<String>>] Forward edges
+      # @param reverse [Hash<String, Array<String>>] Reverse edges (serialized as arrays after to_h)
+      # @return [Set<String>]
+      def collect_neighborhood(node_id, depth, edges:, reverse:)
+        visited = Set.new([node_id])
+        frontier = [node_id]
+
+        depth.times do
+          next_frontier = []
+          frontier.each do |current|
+            (edges[current] || []).each do |dep|
+              next if visited.include?(dep)
+
+              visited.add(dep)
+              next_frontier << dep
+            end
+            (reverse[current] || []).each do |dep|
+              next if visited.include?(dep)
+
+              visited.add(dep)
+              next_frontier << dep
+            end
+          end
+          frontier = next_frontier
+        end
+
+        visited
+      end
+
+      # Scope nodes and edges to the visited set.
+      #
+      # @param visited [Set<String>]
+      # @param nodes [Hash] All graph nodes
+      # @param edges [Hash<String, Array<String>>] Forward edges
+      # @param reverse [Hash<String, Array<String>>] Reverse edges (serialized as arrays)
+      # @return [Array(Hash, Hash, Hash)] scoped_nodes, scoped_forward, scoped_reverse
+      def build_scoped_graph(visited, nodes:, edges:, reverse:)
+        scoped_nodes = {}
+        visited.each { |id| scoped_nodes[id] = nodes[id] if nodes.key?(id) }
+
+        scoped_forward = {}
+        scoped_reverse = {}
+        visited.each do |source|
+          fwd = (edges[source] || []).select { |t| visited.include?(t) }
+          scoped_forward[source] = fwd unless fwd.empty?
+          rev = (reverse[source] || []).select { |t| visited.include?(t) }
+          scoped_reverse[source] = Set.new(rev) unless rev.empty?
+        end
+
+        [scoped_nodes, scoped_forward, scoped_reverse]
+      end
+
+      # Build analysis hash for NodeBuilder, scoped gracefully to what the analyzer provides.
+      # Returns the same shape as Transformer#build_analysis so NodeBuilder can consume it.
+      #
+      # @param analyzer [GraphAnalyzer]
+      # @return [Hash]
+      def build_neighbor_analysis(analyzer)
+        {
+          hubs: (analyzer.hubs(limit: 20) rescue []), # rubocop:disable Style/RescueModifier
+          bridges: (analyzer.bridges(limit: 20) rescue []), # rubocop:disable Style/RescueModifier
+          orphans: (analyzer.orphans rescue []) # rubocop:disable Style/RescueModifier
+        }
+      end
+
+      # Build cycle edge set scoped to visited node IDs.
+      #
+      # @param analyzer [GraphAnalyzer]
+      # @param visited [Set<String>]
+      # @return [Set<Array<String>>]
+      def build_neighbor_cycle_edges(analyzer, visited)
+        cycle_edges = Set.new
+        analyzer.cycles.each do |cycle|
+          cycle.each_cons(2) do |a, b|
+            cycle_edges.add([a, b]) if visited.include?(a) && visited.include?(b)
+          end
+        end
+        cycle_edges
+      rescue StandardError
+        Set.new
+      end
+
+      # Return a 400 Bad Request response with an error message.
+      #
+      # @param message [String] Error description
+      # @return [Array] Rack response triple
+      def bad_request(message)
+        [400, { 'content-type' => 'application/json' },
+         [JSON.generate({ 'error' => message })]]
       end
 
       # Return a JSON response.
