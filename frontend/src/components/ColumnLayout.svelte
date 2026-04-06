@@ -129,6 +129,9 @@
       {nodeTypes}
       onnodeclick={handleNodeClick}
       onpaneclick={handlePaneClick}
+      nodesConnectable={false}
+      edgesUpdatable={false}
+      nodesDraggable={true}
       fitView
       fitViewOptions={{ padding: 0.12, maxZoom: 0.85 }}
       minZoom={0.1}
