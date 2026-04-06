@@ -51,27 +51,31 @@
     {/if}
   </div>
 
-  {#each columns as col, i}
-    <div class="column-row">
-      <!-- Left handle for this column (for incoming FK references) -->
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={`col-left-${col.name}`}
-        style="top: auto; left: -4px; width: 8px; height: 8px; background: {col.foreign ? COLORS.edgeActive : 'transparent'}; border: none;"
-      />
-      <span class="col-icon">{columnIcon(col)}</span>
-      <span class="col-name">{col.name}</span>
-      <span class="col-type">{col.type || ''}</span>
-      <!-- Right handle for this column (for outgoing FK references) -->
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={`col-right-${col.name}`}
-        style="top: auto; right: -4px; width: 8px; height: 8px; background: {col.primary ? COLORS.edgeActive : 'transparent'}; border: none;"
-      />
+  {#if isCenter}
+    {#each columns as col, i}
+      <div class="column-row">
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={`col-left-${col.name}`}
+          style="top: auto; left: -4px; width: 8px; height: 8px; background: {col.foreign ? COLORS.edgeActive : 'transparent'}; border: none;"
+        />
+        <span class="col-icon">{columnIcon(col)}</span>
+        <span class="col-name">{col.name}</span>
+        <span class="col-type">{col.type || ''}</span>
+        <Handle
+          type="source"
+          position={Position.Right}
+          id={`col-right-${col.name}`}
+          style="top: auto; right: -4px; width: 8px; height: 8px; background: {col.primary ? COLORS.edgeActive : 'transparent'}; border: none;"
+        />
+      </div>
+    {/each}
+  {:else if columns.length > 0}
+    <div class="compact-summary">
+      {columns.length} columns
     </div>
-  {/each}
+  {/if}
 
   <Handle type="source" position={sourcePosition || Position.Right} />
 </div>
@@ -157,6 +161,13 @@
     opacity: 0.6;
     flex-shrink: 0;
     font-size: 9px;
+  }
+
+  .compact-summary {
+    padding: 3px 10px;
+    font-size: 9px;
+    color: #64748b;
+    border-top: 1px solid #334155;
   }
 
   .node-dimmed {

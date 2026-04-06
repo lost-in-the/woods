@@ -12,12 +12,15 @@ const HEADER_HEIGHT = 32;
 
 /**
  * Estimate the pixel height of a node.
+ * Center nodes show full column detail; neighbors show compact.
  * @param {Object} node - Svelte Flow node
+ * @param {boolean} isCenter - Whether this is the center node
  * @returns {number}
  */
-function estimateNodeHeight(node) {
+function estimateNodeHeight(node, isCenter) {
   const cols = node.data?.columns?.length || 0;
-  if (cols > 0) return BASE_NODE_HEIGHT + cols * COLUMN_ROW_HEIGHT;
+  if (isCenter && cols > 0) return BASE_NODE_HEIGHT + cols * COLUMN_ROW_HEIGHT;
+  if (cols > 0) return BASE_NODE_HEIGHT + 20; // compact summary row
   if (node.data?.attributes?.length) return BASE_NODE_HEIGHT + 24;
   return BASE_NODE_HEIGHT;
 }
@@ -52,7 +55,7 @@ export function layoutColumns(nodes, columnMap, centerNodeId) {
     let yOffset = HEADER_HEIGHT; // leave room for column header
 
     for (const node of colNodes) {
-      const height = estimateNodeHeight(node);
+      const height = estimateNodeHeight(node, node.id === centerNodeId);
       positioned.push({
         ...node,
         position: { x: xOffset, y: yOffset },
