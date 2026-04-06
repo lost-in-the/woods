@@ -40,7 +40,17 @@
     }));
   });
 
+  // Compute column assignments — needed before edge rendering for direction fix.
+  const columnMap = $derived(
+    assignColumns(centerNodeId, visibleNodeIds, allEdges, expandedBranches)
+  );
+
   // Only show edges connected to the center node to avoid inter-neighbor spaghetti.
+  // For visual correctness, edges must flow left-to-right (source on left, target on
+  // right). SvelteFlow routes source→RIGHT handle and target→LEFT handle by default.
+  // When the backend edge direction puts the source to the RIGHT of the target (e.g.,
+  // Order→Account where Order is in the right column), we swap source/target and their
+  // handles/markers so the edge exits the inner side of each node toward center.
   const visibleEdges = $derived.by(() => {
     return allEdges
       .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
@@ -49,53 +59,75 @@
         const via = e.data?.via;
         const isAssociation = e.type === 'association';
 
-        // Edge style — association edges use a visible color, others are subtle.
-        // Note: isCycle from the dependency graph flags bidirectional association pairs
-        // (has_many + belongs_to), which are expected in ERD views — only apply dashed
-        // style to non-association cycle edges.
+        // Check if we need to swap direction for visual left-to-right flow.
+        // columnMap: negative columns = left, 0 = center, positive = right.
+        const srcCol = columnMap.get(e.source) ?? 0;
+        const tgtCol = columnMap.get(e.target) ?? 0;
+        const needsSwap = srcCol > tgtCol;
+
+        // Resolve source/target after potential swap
+        const source = needsSwap ? e.target : e.source;
+        const target = needsSwap ? e.source : e.target;
+
+        // Edge style per spec
         let style = '';
         if (isAssociation && e.data?.through) {
-          style = 'stroke: #64748b; stroke-width: 1px; opacity: 0.5;';
+          style = 'stroke: #475569; stroke-width: 1px; opacity: 0.4;';
         } else if (isAssociation) {
-          style = 'stroke: #64748b; stroke-width: 1.5px;';
+          style = 'stroke: #475569; stroke-width: 1.5px;';
         } else if (e.data?.isCycle) {
           style = 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;';
         } else {
-          style = 'stroke: #475569; stroke-width: 1px;';
+          style = 'stroke: #475569; stroke-width: 1.5px;';
         }
 
-        // Cardinality markers via CSS on the path element
+        // Cardinality markers — assigned by via type, then swapped if edge was flipped.
+        // marker-start appears at the source (left) end, marker-end at the target (right).
+        let markerStart;
+        let markerEnd;
         if (isAssociation && via) {
           if (via === 'has_many') {
-            style += ' marker-start: url(#marker-crow-foot); marker-end: url(#marker-bar);';
+            markerStart = 'url(#marker-crow-foot)';
+            markerEnd = 'url(#marker-bar)';
           } else if (via === 'has_and_belongs_to_many') {
-            style += ' marker-start: url(#marker-crow-foot); marker-end: url(#marker-crow-foot);';
+            markerStart = 'url(#marker-crow-foot)';
+            markerEnd = 'url(#marker-crow-foot)';
           } else {
-            style += ' marker-end: url(#marker-bar);';
+            // belongs_to, has_one: bar on target (PK) end only
+            markerEnd = 'url(#marker-bar)';
           }
+
+          // Swap markers when edge direction was flipped
+          if (needsSwap) {
+            [markerStart, markerEnd] = [markerEnd, markerStart];
+          }
+        }
+
+        // Handle routing for association edges
+        let sourceHandle;
+        let targetHandle;
+        if (isAssociation) {
+          sourceHandle = needsSwap ? e.data?.targetHandle : e.data?.sourceHandle;
+          targetHandle = needsSwap ? e.data?.sourceHandle : e.data?.targetHandle;
         }
 
         const edge = {
           ...e,
-          type: 'default',
+          source,
+          target,
+          type: 'smoothstep',
           animated: false,
           style,
         };
 
-        // Column-level handle routing for association edges
-        if (isAssociation) {
-          if (e.data?.sourceHandle) edge.sourceHandle = e.data.sourceHandle;
-          if (e.data?.targetHandle) edge.targetHandle = e.data.targetHandle;
-        }
+        if (markerStart) edge.markerStart = markerStart;
+        if (markerEnd) edge.markerEnd = markerEnd;
+        if (sourceHandle) edge.sourceHandle = sourceHandle;
+        if (targetHandle) edge.targetHandle = targetHandle;
 
         return edge;
       });
   });
-
-  // Compute column assignments and layout
-  const columnMap = $derived(
-    assignColumns(centerNodeId, visibleNodeIds, allEdges, expandedBranches)
-  );
 
   let layoutedNodes = $state.raw([]);
   let layoutedEdges = $state.raw([]);
@@ -127,6 +159,7 @@
       No extraction data available. Run <code>rake woods:extract</code> first.
     </div>
   {:else}
+    <CardinalityMarkers />
     <SvelteFlow
       bind:nodes={layoutedNodes}
       bind:edges={layoutedEdges}
@@ -145,7 +178,6 @@
       <MiniMap />
       <Background />
       <FocusNode nodeId={focusNodeId} />
-      <CardinalityMarkers />
     </SvelteFlow>
   {/if}
 </div>
