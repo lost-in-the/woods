@@ -1,102 +1,39 @@
 <script>
-  import GraphView from './components/GraphView.svelte';
-  import ClusterView from './components/ClusterView.svelte';
+  import ColumnLayout from './components/ColumnLayout.svelte';
   import NodeDetail from './components/NodeDetail.svelte';
   import Sidebar from './components/Sidebar.svelte';
-  import { fetchJSON } from './lib/api.js';
-
-  let activeTab = $state('graph');
-  let activeNodeId = $state(null);
-  let visibleNodeIds = $state(new Set());
-  let filterText = $state('');
-  let collapsedTypes = $state(new Set());
+  import { fetchNeighbors, fetchFullGraph } from './lib/api.js';
+  import { computeVisibleNodes, expandRecursive } from './lib/graph-state.js';
 
   let allNodes = $state.raw([]);
   let allEdges = $state.raw([]);
-  let clusterNodes = $state.raw([]);
-  let clusterEdges = $state.raw([]);
-  let clusters = $state.raw([]);
   let loading = $state(true);
-  let focusNodeId = $state(null); // { id, t } object for uniqueness
+  let centerNodeId = $state(null);
+  let expandedBranches = $state(new Map());
+  let hiddenNodeIds = $state(new Set());
+  let recentNodes = $state([]);
+  let activeNodeId = $state(null);
+  let focusNodeId = $state(null);
+  let fullGraphLoaded = $state(false);
 
-  // Bidirectional adjacency set for the active node
-  const adjacencySet = $derived.by(() => {
-    if (!activeNodeId) return new Set();
-    const currentEdges = activeTab === 'clusters' ? clusterEdges : allEdges;
-    const neighbors = new Set();
-    for (const e of currentEdges) {
-      if (e.source === activeNodeId) neighbors.add(e.target);
-      if (e.target === activeNodeId) neighbors.add(e.source);
-    }
-    return neighbors;
-  });
+  // Compute visible nodes from state
+  const visibleNodeIds = $derived(
+    computeVisibleNodes(centerNodeId, expandedBranches, allNodes, allEdges, hiddenNodeIds)
+  );
 
-  // Nodes filtered by visibility, with highlight flags
-  const visibleNodes = $derived.by(() => {
-    const sourceNodes = activeTab === 'clusters' ? clusterNodes : allNodes;
-    return sourceNodes
-      .filter((n) => visibleNodeIds.has(n.id))
-      .map((n) => {
-        if (!activeNodeId) {
-          return { ...n, data: { ...n.data, isActive: undefined, isHighlighted: undefined } };
-        }
-        const isActive = n.id === activeNodeId;
-        const isHighlighted = adjacencySet.has(n.id);
-        return {
-          ...n,
-          data: { ...n.data, isActive, isHighlighted },
-        };
-      });
-  });
-
-  // Edges filtered to visible endpoints, with highlight styling
-  const visibleEdges = $derived.by(() => {
-    const sourceEdges = activeTab === 'clusters' ? clusterEdges : allEdges;
-    return sourceEdges
-      .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
-      .map((e) => {
-        if (!activeNodeId) return e;
-        const connected =
-          e.source === activeNodeId || e.target === activeNodeId;
-        return {
-          ...e,
-          style: connected
-            ? 'stroke: #22c55e; stroke-width: 2px'
-            : 'opacity: 0.3',
-          zIndex: connected ? 10 : 0,
-        };
-      });
-  });
-
-  // Full node object for the detail panel
+  // Active node for detail panel
   const selectedNode = $derived.by(() => {
     if (!activeNodeId) return null;
-    const sourceNodes = activeTab === 'clusters' ? clusterNodes : allNodes;
-    return sourceNodes.find((n) => n.id === activeNodeId) || null;
+    return allNodes.find((n) => n.id === activeNodeId) || null;
   });
 
-  function initCollapsedTypes(nodes) {
-    const types = [...new Set(nodes.map((n) => n.data?.unitType || 'default'))];
-    const TYPE_SORT_ORDER = [
-      'model', 'controller', 'job', 'service', 'mailer', 'concern',
-    ];
-    types.sort((a, b) => {
-      const ai = TYPE_SORT_ORDER.indexOf(a);
-      const bi = TYPE_SORT_ORDER.indexOf(b);
-      if (ai !== -1 && bi !== -1) return ai - bi;
-      if (ai !== -1) return -1;
-      if (bi !== -1) return 1;
-      return a.localeCompare(b);
-    });
-    // Collapse all except the first type
-    const collapsed = new Set(types.slice(1));
-    collapsedTypes = collapsed;
-  }
-
-  async function loadGraphData() {
+  /**
+   * Load the full dependency graph.
+   */
+  async function loadFullGraph() {
     loading = true;
     try {
-      const data = await fetchJSON('graph');
+      const data = await fetchFullGraph();
       const rawNodes = (data.nodes || []).map((n) => ({
         ...n,
         type: n.data?.unitType === 'model' ? 'model' : 'compact',
@@ -104,64 +41,39 @@
       }));
       const rawEdges = (data.edges || []).map((e) => ({
         ...e,
-        style: e.data?.isCycle
-          ? 'stroke: #ef4444; stroke-width: 2px'
-          : undefined,
-        animated: e.data?.isCycle || e.animated || false,
+        animated: e.data?.isCycle || false,
       }));
       allNodes = rawNodes;
       allEdges = rawEdges;
-      visibleNodeIds = new Set(rawNodes.map((n) => n.id));
-      initCollapsedTypes(rawNodes);
+      fullGraphLoaded = true;
+
+      // Auto-select highest pagerank node if no center
+      if (!centerNodeId && rawNodes.length > 0) {
+        const sorted = [...rawNodes].sort((a, b) =>
+          (b.data?.pagerank || 0) - (a.data?.pagerank || 0)
+        );
+        setCenterNode(sorted[0].id);
+      }
     } catch (e) {
-      console.error('Failed to load graph data:', e);
+      console.error('Failed to load graph:', e);
     }
     loading = false;
   }
 
-  async function loadClusterData() {
-    loading = true;
-    try {
-      const data = await fetchJSON('clusters');
-      const rawNodes = (data.nodes || []).map((n) => ({
-        ...n,
-        type: n.data?.unitType === 'model' ? 'model' : 'compact',
-        position: n.position || { x: 0, y: 0 },
-      }));
-      const rawEdges = (data.edges || []).map((e) => ({
-        ...e,
-        animated: e.data?.relationship === 'boundary' || e.animated || false,
-        style:
-          e.data?.relationship === 'boundary'
-            ? 'stroke: #22d3ee; stroke-dasharray: 5 5'
-            : undefined,
-      }));
-      clusterNodes = rawNodes;
-      clusterEdges = rawEdges;
-      clusters = data.clusters || [];
-      visibleNodeIds = new Set(rawNodes.map((n) => n.id));
-      initCollapsedTypes(rawNodes);
-    } catch (e) {
-      console.error('Failed to load cluster data:', e);
-    }
-    loading = false;
+  /**
+   * Set the center node and add to recent history.
+   */
+  function setCenterNode(id) {
+    centerNodeId = id;
+    activeNodeId = id;
+    expandedBranches = new Map();
+    focusNodeId = { id, t: Date.now() };
+
+    // Add to recent (deduplicate, max 10)
+    recentNodes = [id, ...recentNodes.filter((r) => r !== id)].slice(0, 10);
   }
 
-  function switchTab(tab) {
-    if (activeTab === tab) return;
-    activeTab = tab;
-    activeNodeId = null;
-    filterText = '';
-    if (tab === 'graph' && allNodes.length === 0) {
-      loadGraphData();
-    } else if (tab === 'clusters' && clusterNodes.length === 0) {
-      loadClusterData();
-    } else {
-      // Re-init visibleNodeIds for the new tab's data
-      const sourceNodes = tab === 'clusters' ? clusterNodes : allNodes;
-      visibleNodeIds = new Set(sourceNodes.map((n) => n.id));
-    }
-  }
+  // --- Event handlers ---
 
   function handleNodeSelect(node) {
     activeNodeId = node?.id || null;
@@ -176,136 +88,128 @@
   }
 
   function handleSelectUnit(id) {
-    activeNodeId = id;
-    focusNodeId = { id, t: Date.now() };
+    // Re-center on this node
+    setCenterNode(id);
   }
 
   function handleToggleVisibility(id) {
-    const next = new Set(visibleNodeIds);
+    const next = new Set(hiddenNodeIds);
     if (next.has(id)) {
       next.delete(id);
-      // If we're hiding the active node, deselect it
-      if (activeNodeId === id) activeNodeId = null;
     } else {
       next.add(id);
+      if (activeNodeId === id) activeNodeId = null;
     }
-    visibleNodeIds = next;
+    hiddenNodeIds = next;
   }
 
-  function handleFocusUnit(id) {
-    // Show only the selected node + its direct neighbors
-    const neighbors = new Set([id]);
-    const sourceEdges = activeTab === 'clusters' ? clusterEdges : allEdges;
-    for (const e of sourceEdges) {
-      if (e.source === id) neighbors.add(e.target);
-      if (e.target === id) neighbors.add(e.source);
+  function handleClearAll() {
+    // Reset to just the center node
+    expandedBranches = new Map();
+    hiddenNodeIds = new Set();
+  }
+
+  function handleExpand(nodeId, direction) {
+    const next = new Map(expandedBranches);
+    if (!next.has(nodeId)) next.set(nodeId, new Set());
+    next.get(nodeId).add(direction);
+    expandedBranches = next;
+  }
+
+  function handleCollapse(nodeId, direction) {
+    const next = new Map(expandedBranches);
+    if (next.has(nodeId)) {
+      next.get(nodeId).delete(direction);
+      if (next.get(nodeId).size === 0) next.delete(nodeId);
     }
-    visibleNodeIds = neighbors;
-    activeNodeId = id;
+    expandedBranches = next;
   }
 
-  function handleToggleCollapse(type) {
-    const next = new Set(collapsedTypes);
-    if (next.has(type)) {
-      next.delete(type);
-    } else {
-      next.add(type);
+  function handleExpandAll(nodeId, direction) {
+    const newBranches = expandRecursive(nodeId, direction, allEdges);
+    const next = new Map(expandedBranches);
+    for (const [id, dirs] of newBranches) {
+      if (!next.has(id)) next.set(id, new Set());
+      for (const d of dirs) next.get(id).add(d);
     }
-    collapsedTypes = next;
+    expandedBranches = next;
   }
-
-  function handleShowAll() {
-    const sourceNodes = activeTab === 'clusters' ? clusterNodes : allNodes;
-    visibleNodeIds = new Set(sourceNodes.map((n) => n.id));
-  }
-
-  function handleHideAll() {
-    visibleNodeIds = new Set();
-    activeNodeId = null;
-  }
-
-  const sidebarNodes = $derived(
-    activeTab === 'clusters' ? clusterNodes : allNodes
-  );
 
   // Initial load
-  loadGraphData();
+  loadFullGraph();
 </script>
 
-<div class="header">
-  <h1>Woods <span>Visualize</span></h1>
-  <div class="tabs">
-    <button
-      class="tab"
-      class:active={activeTab === 'graph'}
-      onclick={() => switchTab('graph')}
-    >
-      Dependencies
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === 'clusters'}
-      onclick={() => switchTab('clusters')}
-    >
-      Clusters
-    </button>
+<div class="app-layout">
+  <div class="header">
+    <h1>Woods <span>Visualize</span></h1>
   </div>
-</div>
 
-<Sidebar
-  allNodes={sidebarNodes}
-  {activeNodeId}
-  {visibleNodeIds}
-  bind:filterText
-  {collapsedTypes}
-  onSelectUnit={handleSelectUnit}
-  onToggleVisibility={handleToggleVisibility}
-  onFocusUnit={handleFocusUnit}
-  onToggleCollapse={handleToggleCollapse}
-  onShowAll={handleShowAll}
-  onHideAll={handleHideAll}
-/>
-
-<div class="main-content">
-  {#if activeTab === 'graph'}
-    <GraphView
-      nodes={visibleNodes}
-      edges={visibleEdges}
-      {loading}
-      {focusNodeId}
-      onNodeSelect={handleNodeSelect}
-      onCanvasClick={handleCanvasClick}
+  <div class="content">
+    <Sidebar
+      {allNodes}
+      {centerNodeId}
+      {visibleNodeIds}
+      {hiddenNodeIds}
+      {recentNodes}
+      onSelectUnit={handleSelectUnit}
+      onToggleVisibility={handleToggleVisibility}
+      onClearAll={handleClearAll}
     />
-  {:else if activeTab === 'clusters'}
-    <ClusterView
-      nodes={visibleNodes}
-      edges={visibleEdges}
-      {loading}
-      {focusNodeId}
-      onNodeSelect={handleNodeSelect}
-      onCanvasClick={handleCanvasClick}
-    />
-  {/if}
 
-  <NodeDetail node={selectedNode} onClose={handleCloseDetail} />
-</div>
-
-<div class="stats-bar">
-  <div class="stat">
-    Visible: <span class="stat-value">{visibleNodeIds.size}</span> / {sidebarNodes.length}
-  </div>
-  {#if activeTab === 'clusters' && clusters.length > 0}
-    <div class="stat">
-      Clusters: <span class="stat-value">{clusters.length}</span>
+    <div class="main-content">
+      <ColumnLayout
+        {allNodes}
+        {allEdges}
+        {visibleNodeIds}
+        {centerNodeId}
+        {expandedBranches}
+        {loading}
+        {focusNodeId}
+        onNodeSelect={handleNodeSelect}
+        onCanvasClick={handleCanvasClick}
+      />
+      <NodeDetail node={selectedNode} onClose={handleCloseDetail} />
     </div>
-  {/if}
+  </div>
 </div>
 
 <style>
-  .main-content {
-    position: relative;
-    overflow: hidden;
+  .app-layout {
     display: flex;
     flex-direction: column;
+    height: 100vh;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    border-bottom: 1px solid #334155;
+    background: #0f172a;
+  }
+
+  .header h1 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    color: #94a3b8;
+  }
+
+  .header h1 span {
+    color: #22c55e;
+  }
+
+  .content {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .main-content {
+    flex: 1;
+    position: relative;
+    display: flex;
   }
 </style>
