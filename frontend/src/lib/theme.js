@@ -1,49 +1,44 @@
+// Node type colors: border is the primary accent, bg is a dark tinted version
 export const TYPE_COLORS = {
-  model: { bg: '#1e3a5f', border: '#3b82f6', text: '#93c5fd' },
-  controller: { bg: '#1a3b2a', border: '#22c55e', text: '#86efac' },
-  service: { bg: '#3b1f3b', border: '#a855f7', text: '#d8b4fe' },
-  job: { bg: '#3b2e1a', border: '#f59e0b', text: '#fcd34d' },
-  mailer: { bg: '#3b1a2e', border: '#ec4899', text: '#f9a8d4' },
-  concern: { bg: '#1a3b3b', border: '#06b6d4', text: '#67e8f9' },
-  component: { bg: '#1a3b3b', border: '#14b8a6', text: '#5eead4' },
-  graphql: { bg: '#3b1a3b', border: '#e11d48', text: '#fda4af' },
-  serializer: { bg: '#2a3b1a', border: '#84cc16', text: '#bef264' },
-  policy: { bg: '#3b2a1a', border: '#f97316', text: '#fdba74' },
-  route: { bg: '#2a3b1a', border: '#84cc16', text: '#bef264' },
-  middleware: { bg: '#3b2a1a', border: '#f97316', text: '#fdba74' },
-  channel: { bg: '#1e1e3b', border: '#6366f1', text: '#a5b4fc' },
-  framework: { bg: '#27272a', border: '#71717a', text: '#a1a1aa' },
-  flow_step: { bg: '#1e293b', border: '#0ea5e9', text: '#7dd3fc' },
-  default: { bg: '#1e293b', border: '#475569', text: '#94a3b8' },
+  model:        { bg: '#1e1e3b', border: '#818cf8', text: '#c7d2fe' },
+  controller:   { bg: '#1a2e2e', border: '#2dd4bf', text: '#99f6e4' },
+  job:          { bg: '#2e2a1a', border: '#fbbf24', text: '#fde68a' },
+  service:      { bg: '#1e2433', border: '#64748b', text: '#cbd5e1' },
+  poro:         { bg: '#1e2433', border: '#64748b', text: '#cbd5e1' },
+  concern:      { bg: '#2a1e3b', border: '#a78bfa', text: '#ddd6fe' },
+  mailer:       { bg: '#2e1a2a', border: '#fb7185', text: '#fecdd3' },
+  graphql_type: { bg: '#1a2e33', border: '#22d3ee', text: '#a5f3fc' },
+  route:        { bg: '#2e2a1a', border: '#fb923c', text: '#fed7aa' },
+  migration:    { bg: '#1e2127', border: '#9ca3af', text: '#d1d5db' },
+  lib:          { bg: '#1a2e24', border: '#34d399', text: '#a7f3d0' },
+  decorator:    { bg: '#2a1e3b', border: '#a78bfa', text: '#ddd6fe' },
+  component:    { bg: '#1a2e2e', border: '#2dd4bf', text: '#99f6e4' },
+  channel:      { bg: '#1e1e3b', border: '#818cf8', text: '#c7d2fe' },
+  serializer:   { bg: '#1a2e24', border: '#34d399', text: '#a7f3d0' },
+  policy:       { bg: '#2e2a1a', border: '#fb923c', text: '#fed7aa' },
+  middleware:   { bg: '#2e2a1a', border: '#fb923c', text: '#fed7aa' },
+  engine:       { bg: '#1e2127', border: '#9ca3af', text: '#d1d5db' },
+  framework:    { bg: '#1e2127', border: '#71717a', text: '#a1a1aa' },
+  test_mapping: { bg: '#1e2127', border: '#71717a', text: '#a1a1aa' },
+  default:      { bg: '#1e293b', border: '#71717a', text: '#94a3b8' },
 };
 
-export const TYPE_DOT_COLORS = {
-  model: '#3b82f6',
-  controller: '#22c55e',
-  service: '#a855f7',
-  job: '#f59e0b',
-  mailer: '#ec4899',
-  concern: '#06b6d4',
-  component: '#14b8a6',
-  graphql: '#e11d48',
-  serializer: '#84cc16',
-  policy: '#f97316',
-  route: '#84cc16',
-  middleware: '#f97316',
-  channel: '#6366f1',
-  framework: '#71717a',
-  default: '#475569',
-};
+// Dot colors used in sidebar lists (same as border colors)
+export const TYPE_DOT_COLORS = Object.fromEntries(
+  Object.entries(TYPE_COLORS).map(([k, v]) => [k, v.border])
+);
 
+// Human-readable display names
 export const TYPE_DISPLAY_NAMES = {
   model: 'Models',
   controller: 'Controllers',
   service: 'Services',
+  poro: 'POROs',
   job: 'Jobs',
   mailer: 'Mailers',
   concern: 'Concerns',
   component: 'Components',
-  graphql: 'GraphQL',
+  graphql_type: 'GraphQL',
   serializer: 'Serializers',
   policy: 'Policies',
   route: 'Routes',
@@ -57,7 +52,29 @@ export const TYPE_DISPLAY_NAMES = {
   validator: 'Validators',
   channel: 'Channels',
   framework: 'Framework',
-  flow_step: 'Flow Steps',
+  test_mapping: 'Test Mappings',
+  migration: 'Migrations',
+  lib: 'Libraries',
+};
+
+// Functional colors — used across components
+export const COLORS = {
+  canvasBg: '#0f172a',
+  cardBg: '#1e293b',
+  centerBorder: '#22c55e',
+  centerGlow: 'rgba(34, 197, 94, 0.15)',
+  expandedBorder: '#22c55e',
+  textPrimary: '#e2e8f0',
+  textSecondary: '#94a3b8',
+  textMuted: '#64748b',
+  edgeDefault: '#475569',
+  edgeActive: '#22c55e',
+  edgeCycle: '#ef4444',
+  expandBtnBorder: '#334155',
+  expandBtnText: '#475569',
+  expandBtnHoverBorder: '#475569',
+  expandBtnHoverText: '#e2e8f0',
+  borderSubtle: '#334155',
 };
 
 export function getTypeColor(type) {
@@ -65,5 +82,5 @@ export function getTypeColor(type) {
 }
 
 export function getTypeDisplayName(type) {
-  return TYPE_DISPLAY_NAMES[type] || type.charAt(0).toUpperCase() + type.slice(1) + 's';
+  return TYPE_DISPLAY_NAMES[type] || type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ') + 's';
 }
