@@ -19,6 +19,7 @@
     expandedBranches,
     loading,
     focusNodeId,
+    showMode,
     onNodeSelect,
     onCanvasClick,
   } = $props();
@@ -33,6 +34,7 @@
       data: {
         ...n.data,
         isCenter: n.id === centerNodeId,
+        showMode,
       },
     }));
   });

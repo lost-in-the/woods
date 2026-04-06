@@ -2,6 +2,7 @@
   import ColumnLayout from './components/ColumnLayout.svelte';
   import NodeDetail from './components/NodeDetail.svelte';
   import Sidebar from './components/Sidebar.svelte';
+  import ShowModeSelector from './components/ShowModeSelector.svelte';
   import { fetchNeighbors, fetchFullGraph } from './lib/api.js';
   import { computeVisibleNodes, expandRecursive } from './lib/graph-state.js';
 
@@ -15,6 +16,14 @@
   let activeNodeId = $state(null);
   let focusNodeId = $state(null);
   let fullGraphLoaded = $state(false);
+
+  const SHOW_MODE_KEY = 'woods-flow-show-mode';
+  let showMode = $state(localStorage.getItem(SHOW_MODE_KEY) || 'all_fields');
+
+  function handleShowModeChange(mode) {
+    showMode = mode;
+    localStorage.setItem(SHOW_MODE_KEY, mode);
+  }
 
   // Compute visible nodes from state
   const visibleNodeIds = $derived(
@@ -142,6 +151,9 @@
 <div class="app-layout">
   <div class="header">
     <h1>Woods <span>Visualize</span></h1>
+    <div class="header-controls">
+      <ShowModeSelector mode={showMode} onModeChange={handleShowModeChange} />
+    </div>
   </div>
 
   <div class="content">
@@ -167,6 +179,7 @@
         {expandedBranches}
         {loading}
         {focusNodeId}
+        {showMode}
         onNodeSelect={handleNodeSelect}
         onCanvasClick={handleCanvasClick}
       />
@@ -187,9 +200,16 @@
   .header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     padding: 8px 16px;
     border-bottom: 1px solid #334155;
     background: #0f172a;
+  }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .header h1 {

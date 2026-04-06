@@ -11,6 +11,7 @@
   );
   const columns = $derived(data?.columns || []);
   const isCenter = $derived(data?.isCenter || false);
+  const showMode = $derived(data?.showMode || 'all_fields');
 
   const COLLAPSE_THRESHOLD = 20;
   const VISIBLE_WHEN_COLLAPSED = 8;
@@ -18,6 +19,9 @@
   let expanded = $state(false);
 
   const visibleColumns = $derived.by(() => {
+    if (showMode === 'table_name') return [];
+    if (showMode === 'key_only') return columns.filter((c) => c.primary || c.foreign);
+    // all_fields mode — use collapse logic
     if (columns.length <= COLLAPSE_THRESHOLD || expanded) return columns;
 
     // Show first N + all PK/FK columns

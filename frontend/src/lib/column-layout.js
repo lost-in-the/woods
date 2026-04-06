@@ -11,18 +11,28 @@ const COLUMN_ROW_HEIGHT = 20;
 const HEADER_HEIGHT = 32;
 
 /**
- * Estimate the pixel height of a node.
- * Center nodes show full column detail; neighbors show compact.
+ * Estimate the pixel height of a node based on show mode.
  * @param {Object} node - Svelte Flow node
- * @param {boolean} isCenter - Whether this is the center node
  * @returns {number}
  */
-function estimateNodeHeight(node, isCenter) {
+function estimateNodeHeight(node) {
   const cols = node.data?.columns?.length || 0;
-  if (isCenter && cols > 0) return BASE_NODE_HEIGHT + cols * COLUMN_ROW_HEIGHT;
-  if (cols > 0) return BASE_NODE_HEIGHT + 20; // compact summary row
-  if (node.data?.attributes?.length) return BASE_NODE_HEIGHT + 24;
-  return BASE_NODE_HEIGHT;
+  const showMode = node.data?.showMode || 'all_fields';
+
+  if (showMode === 'table_name' || cols === 0) return BASE_NODE_HEIGHT;
+  if (showMode === 'key_only') {
+    const keyCount = (node.data?.columns || []).filter((c) => c.primary || c.foreign).length;
+    return BASE_NODE_HEIGHT + keyCount * COLUMN_ROW_HEIGHT;
+  }
+
+  // all_fields — account for collapse
+  const COLLAPSE_THRESHOLD = 20;
+  const VISIBLE_WHEN_COLLAPSED = 8;
+  if (cols <= COLLAPSE_THRESHOLD) return BASE_NODE_HEIGHT + cols * COLUMN_ROW_HEIGHT;
+
+  const keyBeyond = (node.data?.columns || []).slice(VISIBLE_WHEN_COLLAPSED).filter((c) => c.primary || c.foreign).length;
+  const visibleCount = VISIBLE_WHEN_COLLAPSED + keyBeyond + 1; // +1 for "more" row
+  return BASE_NODE_HEIGHT + visibleCount * COLUMN_ROW_HEIGHT;
 }
 
 /**
@@ -66,7 +76,7 @@ export function layoutColumns(nodes, columnMap, centerNodeId) {
     let yOffset = HEADER_HEIGHT; // leave room for column header
 
     for (const node of colNodes) {
-      const height = estimateNodeHeight(node, node.id === centerNodeId);
+      const height = estimateNodeHeight(node);
       positioned.push({
         ...node,
         position: { x: xOffset, y: yOffset },
