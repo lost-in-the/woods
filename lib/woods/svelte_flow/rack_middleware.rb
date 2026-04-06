@@ -283,7 +283,7 @@ module Woods
       def serve_neighbors_json(env) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
         query = Rack::Utils.parse_query(env['QUERY_STRING'] || '')
         node_id = query['node']
-        return bad_request('Missing required parameter: node') unless node_id&.strip&.length&.positive?
+        return bad_request('Missing required parameter: node') unless node_id && !node_id.strip.empty?
 
         depth = [(query['depth'] || '1').to_i, 5].min
         depth = 1 if depth < 1
@@ -291,7 +291,7 @@ module Woods
         transformer = ensure_transformer
         return service_unavailable unless transformer
 
-        graph = transformer.instance_variable_get(:@graph)
+        graph = transformer.graph
         return not_found unless graph.node_exists?(node_id)
 
         graph_data = graph.to_h
@@ -307,8 +307,8 @@ module Woods
         pagerank_scores = graph.pagerank
         highest_pagerank = pagerank_scores.max_by { |_k, v| v }&.first
 
-        analyzer = transformer.instance_variable_get(:@analyzer)
-        unit_metadata = transformer.instance_variable_get(:@unit_metadata)
+        analyzer = transformer.analyzer
+        unit_metadata = transformer.unit_metadata
 
         node_builder = NodeBuilder.new(
           nodes: scoped_nodes,
@@ -400,10 +400,19 @@ module Woods
       # @return [Hash]
       def build_neighbor_analysis(analyzer)
         {
-          hubs: (analyzer.hubs(limit: 20) rescue []), # rubocop:disable Style/RescueModifier
-          bridges: (analyzer.bridges(limit: 20) rescue []), # rubocop:disable Style/RescueModifier
-          orphans: (analyzer.orphans rescue []) # rubocop:disable Style/RescueModifier
+          hubs: safe_analysis { analyzer.hubs(limit: 20) },
+          bridges: safe_analysis { analyzer.bridges(limit: 20) },
+          orphans: safe_analysis { analyzer.orphans }
         }
+      end
+
+      # Safely call a GraphAnalyzer method, returning [] on any error.
+      #
+      # @return [Array]
+      def safe_analysis
+        yield
+      rescue StandardError
+        []
       end
 
       # Build cycle edge set scoped to visited node IDs.

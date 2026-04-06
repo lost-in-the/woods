@@ -26,6 +26,8 @@ module Woods
         @unit_metadata = unit_metadata
       end
 
+      attr_reader :graph, :analyzer, :unit_metadata
+
       # Convert the full dependency graph into Svelte Flow format.
       #
       # @return [Hash] { "nodes" => Array, "edges" => Array }
