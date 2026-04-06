@@ -10,7 +10,7 @@
  *   things center depends on  |          |  things that depend on center
  */
 
-const MAX_INITIAL_NEIGHBORS = 20;
+const MAX_INITIAL_NEIGHBORS = 10;
 
 /**
  * Get the forward dependencies of a node, grouped by relationship type.
