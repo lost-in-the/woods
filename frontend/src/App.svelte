@@ -25,6 +25,21 @@
     localStorage.setItem(SHOW_MODE_KEY, mode);
   }
 
+  function getCenterFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('center') || null;
+  }
+
+  function updateUrl(centerId) {
+    const url = new URL(window.location.href);
+    if (centerId) {
+      url.searchParams.set('center', centerId);
+    } else {
+      url.searchParams.delete('center');
+    }
+    history.replaceState({}, '', url);
+  }
+
   // Compute visible nodes from state
   const visibleNodeIds = $derived(
     computeVisibleNodes(centerNodeId, expandedBranches, allNodes, allEdges, hiddenNodeIds)
@@ -56,12 +71,13 @@
       allEdges = rawEdges;
       fullGraphLoaded = true;
 
-      // Auto-select highest pagerank node if no center
+      // Auto-select highest pagerank node if no center, or restore from URL
       if (!centerNodeId && rawNodes.length > 0) {
-        const sorted = [...rawNodes].sort((a, b) =>
-          (b.data?.pagerank || 0) - (a.data?.pagerank || 0)
-        );
-        setCenterNode(sorted[0].id);
+        const urlCenter = getCenterFromUrl();
+        const targetId = urlCenter && rawNodes.some((n) => n.id === urlCenter)
+          ? urlCenter
+          : [...rawNodes].sort((a, b) => (b.data?.pagerank || 0) - (a.data?.pagerank || 0))[0].id;
+        setCenterNode(targetId);
       }
     } catch (e) {
       console.error('Failed to load graph:', e);
@@ -77,8 +93,8 @@
     activeNodeId = id;
     expandedBranches = new Map();
     focusNodeId = { id, t: Date.now() };
+    updateUrl(id);
 
-    // Add to recent (deduplicate, max 10)
     recentNodes = [id, ...recentNodes.filter((r) => r !== id)].slice(0, 10);
   }
 
