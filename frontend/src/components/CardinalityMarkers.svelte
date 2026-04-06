@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   let el;
 
@@ -29,28 +29,28 @@
     return marker;
   }
 
-  // Inject marker defs into SvelteFlow's own SVG so url(#id) references resolve.
-  // SvelteFlow renders edges in <svg class="svelte-flow__edges"> — markers must
-  // live inside that SVG for cross-browser compatibility.
-  onMount(() => {
-    const flowContainer = el?.closest('.svelte-flow');
-    const edgeSvg = flowContainer?.querySelector('svg.svelte-flow__edges');
-    if (!edgeSvg) return;
+  function injectDefs() {
+    if (!el) return false;
+    const flowContainer = el.closest('.svelte-flow');
+    if (!flowContainer) return false;
 
-    if (edgeSvg.querySelector('#marker-bar')) return;
+    // SvelteFlow renders edges in this SVG — markers must live here
+    const edgeSvg = flowContainer.querySelector('svg.svelte-flow__edges');
+    if (!edgeSvg) return false;
+    if (edgeSvg.querySelector('#marker-bar')) return true; // already injected
 
     const color = '#94a3b8';
     const defs = document.createElementNS(NS, 'defs');
     defs.setAttribute('id', 'cardinality-markers');
 
-    // Bar marker (one)
+    // Bar marker (one side of relationship)
     defs.appendChild(
       createMarker('marker-bar', '0 0 10 14', '5', '7', '10', '14', [
         createLine('5', '0', '5', '14', color, '2'),
       ])
     );
 
-    // Crow's foot marker (many)
+    // Crow's foot marker (many side of relationship)
     defs.appendChild(
       createMarker('marker-crow-foot', '0 0 16 14', '1', '7', '16', '14', [
         createLine('14', '0', '1', '7', color, '1.5'),
@@ -60,10 +60,24 @@
     );
 
     edgeSvg.prepend(defs);
+    return true;
+  }
 
-    return () => {
-      defs.remove();
-    };
+  // Try injection after mount, with retries for SvelteFlow's async rendering
+  onMount(async () => {
+    await tick();
+    if (injectDefs()) return;
+
+    // SvelteFlow SVG may not exist yet — retry a few times
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      if (injectDefs() || attempts > 20) {
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
   });
 </script>
 

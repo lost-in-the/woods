@@ -29,7 +29,6 @@
     const keyColumns = columns.slice(VISIBLE_WHEN_COLLAPSED).filter(
       (c) => c.primary || c.foreign
     );
-    // Deduplicate (in case a key column is in the first N)
     const seen = new Set(first.map((c) => c.name));
     const extra = keyColumns.filter((c) => !seen.has(c.name));
     return [...first, ...extra];
@@ -63,14 +62,30 @@
     if (!col.nullable) return '\u25C6';
     return '\u25C7';
   }
+
+  // Liam-style handle: small circle visible on FK/PK columns, invisible on others
+  function handleStyle(side, col) {
+    const isKey = col.primary || col.foreign;
+    const base = side === 'left'
+      ? 'left: -5px;'
+      : 'right: -5px;';
+    if (isKey) {
+      return `${base} width: 8px; height: 8px; background: #1e293b; border: 1.5px solid #64748b; border-radius: 50%;`;
+    }
+    return `${base} width: 6px; height: 6px; background: transparent; border: none; opacity: 0;`;
+  }
 </script>
 
 <div
   class="model-node {highlightClass}"
   style="background:{colors.bg}; border-color:{borderColor}; color:{colors.text};"
 >
-  <!-- Card-level handles for non-column edges -->
-  <Handle type="target" position={targetPosition || Position.Left} />
+  <!-- Card-level handles — invisible, used only for non-column edges -->
+  <Handle
+    type="target"
+    position={targetPosition || Position.Left}
+    class="card-handle"
+  />
 
   <div class="node-header" style={isCenter ? `background: ${COLORS.centerGlow};` : ''}>
     <span class="type-dot" style="background:{colors.border};"></span>
@@ -86,7 +101,7 @@
         type="target"
         position={Position.Left}
         id={`${data.label}-${col.name}`}
-        style="top: auto; left: -4px; width: 8px; height: 8px; background: transparent; border: none;"
+        style={handleStyle('left', col)}
       />
       <span class="col-icon">{columnIcon(col)}</span>
       <span class="col-name">{col.name}</span>
@@ -95,7 +110,7 @@
         type="source"
         position={Position.Right}
         id={`${data.label}-${col.name}`}
-        style="top: auto; right: -4px; width: 8px; height: 8px; background: transparent; border: none;"
+        style={handleStyle('right', col)}
       />
     </div>
   {/each}
@@ -105,7 +120,11 @@
     </button>
   {/if}
 
-  <Handle type="source" position={sourcePosition || Position.Right} />
+  <Handle
+    type="source"
+    position={sourcePosition || Position.Right}
+    class="card-handle"
+  />
 </div>
 
 <style>
@@ -211,5 +230,16 @@
 
   .node-dimmed {
     opacity: 0.3;
+  }
+
+  /* Hide card-level handles — only column handles should be visible */
+  :global(.card-handle) {
+    width: 1px !important;
+    height: 1px !important;
+    background: transparent !important;
+    border: none !important;
+    opacity: 0 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
   }
 </style>

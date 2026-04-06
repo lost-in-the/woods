@@ -49,36 +49,37 @@
         const via = e.data?.via;
         const isAssociation = e.type === 'association';
 
-        // Build style string
+        // Edge style — association edges use a visible color, others are subtle
         let style = '';
         if (e.data?.isCycle) {
           style = 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;';
         } else if (e.data?.through) {
-          style = 'stroke: #475569; stroke-width: 1px; opacity: 0.4;';
+          style = 'stroke: #64748b; stroke-width: 1px; opacity: 0.5;';
+        } else if (isAssociation) {
+          style = 'stroke: #64748b; stroke-width: 1.5px;';
         } else {
-          style = 'stroke: #475569; stroke-width: 1.5px;';
+          style = 'stroke: #475569; stroke-width: 1px;';
         }
 
-        // Add cardinality markers via CSS
+        // Cardinality markers via CSS on the path element
         if (isAssociation && via) {
           if (via === 'has_many') {
             style += ' marker-start: url(#marker-crow-foot); marker-end: url(#marker-bar);';
           } else if (via === 'has_and_belongs_to_many') {
             style += ' marker-start: url(#marker-crow-foot); marker-end: url(#marker-crow-foot);';
           } else {
-            // belongs_to, has_one
             style += ' marker-end: url(#marker-bar);';
           }
         }
 
         const edge = {
           ...e,
-          type: isAssociation ? 'smoothstep' : 'default',
+          type: 'default',
           animated: false,
           style,
         };
 
-        // Handle IDs come directly from edge data — no heuristic matching
+        // Column-level handle routing for association edges
         if (isAssociation) {
           if (e.data?.sourceHandle) edge.sourceHandle = e.data.sourceHandle;
           if (e.data?.targetHandle) edge.targetHandle = e.data.targetHandle;
