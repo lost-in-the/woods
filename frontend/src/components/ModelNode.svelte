@@ -12,6 +12,31 @@
   const columns = $derived(data?.columns || []);
   const isCenter = $derived(data?.isCenter || false);
 
+  const COLLAPSE_THRESHOLD = 20;
+  const VISIBLE_WHEN_COLLAPSED = 8;
+
+  let expanded = $state(false);
+
+  const visibleColumns = $derived.by(() => {
+    if (columns.length <= COLLAPSE_THRESHOLD || expanded) return columns;
+
+    // Show first N + all PK/FK columns
+    const first = columns.slice(0, VISIBLE_WHEN_COLLAPSED);
+    const keyColumns = columns.slice(VISIBLE_WHEN_COLLAPSED).filter(
+      (c) => c.primary || c.foreign
+    );
+    // Deduplicate (in case a key column is in the first N)
+    const seen = new Set(first.map((c) => c.name));
+    const extra = keyColumns.filter((c) => !seen.has(c.name));
+    return [...first, ...extra];
+  });
+
+  const hiddenCount = $derived(
+    columns.length <= COLLAPSE_THRESHOLD || expanded
+      ? 0
+      : columns.length - visibleColumns.length
+  );
+
   const highlightClass = $derived.by(() => {
     if (isCenter) return 'node-center';
     if (data?.isActive === undefined) return '';
@@ -51,30 +76,29 @@
     {/if}
   </div>
 
-  {#if isCenter}
-    {#each columns as col, i}
-      <div class="column-row">
-        <Handle
-          type="target"
-          position={Position.Left}
-          id={`col-left-${col.name}`}
-          style="top: auto; left: -4px; width: 8px; height: 8px; background: {col.foreign ? COLORS.edgeActive : 'transparent'}; border: none;"
-        />
-        <span class="col-icon">{columnIcon(col)}</span>
-        <span class="col-name">{col.name}</span>
-        <span class="col-type">{col.type || ''}</span>
-        <Handle
-          type="source"
-          position={Position.Right}
-          id={`col-right-${col.name}`}
-          style="top: auto; right: -4px; width: 8px; height: 8px; background: {col.primary ? COLORS.edgeActive : 'transparent'}; border: none;"
-        />
-      </div>
-    {/each}
-  {:else if columns.length > 0}
-    <div class="compact-summary">
-      {columns.length} columns
+  {#each visibleColumns as col}
+    <div class="column-row">
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={`${data.label}-${col.name}`}
+        style="top: auto; left: -4px; width: 8px; height: 8px; background: {col.foreign ? COLORS.edgeActive : 'transparent'}; border: none;"
+      />
+      <span class="col-icon">{columnIcon(col)}</span>
+      <span class="col-name">{col.name}</span>
+      <span class="col-type">{col.type || ''}</span>
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={`${data.label}-${col.name}`}
+        style="top: auto; right: -4px; width: 8px; height: 8px; background: {col.primary ? COLORS.edgeActive : 'transparent'}; border: none;"
+      />
     </div>
+  {/each}
+  {#if hiddenCount > 0}
+    <button class="expand-columns-row" onclick={() => expanded = true}>
+      + {hiddenCount} more
+    </button>
   {/if}
 
   <Handle type="source" position={sourcePosition || Position.Right} />
@@ -163,11 +187,22 @@
     font-size: 9px;
   }
 
-  .compact-summary {
+  .expand-columns-row {
+    display: block;
+    width: 100%;
     padding: 3px 10px;
     font-size: 9px;
     color: #64748b;
+    background: transparent;
+    border: none;
     border-top: 1px solid #334155;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .expand-columns-row:hover {
+    color: #94a3b8;
+    background: rgba(51, 65, 85, 0.3);
   }
 
   .node-dimmed {
