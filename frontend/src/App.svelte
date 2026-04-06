@@ -145,16 +145,18 @@
   </div>
 
   <div class="content">
-    <Sidebar
-      {allNodes}
-      {centerNodeId}
-      {visibleNodeIds}
-      {hiddenNodeIds}
-      {recentNodes}
-      onSelectUnit={handleSelectUnit}
-      onToggleVisibility={handleToggleVisibility}
-      onClearAll={handleClearAll}
-    />
+    <div class="sidebar">
+      <Sidebar
+        {allNodes}
+        {centerNodeId}
+        {visibleNodeIds}
+        {hiddenNodeIds}
+        {recentNodes}
+        onSelectUnit={handleSelectUnit}
+        onToggleVisibility={handleToggleVisibility}
+        onClearAll={handleClearAll}
+      />
+    </div>
 
     <div class="main-content">
       <ColumnLayout
@@ -205,11 +207,21 @@
     display: flex;
     flex: 1;
     min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background: #1e293b;
+    border-right: 1px solid #475569;
+    overflow-y: auto;
   }
 
   .main-content {
     flex: 1;
     position: relative;
     display: flex;
+    min-width: 0;
   }
 </style>
