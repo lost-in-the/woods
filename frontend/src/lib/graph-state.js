@@ -90,19 +90,23 @@ export function computeVisibleNodes(centerNodeId, expandedBranches, allNodes, al
 
   // Depth 1: direct neighbors of center, limited to top N per direction
   // Left = dependencies (things center depends on): edge.source === center
-  const leftNeighbors = [];
   // Right = dependents (things that depend on center): edge.target === center
-  const rightNeighbors = [];
+  // Skip self-edges; deduplicate bidirectional neighbors → prefer right (dependent)
+  const leftAll = [];
+  const rightAll = [];
 
   for (const edge of allEdges) {
-    if (edge.source === centerNodeId) leftNeighbors.push(edge.target);
-    if (edge.target === centerNodeId) rightNeighbors.push(edge.source);
+    if (edge.source === centerNodeId && edge.target !== centerNodeId) leftAll.push(edge.target);
+    if (edge.target === centerNodeId && edge.source !== centerNodeId) rightAll.push(edge.source);
   }
 
-  for (const id of topByPageRank(leftNeighbors, nodeMap, MAX_INITIAL_NEIGHBORS)) {
+  const rightSet = new Set(rightAll);
+  const leftOnly = leftAll.filter((id) => !rightSet.has(id));
+
+  for (const id of topByPageRank(leftOnly, nodeMap, MAX_INITIAL_NEIGHBORS)) {
     visible.add(id);
   }
-  for (const id of topByPageRank(rightNeighbors, nodeMap, MAX_INITIAL_NEIGHBORS)) {
+  for (const id of topByPageRank(rightAll, nodeMap, MAX_INITIAL_NEIGHBORS)) {
     visible.add(id);
   }
 
@@ -197,9 +201,36 @@ export function expandRecursive(startNodeId, direction, allEdges, maxDepth = 5) 
 export function assignColumns(centerNodeId, visibleNodeIds, allEdges, expandedBranches) {
   const columns = new Map();
   columns.set(centerNodeId, 0);
-
   const visited = new Set([centerNodeId]);
-  const queue = [{ id: centerNodeId, col: 0 }];
+
+  // Step 1: Classify center's direct neighbors by direction.
+  // Bidirectional nodes (both dependency AND dependent) go RIGHT (dependent view).
+  const forwardFromCenter = new Set(); // dependency candidates (left)
+  const reverseToCenter = new Set();   // dependent candidates (right)
+
+  for (const edge of allEdges) {
+    if (edge.source === centerNodeId && edge.target !== centerNodeId && visibleNodeIds.has(edge.target)) {
+      forwardFromCenter.add(edge.target);
+    }
+    if (edge.target === centerNodeId && edge.source !== centerNodeId && visibleNodeIds.has(edge.source)) {
+      reverseToCenter.add(edge.source);
+    }
+  }
+
+  // Dependency-only → left; dependent (or bidirectional) → right
+  for (const id of forwardFromCenter) {
+    if (!reverseToCenter.has(id)) {
+      columns.set(id, -1);
+      visited.add(id);
+    }
+  }
+  for (const id of reverseToCenter) {
+    columns.set(id, 1);
+    visited.add(id);
+  }
+
+  // Step 2: BFS for expanded nodes beyond depth 1
+  const queue = [...columns.entries()].map(([id, col]) => ({ id, col }));
 
   while (queue.length > 0) {
     const { id, col } = queue.shift();
