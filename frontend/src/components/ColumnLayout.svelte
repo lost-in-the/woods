@@ -8,8 +8,11 @@
   import ModelNode from './ModelNode.svelte';
   import CompactNode from './CompactNode.svelte';
   import FocusNode from './FocusNode.svelte';
+  import { useSvelteFlow } from '@xyflow/svelte';
   import { layoutColumns } from '../lib/column-layout.js';
   import { assignColumns } from '../lib/graph-state.js';
+
+  const { fitView } = useSvelteFlow();
 
   let {
     allNodes,
@@ -43,9 +46,9 @@
       .map((e) => ({
         ...e,
         style: e.data?.isCycle
-          ? 'stroke: #ef4444; stroke-width: 2px'
+          ? 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;'
           : 'stroke: #475569; stroke-width: 1.5px',
-        animated: e.data?.isCycle || false,
+        animated: false,
       }));
   });
 
@@ -65,6 +68,11 @@
     }
     layoutedNodes = layoutColumns(visibleNodes, columnMap, centerNodeId);
     layoutedEdges = visibleEdges;
+
+    // After layout, fit to view with readable zoom
+    requestAnimationFrame(() => {
+      fitView({ padding: 0.15, maxZoom: 0.9, duration: 200 });
+    });
   });
 
   function handleNodeClick({ node }) {
@@ -90,7 +98,7 @@
       {nodeTypes}
       onnodeclick={handleNodeClick}
       onpaneclick={handlePaneClick}
-      defaultViewport={{ x: 50, y: 50, zoom: 0.85 }}
+      defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
       minZoom={0.1}
       maxZoom={2}
     >
