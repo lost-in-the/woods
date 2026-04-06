@@ -25,16 +25,13 @@
   class="compact-node {highlightClass}"
   style="background:{colors.bg}; border-color:{colors.border}; color:{colors.text};"
 >
-  <Handle type="target" position={targetPosition || Position.Top} />
+  <Handle type="target" position={targetPosition || Position.Left} />
 
   <div class="node-header">
     <span class="type-dot" style="background:{colors.border};"></span>
     <span class="node-name">{truncated}</span>
-    {#if data?.isHub}
-      <span class="badge hub">HUB</span>
-    {/if}
-    {#if data?.isBridge}
-      <span class="badge bridge">BRG</span>
+    {#if (data?.dependencyCount || 0) + (data?.dependentCount || 0) > 50}
+      <span class="badge connectivity">{(data?.dependencyCount || 0) + (data?.dependentCount || 0)}</span>
     {/if}
   </div>
 
@@ -42,7 +39,7 @@
     <div class="attr-row">{attributes}</div>
   {/if}
 
-  <Handle type="source" position={sourcePosition || Position.Bottom} />
+  <Handle type="source" position={sourcePosition || Position.Right} />
 </div>
 
 <style>
@@ -88,14 +85,9 @@
     flex-shrink: 0;
   }
 
-  .badge.hub {
-    background: #dc2626;
-    color: #fff;
-  }
-
-  .badge.bridge {
-    background: #f59e0b;
-    color: #000;
+  .badge.connectivity {
+    background: #334155;
+    color: #94a3b8;
   }
 
   .attr-row {
@@ -105,6 +97,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid #334155;
   }
 </style>

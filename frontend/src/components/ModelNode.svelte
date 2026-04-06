@@ -1,22 +1,32 @@
 <script>
   import { Handle, Position } from '@xyflow/svelte';
-  import { getTypeColor } from '../lib/theme.js';
+  import { getTypeColor, COLORS } from '../lib/theme.js';
 
   let { data, sourcePosition, targetPosition } = $props();
 
   const colors = $derived(getTypeColor(data?.unitType));
   const label = $derived(data?.label || '');
   const truncated = $derived(
-    label.length > 24 ? label.slice(0, 22) + '...' : label
+    label.length > 28 ? label.slice(0, 26) + '...' : label
   );
   const columns = $derived(data?.columns || []);
+  const isCenter = $derived(data?.isCenter || false);
 
   const highlightClass = $derived.by(() => {
+    if (isCenter) return 'node-center';
     if (data?.isActive === undefined) return '';
     if (data?.isActive) return 'node-active';
     if (data?.isHighlighted) return 'node-highlighted';
     return 'node-dimmed';
   });
+
+  const borderColor = $derived(
+    isCenter ? COLORS.centerBorder : colors.border
+  );
+
+  const connectionCount = $derived(
+    (data?.dependencyCount || 0) + (data?.dependentCount || 0)
+  );
 
   function columnIcon(col) {
     if (col.primary) return '\u{1F511}';
@@ -28,41 +38,57 @@
 
 <div
   class="model-node {highlightClass}"
-  style="background:{colors.bg}; border-color:{colors.border}; color:{colors.text};"
+  style="background:{colors.bg}; border-color:{borderColor}; color:{colors.text};"
 >
-  <Handle type="target" position={targetPosition || Position.Top} />
+  <!-- Card-level handles for non-column edges -->
+  <Handle type="target" position={targetPosition || Position.Left} />
 
-  <div class="node-header">
+  <div class="node-header" style={isCenter ? `background: ${COLORS.centerGlow};` : ''}>
     <span class="type-dot" style="background:{colors.border};"></span>
     <span class="node-name">{truncated}</span>
-    {#if data?.isHub}
-      <span class="badge hub">HUB</span>
-    {/if}
-    {#if data?.isBridge}
-      <span class="badge bridge">BRG</span>
+    {#if connectionCount > 50}
+      <span class="badge connectivity" title="{connectionCount} total connections">{connectionCount}</span>
     {/if}
   </div>
 
   {#each columns as col, i}
     <div class="column-row">
+      <!-- Left handle for this column (for incoming FK references) -->
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={`col-left-${col.name}`}
+        style="top: auto; left: -4px; width: 8px; height: 8px; background: {col.foreign ? COLORS.edgeActive : 'transparent'}; border: none;"
+      />
       <span class="col-icon">{columnIcon(col)}</span>
       <span class="col-name">{col.name}</span>
       <span class="col-type">{col.type || ''}</span>
+      <!-- Right handle for this column (for outgoing FK references) -->
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={`col-right-${col.name}`}
+        style="top: auto; right: -4px; width: 8px; height: 8px; background: {col.primary ? COLORS.edgeActive : 'transparent'}; border: none;"
+      />
     </div>
   {/each}
 
-  <Handle type="source" position={sourcePosition || Position.Bottom} />
+  <Handle type="source" position={sourcePosition || Position.Right} />
 </div>
 
 <style>
   .model-node {
     border: 2px solid;
     border-radius: 8px;
-    min-width: 140px;
-    max-width: 220px;
+    min-width: 160px;
+    max-width: 240px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     position: relative;
     transition: opacity 0.15s, box-shadow 0.15s;
+  }
+
+  .node-center {
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
   }
 
   .node-header {
@@ -70,6 +96,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
+    border-radius: 6px 6px 0 0;
   }
 
   .type-dot {
@@ -97,14 +124,9 @@
     flex-shrink: 0;
   }
 
-  .badge.hub {
-    background: #dc2626;
-    color: #fff;
-  }
-
-  .badge.bridge {
-    background: #f59e0b;
-    color: #000;
+  .badge.connectivity {
+    background: #334155;
+    color: #94a3b8;
   }
 
   .column-row {
@@ -113,7 +135,8 @@
     gap: 4px;
     padding: 2px 10px;
     font-size: 10px;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid #334155;
+    position: relative;
   }
 
   .col-icon {
@@ -134,5 +157,9 @@
     opacity: 0.6;
     flex-shrink: 0;
     font-size: 9px;
+  }
+
+  .node-dimmed {
+    opacity: 0.3;
   }
 </style>
