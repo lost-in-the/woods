@@ -64,7 +64,7 @@
 
 {#if query && query.length > 0}
   <!-- Backdrop to catch clicks outside -->
-  <div class="search-backdrop" onclick={onClose}></div>
+  <div class="search-backdrop" role="presentation" onmousedown={onClose}></div>
 
   <div class="search-dropdown">
     {#if !hasResults}
