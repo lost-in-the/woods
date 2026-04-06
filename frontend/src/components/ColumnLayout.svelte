@@ -8,6 +8,7 @@
   import ModelNode from './ModelNode.svelte';
   import CompactNode from './CompactNode.svelte';
   import FocusNode from './FocusNode.svelte';
+  import CardinalityMarkers from './CardinalityMarkers.svelte';
   import { layoutColumns } from '../lib/column-layout.js';
   import { assignColumns } from '../lib/graph-state.js';
 
@@ -40,31 +41,47 @@
   });
 
   // Only show edges connected to the center node to avoid inter-neighbor spaghetti.
-  // Route through FK/PK column handles on center for Liam ERD-style connections.
   const visibleEdges = $derived.by(() => {
-    const centerNode = allNodes.find((n) => n.id === centerNodeId);
-    const centerColumns = centerNode?.data?.columns || [];
-
     return allEdges
       .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
       .filter((e) => e.source === centerNodeId || e.target === centerNodeId)
       .map((e) => {
+        const via = e.data?.via;
+        const isAssociation = e.type === 'association';
+
+        // Build style string
+        let style = '';
+        if (e.data?.isCycle) {
+          style = 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;';
+        } else if (e.data?.through) {
+          style = 'stroke: #475569; stroke-width: 1px; opacity: 0.4;';
+        } else {
+          style = 'stroke: #475569; stroke-width: 1.5px;';
+        }
+
+        // Add cardinality markers via CSS
+        if (isAssociation && via) {
+          if (via === 'has_many') {
+            style += ' marker-start: url(#marker-crow-foot); marker-end: url(#marker-bar);';
+          } else if (via === 'has_and_belongs_to_many') {
+            style += ' marker-start: url(#marker-crow-foot); marker-end: url(#marker-crow-foot);';
+          } else {
+            // belongs_to, has_one
+            style += ' marker-end: url(#marker-bar);';
+          }
+        }
+
         const edge = {
           ...e,
-          style: e.data?.isCycle
-            ? 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;'
-            : 'stroke: #475569; stroke-width: 1.5px',
+          type: isAssociation ? 'smoothstep' : 'default',
           animated: false,
+          style,
         };
 
-        if (e.source === centerNodeId) {
-          // Center depends on target → route through FK column on center's left side
-          const fkCol = findFkColumn(centerColumns, e.target);
-          if (fkCol) edge.sourceHandle = `col-left-${fkCol.name}`;
-        } else {
-          // Source depends on center → route to center's PK column on right side
-          const pkCol = centerColumns.find((c) => c.primary);
-          if (pkCol) edge.targetHandle = `col-right-${pkCol.name}`;
+        // Handle IDs come directly from edge data — no heuristic matching
+        if (isAssociation) {
+          if (e.data?.sourceHandle) edge.sourceHandle = e.data.sourceHandle;
+          if (e.data?.targetHandle) edge.targetHandle = e.data.targetHandle;
         }
 
         return edge;
@@ -88,20 +105,6 @@
     layoutedNodes = layoutColumns(visibleNodes, columnMap, centerNodeId);
     layoutedEdges = visibleEdges;
   });
-
-  /**
-   * Find the FK column on the center node that matches a target model name.
-   * e.g., target "Country" → column "country_id", target "PlanPrice" → "plan_price_id"
-   */
-  function findFkColumn(columns, targetId) {
-    const snake = targetId
-      .replace(/::/g, '/')
-      .replace(/([a-z\d])([A-Z])/g, '$1_$2')
-      .toLowerCase()
-      .replace(/\//g, '_');
-    const fkName = snake + '_id';
-    return columns.find((c) => c.name === fkName);
-  }
 
   function handleNodeClick({ node }) {
     onNodeSelect?.(node);
@@ -135,6 +138,7 @@
       <MiniMap />
       <Background />
       <FocusNode nodeId={focusNodeId} />
+      <CardinalityMarkers />
     </SvelteFlow>
   {/if}
 </div>
