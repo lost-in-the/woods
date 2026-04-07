@@ -8,7 +8,7 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 26 | 31 |
+| **Tools** | 28 | 31 |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
@@ -96,7 +96,7 @@ Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
-### Tools (26)
+### Tools (28)
 
 #### Core Query (6)
 
@@ -109,11 +109,12 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Conso
 | `structure` | Get codebase structure: manifest summary or full unit breakdown by type. |
 | `recent_changes` | List recently modified units sorted by git timestamp. |
 
-#### Graph Analysis (3)
+#### Graph Analysis (4)
 
 | Tool | Description |
 |------|-------------|
 | `graph_analysis` | Structural analysis: orphans, dead ends, hubs, cycles, bridges. |
+| `domain_clusters` | Semantic domain grouping by namespace and graph connectivity. |
 | `pagerank` | PageRank importance scores — higher means more structurally central. |
 | `framework` | Search Rails/gem framework source by concept keyword (e.g., "has_many", "before_action"). |
 
@@ -134,8 +135,8 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Conso
 
 | Tool | Description |
 |------|-------------|
-| `pipeline_extract` | Trigger extraction pipeline (full or incremental). Rate-limited to 5-minute cooldown. |
-| `pipeline_embed` | Trigger embedding generation for extracted units. |
+| `pipeline_extract` | Trigger extraction pipeline (full or incremental). Rate-limited to 5-minute cooldown. Requires `agent_indexing_enabled` config. |
+| `pipeline_embed` | Trigger embedding generation for extracted units. Requires `agent_indexing_enabled` config. |
 | `pipeline_status` | Current pipeline state: last extraction time, unit counts, staleness indicators. |
 | `pipeline_diagnose` | Classify a pipeline error and suggest remediation steps. |
 | `pipeline_repair` | Clear stale locks or reset rate limit cooldowns. |
