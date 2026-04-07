@@ -4,6 +4,7 @@ import { Command, defaultFilter } from 'cmdk'
 import { type FC, useCallback, useMemo, useState } from 'react'
 import { TableOptions, WoodsNodeOptions } from '../CommandPaletteOptions'
 import { TablePreview } from '../CommandPalettePreview/TablePreview'
+import { CommandPaletteFooter } from '../CommandPaletteFooter/CommandPaletteFooter'
 import { CommandPaletteSearchInput } from '../CommandPaletteSearchInput'
 import { useCommandPaletteOrThrow } from '../CommandPaletteProvider'
 import type { CommandPaletteInputMode } from '../types'
@@ -109,6 +110,7 @@ export const CommandPaletteContent: FC = () => {
           }
         </div>
       </div>
+      <CommandPaletteFooter />
     </Command>
   )
 }
