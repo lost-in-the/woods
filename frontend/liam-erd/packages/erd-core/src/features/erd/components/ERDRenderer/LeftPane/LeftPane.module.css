@@ -155,3 +155,12 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+.buttonUnfocused {
+  opacity: 0.4;
+  transition: opacity 300ms var(--default-timing-function);
+}
+
+.buttonUnfocused:hover {
+  opacity: 0.7;
+}

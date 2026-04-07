@@ -232,6 +232,8 @@ export const ERDRenderer: FC<Props> = ({
               >
                 <LeftPane
                   onFocusNode={handleFocusNode}
+                  onToggleFocusNode={toggleFocusedNode}
+                  focusedNodes={focusedNodes}
                   nodeLayers={nodeLayers}
                 />
               </ResizablePanel>

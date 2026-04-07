@@ -1,4 +1,5 @@
 import type { WoodsNodeType } from '@liam-hq/schema'
+import clsx from 'clsx'
 import {
   BookText,
   Eye,
@@ -47,8 +48,11 @@ const WoodsNodeGroup: FC<{
   nodeType: WoodsNodeType
   nodes: Node[]
   onFocusNode: (nodeId: string | null) => void
-}> = ({ label, nodeType, nodes, onFocusNode }) => {
+  onToggleFocusNode: (nodeId: string) => void
+  focusedNodes: Set<string>
+}> = ({ label, nodeType, nodes, onFocusNode, onToggleFocusNode, focusedNodes }) => {
   const [isOpen, setIsOpen] = useState(false)
+  const hasFocus = focusedNodes.size > 0
 
   return (
     <SidebarGroup>
@@ -62,20 +66,33 @@ const WoodsNodeGroup: FC<{
       {isOpen && (
         <SidebarGroupContent>
           <SidebarMenu className={styles.tablesMenu}>
-            {nodes.map((node) => (
-              <SidebarMenuItem key={node.id}>
-                <SidebarMenuButton
-                  className={styles.button}
-                  onClick={() => onFocusNode(node.id)}
-                >
-                  <span
-                    className={styles.colorDot}
-                    style={{ backgroundColor: woodsNodeColors[nodeType].border }}
-                  />
-                  <span>{String(node.data['name'])}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+            {nodes.map((node) => {
+              const isFocused = focusedNodes.has(node.id)
+              return (
+                <SidebarMenuItem key={node.id}>
+                  <SidebarMenuButton
+                    className={clsx(
+                      styles.button,
+                      hasFocus && !isFocused && styles.buttonUnfocused,
+                    )}
+                    title="Click to focus · ⌘+Click to add"
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey) {
+                        onToggleFocusNode(node.id)
+                      } else {
+                        onFocusNode(node.id)
+                      }
+                    }}
+                  >
+                    <span
+                      className={styles.colorDot}
+                      style={{ backgroundColor: woodsNodeColors[nodeType].border }}
+                    />
+                    <span>{String(node.data['name'])}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )
+            })}
           </SidebarMenu>
         </SidebarGroupContent>
       )}
@@ -85,10 +102,12 @@ const WoodsNodeGroup: FC<{
 
 type Props = {
   onFocusNode: (nodeId: string | null) => void
+  onToggleFocusNode: (nodeId: string) => void
+  focusedNodes: Set<string>
   nodeLayers: Record<NodeLayer, boolean>
 }
 
-export const LeftPane = ({ onFocusNode, nodeLayers }: Props) => {
+export const LeftPane = ({ onFocusNode, onToggleFocusNode, focusedNodes, nodeLayers }: Props) => {
   const { version } = useVersionOrThrow()
   const { selectedNodeIds, setHiddenNodeIds, resetSelectedNodeIds } =
     useUserEditingOrThrow()
@@ -235,13 +254,19 @@ export const LeftPane = ({ onFocusNode, nodeLayers }: Props) => {
           <SidebarGroupContent>
             <SidebarMenu className={styles.tablesMenu}>
               {tableNodes.map((node) => (
-                <TableNameMenuButton
+                <div
                   key={node.id}
-                  node={node}
-                  nodes={tableNodes}
-                  showSelectedTables={showSelectedTables}
-                  onFocus={onFocusNode}
-                />
+                  className={clsx(
+                    focusedNodes.size > 0 && !focusedNodes.has(node.id) && styles.buttonUnfocused,
+                  )}
+                >
+                  <TableNameMenuButton
+                    node={node}
+                    nodes={tableNodes}
+                    showSelectedTables={showSelectedTables}
+                    onFocus={onFocusNode}
+                  />
+                </div>
               ))}
             </SidebarMenu>
 
@@ -274,6 +299,8 @@ export const LeftPane = ({ onFocusNode, nodeLayers }: Props) => {
               nodeType={nodeType}
               nodes={sectionNodes}
               onFocusNode={onFocusNode}
+              onToggleFocusNode={onToggleFocusNode}
+              focusedNodes={focusedNodes}
             />
           )
         })}
