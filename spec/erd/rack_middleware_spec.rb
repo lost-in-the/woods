@@ -36,12 +36,11 @@ RSpec.describe Woods::Erd::RackMiddleware do
       File.write(File.join(assets_dir, 'index.html'), '<html>ERD</html>')
     end
 
-    it 'serves index.html at the base path' do
-      status, headers, body = request('/woods/erd')
+    it 'redirects base path to trailing slash' do
+      status, headers, _body = request('/woods/erd')
 
-      expect(status).to eq(200)
-      expect(headers['content-type']).to eq('text/html')
-      expect(body.join).to include('ERD')
+      expect(status).to eq(301)
+      expect(headers['location']).to eq('/woods/erd/')
     end
 
     it 'serves index.html at the base path with trailing slash' do

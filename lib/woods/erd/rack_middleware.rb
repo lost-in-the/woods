@@ -55,7 +55,9 @@ module Woods
         return @app.call(env) unless request_path.start_with?(@path)
 
         relative_path = request_path[@path.length..] || ''
-        relative_path = '/' if relative_path.empty?
+
+        # Redirect /woods/erd to /woods/erd/ so relative asset paths resolve correctly
+        return [301, { 'location' => "#{@path}/", 'content-length' => '0' }, []] if relative_path.empty?
 
         serve(relative_path)
       end
