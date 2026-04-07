@@ -156,7 +156,7 @@ module Woods
 
       def update_index(identifier, unit)
         index_path = File.join(@patterns_dir, '_index.json')
-        new_content = atomic_index_update(index_path) do |existing|
+        locked_index_update(index_path) do |existing|
           existing.reject! { |e| e['identifier'] == identifier }
           existing << {
             'identifier' => identifier,
@@ -166,30 +166,30 @@ module Woods
           }
           existing
         end
-        File.write(index_path, new_content)
       end
 
       def remove_from_index(identifier)
         index_path = File.join(@patterns_dir, '_index.json')
         return unless File.exist?(index_path)
 
-        new_content = atomic_index_update(index_path) do |existing|
+        locked_index_update(index_path) do |existing|
           existing.reject! { |e| e['identifier'] == identifier }
           existing
         end
-        File.write(index_path, new_content)
       end
 
-      # Read _index.json under an exclusive lock, yield entries for modification,
-      # and return the new JSON string. The caller writes the result outside the lock
-      # to minimize lock hold time.
-      def atomic_index_update(index_path)
-        entries = File.open(index_path, File::RDWR | File::CREAT, 0o644) do |f|
+      # Read, modify, and write _index.json under an exclusive file lock.
+      # The lock is held across the entire read-modify-write cycle to prevent
+      # concurrent writes from losing data.
+      def locked_index_update(index_path)
+        File.open(index_path, File::RDWR | File::CREAT, 0o644) do |f|
           f.flock(File::LOCK_EX)
-          f.size.positive? ? JSON.parse(f.read) : []
+          existing = f.size.positive? ? JSON.parse(f.read) : []
+          updated = yield(existing)
+          f.rewind
+          f.truncate(0)
+          f.write(JSON.pretty_generate(updated))
         end
-        updated = yield(entries)
-        JSON.pretty_generate(updated)
       end
     end
   end
