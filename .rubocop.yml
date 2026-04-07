@@ -48,6 +48,7 @@ Metrics/ModuleLength:
 Metrics/ClassLength:
   Exclude:
     - 'lib/woods/ast/**/*'
+    - 'lib/woods/erd/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'
     - 'lib/woods/retrieval/**/*'
