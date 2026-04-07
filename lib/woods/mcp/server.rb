@@ -1005,13 +1005,16 @@ module Woods
           "\n\n_Tip: Found something useful? Use `index_pattern` to save it for future agents._"
         end
 
+        INDEXING_DISABLED_MESSAGE = 'Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.'
+
         def define_pattern_tools(server, reader, index_dir, respond, renderer) # rubocop:disable Metrics/MethodLength
-          define_index_pattern_tool(server, reader, index_dir, respond, renderer)
-          define_list_patterns_tool(server, index_dir, respond, renderer)
-          define_delete_pattern_tool(server, reader, index_dir, respond, renderer)
+          pattern_writer = PatternWriter.new(index_dir: index_dir)
+          define_index_pattern_tool(server, reader, pattern_writer, respond, renderer)
+          define_list_patterns_tool(server, pattern_writer, respond, renderer)
+          define_delete_pattern_tool(server, reader, pattern_writer, respond, renderer)
         end
 
-        def define_index_pattern_tool(server, reader, index_dir, respond, renderer) # rubocop:disable Metrics/MethodLength
+        def define_index_pattern_tool(server, reader, pattern_writer, respond, renderer) # rubocop:disable Metrics/MethodLength
           server.define_tool(
             name: 'index_pattern',
             description: 'Save an agent-discovered pattern or insight for future retrieval. ' \
@@ -1031,32 +1034,13 @@ module Woods
               required: %w[identifier content]
             }
           ) do |identifier:, content:, server_context:, tags: nil, supersedes: nil|
-            unless Woods.configuration.agent_indexing_enabled
-              next respond.call('Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
-            end
+            next respond.call(INDEXING_DISABLED_MESSAGE) unless Woods.configuration.agent_indexing_enabled
 
-            writer = PatternWriter.new(index_dir: index_dir)
             metadata = {}
             metadata['tags'] = tags if tags
-            unit = writer.write(identifier: identifier, content: content, metadata: metadata, supersedes: supersedes)
+            unit = pattern_writer.write(identifier: identifier, content: content, metadata: metadata, supersedes: supersedes)
 
-            embedded = false
-            config = Woods.configuration
-            if config.respond_to?(:embedding_provider) && config.embedding_provider
-              begin
-                builder = Woods::Builder.new(config)
-                provider = builder.build_embedding_provider
-                vector_store = builder.build_vector_store
-                text_preparer = Woods::Embedding::TextPreparer.new
-                writer.embed(unit, provider: provider, vector_store: vector_store, text_preparer: text_preparer)
-                embedded = true
-              rescue StandardError => e
-                # Embedding is optional; pattern is still saved to disk
-                logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-                logger.warn("[Woods] Pattern embedding failed: #{e.message}")
-              end
-            end
-
+            embedded = try_embed_pattern(pattern_writer, unit)
             reader.reload!
 
             respond.call(renderer.render_default({
@@ -1070,7 +1054,7 @@ module Woods
           end
         end
 
-        def define_list_patterns_tool(server, index_dir, respond, renderer)
+        def define_list_patterns_tool(server, pattern_writer, respond, renderer)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'list_patterns',
@@ -1082,13 +1066,10 @@ module Woods
               }
             }
           ) do |server_context:, tag: nil, limit: nil|
-            unless Woods.configuration.agent_indexing_enabled
-              next respond.call('Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
-            end
+            next respond.call(INDEXING_DISABLED_MESSAGE) unless Woods.configuration.agent_indexing_enabled
 
             limit = coerce_int.call(limit) || 50
-            writer = PatternWriter.new(index_dir: index_dir)
-            patterns = writer.list(tag: tag).first(limit)
+            patterns = pattern_writer.list(tag: tag).first(limit)
 
             respond.call(renderer.render_default({
                                                    pattern_count: patterns.size,
@@ -1097,7 +1078,7 @@ module Woods
           end
         end
 
-        def define_delete_pattern_tool(server, reader, index_dir, respond, renderer)
+        def define_delete_pattern_tool(server, reader, pattern_writer, respond, renderer)
           server.define_tool(
             name: 'delete_pattern',
             description: 'Delete an agent-authored pattern from the index.',
@@ -1108,12 +1089,9 @@ module Woods
               required: ['identifier']
             }
           ) do |identifier:, server_context:|
-            unless Woods.configuration.agent_indexing_enabled
-              next respond.call('Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
-            end
+            next respond.call(INDEXING_DISABLED_MESSAGE) unless Woods.configuration.agent_indexing_enabled
 
-            writer = PatternWriter.new(index_dir: index_dir)
-            deleted = writer.delete(identifier)
+            deleted = pattern_writer.delete(identifier)
 
             if deleted
               reader.reload!
@@ -1122,6 +1100,22 @@ module Woods
               respond.call("Pattern not found: #{identifier}")
             end
           end
+        end
+
+        def try_embed_pattern(pattern_writer, unit)
+          config = Woods.configuration
+          return false unless config.respond_to?(:embedding_provider) && config.embedding_provider
+
+          builder = Woods::Builder.new(config)
+          provider = builder.build_embedding_provider
+          vector_store = builder.build_vector_store
+          text_preparer = Woods::Embedding::TextPreparer.new
+          pattern_writer.embed(unit, provider: provider, vector_store: vector_store, text_preparer: text_preparer)
+          true
+        rescue StandardError => e
+          logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+          logger.warn("[Woods] Pattern embedding failed: #{e.message}")
+          false
         end
 
         def build_resource_templates

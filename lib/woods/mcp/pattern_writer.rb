@@ -41,21 +41,22 @@ module Woods
       # @param metadata [Hash] Additional metadata (tags, etc.)
       # @param supersedes [String, nil] Identifier of the pattern this corrects
       # @return [Woods::ExtractedUnit] The written unit
-      # @raise [ArgumentError] if identifier or content fails validation
+      # @raise [ArgumentError] if identifier, content, or metadata fails validation
       def write(identifier:, content:, metadata: {}, supersedes: nil)
         validate_identifier!(identifier)
         validate_content!(content)
+        validate_metadata!(metadata)
 
-        tags = metadata[:tags] || metadata['tags']
-        validate_tags!(tags) if tags
+        metadata = normalize_metadata(metadata)
+        validate_tags!(metadata['tags']) if metadata.key?('tags')
 
-        unit = build_unit(identifier, content, metadata, supersedes)
+        unit = build_unit(identifier: identifier, content: content, metadata: metadata, supersedes: supersedes)
 
         FileUtils.mkdir_p(@patterns_dir)
         filename = self.class.collision_safe_filename(identifier)
         File.write(File.join(@patterns_dir, filename), JSON.pretty_generate(unit.to_h))
 
-        update_index(identifier, filename, unit)
+        update_index(identifier, unit)
 
         unit
       end
@@ -86,8 +87,7 @@ module Woods
         return entries unless tag
 
         entries.select do |entry|
-          tags = entry['tags'] || []
-          tags.include?(tag)
+          (entry['tags'] || []).include?(tag)
         end
       end
 
@@ -110,7 +110,7 @@ module Woods
 
       private
 
-      def build_unit(identifier, content, metadata, supersedes)
+      def build_unit(identifier:, content:, metadata:, supersedes:)
         unit = Woods::ExtractedUnit.new(
           type: :pattern,
           identifier: identifier,
@@ -124,6 +124,10 @@ module Woods
         unit
       end
 
+      def normalize_metadata(metadata)
+        metadata.transform_keys(&:to_s)
+      end
+
       def validate_identifier!(identifier)
         raise ArgumentError, 'Identifier must be a non-empty string' if identifier.nil? || identifier.empty?
         raise ArgumentError, "Identifier exceeds #{MAX_IDENTIFIER_LENGTH} characters" if identifier.length > MAX_IDENTIFIER_LENGTH
@@ -133,6 +137,10 @@ module Woods
       def validate_content!(content)
         raise ArgumentError, 'Content must be a non-empty string' if content.nil? || content.empty?
         raise ArgumentError, "Content exceeds #{MAX_CONTENT_LENGTH} characters" if content.length > MAX_CONTENT_LENGTH
+      end
+
+      def validate_metadata!(metadata)
+        raise ArgumentError, 'Metadata must be a Hash' unless metadata.is_a?(Hash)
       end
 
       def validate_tags!(tags)
@@ -146,36 +154,42 @@ module Woods
         end
       end
 
-      def update_index(identifier, filename, unit)
+      def update_index(identifier, unit)
         index_path = File.join(@patterns_dir, '_index.json')
-        File.open(index_path, File::RDWR | File::CREAT, 0o644) do |f|
-          f.flock(File::LOCK_EX)
-          existing = f.size.positive? ? JSON.parse(f.read) : []
+        new_content = atomic_index_update(index_path) do |existing|
           existing.reject! { |e| e['identifier'] == identifier }
           existing << {
             'identifier' => identifier,
             'file_path' => unit.file_path,
             'estimated_tokens' => unit.estimated_tokens,
-            'tags' => unit.metadata['tags'] || unit.metadata[:tags] || []
+            'tags' => unit.metadata['tags'] || []
           }
-          f.rewind
-          f.truncate(0)
-          f.write(JSON.pretty_generate(existing))
+          existing
         end
+        File.write(index_path, new_content)
       end
 
       def remove_from_index(identifier)
         index_path = File.join(@patterns_dir, '_index.json')
         return unless File.exist?(index_path)
 
-        File.open(index_path, File::RDWR) do |f|
-          f.flock(File::LOCK_EX)
-          existing = JSON.parse(f.read)
+        new_content = atomic_index_update(index_path) do |existing|
           existing.reject! { |e| e['identifier'] == identifier }
-          f.rewind
-          f.truncate(0)
-          f.write(JSON.pretty_generate(existing))
+          existing
         end
+        File.write(index_path, new_content)
+      end
+
+      # Read _index.json under an exclusive lock, yield entries for modification,
+      # and return the new JSON string. The caller writes the result outside the lock
+      # to minimize lock hold time.
+      def atomic_index_update(index_path)
+        entries = File.open(index_path, File::RDWR | File::CREAT, 0o644) do |f|
+          f.flock(File::LOCK_EX)
+          f.size.positive? ? JSON.parse(f.read) : []
+        end
+        updated = yield(entries)
+        JSON.pretty_generate(updated)
       end
     end
   end
