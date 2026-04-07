@@ -1,24 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { EdgeCategory, NodeLayer } from './useLayerState'
-
-const WOODS_TYPE_TO_LAYER: Record<string, NodeLayer> = {
-  controller: 'controllers',
-  job: 'jobs',
-  service: 'services',
-  mailer: 'mailers',
-}
-
-export function filterNodesByLayers(
-  nodes: Node[],
-  nodeLayers: Record<NodeLayer, boolean>,
-): Node[] {
-  return nodes.filter((node) => {
-    if (node.type !== 'woodsNode') return true
-    const layerKey = WOODS_TYPE_TO_LAYER[node.data['type'] as string]
-    if (!layerKey) return true
-    return nodeLayers[layerKey]
-  })
-}
+import type { EdgeCategory } from './useLayerState'
 
 export function filterByFocus(
   nodes: Node[],

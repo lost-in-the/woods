@@ -136,8 +136,12 @@ export const convertSchemaToNodes = ({
       })
     }
 
-    // Convert dependencies to React Flow edges
+    // Convert dependencies to React Flow edges (skip disabled layers)
     for (const [id, woodsNode] of Object.entries(schema.nodes)) {
+      if (nodeLayers) {
+        const layerKey = WOODS_TYPE_TO_LAYER[woodsNode.type]
+        if (layerKey && !nodeLayers[layerKey]) continue
+      }
       for (const dep of woodsNode.dependencies) {
         // Table targets use table name directly (matches table node IDs)
         // Non-table targets use woods- prefix
