@@ -35,15 +35,15 @@ module Woods
       end
     end
 
-    config.after_initialize do |app|
-      woods_config = Woods.configuration
-      if woods_config.erd_enabled
+    initializer 'woods.erd', after: :load_config_initializers do |app|
+      config = Woods.configuration
+      if config.erd_enabled
         require 'woods/erd/rack_middleware'
 
         app.middleware.use(
           Woods::Erd::RackMiddleware,
-          path: woods_config.erd_path,
-          output_dir: woods_config.output_dir
+          path: config.erd_path,
+          output_dir: config.output_dir
         )
       end
     end
