@@ -176,6 +176,24 @@ module Woods
 
             Preference order: Tier 1 tools → `console_query` → `console_sql` → `console_eval`
 
+            ## Configuration Quick Reference
+
+            The Console Server is configured in the parent Rails app via `config/initializers/woods.rb`
+            and `console.yml`. Key options affecting this server:
+
+            | Option | Default | Purpose |
+            |--------|---------|---------|
+            | `connection.mode` | `direct` | Bridge mode: `direct`, `docker`, or `ssh` |
+            | `redacted_columns` | `[]` | Columns masked as `[REDACTED]` in responses |
+            | `read_tools_enabled` | `false` | Enable `console_sql` / `console_query` in embedded mode |
+            | `context_format` | `:markdown` | Response format: `:markdown`, `:json`, `:plain` |
+
+            **Safety layers active on every request:**
+            1. All operations run in rolled-back transactions (writes silently discarded)
+            2. SQL is validated — DML/DDL rejected before reaching the database
+            3. Tier 4 tools (`console_eval`, `console_sql`) may require explicit confirmation
+            4. Model names validated against `ActiveRecord::Base.descendants`
+
             ## Response Format
 
             Tabular data is returned as Markdown tables. Scalars and hashes are rendered as plain text or bullet lists.

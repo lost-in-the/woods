@@ -40,6 +40,14 @@ RSpec.describe Woods::Console::Server do
       expect(instructions).to include('console_status')
       expect(instructions).to include('console_query')
     end
+
+    it 'includes configuration quick reference in instructions' do
+      server = described_class.build(config: config)
+      instructions = server.instance_variable_get(:@instructions)
+      expect(instructions).to include('Configuration Quick Reference')
+      expect(instructions).to include('redacted_columns')
+      expect(instructions).to include('rolled-back transactions')
+    end
   end
 
   describe 'tool registration' do

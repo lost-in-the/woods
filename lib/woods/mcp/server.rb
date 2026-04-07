@@ -138,6 +138,26 @@ module Woods
             - `codebase://unit/{identifier}` — look up a unit by identifier
             - `codebase://type/{type}` — list all units of a given type
 
+            ## Configuration Quick Reference
+
+            Woods is configured in the parent Rails app via `config/initializers/woods.rb`:
+
+            | Option | Default | Purpose |
+            |--------|---------|---------|
+            | `output_dir` | `tmp/woods` | Extraction output directory (what this server reads) |
+            | `extractors` | models, controllers, services, ... | Which code layers to extract |
+            | `embedding_provider` | — | `:openai` or `:ollama` (enables `codebase_retrieve`) |
+            | `vector_store` | — | `:in_memory`, `:pgvector`, or `:qdrant` |
+            | `context_format` | `:markdown` | Response format: `:markdown`, `:json`, `:plain`, `:claude` |
+            | `agent_indexing_enabled` | `false` | Unlocks pipeline + pattern tools |
+            | `precompute_flows` | `false` | Pre-compute per-action request flow maps |
+            | `enable_snapshots` | `false` | Enable temporal snapshot tracking |
+
+            Presets for quick setup: `Woods.configure_with_preset(:local)`, `:postgresql`, `:production`.
+
+            If `codebase_retrieve` returns "not available", the embedding provider is not configured.
+            If pipeline/pattern tools return "disabled", set `agent_indexing_enabled = true`.
+
             ## Response Format
 
             Responses are Markdown with headers, tables, and fenced code blocks.
