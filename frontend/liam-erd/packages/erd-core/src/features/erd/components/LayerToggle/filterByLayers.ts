@@ -14,7 +14,7 @@ export function filterNodesByLayers(
 ): Node[] {
   return nodes.filter((node) => {
     if (node.type !== 'woodsNode') return true
-    const layerKey = WOODS_TYPE_TO_LAYER[node.data.type as string]
+    const layerKey = WOODS_TYPE_TO_LAYER[node.data['type'] as string]
     if (!layerKey) return true
     return nodeLayers[layerKey]
   })
@@ -50,7 +50,7 @@ export function filterEdgesByLayers(
     if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) {
       return false
     }
-    if (edge.data?.via) {
+    if (edge.data?.['via']) {
       return edgeCategories.dependency
     }
     return edgeCategories.data
