@@ -102,3 +102,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.memberToggle {
+  border-top: 1px solid var(--overlay-10);
+}
+
+.memberToggleButton {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-6);
+  color: var(--overlay-40);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s;
+}
+
+.memberToggleButton:hover {
+  color: var(--overlay-70);
+}
