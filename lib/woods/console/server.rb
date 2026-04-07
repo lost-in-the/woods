@@ -124,7 +124,8 @@ module Woods
         def build_server(conn_mgr, safe_ctx)
           server = ::MCP::Server.new(
             name: 'woods-console',
-            version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0'
+            version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0',
+            instructions: console_server_instructions
           )
 
           renderer = build_console_renderer
@@ -138,6 +139,47 @@ module Woods
 
         def respond(text)
           ::MCP::Tool::Response.new([{ type: 'text', text: text }])
+        end
+
+        # Server instructions returned to agents during the MCP initialize handshake.
+        # Guides agents through tool tiers and the safety model.
+        #
+        # @return [String]
+        def console_server_instructions # rubocop:disable Metrics/MethodLength
+          <<~INSTRUCTIONS
+            # Woods Console Server
+
+            You are connected to a live Rails application. All queries run inside rolled-back transactions — writes are silently discarded. Sensitive columns may be redacted.
+
+            ## Getting Started
+
+            1. Call `console_status` to verify the database connection is healthy.
+            2. Call `console_schema` with a model name to inspect its columns and types.
+
+            ## Tool Tiers
+
+            **Tier 1 — Read-Only Data Access:**
+            `console_count` · `console_find` · `console_sample` · `console_pluck` · `console_aggregate` · `console_association_count` · `console_schema` · `console_recent`
+
+            **Tier 2 — Domain Introspection:**
+            `console_diagnose_model` (associations, validations, callbacks) · `console_data_snapshot` · `console_validate_record` · `console_check_setting` · `console_check_policy`
+
+            **Tier 3 — Analytics & Monitoring:**
+            `console_job_queues` · `console_job_failures` · `console_error_rates` · `console_throughput` · `console_cache_stats` · `console_redis_info`
+
+            **Tier 4 — Guarded:**
+            `console_eval` (arbitrary Ruby, requires confirmation) · `console_sql` · `console_query`
+
+            ## SQL Guidance
+
+            Prefer `console_query` for data access — it uses ActiveRecord internally, handles joins and grouping safely, and works across database adapters (MySQL and PostgreSQL). Use `console_sql` only for queries that can't be expressed through the query builder (complex CTEs, window functions, lateral joins). Raw SQL must be SELECT/WITH...SELECT only; DML and DDL are rejected.
+
+            Preference order: Tier 1 tools → `console_query` → `console_sql` → `console_eval`
+
+            ## Response Format
+
+            Tabular data is returned as Markdown tables. Scalars and hashes are rendered as plain text or bullet lists.
+          INSTRUCTIONS
         end
 
         def send_to_bridge(conn_mgr, request, safe_ctx = nil, renderer: nil)

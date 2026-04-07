@@ -4,6 +4,39 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 
 ---
 
+## Agent Onboarding
+
+### How instructions work
+
+Both Woods MCP servers (Index and Console) provide an `instructions` field during the MCP `initialize` handshake. When an agent connects, it automatically receives a workflow guide explaining available tools, recommended first steps, and the response format. No manual discovery is needed — the server tells the agent how to use it on first contact.
+
+### Enabling agent-triggered indexing
+
+By default, agents cannot trigger extraction or embedding pipelines via the `pipeline_extract` and `pipeline_embed` tools. To allow it:
+
+```ruby
+Woods.configure do |config|
+  config.agent_indexing_enabled = true
+end
+```
+
+When disabled, calling these tools returns a clear message explaining how to enable the feature. The `pipeline_status` tool is always available regardless of this setting.
+
+### SQL tool preference hierarchy (Console Server)
+
+When querying live application data, prefer higher-level tools over raw SQL:
+
+| Priority | Tool | When to use |
+|----------|------|-------------|
+| 1 | Tier 1 tools (`console_count`, `console_find`, etc.) | Simple lookups, counts, and samples |
+| 2 | `console_query` | Joins, grouping, aggregation — uses ActiveRecord internally, works across MySQL and PostgreSQL |
+| 3 | `console_sql` | Complex CTEs, window functions, lateral joins — raw SQL, SELECT only |
+| 4 | `console_eval` | Last resort — arbitrary Ruby execution, requires confirmation |
+
+`console_query` is backed by ActiveRecord and Arel, so it generates adapter-safe SQL automatically. `console_sql` accepts raw SQL strings and validates them for read-only safety (rejects DML/DDL). Both run inside rolled-back transactions.
+
+---
+
 ## Understanding Your Codebase
 
 ### "What models do we have?"

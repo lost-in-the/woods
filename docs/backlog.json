@@ -527,5 +527,15 @@
     "description": "Three rake tasks: woods:retrieve[query] (CLI retrieval with HumanAdapter), woods:embed (full embedding pipeline), woods:embed_incremental (content_hash-based).",
     "status": "resolved",
     "depends_on": ["B-038"]
+  },
+  {
+    "id": "B-053",
+    "title": "MySQL metadata and graph store adapters",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "storage",
+    "files": ["lib/woods/storage/"],
+    "description": "Implement MySQL-backed MetadataStore and GraphStore adapters. MySQL 8.0+ supports recursive CTEs for graph traversal and JSON columns for metadata. Requires the :mysql configuration preset documented in BACKEND_MATRIX.md. Currently only SQLite (metadata) and in-memory (graph) adapters exist.",
+    "status": "open"
   }
 ]

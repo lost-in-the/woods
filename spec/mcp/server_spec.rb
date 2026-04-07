@@ -14,6 +14,15 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
+    it 'includes instructions' do
+      instructions = server.instance_variable_get(:@instructions)
+      expect(instructions).to be_a(String)
+      expect(instructions).not_to be_empty
+      expect(instructions).to include('Woods Index Server')
+      expect(instructions).to include('structure')
+      expect(instructions).to include('lookup')
+    end
+
     it 'registers 28 tools' do
       tools = server.instance_variable_get(:@tools)
       expect(tools.size).to eq(28)
@@ -497,79 +506,113 @@ RSpec.describe Woods::MCP::Server do
   end
 
   describe 'tool: pipeline_extract' do
-    context 'without operator configured' do
-      it 'returns not configured message' do
+    context 'when agent_indexing_enabled is false (default)' do
+      it 'returns disabled message' do
         response = call_tool(server, 'pipeline_extract')
-        expect(response_text(response)).to include('not configured')
+        expect(response_text(response)).to include('Agent-triggered indexing is disabled')
       end
     end
 
-    context 'with operator configured' do
-      let(:guard) do
-        instance_double('Woods::Operator::PipelineGuard').tap do |g|
-          allow(g).to receive(:allow?).with(:extraction).and_return(true)
-          allow(g).to receive(:record!).with(:extraction)
+    context 'when agent_indexing_enabled is true' do
+      before do
+        @original_config = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.agent_indexing_enabled = true
+      end
+
+      after { Woods.configuration = @original_config }
+
+      context 'without operator configured' do
+        it 'returns not configured message' do
+          response = call_tool(server, 'pipeline_extract')
+          expect(response_text(response)).to include('not configured')
         end
       end
 
-      let(:operator) { { pipeline_guard: guard } }
+      context 'with operator configured' do
+        let(:guard) do
+          instance_double('Woods::Operator::PipelineGuard').tap do |g|
+            allow(g).to receive(:allow?).with(:extraction).and_return(true)
+            allow(g).to receive(:record!).with(:extraction)
+          end
+        end
 
-      let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
-      end
+        let(:operator) { { pipeline_guard: guard } }
 
-      it 'returns started status and spawns a background thread' do
-        wait_for_threads do
+        let(:server_with_operator) do
+          described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+        end
+
+        it 'returns started status and spawns a background thread' do
+          wait_for_threads do
+            response = call_tool(server_with_operator, 'pipeline_extract')
+            data = parse_response(response)
+            expect(data['status']).to eq('started')
+            expect(data['message']).to include('background thread')
+          end
+        end
+
+        it 'is rate-limited when guard denies' do
+          allow(guard).to receive(:allow?).with(:extraction).and_return(false)
           response = call_tool(server_with_operator, 'pipeline_extract')
-          data = parse_response(response)
-          expect(data['status']).to eq('started')
-          expect(data['message']).to include('background thread')
+          expect(response_text(response)).to include('rate-limited')
         end
-      end
-
-      it 'is rate-limited when guard denies' do
-        allow(guard).to receive(:allow?).with(:extraction).and_return(false)
-        response = call_tool(server_with_operator, 'pipeline_extract')
-        expect(response_text(response)).to include('rate-limited')
       end
     end
   end
 
   describe 'tool: pipeline_embed' do
-    context 'without operator configured' do
-      it 'returns not configured message' do
+    context 'when agent_indexing_enabled is false (default)' do
+      it 'returns disabled message' do
         response = call_tool(server, 'pipeline_embed')
-        expect(response_text(response)).to include('not configured')
+        expect(response_text(response)).to include('Agent-triggered indexing is disabled')
       end
     end
 
-    context 'with operator configured' do
-      let(:guard) do
-        instance_double('Woods::Operator::PipelineGuard').tap do |g|
-          allow(g).to receive(:allow?).with(:embedding).and_return(true)
-          allow(g).to receive(:record!).with(:embedding)
+    context 'when agent_indexing_enabled is true' do
+      before do
+        @original_config = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.agent_indexing_enabled = true
+      end
+
+      after { Woods.configuration = @original_config }
+
+      context 'without operator configured' do
+        it 'returns not configured message' do
+          response = call_tool(server, 'pipeline_embed')
+          expect(response_text(response)).to include('not configured')
         end
       end
 
-      let(:operator) { { pipeline_guard: guard } }
+      context 'with operator configured' do
+        let(:guard) do
+          instance_double('Woods::Operator::PipelineGuard').tap do |g|
+            allow(g).to receive(:allow?).with(:embedding).and_return(true)
+            allow(g).to receive(:record!).with(:embedding)
+          end
+        end
 
-      let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
-      end
+        let(:operator) { { pipeline_guard: guard } }
 
-      it 'returns started status and spawns a background thread' do
-        wait_for_threads do
+        let(:server_with_operator) do
+          described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+        end
+
+        it 'returns started status and spawns a background thread' do
+          wait_for_threads do
+            response = call_tool(server_with_operator, 'pipeline_embed')
+            data = parse_response(response)
+            expect(data['status']).to eq('started')
+            expect(data['message']).to include('background thread')
+          end
+        end
+
+        it 'is rate-limited when guard denies' do
+          allow(guard).to receive(:allow?).with(:embedding).and_return(false)
           response = call_tool(server_with_operator, 'pipeline_embed')
-          data = parse_response(response)
-          expect(data['status']).to eq('started')
-          expect(data['message']).to include('background thread')
+          expect(response_text(response)).to include('rate-limited')
         end
-      end
-
-      it 'is rate-limited when guard denies' do
-        allow(guard).to receive(:allow?).with(:embedding).and_return(false)
-        response = call_tool(server_with_operator, 'pipeline_embed')
-        expect(response_text(response)).to include('rate-limited')
       end
     end
   end
@@ -599,8 +642,9 @@ RSpec.describe Woods::MCP::Server do
 
     before do
       stub_const('Woods::Extractor', extractor_class)
-      mock_config = Struct.new(:output_dir).new(fixture_dir)
-      Woods.configuration = mock_config
+      config = Woods::Configuration.new
+      config.agent_indexing_enabled = true
+      Woods.configuration = config
     end
 
     after do
@@ -650,8 +694,9 @@ RSpec.describe Woods::MCP::Server do
     let(:indexer_class) { double('IndexerClass', new: mock_indexer) }
 
     before do
-      mock_config = Struct.new(:output_dir).new(fixture_dir)
-      Woods.configuration = mock_config
+      config = Woods::Configuration.new
+      config.agent_indexing_enabled = true
+      Woods.configuration = config
       allow(Woods::Builder).to receive(:new).and_return(mock_builder)
       stub_const('Woods::Embedding::TextPreparer', text_preparer_class)
       stub_const('Woods::Embedding::Indexer', indexer_class)

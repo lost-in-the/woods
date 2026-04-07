@@ -43,6 +43,7 @@ module Woods
           server = ::MCP::Server.new(
             name: 'woods',
             version: Woods::VERSION,
+            instructions: index_server_instructions,
             resources: resources,
             resource_templates: resource_templates
           )
@@ -82,6 +83,55 @@ module Woods
 
         def text_response(text)
           ::MCP::Tool::Response.new([{ type: 'text', text: text }])
+        end
+
+        # Server instructions returned to agents during the MCP initialize handshake.
+        # Guides agents through tool selection and common workflows.
+        #
+        # @return [String]
+        def index_server_instructions # rubocop:disable Metrics/MethodLength
+          <<~INSTRUCTIONS
+            # Woods Index Server
+
+            You are connected to a Woods extraction index — a structured snapshot of a Rails codebase covering models, controllers, services, jobs, routes, mailers, and more.
+
+            ## Getting Started
+
+            1. Call `structure` to get the codebase manifest (unit counts, types, git info).
+            2. Use `search` to find units by name or pattern.
+            3. Use `lookup` to inspect a specific unit's source, metadata, and relationships.
+
+            ## Workflows
+
+            **Understand a piece of code:**
+            `lookup` → `dependencies` (what it uses) → `dependents` (what uses it)
+
+            **Find code by name or pattern:**
+            `search` with a query string — matches identifiers, source, and metadata.
+
+            **Semantic search (if retriever is configured):**
+            `codebase_retrieve` — natural language query with token-budgeted context assembly.
+
+            **Codebase health and architecture:**
+            `graph_analysis` (orphans, cycles, hubs, bridges) · `pagerank` (importance scores) · `domain_clusters` (semantic grouping)
+
+            **Trace execution flow:**
+            `trace_flow` — follows a request from route → controller → service → model.
+
+            **Pipeline management (requires `agent_indexing_enabled` config):**
+            `pipeline_status` · `pipeline_extract` · `pipeline_embed`
+
+            ## Resources
+
+            - `codebase://manifest` — extraction manifest
+            - `codebase://graph` — full dependency graph
+            - `codebase://unit/{identifier}` — look up a unit by identifier
+            - `codebase://type/{type}` — list all units of a given type
+
+            ## Response Format
+
+            Responses are Markdown with headers, tables, and fenced code blocks.
+          INSTRUCTIONS
         end
 
         def truncate_section(array, limit)
@@ -573,6 +623,9 @@ module Woods
               }
             }
           ) do |server_context:, incremental: nil|
+            unless Woods.configuration.agent_indexing_enabled
+              next respond.call('Agent-triggered indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
+            end
             next respond.call('Pipeline operator is not configured.') unless operator
 
             guard = operator[:pipeline_guard]
@@ -607,6 +660,9 @@ module Woods
               }
             }
           ) do |server_context:, incremental: nil|
+            unless Woods.configuration.agent_indexing_enabled
+              next respond.call('Agent-triggered indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
+            end
             next respond.call('Pipeline operator is not configured.') unless operator
 
             guard = operator[:pipeline_guard]

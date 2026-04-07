@@ -46,7 +46,7 @@ module Woods
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
-                :cache_enabled
+                :cache_enabled, :agent_indexing_enabled
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -77,6 +77,7 @@ module Woods
       @cache_enabled = false
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
+      @agent_indexing_enabled = false
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods
@@ -148,6 +149,13 @@ module Woods
     def cache_enabled=(value)
       validate_boolean!(:cache_enabled, value)
       @cache_enabled = value
+    end
+
+    # @param value [Boolean] Allow agents to trigger extraction and embedding pipelines via MCP
+    # @raise [ConfigurationError] if value is not a boolean
+    def agent_indexing_enabled=(value)
+      validate_boolean!(:agent_indexing_enabled, value)
+      @agent_indexing_enabled = value
     end
 
     # Add a gem to be indexed
