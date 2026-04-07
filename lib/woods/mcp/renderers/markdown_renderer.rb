@@ -301,6 +301,81 @@ module Woods
           lines.join("\n").rstrip
         end
 
+        # ── trace_flow ──────────────────────────────────────────────
+
+        # @param data [Hash] FlowDocument data with :entry_point, :route, :steps
+        # @return [String] Markdown-formatted execution flow
+        def render_trace_flow(data, **)
+          entry = fetch_key(data, :entry_point)
+          route = fetch_key(data, :route)
+          steps = fetch_key(data, :steps, [])
+
+          lines = []
+          lines << "## Flow: #{entry}"
+          lines << ''
+          lines << "**Route:** `#{route[:verb]} #{route[:path]}`" if route.is_a?(Hash) && route[:verb]
+          lines << "**Depth:** #{fetch_key(data, :max_depth)}"
+          lines << ''
+
+          steps.each_with_index do |step, i|
+            unit = fetch_key(step, :unit)
+            file = fetch_key(step, :file_path)
+            ops = fetch_key(step, :operations, [])
+            lines << "### #{i + 1}. #{unit}"
+            lines << "`#{file}`" if file
+            lines << ''
+            ops.each do |op|
+              op_type = fetch_key(op, :type)
+              target = fetch_key(op, :target)
+              method_name = fetch_key(op, :method)
+              desc = [op_type, target, method_name].compact.join(' → ')
+              lines << "- #{desc}"
+            end
+            lines << ''
+          end
+
+          lines << '_(empty flow)_' if steps.empty?
+          lines.join("\n").rstrip
+        end
+
+        # ── session_trace ──────────────────────────────────────────
+
+        # @param data [Hash] SessionFlowDocument data with :session_id, :steps, :side_effects
+        # @return [String] Markdown-formatted session trace
+        def render_session_trace(data, **)
+          session_id = fetch_key(data, :session_id)
+          steps = fetch_key(data, :steps, [])
+          token_count = fetch_key(data, :token_count)
+          side_effects = fetch_key(data, :side_effects, [])
+
+          lines = []
+          lines << "## Session: #{session_id}"
+          lines << ''
+          lines << "**Requests:** #{steps.size} | **Tokens:** ~#{token_count}" if token_count
+          lines << ''
+
+          steps.each do |step|
+            method = fetch_key(step, :method) || fetch_key(step, :verb)
+            path = fetch_key(step, :path)
+            controller = fetch_key(step, :controller)
+            action = fetch_key(step, :action)
+            status = fetch_key(step, :status)
+            duration = fetch_key(step, :duration_ms)
+            line = "- **#{method} #{path}** → #{controller}##{action}"
+            line += " (#{status}, #{duration}ms)" if status
+            lines << line
+          end
+
+          if side_effects.any?
+            lines << ''
+            lines << '### Side Effects'
+            lines << ''
+            side_effects.each { |se| lines << "- #{se}" }
+          end
+
+          lines.join("\n").rstrip
+        end
+
         # ── Default fallback ────────────────────────────────────────
 
         # @param data [Object] Any data

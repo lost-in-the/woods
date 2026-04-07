@@ -8,7 +8,7 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 31 | 31 |
+| **Tools** | 32 | 31 |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
@@ -98,9 +98,9 @@ Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
-### Tools (31)
+### Tools (32)
 
-#### Core Query (6)
+#### Core Query (7)
 
 | Tool | Description |
 |------|-------------|
@@ -110,6 +110,7 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Conso
 | `dependents` | Traverse reverse dependencies (what depends on a unit) with BFS depth control. |
 | `structure` | Get codebase structure: manifest summary or full unit breakdown by type. |
 | `recent_changes` | List recently modified units sorted by git timestamp. |
+| `type_members` | List all units of a specific type (e.g. model, controller, job, pattern). |
 
 #### Graph Analysis (4)
 

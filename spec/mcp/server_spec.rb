@@ -23,9 +23,9 @@ RSpec.describe Woods::MCP::Server do
       expect(instructions).to include('lookup')
     end
 
-    it 'registers 31 tools' do
+    it 'registers 32 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(31)
+      expect(tools.size).to eq(32)
     end
 
     it 'registers expected tool names' do
@@ -33,7 +33,7 @@ RSpec.describe Woods::MCP::Server do
       expect(tools.keys).to contain_exactly(
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'domain_clusters', 'pagerank', 'framework',
-        'recent_changes', 'reload', 'codebase_retrieve',
+        'recent_changes', 'type_members', 'reload', 'codebase_retrieve',
         'trace_flow', 'session_trace',
         'pipeline_extract', 'pipeline_embed', 'pipeline_status',
         'pipeline_diagnose', 'pipeline_repair',
@@ -149,6 +149,24 @@ RSpec.describe Woods::MCP::Server do
       response = call_tool(server, 'search', query: 'class', fields: 'source_code')
       data = parse_response(response)
       expect(data['result_count']).to be >= 1
+    end
+  end
+
+  describe 'tool: type_members' do
+    it 'returns all units of a given type' do
+      response = call_tool(server, 'type_members', type: 'model')
+      data = parse_response(response)
+      expect(data['type']).to eq('model')
+      expect(data['count']).to be >= 1
+      expect(data['units']).to be_an(Array)
+      identifiers = data['units'].map { |u| u['identifier'] }
+      expect(identifiers).to include('Post')
+    end
+
+    it 'returns empty list for unknown type' do
+      response = call_tool(server, 'type_members', type: 'nonexistent')
+      data = parse_response(response)
+      expect(data['count']).to eq(0)
     end
   end
 
@@ -811,7 +829,15 @@ RSpec.describe Woods::MCP::Server do
       let(:mock_doc) do
         instance_double(
           'Woods::SessionTracer::SessionFlowDocument',
-          to_markdown: "## Session: sess1\n_Generated at 2026-02-18T00:00:00Z | 1 requests | ~42 tokens_"
+          to_h: {
+            session_id: 'sess1',
+            generated_at: '2026-02-18T00:00:00Z',
+            token_count: 42,
+            steps: [{ method: 'GET', path: '/posts', controller: 'PostsController', action: 'index', status: 200 }],
+            context_pool: {},
+            side_effects: [],
+            dependency_map: {}
+          }
         )
       end
 
@@ -839,10 +865,11 @@ RSpec.describe Woods::MCP::Server do
         expect(mock_assembler).to have_received(:assemble).with('sess1', budget: 4000, depth: 2)
       end
 
-      it 'returns the markdown from the session flow document' do
+      it 'returns session data from the flow document' do
         response = call_tool(server, 'session_trace', session_id: 'sess1')
-        text = response_text(response)
-        expect(text).to include('Session: sess1')
+        data = parse_response(response)
+        expect(data['session_id']).to eq('sess1')
+        expect(data['steps']).to be_an(Array)
       end
 
       it 'returns an error hash when assembly raises' do
