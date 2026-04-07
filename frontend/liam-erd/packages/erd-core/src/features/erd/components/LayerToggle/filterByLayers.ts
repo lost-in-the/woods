@@ -23,20 +23,21 @@ export function filterNodesByLayers(
 export function filterByFocus(
   nodes: Node[],
   edges: Edge[],
-  focusedNode: string | null,
+  focusedNodes: Set<string>,
 ): { nodes: Node[]; edges: Edge[] } {
-  if (!focusedNode) return { nodes, edges }
+  if (focusedNodes.size === 0) return { nodes, edges }
 
-  const connectedIds = new Set<string>([focusedNode])
+  // Compute union of one-hop neighborhoods for all focused nodes
+  const visibleIds = new Set<string>(focusedNodes)
   for (const edge of edges) {
-    if (edge.source === focusedNode) connectedIds.add(edge.target)
-    if (edge.target === focusedNode) connectedIds.add(edge.source)
+    if (focusedNodes.has(edge.source)) visibleIds.add(edge.target)
+    if (focusedNodes.has(edge.target)) visibleIds.add(edge.source)
   }
 
   return {
-    nodes: nodes.filter((node) => connectedIds.has(node.id)),
+    nodes: nodes.filter((node) => visibleIds.has(node.id)),
     edges: edges.filter(
-      (edge) => connectedIds.has(edge.source) && connectedIds.has(edge.target),
+      (edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target),
     ),
   }
 }
