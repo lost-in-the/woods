@@ -15,13 +15,13 @@ const formatLabel = (type: WoodsNodeType): string => {
 }
 
 const formatMeta = (type: WoodsNodeType, meta: Record<string, unknown>): string | null => {
-  if (type === 'controller' && typeof meta.action_count === 'number') {
-    return `${meta.action_count} actions`
+  if (type === 'controller' && typeof meta['action_count'] === 'number') {
+    return `${meta['action_count']} actions`
   }
-  if (type === 'job' && typeof meta.queue_name === 'string') {
-    return meta.queue_name
+  if (type === 'job' && typeof meta['queue'] === 'string') {
+    return meta['queue']
   }
-  if (type === 'service' && meta.callable === true) {
+  if (type === 'service' && meta['callable'] === true) {
     return 'callable'
   }
   return null

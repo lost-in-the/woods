@@ -10,7 +10,7 @@ export type WoodsNodeMember = v.InferOutput<typeof woodsNodeMemberSchema>
 export const woodsNodeDependencySchema = v.object({
   target: v.string(),
   target_type: v.string(),
-  via: v.string(),
+  via: v.optional(v.string()),
 })
 export type WoodsNodeDependency = v.InferOutput<typeof woodsNodeDependencySchema>
 
