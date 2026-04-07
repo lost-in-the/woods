@@ -1073,6 +1073,14 @@ RSpec.describe Woods::MCP::Server do
       expect(instructions).to include('index_pattern')
       expect(instructions).to include('Persist discoveries')
     end
+
+    it 'includes configuration quick reference' do
+      instructions = server.instance_variable_get(:@instructions)
+      expect(instructions).to include('Configuration Quick Reference')
+      expect(instructions).to include('agent_indexing_enabled')
+      expect(instructions).to include('embedding_provider')
+      expect(instructions).to include('configure_with_preset')
+    end
   end
 
   context 'with markdown format' do
