@@ -112,7 +112,12 @@ module Woods
       #
       # @return [String] JSON string
       def generate_schema
-        schema = SchemaGenerator.new(@output_dir).generate
+        layers = if defined?(Woods) && Woods.respond_to?(:configuration)
+                   Woods.configuration.erd_layers
+                 else
+                   [:models]
+                 end
+        schema = SchemaGenerator.new(@output_dir, layers: layers).generate
         JSON.generate(schema)
       end
 

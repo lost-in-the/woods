@@ -34,6 +34,22 @@ RSpec.describe Woods::Erd::SchemaGenerator do
     File.write(index_path, JSON.generate(existing))
   end
 
+  def write_unit(type, identifier, metadata: {}, dependencies: [])
+    type_dir = File.join(output_dir, "#{type}s")
+    FileUtils.mkdir_p(type_dir)
+
+    unit = {
+      'type' => type.to_s,
+      'identifier' => identifier,
+      'metadata' => metadata,
+      'dependencies' => dependencies
+    }
+
+    digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+    filename = "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}_#{digest}.json"
+    File.write(File.join(type_dir, filename), JSON.generate(unit))
+  end
+
   describe '#generate' do
     it 'generates a table with columns' do
       write_model_unit('Post', {
@@ -280,6 +296,62 @@ RSpec.describe Woods::Erd::SchemaGenerator do
       expect do
         described_class.new(output_dir).generate
       end.to raise_error(Woods::Error, /no extracted model data/i)
+    end
+  end
+
+  describe '#generate with nodes' do
+    before do
+      write_model_unit('Order', {
+        'table_name' => 'orders',
+        'table_exists' => true,
+        'primary_key' => 'id',
+        'columns' => [{ 'name' => 'id', 'type' => 'bigint', 'null' => false, 'default' => nil }],
+        'associations' => [],
+        'indexes' => [],
+        'foreign_keys' => [],
+        'enums' => {}
+      })
+    end
+
+    it 'generates controller nodes with actions as members' do
+      write_unit(:controller, 'OrdersController',
+        metadata: {
+          'actions' => %w[index show create],
+          'action_count' => 3,
+          'filters' => [],
+          'routes' => {}
+        },
+        dependencies: [
+          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+        ])
+
+      schema = described_class.new(output_dir, layers: [:models, :controllers]).generate
+
+      expect(schema).to have_key('nodes')
+      expect(schema['nodes']).to have_key('OrdersController')
+
+      node = schema['nodes']['OrdersController']
+      expect(node['name']).to eq('OrdersController')
+      expect(node['type']).to eq('controller')
+      expect(node['members']).to eq([
+        { 'name' => 'index' },
+        { 'name' => 'show' },
+        { 'name' => 'create' }
+      ])
+      expect(node['meta']).to eq({ 'action_count' => 3 })
+      expect(node['dependencies']).to include(
+        hash_including('target' => 'orders', 'target_type' => 'table', 'via' => 'code_reference')
+      )
+    end
+
+    it 'excludes nodes when layer is not active' do
+      write_unit(:controller, 'OrdersController',
+        metadata: { 'actions' => %w[index], 'action_count' => 1 },
+        dependencies: [])
+
+      schema = described_class.new(output_dir, layers: [:models]).generate
+
+      expect(schema).not_to have_key('nodes')
     end
   end
 end

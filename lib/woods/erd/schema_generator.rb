@@ -19,14 +19,23 @@ module Woods
     #   # => { "tables" => { "posts" => { ... } }, "enums" => {}, "extensions" => {} }
     #
     class SchemaGenerator
+      LAYER_DIRECTORIES = {
+        controllers: 'controllers',
+        jobs: 'jobs',
+        services: 'services',
+        mailers: 'mailers'
+      }.freeze
+
       # @param output_dir [String, Pathname] Path to Woods extraction output directory
-      def initialize(output_dir)
+      # @param layers [Array<Symbol>] Active layers to include (default: [:models])
+      def initialize(output_dir, layers: [:models])
         @output_dir = Pathname.new(output_dir)
+        @layers = layers
       end
 
       # Generate a Liam-compatible schema hash from extracted model units.
       #
-      # @return [Hash] Schema with tables, enums, and extensions keys
+      # @return [Hash] Schema with tables, enums, extensions, and optionally nodes keys
       # @raise [Woods::Error] if no extracted model data is found
       def generate
         models_dir = @output_dir.join('models')
@@ -36,7 +45,16 @@ module Woods
         tables = build_tables(units)
         enums = build_enums(units)
 
-        { 'tables' => tables, 'enums' => enums, 'extensions' => {} }
+        schema = { 'tables' => tables, 'enums' => enums, 'extensions' => {} }
+
+        non_model_layers = @layers.reject { |l| l == :models }
+        unless non_model_layers.empty?
+          table_lookup = build_table_lookup(units)
+          nodes = build_nodes(non_model_layers, table_lookup)
+          schema['nodes'] = nodes unless nodes.empty?
+        end
+
+        schema
       end
 
       private
@@ -200,6 +218,90 @@ module Woods
         when 'nullify', 'set_null' then 'SET_NULL'
         when 'set_default' then 'SET_DEFAULT'
         else 'NO_ACTION'
+        end
+      end
+
+      def build_nodes(layers, table_lookup)
+        nodes = {}
+
+        layers.each do |layer|
+          dir_name = LAYER_DIRECTORIES[layer]
+          next unless dir_name
+
+          layer_dir = @output_dir.join(dir_name)
+          next unless layer_dir.directory?
+
+          layer_dir.children
+                   .select { |f| f.extname == '.json' && f.basename.to_s != '_index.json' }
+                   .each do |file|
+                     unit = JSON.parse(file.read)
+                     node = build_node(unit, layer, table_lookup)
+                     nodes[unit['identifier']] = node
+                   end
+        end
+
+        nodes
+      end
+
+      def build_node(unit, layer, table_lookup)
+        meta = unit['metadata'] || {}
+        deps = unit['dependencies'] || []
+
+        {
+          'name' => unit['identifier'],
+          'type' => layer.to_s.delete_suffix('s'),
+          'members' => build_node_members(layer, meta),
+          'meta' => build_node_meta(layer, meta),
+          'dependencies' => build_node_dependencies(deps, table_lookup)
+        }
+      end
+
+      def build_node_members(layer, meta)
+        actions = case layer
+                  when :controllers, :mailers
+                    meta['actions'] || []
+                  when :jobs
+                    meta['perform_params'] || []
+                  when :services
+                    meta['public_methods'] || []
+                  else
+                    []
+                  end
+
+        actions.map { |a| { 'name' => a } }
+      end
+
+      def build_node_meta(layer, meta)
+        case layer
+        when :controllers
+          { 'action_count' => meta['action_count'] || 0 }
+        when :jobs
+          result = {}
+          result['queue'] = meta['queue'] if meta.key?('queue')
+          result['job_type'] = meta['job_type'] if meta.key?('job_type')
+          result
+        when :services
+          meta['is_callable'] ? { 'callable' => true } : {}
+        when :mailers
+          result = {}
+          result['delivery_method'] = meta['delivery_method'] if meta.key?('delivery_method')
+          result['action_count'] = meta['action_count'] if meta.key?('action_count')
+          result
+        else
+          {}
+        end
+      end
+
+      def build_node_dependencies(deps, table_lookup)
+        deps.map do |dep|
+          target = dep['target']
+          resolved_target = table_lookup[target]
+
+          if resolved_target
+            { 'target' => resolved_target, 'target_type' => 'table', 'via' => dep['via'] }
+          else
+            { 'target' => target, 'target_type' => dep['type'], 'via' => dep['via'] }
+          end
         end
       end
     end
