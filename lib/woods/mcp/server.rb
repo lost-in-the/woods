@@ -9,7 +9,7 @@ require_relative 'tool_response_renderer'
 
 module Woods
   module MCP
-    # Builds an MCP::Server with 31 tools, 2 resources, and 2 resource templates for querying
+    # Builds an MCP::Server with 32 tools, 2 resources, and 2 resource templates for querying
     # Woods extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -67,11 +67,12 @@ module Woods
           define_pagerank_tool(server, reader, respond, renderer)
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
+          define_type_members_tool(server, reader, respond, renderer)
           define_reload_tool(server, reader, respond, renderer)
           define_retrieve_tool(server, retriever, respond)
           define_trace_flow_tool(server, reader, index_dir, respond, renderer)
-          define_session_trace_tool(server, reader, respond)
-          define_operator_tools(server, operator, respond, renderer)
+          define_session_trace_tool(server, reader, respond, renderer)
+          define_operator_tools(server, operator, reader, respond, renderer)
           define_feedback_tools(server, feedback_store, respond, renderer)
           define_snapshot_tools(server, snapshot_store, respond, renderer)
           define_notion_sync_tool(server, reader, index_dir, respond, renderer)
@@ -516,6 +517,30 @@ module Woods
           end
         end
 
+        def define_type_members_tool(server, reader, respond, renderer)
+          coerce_int = method(:coerce_integer)
+          server.define_tool(
+            name: 'type_members',
+            description: 'List all units of a specific type (e.g. model, controller, job, pattern). ' \
+                         'Returns identifiers and file paths.',
+            input_schema: {
+              properties: {
+                type: { type: 'string', description: 'Unit type: model, controller, service, job, mailer, pattern, etc.' },
+                limit: { type: 'integer', description: 'Maximum results (default: 100)' }
+              },
+              required: ['type']
+            }
+          ) do |type:, server_context:, limit: nil|
+            limit = coerce_int.call(limit) || 100
+            units = reader.list_units(type: type).first(limit)
+            respond.call(renderer.render_default({
+                                                   type: type,
+                                                   count: units.size,
+                                                   units: units.map { |u| { identifier: u['identifier'], file_path: u['file_path'] } }
+                                                 }))
+          end
+        end
+
         def define_reload_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'reload',
@@ -597,11 +622,11 @@ module Woods
 
             respond.call(renderer.render(:trace_flow, flow_doc.to_h))
           rescue StandardError => e
-            respond.call(JSON.pretty_generate({ error: e.message }))
+            respond.call(renderer.render_default({ error: e.message }))
           end
         end
 
-        def define_session_trace_tool(server, reader, respond)
+        def define_session_trace_tool(server, reader, respond, renderer)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'session_trace',
@@ -618,7 +643,7 @@ module Woods
             budget = coerce_int.call(budget)
             depth = coerce_int.call(depth)
             store = Woods.configuration.session_store
-            next respond.call(JSON.pretty_generate({ error: 'Session tracer not configured' })) unless store
+            next respond.call(renderer.render_default({ error: 'Session tracer not configured' })) unless store
 
             require_relative '../session_tracer/session_flow_assembler'
 
@@ -626,16 +651,16 @@ module Woods
               store: store, reader: reader
             )
             doc = assembler.assemble(session_id, budget: budget || 8000, depth: depth || 1)
-            respond.call(doc.to_markdown)
+            respond.call(renderer.render(:session_trace, doc.to_h))
           rescue StandardError => e
-            respond.call(JSON.pretty_generate({ error: e.message }))
+            respond.call(renderer.render_default({ error: e.message }))
           end
         end
 
-        def define_operator_tools(server, operator, respond, renderer)
+        def define_operator_tools(server, operator, reader, respond, renderer)
           define_pipeline_extract_tool(server, operator, respond, renderer)
           define_pipeline_embed_tool(server, operator, respond, renderer)
-          define_pipeline_status_tool(server, operator, respond, renderer)
+          define_pipeline_status_tool(server, operator, reader, respond, renderer)
           define_pipeline_diagnose_tool(server, operator, respond, renderer)
           define_pipeline_repair_tool(server, operator, respond, renderer)
         end
@@ -729,10 +754,10 @@ module Woods
           end
         end
 
-        def define_pipeline_status_tool(server, operator, respond, renderer)
+        def define_pipeline_status_tool(server, operator, reader, respond, renderer)
           server.define_tool(
             name: 'pipeline_status',
-            description: 'Get the current pipeline status: last extraction time, unit counts, staleness.',
+            description: 'Get the current pipeline status: last extraction time, unit counts, staleness, pattern counts.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
             next respond.call('Pipeline operator is not configured.') unless operator
@@ -741,6 +766,12 @@ module Woods
             next respond.call('Status reporter is not configured.') unless reporter
 
             status = reporter.report
+
+            if Woods.configuration.agent_indexing_enabled
+              patterns = reader.list_units(type: 'pattern') rescue []
+              status[:agent_patterns] = patterns.size
+            end
+
             respond.call(renderer.render_default(status))
           end
         end
@@ -1017,7 +1048,7 @@ module Woods
                                                    errors: stats[:errors].first(10)
                                                  }))
           rescue StandardError => e
-            respond.call("Notion sync failed: #{e.message}")
+            respond.call(renderer.render_default({ error: "Notion sync failed: #{e.message}" }))
           end
         end
 
@@ -1114,6 +1145,7 @@ module Woods
             deleted = pattern_writer.delete(identifier)
 
             if deleted
+              try_delete_embedding(identifier)
               reader.reload!
               respond.call(renderer.render_default({ status: 'deleted', identifier: identifier }))
             else
@@ -1136,6 +1168,17 @@ module Woods
           logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
           logger.warn("[Woods] Pattern embedding failed: #{e.message}")
           false
+        end
+
+        def try_delete_embedding(identifier)
+          config = Woods.configuration
+          return unless config.respond_to?(:embedding_provider) && config.embedding_provider
+
+          builder = Woods::Builder.new(config)
+          vector_store = builder.build_vector_store
+          vector_store.delete(identifier) if vector_store.respond_to?(:delete)
+        rescue StandardError
+          # Vector deletion failure is non-fatal; pattern is already removed from disk
         end
 
         def build_resource_templates
