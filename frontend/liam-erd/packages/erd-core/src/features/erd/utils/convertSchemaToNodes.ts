@@ -175,7 +175,12 @@ export const convertSchemaToNodes = ({
   }
 
   if (hasDisconnectedWoods) {
-    nodes.push({
+    // Insert group node BEFORE its children — convertNodesToElkNodes requires
+    // parent nodes to appear first in the array (it builds a nodeMap linearly).
+    const groupNodeIndex = nodes.findIndex(
+      (n) => n.parentId === WOODS_DISCONNECTED_GROUP_ID,
+    )
+    nodes.splice(groupNodeIndex, 0, {
       id: WOODS_DISCONNECTED_GROUP_ID,
       type: 'nonRelatedTableGroup',
       data: {},
