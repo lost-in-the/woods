@@ -8,7 +8,7 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 28 | 31 |
+| **Tools** | 31 | 31 |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
