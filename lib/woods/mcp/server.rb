@@ -66,14 +66,14 @@ module Woods
           define_pagerank_tool(server, reader, respond, renderer)
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
-          define_reload_tool(server, reader, respond)
+          define_reload_tool(server, reader, respond, renderer)
           define_retrieve_tool(server, retriever, respond)
           define_trace_flow_tool(server, reader, index_dir, respond, renderer)
           define_session_trace_tool(server, reader, respond)
-          define_operator_tools(server, operator, respond)
-          define_feedback_tools(server, feedback_store, respond)
-          define_snapshot_tools(server, snapshot_store, respond)
-          define_notion_sync_tool(server, reader, index_dir, respond)
+          define_operator_tools(server, operator, respond, renderer)
+          define_feedback_tools(server, feedback_store, respond, renderer)
+          define_snapshot_tools(server, snapshot_store, respond, renderer)
+          define_notion_sync_tool(server, reader, index_dir, respond, renderer)
           register_resource_handler(server, reader)
 
           server
@@ -484,7 +484,7 @@ module Woods
           end
         end
 
-        def define_reload_tool(server, reader, respond)
+        def define_reload_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'reload',
             description: 'Reload extraction data from disk. Use after re-running extraction to pick up changes ' \
@@ -493,12 +493,12 @@ module Woods
           ) do |server_context:|
             reader.reload!
             manifest = reader.manifest
-            respond.call(JSON.pretty_generate({
-                                                reloaded: true,
-                                                extracted_at: manifest['extracted_at'],
-                                                total_units: manifest['total_units'],
-                                                counts: manifest['counts']
-                                              }))
+            respond.call(renderer.render_default({
+                                                   reloaded: true,
+                                                   extracted_at: manifest['extracted_at'],
+                                                   total_units: manifest['total_units'],
+                                                   counts: manifest['counts']
+                                                 }))
           end
         end
 
@@ -598,22 +598,22 @@ module Woods
           end
         end
 
-        def define_operator_tools(server, operator, respond)
-          define_pipeline_extract_tool(server, operator, respond)
-          define_pipeline_embed_tool(server, operator, respond)
-          define_pipeline_status_tool(server, operator, respond)
-          define_pipeline_diagnose_tool(server, operator, respond)
-          define_pipeline_repair_tool(server, operator, respond)
+        def define_operator_tools(server, operator, respond, renderer)
+          define_pipeline_extract_tool(server, operator, respond, renderer)
+          define_pipeline_embed_tool(server, operator, respond, renderer)
+          define_pipeline_status_tool(server, operator, respond, renderer)
+          define_pipeline_diagnose_tool(server, operator, respond, renderer)
+          define_pipeline_repair_tool(server, operator, respond, renderer)
         end
 
-        def define_feedback_tools(server, feedback_store, respond)
-          define_retrieval_rate_tool(server, feedback_store, respond)
-          define_retrieval_report_gap_tool(server, feedback_store, respond)
-          define_retrieval_explain_tool(server, feedback_store, respond)
-          define_retrieval_suggest_tool(server, feedback_store, respond)
+        def define_feedback_tools(server, feedback_store, respond, renderer)
+          define_retrieval_rate_tool(server, feedback_store, respond, renderer)
+          define_retrieval_report_gap_tool(server, feedback_store, respond, renderer)
+          define_retrieval_explain_tool(server, feedback_store, respond, renderer)
+          define_retrieval_suggest_tool(server, feedback_store, respond, renderer)
         end
 
-        def define_pipeline_extract_tool(server, operator, respond)
+        def define_pipeline_extract_tool(server, operator, respond, renderer)
           server.define_tool(
             name: 'pipeline_extract',
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
@@ -643,14 +643,14 @@ module Woods
               logger.error("[Woods] Pipeline extract failed: #{e.message}")
             end
 
-            respond.call(JSON.pretty_generate({
-                                                status: 'started',
-                                                message: 'Extraction pipeline started in background thread'
-                                              }))
+            respond.call(renderer.render_default({
+                                                   status: 'started',
+                                                   message: 'Extraction pipeline started in background thread'
+                                                 }))
           end
         end
 
-        def define_pipeline_embed_tool(server, operator, respond)
+        def define_pipeline_embed_tool(server, operator, respond, renderer)
           server.define_tool(
             name: 'pipeline_embed',
             description: 'Trigger embedding generation for extracted units. Checks rate limits before proceeding.',
@@ -688,14 +688,14 @@ module Woods
               logger.error("[Woods] Pipeline embed failed: #{e.message}")
             end
 
-            respond.call(JSON.pretty_generate({
-                                                status: 'started',
-                                                message: 'Embedding pipeline started in background thread'
-                                              }))
+            respond.call(renderer.render_default({
+                                                   status: 'started',
+                                                   message: 'Embedding pipeline started in background thread'
+                                                 }))
           end
         end
 
-        def define_pipeline_status_tool(server, operator, respond)
+        def define_pipeline_status_tool(server, operator, respond, renderer)
           server.define_tool(
             name: 'pipeline_status',
             description: 'Get the current pipeline status: last extraction time, unit counts, staleness.',
@@ -707,11 +707,11 @@ module Woods
             next respond.call('Status reporter is not configured.') unless reporter
 
             status = reporter.report
-            respond.call(JSON.pretty_generate(status))
+            respond.call(renderer.render_default(status))
           end
         end
 
-        def define_pipeline_diagnose_tool(server, operator, respond)
+        def define_pipeline_diagnose_tool(server, operator, respond, renderer)
           server.define_tool(
             name: 'pipeline_diagnose',
             description: 'Classify a recent pipeline error and suggest remediation.',
@@ -732,11 +732,11 @@ module Woods
             # Set the class name in the error string for pattern matching
             result = escalator.classify(error)
             result[:original_class] = error_class
-            respond.call(JSON.pretty_generate(result))
+            respond.call(renderer.render_default(result))
           end
         end
 
-        def define_pipeline_repair_tool(server, operator, respond)
+        def define_pipeline_repair_tool(server, operator, respond, renderer)
           server.define_tool(
             name: 'pipeline_repair',
             description: 'Attempt to repair pipeline state: clear stale locks, reset rate limits.',
@@ -758,19 +758,19 @@ module Woods
               lock = operator[:pipeline_lock]
               if lock
                 lock.release
-                respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks' }))
+                respond.call(renderer.render_default({ repaired: true, action: 'clear_locks' }))
               else
                 respond.call('Pipeline lock is not configured.')
               end
             when 'reset_cooldowns'
-              respond.call(JSON.pretty_generate({ repaired: true, action: 'reset_cooldowns' }))
+              respond.call(renderer.render_default({ repaired: true, action: 'reset_cooldowns' }))
             else
               respond.call("Unknown repair action: #{action}")
             end
           end
         end
 
-        def define_retrieval_rate_tool(server, feedback_store, respond)
+        def define_retrieval_rate_tool(server, feedback_store, respond, renderer)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'retrieval_rate',
@@ -788,11 +788,11 @@ module Woods
 
             score = coerce_int.call(score)
             feedback_store.record_rating(query: query, score: score, comment: comment)
-            respond.call(JSON.pretty_generate({ recorded: true, type: 'rating', query: query, score: score }))
+            respond.call(renderer.render_default({ recorded: true, type: 'rating', query: query, score: score }))
           end
         end
 
-        def define_retrieval_report_gap_tool(server, feedback_store, respond)
+        def define_retrieval_report_gap_tool(server, feedback_store, respond, renderer)
           server.define_tool(
             name: 'retrieval_report_gap',
             description: 'Report a missing unit that should have appeared in retrieval results.',
@@ -808,15 +808,15 @@ module Woods
             next respond.call('Feedback store is not configured.') unless feedback_store
 
             feedback_store.record_gap(query: query, missing_unit: missing_unit, unit_type: unit_type)
-            respond.call(JSON.pretty_generate({
-                                                recorded: true,
-                                                type: 'gap',
-                                                missing_unit: missing_unit
-                                              }))
+            respond.call(renderer.render_default({
+                                                   recorded: true,
+                                                   type: 'gap',
+                                                   missing_unit: missing_unit
+                                                 }))
           end
         end
 
-        def define_retrieval_explain_tool(server, feedback_store, respond)
+        def define_retrieval_explain_tool(server, feedback_store, respond, renderer)
           server.define_tool(
             name: 'retrieval_explain',
             description: 'Get feedback statistics: average score, total ratings, gap count.',
@@ -826,17 +826,17 @@ module Woods
 
             ratings = feedback_store.ratings
             gaps = feedback_store.gaps
-            respond.call(JSON.pretty_generate({
-                                                total_ratings: ratings.size,
-                                                average_score: feedback_store.average_score,
-                                                total_gaps: gaps.size,
-                                                recent_ratings: ratings.last(5),
-                                                recent_gaps: gaps.last(5)
-                                              }))
+            respond.call(renderer.render_default({
+                                                   total_ratings: ratings.size,
+                                                   average_score: feedback_store.average_score,
+                                                   total_gaps: gaps.size,
+                                                   recent_ratings: ratings.last(5),
+                                                   recent_gaps: gaps.last(5)
+                                                 }))
           end
         end
 
-        def define_retrieval_suggest_tool(server, feedback_store, respond)
+        def define_retrieval_suggest_tool(server, feedback_store, respond, renderer)
           server.define_tool(
             name: 'retrieval_suggest',
             description: 'Analyze feedback to suggest improvements: detect patterns in low scores and missing units.',
@@ -847,21 +847,21 @@ module Woods
             require_relative '../feedback/gap_detector'
             detector = Woods::Feedback::GapDetector.new(feedback_store: feedback_store)
             issues = detector.detect
-            respond.call(JSON.pretty_generate({
-                                                issues_found: issues.size,
-                                                issues: issues
-                                              }))
+            respond.call(renderer.render_default({
+                                                   issues_found: issues.size,
+                                                   issues: issues
+                                                 }))
           end
         end
 
-        def define_snapshot_tools(server, snapshot_store, respond)
-          define_list_snapshots_tool(server, snapshot_store, respond)
-          define_snapshot_diff_tool(server, snapshot_store, respond)
-          define_unit_history_tool(server, snapshot_store, respond)
-          define_snapshot_detail_tool(server, snapshot_store, respond)
+        def define_snapshot_tools(server, snapshot_store, respond, renderer)
+          define_list_snapshots_tool(server, snapshot_store, respond, renderer)
+          define_snapshot_diff_tool(server, snapshot_store, respond, renderer)
+          define_unit_history_tool(server, snapshot_store, respond, renderer)
+          define_snapshot_detail_tool(server, snapshot_store, respond, renderer)
         end
 
-        def define_list_snapshots_tool(server, snapshot_store, respond)
+        def define_list_snapshots_tool(server, snapshot_store, respond, renderer)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'list_snapshots',
@@ -877,11 +877,11 @@ module Woods
 
             limit = coerce_int.call(limit)
             results = snapshot_store.list(limit: limit || 20, branch: branch)
-            respond.call(JSON.pretty_generate({ snapshot_count: results.size, snapshots: results }))
+            respond.call(renderer.render_default({ snapshot_count: results.size, snapshots: results }))
           end
         end
 
-        def define_snapshot_diff_tool(server, snapshot_store, respond)
+        def define_snapshot_diff_tool(server, snapshot_store, respond, renderer)
           server.define_tool(
             name: 'snapshot_diff',
             description: 'Compare two extraction snapshots by git SHA. Returns lists of added, modified, and deleted units.',
@@ -896,17 +896,17 @@ module Woods
             next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
 
             result = snapshot_store.diff(sha_a, sha_b)
-            respond.call(JSON.pretty_generate({
-                                                sha_a: sha_a, sha_b: sha_b,
-                                                added: result[:added].size,
-                                                modified: result[:modified].size,
-                                                deleted: result[:deleted].size,
-                                                details: result
-                                              }))
+            respond.call(renderer.render_default({
+                                                   sha_a: sha_a, sha_b: sha_b,
+                                                   added: result[:added].size,
+                                                   modified: result[:modified].size,
+                                                   deleted: result[:deleted].size,
+                                                   details: result
+                                                 }))
           end
         end
 
-        def define_unit_history_tool(server, snapshot_store, respond)
+        def define_unit_history_tool(server, snapshot_store, respond, renderer)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'unit_history',
@@ -923,15 +923,15 @@ module Woods
 
             limit = coerce_int.call(limit)
             entries = snapshot_store.unit_history(identifier, limit: limit || 20)
-            respond.call(JSON.pretty_generate({
-                                                identifier: identifier,
-                                                versions: entries.size,
-                                                history: entries
-                                              }))
+            respond.call(renderer.render_default({
+                                                   identifier: identifier,
+                                                   versions: entries.size,
+                                                   history: entries
+                                                 }))
           end
         end
 
-        def define_snapshot_detail_tool(server, snapshot_store, respond)
+        def define_snapshot_detail_tool(server, snapshot_store, respond, renderer)
           server.define_tool(
             name: 'snapshot_detail',
             description: 'Get full metadata for a specific extraction snapshot by git SHA.',
@@ -946,14 +946,14 @@ module Woods
 
             snapshot = snapshot_store.find(git_sha)
             if snapshot
-              respond.call(JSON.pretty_generate(snapshot))
+              respond.call(renderer.render_default(snapshot))
             else
               respond.call("Snapshot not found for git SHA: #{git_sha}")
             end
           end
         end
 
-        def define_notion_sync_tool(server, reader, index_dir, respond)
+        def define_notion_sync_tool(server, reader, index_dir, respond, renderer)
           server.define_tool(
             name: 'notion_sync',
             description: 'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
@@ -976,12 +976,12 @@ module Woods
             exporter = Woods::Notion::Exporter.new(index_dir: index_dir, reader: reader)
             stats = exporter.sync_all
 
-            respond.call(JSON.pretty_generate({
-                                                synced: true,
-                                                data_models: stats[:data_models],
-                                                columns: stats[:columns],
-                                                errors: stats[:errors].first(10)
-                                              }))
+            respond.call(renderer.render_default({
+                                                   synced: true,
+                                                   data_models: stats[:data_models],
+                                                   columns: stats[:columns],
+                                                   errors: stats[:errors].first(10)
+                                                 }))
           rescue StandardError => e
             respond.call("Notion sync failed: #{e.message}")
           end
