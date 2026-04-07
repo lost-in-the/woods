@@ -117,7 +117,7 @@
   border: none;
   cursor: pointer;
   text-align: left;
-  transition: color 0.15s;
+  transition: color 300ms var(--default-timing-function);
 }
 
 .memberToggleButton:hover {
