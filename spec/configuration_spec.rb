@@ -63,6 +63,10 @@ RSpec.describe Woods::Configuration do
     it 'sets erd_path to /woods/erd' do
       expect(config.erd_path).to eq('/woods/erd')
     end
+
+    it 'sets erd_layers to [:models]' do
+      expect(config.erd_layers).to eq([:models])
+    end
   end
 
   describe 'session tracer configuration' do

@@ -44,7 +44,7 @@ module Woods
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
-                  :cache_store, :cache_options, :erd_enabled, :erd_path
+                  :cache_store, :cache_options, :erd_enabled, :erd_path, :erd_layers
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
                 :cache_enabled
 
@@ -79,6 +79,7 @@ module Woods
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @erd_enabled = false
       @erd_path = '/woods/erd'
+      @erd_layers = [:models]
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods
