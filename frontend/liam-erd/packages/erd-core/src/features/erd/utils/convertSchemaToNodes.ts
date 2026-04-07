@@ -7,15 +7,18 @@ import {
 } from '@/features/erd/constants'
 import { columnHandleId } from '@/features/erd/utils'
 import type { ShowMode } from '@/schemas/showMode'
+import type { NodeLayer } from '../components/LayerToggle'
 
 type Params = {
   schema: Schema
   showMode: ShowMode
+  nodeLayers?: Record<NodeLayer, boolean>
 }
 
 export const convertSchemaToNodes = ({
   schema,
   showMode,
+  nodeLayers,
 }: Params): {
   nodes: Node[]
   edges: Edge[]
@@ -104,7 +107,21 @@ export const convertSchemaToNodes = ({
 
   // Convert Woods nodes to React Flow nodes
   if (schema.nodes) {
+    // Map woods node type to layer key
+    const WOODS_TYPE_TO_LAYER: Record<string, NodeLayer> = {
+      controller: 'controllers',
+      job: 'jobs',
+      service: 'services',
+      mailer: 'mailers',
+    }
+
     for (const [id, woodsNode] of Object.entries(schema.nodes)) {
+      // Skip nodes whose layer is disabled (lazy creation)
+      if (nodeLayers) {
+        const layerKey = WOODS_TYPE_TO_LAYER[woodsNode.type]
+        if (layerKey && !nodeLayers[layerKey]) continue
+      }
+
       nodes.push({
         id: `woods-${id}`,
         type: 'woodsNode',

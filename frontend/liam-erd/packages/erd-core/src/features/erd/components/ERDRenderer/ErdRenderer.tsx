@@ -36,7 +36,6 @@ import {
   LayerToggleDropdown,
   filterByFocus,
   filterEdgesByLayers,
-  filterNodesByLayers,
   useLayerState,
 } from '../LayerToggle'
 import { CardinalityMarkers } from './CardinalityMarkers'
@@ -83,11 +82,6 @@ export const ERDRenderer: FC<Props> = ({
     return createHash(str)
   }, [schema])
 
-  const { nodes, edges } = convertSchemaToNodes({
-    schema,
-    showMode,
-  })
-
   const {
     nodeLayers,
     edgeCategories,
@@ -97,13 +91,15 @@ export const ERDRenderer: FC<Props> = ({
     setFocusedNode,
   } = useLayerState()
 
-  const filteredNodes = useMemo(
-    () => filterNodesByLayers(nodes, nodeLayers),
-    [nodes, nodeLayers],
-  )
+  const { nodes, edges } = convertSchemaToNodes({
+    schema,
+    showMode,
+    nodeLayers,
+  })
+
   const visibleNodeIds = useMemo(
-    () => new Set(filteredNodes.map((n) => n.id)),
-    [filteredNodes],
+    () => new Set(nodes.map((n) => n.id)),
+    [nodes],
   )
   const filteredEdges = useMemo(
     () => filterEdgesByLayers(edges, edgeCategories, visibleNodeIds),
@@ -111,8 +107,8 @@ export const ERDRenderer: FC<Props> = ({
   )
 
   const { nodes: visibleNodes, edges: visibleEdges } = useMemo(
-    () => filterByFocus(filteredNodes, filteredEdges, focusedNode),
-    [filteredNodes, filteredEdges, focusedNode],
+    () => filterByFocus(nodes, filteredEdges, focusedNode),
+    [nodes, filteredEdges, focusedNode],
   )
 
   // Encode active layers into a key fragment so ERDContent re-mounts (and
