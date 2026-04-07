@@ -4,6 +4,8 @@ require 'json'
 require 'pathname'
 
 module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Erd
     # Transforms Woods extracted model units into Liam ERD's schema.json format.
     #
