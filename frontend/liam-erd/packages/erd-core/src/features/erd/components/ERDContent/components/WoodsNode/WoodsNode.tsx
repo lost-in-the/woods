@@ -16,6 +16,7 @@ export const WoodsNode: FC<Props> = ({ data }) => {
     <div
       className={clsx(
         styles.wrapper,
+        data.isHoverHighlighted && styles.wrapperHoverHighlighted,
         data.isHighlighted && styles.wrapperHighlighted,
         data.isActiveHighlighted && styles.wrapperActive,
       )}

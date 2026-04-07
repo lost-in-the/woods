@@ -28,11 +28,14 @@ export const TableNode: FC<Props> = ({ data }) => {
           <div
             className={clsx(
               styles.wrapper,
+              data.isHoverHighlighted && styles.wrapperHoverHighlighted,
               data.isHighlighted && styles.wrapperHighlighted,
               data.isActiveHighlighted && styles.wrapperActive,
             )}
             data-erd={
-              (data.isHighlighted || data.isActiveHighlighted) &&
+              (data.isHighlighted ||
+                data.isHoverHighlighted ||
+                data.isActiveHighlighted) &&
               'table-node-highlighted'
             }
           >

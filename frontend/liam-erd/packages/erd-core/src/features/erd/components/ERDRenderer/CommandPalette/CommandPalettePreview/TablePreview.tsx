@@ -22,6 +22,7 @@ export const TablePreview: FC<Props> = ({ tableName }) => {
               table: table,
               isActiveHighlighted: false,
               isHighlighted: false,
+              isHoverHighlighted: false,
               isTooltipVisible: false,
               sourceColumnName: undefined,
               targetColumnCardinalities: undefined,

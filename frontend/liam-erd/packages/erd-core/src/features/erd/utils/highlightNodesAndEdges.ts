@@ -45,6 +45,8 @@ const activeHighlightNode = (node: TableNodeType): TableNodeType => ({
   data: {
     ...node.data,
     isActiveHighlighted: true,
+    isHighlighted: false,
+    isHoverHighlighted: false,
   },
 })
 
@@ -52,7 +54,19 @@ const highlightNode = (node: TableNodeType): TableNodeType => ({
   ...node,
   data: {
     ...node.data,
+    isActiveHighlighted: false,
     isHighlighted: true,
+    isHoverHighlighted: false,
+  },
+})
+
+const hoverHighlightNode = (node: TableNodeType): TableNodeType => ({
+  ...node,
+  data: {
+    ...node.data,
+    isActiveHighlighted: false,
+    isHighlighted: false,
+    isHoverHighlighted: true,
   },
 })
 
@@ -62,6 +76,7 @@ const unhighlightNode = (node: TableNodeType): TableNodeType => ({
     ...node.data,
     isActiveHighlighted: false,
     isHighlighted: false,
+    isHoverHighlighted: false,
   },
 })
 
@@ -70,7 +85,15 @@ const highlightEdge = (edge: Edge): Edge => ({
   animated: false,
   selectable: false,
   zIndex: zIndex.edgeHighlighted,
-  data: { ...edge.data, isHighlighted: true },
+  data: { ...edge.data, isHighlighted: true, isHoverHighlighted: false },
+})
+
+const hoverHighlightEdge = (edge: Edge): Edge => ({
+  ...edge,
+  animated: false,
+  selectable: false,
+  zIndex: zIndex.edgeHighlighted,
+  data: { ...edge.data, isHighlighted: false, isHoverHighlighted: true },
 })
 
 const unhighlightEdge = (edge: Edge): Edge => ({
@@ -78,8 +101,10 @@ const unhighlightEdge = (edge: Edge): Edge => ({
   animated: false,
   selectable: false,
   zIndex: zIndex.edgeDefault,
-  data: { ...edge.data, isHighlighted: false },
+  data: { ...edge.data, isHighlighted: false, isHoverHighlighted: false },
 })
+
+const isWoodsNode = (node: Node): boolean => node.type === 'woodsNode'
 
 export const highlightNodesAndEdges = (
   nodes: Node[],
@@ -105,31 +130,91 @@ export const highlightNodesAndEdges = (
   }
 
   const updatedNodes = nodes.map((node) => {
-    if (!isTableNode(node)) {
-      return node
+    if (isTableNode(node)) {
+      if (isActiveNode(activeTableName, node)) {
+        return activeHighlightNode(node)
+      }
+
+      if (isRelatedNodeToTarget(activeTableName, edgeMap, node)) {
+        return highlightNode(node)
+      }
+
+      if (
+        isHoveredNode(hoverTableName, node) ||
+        isRelatedNodeToTarget(hoverTableName, edgeMap, node)
+      ) {
+        return hoverHighlightNode(node)
+      }
+
+      return unhighlightNode(node)
     }
 
-    if (isActiveNode(activeTableName, node)) {
-      return activeHighlightNode(node)
+    if (isWoodsNode(node)) {
+      const nodeId = node.id
+      const isActive = nodeId === activeTableName
+      const isRelatedToActive =
+        edgeMap.get(activeTableName ?? '')?.has(nodeId) ?? false
+      const isHovered = nodeId === hoverTableName
+      const isRelatedToHovered =
+        edgeMap.get(hoverTableName ?? '')?.has(nodeId) ?? false
+
+      if (isActive) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isActiveHighlighted: true,
+            isHighlighted: false,
+            isHoverHighlighted: false,
+          },
+        }
+      }
+
+      if (isRelatedToActive) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isActiveHighlighted: false,
+            isHighlighted: true,
+            isHoverHighlighted: false,
+          },
+        }
+      }
+
+      if (isHovered || isRelatedToHovered) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isActiveHighlighted: false,
+            isHighlighted: false,
+            isHoverHighlighted: true,
+          },
+        }
+      }
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          isActiveHighlighted: false,
+          isHighlighted: false,
+          isHoverHighlighted: false,
+        },
+      }
     }
 
-    if (
-      isRelatedNodeToTarget(activeTableName, edgeMap, node) ||
-      isHoveredNode(hoverTableName, node) ||
-      isRelatedNodeToTarget(hoverTableName, edgeMap, node)
-    ) {
-      return highlightNode(node)
-    }
-
-    return unhighlightNode(node)
+    return node
   })
 
   const updatedEdges = edges.map((edge) => {
-    if (
-      isRelatedEdgeToTarget(activeTableName, edge) ||
-      isRelatedEdgeToTarget(hoverTableName, edge)
-    ) {
+    if (isRelatedEdgeToTarget(activeTableName, edge)) {
       return highlightEdge(edge)
+    }
+
+    if (isRelatedEdgeToTarget(hoverTableName, edge)) {
+      return hoverHighlightEdge(edge)
     }
 
     return unhighlightEdge(edge)

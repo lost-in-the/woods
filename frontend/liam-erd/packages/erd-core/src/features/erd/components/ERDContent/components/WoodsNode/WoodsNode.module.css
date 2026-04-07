@@ -15,12 +15,20 @@
   opacity: 0;
 }
 
-.wrapperHighlighted,
+/* Hover state — neutral accent */
+.wrapperHoverHighlighted,
 .wrapper:hover {
+  border: 1px solid var(--overlay-50, #94a3b8);
+  box-shadow: 0px 0px 16px 0px rgba(148, 163, 184, 0.3);
+}
+
+/* Connected to active/selected — type color */
+.wrapperHighlighted {
   border: 1px solid var(--woods-border-color, var(--primary-accent));
   box-shadow: 0px 0px 20px 0px color-mix(in srgb, var(--woods-border-color, var(--primary-accent)) 40%, transparent);
 }
 
+/* Active/selected — stronger type color */
 .wrapperActive,
 .wrapperActive:hover {
   border: 2px solid var(--woods-border-color, var(--primary-accent));

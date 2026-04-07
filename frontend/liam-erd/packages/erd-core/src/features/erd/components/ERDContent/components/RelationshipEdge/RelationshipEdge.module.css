@@ -9,6 +9,12 @@
   opacity: 0;
 }
 
+/* Connected to hovered node — neutral color */
 .edge.hovered {
+  stroke: var(--overlay-50, #94a3b8);
+}
+
+/* Connected to active/selected node — bright accent */
+.edge.highlighted {
   stroke: var(--node-layout);
 }

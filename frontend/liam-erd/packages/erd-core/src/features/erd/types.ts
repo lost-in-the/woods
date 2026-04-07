@@ -11,6 +11,7 @@ export type TableNodeData = {
   table: Table
   isActiveHighlighted: boolean
   isHighlighted: boolean
+  isHoverHighlighted: boolean
   isTooltipVisible: boolean
   sourceColumnName: string | undefined
   targetColumnCardinalities?:
@@ -28,6 +29,7 @@ export type WoodsNodeData = {
   meta: Record<string, unknown>
   isHighlighted?: boolean
   isActiveHighlighted?: boolean
+  isHoverHighlighted?: boolean
 }
 
 export type WoodsNodeType = Node<WoodsNodeData, 'woodsNode'>

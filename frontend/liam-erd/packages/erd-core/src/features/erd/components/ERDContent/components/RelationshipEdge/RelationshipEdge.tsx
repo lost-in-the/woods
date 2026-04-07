@@ -48,7 +48,11 @@ export const RelationshipEdge: FC<Props> = ({
               ? 'url(#zeroOrManyLeftHighlight)'
               : 'url(#zeroOrManyLeft)'
         }
-        className={clsx(styles.edge, data?.isHighlighted && styles.hovered)}
+        className={clsx(
+          styles.edge,
+          data?.isHighlighted && styles.highlighted,
+          data?.isHoverHighlighted && styles.hovered,
+        )}
       />
       {data?.isHighlighted &&
         [...Array(PARTICLE_COUNT)].map((_, i) => (

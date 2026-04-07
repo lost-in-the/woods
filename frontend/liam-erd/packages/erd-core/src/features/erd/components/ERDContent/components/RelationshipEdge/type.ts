@@ -3,6 +3,7 @@ import type { Edge } from '@xyflow/react'
 
 type Data = {
   isHighlighted: boolean
+  isHoverHighlighted: boolean
   cardinality: Cardinality
 }
 
