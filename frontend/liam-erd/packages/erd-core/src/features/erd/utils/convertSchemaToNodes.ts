@@ -157,5 +157,31 @@ export const convertSchemaToNodes = ({
     }
   }
 
+  // Identify disconnected woods nodes (no edges at all)
+  const connectedNodeIds = new Set<string>()
+  for (const edge of edges) {
+    connectedNodeIds.add(edge.source)
+    connectedNodeIds.add(edge.target)
+  }
+
+  const WOODS_DISCONNECTED_GROUP_ID = 'woods-disconnected-group'
+  let hasDisconnectedWoods = false
+
+  for (const node of nodes) {
+    if (node.type === 'woodsNode' && !connectedNodeIds.has(node.id)) {
+      node.parentId = WOODS_DISCONNECTED_GROUP_ID
+      hasDisconnectedWoods = true
+    }
+  }
+
+  if (hasDisconnectedWoods) {
+    nodes.push({
+      id: WOODS_DISCONNECTED_GROUP_ID,
+      type: 'nonRelatedTableGroup',
+      data: {},
+      position: { x: 0, y: 0 },
+    })
+  }
+
   return { nodes, edges }
 }
