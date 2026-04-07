@@ -8,8 +8,9 @@ export interface LayerState {
   edgeCategories: Record<EdgeCategory, boolean>
   toggleNodeLayer: (layer: NodeLayer) => void
   toggleEdgeCategory: (category: EdgeCategory) => void
-  focusedNode: string | null
-  setFocusedNode: (nodeId: string | null) => void
+  focusedNodes: Set<string>
+  setFocusedNodes: (nodes: Set<string>) => void
+  toggleFocusedNode: (nodeId: string) => void
 }
 
 const DEFAULT_NODE_LAYERS: Record<NodeLayer, boolean> = {
@@ -30,7 +31,7 @@ export function useLayerState(): LayerState {
   const [edgeCategories, setEdgeCategories] = useState<
     Record<EdgeCategory, boolean>
   >(DEFAULT_EDGE_CATEGORIES)
-  const [focusedNode, setFocusedNode] = useState<string | null>(null)
+  const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set())
 
   const toggleNodeLayer = useCallback((layer: NodeLayer) => {
     setNodeLayers((prev) => ({ ...prev, [layer]: !prev[layer] }))
@@ -40,12 +41,25 @@ export function useLayerState(): LayerState {
     setEdgeCategories((prev) => ({ ...prev, [category]: !prev[category] }))
   }, [])
 
+  const toggleFocusedNode = useCallback((nodeId: string) => {
+    setFocusedNodes((prev) => {
+      const next = new Set(prev)
+      if (next.has(nodeId)) {
+        next.delete(nodeId)
+      } else {
+        next.add(nodeId)
+      }
+      return next
+    })
+  }, [])
+
   return {
     nodeLayers,
     edgeCategories,
     toggleNodeLayer,
     toggleEdgeCategory,
-    focusedNode,
-    setFocusedNode,
+    focusedNodes,
+    setFocusedNodes,
+    toggleFocusedNode,
   }
 }
