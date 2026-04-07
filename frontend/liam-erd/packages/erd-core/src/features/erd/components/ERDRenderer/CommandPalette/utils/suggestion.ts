@@ -13,7 +13,11 @@ export const textToSuggestion = (
   const [suggestionType, name] = words
   if (!suggestionType || !name) return null
 
-  if (suggestionType === 'table' || suggestionType === 'command')
+  if (
+    suggestionType === 'table' ||
+    suggestionType === 'command' ||
+    suggestionType === 'woods'
+  )
     return { type: suggestionType, name }
 
   return null

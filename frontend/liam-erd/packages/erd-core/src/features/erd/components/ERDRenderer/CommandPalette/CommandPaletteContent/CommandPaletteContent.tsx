@@ -1,10 +1,11 @@
 import { Button } from '@liam-hq/ui'
 import { DialogClose } from '@radix-ui/react-dialog'
 import { Command, defaultFilter } from 'cmdk'
-import { type FC, useMemo, useState } from 'react'
-import { TableOptions } from '../CommandPaletteOptions'
+import { type FC, useCallback, useMemo, useState } from 'react'
+import { TableOptions, WoodsNodeOptions } from '../CommandPaletteOptions'
 import { TablePreview } from '../CommandPalettePreview/TablePreview'
 import { CommandPaletteSearchInput } from '../CommandPaletteSearchInput'
+import { useCommandPaletteOrThrow } from '../CommandPaletteProvider'
 import type { CommandPaletteInputMode } from '../types'
 import { textToSuggestion } from '../utils'
 import styles from './CommandPaletteContent.module.css'
@@ -29,6 +30,28 @@ export const CommandPaletteContent: FC = () => {
   const suggestion = useMemo(
     () => textToSuggestion(suggestionText),
     [suggestionText],
+  )
+
+  const { setOpen } = useCommandPaletteOrThrow()
+
+  const handleFocusNode = useCallback(
+    (nodeId: string) => {
+      window.dispatchEvent(
+        new CustomEvent('erd:focus-node', { detail: { nodeId } }),
+      )
+      setOpen(false)
+    },
+    [setOpen],
+  )
+
+  const handleToggleFocusNode = useCallback(
+    (nodeId: string) => {
+      window.dispatchEvent(
+        new CustomEvent('erd:toggle-focus-node', { detail: { nodeId } }),
+      )
+      setOpen(false)
+    },
+    [setOpen],
   )
 
   return (
@@ -57,7 +80,13 @@ export const CommandPaletteContent: FC = () => {
         <Command.List>
           <Command.Empty>No results found.</Command.Empty>
           {inputMode.type === 'default' && (
-            <TableOptions suggestion={suggestion} />
+            <>
+              <TableOptions suggestion={suggestion} />
+              <WoodsNodeOptions
+                onSelectNode={handleFocusNode}
+                onToggleNode={handleToggleFocusNode}
+              />
+            </>
           )}
           {
             (inputMode.type === 'default' || inputMode.type === 'command') &&
