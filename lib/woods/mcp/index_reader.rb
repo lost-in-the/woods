@@ -28,7 +28,7 @@ module Woods
         engines view_templates migrations action_cable_channels
         scheduled_jobs rake_tasks state_machines events decorators
         database_views caching factories test_mappings rails_source
-        poros libs
+        poros libs patterns
       ].freeze
 
       # Singular type name for each directory (used in search filtering).

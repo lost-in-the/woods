@@ -29,6 +29,8 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 | Monitor job queues | `console_job_queues` | Console |
 | Find dead code | `graph_analysis` | Index |
 | Check codebase health | `pipeline_status` | Index |
+| Save a discovery for future agents | `index_pattern` | Index |
+| List saved patterns | `list_patterns` | Index |
 
 For detailed examples with parameters and expected output, see [MCP Tool Cookbook](MCP_TOOL_COOKBOOK.md).
 
@@ -96,7 +98,7 @@ Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
-### Tools (28)
+### Tools (31)
 
 #### Core Query (6)
 
@@ -158,6 +160,14 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Conso
 | `snapshot_diff` | Compare two snapshots — added, modified, deleted units. |
 | `unit_history` | Track how a single unit changed across snapshots. |
 | `snapshot_detail` | Full metadata for a specific snapshot by git SHA. |
+
+#### Agent Pattern Indexing (3)
+
+| Tool | Description |
+|------|-------------|
+| `index_pattern` | Save an agent-discovered pattern or insight for future retrieval. Supports upsert and correction via `supersedes`. Requires `agent_indexing_enabled`. |
+| `list_patterns` | List agent-authored patterns, optionally filtered by tag. Requires `agent_indexing_enabled`. |
+| `delete_pattern` | Delete an agent-authored pattern from the index. Requires `agent_indexing_enabled`. |
 
 #### Notion (1)
 

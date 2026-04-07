@@ -23,9 +23,9 @@ RSpec.describe Woods::MCP::Server do
       expect(instructions).to include('lookup')
     end
 
-    it 'registers 28 tools' do
+    it 'registers 31 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(28)
+      expect(tools.size).to eq(31)
     end
 
     it 'registers expected tool names' do
@@ -41,7 +41,8 @@ RSpec.describe Woods::MCP::Server do
         'retrieval_explain', 'retrieval_suggest',
         'list_snapshots', 'snapshot_diff',
         'unit_history', 'snapshot_detail',
-        'notion_sync'
+        'notion_sync',
+        'index_pattern', 'list_patterns', 'delete_pattern'
       )
     end
 
@@ -943,6 +944,134 @@ RSpec.describe Woods::MCP::Server do
         response = call_tool(server, 'retrieval_suggest')
         expect(response_text(response)).to include('not configured')
       end
+    end
+  end
+
+  # ── Pattern tools ─────────────────────────────────────────────
+
+  describe 'tool: index_pattern' do
+    context 'when agent_indexing_enabled is false (default)' do
+      it 'returns disabled message' do
+        response = call_tool(server, 'index_pattern', identifier: 'test', content: 'test')
+        expect(response_text(response)).to include('Agent indexing is disabled')
+      end
+    end
+
+    context 'when agent_indexing_enabled is true' do
+      before do
+        @original_config = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.agent_indexing_enabled = true
+      end
+
+      after { Woods.configuration = @original_config }
+
+      it 'creates a pattern and returns confirmation' do
+        response = call_tool(server, 'index_pattern', identifier: 'test-pattern', content: 'A useful finding')
+        data = parse_response(response)
+        expect(data['status']).to eq('created')
+        expect(data['identifier']).to eq('test-pattern')
+        expect(data['embedded']).to be false
+      end
+
+      it 'records supersedes in response' do
+        response = call_tool(server, 'index_pattern',
+                             identifier: 'corrected', content: 'Fixed version', supersedes: 'original')
+        data = parse_response(response)
+        expect(data['supersedes']).to eq('original')
+      end
+
+      it 'returns validation error for invalid identifier' do
+        response = call_tool(server, 'index_pattern', identifier: 'bad;id', content: 'content')
+        expect(response_text(response)).to include('Validation error')
+      end
+    end
+  end
+
+  describe 'tool: list_patterns' do
+    context 'when agent_indexing_enabled is false' do
+      it 'returns disabled message' do
+        response = call_tool(server, 'list_patterns')
+        expect(response_text(response)).to include('Agent indexing is disabled')
+      end
+    end
+
+    context 'when agent_indexing_enabled is true' do
+      before do
+        @original_config = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.agent_indexing_enabled = true
+      end
+
+      after { Woods.configuration = @original_config }
+
+      it 'returns patterns list' do
+        response = call_tool(server, 'list_patterns')
+        data = parse_response(response)
+        expect(data).to have_key('pattern_count')
+        expect(data).to have_key('patterns')
+      end
+    end
+  end
+
+  describe 'tool: delete_pattern' do
+    context 'when agent_indexing_enabled is false' do
+      it 'returns disabled message' do
+        response = call_tool(server, 'delete_pattern', identifier: 'test')
+        expect(response_text(response)).to include('Agent indexing is disabled')
+      end
+    end
+
+    context 'when agent_indexing_enabled is true' do
+      before do
+        @original_config = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.agent_indexing_enabled = true
+      end
+
+      after { Woods.configuration = @original_config }
+
+      it 'returns not found for nonexistent pattern' do
+        response = call_tool(server, 'delete_pattern', identifier: 'nonexistent')
+        expect(response_text(response)).to include('Pattern not found')
+      end
+    end
+  end
+
+  # ── Hints ────────────────────────────────────────────────────────
+
+  describe 'search hint' do
+    context 'when agent_indexing_enabled is true' do
+      before do
+        @original_config = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.agent_indexing_enabled = true
+      end
+
+      after { Woods.configuration = @original_config }
+
+      it 'appends pattern hint to search results' do
+        response = call_tool(server, 'search', query: 'Post')
+        text = response_text(response)
+        expect(text).to include('index_pattern')
+        expect(text).to include('Tip')
+      end
+    end
+
+    context 'when agent_indexing_enabled is false' do
+      it 'does not include pattern hint in search results' do
+        response = call_tool(server, 'search', query: 'Post')
+        text = response_text(response)
+        expect(text).not_to include('index_pattern')
+      end
+    end
+  end
+
+  describe 'instructions' do
+    it 'includes pattern saving guidance' do
+      instructions = server.instance_variable_get(:@instructions)
+      expect(instructions).to include('index_pattern')
+      expect(instructions).to include('Persist discoveries')
     end
   end
 
