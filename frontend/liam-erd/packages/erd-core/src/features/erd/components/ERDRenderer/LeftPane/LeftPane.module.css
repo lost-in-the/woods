@@ -1,0 +1,146 @@
+.groupLabel {
+  display: grid;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: space-between;
+  container-type: inline-size;
+}
+
+.tableCount {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: var(--spacing-half);
+  color: var(--overlay-70);
+  font-family: var(--code-font);
+  font-size: var(--font-size-1);
+  font-weight: 400;
+
+  @media (min-width: 768px) {
+    display: none !important;
+  }
+}
+
+.tableCountDivider {
+  color: var(--overlay-20);
+}
+
+.tableCounterWrapper {
+  display: none;
+
+  @media (min-width: 768px) {
+    display: block;
+  }
+}
+
+.footer {
+  padding: 0;
+
+  @media (min-width: 768px) {
+    padding: var(--spacing-2);
+  }
+}
+
+.tablesMenu {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: var(--spacing-4);
+}
+
+.contentControls {
+  padding: var(--spacing-2) 0;
+  border-block: 1px solid var(--global-border);
+
+  @media (min-width: 768px) {
+    display: none;
+  }
+}
+
+.contentLinks {
+  padding: var(--spacing-1) 0;
+
+  @media (min-width: 768px) {
+    display: none;
+  }
+}
+
+.icon {
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--overlay-70);
+}
+
+.versionWrapper {
+  padding: var(--spacing-2);
+}
+
+.version {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--border-radius-full);
+  background: var(--pane-muted-background);
+}
+
+.versionText {
+  color: var(--global-mute-text);
+  font-family: var(--code-font);
+  font-size: var(--font-size-1);
+  font-weight: 400;
+}
+
+.textCursor {
+  cursor: pointer;
+}
+
+.tablesHeaderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  border: 1px solid var(--global-border);
+  border-radius: var(--border-radius-sm);
+  padding: var(--spacing-1);
+  width: 100%;
+  min-width: 0;
+}
+
+.tablesHeaderRow:hover {
+  background: var(--pane-background-active, #2e3031);
+}
+
+.showAllButton {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-half);
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 var(--spacing-1);
+  border-radius: var(--border-radius-sm);
+  transition: background 0.15s;
+}
+
+.showAllButton:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.showAllText {
+  font-size: var(--font-size-2);
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
+.visibleCount {
+  color: var(--overlay-40);
+  font-size: var(--font-size-1);
+  font-family: var(--code-font);
+  margin-left: var(--spacing-1);
+}
+
+@container (max-width: 235px) {
+  .groupLabel .visibleCount {
+    display: none;
+  }
+}

@@ -1,0 +1,34 @@
+.tableName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  flex: 1;
+}
+
+.button {
+  cursor: pointer;
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+}
+
+.active {
+  background:
+    linear-gradient(
+      0deg,
+      var(--primary-accent-overlay) 0%,
+      var(--primary-accent-overlay) 100%
+    ), var(--pane-background-active);
+}
+
+.active:hover {
+  background:
+    linear-gradient(
+      0deg,
+      var(--primary-accent-overlay-hover) 0%,
+      var(--primary-accent-overlay-hover) 100%
+    ), var(--pane-background-active);
+}

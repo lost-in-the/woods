@@ -1,0 +1,31 @@
+{
+  "name": "@liam-hq/cli",
+  "description": "Woods fork — SPA build only (no CLI binary)",
+  "license": "Apache-2.0",
+  "private": true,
+  "version": "0.7.9",
+  "type": "module",
+  "dependencies": {
+    "@liam-hq/erd-core": "workspace:*",
+    "@liam-hq/schema": "workspace:*",
+    "neverthrow": "8.2.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "valibot": "1.1.0"
+  },
+  "devDependencies": {
+    "@liam-hq/configs": "workspace:*",
+    "@types/node": "22.17.1",
+    "@types/react": "19.1.9",
+    "@types/react-dom": "19.1.7",
+    "@vitejs/plugin-react": "4.6.0",
+    "typescript": "5.9.2",
+    "vite": "6.3.5",
+    "vite-tsconfig-paths": "5.1.4",
+    "vitest": "3.2.4"
+  },
+  "scripts": {
+    "build:vite": "vite build",
+    "dev": "vite --port 5173"
+  }
+}

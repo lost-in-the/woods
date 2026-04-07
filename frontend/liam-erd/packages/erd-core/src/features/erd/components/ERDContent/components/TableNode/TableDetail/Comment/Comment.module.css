@@ -1,0 +1,15 @@
+.wrapper {
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--global-border);
+}
+
+.text {
+  padding: var(--spacing-2);
+  border-radius: var(--border-radius-base);
+  background: var(--pane-muted-background);
+  color: var(--color-white-alpha-70);
+  font-size: var(--font-size-3);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 150%;
+}

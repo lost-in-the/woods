@@ -1,0 +1,30 @@
+:root {
+  --default-timing-function: ease-out;
+  --default-animation-duration: 300ms;
+  --default-hover-animation-duration: 100ms;
+
+  --code-font:
+    'ui-monospace', 'IBM Plex Mono', SF Mono, Menlo, Monaco, Consolas, monospace;
+
+  --z-index-toolbar-closed: 800;
+  --z-index-sidebar: 900;
+  --z-index-drawer: 900;
+  --z-index-header: 1000;
+  --z-index-dropdown-menu: 1100;
+  --z-index-popover: 1500;
+  --z-index-tooltip: 2000;
+  --z-index-overlay: 3100;
+  --z-index-toolbar-opened: 3200;
+  --z-index-command-palette: 3300;
+  --z-index-toast: 3400;
+  --z-index-cookie-consent: 4000;
+
+  /* Scrollbar design tokens */
+  --scrollbar-width: thin;
+  --scrollbar-track-background: transparent;
+  --scrollbar-thumb-background: var(--overlay-20);
+  --scrollbar-thumb-background-hover: var(--global-border);
+  --scrollbar-webkit-width: 6px;
+  --scrollbar-webkit-height: 6px;
+  --scrollbar-webkit-thumb-border-radius: 3px;
+}

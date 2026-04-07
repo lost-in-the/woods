@@ -1,0 +1,63 @@
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  color: var(--global-muted-background);
+  border-radius: var(--border-radius-2xl);
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  overflow: hidden;
+}
+
+.sizeXxs {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}
+
+.sizeXs {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+
+.sizeSm {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+}
+
+.sizeMd {
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+}
+
+.sizeLg {
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  border-radius: var(--border-radius-full);
+}
+
+.sizeXl {
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+  border-radius: var(--border-radius-full);
+}
+
+.size2xl {
+  width: 56px;
+  height: 56px;
+  font-size: 24px;
+  border-radius: var(--border-radius-full);
+}
+
+.jackIcon {
+  width: 100%;
+  height: 100%;
+}

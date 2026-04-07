@@ -1,0 +1,15 @@
+.content {
+  position: fixed;
+  z-index: var(--z-index-drawer);
+}
+
+/*
+ * Override Vaul's default animation settings
+ * Note: Specificity is tied to the [data-vaul-drawer] attribute
+ */
+.content[data-vaul-drawer] {
+  transition: transform var(--default-animation-duration)
+    var(--default-timing-function);
+  animation-duration: var(--default-animation-duration);
+  animation-timing-function: var(--default-timing-function);
+}

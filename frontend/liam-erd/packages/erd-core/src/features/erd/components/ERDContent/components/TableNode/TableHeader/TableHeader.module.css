@@ -1,0 +1,77 @@
+.wrapper {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  width: 100%;
+  border-radius: var(--border-radius-md) var(--border-radius-md) 0px 0px;
+  background: var(--global-muted-background);
+}
+
+.wrapperTableNameMode {
+  border-radius: var(--border-radius-md);
+}
+
+.diffBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 100%;
+  border-top-left-radius: var(--border-radius-md);
+  background-color: var(--overlay-10);
+}
+
+.diffBoxTableNameMode {
+  border-bottom-left-radius: var(--border-radius-md);
+}
+
+.container {
+  flex: 1;
+  display: flex;
+  padding: var(--spacing-2);
+  align-items: center;
+  gap: var(--spacing-1);
+  border-radius: var(--border-radius-md) var(--border-radius-md) 0px 0px;
+  background: var(--global-muted-background);
+  color: var(--overlay-60);
+  text-overflow: ellipsis;
+  font-size: var(--font-size-5);
+  font-weight: 500;
+  line-height: normal;
+}
+
+.containerTableNameMode {
+  border-radius: var(--border-radius-md);
+}
+
+.containerDiffView {
+  border-top-left-radius: var(--border-radius-none);
+  border-bottom-left-radius: var(--border-radius-none);
+}
+
+.tableIcon {
+  min-width: 1rem;
+  width: 1rem;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handle {
+  top: auto;
+  opacity: 0;
+}
+
+.handle[data-handlepos='right'] {
+  transform: translate(50%, 0%);
+  right: -17px;
+  pointer-events: none;
+}
+
+.handle[data-handlepos='left'] {
+  transform: translate(-50%, 0%);
+  left: -20px;
+  pointer-events: none;
+}
