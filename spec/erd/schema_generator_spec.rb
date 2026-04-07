@@ -353,5 +353,94 @@ RSpec.describe Woods::Erd::SchemaGenerator do
 
       expect(schema).not_to have_key('nodes')
     end
+
+    it 'generates job nodes with perform params as members' do
+      write_unit(:job, 'OrderSyncJob',
+        metadata: {
+          'perform_params' => %w[order_id force],
+          'queue' => 'critical',
+          'job_type' => 'sidekiq'
+        },
+        dependencies: [
+          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+        ])
+
+      schema = described_class.new(output_dir, layers: [:models, :jobs]).generate
+
+      expect(schema['nodes']).to have_key('OrderSyncJob')
+      node = schema['nodes']['OrderSyncJob']
+      expect(node['type']).to eq('job')
+      expect(node['members']).to eq([{ 'name' => 'order_id' }, { 'name' => 'force' }])
+      expect(node['meta']).to eq({ 'queue' => 'critical', 'job_type' => 'sidekiq' })
+    end
+
+    it 'generates service nodes with public methods as members' do
+      write_unit(:service, 'OrderCreator',
+        metadata: {
+          'public_methods' => %w[call validate],
+          'is_callable' => true
+        },
+        dependencies: [
+          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+        ])
+
+      schema = described_class.new(output_dir, layers: [:models, :services]).generate
+
+      expect(schema['nodes']).to have_key('OrderCreator')
+      node = schema['nodes']['OrderCreator']
+      expect(node['type']).to eq('service')
+      expect(node['members']).to eq([{ 'name' => 'call' }, { 'name' => 'validate' }])
+      expect(node['meta']).to eq({ 'callable' => true })
+    end
+
+    it 'generates mailer nodes with mail actions as members' do
+      write_unit(:mailer, 'OrderMailer',
+        metadata: {
+          'actions' => %w[confirmation receipt],
+          'action_count' => 2,
+          'delivery_method' => 'smtp'
+        },
+        dependencies: [
+          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+        ])
+
+      schema = described_class.new(output_dir, layers: [:models, :mailers]).generate
+
+      expect(schema['nodes']).to have_key('OrderMailer')
+      node = schema['nodes']['OrderMailer']
+      expect(node['type']).to eq('mailer')
+      expect(node['members']).to eq([{ 'name' => 'confirmation' }, { 'name' => 'receipt' }])
+      expect(node['meta']).to include('delivery_method' => 'smtp', 'action_count' => 2)
+    end
+
+    it 'generates nodes for all active layers' do
+      write_unit(:controller, 'OrdersController',
+        metadata: { 'actions' => %w[index], 'action_count' => 1 },
+        dependencies: [])
+      write_unit(:job, 'OrderSyncJob',
+        metadata: { 'perform_params' => %w[order_id], 'queue' => 'default' },
+        dependencies: [])
+
+      schema = described_class.new(output_dir, layers: [:models, :controllers, :jobs]).generate
+
+      expect(schema['nodes']).to have_key('OrdersController')
+      expect(schema['nodes']).to have_key('OrderSyncJob')
+    end
+
+    it 'skips layers with no extraction directory' do
+      schema = described_class.new(output_dir, layers: [:models, :controllers, :jobs]).generate
+
+      expect(schema).not_to have_key('nodes')
+    end
+
+    it 'generates nodes with empty dependencies array' do
+      write_unit(:service, 'Standalone',
+        metadata: { 'public_methods' => %w[run], 'is_callable' => false },
+        dependencies: [])
+
+      schema = described_class.new(output_dir, layers: [:models, :services]).generate
+
+      expect(schema['nodes']['Standalone']['dependencies']).to eq([])
+    end
   end
 end
