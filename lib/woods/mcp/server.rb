@@ -4,6 +4,7 @@ require 'logger'
 require 'mcp'
 require 'set'
 require_relative 'index_reader'
+require_relative 'pattern_writer'
 require_relative 'tool_response_renderer'
 
 module Woods
@@ -74,6 +75,7 @@ module Woods
           define_feedback_tools(server, feedback_store, respond, renderer)
           define_snapshot_tools(server, snapshot_store, respond, renderer)
           define_notion_sync_tool(server, reader, index_dir, respond, renderer)
+          define_pattern_tools(server, reader, index_dir, respond, renderer)
           register_resource_handler(server, reader)
 
           server
@@ -120,6 +122,14 @@ module Woods
 
             **Pipeline management (requires `agent_indexing_enabled` config):**
             `pipeline_status` · `pipeline_extract` · `pipeline_embed`
+
+            **Persist discoveries (requires `agent_indexing_enabled` config):**
+            When you discover something useful and undocumented — a non-obvious data flow,
+            a hidden dependency, a business rule buried in callbacks — save it with
+            `index_pattern` so future agents can find it via `search`, `lookup`, or
+            `codebase_retrieve`. If you find a saved pattern that's wrong or outdated,
+            correct it by calling `index_pattern` with the `supersedes` parameter pointing
+            to the original identifier. Use `list_patterns` and `delete_pattern` to manage.
 
             ## Resources
 
@@ -257,11 +267,13 @@ module Woods
               fields: fields || %w[identifier],
               limit: limit || 20
             )
-            respond.call(renderer.render(:search, {
-                                           query: query,
-                                           result_count: results.size,
-                                           results: results
-                                         }))
+            rendered = renderer.render(:search, {
+                                        query: query,
+                                        result_count: results.size,
+                                        results: results
+                                      })
+            rendered += pattern_hint if Woods.configuration.agent_indexing_enabled
+            respond.call(rendered)
           end
         end
 
@@ -520,7 +532,9 @@ module Woods
             budget = coerce_int.call(budget)
             if retriever
               result = retriever.retrieve(query, budget: budget || 8000)
-              respond.call(result.context)
+              context = result.context
+              context += pattern_hint if Woods.configuration.agent_indexing_enabled
+              respond.call(context)
             else
               respond.call(
                 'Semantic search is not available. Embedding provider is not configured. ' \
@@ -984,6 +998,129 @@ module Woods
                                                  }))
           rescue StandardError => e
             respond.call("Notion sync failed: #{e.message}")
+          end
+        end
+
+        def pattern_hint
+          "\n\n_Tip: Found something useful? Use `index_pattern` to save it for future agents._"
+        end
+
+        def define_pattern_tools(server, reader, index_dir, respond, renderer) # rubocop:disable Metrics/MethodLength
+          define_index_pattern_tool(server, reader, index_dir, respond, renderer)
+          define_list_patterns_tool(server, index_dir, respond, renderer)
+          define_delete_pattern_tool(server, reader, index_dir, respond, renderer)
+        end
+
+        def define_index_pattern_tool(server, reader, index_dir, respond, renderer) # rubocop:disable Metrics/MethodLength
+          server.define_tool(
+            name: 'index_pattern',
+            description: 'Save an agent-discovered pattern or insight for future retrieval. ' \
+                         'Patterns become searchable via search, lookup, and codebase_retrieve. ' \
+                         'Writing the same identifier again overwrites (upsert). ' \
+                         'Use supersedes to explicitly link a correction to the original.',
+            input_schema: {
+              properties: {
+                identifier: { type: 'string', description: 'Unique name for this pattern (e.g. "order-payment-flow")' },
+                content: { type: 'string', description: 'The pattern description or insight' },
+                tags: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Categorization tags (e.g. ["data-flow", "authorization"])'
+                },
+                supersedes: { type: 'string', description: 'Identifier of the pattern this corrects (optional)' }
+              },
+              required: %w[identifier content]
+            }
+          ) do |identifier:, content:, server_context:, tags: nil, supersedes: nil|
+            unless Woods.configuration.agent_indexing_enabled
+              next respond.call('Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
+            end
+
+            writer = PatternWriter.new(index_dir: index_dir)
+            metadata = {}
+            metadata['tags'] = tags if tags
+            unit = writer.write(identifier: identifier, content: content, metadata: metadata, supersedes: supersedes)
+
+            embedded = false
+            config = Woods.configuration
+            if config.respond_to?(:embedding_provider) && config.embedding_provider
+              begin
+                builder = Woods::Builder.new(config)
+                provider = builder.build_embedding_provider
+                vector_store = builder.build_vector_store
+                text_preparer = Woods::Embedding::TextPreparer.new
+                writer.embed(unit, provider: provider, vector_store: vector_store, text_preparer: text_preparer)
+                embedded = true
+              rescue StandardError => e
+                # Embedding is optional; pattern is still saved to disk
+                logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+                logger.warn("[Woods] Pattern embedding failed: #{e.message}")
+              end
+            end
+
+            reader.reload!
+
+            respond.call(renderer.render_default({
+                                                   status: 'created',
+                                                   identifier: identifier,
+                                                   embedded: embedded,
+                                                   supersedes: supersedes
+                                                 }.compact))
+          rescue ArgumentError => e
+            respond.call("Validation error: #{e.message}")
+          end
+        end
+
+        def define_list_patterns_tool(server, index_dir, respond, renderer)
+          coerce_int = method(:coerce_integer)
+          server.define_tool(
+            name: 'list_patterns',
+            description: 'List agent-authored patterns saved to the index. Optionally filter by tag.',
+            input_schema: {
+              properties: {
+                tag: { type: 'string', description: 'Filter by tag' },
+                limit: { type: 'integer', description: 'Maximum results (default: 50)' }
+              }
+            }
+          ) do |server_context:, tag: nil, limit: nil|
+            unless Woods.configuration.agent_indexing_enabled
+              next respond.call('Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
+            end
+
+            limit = coerce_int.call(limit) || 50
+            writer = PatternWriter.new(index_dir: index_dir)
+            patterns = writer.list(tag: tag).first(limit)
+
+            respond.call(renderer.render_default({
+                                                   pattern_count: patterns.size,
+                                                   patterns: patterns
+                                                 }))
+          end
+        end
+
+        def define_delete_pattern_tool(server, reader, index_dir, respond, renderer)
+          server.define_tool(
+            name: 'delete_pattern',
+            description: 'Delete an agent-authored pattern from the index.',
+            input_schema: {
+              properties: {
+                identifier: { type: 'string', description: 'Pattern identifier to delete' }
+              },
+              required: ['identifier']
+            }
+          ) do |identifier:, server_context:|
+            unless Woods.configuration.agent_indexing_enabled
+              next respond.call('Agent indexing is disabled. Set `agent_indexing_enabled = true` in Woods configuration to enable.')
+            end
+
+            writer = PatternWriter.new(index_dir: index_dir)
+            deleted = writer.delete(identifier)
+
+            if deleted
+              reader.reload!
+              respond.call(renderer.render_default({ status: 'deleted', identifier: identifier }))
+            else
+              respond.call("Pattern not found: #{identifier}")
+            end
           end
         end
 

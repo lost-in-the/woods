@@ -35,6 +35,38 @@ When querying live application data, prefer higher-level tools over raw SQL:
 
 `console_query` is backed by ActiveRecord and Arel, so it generates adapter-safe SQL automatically. `console_sql` accepts raw SQL strings and validates them for read-only safety (rejects DML/DDL). Both run inside rolled-back transactions.
 
+### Persisting discoveries with pattern indexing
+
+When you discover something useful and undocumented — a non-obvious data flow, a hidden dependency, a business rule buried in callbacks — save it so future agents don't repeat the same discovery work.
+
+**Save a finding after a query:**
+
+```
+→ index_pattern(identifier: "order-refund-requires-admin", content: "The Order→Payment→Refund flow always requires an admin-authorized Payment record. Without admin authorization on the Payment, Refund#process raises NotAuthorizedError.", tags: ["authorization", "data-flow"])
+
+← { status: "created", identifier: "order-refund-requires-admin", embedded: true }
+```
+
+**Correct a stale pattern left by a previous agent:**
+
+```
+→ index_pattern(identifier: "order-refund-requires-admin", content: "Since PR #482, the admin authorization check moved from Refund#process to Payment#authorize!. Refund now delegates to Payment.", supersedes: "order-refund-requires-admin")
+
+← { status: "created", identifier: "order-refund-requires-admin", embedded: true, supersedes: "order-refund-requires-admin" }
+```
+
+**How patterns surface:** Patterns appear alongside extracted code units in `search`, `lookup`, and `codebase_retrieve` results automatically. They are stored as `type: "pattern"` with `file_path: agent://patterns/{id}`.
+
+**When to use `index_pattern`:**
+- Non-obvious data flows you had to trace across multiple units
+- Business rules buried in callbacks or service objects
+- Hidden gotchas that aren't apparent from reading a single unit
+- Architectural patterns that span multiple layers
+
+**Managing patterns:** Use `list_patterns` to see all saved patterns (optionally filter by tag), and `delete_pattern` to remove outdated or incorrect ones.
+
+Requires `agent_indexing_enabled = true` in Woods configuration.
+
 ---
 
 ## Understanding Your Codebase
