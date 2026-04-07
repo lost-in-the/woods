@@ -15,6 +15,7 @@ import {
   type FC,
   type ReactNode,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from 'react'
@@ -87,8 +88,9 @@ export const ERDRenderer: FC<Props> = ({
     edgeCategories,
     toggleNodeLayer,
     toggleEdgeCategory,
-    focusedNode,
-    setFocusedNode,
+    focusedNodes,
+    setFocusedNodes,
+    toggleFocusedNode,
   } = useLayerState()
 
   const { nodes, edges } = convertSchemaToNodes({
@@ -107,8 +109,8 @@ export const ERDRenderer: FC<Props> = ({
   )
 
   const { nodes: visibleNodes, edges: visibleEdges } = useMemo(
-    () => filterByFocus(nodes, filteredEdges, focusedNode),
-    [nodes, filteredEdges, focusedNode],
+    () => filterByFocus(nodes, filteredEdges, focusedNodes),
+    [nodes, filteredEdges, focusedNodes],
   )
 
   // Encode active layers into a key fragment so ERDContent re-mounts (and
@@ -122,6 +124,45 @@ export const ERDRenderer: FC<Props> = ({
         .join(','),
     [nodeLayers],
   )
+
+  const focusKey = useMemo(
+    () => Array.from(focusedNodes).sort().join(','),
+    [focusedNodes],
+  )
+
+  const handleFocusNode = useCallback(
+    (nodeId: string | null) => {
+      setFocusedNodes(nodeId ? new Set([nodeId]) : new Set())
+    },
+    [setFocusedNodes],
+  )
+
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && focusedNodes.size > 0) {
+        setFocusedNodes(new Set())
+      }
+    }
+    document.addEventListener('keydown', down)
+    return () => document.removeEventListener('keydown', down)
+  }, [focusedNodes, setFocusedNodes])
+
+  useEffect(() => {
+    const handleFocus = (e: Event) => {
+      const detail = (e as CustomEvent<{ nodeId: string }>).detail
+      setFocusedNodes(new Set([detail.nodeId]))
+    }
+    const handleToggle = (e: Event) => {
+      const detail = (e as CustomEvent<{ nodeId: string }>).detail
+      toggleFocusedNode(detail.nodeId)
+    }
+    window.addEventListener('erd:focus-node', handleFocus)
+    window.addEventListener('erd:toggle-focus-node', handleToggle)
+    return () => {
+      window.removeEventListener('erd:focus-node', handleFocus)
+      window.removeEventListener('erd:toggle-focus-node', handleToggle)
+    }
+  }, [setFocusedNodes, toggleFocusedNode])
 
   const leftPanelRef = createRef<ImperativePanelHandle>()
 
@@ -190,7 +231,7 @@ export const ERDRenderer: FC<Props> = ({
                 }}
               >
                 <LeftPane
-                  onFocusNode={setFocusedNode}
+                  onFocusNode={handleFocusNode}
                   nodeLayers={nodeLayers}
                 />
               </ResizablePanel>
@@ -210,14 +251,19 @@ export const ERDRenderer: FC<Props> = ({
                     )}
                     {errorObjects.length > 0 || (
                       <>
-                        {focusedNode && (
+                        {focusedNodes.size > 0 && (
                           <FocusBanner
-                            focusedNode={focusedNode}
-                            onExitFocus={() => setFocusedNode(null)}
+                            focusedNodes={focusedNodes}
+                            onRemoveNode={(nodeId) => {
+                              const next = new Set(focusedNodes)
+                              next.delete(nodeId)
+                              setFocusedNodes(next)
+                            }}
+                            onExitFocus={() => setFocusedNodes(new Set())}
                           />
                         )}
                         <ERDContent
-                          key={`${schemaKey}-${showMode}-${layerKey}`}
+                          key={`${schemaKey}-${showMode}-${layerKey}-${focusKey}`}
                           nodes={visibleNodes}
                           edges={visibleEdges}
                           displayArea="main"
