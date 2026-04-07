@@ -32,3 +32,23 @@
       var(--primary-accent-overlay-hover) 100%
     ), var(--pane-background-active);
 }
+
+.focusButton {
+  display: none;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--border-radius-sm, 4px);
+  color: var(--overlay-40);
+  transition: color 0.15s;
+}
+
+.focusButton:hover {
+  color: var(--overlay-70);
+}
+
+.button:hover .focusButton {
+  display: flex;
+}

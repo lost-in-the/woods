@@ -8,6 +8,8 @@ export interface LayerState {
   edgeCategories: Record<EdgeCategory, boolean>
   toggleNodeLayer: (layer: NodeLayer) => void
   toggleEdgeCategory: (category: EdgeCategory) => void
+  focusedNode: string | null
+  setFocusedNode: (nodeId: string | null) => void
 }
 
 const DEFAULT_NODE_LAYERS: Record<NodeLayer, boolean> = {
@@ -28,6 +30,7 @@ export function useLayerState(): LayerState {
   const [edgeCategories, setEdgeCategories] = useState<
     Record<EdgeCategory, boolean>
   >(DEFAULT_EDGE_CATEGORIES)
+  const [focusedNode, setFocusedNode] = useState<string | null>(null)
 
   const toggleNodeLayer = useCallback((layer: NodeLayer) => {
     setNodeLayers((prev) => ({ ...prev, [layer]: !prev[layer] }))
@@ -37,5 +40,12 @@ export function useLayerState(): LayerState {
     setEdgeCategories((prev) => ({ ...prev, [category]: !prev[category] }))
   }, [])
 
-  return { nodeLayers, edgeCategories, toggleNodeLayer, toggleEdgeCategory }
+  return {
+    nodeLayers,
+    edgeCategories,
+    toggleNodeLayer,
+    toggleEdgeCategory,
+    focusedNode,
+    setFocusedNode,
+  }
 }

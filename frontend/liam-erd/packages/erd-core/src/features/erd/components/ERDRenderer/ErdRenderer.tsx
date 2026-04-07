@@ -34,6 +34,7 @@ import {
 import { ERDContent } from '../ERDContent'
 import {
   LayerToggleDropdown,
+  filterByFocus,
   filterEdgesByLayers,
   filterNodesByLayers,
   useLayerState,
@@ -41,6 +42,7 @@ import {
 import { CardinalityMarkers } from './CardinalityMarkers'
 import { CommandPalette, CommandPaletteProvider } from './CommandPalette'
 import { ErrorDisplay } from './ErrorDisplay'
+import { FocusBanner } from './FocusBanner'
 import { LeftPane } from './LeftPane'
 import { RelationshipEdgeParticleMarker } from './RelationshipEdgeParticleMarker'
 import { TableDetailDrawer, TableDetailDrawerRoot } from './TableDetailDrawer'
@@ -86,8 +88,14 @@ export const ERDRenderer: FC<Props> = ({
     showMode,
   })
 
-  const { nodeLayers, edgeCategories, toggleNodeLayer, toggleEdgeCategory } =
-    useLayerState()
+  const {
+    nodeLayers,
+    edgeCategories,
+    toggleNodeLayer,
+    toggleEdgeCategory,
+    focusedNode,
+    setFocusedNode,
+  } = useLayerState()
 
   const filteredNodes = useMemo(
     () => filterNodesByLayers(nodes, nodeLayers),
@@ -100,6 +108,11 @@ export const ERDRenderer: FC<Props> = ({
   const filteredEdges = useMemo(
     () => filterEdgesByLayers(edges, edgeCategories, visibleNodeIds),
     [edges, edgeCategories, visibleNodeIds],
+  )
+
+  const { nodes: visibleNodes, edges: visibleEdges } = useMemo(
+    () => filterByFocus(filteredNodes, filteredEdges, focusedNode),
+    [filteredNodes, filteredEdges, focusedNode],
   )
 
   const leftPanelRef = createRef<ImperativePanelHandle>()
@@ -168,7 +181,11 @@ export const ERDRenderer: FC<Props> = ({
                   }
                 }}
               >
-                <LeftPane />
+                <LeftPane
+                  focusedNode={focusedNode}
+                  onFocusNode={setFocusedNode}
+                  nodeLayers={nodeLayers}
+                />
               </ResizablePanel>
               <ResizableHandle onDragging={(e) => setIsResizing(e)} />
               <ResizablePanel
@@ -186,10 +203,16 @@ export const ERDRenderer: FC<Props> = ({
                     )}
                     {errorObjects.length > 0 || (
                       <>
+                        {focusedNode && (
+                          <FocusBanner
+                            focusedNode={focusedNode}
+                            onExitFocus={() => setFocusedNode(null)}
+                          />
+                        )}
                         <ERDContent
                           key={`${schemaKey}-${showMode}`}
-                          nodes={filteredNodes}
-                          edges={filteredEdges}
+                          nodes={visibleNodes}
+                          edges={visibleEdges}
                           displayArea="main"
                         />
                         <TableDetailDrawer />

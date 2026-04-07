@@ -20,6 +20,27 @@ export function filterNodesByLayers(
   })
 }
 
+export function filterByFocus(
+  nodes: Node[],
+  edges: Edge[],
+  focusedNode: string | null,
+): { nodes: Node[]; edges: Edge[] } {
+  if (!focusedNode) return { nodes, edges }
+
+  const connectedIds = new Set<string>([focusedNode])
+  for (const edge of edges) {
+    if (edge.source === focusedNode) connectedIds.add(edge.target)
+    if (edge.target === focusedNode) connectedIds.add(edge.source)
+  }
+
+  return {
+    nodes: nodes.filter((node) => connectedIds.has(node.id)),
+    edges: edges.filter(
+      (edge) => connectedIds.has(edge.source) && connectedIds.has(edge.target),
+    ),
+  }
+}
+
 export function filterEdgesByLayers(
   edges: Edge[],
   edgeCategories: Record<EdgeCategory, boolean>,

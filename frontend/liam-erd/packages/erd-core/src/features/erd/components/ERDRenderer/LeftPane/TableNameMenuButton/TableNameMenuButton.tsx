@@ -1,6 +1,7 @@
 import {
   ContextMenu,
   Eye,
+  Scan,
   SidebarMenuButton,
   SidebarMenuItem,
   Table2,
@@ -27,12 +28,14 @@ type Props = {
   node: TableNodeType
   nodes: TableNodeType[]
   showSelectedTables: (event: MouseEvent<HTMLDivElement>) => void
+  onFocus: (nodeId: string) => void
 }
 
 export const TableNameMenuButton: FC<Props> = ({
   node,
   nodes,
   showSelectedTables,
+  onFocus,
 }) => {
   const nodeId = node.id
   const name = node.data.table.name
@@ -140,6 +143,17 @@ export const TableNameMenuButton: FC<Props> = ({
                   {name}
                 </span>
                 <VisibilityButton tableName={name} hidden={node.hidden} />
+                <button
+                  type="button"
+                  className={styles.focusButton}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onFocus(nodeId)
+                  }}
+                  aria-label={`Focus on ${name}`}
+                >
+                  <Scan width={10} height={10} />
+                </button>
               </>
             }
             ContextMenuElement={

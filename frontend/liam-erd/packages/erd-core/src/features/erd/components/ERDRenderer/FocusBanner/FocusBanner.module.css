@@ -1,0 +1,40 @@
+.banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-4);
+  border-radius: var(--border-radius-md, 6px);
+  background: var(--pane-background, #1e1e2e);
+  border: 1px solid var(--global-border);
+  font-size: var(--font-size-2);
+  color: var(--overlay-70);
+}
+
+.label strong {
+  color: var(--overlay-100, #e2e8f0);
+  font-weight: 500;
+}
+
+.exitButton {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  background: none;
+  border: 1px solid var(--global-border);
+  border-radius: var(--border-radius-sm, 4px);
+  color: var(--overlay-60);
+  padding: 2px var(--spacing-2);
+  cursor: pointer;
+  font-size: var(--font-size-1);
+  transition: background 0.15s, color 0.15s;
+}
+
+.exitButton:hover {
+  background: var(--pane-background-active, #2e3031);
+  color: var(--overlay-100, #e2e8f0);
+}
