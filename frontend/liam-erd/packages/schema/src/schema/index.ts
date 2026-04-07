@@ -42,3 +42,15 @@ export {
   schemaSchema,
   tableSchema,
 } from './schema.js'
+export {
+  woodsNodeSchema,
+  woodsNodeMemberSchema,
+  woodsNodeDependencySchema,
+  woodsNodeTypeSchema,
+  woodsNodesSchema,
+  type WoodsNode,
+  type WoodsNodeMember,
+  type WoodsNodeDependency,
+  type WoodsNodeType,
+  type WoodsNodes,
+} from './nodes.js'

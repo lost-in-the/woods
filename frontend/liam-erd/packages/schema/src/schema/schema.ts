@@ -1,4 +1,5 @@
 import * as v from 'valibot'
+import { woodsNodesSchema } from './nodes'
 
 // Export these schema definitions
 const columnNameSchema = v.string()
@@ -153,6 +154,7 @@ export const schemaSchema = v.object({
   tables: tablesSchema,
   enums: enumsSchema,
   extensions: extensionsSchema,
+  nodes: v.optional(woodsNodesSchema),
 })
 
 export type Schema = v.InferOutput<typeof schemaSchema>

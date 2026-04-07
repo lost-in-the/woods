@@ -57,6 +57,13 @@ export {
   type Table,
   type Tables,
   type UniqueConstraint,
+  woodsNodeSchema,
+  woodsNodesSchema,
+  type WoodsNode,
+  type WoodsNodeMember,
+  type WoodsNodeDependency,
+  type WoodsNodeType,
+  type WoodsNodes,
 } from './schema/index.js'
 export {
   type Cardinality,
