@@ -55,6 +55,10 @@ RSpec.describe Woods::Configuration do
     it 'sets session_exclude_paths to empty array' do
       expect(config.session_exclude_paths).to eq([])
     end
+
+    it 'sets agent_indexing_enabled to false' do
+      expect(config.agent_indexing_enabled).to eq(false)
+    end
   end
 
   describe 'session tracer configuration' do
@@ -201,6 +205,26 @@ RSpec.describe Woods::Configuration do
 
     it 'raises on integer' do
       expect { config.pretty_json = 1 }.to raise_error(Woods::ConfigurationError)
+    end
+  end
+
+  describe '#agent_indexing_enabled=' do
+    it 'accepts true' do
+      config.agent_indexing_enabled = true
+      expect(config.agent_indexing_enabled).to eq(true)
+    end
+
+    it 'accepts false' do
+      config.agent_indexing_enabled = false
+      expect(config.agent_indexing_enabled).to eq(false)
+    end
+
+    it 'raises on nil' do
+      expect { config.agent_indexing_enabled = nil }.to raise_error(Woods::ConfigurationError)
+    end
+
+    it 'raises on string' do
+      expect { config.agent_indexing_enabled = 'true' }.to raise_error(Woods::ConfigurationError)
     end
   end
 

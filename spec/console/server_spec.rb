@@ -30,6 +30,16 @@ RSpec.describe Woods::Console::Server do
       server = described_class.build(config: config_with_redaction)
       expect(server).to be_a(MCP::Server)
     end
+
+    it 'includes instructions' do
+      server = described_class.build(config: config)
+      instructions = server.instance_variable_get(:@instructions)
+      expect(instructions).to be_a(String)
+      expect(instructions).not_to be_empty
+      expect(instructions).to include('Woods Console Server')
+      expect(instructions).to include('console_status')
+      expect(instructions).to include('console_query')
+    end
   end
 
   describe 'tool registration' do
