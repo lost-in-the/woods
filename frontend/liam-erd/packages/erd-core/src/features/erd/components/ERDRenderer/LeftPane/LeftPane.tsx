@@ -1,3 +1,4 @@
+import type { WoodsNodeType } from '@liam-hq/schema'
 import {
   BookText,
   Eye,
@@ -15,8 +16,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@liam-hq/ui'
+import type { Node } from '@xyflow/react'
 import { useNodes } from '@xyflow/react'
-import { useCallback, useMemo } from 'react'
+import { type FC, useCallback, useMemo } from 'react'
+import { woodsNodeColors } from '@/features/erd/components/ERDContent/components/WoodsNode'
 import type { NodeLayer } from '@/features/erd/components/LayerToggle'
 import { isTableNode } from '@/features/erd/utils'
 import { useCustomReactflow } from '@/features/reactflow/hooks'
@@ -28,13 +31,54 @@ import styles from './LeftPane.module.css'
 import { MenuItemLink, type Props as MenuItemLinkProps } from './MenuItemLink'
 import { TableNameMenuButton } from './TableNameMenuButton'
 
+const WOODS_SECTIONS: {
+  layer: NodeLayer
+  label: string
+  nodeType: WoodsNodeType
+}[] = [
+  { layer: 'controllers', label: 'Controllers', nodeType: 'controller' },
+  { layer: 'jobs', label: 'Jobs', nodeType: 'job' },
+  { layer: 'services', label: 'Services', nodeType: 'service' },
+  { layer: 'mailers', label: 'Mailers', nodeType: 'mailer' },
+]
+
+const WoodsNodeGroup: FC<{
+  label: string
+  nodeType: WoodsNodeType
+  nodes: Node[]
+  onFocusNode: (nodeId: string | null) => void
+}> = ({ label, nodeType, nodes, onFocusNode }) => (
+  <SidebarGroup>
+    <SidebarGroupLabel className={styles.groupLabel}>
+      <span>{label}</span>
+    </SidebarGroupLabel>
+    <SidebarGroupContent>
+      <SidebarMenu className={styles.tablesMenu}>
+        {nodes.map((node) => (
+          <SidebarMenuItem key={node.id}>
+            <SidebarMenuButton
+              className={styles.button}
+              onClick={() => onFocusNode(node.id)}
+            >
+              <span
+                className={styles.colorDot}
+                style={{ backgroundColor: woodsNodeColors[nodeType].border }}
+              />
+              <span>{String(node.data['name'])}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
+      </SidebarMenu>
+    </SidebarGroupContent>
+  </SidebarGroup>
+)
+
 type Props = {
-  focusedNode: string | null
   onFocusNode: (nodeId: string | null) => void
   nodeLayers: Record<NodeLayer, boolean>
 }
 
-export const LeftPane = ({ focusedNode, onFocusNode, nodeLayers }: Props) => {
+export const LeftPane = ({ onFocusNode, nodeLayers }: Props) => {
   const { version } = useVersionOrThrow()
   const { selectedNodeIds, setHiddenNodeIds, resetSelectedNodeIds } =
     useUserEditingOrThrow()
@@ -97,26 +141,17 @@ export const LeftPane = ({ focusedNode, onFocusNode, nodeLayers }: Props) => {
     })
   }, [nodes])
 
-  const woodsNodes = useMemo(
-    () => nodes.filter((n) => n.type === 'woodsNode'),
-    [nodes],
-  )
-  const controllerNodes = useMemo(
-    () => woodsNodes.filter((n) => n.data.type === 'controller'),
-    [woodsNodes],
-  )
-  const jobNodes = useMemo(
-    () => woodsNodes.filter((n) => n.data.type === 'job'),
-    [woodsNodes],
-  )
-  const serviceNodes = useMemo(
-    () => woodsNodes.filter((n) => n.data.type === 'service'),
-    [woodsNodes],
-  )
-  const mailerNodes = useMemo(
-    () => woodsNodes.filter((n) => n.data.type === 'mailer'),
-    [woodsNodes],
-  )
+  const woodsNodesByType = useMemo(() => {
+    const grouped: Record<string, Node[]> = {}
+    for (const node of nodes) {
+      if (node.type === 'woodsNode') {
+        const nodeType = String(node.data['type'])
+        if (!grouped[nodeType]) grouped[nodeType] = []
+        grouped[nodeType].push(node)
+      }
+    }
+    return grouped
+  }, [nodes])
 
   const allCount = tableNodes.length
   const visibleCount = tableNodes.filter((node) => !node.hidden).length
@@ -219,109 +254,19 @@ export const LeftPane = ({ focusedNode, onFocusNode, nodeLayers }: Props) => {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {nodeLayers.controllers && controllerNodes.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className={styles.groupLabel}>
-              <span>Controllers</span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className={styles.tablesMenu}>
-                {controllerNodes.map((node) => (
-                  <SidebarMenuItem key={node.id}>
-                    <SidebarMenuButton
-                      className={styles.button}
-                      onClick={() => onFocusNode(node.id)}
-                    >
-                      <span
-                        className={styles.colorDot}
-                        style={{ backgroundColor: '#60a5fa' }}
-                      />
-                      <span>{String(node.data.name)}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {nodeLayers.jobs && jobNodes.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className={styles.groupLabel}>
-              <span>Jobs</span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className={styles.tablesMenu}>
-                {jobNodes.map((node) => (
-                  <SidebarMenuItem key={node.id}>
-                    <SidebarMenuButton
-                      className={styles.button}
-                      onClick={() => onFocusNode(node.id)}
-                    >
-                      <span
-                        className={styles.colorDot}
-                        style={{ backgroundColor: '#fbbf24' }}
-                      />
-                      <span>{String(node.data.name)}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {nodeLayers.services && serviceNodes.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className={styles.groupLabel}>
-              <span>Services</span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className={styles.tablesMenu}>
-                {serviceNodes.map((node) => (
-                  <SidebarMenuItem key={node.id}>
-                    <SidebarMenuButton
-                      className={styles.button}
-                      onClick={() => onFocusNode(node.id)}
-                    >
-                      <span
-                        className={styles.colorDot}
-                        style={{ backgroundColor: '#c084fc' }}
-                      />
-                      <span>{String(node.data.name)}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {nodeLayers.mailers && mailerNodes.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className={styles.groupLabel}>
-              <span>Mailers</span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className={styles.tablesMenu}>
-                {mailerNodes.map((node) => (
-                  <SidebarMenuItem key={node.id}>
-                    <SidebarMenuButton
-                      className={styles.button}
-                      onClick={() => onFocusNode(node.id)}
-                    >
-                      <span
-                        className={styles.colorDot}
-                        style={{ backgroundColor: '#f472b6' }}
-                      />
-                      <span>{String(node.data.name)}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
+        {WOODS_SECTIONS.map(({ layer, label, nodeType }) => {
+          const sectionNodes = woodsNodesByType[nodeType] ?? []
+          if (!nodeLayers[layer] || sectionNodes.length === 0) return null
+          return (
+            <WoodsNodeGroup
+              key={layer}
+              label={label}
+              nodeType={nodeType}
+              nodes={sectionNodes}
+              onFocusNode={onFocusNode}
+            />
+          )
+        })}
       </SidebarContent>
     </Sidebar>
   )

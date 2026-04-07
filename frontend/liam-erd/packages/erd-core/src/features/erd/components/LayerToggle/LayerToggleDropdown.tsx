@@ -11,19 +11,26 @@ import {
   DropdownMenuTrigger,
 } from '@liam-hq/ui'
 import type { FC } from 'react'
+import { woodsNodeColors } from '@/features/erd/components/ERDContent/components/WoodsNode'
 import type { EdgeCategory, NodeLayer } from './useLayerState'
 import styles from './LayerToggleDropdown.module.css'
 
 const NODE_LAYER_OPTIONS: {
   value: NodeLayer
   label: string
-  color: string
 }[] = [
-  { value: 'controllers', label: 'Controllers', color: '#60a5fa' },
-  { value: 'jobs', label: 'Jobs', color: '#fbbf24' },
-  { value: 'services', label: 'Services', color: '#c084fc' },
-  { value: 'mailers', label: 'Mailers', color: '#f472b6' },
+  { value: 'controllers', label: 'Controllers' },
+  { value: 'jobs', label: 'Jobs' },
+  { value: 'services', label: 'Services' },
+  { value: 'mailers', label: 'Mailers' },
 ]
+
+const LAYER_TO_NODE_TYPE = {
+  controllers: 'controller',
+  jobs: 'job',
+  services: 'service',
+  mailers: 'mailer',
+} as const
 
 const EDGE_CATEGORY_OPTIONS: { value: EdgeCategory; label: string }[] = [
   { value: 'data', label: 'Data' },
@@ -72,7 +79,7 @@ export const LayerToggleDropdown: FC<Props> = ({
             <DropdownMenuLabel>
               <span className={styles.sectionLabel}>Node Types</span>
             </DropdownMenuLabel>
-            {NODE_LAYER_OPTIONS.map(({ value, label, color }) => (
+            {NODE_LAYER_OPTIONS.map(({ value, label }) => (
               <DropdownMenuItem
                 key={value}
                 size="sm"
@@ -84,7 +91,7 @@ export const LayerToggleDropdown: FC<Props> = ({
                 <span className={styles.itemContent}>
                   <span
                     className={styles.colorDot}
-                    style={{ backgroundColor: color }}
+                    style={{ backgroundColor: woodsNodeColors[LAYER_TO_NODE_TYPE[value]].border }}
                   />
                   <span className={styles.itemLabel}>{label}</span>
                   {nodeLayers[value] && (

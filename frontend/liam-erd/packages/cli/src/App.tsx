@@ -13,6 +13,8 @@ import * as v from 'valibot'
 
 const emptySchema: Schema = {
   tables: {},
+  enums: {},
+  extensions: {},
 }
 
 function loadSchemaContent() {

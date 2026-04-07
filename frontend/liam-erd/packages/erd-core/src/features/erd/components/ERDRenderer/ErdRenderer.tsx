@@ -182,7 +182,6 @@ export const ERDRenderer: FC<Props> = ({
                 }}
               >
                 <LeftPane
-                  focusedNode={focusedNode}
                   onFocusNode={setFocusedNode}
                   nodeLayers={nodeLayers}
                 />

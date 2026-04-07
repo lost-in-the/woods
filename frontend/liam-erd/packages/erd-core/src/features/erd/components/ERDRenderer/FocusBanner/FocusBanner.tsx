@@ -8,11 +8,13 @@ type Props = {
 }
 
 export const FocusBanner: FC<Props> = ({ focusedNode, onExitFocus }) => {
+  const displayName = focusedNode.replace(/^woods-/, '')
+
   return (
     <div className={styles.banner}>
       <Scan width={14} height={14} />
       <span className={styles.label}>
-        Focused: <strong>{focusedNode}</strong>
+        Focused: <strong>{displayName}</strong>
       </span>
       <button
         type="button"
