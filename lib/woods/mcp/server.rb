@@ -9,7 +9,7 @@ require_relative 'tool_response_renderer'
 
 module Woods
   module MCP
-    # Builds an MCP::Server with 27 tools, 2 resources, and 2 resource templates for querying
+    # Builds an MCP::Server with 31 tools, 2 resources, and 2 resource templates for querying
     # Woods extraction output, managing pipelines, and collecting feedback.
     #
     # All tools are defined inline via closures over an IndexReader instance.
