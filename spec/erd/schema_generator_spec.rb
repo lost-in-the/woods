@@ -270,6 +270,10 @@ RSpec.describe Woods::Erd::SchemaGenerator do
       expect(schema).to have_key('tables')
       expect(schema).to have_key('enums')
       expect(schema).to have_key('extensions')
+
+      expect(schema['enums']).to have_key('Post.status')
+      expect(schema['enums']['Post.status']['values']).to eq(%w[draft published])
+      expect(schema['enums']['Post.status']['name']).to eq('Post.status')
     end
 
     it 'raises an error when output directory has no models dir' do

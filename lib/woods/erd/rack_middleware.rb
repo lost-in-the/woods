@@ -41,7 +41,7 @@ module Woods
         @app = app
         @path = path.chomp('/')
         @output_dir = output_dir&.to_s || default_output_dir
-        @assets_dir = Pathname.new(assets_dir || default_assets_dir)
+        @assets_dir = Pathname.new(assets_dir || default_assets_dir).cleanpath
         @cached_schema = nil
       end
 
@@ -89,7 +89,7 @@ module Woods
 
         ext = file_path.extname
         content_type = CONTENT_TYPES[ext] || 'application/octet-stream'
-        body = file_path.read
+        body = file_path.binread
 
         [200, { 'content-type' => content_type, 'content-length' => body.bytesize.to_s }, [body]]
       end

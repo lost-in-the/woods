@@ -50,7 +50,7 @@ module Woods
       def build_tables(units)
         tables = {}
 
-        units.each do |unit|
+        prioritize_base_models(units).each do |unit|
           meta = unit['metadata'] || {}
           table_name = meta['table_name']
           next if table_name.nil?
@@ -61,6 +61,11 @@ module Woods
         end
 
         tables
+      end
+
+      # Sort STI base models first so dedup keeps the base model's metadata
+      def prioritize_base_models(units)
+        units.sort_by { |u| u.dig('metadata', 'is_sti_child') ? 1 : 0 }
       end
 
       def build_table(table_name, meta, all_units)
