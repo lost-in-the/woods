@@ -18,7 +18,7 @@ import {
 } from '@liam-hq/ui'
 import type { Node } from '@xyflow/react'
 import { useNodes } from '@xyflow/react'
-import { type FC, useCallback, useMemo } from 'react'
+import { type FC, useCallback, useMemo, useState } from 'react'
 import { woodsNodeColors } from '@/features/erd/components/ERDContent/components/WoodsNode'
 import type { NodeLayer } from '@/features/erd/components/LayerToggle'
 import { isTableNode } from '@/features/erd/utils'
@@ -47,31 +47,41 @@ const WoodsNodeGroup: FC<{
   nodeType: WoodsNodeType
   nodes: Node[]
   onFocusNode: (nodeId: string | null) => void
-}> = ({ label, nodeType, nodes, onFocusNode }) => (
-  <SidebarGroup>
-    <SidebarGroupLabel className={styles.groupLabel}>
-      <span>{label}</span>
-    </SidebarGroupLabel>
-    <SidebarGroupContent>
-      <SidebarMenu className={styles.tablesMenu}>
-        {nodes.map((node) => (
-          <SidebarMenuItem key={node.id}>
-            <SidebarMenuButton
-              className={styles.button}
-              onClick={() => onFocusNode(node.id)}
-            >
-              <span
-                className={styles.colorDot}
-                style={{ backgroundColor: woodsNodeColors[nodeType].border }}
-              />
-              <span>{String(node.data['name'])}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ))}
-      </SidebarMenu>
-    </SidebarGroupContent>
-  </SidebarGroup>
-)
+}> = ({ label, nodeType, nodes, onFocusNode }) => {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel
+        className={styles.groupLabel}
+        onClick={() => setIsOpen((prev) => !prev)}
+        style={{ cursor: 'pointer' }}
+      >
+        <span>{label} ({nodes.length})</span>
+      </SidebarGroupLabel>
+      {isOpen && (
+        <SidebarGroupContent>
+          <SidebarMenu className={styles.tablesMenu}>
+            {nodes.map((node) => (
+              <SidebarMenuItem key={node.id}>
+                <SidebarMenuButton
+                  className={styles.button}
+                  onClick={() => onFocusNode(node.id)}
+                >
+                  <span
+                    className={styles.colorDot}
+                    style={{ backgroundColor: woodsNodeColors[nodeType].border }}
+                  />
+                  <span>{String(node.data['name'])}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      )}
+    </SidebarGroup>
+  )
+}
 
 type Props = {
   onFocusNode: (nodeId: string | null) => void
