@@ -374,6 +374,23 @@ RSpec.describe Woods::Erd::SchemaGenerator do
       expect(node['meta']).to eq({ 'queue' => 'critical', 'job_type' => 'sidekiq' })
     end
 
+    it 'extracts name strings from hash-style perform params' do
+      write_unit(:job, 'SyncWorker',
+                 metadata: {
+                   'perform_params' => [
+                     { 'name' => 'account_id', 'splat' => nil, 'has_default' => false },
+                     { 'name' => 'force', 'splat' => nil, 'has_default' => true }
+                   ],
+                   'queue' => 'default'
+                 },
+                 dependencies: [])
+
+      schema = described_class.new(output_dir, layers: %i[models jobs]).generate
+
+      node = schema['nodes']['SyncWorker']
+      expect(node['members']).to eq([{ 'name' => 'account_id' }, { 'name' => 'force' }])
+    end
+
     it 'generates service nodes with public methods as members' do
       write_unit(:service, 'OrderCreator',
                  metadata: {

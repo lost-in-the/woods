@@ -268,7 +268,10 @@ module Woods
                     []
                   end
 
-        actions.map { |a| { 'name' => a } }
+        actions.map do |a|
+          name = a.is_a?(Hash) ? (a['name'] || a[:name]).to_s : a.to_s
+          { 'name' => name }
+        end
       end
 
       def build_node_meta(layer, meta)
