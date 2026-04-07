@@ -162,13 +162,13 @@ module Woods
             `console_count` · `console_find` · `console_sample` · `console_pluck` · `console_aggregate` · `console_association_count` · `console_schema` · `console_recent`
 
             **Tier 2 — Domain Introspection:**
-            `console_diagnose_model` (associations, validations, callbacks) · `console_data_snapshot` · `console_validate_record` · `console_check_setting` · `console_check_policy`
+            `console_diagnose_model` · `console_data_snapshot` · `console_validate_record` · `console_check_setting` · `console_update_setting` (requires confirmation) · `console_check_policy` · `console_validate_with` · `console_check_eligibility` · `console_decorate`
 
             **Tier 3 — Analytics & Monitoring:**
-            `console_job_queues` · `console_job_failures` · `console_error_rates` · `console_throughput` · `console_cache_stats` · `console_redis_info`
+            `console_slow_endpoints` · `console_error_rates` · `console_throughput` · `console_job_queues` · `console_job_failures` · `console_job_find` · `console_job_schedule` · `console_redis_info` · `console_cache_stats` · `console_channel_status`
 
-            **Tier 4 — Guarded:**
-            `console_eval` (arbitrary Ruby, requires confirmation) · `console_sql` · `console_query`
+            **Tier 4 — Guarded (require confirmation):**
+            `console_eval` (arbitrary Ruby) · `console_sql` (read-only SQL) · `console_query` (query builder)
 
             ## SQL Guidance
 

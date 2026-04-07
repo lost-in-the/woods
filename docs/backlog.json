@@ -537,5 +537,85 @@
     "files": ["lib/woods/storage/"],
     "description": "Implement MySQL-backed MetadataStore and GraphStore adapters. MySQL 8.0+ supports recursive CTEs for graph traversal and JSON columns for metadata. Requires the :mysql configuration preset documented in BACKEND_MATRIX.md. Currently only SQLite (metadata) and in-memory (graph) adapters exist.",
     "status": "open"
+  },
+  {
+    "id": "B-054",
+    "title": "MCP tool: classify_query (retrieval debugging)",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/retrieval/query_classifier.rb"],
+    "description": "Expose QueryClassifier via an MCP tool so agents can inspect how a query is interpreted (intent, scope, target_type, keywords) before running codebase_retrieve. Helps debug poor retrieval results.",
+    "status": "open"
+  },
+  {
+    "id": "B-055",
+    "title": "MCP tool: cost_estimate (embedding cost modeling)",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/cost_model/estimator.rb"],
+    "description": "Expose the cost model Estimator via MCP so agents can estimate embedding costs before triggering pipeline_embed. Returns full index cost, monthly query cost, and per-provider comparison.",
+    "status": "open"
+  },
+  {
+    "id": "B-056",
+    "title": "MCP tool: index_validate (integrity check)",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/resilience/index_validator.rb"],
+    "description": "Expose IndexValidator via MCP tool. Returns validation report (valid?, errors, warnings) for the extraction index. Currently only accessible via the woods:validate rake task.",
+    "status": "open"
+  },
+  {
+    "id": "B-057",
+    "title": "MCP tool: system_health (observability probe)",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/observability/health_check.rb"],
+    "description": "Expose HealthCheck via MCP tool. Probes vector_store, metadata_store, and embedding_provider to report system health. Agents need this to understand why embedding/search operations might be failing.",
+    "status": "open"
+  },
+  {
+    "id": "B-058",
+    "title": "MCP tool: eval_retrieval (evaluation harness)",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/evaluation/evaluator.rb"],
+    "description": "Expose the evaluation harness via MCP so agents can run precision@k, MRR, and recall metrics against ground-truth query sets. Enables retrieval quality measurement without rake tasks.",
+    "status": "open"
+  },
+  {
+    "id": "B-059",
+    "title": "MCP: cache management tools",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/cache/"],
+    "description": "Add cache_stats and cache_clear_domain MCP tools. cache_stats returns hit/miss rates and entry counts by domain. cache_clear_domain invalidates a specific cache namespace (e.g., search results after re-extraction).",
+    "status": "open"
+  },
+  {
+    "id": "B-060",
+    "title": "Console MCP server: add resources and resource templates",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/console/server.rb"],
+    "description": "Add MCP resources (console://status) and resource templates (console://schema/{model}) to the Console Server. The Index Server has 2 resources and 2 templates; the Console Server has none.",
+    "status": "open"
+  },
+  {
+    "id": "B-061",
+    "title": "Console tool-specific response renderers",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "agentic",
+    "files": ["lib/woods/console/console_response_renderer.rb"],
+    "description": "Add tool-specific render methods to ConsoleResponseRenderer for console_schema (table with columns/types/indexes), console_diagnose_model (structured diagnostic sections), and console_job_queues (queue status dashboard). Currently all console tools use render_default with generic auto-detection.",
+    "status": "open"
   }
 ]

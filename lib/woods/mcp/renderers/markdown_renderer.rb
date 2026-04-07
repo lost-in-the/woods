@@ -318,7 +318,7 @@ module Woods
           lines << ''
 
           steps.each_with_index do |step, i|
-            unit = fetch_key(step, :unit)
+            unit = fetch_key(step, :unit) || '(unknown)'
             file = fetch_key(step, :file_path)
             ops = fetch_key(step, :operations, [])
             lines << "### #{i + 1}. #{unit}"
@@ -355,13 +355,14 @@ module Woods
           lines << ''
 
           steps.each do |step|
-            method = fetch_key(step, :method) || fetch_key(step, :verb)
-            path = fetch_key(step, :path)
+            method = fetch_key(step, :method) || fetch_key(step, :verb) || '?'
+            path = fetch_key(step, :path) || '?'
             controller = fetch_key(step, :controller)
             action = fetch_key(step, :action)
             status = fetch_key(step, :status)
             duration = fetch_key(step, :duration_ms)
-            line = "- **#{method} #{path}** → #{controller}##{action}"
+            line = "- **#{method} #{path}**"
+            line += " → #{controller}##{action}" if controller && action
             line += " (#{status}, #{duration}ms)" if status
             lines << line
           end

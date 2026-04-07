@@ -27,10 +27,12 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 | Check database schema | `console_schema` | Console |
 | Diagnose a model's data | `console_diagnose_model` | Console |
 | Monitor job queues | `console_job_queues` | Console |
+| List all models, jobs, or other types | `type_members` | Index |
 | Find dead code | `graph_analysis` | Index |
 | Check codebase health | `pipeline_status` | Index |
 | Save a discovery for future agents | `index_pattern` | Index |
 | List saved patterns | `list_patterns` | Index |
+| Remove an outdated pattern | `delete_pattern` | Index |
 
 For detailed examples with parameters and expected output, see [MCP Tool Cookbook](MCP_TOOL_COOKBOOK.md).
 
