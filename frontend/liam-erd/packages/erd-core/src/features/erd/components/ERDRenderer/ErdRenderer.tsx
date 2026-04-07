@@ -115,6 +115,18 @@ export const ERDRenderer: FC<Props> = ({
     [filteredNodes, filteredEdges, focusedNode],
   )
 
+  // Encode active layers into a key fragment so ERDContent re-mounts (and
+  // re-layouts via ELK) when the user toggles node layers on or off.
+  const layerKey = useMemo(
+    () =>
+      Object.entries(nodeLayers)
+        .filter(([, v]) => v)
+        .map(([k]) => k)
+        .sort()
+        .join(','),
+    [nodeLayers],
+  )
+
   const leftPanelRef = createRef<ImperativePanelHandle>()
 
   const { version } = useVersionOrThrow()
@@ -209,7 +221,7 @@ export const ERDRenderer: FC<Props> = ({
                           />
                         )}
                         <ERDContent
-                          key={`${schemaKey}-${showMode}`}
+                          key={`${schemaKey}-${showMode}-${layerKey}`}
                           nodes={visibleNodes}
                           edges={visibleEdges}
                           displayArea="main"
