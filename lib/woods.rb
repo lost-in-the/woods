@@ -79,7 +79,7 @@ module Woods
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @erd_enabled = false
       @erd_path = '/woods/erd'
-      @erd_layers = [:models]
+      @erd_layers = %i[models controllers jobs services mailers]
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods

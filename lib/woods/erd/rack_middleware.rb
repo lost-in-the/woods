@@ -115,7 +115,7 @@ module Woods
         layers = if defined?(Woods) && Woods.respond_to?(:configuration) && Woods.configuration
                    Woods.configuration.erd_layers
                  else
-                   [:models]
+                   %i[models controllers jobs services mailers]
                  end
         schema = SchemaGenerator.new(@output_dir, layers: layers).generate
         JSON.generate(schema)

@@ -64,8 +64,8 @@ RSpec.describe Woods::Configuration do
       expect(config.erd_path).to eq('/woods/erd')
     end
 
-    it 'sets erd_layers to [:models]' do
-      expect(config.erd_layers).to eq([:models])
+    it 'sets erd_layers to all supported layers' do
+      expect(config.erd_layers).to eq(%i[models controllers jobs services mailers])
     end
   end
 
