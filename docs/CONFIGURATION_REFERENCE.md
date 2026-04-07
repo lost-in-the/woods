@@ -174,6 +174,7 @@ end
 |--------|------|---------|-------------|
 | `precompute_flows` | Boolean | `false` | Pre-compute per-action request flow maps during extraction |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots (requires migrations 004+005) |
+| `agent_indexing_enabled` | Boolean | `false` | Allow agents to trigger extraction and embedding via `pipeline_extract` and `pipeline_embed` MCP tools. Disabled by default for safety. |
 
 ## Session Tracer Options
 
