@@ -32,6 +32,12 @@ import {
   setCookieJson,
 } from '../../utils'
 import { ERDContent } from '../ERDContent'
+import {
+  LayerToggleDropdown,
+  filterEdgesByLayers,
+  filterNodesByLayers,
+  useLayerState,
+} from '../LayerToggle'
 import { CardinalityMarkers } from './CardinalityMarkers'
 import { CommandPalette, CommandPaletteProvider } from './CommandPalette'
 import { ErrorDisplay } from './ErrorDisplay'
@@ -79,6 +85,22 @@ export const ERDRenderer: FC<Props> = ({
     schema,
     showMode,
   })
+
+  const { nodeLayers, edgeCategories, toggleNodeLayer, toggleEdgeCategory } =
+    useLayerState()
+
+  const filteredNodes = useMemo(
+    () => filterNodesByLayers(nodes, nodeLayers),
+    [nodes, nodeLayers],
+  )
+  const visibleNodeIds = useMemo(
+    () => new Set(filteredNodes.map((n) => n.id)),
+    [filteredNodes],
+  )
+  const filteredEdges = useMemo(
+    () => filterEdgesByLayers(edges, edgeCategories, visibleNodeIds),
+    [edges, edgeCategories, visibleNodeIds],
+  )
 
   const leftPanelRef = createRef<ImperativePanelHandle>()
 
@@ -166,8 +188,8 @@ export const ERDRenderer: FC<Props> = ({
                       <>
                         <ERDContent
                           key={`${schemaKey}-${showMode}`}
-                          nodes={nodes}
-                          edges={edges}
+                          nodes={filteredNodes}
+                          edges={filteredEdges}
                           displayArea="main"
                         />
                         <TableDetailDrawer />
@@ -176,7 +198,19 @@ export const ERDRenderer: FC<Props> = ({
                   </TableDetailDrawerRoot>
                   {errorObjects.length === 0 && (
                     <div className={styles.toolbarWrapper}>
-                      <Toolbar customActions={customToolbarActions} />
+                      <Toolbar
+                        customActions={
+                          <>
+                            <LayerToggleDropdown
+                              nodeLayers={nodeLayers}
+                              edgeCategories={edgeCategories}
+                              onToggleNodeLayer={toggleNodeLayer}
+                              onToggleEdgeCategory={toggleEdgeCategory}
+                            />
+                            {customToolbarActions}
+                          </>
+                        }
+                      />
                     </div>
                   )}
                 </main>
