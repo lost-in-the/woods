@@ -55,6 +55,14 @@ RSpec.describe Woods::Configuration do
     it 'sets session_exclude_paths to empty array' do
       expect(config.session_exclude_paths).to eq([])
     end
+
+    it 'sets erd_enabled to false' do
+      expect(config.erd_enabled).to eq(false)
+    end
+
+    it 'sets erd_path to /woods/erd' do
+      expect(config.erd_path).to eq('/woods/erd')
+    end
   end
 
   describe 'session tracer configuration' do
