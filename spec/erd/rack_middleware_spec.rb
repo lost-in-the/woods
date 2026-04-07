@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'fileutils'
+require 'tmpdir'
 require 'woods/erd/rack_middleware'
 require 'rack'
 

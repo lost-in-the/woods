@@ -302,30 +302,30 @@ RSpec.describe Woods::Erd::SchemaGenerator do
   describe '#generate with nodes' do
     before do
       write_model_unit('Order', {
-        'table_name' => 'orders',
-        'table_exists' => true,
-        'primary_key' => 'id',
-        'columns' => [{ 'name' => 'id', 'type' => 'bigint', 'null' => false, 'default' => nil }],
-        'associations' => [],
-        'indexes' => [],
-        'foreign_keys' => [],
-        'enums' => {}
-      })
+                         'table_name' => 'orders',
+                         'table_exists' => true,
+                         'primary_key' => 'id',
+                         'columns' => [{ 'name' => 'id', 'type' => 'bigint', 'null' => false, 'default' => nil }],
+                         'associations' => [],
+                         'indexes' => [],
+                         'foreign_keys' => [],
+                         'enums' => {}
+                       })
     end
 
     it 'generates controller nodes with actions as members' do
       write_unit(:controller, 'OrdersController',
-        metadata: {
-          'actions' => %w[index show create],
-          'action_count' => 3,
-          'filters' => [],
-          'routes' => {}
-        },
-        dependencies: [
-          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
-        ])
+                 metadata: {
+                   'actions' => %w[index show create],
+                   'action_count' => 3,
+                   'filters' => [],
+                   'routes' => {}
+                 },
+                 dependencies: [
+                   { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+                 ])
 
-      schema = described_class.new(output_dir, layers: [:models, :controllers]).generate
+      schema = described_class.new(output_dir, layers: %i[models controllers]).generate
 
       expect(schema).to have_key('nodes')
       expect(schema['nodes']).to have_key('OrdersController')
@@ -334,10 +334,10 @@ RSpec.describe Woods::Erd::SchemaGenerator do
       expect(node['name']).to eq('OrdersController')
       expect(node['type']).to eq('controller')
       expect(node['members']).to eq([
-        { 'name' => 'index' },
-        { 'name' => 'show' },
-        { 'name' => 'create' }
-      ])
+                                      { 'name' => 'index' },
+                                      { 'name' => 'show' },
+                                      { 'name' => 'create' }
+                                    ])
       expect(node['meta']).to eq({ 'action_count' => 3 })
       expect(node['dependencies']).to include(
         hash_including('target' => 'orders', 'target_type' => 'table', 'via' => 'code_reference')
@@ -346,8 +346,8 @@ RSpec.describe Woods::Erd::SchemaGenerator do
 
     it 'excludes nodes when layer is not active' do
       write_unit(:controller, 'OrdersController',
-        metadata: { 'actions' => %w[index], 'action_count' => 1 },
-        dependencies: [])
+                 metadata: { 'actions' => %w[index], 'action_count' => 1 },
+                 dependencies: [])
 
       schema = described_class.new(output_dir, layers: [:models]).generate
 
@@ -356,16 +356,16 @@ RSpec.describe Woods::Erd::SchemaGenerator do
 
     it 'generates job nodes with perform params as members' do
       write_unit(:job, 'OrderSyncJob',
-        metadata: {
-          'perform_params' => %w[order_id force],
-          'queue' => 'critical',
-          'job_type' => 'sidekiq'
-        },
-        dependencies: [
-          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
-        ])
+                 metadata: {
+                   'perform_params' => %w[order_id force],
+                   'queue' => 'critical',
+                   'job_type' => 'sidekiq'
+                 },
+                 dependencies: [
+                   { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+                 ])
 
-      schema = described_class.new(output_dir, layers: [:models, :jobs]).generate
+      schema = described_class.new(output_dir, layers: %i[models jobs]).generate
 
       expect(schema['nodes']).to have_key('OrderSyncJob')
       node = schema['nodes']['OrderSyncJob']
@@ -376,15 +376,15 @@ RSpec.describe Woods::Erd::SchemaGenerator do
 
     it 'generates service nodes with public methods as members' do
       write_unit(:service, 'OrderCreator',
-        metadata: {
-          'public_methods' => %w[call validate],
-          'is_callable' => true
-        },
-        dependencies: [
-          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
-        ])
+                 metadata: {
+                   'public_methods' => %w[call validate],
+                   'is_callable' => true
+                 },
+                 dependencies: [
+                   { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+                 ])
 
-      schema = described_class.new(output_dir, layers: [:models, :services]).generate
+      schema = described_class.new(output_dir, layers: %i[models services]).generate
 
       expect(schema['nodes']).to have_key('OrderCreator')
       node = schema['nodes']['OrderCreator']
@@ -395,16 +395,16 @@ RSpec.describe Woods::Erd::SchemaGenerator do
 
     it 'generates mailer nodes with mail actions as members' do
       write_unit(:mailer, 'OrderMailer',
-        metadata: {
-          'actions' => %w[confirmation receipt],
-          'action_count' => 2,
-          'delivery_method' => 'smtp'
-        },
-        dependencies: [
-          { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
-        ])
+                 metadata: {
+                   'actions' => %w[confirmation receipt],
+                   'action_count' => 2,
+                   'delivery_method' => 'smtp'
+                 },
+                 dependencies: [
+                   { 'type' => 'model', 'target' => 'Order', 'via' => 'code_reference' }
+                 ])
 
-      schema = described_class.new(output_dir, layers: [:models, :mailers]).generate
+      schema = described_class.new(output_dir, layers: %i[models mailers]).generate
 
       expect(schema['nodes']).to have_key('OrderMailer')
       node = schema['nodes']['OrderMailer']
@@ -415,30 +415,30 @@ RSpec.describe Woods::Erd::SchemaGenerator do
 
     it 'generates nodes for all active layers' do
       write_unit(:controller, 'OrdersController',
-        metadata: { 'actions' => %w[index], 'action_count' => 1 },
-        dependencies: [])
+                 metadata: { 'actions' => %w[index], 'action_count' => 1 },
+                 dependencies: [])
       write_unit(:job, 'OrderSyncJob',
-        metadata: { 'perform_params' => %w[order_id], 'queue' => 'default' },
-        dependencies: [])
+                 metadata: { 'perform_params' => %w[order_id], 'queue' => 'default' },
+                 dependencies: [])
 
-      schema = described_class.new(output_dir, layers: [:models, :controllers, :jobs]).generate
+      schema = described_class.new(output_dir, layers: %i[models controllers jobs]).generate
 
       expect(schema['nodes']).to have_key('OrdersController')
       expect(schema['nodes']).to have_key('OrderSyncJob')
     end
 
     it 'skips layers with no extraction directory' do
-      schema = described_class.new(output_dir, layers: [:models, :controllers, :jobs]).generate
+      schema = described_class.new(output_dir, layers: %i[models controllers jobs]).generate
 
       expect(schema).not_to have_key('nodes')
     end
 
     it 'generates nodes with empty dependencies array' do
       write_unit(:service, 'Standalone',
-        metadata: { 'public_methods' => %w[run], 'is_callable' => false },
-        dependencies: [])
+                 metadata: { 'public_methods' => %w[run], 'is_callable' => false },
+                 dependencies: [])
 
-      schema = described_class.new(output_dir, layers: [:models, :services]).generate
+      schema = described_class.new(output_dir, layers: %i[models services]).generate
 
       expect(schema['nodes']['Standalone']['dependencies']).to eq([])
     end

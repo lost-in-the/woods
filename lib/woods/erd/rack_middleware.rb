@@ -112,7 +112,7 @@ module Woods
       #
       # @return [String] JSON string
       def generate_schema
-        layers = if defined?(Woods) && Woods.respond_to?(:configuration)
+        layers = if defined?(Woods) && Woods.respond_to?(:configuration) && Woods.configuration
                    Woods.configuration.erd_layers
                  else
                    [:models]
