@@ -23,6 +23,7 @@ import {
   RelationshipEdge,
   Spinner,
   TableNode,
+  WoodsNode,
 } from './components'
 import styles from './ERDContent.module.css'
 import { ErdContentProvider, useErdContentContext } from './ErdContentContext'
@@ -31,6 +32,7 @@ import { useInitialAutoLayout, useQueryParamsChanged } from './hooks'
 const nodeTypes = {
   table: TableNode,
   nonRelatedTableGroup: NonRelatedTableGroupNode,
+  woodsNode: WoodsNode,
 }
 
 const edgeTypes = {

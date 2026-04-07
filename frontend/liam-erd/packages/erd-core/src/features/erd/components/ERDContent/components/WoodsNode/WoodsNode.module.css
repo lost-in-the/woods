@@ -1,0 +1,96 @@
+.wrapper {
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--woods-border-color, var(--overlay-20));
+  min-width: 172px;
+  width: auto;
+  transition:
+    border-color 300ms var(--default-timing-function),
+    border-width 300ms var(--default-timing-function);
+  opacity: 1;
+  box-shadow: 0px 0px 20px 0px rgba(0, 0, 0, 0.4);
+  background: var(--node-background);
+}
+
+:global([data-loading='true']) .wrapper {
+  opacity: 0;
+}
+
+.wrapperHighlighted,
+.wrapper:hover {
+  border: 1px solid var(--woods-border-color, var(--primary-accent));
+  box-shadow: 0px 0px 20px 0px color-mix(in srgb, var(--woods-border-color, var(--primary-accent)) 40%, transparent);
+}
+
+.wrapperActive,
+.wrapperActive:hover {
+  border: 2px solid var(--woods-border-color, var(--primary-accent));
+  box-shadow: 0px 0px 20px 0px color-mix(in srgb, var(--woods-border-color, var(--primary-accent)) 40%, transparent);
+}
+
+.header {
+  display: flex;
+  padding: var(--spacing-2);
+  align-items: center;
+  gap: var(--spacing-1);
+  border-radius: var(--border-radius-md) var(--border-radius-md) 0px 0px;
+  color: #ffffff;
+  font-size: var(--font-size-5);
+  font-weight: 500;
+  line-height: normal;
+}
+
+.typeLabel {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.meta {
+  font-size: 10px;
+  opacity: 0.7;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.handle {
+  top: auto;
+  opacity: 0;
+}
+
+.handle[data-handlepos='right'] {
+  transform: translate(50%, 0%);
+  right: -17px;
+  pointer-events: none;
+}
+
+.handle[data-handlepos='left'] {
+  transform: translate(-50%, 0%);
+  left: -20px;
+  pointer-events: none;
+}
+
+.memberList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.memberItem {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-6);
+  color: var(--overlay-60);
+  border-top: 1px solid var(--overlay-10);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

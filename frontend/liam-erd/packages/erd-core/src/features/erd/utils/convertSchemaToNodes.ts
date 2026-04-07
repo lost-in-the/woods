@@ -102,5 +102,43 @@ export const convertSchemaToNodes = ({
     },
   }))
 
+  // Convert Woods nodes to React Flow nodes
+  if (schema.nodes) {
+    for (const [id, woodsNode] of Object.entries(schema.nodes)) {
+      nodes.push({
+        id: `woods-${id}`,
+        type: 'woodsNode',
+        position: { x: 0, y: 0 },
+        data: {
+          name: woodsNode.name,
+          type: woodsNode.type,
+          members: woodsNode.members,
+          meta: woodsNode.meta,
+        },
+        zIndex: zIndex.nodeDefault,
+      })
+    }
+
+    // Convert dependencies to React Flow edges
+    for (const [id, woodsNode] of Object.entries(schema.nodes)) {
+      for (const dep of woodsNode.dependencies) {
+        // Table targets use table name directly (matches table node IDs)
+        // Non-table targets use woods- prefix
+        const targetId =
+          dep.target_type === 'table' ? dep.target : `woods-${dep.target}`
+        edges.push({
+          id: `dep-${id}-${dep.target}-${dep.via}`,
+          source: `woods-${id}`,
+          target: targetId,
+          type: 'relationship',
+          data: {
+            via: dep.via,
+            sourceNodeType: woodsNode.type,
+          },
+        })
+      }
+    }
+  }
+
   return { nodes, edges }
 }
