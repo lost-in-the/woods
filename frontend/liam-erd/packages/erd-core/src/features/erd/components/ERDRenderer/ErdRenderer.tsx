@@ -83,6 +83,14 @@ export const ERDRenderer: FC<Props> = ({
     return createHash(str)
   }, [schema])
 
+  const initialFocusedNodes = useMemo(() => {
+    const params = new URLSearchParams(window.location.search)
+    const focusParam = params.get('focus')
+    if (!focusParam) return undefined
+
+    return new Set(focusParam.split(','))
+  }, [])
+
   const {
     nodeLayers,
     edgeCategories,
@@ -91,7 +99,7 @@ export const ERDRenderer: FC<Props> = ({
     focusedNodes,
     setFocusedNodes,
     toggleFocusedNode,
-  } = useLayerState()
+  } = useLayerState(initialFocusedNodes)
 
   const { nodes, edges } = convertSchemaToNodes({
     schema,
@@ -163,6 +171,20 @@ export const ERDRenderer: FC<Props> = ({
       window.removeEventListener('erd:toggle-focus-node', handleToggle)
     }
   }, [setFocusedNodes, toggleFocusedNode])
+
+  // Sync focus state to URL
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (focusedNodes.size > 0) {
+      const names = Array.from(focusedNodes)
+        .map((id) => id.replace(/^woods-/, ''))
+        .join(',')
+      url.searchParams.set('focus', names)
+    } else {
+      url.searchParams.delete('focus')
+    }
+    window.history.replaceState({}, '', url.toString())
+  }, [focusedNodes])
 
   const leftPanelRef = createRef<ImperativePanelHandle>()
 

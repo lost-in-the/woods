@@ -25,13 +25,15 @@ const DEFAULT_EDGE_CATEGORIES: Record<EdgeCategory, boolean> = {
   dependency: true,
 }
 
-export function useLayerState(): LayerState {
+export function useLayerState(initialFocusedNodes?: Set<string>): LayerState {
   const [nodeLayers, setNodeLayers] =
     useState<Record<NodeLayer, boolean>>(DEFAULT_NODE_LAYERS)
   const [edgeCategories, setEdgeCategories] = useState<
     Record<EdgeCategory, boolean>
   >(DEFAULT_EDGE_CATEGORIES)
-  const [focusedNodes, setFocusedNodes] = useState<Set<string>>(new Set())
+  const [focusedNodes, setFocusedNodes] = useState<Set<string>>(
+    initialFocusedNodes ?? new Set(),
+  )
 
   const toggleNodeLayer = useCallback((layer: NodeLayer) => {
     setNodeLayers((prev) => ({ ...prev, [layer]: !prev[layer] }))
