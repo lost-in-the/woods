@@ -173,6 +173,7 @@ end
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `precompute_flows` | Boolean | `false` | Pre-compute per-action request flow maps during extraction |
+| `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots (requires migrations 004+005) |
 
 ## Session Tracer Options

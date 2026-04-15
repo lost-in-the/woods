@@ -39,7 +39,7 @@ lib/
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
 │   ├── filename_utils.rb               # Safe filename generation
-│   ├── extractors/                      # 34 extractors + callback_analyzer + behavioral_profile
+│   ├── extractors/                      # 34 extractors + callback_analyzer + behavioral_profile + route_helper_resolver
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -81,6 +81,7 @@ exe/
 - **Dependency graph is bidirectional.** First pass: each extractor records forward dependencies. Second pass: the graph resolves reverse edges (dependents). Both directions matter for retrieval.
 - **PageRank for importance scoring.** `DependencyGraph` computes PageRank over the unit graph to surface high-importance nodes for retrieval ranking. `GraphAnalyzer` provides structural analysis — orphans, dead ends, hubs, cycles, and bridges — for codebase health insights.
 - **Behavioral depth over structural metadata.** Extraction output answers "what happens when X runs?" not just "what exists." Callback side-effects (columns written, jobs enqueued, services called) are detected via `CallbackAnalyzer`. `BehavioralProfile` introspects resolved `Rails.application.config` values. `FlowPrecomputer` generates per-action request flow maps (opt-in via `precompute_flows` config flag, default false).
+- **Navigation edges trace route helper references.** Dependency edges carry a `:via` label that distinguishes relationship types (`:belongs_to`, `:code_reference`, `:render`, `:link_to`, `:redirect_to`, `:form_action`). Navigation edges (`link_to`, `redirect_to`, `form_action`) are resolved from `_path`/`_url` route helpers via `RouteHelperResolver`. These edges mean "this unit references a route helper pointing at that controller" — the scanner matches all `_path`/`_url` usages, not just those inside `link_to` calls. `IGNORED_HELPER_PREFIXES` filters known false positives (`file_path`, `root_path`, etc.).
 
 ## Code Conventions
 
@@ -185,3 +186,8 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `CachingExtractor` scans controllers, models, and view templates (`.erb`) — the `file_type` parameter on `extract_caching_file` defaults to nil (auto-detected from path).
 - `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.
 - Notion export requires `notion_api_token` and `notion_database_ids` to be configured. If only one database ID is set, the other sync (columns or data_models) is skipped gracefully. Environment variable `NOTION_API_TOKEN` overrides config. The Notion API enforces 3 req/sec — `RateLimiter` handles this automatically.
+- Navigation edge extraction (`link_to`, `redirect_to`, `form_action`) is gated by `extract_navigation_edges` config (default: true). Extractors that scan for navigation edges must include both `SharedDependencyScanner` and `RouteHelperResolver`, and call `build_route_helper_map` in their initializer.
+- `RouteHelperResolver` uses `IGNORED_HELPER_PREFIXES` to filter false positives from non-route `_path`/`_url` suffixes (e.g., `file_path`, `base_url`, `log_path`). Add new prefixes there when false positives are discovered in host apps.
+- `DependencyGraph` edges are stored as `[{ target:, via: }]` hashes (symbol keys). `IndexReader` normalizes from JSON to `[{ 'target' => ..., 'via' => ... }]` (string keys). The two normalizers (`DependencyGraph.normalize_edges` vs `IndexReader.normalize_all_edges`) are intentionally separate — do not merge them.
+- `DependencyGraph.from_h` handles both old-format (bare string) and new-format (hash) edges via `normalize_edges`. Old serialized graphs load without migration.
+- `dependencies_of` and `dependents_of` accept an optional `via:` filter (Symbol or Array<Symbol>). The MCP `dependencies`/`dependents` tools expose this as a `via` array parameter.

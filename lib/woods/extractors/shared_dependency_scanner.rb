@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require 'set'
 require_relative '../model_name_cache'
+require_relative 'route_helper_resolver'
 
 module Woods
   module Extractors
@@ -85,6 +87,76 @@ module Woods
         deps.concat(scan_job_dependencies(source))
         deps.concat(scan_mailer_dependencies(source))
         deps.uniq { |d| [d[:type], d[:target]] }
+      end
+
+      # Match _path/_url route helpers anywhere in source.
+      # This intentionally matches all usages (assignments, string interpolation, etc.)
+      # not just link_to/redirect_to calls — any reference to a route helper indicates
+      # a dependency on that controller. False positives from non-route _path/_url
+      # suffixes (file_path, base_url, etc.) are filtered by RouteHelperResolver::IGNORED_HELPER_PREFIXES.
+      # Requires the including class to also include RouteHelperResolver
+      # and call build_route_helper_map in its initializer.
+      ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
+
+      # Match form_with/form_for with a named route helper as the action/url.
+      # Scans only within the form opening tag (up to the first `do`, `%>`, or `end`)
+      # to avoid matching unrelated _path/_url helpers that appear after the form.
+      FORM_ACTION_HELPER = /form_(with|for)\b[^%]*?(\w+)_(path|url)/
+
+      # Scan source for named route helpers and resolve them to controller targets.
+      #
+      # Gated by +Woods.configuration.extract_navigation_edges+.
+      # Requires {RouteHelperResolver} to be included and initialized.
+      #
+      # @param source [String] Ruby/ERB/HAML source code to scan
+      # @param via_type [Symbol] Relationship label (default: :link_to)
+      # @return [Array<Hash>] Dependency hashes with :type, :target, :via
+      def scan_navigation_dependencies(source, via_type: :link_to)
+        return [] unless Woods.configuration&.extract_navigation_edges
+
+        seen_helpers = Set.new
+        seen_targets = Set.new
+        deps = []
+        source.scan(ROUTE_HELPER_PATTERN).each do |route_name, suffix|
+          helper = "#{route_name}_#{suffix}"
+          next if seen_helpers.include?(helper)
+
+          seen_helpers.add(helper)
+          resolved = resolve_route_helper(helper)
+          next unless resolved
+
+          target = resolved[:controller]
+          next if seen_targets.include?(target)
+
+          seen_targets.add(target)
+          deps << { type: :controller, target: target, via: via_type }
+        end
+        deps
+      end
+
+      # Scan source for form_with/form_for calls targeting named route helpers.
+      #
+      # Gated by +Woods.configuration.extract_navigation_edges+.
+      # Requires {RouteHelperResolver} to be included and initialized.
+      #
+      # @param source [String] Template/Ruby source code
+      # @return [Array<Hash>] Dependency hashes with via: :form_action
+      def scan_form_dependencies(source)
+        return [] unless Woods.configuration&.extract_navigation_edges
+
+        seen = Set.new
+        deps = []
+        source.scan(FORM_ACTION_HELPER).each do |_, route_name, suffix|
+          resolved = resolve_route_helper("#{route_name}_#{suffix}")
+          next unless resolved
+
+          target = resolved[:controller]
+          next if seen.include?(target)
+
+          seen.add(target)
+          deps << { type: :controller, target: target, via: :form_action }
+        end
+        deps
       end
     end
   end
