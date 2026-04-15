@@ -65,6 +65,7 @@ module Woods
         @dependency_graph = nil
         @graph_analysis = nil
         @raw_graph_data = nil
+        @normalized_graph_edges = nil
       end
 
       # @return [Hash] Parsed manifest.json
@@ -279,6 +280,12 @@ module Woods
 
       private
 
+      # Memoized normalized edges — converts bare strings (old format) to hashes once.
+      # Cleared by reload! alongside raw_graph_data.
+      def normalized_graph_edges
+        @normalized_graph_edges ||= normalize_all_edges(raw_graph_data['edges'] || {})
+      end
+
       # Build identifier → { type_dir, filename } map from all _index.json files.
       def identifier_map
         @identifier_map ||= build_identifier_map
@@ -359,8 +366,8 @@ module Woods
 
         return { root: identifier, found: false, nodes: {} } unless nodes_data.key?(identifier)
 
-        # Normalize edges once — convert bare strings (old format) to hashes
-        normalized_edges = normalize_all_edges(graph_data['edges'] || {})
+        # Normalize edges once per graph load — memoized alongside raw_graph_data
+        normalized_edges = normalized_graph_edges
 
         type_set = types&.to_set
         via_set = via&.to_set

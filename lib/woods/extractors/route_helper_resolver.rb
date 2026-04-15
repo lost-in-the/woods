@@ -26,6 +26,12 @@ module Woods
       # Route helper prefixes that produce non-navigation dependencies.
       # These generate asset URLs or are common false positives from
       # non-route uses of _path/_url suffixes in Ruby code.
+      #
+      # NOTE: `root` is intentionally excluded — root_path is the most common
+      # Rails route helper, but it appears so frequently in non-navigation contexts
+      # (path construction, config, tests) that it generates excessive noise.
+      # The tradeoff: "what links to the home page?" won't appear in graph queries.
+      # Add new prefixes here when false positives are discovered in host apps.
       IGNORED_HELPER_PREFIXES = %w[
         asset
         image

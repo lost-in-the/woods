@@ -218,7 +218,7 @@ RSpec.describe Woods::Configuration do
   describe 'Woods.configure' do
     before { Woods.configuration = nil }
 
-    after { Woods.configure }
+    after { Woods.configuration = nil }
 
     it 'yields the configuration' do
       Woods.configure do |c|
