@@ -104,6 +104,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each action becomes a `:action` chunk with its applicable filters and route
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- Extracts `redirect_to` navigation edges: named route helpers (`posts_path`, `users_url`) are resolved to controller targets via `RouteHelperResolver`, producing `:redirect_to` dependency edges (gated by `extract_navigation_edges` config)
 
 **Edge cases:**
 - API-only controllers (`ActionController::API` descendants) are included when the gem is present
@@ -273,6 +274,9 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **Key details:**
 - File-based scanning — no Rails boot needed for the actual file reading
 - Records which partials a template renders and which instance variables it expects
+- Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
+- Navigation edges use `:link_to` and `:form_action` via types in the dependency array
+- Gated by `extract_navigation_edges` config (default: true)
 
 ---
 

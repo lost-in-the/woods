@@ -24,7 +24,8 @@ module Woods
     #
     module RouteHelperResolver
       # Route helper prefixes that produce non-navigation dependencies.
-      # These generate asset URLs, not user-navigable page links.
+      # These generate asset URLs or are common false positives from
+      # non-route uses of _path/_url suffixes in Ruby code.
       IGNORED_HELPER_PREFIXES = %w[
         asset
         image
@@ -34,6 +35,13 @@ module Woods
         audio
         video
         turbo_stream
+        file
+        tmp
+        base
+        root
+        log
+        socket
+        download
       ].freeze
 
       # Build the route helper lookup map from Rails named routes.

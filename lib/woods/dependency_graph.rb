@@ -250,6 +250,10 @@ module Woods
 
     # Normalize edge data from either old format (bare strings) or new format (hashes).
     #
+    # NOTE: Uses symbol keys (:target, :via) for in-memory Ruby objects.
+    # IndexReader.normalize_all_edges uses string keys for parsed JSON.
+    # The two normalizers are intentionally separate.
+    #
     # @param edges [Array] Edge entries — either strings or hashes
     # @return [Array<Hash>] Normalized edges with :target and :via keys
     def self.normalize_edges(edges)

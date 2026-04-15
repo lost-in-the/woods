@@ -353,6 +353,21 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(form_deps).to include(a_hash_including(target: 'PostsController'))
     end
 
+    it 'extracts multi-line form_with calls' do
+      create_file('app/views/posts/new.html.erb', <<~ERB)
+        <%= form_with model: @post,
+                      url: posts_path do |f| %>
+          <%= f.text_field :title %>
+          <%= f.submit %>
+        <% end %>
+      ERB
+
+      units = form_extractor.extract_all
+      deps = units.first.dependencies
+      form_deps = deps.select { |d| d[:via] == :form_action }
+      expect(form_deps).to include(a_hash_including(target: 'PostsController'))
+    end
+
     it 'returns no form edges when config is disabled' do
       allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
       create_file('app/views/posts/new.html.erb', '<%= form_with url: posts_path do |f| %><% end %>')
