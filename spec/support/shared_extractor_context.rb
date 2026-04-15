@@ -9,7 +9,9 @@ RSpec.shared_context 'extractor setup' do
 
   before do
     @_real_model_name_cache = Woods::ModelNameCache
-    stub_const('Rails', double('Rails', root: rails_root, logger: logger))
+    routes_double = double('Routes', named_routes: {})
+    app_double = double('Application', routes: routes_double)
+    stub_const('Rails', double('Rails', root: rails_root, logger: logger, application: app_double))
     stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names_regex: /(?!)/, reset!: nil))
   end
 
