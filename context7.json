@@ -17,6 +17,7 @@
     "Concern inlining: model source_code includes all included concerns inline. The `metadata.inlined_concerns` array lists resolved concern names.",
     "Find enqueued jobs: MCP tool `dependencies` with `identifier`, `depth: 2`, `types: [\"job\"]`. Traces through callbacks to find triggered jobs.",
     "Runtime methods: extraction inside a booted Rails process captures enum predicates, association builders, and scope methods that static tools miss.",
-    "Graph analysis: MCP tool `graph_analysis` with analysis: \"orphans\", \"cycles\", \"bridges\", or \"hubs\". MCP tool `pagerank` ranks by importance."
+    "Graph analysis: MCP tool `graph_analysis` with analysis: \"orphans\", \"cycles\", \"bridges\", or \"hubs\". MCP tool `pagerank` ranks by importance.",
+    "Navigation edges: use `via` parameter on `dependencies`/`dependents` tools to filter by relationship type. Values: link_to, redirect_to, form_action, render, code_reference, belongs_to, has_many, include. Config: `extract_navigation_edges` (default: true)."
   ]
 }

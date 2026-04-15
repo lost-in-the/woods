@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'shared_dependency_scanner'
+require_relative 'route_helper_resolver'
+
 module Woods
   module Extractors
     # ViewTemplateExtractor handles ERB view template extraction.
@@ -18,6 +21,9 @@ module Woods
     #   index = units.find { |u| u.identifier == "users/index.html.erb" }
     #
     class ViewTemplateExtractor
+      include SharedDependencyScanner
+      include RouteHelperResolver
+
       # Directories to scan for view templates
       VIEW_DIRECTORIES = %w[
         app/views
@@ -59,6 +65,7 @@ module Woods
       def initialize
         @directories = VIEW_DIRECTORIES.map { |d| Rails.root.join(d) }
                                        .select(&:directory?)
+        build_route_helper_map
       end
 
       # Extract all ERB view templates
@@ -92,8 +99,9 @@ module Woods
 
         unit.namespace = namespace
         unit.source_code = source
-        unit.metadata = build_metadata(source, file_path)
-        unit.dependencies = build_dependencies(source, file_path, identifier)
+        partials = extract_rendered_partials(source)
+        unit.metadata = build_metadata(source, file_path, partials)
+        unit.dependencies = build_dependencies(source, file_path, identifier, partials)
 
         unit
       rescue StandardError => e
@@ -126,12 +134,13 @@ module Woods
       #
       # @param source [String] Template source code
       # @param file_path [String] Path to the template
+      # @param partials [Array<String>] Pre-extracted partial names
       # @return [Hash]
-      def build_metadata(source, file_path)
+      def build_metadata(source, file_path, partials)
         {
           template_engine: 'erb',
           is_partial: partial?(file_path),
-          partials_rendered: extract_rendered_partials(source),
+          partials_rendered: partials,
           instance_variables: extract_instance_variables(source),
           helpers_called: extract_helpers(source),
           loc: source.lines.count { |l| l.strip.length.positive? }
@@ -201,12 +210,13 @@ module Woods
       # @param source [String] Template source code
       # @param file_path [String] Path to the template
       # @param identifier [String] Template identifier
+      # @param partials [Array<String>] Pre-extracted partial names
       # @return [Array<Hash>]
-      def build_dependencies(source, file_path, identifier)
+      def build_dependencies(source, file_path, identifier, partials)
         deps = []
 
         # Rendered partials
-        extract_rendered_partials(source).each do |partial_name|
+        partials.each do |partial_name|
           partial_identifier = resolve_partial_identifier(partial_name, identifier)
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
@@ -215,7 +225,13 @@ module Woods
         controller = infer_controller(file_path)
         deps << { type: :controller, target: controller, via: :view_render } if controller
 
-        deps
+        # Navigation edges (link_to, button_to via _path/_url helpers)
+        deps.concat(scan_navigation_dependencies(source, via_type: :link_to))
+
+        # Form destinations (form_with/form_for submitting to a route)
+        deps.concat(scan_form_dependencies(source))
+
+        deps.uniq { |d| [d[:type], d[:target], d[:via]] }
       end
 
       # Resolve a partial name to its file identifier.
