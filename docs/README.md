@@ -24,6 +24,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [WHY_WOODS.md](WHY_WOODS.md) | What Woods is, why it exists, before/after examples |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline stages, ExtractedUnit, dependency graph, retrieval, storage backends, MCP servers |
 | [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 34 extractors captures, edge cases, example output |
+| [AGENT_GUIDE.md](AGENT_GUIDE.md) | Deep reference for AI agents — workflows, full tool table, relationship type catalog, gotchas |
 | [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
 
 ## Reference

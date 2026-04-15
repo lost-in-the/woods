@@ -409,6 +409,11 @@ module Woods
 
       # Normalize all edge arrays once, converting bare strings to hashes.
       #
+      # NOTE: This uses string keys ('target', 'via') because IndexReader
+      # operates on parsed JSON. DependencyGraph.normalize_edges uses symbol
+      # keys (:target, :via) for in-memory Ruby objects. The two normalizers
+      # are intentionally separate — do not merge them.
+      #
       # @param raw_edges [Hash] Raw edges from graph JSON
       # @return [Hash] Edges with all entries as { 'target' => ..., 'via' => ... } hashes
       def normalize_all_edges(raw_edges)

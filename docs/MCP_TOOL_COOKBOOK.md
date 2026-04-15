@@ -203,6 +203,22 @@ To find only which jobs depend on `User`:
 
 ---
 
+### "What views link to OrdersController?"
+
+**Tool:** `dependents` (Index Server)
+
+```json
+{
+  "identifier": "OrdersController",
+  "depth": 1,
+  "via": ["link_to", "form_action"]
+}
+```
+
+**What you'll get:** View templates and controllers that navigate to `OrdersController` via `link_to` helpers or form submissions. The `via` filter excludes code references and other relationship types, showing only UI navigation edges.
+
+---
+
 ### "What does User depend on?"
 
 **Tool:** `dependencies` (Index Server)
@@ -314,6 +330,22 @@ Search `source_code` when you want semantic matches, not just naming matches.
 ```
 
 This traces through the dependency graph: `CheckoutService` calls `Order#save!`, which triggers `after_commit :send_confirmation`, which enqueues `OrderConfirmationJob`. Without the graph, you'd need to manually follow callbacks across multiple files.
+
+---
+
+### "Where does UsersController redirect to?"
+
+**Tool:** `dependencies` (Index Server)
+
+```json
+{
+  "identifier": "UsersController",
+  "depth": 1,
+  "via": ["redirect_to"]
+}
+```
+
+**What you'll get:** Controllers that `UsersController` redirects to via `redirect_to` with named route helpers. Useful for tracing user flow after form submissions or authentication.
 
 ---
 

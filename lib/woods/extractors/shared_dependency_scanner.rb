@@ -94,8 +94,11 @@ module Woods
       # and call build_route_helper_map in its initializer.
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
-      # Match form_with/form_for with a named route helper as the action/url
-      FORM_ACTION_HELPER = /form_(with|for)\b.*?(\w+)_(path|url)/
+      # Match form_with/form_for with a named route helper as the action/url.
+      # Uses /m flag so .*? spans newlines in multi-line form calls:
+      #   form_with model: @post,
+      #             url: posts_path do |f|
+      FORM_ACTION_HELPER = /form_(with|for)\b.*?(\w+)_(path|url)/m
 
       # Scan source for named route helpers and resolve them to controller targets.
       #

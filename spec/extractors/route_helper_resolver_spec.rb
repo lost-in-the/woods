@@ -114,6 +114,34 @@ RSpec.describe Woods::Extractors::RouteHelperResolver do
     it 'ignores turbo_stream helpers' do
       expect(subject.resolve_route_helper('turbo_stream_path')).to be_nil
     end
+
+    it 'ignores file_path (common false positive)' do
+      expect(subject.resolve_route_helper('file_path')).to be_nil
+    end
+
+    it 'ignores tmp_path (common false positive)' do
+      expect(subject.resolve_route_helper('tmp_path')).to be_nil
+    end
+
+    it 'ignores base_url (common false positive)' do
+      expect(subject.resolve_route_helper('base_url')).to be_nil
+    end
+
+    it 'ignores log_path (common false positive)' do
+      expect(subject.resolve_route_helper('log_path')).to be_nil
+    end
+
+    it 'ignores root_path (common false positive)' do
+      expect(subject.resolve_route_helper('root_path')).to be_nil
+    end
+
+    it 'ignores socket_url (common false positive)' do
+      expect(subject.resolve_route_helper('socket_url')).to be_nil
+    end
+
+    it 'ignores download_path (common false positive)' do
+      expect(subject.resolve_route_helper('download_path')).to be_nil
+    end
   end
 
   describe '#build_route_helper_map' do

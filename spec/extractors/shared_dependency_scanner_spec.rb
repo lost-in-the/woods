@@ -278,6 +278,7 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
     subject(:nav_scanner) { nav_test_class.new(route_map) }
 
     before do
+      Woods.configure unless Woods.configuration
       allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
     end
 
@@ -349,6 +350,110 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       source = 'link_to "Posts", posts_path; link_to "Users", users_path'
       result = nav_scanner.scan_navigation_dependencies(source)
       expect(result).to all(satisfy { |d| d[:type] == :controller })
+    end
+
+    it 'ignores common false-positive prefixes like file_path and log_url' do
+      source = <<~RUBY
+        File.read(file_path)
+        Logger.new(log_path)
+        open(socket_url)
+        save_to(tmp_path)
+        URI.parse(base_url)
+      RUBY
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to be_empty
+    end
+  end
+
+  # ── #scan_form_dependencies ─────────────────────────────────────
+
+  describe '#scan_form_dependencies' do
+    let(:form_test_class) do
+      Class.new do
+        include Woods::Extractors::SharedDependencyScanner
+        include Woods::Extractors::RouteHelperResolver
+
+        def initialize(route_map)
+          @route_helper_map = route_map
+        end
+      end
+    end
+
+    let(:route_map) do
+      {
+        'posts' => { controller: 'PostsController', action: 'create', path: '/posts', verb: 'POST' },
+        'users' => { controller: 'UsersController', action: 'create', path: '/users', verb: 'POST' }
+      }
+    end
+
+    subject(:form_scanner) { form_test_class.new(route_map) }
+
+    before do
+      Woods.configure unless Woods.configuration
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+    end
+
+    it 'extracts form_with targeting a route helper' do
+      source = '<%= form_with url: posts_path do |f| %>'
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to include(a_hash_including(target: 'PostsController', via: :form_action))
+    end
+
+    it 'extracts form_for targeting a route helper' do
+      source = '<%= form_for @post, url: posts_path do |f| %>'
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to include(a_hash_including(target: 'PostsController', via: :form_action))
+    end
+
+    it 'handles multi-line form_with calls' do
+      source = <<~ERB
+        <%= form_with model: @post,
+                      url: posts_path do |f| %>
+          <%= f.text_field :title %>
+        <% end %>
+      ERB
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to include(a_hash_including(target: 'PostsController', via: :form_action))
+    end
+
+    it 'handles multi-line form_for calls' do
+      source = <<~ERB
+        <%= form_for @user,
+                     url: users_path,
+                     html: { class: "form" } do |f| %>
+          <%= f.text_field :name %>
+        <% end %>
+      ERB
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to include(a_hash_including(target: 'UsersController', via: :form_action))
+    end
+
+    it 'deduplicates same controller' do
+      source = <<~ERB
+        <%= form_with url: posts_path do |f| %>
+        <%= form_with url: posts_path do |f| %>
+      ERB
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result.size).to eq(1)
+    end
+
+    it 'returns empty when config is disabled' do
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
+      source = '<%= form_with url: posts_path do |f| %>'
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'skips unresolvable helpers' do
+      source = '<%= form_with url: nonexistent_path do |f| %>'
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'all returned dependencies have via :form_action' do
+      source = '<%= form_with url: posts_path do |f| %>'
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to all(satisfy { |d| d[:via] == :form_action })
     end
   end
 end
