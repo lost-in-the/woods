@@ -25,6 +25,7 @@ module Woods
       @nodes = {}      # identifier => { type:, file_path: }
       @edges = {}      # identifier => [{ target:, via: }]
       @reverse = {}    # identifier => Set of dependent identifiers
+      @reverse_via = {} # [target, via] => Set of dependent identifiers
       @file_map = {}   # file_path => identifier
       @type_index = {} # type => Set of identifiers
       @to_h = nil
@@ -51,6 +52,7 @@ module Woods
       # Build reverse edges (Set-based for O(1) insert)
       unit.dependencies.each do |dep|
         (@reverse[dep[:target]] ||= Set.new).add(unit.identifier)
+        (@reverse_via[[dep[:target], dep[:via]]] ||= Set.new).add(unit.identifier)
       end
     end
 
@@ -124,14 +126,11 @@ module Woods
     # @param via [Symbol, Array<Symbol>, nil] Filter by relationship type(s)
     # @return [Array<String>] List of dependent identifiers
     def dependents_of(identifier, via: nil)
-      deps = @reverse.fetch(identifier, Set.new).to_a
-      return deps unless via
+      return @reverse.fetch(identifier, Set.new).to_a unless via
 
-      via_set = Array(via)
-      deps.select do |dep_id|
-        edges = @edges[dep_id] || []
-        edges.any? { |e| e[:target] == identifier && via_set.include?(e[:via]) }
-      end
+      Array(via).each_with_object(Set.new) do |v, result|
+        @reverse_via.fetch([identifier, v], Set.new).each { |dep| result.add(dep) }
+      end.to_a
     end
 
     # Get all units of a specific type
@@ -230,6 +229,15 @@ module Woods
       graph.instance_variable_set(:@type_index, raw_type_index.transform_keys(&:to_sym).transform_values do |v|
         v.is_a?(Set) ? v : Set.new(v)
       end)
+
+      # Rebuild reverse_via index from edges
+      reverse_via = {}
+      graph.instance_variable_get(:@edges).each do |source_id, edges|
+        edges.each do |edge|
+          (reverse_via[[edge[:target], edge[:via]]] ||= Set.new).add(source_id)
+        end
+      end
+      graph.instance_variable_set(:@reverse_via, reverse_via)
 
       graph
     end

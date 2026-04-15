@@ -90,15 +90,18 @@ module Woods
       end
 
       # Match _path/_url route helpers anywhere in source.
+      # This intentionally matches all usages (assignments, string interpolation, etc.)
+      # not just link_to/redirect_to calls — any reference to a route helper indicates
+      # a dependency on that controller. False positives from non-route _path/_url
+      # suffixes (file_path, base_url, etc.) are filtered by RouteHelperResolver::IGNORED_HELPER_PREFIXES.
       # Requires the including class to also include RouteHelperResolver
       # and call build_route_helper_map in its initializer.
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
       # Match form_with/form_for with a named route helper as the action/url.
-      # Uses /m flag so .*? spans newlines in multi-line form calls:
-      #   form_with model: @post,
-      #             url: posts_path do |f|
-      FORM_ACTION_HELPER = /form_(with|for)\b.*?(\w+)_(path|url)/m
+      # Scans only within the form opening tag (up to the first `do`, `%>`, or `end`)
+      # to avoid matching unrelated _path/_url helpers that appear after the form.
+      FORM_ACTION_HELPER = /form_(with|for)\b[^%]*?(\w+)_(path|url)/
 
       # Scan source for named route helpers and resolve them to controller targets.
       #
