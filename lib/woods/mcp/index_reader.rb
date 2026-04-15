@@ -176,9 +176,10 @@ module Woods
       # @param identifier [String] Starting unit identifier
       # @param depth [Integer] Maximum traversal depth
       # @param types [Array<String>, nil] Filter to these singular type names
+      # @param via [Array<String>, nil] Filter to these relationship types (e.g. ["link_to", "redirect_to"])
       # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
-      def traverse_dependencies(identifier, depth: 2, types: nil)
-        traverse(identifier, depth: depth, types: types, direction: :forward)
+      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :forward)
       end
 
       # BFS traversal of reverse dependencies (dependents).
@@ -186,9 +187,10 @@ module Woods
       # @param identifier [String] Starting unit identifier
       # @param depth [Integer] Maximum traversal depth
       # @param types [Array<String>, nil] Filter to these singular type names
+      # @param via [Array<String>, nil] Filter to these relationship types (e.g. ["link_to", "redirect_to"])
       # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
-      def traverse_dependents(identifier, depth: 2, types: nil)
-        traverse(identifier, depth: depth, types: types, direction: :reverse)
+      def traverse_dependents(identifier, depth: 2, types: nil, via: nil)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :reverse)
       end
 
       # Search rails_source units by concept keyword.
@@ -340,13 +342,28 @@ module Woods
       end
 
       # BFS traversal in either direction.
-      def traverse(identifier, depth:, types:, direction:)
+      #
+      # Edges may be stored as bare strings (old format) or as
+      # +{"target" => "...", "via" => "..."}+ hashes (new format).
+      # This method handles both transparently.
+      #
+      # @param identifier [String] Starting unit identifier
+      # @param depth [Integer] Maximum traversal depth
+      # @param types [Array<String>, nil] Filter to these unit type names
+      # @param via [Array<String>, nil] Filter to these relationship types
+      # @param direction [:forward, :reverse] Traversal direction
+      # @return [Hash]
+      def traverse(identifier, depth:, types:, via:, direction:)
         graph_data = raw_graph_data
         nodes_data = graph_data['nodes'] || {}
 
         return { root: identifier, found: false, nodes: {} } unless nodes_data.key?(identifier)
 
+        # Normalize edges once — convert bare strings (old format) to hashes
+        normalized_edges = normalize_all_edges(graph_data['edges'] || {})
+
         type_set = types&.to_set
+        via_set = via&.to_set
         visited = Set.new([identifier])
         queue = [[identifier, 0]]
         result_nodes = {}
@@ -355,12 +372,12 @@ module Woods
           current, current_depth = queue.shift
 
           neighbors = if direction == :forward
-                        (graph_data['edges'] || {})[current] || []
+                        resolve_forward_neighbors(normalized_edges, current, via_set)
                       else
-                        (graph_data['reverse'] || {})[current] || []
+                        resolve_reverse_neighbors(graph_data, normalized_edges, current, via_set)
                       end
 
-          # Filter by type if requested
+          # Filter by node type if requested
           filtered = if type_set
                        neighbors.select do |n|
                          node_meta = nodes_data[n]
@@ -388,6 +405,38 @@ module Woods
         end
 
         { root: identifier, found: true, nodes: result_nodes }
+      end
+
+      # Normalize all edge arrays once, converting bare strings to hashes.
+      #
+      # @param raw_edges [Hash] Raw edges from graph JSON
+      # @return [Hash] Edges with all entries as { 'target' => ..., 'via' => ... } hashes
+      def normalize_all_edges(raw_edges)
+        raw_edges.transform_values do |entries|
+          entries.map { |e| e.is_a?(Hash) ? e : { 'target' => e } }
+        end
+      end
+
+      # Extract forward neighbor identifiers, optionally filtered by via type.
+      # Expects pre-normalized edges (all entries are hashes).
+      def resolve_forward_neighbors(normalized_edges, identifier, via_set)
+        edges = normalized_edges[identifier] || []
+        edges = edges.select { |e| via_set.include?(e['via']) } if via_set
+        edges.map { |e| e['target'] }
+      end
+
+      # Extract reverse neighbor identifiers, optionally filtered by via type.
+      # Reverse edges are stored as bare identifier arrays. When via filtering
+      # is requested, checks each dependent's pre-normalized forward edges to
+      # find those pointing at +identifier+ with a matching via type.
+      def resolve_reverse_neighbors(graph_data, normalized_edges, identifier, via_set)
+        dependents = (graph_data['reverse'] || {})[identifier] || []
+        return dependents unless via_set
+
+        dependents.select do |dep|
+          forward = normalized_edges[dep] || []
+          forward.any? { |e| e['target'] == identifier && via_set.include?(e['via']) }
+        end
       end
     end
   end

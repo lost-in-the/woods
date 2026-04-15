@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/model_name_cache'
 require 'woods/extractors/shared_dependency_scanner'
 
@@ -248,6 +249,106 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
 
       result = scanner.scan_common_dependencies(source)
       expect(result).to all(satisfy { |d| d[:via] == :code_reference })
+    end
+  end
+
+  # ── #scan_navigation_dependencies ────────────────────────────────
+
+  describe '#scan_navigation_dependencies' do
+    let(:nav_test_class) do
+      Class.new do
+        include Woods::Extractors::SharedDependencyScanner
+        include Woods::Extractors::RouteHelperResolver
+
+        def initialize(route_map)
+          @route_helper_map = route_map
+        end
+      end
+    end
+
+    let(:route_map) do
+      {
+        'posts' => { controller: 'PostsController', action: 'index', path: '/posts', verb: 'GET' },
+        'new_post' => { controller: 'PostsController', action: 'new', path: '/posts/new', verb: 'GET' },
+        'edit_post' => { controller: 'PostsController', action: 'edit', path: '/posts/:id/edit', verb: 'GET' },
+        'users' => { controller: 'UsersController', action: 'index', path: '/users', verb: 'GET' }
+      }
+    end
+
+    subject(:nav_scanner) { nav_test_class.new(route_map) }
+
+    before do
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+    end
+
+    it 'finds _path route helpers and resolves to controller targets' do
+      source = 'link_to "Posts", posts_path'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to include(a_hash_including(target: 'PostsController', via: :link_to))
+    end
+
+    it 'finds _url route helpers' do
+      source = 'redirect_to posts_url'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to include(a_hash_including(target: 'PostsController'))
+    end
+
+    it 'resolves multiple different helpers' do
+      source = <<~ERB
+        link_to "Posts", posts_path
+        link_to "Users", users_path
+      ERB
+      result = nav_scanner.scan_navigation_dependencies(source)
+      targets = result.map { |d| d[:target] }
+      expect(targets).to contain_exactly('PostsController', 'UsersController')
+    end
+
+    it 'deduplicates same controller via same via type' do
+      source = <<~ERB
+        link_to "Posts", posts_path
+        link_to "New Post", new_post_path
+        link_to "Edit", edit_post_path(post)
+      ERB
+      result = nav_scanner.scan_navigation_dependencies(source)
+      posts_deps = result.select { |d| d[:target] == 'PostsController' }
+      expect(posts_deps.size).to eq(1)
+    end
+
+    it 'accepts a custom via_type' do
+      source = 'redirect_to posts_path'
+      result = nav_scanner.scan_navigation_dependencies(source, via_type: :redirect_to)
+      expect(result.first[:via]).to eq(:redirect_to)
+    end
+
+    it 'ignores asset_path helpers' do
+      source = 'image_tag asset_path("logo.png")'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'ignores image_path helpers' do
+      source = 'image_tag image_path("photo.jpg")'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'skips unresolvable helpers' do
+      source = 'link_to "Unknown", totally_unknown_path'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'returns empty when config is disabled' do
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
+      source = 'link_to "Posts", posts_path'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'all returned dependencies have type :controller' do
+      source = 'link_to "Posts", posts_path; link_to "Users", users_path'
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result).to all(satisfy { |d| d[:type] == :controller })
     end
   end
 end

@@ -228,14 +228,20 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Filter to these types'
+                },
+                via: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Filter by relationship type (e.g. link_to, redirect_to, form_action, render, ' \
+                               'code_reference, belongs_to, has_many)'
                 }
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil|
             types = coerce.call(types)
+            via = coerce.call(via)
             depth = coerce_int.call(depth)
-            result = reader.send(reader_method, identifier, depth: depth || 2, types: types)
+            result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via)
             if result[:found] == false
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."

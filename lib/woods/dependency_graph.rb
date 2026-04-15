@@ -23,7 +23,7 @@ module Woods
   class DependencyGraph
     def initialize
       @nodes = {}      # identifier => { type:, file_path: }
-      @edges = {}      # identifier => [dependency identifiers]
+      @edges = {}      # identifier => [{ target:, via: }]
       @reverse = {}    # identifier => Set of dependent identifiers
       @file_map = {}   # file_path => identifier
       @type_index = {} # type => Set of identifiers
@@ -42,7 +42,7 @@ module Woods
         namespace: unit.namespace
       }
 
-      @edges[unit.identifier] = unit.dependencies.map { |d| d[:target] }
+      @edges[unit.identifier] = unit.dependencies.map { |d| { target: d[:target], via: d[:via] } }
       @file_map[unit.file_path] = unit.identifier if unit.file_path
 
       # Type index for filtering (Set-based for O(1) insert)
@@ -107,17 +107,31 @@ module Woods
     # Get direct dependencies of a unit
     #
     # @param identifier [String] Unit identifier
+    # @param via [Symbol, Array<Symbol>, nil] Filter by relationship type(s)
     # @return [Array<String>] List of dependency identifiers
-    def dependencies_of(identifier)
-      @edges[identifier] || []
+    def dependencies_of(identifier, via: nil)
+      edges = @edges[identifier] || []
+      if via
+        via_set = Array(via)
+        edges = edges.select { |e| via_set.include?(e[:via]) }
+      end
+      edges.map { |e| e[:target] }
     end
 
     # Get direct dependents of a unit (what depends on it)
     #
     # @param identifier [String] Unit identifier
+    # @param via [Symbol, Array<Symbol>, nil] Filter by relationship type(s)
     # @return [Array<String>] List of dependent identifiers
-    def dependents_of(identifier)
-      @reverse.fetch(identifier, Set.new).to_a
+    def dependents_of(identifier, via: nil)
+      deps = @reverse.fetch(identifier, Set.new).to_a
+      return deps unless via
+
+      via_set = Array(via)
+      deps.select do |dep_id|
+        edges = @edges[dep_id] || []
+        edges.any? { |e| e[:target] == identifier && via_set.include?(e[:via]) }
+      end
     end
 
     # Get all units of a specific type
@@ -204,7 +218,8 @@ module Woods
       raw_nodes = data[:nodes] || data['nodes'] || {}
       graph.instance_variable_set(:@nodes, raw_nodes.transform_values { |v| symbolize_node(v) })
 
-      graph.instance_variable_set(:@edges, data[:edges] || data['edges'] || {})
+      raw_edges = data[:edges] || data['edges'] || {}
+      graph.instance_variable_set(:@edges, raw_edges.transform_values { |edges| normalize_edges(edges) })
 
       raw_reverse = data[:reverse] || data['reverse'] || {}
       graph.instance_variable_set(:@reverse, raw_reverse.transform_values { |v| v.is_a?(Set) ? v : Set.new(v) })
@@ -231,6 +246,24 @@ module Woods
         file_path: node[:file_path] || node['file_path'],
         namespace: node[:namespace] || node['namespace']
       }
+    end
+
+    # Normalize edge data from either old format (bare strings) or new format (hashes).
+    #
+    # @param edges [Array] Edge entries — either strings or hashes
+    # @return [Array<Hash>] Normalized edges with :target and :via keys
+    def self.normalize_edges(edges)
+      return [] unless edges.is_a?(Array)
+
+      edges.map do |edge|
+        if edge.is_a?(String)
+          { target: edge, via: nil }
+        elsif edge.is_a?(Hash)
+          { target: edge[:target] || edge['target'], via: (edge[:via] || edge['via'])&.to_sym }
+        else
+          { target: edge.to_s, via: nil }
+        end
+      end
     end
   end
 end

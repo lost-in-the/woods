@@ -39,7 +39,7 @@ module Woods
     attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
-                  :concurrent_extraction, :precompute_flows, :enable_snapshots,
+                  :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :notion_api_token, :notion_database_ids,
@@ -60,6 +60,7 @@ module Woods
       @pretty_json = true
       @concurrent_extraction = false
       @precompute_flows = false
+      @extract_navigation_edges = true
       @enable_snapshots = false
       @context_format = :markdown
       @session_tracer_enabled = false
