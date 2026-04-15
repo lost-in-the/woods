@@ -196,7 +196,7 @@ RSpec.describe Woods::DependencyGraph do
     end
 
     it 'filters by multiple via types' do
-      deps = graph.dependencies_of('UsersController', via: [:code_reference, :redirect_to])
+      deps = graph.dependencies_of('UsersController', via: %i[code_reference redirect_to])
       expect(deps).to contain_exactly('User', 'PostsController')
     end
 
