@@ -39,12 +39,12 @@ function loadSchemaContent() {
 }
 
 const versionData = {
-  version: import.meta.env.VITE_CLI_VERSION_VERSION,
-  gitHash: import.meta.env.VITE_CLI_VERSION_GIT_HASH,
-  envName: import.meta.env.VITE_CLI_VERSION_ENV_NAME,
+  version: import.meta.env.VITE_CLI_VERSION_VERSION ?? '0.0.0',
+  gitHash: import.meta.env.VITE_CLI_VERSION_GIT_HASH ?? 'unknown',
+  envName: import.meta.env.VITE_CLI_VERSION_ENV_NAME ?? 'production',
   isReleasedGitHash:
     import.meta.env.VITE_CLI_VERSION_IS_RELEASED_GIT_HASH === '1',
-  date: import.meta.env.VITE_CLI_VERSION_DATE,
+  date: import.meta.env.VITE_CLI_VERSION_DATE ?? '1970-01-01',
   displayedOn: 'cli',
 }
 const version = v.parse(versionSchema, versionData)
