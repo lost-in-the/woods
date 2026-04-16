@@ -51,7 +51,7 @@ module Woods
         api_token = config.unblocked_api_token
         raise ConfigurationError, 'unblocked_api_token is required' unless api_token
 
-        budget = ENV.fetch('UNBLOCKED_DAILY_BUDGET', RateLimiter::DEFAULT_BUDGET).to_i
+        budget = ENV.fetch('UNBLOCKED_DAILY_BUDGET', RateLimiter::DEFAULT_BUDGET.to_s).to_i
         limiter = RateLimiter.new(daily_budget: budget)
 
         @client = client || Client.new(api_token: api_token, rate_limiter: limiter)
