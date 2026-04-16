@@ -263,6 +263,36 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  describe 'tool: domain_clusters' do
+    it 'returns clusters from the graph' do
+      response = call_tool(server, 'domain_clusters')
+      data = parse_response(response)
+      expect(data).to have_key('clusters')
+      expect(data).to have_key('total')
+      expect(data['clusters']).to be_an(Array)
+    end
+
+    it 'respects min_size parameter' do
+      response = call_tool(server, 'domain_clusters', min_size: 100)
+      data = parse_response(response)
+      # With a very high min_size, all clusters should still be present
+      # (disconnected clusters are preserved, not dropped)
+      expect(data['clusters']).to be_an(Array)
+    end
+
+    it 'coerces string min_size' do
+      response = call_tool(server, 'domain_clusters', min_size: '3')
+      data = parse_response(response)
+      expect(data['clusters']).to be_an(Array)
+    end
+
+    it 'filters by types' do
+      response = call_tool(server, 'domain_clusters', types: ['model'])
+      data = parse_response(response)
+      expect(data['clusters']).to be_an(Array)
+    end
+  end
+
   describe 'tool: pagerank' do
     it 'returns ranked nodes with scores' do
       response = call_tool(server, 'pagerank')

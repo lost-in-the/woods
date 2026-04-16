@@ -118,7 +118,7 @@ module Woods
           http.request(req)
         rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
           attempts += 1
-          raise Woods::Error, "Network error after #{attempts} retries: #{e.message}" if attempts >= MAX_RETRIES
+          raise Woods::Error, "Network error after #{attempts} retries: #{e.message}" if attempts > MAX_RETRIES
 
           sleep(2**attempts)
           retry
