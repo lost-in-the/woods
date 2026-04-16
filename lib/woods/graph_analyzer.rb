@@ -307,11 +307,10 @@ module Woods
         # Find which other cluster this one connects to most
         target = find_merge_target(cluster, clusters, name)
 
-        if target
-          clusters[target][:members].concat(cluster[:members])
-          cluster[:members].each { |id| clusters[target][:member_set].add(id) }
-        end
+        break unless target
 
+        clusters[target][:members].concat(cluster[:members])
+        cluster[:members].each { |id| clusters[target][:member_set].add(id) }
         clusters.delete(name)
       end
     end

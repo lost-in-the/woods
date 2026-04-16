@@ -147,7 +147,9 @@ module Woods
             lines << "### #{section.tr('_', ' ').capitalize}"
             lines << ''
             items.each do |item|
-              lines << if item.is_a?(Hash)
+              lines << if item.is_a?(Hash) && item.key?('score')
+                         "- **#{item['identifier']}** (#{item['type']}) — score: #{item['score']}"
+                       elsif item.is_a?(Hash)
                          "- **#{item['identifier']}** (#{item['type']}) — #{item['dependent_count']} dependents"
                        else
                          "- #{item}"
