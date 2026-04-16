@@ -171,6 +171,92 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe '#dependencies_of with via filter' do
+    before do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(
+                       type: :controller,
+                       identifier: 'UsersController',
+                       dependencies: [
+                         { type: :model, target: 'User', via: :code_reference },
+                         { type: :controller, target: 'ApplicationController', via: :include },
+                         { type: :controller, target: 'PostsController', via: :redirect_to }
+                       ]
+                     ))
+    end
+
+    it 'returns all targets when via is nil' do
+      deps = graph.dependencies_of('UsersController')
+      expect(deps).to contain_exactly('User', 'ApplicationController', 'PostsController')
+    end
+
+    it 'filters by a single via type' do
+      deps = graph.dependencies_of('UsersController', via: :redirect_to)
+      expect(deps).to eq(['PostsController'])
+    end
+
+    it 'filters by multiple via types' do
+      deps = graph.dependencies_of('UsersController', via: %i[code_reference redirect_to])
+      expect(deps).to contain_exactly('User', 'PostsController')
+    end
+
+    it 'returns empty when no edges match the via filter' do
+      deps = graph.dependencies_of('UsersController', via: :link_to)
+      expect(deps).to be_empty
+    end
+  end
+
+  describe '#dependents_of with via filter' do
+    before do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(
+                       type: :service, identifier: 'UserService',
+                       dependencies: [{ type: :model, target: 'User', via: :code_reference }]
+                     ))
+      graph.register(make_unit(
+                       type: :controller, identifier: 'UsersController',
+                       dependencies: [{ type: :model, target: 'User', via: :link_to }]
+                     ))
+    end
+
+    it 'returns all dependents when via is nil' do
+      deps = graph.dependents_of('User')
+      expect(deps).to contain_exactly('UserService', 'UsersController')
+    end
+
+    it 'filters dependents by via type' do
+      deps = graph.dependents_of('User', via: :link_to)
+      expect(deps).to eq(['UsersController'])
+    end
+
+    it 'returns empty when no dependents match the via filter' do
+      deps = graph.dependents_of('User', via: :redirect_to)
+      expect(deps).to be_empty
+    end
+  end
+
+  describe '@edges shape' do
+    it 'stores edges as hashes with target and via keys' do
+      graph.register(make_unit(
+                       type: :model, identifier: 'Order',
+                       dependencies: [{ type: :model, target: 'User', via: :belongs_to }]
+                     ))
+
+      edges = graph.instance_variable_get(:@edges)
+      expect(edges['Order']).to eq([{ target: 'User', via: :belongs_to }])
+    end
+
+    it 'stores nil via when dependency has no via key' do
+      graph.register(make_unit(
+                       type: :model, identifier: 'Order',
+                       dependencies: [{ type: :model, target: 'User' }]
+                     ))
+
+      edges = graph.instance_variable_get(:@edges)
+      expect(edges['Order']).to eq([{ target: 'User', via: nil }])
+    end
+  end
+
   describe 'Set-based internals' do
     it 'stores @reverse values as Sets' do
       graph.register(make_unit(type: :model, identifier: 'User'))
@@ -291,6 +377,59 @@ RSpec.describe Woods::DependencyGraph do
       serialized = graph.to_h
       expect(serialized[:type_index][:model]).to be_a(Array)
       expect(serialized[:type_index][:service]).to be_a(Array)
+    end
+
+    it 'preserves via metadata through JSON round-trip' do
+      via_graph = described_class.new
+      via_graph.register(make_unit(
+                           type: :model, identifier: 'User',
+                           file_path: 'app/models/user.rb'
+                         ))
+      via_graph.register(make_unit(
+                           type: :controller, identifier: 'UsersController',
+                           file_path: 'app/controllers/users_controller.rb',
+                           dependencies: [
+                             { type: :model, target: 'User', via: :code_reference },
+                             { type: :controller, target: 'PostsController', via: :redirect_to }
+                           ]
+                         ))
+
+      json = JSON.generate(via_graph.to_h)
+      restored = described_class.from_h(JSON.parse(json))
+
+      expect(restored.dependencies_of('UsersController')).to contain_exactly('User', 'PostsController')
+      expect(restored.dependencies_of('UsersController', via: :redirect_to)).to eq(['PostsController'])
+      expect(restored.dependencies_of('UsersController', via: :code_reference)).to eq(['User'])
+    end
+
+    it 'handles old format (bare string edges) in from_h' do
+      old_data = {
+        'nodes' => {
+          'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb' },
+          'Order' => { 'type' => 'model', 'file_path' => 'app/models/order.rb' }
+        },
+        'edges' => {
+          'Order' => ['User']
+        },
+        'reverse' => {
+          'User' => ['Order']
+        },
+        'file_map' => {
+          'app/models/user.rb' => 'User',
+          'app/models/order.rb' => 'Order'
+        },
+        'type_index' => {
+          'model' => %w[User Order]
+        }
+      }
+
+      restored = described_class.from_h(old_data)
+
+      expect(restored.dependencies_of('Order')).to eq(['User'])
+      expect(restored.dependents_of('User')).to eq(['Order'])
+
+      edges = restored.instance_variable_get(:@edges)
+      expect(edges['Order']).to eq([{ target: 'User', via: nil }])
     end
   end
 end

@@ -71,7 +71,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
   let(:app_controller) { Class.new(base_controller) }
 
   let(:extractor) do
-    routes_double = double('Routes', routes: [])
+    routes_double = double('Routes', routes: [], named_routes: {})
     app_double = double('Application', routes: routes_double)
     stub_const('Rails', double('Rails', root: rails_root, application: app_double, logger: logger))
     stub_const('ActionController::Base', base_controller)

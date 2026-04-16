@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'woods'
 require 'woods/model_name_cache'
 require 'woods/extractors/view_template_extractor'
 
@@ -234,6 +235,147 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
         controller_dep = deps.find { |d| d[:via] == :view_render }
         expect(controller_dep).to be_nil
       end
+    end
+  end
+
+  # ── Navigation dependencies ──────────────────────────────────────────
+
+  describe 'navigation dependencies' do
+    let(:nav_extractor) do
+      posts_route = double('Route',
+                           defaults: { controller: 'posts', action: 'index' },
+                           path: double(spec: double(to_s: '/posts(.:format)')),
+                           verb: 'GET')
+      users_route = double('Route',
+                           defaults: { controller: 'users', action: 'index' },
+                           path: double(spec: double(to_s: '/users(.:format)')),
+                           verb: 'GET')
+      named_routes = { posts: posts_route, users: users_route }
+      routes_double = double('Routes', named_routes: named_routes)
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', root: rails_root, logger: logger, application: app_double))
+      described_class.new
+    end
+
+    before do
+      Woods.configure unless Woods.configuration
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+    end
+
+    it 'extracts link_to navigation edges via _path helpers' do
+      create_file('app/views/home/index.html.erb', <<~ERB)
+        <h1>Home</h1>
+        <%= link_to "Posts", posts_path %>
+      ERB
+
+      units = nav_extractor.extract_all
+      deps = units.first.dependencies
+      nav_deps = deps.select { |d| d[:via] == :link_to }
+      expect(nav_deps).to include(a_hash_including(target: 'PostsController'))
+    end
+
+    it 'extracts multiple navigation targets' do
+      create_file('app/views/home/index.html.erb', <<~ERB)
+        <%= link_to "Posts", posts_path %>
+        <%= link_to "Users", users_path %>
+      ERB
+
+      units = nav_extractor.extract_all
+      deps = units.first.dependencies
+      nav_targets = deps.select { |d| d[:via] == :link_to }.map { |d| d[:target] }
+      expect(nav_targets).to contain_exactly('PostsController', 'UsersController')
+    end
+
+    it 'returns no navigation edges when config is disabled' do
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
+      create_file('app/views/home/index.html.erb', '<%= link_to "Posts", posts_path %>')
+
+      units = nav_extractor.extract_all
+      deps = units.first.dependencies
+      nav_deps = deps.select { |d| d[:via] == :link_to }
+      expect(nav_deps).to be_empty
+    end
+
+    it 'skips unresolvable helpers' do
+      create_file('app/views/home/index.html.erb', '<%= link_to "X", unknown_path %>')
+
+      units = nav_extractor.extract_all
+      deps = units.first.dependencies
+      nav_deps = deps.select { |d| d[:via] == :link_to }
+      expect(nav_deps).to be_empty
+    end
+  end
+
+  # ── Form dependencies ──────────────────────────────────────────────
+
+  describe 'form dependencies' do
+    let(:form_extractor) do
+      posts_route = double('Route',
+                           defaults: { controller: 'posts', action: 'create' },
+                           path: double(spec: double(to_s: '/posts(.:format)')),
+                           verb: 'POST')
+      named_routes = { posts: posts_route }
+      routes_double = double('Routes', named_routes: named_routes)
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', root: rails_root, logger: logger, application: app_double))
+      described_class.new
+    end
+
+    before do
+      Woods.configure unless Woods.configuration
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+    end
+
+    it 'extracts form_with targeting a route helper' do
+      create_file('app/views/posts/new.html.erb', <<~ERB)
+        <%= form_with url: posts_path do |f| %>
+          <%= f.text_field :title %>
+          <%= f.submit %>
+        <% end %>
+      ERB
+
+      units = form_extractor.extract_all
+      deps = units.first.dependencies
+      form_deps = deps.select { |d| d[:via] == :form_action }
+      expect(form_deps).to include(a_hash_including(target: 'PostsController'))
+    end
+
+    it 'extracts form_for targeting a route helper' do
+      create_file('app/views/posts/new.html.erb', <<~ERB)
+        <%= form_for @post, url: posts_path do |f| %>
+          <%= f.text_field :title %>
+        <% end %>
+      ERB
+
+      units = form_extractor.extract_all
+      deps = units.first.dependencies
+      form_deps = deps.select { |d| d[:via] == :form_action }
+      expect(form_deps).to include(a_hash_including(target: 'PostsController'))
+    end
+
+    it 'extracts multi-line form_with calls' do
+      create_file('app/views/posts/new.html.erb', <<~ERB)
+        <%= form_with model: @post,
+                      url: posts_path do |f| %>
+          <%= f.text_field :title %>
+          <%= f.submit %>
+        <% end %>
+      ERB
+
+      units = form_extractor.extract_all
+      deps = units.first.dependencies
+      form_deps = deps.select { |d| d[:via] == :form_action }
+      expect(form_deps).to include(a_hash_including(target: 'PostsController'))
+    end
+
+    it 'returns no form edges when config is disabled' do
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
+      create_file('app/views/posts/new.html.erb', '<%= form_with url: posts_path do |f| %><% end %>')
+
+      units = form_extractor.extract_all
+      deps = units.first.dependencies
+      form_deps = deps.select { |d| d[:via] == :form_action }
+      expect(form_deps).to be_empty
     end
   end
 
