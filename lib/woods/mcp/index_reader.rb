@@ -145,7 +145,9 @@ module Woods
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
       def search(query, types: nil, fields: %w[identifier], limit: 20)
         pattern = compile_search_pattern(query)
-        max_scan = (ENV.fetch('WOODS_SEARCH_MAX_SCAN', nil) || DEFAULT_SEARCH_MAX_SCAN).to_i
+        max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
+        max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
+        max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
 
         results = []
         notes = []
@@ -186,7 +188,7 @@ module Woods
 
             if phase2_scanned >= max_scan
               partial = true
-              break
+              next
             end
 
             unit = find_unit(id)
@@ -200,8 +202,6 @@ module Woods
               results << { identifier: id, type: type_name, match_field: 'metadata' }
             end
           end
-
-          break if partial
         end
 
         response = { results: results.first(limit) }

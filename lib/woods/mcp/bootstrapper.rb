@@ -116,7 +116,10 @@ module Woods
       # Check whether Ollama is reachable at the configured base URL.
       #
       # Uses a 500ms timeout so startup is not meaningfully delayed when Ollama
-      # is absent. Returns false on any network error or timeout.
+      # is absent. Probes /api/tags (the documented list-models endpoint) so any
+      # running Ollama version responds. Treats any non-5xx response as reachable
+      # — we only care whether something is listening, not whether the response
+      # body is well-formed. Returns false on any network error or timeout.
       #
       # @return [Boolean]
       def self.ollama_reachable?
@@ -129,8 +132,8 @@ module Woods
         Net::HTTP.start(uri.host, uri.port,
                         open_timeout: 0.5, read_timeout: 0.5,
                         use_ssl: uri.scheme == 'https') do |http|
-          response = http.head('/')
-          response.is_a?(Net::HTTPSuccess) || response.is_a?(Net::HTTPRedirection)
+          response = http.get('/api/tags')
+          !response.is_a?(Net::HTTPServerError)
         end
       rescue StandardError
         false
