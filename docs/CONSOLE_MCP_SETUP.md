@@ -309,7 +309,7 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 | `console_sample` | Random sample of records (max 25) |
 | `console_find` | Find a record by primary key or unique column |
 | `console_pluck` | Extract column values with optional distinct (max 1000 rows) |
-| `console_aggregate` | Run `sum`, `average`, `minimum`, or `maximum` on a column |
+| `console_aggregate` | Run `sum`, `average`, `minimum`, `maximum`, or `count` on a column (column optional for `count`) |
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
@@ -429,6 +429,8 @@ Each transaction sets a statement timeout before any query runs. The default is 
 ### Model and Column Validation
 
 Before any query runs, the model name is checked against the registry built from `ActiveRecord::Base.descendants`. Unrecognized model names raise `ValidationError` without touching the database. Column names are validated against the model's `column_names` before pluck, aggregate, and recent operations.
+
+Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) — see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.
 
 ---
 
