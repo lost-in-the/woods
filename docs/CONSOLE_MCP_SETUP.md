@@ -378,14 +378,37 @@ end
 
 ### `console_redacted_columns`
 
-Redaction applies to all tool results regardless of transport. When a result hash contains a redacted column, the value is replaced with `"[REDACTED]"` before the MCP response is sent.
+Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive — use the exact names from your database schema.
 
 ```ruby
 # Example: redact PII
 config.console_redacted_columns = %w[email phone_number date_of_birth ssn]
 ```
 
-The column names are matched by string, case-sensitive. Use the exact column names from your database schema.
+#### Known limitation: redaction scope
+
+Redaction checks only top-level hash keys, so tools whose results nest row data under another key (`records`, `record`) or expose values positionally (`rows`, `values`) bypass redaction entirely. This affects **every transport** — stdio, Rack, and the bridge architecture — because all tool output flows through the same shallow redaction pass on the server.
+
+| Tool                       | Output shape                                 | Redacted? |
+| -------------------------- | -------------------------------------------- | --------- |
+| `console_count`            | `{count: N}`                                 | n/a — no row data |
+| `console_aggregate`        | `{value: N}` / `{count: N}`                  | n/a — no row data |
+| `console_association_count`| `{count: N}`                                 | n/a — no row data |
+| `console_schema`           | `{columns: [...]}`                           | n/a — no row data |
+| `console_sample`           | `{records: [{col: val, ...}, ...]}`          | **No** — records are nested one level deep |
+| `console_recent`           | `{records: [{col: val, ...}, ...]}`          | **No** — records are nested one level deep |
+| `console_find`             | `{record: {col: val, ...}}`                  | **No** — record is nested one level deep |
+| `console_pluck`            | `{values: [[...], ...]}`                     | **No** — rows are positional arrays |
+| `console_sql`              | `{columns: [...], rows: [[...], ...]}`       | **No** — rows are positional arrays |
+| `console_query`            | `{columns: [...], rows: [[...], ...]}`       | **No** — rows are positional arrays |
+
+Until this is fixed, treat `console_redacted_columns` as **best-effort**. Assume every column reachable by `sample`, `recent`, `find`, `pluck`, `sql`, and `query` is visible to the agent in its raw form, regardless of whether the name appears in `console_redacted_columns`.
+
+Practical guidance:
+
+- Keep plaintext secrets out of database columns where possible (prefer hashed, encrypted, or vault-referenced storage).
+- Only enable `console_embedded_read_tools = true` in environments where direct table access is already an acceptable ceiling (local dev, throwaway staging).
+- For production bridge deployments, prefer agent-side deny rules on the six affected tools over relying on column-name redaction.
 
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
