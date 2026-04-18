@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Documented `console_redacted_columns` scope limitation.** Redaction only walks the top level of a tool's result hash, so `console_sample`, `console_recent`, `console_find`, `console_pluck`, `console_sql`, and `console_query` return row data untouched even when a matching column name is configured (records are nested under `records` / `record`, or rows are positional arrays under `rows` / `values`). Affects every transport — stdio, Rack, and bridge. `docs/CONSOLE_MCP_SETUP.md` now details the affected tools and recommends treating redaction as best-effort until the fix lands. No code change in this release.
+
 ### Fixed
 
 - **MCP `search` tool no longer destroys regex patterns.** `index_reader` was wrapping queries in `Regexp.escape`, turning `User|Account` into a literal-only match. Now compiles raw with `IGNORECASE` and falls back to the escaped form only on `RegexpError`.
