@@ -39,19 +39,22 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
   describe '#send_request' do
     context 'unsupported tools' do
-      it 'returns unsupported error for Tier 2+ tools' do
+      it 'points Tier 2+ tools at the bridge architecture' do
         response = executor.send_request({ 'tool' => 'diagnose_model', 'params' => { 'model' => 'User' } })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/Not yet implemented in embedded mode/)
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include('diagnose_model')
+        expect(response['error']).to include('bridge architecture')
+        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'returns unsupported error for eval tool' do
+      it 'points eval at the bridge architecture' do
         response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'puts 1' } })
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include('bridge architecture')
       end
     end
 
@@ -547,14 +550,17 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     # ── Read tools (sql/query) gated by read_tools_enabled ──────────
 
     context 'read tools disabled (default)' do
-      it 'returns unsupported error for sql tool' do
+      it 'points sql at embedded_read_tools and the docs' do
         response = executor.send_request({ 'tool' => 'sql', 'params' => { 'sql' => 'SELECT 1' } })
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include("'sql'")
+        expect(response['error']).to include('embedded_read_tools: true')
+        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'returns unsupported error for query tool' do
+      it 'points query at embedded_read_tools and the docs' do
         response = executor.send_request({
                                            'tool' => 'query',
                                            'params' => { 'model' => 'User', 'select' => ['id'] }
@@ -562,6 +568,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include("'query'")
+        expect(response['error']).to include('embedded_read_tools: true')
       end
     end
 
