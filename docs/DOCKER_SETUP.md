@@ -374,4 +374,10 @@ Then re-run extraction.
 
 **Expected behavior.** The embedded console (Option 1) only supports 9 Tier 1 tools. Switch to the bridge (Option 2) for the full 31 tools.
 
+Alternatively, to unlock `console_sql` and `console_query` without switching to bridge mode, enable `embedded_read_tools: true` in the Rack middleware. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for details.
+
+### Woods MCP tools not available in a git worktree
+
+When working in a git worktree, subagents may not find the woods MCP servers because `.mcp.json` discovery is path-based and the worktree has a different root directory. See [MCP_WORKTREE_SETUP.md](MCP_WORKTREE_SETUP.md) for the fix and verification steps.
+
 See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for detailed console server documentation.

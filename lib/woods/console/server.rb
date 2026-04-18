@@ -558,8 +558,13 @@ module Woods
 
         def define_sql(server, conn_mgr, safe_ctx = nil, renderer: nil)
           validator = SqlValidator.new
-          define_console_tool(server, conn_mgr, 'console_sql',
-                              'Execute read-only SQL (SELECT/WITH...SELECT only)',
+          sql_description = [
+            'Execute read-only SQL against the live database (SELECT/WITH...SELECT only).',
+            'SqlValidator blocks all DML/DDL. Every query runs inside a rolled-back transaction — no writes persist.',
+            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
+            'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
+          ].join(' ')
+          define_console_tool(server, conn_mgr, 'console_sql', sql_description,
                               properties: {
                                 sql: str_prop('SQL query (SELECT or WITH...SELECT only)'),
                                 limit: int_prop('Max rows returned (default unlimited, max 10000)')
@@ -568,15 +573,27 @@ module Woods
           end
         end
 
+        # rubocop:disable Metrics/MethodLength
         def define_query(server, conn_mgr, safe_ctx = nil, renderer: nil)
+          query_description = [
+            'Build and run a structured ActiveRecord query with optional joins, grouping, and ordering.',
+            'Example: {model: "Order", select: ["status", "COUNT(*) AS n"], group_by: ["status"]}.',
+            'Use console_count or console_aggregate for simple aggregates without a custom SELECT.',
+            'Use console_sql when you need raw SQL that the query builder cannot express.',
+            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
+            'Max 10,000 rows returned. Returns columns + rows arrays like a SQL result set.'
+          ].join(' ')
           props = {
-            model: str_prop('Model name'), select: arr_prop('Columns to select'),
-            joins: arr_prop('Associations to join'), group_by: arr_prop('Columns to group by'),
-            having: str_prop('HAVING clause'), order: obj_prop('Order specification'),
-            scope: obj_prop('Filter conditions'), limit: int_prop('Max rows (max 10000)')
+            model: str_prop('ActiveRecord model name (e.g. "Order")'),
+            select: arr_prop('Columns or expressions to select (e.g. ["status", "COUNT(*) AS n"])'),
+            joins: arr_prop('Association names to JOIN (e.g. ["line_items", "user"])'),
+            group_by: arr_prop('Columns to GROUP BY (e.g. ["status", "user_id"])'),
+            having: str_prop('HAVING filter applied after GROUP BY (e.g. "COUNT(*) > 5")'),
+            order: obj_prop('Order specification as {column => direction} (e.g. {"created_at" => "desc"})'),
+            scope: obj_prop('WHERE conditions as {column => value} or [sql, bind] array'),
+            limit: int_prop('Maximum rows to return (default 10000, hard max 10000)')
           }
-          define_console_tool(server, conn_mgr, 'console_query',
-                              'Enhanced query builder with joins and grouping',
+          define_console_tool(server, conn_mgr, 'console_query', query_description,
                               properties: props, required: %w[model select],
                               safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier4.console_query(
@@ -586,6 +603,7 @@ module Woods
             )
           end
         end
+        # rubocop:enable Metrics/MethodLength
 
         # Shared tool definition helper that wires block -> bridge -> response.
         # rubocop:disable Metrics/ParameterLists
