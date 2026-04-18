@@ -59,7 +59,7 @@ module Woods
 
         unless TIER1_TOOLS.include?(tool) || (@read_tools_enabled && EMBEDDED_READ_TOOLS.include?(tool))
           return { 'ok' => false,
-                   'error' => 'Not yet implemented in embedded mode',
+                   'error' => unsupported_message(tool),
                    'error_type' => 'unsupported' }
         end
 
@@ -75,6 +75,25 @@ module Woods
       end
 
       private
+
+      # Self-describing error for tools the embedded executor cannot run.
+      #
+      # `sql`/`query` are gated behind `embedded_read_tools: true` — point the
+      # caller at the flag. Everything else (Tier 2–4 domain/analytics tools)
+      # requires the bridge architecture.
+      #
+      # @param tool [String] Tool name that was rejected
+      # @return [String] Actionable error message
+      def unsupported_message(tool)
+        if EMBEDDED_READ_TOOLS.include?(tool)
+          "Tool '#{tool}' requires embedded_read_tools: true on " \
+            'Woods::Console::RackMiddleware, or use the bridge (Option D). ' \
+            'See docs/CONSOLE_MCP_SETUP.md.'
+        else
+          "Tool '#{tool}' is not available in embedded mode — it requires the " \
+            'bridge architecture (Option D in docs/CONSOLE_MCP_SETUP.md).'
+        end
+      end
 
       # Route a tool name to its handler.
       #
