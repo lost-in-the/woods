@@ -3,6 +3,7 @@
 require_relative 'bridge'
 require_relative 'model_validator'
 require_relative 'safe_context'
+require_relative 'scope_predicate_parser'
 
 module Woods
   module Console
@@ -19,7 +20,7 @@ module Woods
     #   # => { 'ok' => true, 'result' => { 'count' => 42 }, 'timing_ms' => 1.2 }
     #
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
-      AGGREGATE_FUNCTIONS = %w[sum average minimum maximum].freeze
+      AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
 
       TIER1_TOOLS = Bridge::TIER1_TOOLS
 
@@ -113,14 +114,14 @@ module Woods
 
       def handle_count(params)
         model = resolve_model(params['model'])
-        scope = apply_scope(model, params['scope'])
+        scope = apply_scope(model, params['scope'], model_name: params['model'])
         { 'count' => scope.count }
       end
 
       def handle_sample(params)
         model = resolve_model(params['model'])
         limit = [params.fetch('limit', 5).to_i, 25].min
-        scope = apply_scope(model, params['scope'])
+        scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
         records = scope.order(random_function).limit(limit)
         { 'records' => serialize_records(records, params['columns']) }
@@ -141,7 +142,7 @@ module Woods
         @model_validator.validate_columns!(params['model'], columns) if columns
         model = resolve_model(params['model'])
         limit = [params.fetch('limit', 100).to_i, 1000].min
-        scope = apply_scope(model, params['scope'])
+        scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = scope.distinct if params['distinct']
         values = scope.limit(limit).pluck(*columns.map(&:to_sym))
         { 'values' => values }
@@ -158,8 +159,14 @@ module Woods
         end
 
         model = resolve_model(params['model'])
-        scope = apply_scope(model, params['scope'])
-        { 'value' => scope.send(function.to_sym, column.to_sym) }
+        scope = apply_scope(model, params['scope'], model_name: params['model'])
+
+        value = if function == 'count'
+                  column ? scope.count(column.to_sym) : scope.count
+                else
+                  scope.send(function.to_sym, column.to_sym)
+                end
+        { 'value' => value }
       end
 
       def handle_association_count(params)
@@ -208,7 +215,7 @@ module Woods
         @model_validator.validate_column!(params['model'], order_by)
         direction = 'desc' unless %w[asc desc].include?(direction)
 
-        scope = apply_scope(model, params['scope'])
+        scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
         records = scope.order(order_by => direction.to_sym).limit(limit)
         { 'records' => serialize_records(records, params['columns']) }
@@ -276,7 +283,7 @@ module Woods
       def apply_query_clauses(relation, params) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         relation = relation.select(params['select']) if params['select']
         relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
-        relation = apply_scope(relation, params['scope'])
+        relation = apply_scope(relation, params['scope'], model_name: params['model'])
         relation = relation.group(params['group_by']) if params['group_by']&.any?
         relation = relation.having(params['having']) if params['having']
         relation = relation.order(params['order']) if params['order']
@@ -287,22 +294,43 @@ module Woods
 
       # Apply scope conditions (WHERE clauses) to a relation.
       #
-      # Accepts Hash form for simple equality conditions, or Array form
-      # for parameterized SQL (e.g., JSON column queries like
+      # Accepts Hash form for equality or Ransack-style predicate suffixes
+      # (e.g., `{total_refund_gt: 0, status_in: ['paid','refunded']}`), or
+      # Array form for parameterized SQL (e.g., JSON column queries like
       # ["preferences->>'theme' = ?", "dark"]).
+      #
+      # When `model_name` is supplied and the Hash contains at least one key
+      # with a recognised predicate suffix, the ScopePredicateParser builds
+      # safe Arel nodes. Plain equality hashes skip the parser entirely.
       #
       # @param relation [ActiveRecord::Relation, Class] Model or relation
       # @param scope [Hash, Array, nil] Filter conditions
+      # @param model_name [String, nil] Model name for column validation (predicate path only)
       # @return [ActiveRecord::Relation]
-      def apply_scope(relation, scope)
+      def apply_scope(relation, scope, model_name: nil)
         case scope
         when Hash
-          scope.any? ? relation.where(scope) : relation
+          return relation unless scope.any?
+
+          if model_name && predicate_suffix?(scope)
+            parser = ScopePredicateParser.new(model_name: model_name, model_validator: @model_validator)
+            parser.parse(relation, scope)
+          else
+            relation.where(scope)
+          end
         when Array
           scope.any? ? relation.where(*scope) : relation
         else
           relation
         end
+      end
+
+      # Returns true if any key in the hash has a recognised predicate suffix.
+      #
+      # @param scope [Hash]
+      # @return [Boolean]
+      def predicate_suffix?(scope)
+        scope.any? { |k, _| ScopePredicateParser::SUFFIX_PATTERN.match?(k.to_s) }
       end
 
       # Apply column selection to a relation.
