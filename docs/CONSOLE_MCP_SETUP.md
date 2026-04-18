@@ -382,6 +382,30 @@ config.console_redacted_columns = %w[email phone_number date_of_birth ssn]
 
 The column names are matched by string, case-sensitive. Use the exact column names from your database schema.
 
+### Unlocking `console_sql` / `console_query` in embedded mode
+
+By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, pass `embedded_read_tools: true` when you mount the Rack middleware (Option C):
+
+```ruby
+# config/initializers/woods_console.rb
+Rails.application.config.middleware.use \
+  Woods::Console::RackMiddleware,
+  path: '/mcp/console',
+  embedded_read_tools: true
+```
+
+Security posture with the flag on:
+
+| Layer | What it enforces |
+|-------|------------------|
+| `SqlValidator` denylist | Rejects INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / REPLACE / UNION / multi-statement / comment-hidden injections before any DB interaction. Only `SELECT` and `WITH…SELECT` make it through. |
+| `SafeContext` rollback | Every request runs inside a database transaction that is always rolled back, so even side-effecting reads (functions, settings) cannot persist. |
+| Per-request connection pooling | Each HTTP request draws a fresh connection from `ActiveRecord::Base`'s pool — no shared mutable state between requests. |
+
+These three layers make `embedded_read_tools: true` safe for read-only workloads. If your threat model requires stricter process isolation, keep the flag off and use the bridge architecture (Option D) instead, which runs the executor in a separate process.
+
+The stdio transports (Options A and B) do not currently accept this flag — they always run with embedded reads disabled. Enable `embedded_read_tools` through the Rack middleware when you need `console_sql`/`console_query` without switching to a bridge.
+
 ---
 
 ## Safety Model
@@ -468,7 +492,10 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 
 ### Tier 2–4 tools return "unsupported in embedded mode"
 
-This is expected. The embedded executor (used in Options A–C) only implements the 9 Tier 1 tools. To use Tier 2–4 tools (`console_diagnose_model`, `console_eval`, `console_sql`, etc.), switch to the bridge architecture (Option D).
+The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus, when opted in, the two Tier 4 read tools `console_sql` and `console_query`.
+
+- For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
+- For everything else (`console_diagnose_model`, `console_eval`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
 
 ### Slow first request on HTTP/Rack middleware
 
