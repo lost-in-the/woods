@@ -368,6 +368,11 @@ Woods.configure do |config|
   # Column names to redact from all query results. Default: [].
   # Replaced with "[REDACTED]" in output.
   config.console_redacted_columns = %w[password_digest encrypted_password api_key ssn token]
+
+  # Unlock console_sql / console_query in the embedded executor. Default: false.
+  # Flows through to the Rack middleware AND the stdio entry point (rake / rails runner).
+  # See "Unlocking console_sql / console_query in embedded mode" below.
+  config.console_embedded_read_tools = false
 end
 ```
 
@@ -384,10 +389,21 @@ The column names are matched by string, case-sensitive. Use the exact column nam
 
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
-By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, pass `embedded_read_tools: true` when you mount the Rack middleware (Option C):
+By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:
 
 ```ruby
-# config/initializers/woods_console.rb
+# config/initializers/woods.rb
+Woods.configure do |config|
+  config.console_mcp_enabled           = true     # mount the Rack middleware via Railtie
+  config.console_mcp_path              = '/mcp/console'
+  config.console_embedded_read_tools   = true     # unlock console_sql / console_query
+  config.console_redacted_columns      = %w[password_digest encrypted_password api_key token]
+end
+```
+
+This flag flows through to both the Rack middleware (Option C) and the stdio transports (Options A and B) automatically. To override per-mount (e.g., enable it on one mount but not another), pass `embedded_read_tools:` directly:
+
+```ruby
 Rails.application.config.middleware.use \
   Woods::Console::RackMiddleware,
   path: '/mcp/console',
@@ -404,7 +420,7 @@ Security posture with the flag on:
 
 These three layers make `embedded_read_tools: true` safe for read-only workloads. If your threat model requires stricter process isolation, keep the flag off and use the bridge architecture (Option D) instead, which runs the executor in a separate process.
 
-The stdio transports (Options A and B) do not currently accept this flag — they always run with embedded reads disabled. Enable `embedded_read_tools` through the Rack middleware when you need `console_sql`/`console_query` without switching to a bridge.
+All three embedded transports (Options A, B, and C) honour `console_embedded_read_tools` from `Woods.configure` — stdio rake, rails runner, and Rack middleware each read the flag at startup.
 
 ---
 

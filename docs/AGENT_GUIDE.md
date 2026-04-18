@@ -412,6 +412,7 @@ Set these in `config/initializers/woods.rb` (created by `rails generate woods:in
 | `extract_navigation_edges` | `true` | Navigation edges (`link_to`, `redirect_to`, `form_action`) included in extraction |
 | `session_tracer_enabled` | `false` | Required for `session_trace` tool |
 | `console_redacted_columns` | `[]` | Columns hidden from Console Server results |
+| `console_embedded_read_tools` | `false` | Unlocks `console_sql` / `console_query` in embedded transports |
 
 Storage presets set vector store, metadata store, and embedding together:
 
