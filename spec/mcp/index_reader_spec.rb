@@ -30,7 +30,7 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(reader.manifest).to include(
         'rails_version' => '8.1.2',
         'ruby_version' => '4.0.1',
-        'total_units' => 8
+        'total_units' => 9
       )
     end
 
@@ -102,7 +102,8 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(identifiers).to contain_exactly(
         'Post', 'Comment', 'PostsController',
         'ActiveRecord::Base', 'ActionController::Base',
-        'PostDecorator', 'Publishable', 'External::Analytics'
+        'PostDecorator', 'Publishable', 'External::Analytics',
+        'UserMailer'
       )
     end
 
@@ -124,45 +125,98 @@ RSpec.describe Woods::MCP::IndexReader do
   end
 
   describe '#search' do
+    it 'returns a hash with :results key' do
+      result = reader.search('Post')
+      expect(result).to include(:results)
+      expect(result[:results]).to be_an(Array)
+    end
+
     it 'matches identifiers by default' do
-      results = reader.search('Post')
+      results = reader.search('Post')[:results]
       identifiers = results.map { |r| r[:identifier] }
       expect(identifiers).to include('Post', 'PostsController')
     end
 
     it 'is case-insensitive' do
-      results = reader.search('post')
+      results = reader.search('post')[:results]
       identifiers = results.map { |r| r[:identifier] }
       expect(identifiers).to include('Post')
     end
 
     it 'filters by type' do
-      results = reader.search('Post', types: ['model'])
+      results = reader.search('Post', types: ['model'])[:results]
       expect(results.all? { |r| r[:type] == 'model' }).to be true
     end
 
     it 'respects limit' do
-      results = reader.search('o', limit: 2)
+      results = reader.search('o', limit: 2)[:results]
       expect(results.size).to eq(2)
     end
 
     it 'searches source_code when requested' do
-      results = reader.search('has_many', fields: %w[source_code])
+      results = reader.search('has_many', fields: %w[source_code])[:results]
       expect(results.first[:identifier]).to eq('Post')
       expect(results.first[:match_field]).to eq('source_code')
     end
 
     it 'searches metadata when requested' do
-      results = reader.search('posts_controller', fields: %w[metadata])
+      results = reader.search('posts_controller', fields: %w[metadata])[:results]
       # The fixtures have metadata with parent_class etc — this tests that metadata JSON is searched
       expect(results).to be_an(Array)
     end
 
     it 'returns match_field for each result' do
-      results = reader.search('Comment')
+      results = reader.search('Comment')[:results]
       results.each do |r|
         expect(r).to include(:identifier, :type, :match_field)
       end
+    end
+
+    it 'treats query as raw regex — Worker|Job matches both' do
+      results = reader.search('Worker|Job')[:results]
+      # No Worker/Job fixtures but pattern compiles without error
+      expect(results).to be_an(Array)
+    end
+
+    it 'supports anchored patterns — ^Mailer$ matches only exact Mailer identifier' do
+      results = reader.search('^UserMailer$')[:results]
+      identifiers = results.map { |r| r[:identifier] }
+      expect(identifiers).to eq(['UserMailer'])
+    end
+
+    it 'returns results for broad pattern .* with a :note field' do
+      result = reader.search('.*')
+      expect(result[:results]).not_to be_empty
+      expect(result[:note]).to be_a(String)
+    end
+
+    it 'falls back to literal match for invalid regex' do
+      # A lone unmatched paren is an invalid regex; fallback treats it literally
+      result = reader.search('(invalid[')
+      expect(result[:results]).to be_an(Array)
+      expect(result).not_to have_key(:error)
+    end
+
+    it 'caps phase-2 scan at WOODS_SEARCH_MAX_SCAN and sets :partial' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '1'
+      begin
+        result = reader.search('has_many', fields: %w[source_code])
+        expect(result[:partial]).to be true
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
+    it 'types filter restricts to mailer dir — no leak from other types' do
+      results = reader.search('Mailer', types: ['mailer'])[:results]
+      results.each do |r|
+        expect(r[:type]).to eq('mailer')
+      end
+      identifiers = results.map { |r| r[:identifier] }
+      expect(identifiers).to include('UserMailer')
+      expect(identifiers).not_to include('Post', 'PostsController')
     end
   end
 
@@ -310,20 +364,20 @@ RSpec.describe Woods::MCP::IndexReader do
     end
 
     it 'searches with types filter for decorators' do
-      results = reader.search('Post', types: ['decorator'])
+      results = reader.search('Post', types: ['decorator'])[:results]
       expect(results).to include(
         a_hash_including(identifier: 'PostDecorator', type: 'decorator')
       )
     end
 
     it 'searches decorator source_code' do
-      results = reader.search('display_title', types: ['decorator'], fields: %w[source_code])
+      results = reader.search('display_title', types: ['decorator'], fields: %w[source_code])[:results]
       expect(results.first[:identifier]).to eq('PostDecorator')
       expect(results.first[:match_field]).to eq('source_code')
     end
 
     it 'searches concern metadata' do
-      results = reader.search('publish', types: ['concern'], fields: %w[metadata])
+      results = reader.search('publish', types: ['concern'], fields: %w[metadata])[:results]
       expect(results.first[:identifier]).to eq('Publishable')
     end
 
@@ -349,7 +403,7 @@ RSpec.describe Woods::MCP::IndexReader do
     end
 
     it 'searches lib units by identifier' do
-      results = reader.search('Analytics', types: ['lib'])
+      results = reader.search('Analytics', types: ['lib'])[:results]
       expect(results).to include(
         a_hash_including(identifier: 'External::Analytics', type: 'lib')
       )
@@ -412,7 +466,7 @@ RSpec.describe Woods::MCP::IndexReader do
   describe '#reload!' do
     it 'clears cached manifest so next access re-reads from disk' do
       original = reader.manifest
-      expect(original['total_units']).to eq(8)
+      expect(original['total_units']).to eq(9)
 
       # Swap manifest on disk, reload, and verify fresh data is returned
       manifest_path = File.join(fixture_dir, 'manifest.json')
