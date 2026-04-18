@@ -252,7 +252,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       )
     end
 
-    it 'returns unsupported error for query tool' do
+    it 'points query at embedded_read_tools and the docs' do
       response = executor_disabled.send_request({
                                                   'tool' => 'query',
                                                   'params' => { 'model' => 'Order', 'select' => ['id'] }
@@ -260,6 +260,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
 
       expect(response['ok']).to be false
       expect(response['error_type']).to eq('unsupported')
+      expect(response['error']).to include('embedded_read_tools: true')
+      expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
     end
   end
 end
