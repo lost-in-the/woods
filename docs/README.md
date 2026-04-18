@@ -19,6 +19,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) | Console MCP server setup — stdio, Docker, HTTP/Rack, SSH bridge, tool tiers, safety model |
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
 | [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/woods-mcp-http`) |
+| [MCP_WORKTREE_SETUP.md](MCP_WORKTREE_SETUP.md) | MCP registration in git worktrees — why tools may be missing for subagents, how to fix it |
 | [FAQ.md](FAQ.md) | Frequently asked questions — general, setup, extraction, MCP servers, Docker, storage |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix for extraction, MCP, embedding, storage, Docker, and Notion problems |
 | [WHY_WOODS.md](WHY_WOODS.md) | What Woods is, why it exists, before/after examples |
