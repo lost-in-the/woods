@@ -187,18 +187,27 @@ module Woods
         end
 
         def define_count(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_count', 'Count records matching scope conditions',
-                              properties: { model: str_prop('Model name'), scope: obj_prop('Filter conditions') },
+          define_console_tool(server, conn_mgr, 'console_count', 'Count records matching scope conditions.',
+                              properties: {
+                                model: str_prop('Model name'),
+                                scope: obj_prop('Filter: {status: "paid", total_refund_gt: 0, ' \
+                                                'transaction_id_not_null: true}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.')
+                              },
                               required: ['model'], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_count(model: args[:model], scope: args[:scope])
           end
         end
 
         def define_sample(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_sample', 'Random sample of records',
+          define_console_tool(server, conn_mgr, 'console_sample', 'Random sample of records.',
                               properties: {
                                 model: str_prop('Model name'), limit: int_prop('Max records (default 5, max 25)'),
-                                columns: arr_prop('Columns to include'), scope: obj_prop('Filter conditions')
+                                columns: arr_prop('Columns to include'),
+                                scope: obj_prop('Filter: {status: "paid", amount_gt: 100}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.')
                               }, required: ['model'], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_sample(
               model: args[:model], scope: args[:scope], limit: args[:limit] || 5, columns: args[:columns]
@@ -219,10 +228,12 @@ module Woods
         end
 
         def define_pluck(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_pluck', 'Extract column values from records',
+          define_console_tool(server, conn_mgr, 'console_pluck', 'Extract column values from records.',
                               properties: {
                                 model: str_prop('Model name'), columns: arr_prop('Column names to pluck'),
-                                scope: obj_prop('Filter conditions'),
+                                scope: obj_prop('Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.'),
                                 limit: int_prop('Max records (default 100, max 1000)'),
                                 distinct: bool_prop('Return unique values only')
                               }, required: %w[model columns], safe_ctx: safe_ctx, renderer: renderer) do |args|
@@ -235,12 +246,17 @@ module Woods
 
         def define_aggregate(server, conn_mgr, safe_ctx = nil, renderer: nil)
           define_console_tool(server, conn_mgr, 'console_aggregate',
-                              'Run aggregate function (sum/avg/min/max) on a column',
+                              'Run aggregate function on a column. ' \
+                              'count omits column to count all rows. ' \
+                              'Supports scope predicates: {status: "paid", total_gt: 0}. ' \
+                              'For complex queries use console_query.',
                               properties: {
                                 model: str_prop('Model name'),
-                                function: str_prop('Aggregate function: sum, avg, minimum, maximum'),
-                                column: str_prop('Column to aggregate'), scope: obj_prop('Filter conditions')
-                              }, required: %w[model function column], safe_ctx: safe_ctx, renderer: renderer) do |args|
+                                function: str_prop('Aggregate function: sum, average, minimum, maximum, count'),
+                                column: str_prop('Column to aggregate (optional for count)'),
+                                scope: obj_prop('Filter conditions: {col: val} or predicate suffixes ' \
+                                                '(_gt, _lt, _in, _null, etc.)')
+                              }, required: %w[model function], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_aggregate(
               model: args[:model], function: args[:function], column: args[:column], scope: args[:scope]
             )
@@ -249,11 +265,13 @@ module Woods
 
         def define_association_count(server, conn_mgr, safe_ctx = nil, renderer: nil)
           define_console_tool(server, conn_mgr, 'console_association_count',
-                              'Count associated records for a specific record',
+                              'Count associated records for a specific record.',
                               properties: {
                                 model: str_prop('Model name'), id: int_prop('Record primary key'),
                                 association: str_prop('Association name'),
-                                scope: obj_prop('Filter on association')
+                                scope: obj_prop('Filter on association: {status: "paid", amount_gt: 0}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.')
                               }, required: %w[model id association], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_association_count(
               model: args[:model], id: args[:id], association: args[:association], scope: args[:scope]
@@ -272,13 +290,16 @@ module Woods
         end
 
         def define_recent(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_recent', 'Recently created/updated records',
+          define_console_tool(server, conn_mgr, 'console_recent', 'Recently created/updated records.',
                               properties: {
                                 model: str_prop('Model name'),
                                 order_by: str_prop('Column to sort by (default: created_at)'),
                                 direction: str_prop('Sort direction: asc or desc (default: desc)'),
                                 limit: int_prop('Max records (default 10, max 50)'),
-                                scope: obj_prop('Filter conditions'), columns: arr_prop('Columns to include')
+                                scope: obj_prop('Filter: {status: "paid", total_gt: 0}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.'),
+                                columns: arr_prop('Columns to include')
                               }, required: ['model'], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_recent(
               model: args[:model], order_by: args[:order_by] || 'created_at',

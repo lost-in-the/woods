@@ -266,6 +266,31 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['result']['value']).to eq(5.5)
       end
 
+      it 'runs count aggregate without column' do
+        allow(user_model).to receive(:count).with(no_args).and_return(99)
+
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'count' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['value']).to eq(99)
+      end
+
+      it 'runs count aggregate with column' do
+        allow(user_model).to receive(:count).with(:email).and_return(40)
+
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'count',
+                                                         'column' => 'email' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['value']).to eq(40)
+      end
+
       it 'rejects invalid aggregate function' do
         response = executor.send_request({
                                            'tool' => 'aggregate',
@@ -416,6 +441,45 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                               })
 
         expect(ordered).to have_received(:limit).with(50)
+      end
+    end
+
+    context 'predicate-suffix scope' do
+      let(:user_model) { class_double('User') }
+      let(:arel_table) { instance_double('Arel::Table') }
+      let(:arel_col)   { instance_double('Arel::Attributes::Attribute') }
+      let(:arel_node)  { instance_double('Arel::Nodes::GreaterThan') }
+      let(:scoped)     { instance_double('ActiveRecord::Relation') }
+
+      before do
+        stub_const('User', user_model)
+        allow(user_model).to receive(:arel_table).and_return(arel_table)
+        allow(arel_table).to receive(:[]).with('id').and_return(arel_col)
+        allow(arel_col).to receive(:gt).with(10).and_return(arel_node)
+        allow(user_model).to receive(:where).with(arel_node).and_return(scoped)
+        allow(scoped).to receive(:count).and_return(5)
+      end
+
+      it 'routes predicate-suffix keys through ScopePredicateParser' do
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => { 'id_gt' => 10 } }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['count']).to eq(5)
+        expect(arel_col).to have_received(:gt).with(10)
+      end
+
+      it 'rejects unknown column in predicate suffix' do
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => { 'evil_col_gt' => 0 } }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/Unknown column 'evil_col'/)
+        expect(response['error_type']).to eq('validation')
       end
     end
 
