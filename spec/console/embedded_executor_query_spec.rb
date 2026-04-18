@@ -36,8 +36,17 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
     allow(connection).to receive(:execute)
     allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
 
-    stub_const('Arel', Module.new.tap { |m| m.define_singleton_method(:sql) { |s| s } }) unless defined?(Arel)
-    Arel.define_singleton_method(:sql) { |s| s } unless Arel.respond_to?(:sql)
+    @stubbed_arel_sql = false
+    if !defined?(Arel)
+      stub_const('Arel', Module.new.tap { |m| m.define_singleton_method(:sql) { |s| s } })
+    elsif !Arel.respond_to?(:sql)
+      Arel.define_singleton_method(:sql) { |s| s }
+      @stubbed_arel_sql = true
+    end
+  end
+
+  after do
+    Arel.singleton_class.send(:remove_method, :sql) if @stubbed_arel_sql
   end
 
   # Helper: build a chainable relation double that accepts the calls we need.
