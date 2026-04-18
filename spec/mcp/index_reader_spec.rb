@@ -209,6 +209,48 @@ RSpec.describe Woods::MCP::IndexReader do
       end
     end
 
+    it 'still returns identifier matches from later dirs after phase-2 cap is hit' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '1'
+      begin
+        # Search across identifier AND source_code. The source_code scan will hit
+        # the cap in an early dir (models), but identifier matches in later dirs
+        # (mailers, controllers) must still surface.
+        result = reader.search('Mailer|Controller', fields: %w[identifier source_code])
+        identifiers = result[:results].map { |r| r[:identifier] }
+        expect(identifiers).to include('UserMailer')
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
+    it 'treats empty WOODS_SEARCH_MAX_SCAN as unset and uses default cap' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = ''
+      begin
+        result = reader.search('has_many', fields: %w[source_code])
+        # With empty env var, default 500 applies — fixtures have <500 units so
+        # phase-2 completes without hitting the cap.
+        expect(result[:partial]).to be_falsey
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
+    it 'treats whitespace-only WOODS_SEARCH_MAX_SCAN as unset' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '   '
+      begin
+        result = reader.search('has_many', fields: %w[source_code])
+        expect(result[:partial]).to be_falsey
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
     it 'types filter restricts to mailer dir — no leak from other types' do
       results = reader.search('Mailer', types: ['mailer'])[:results]
       results.each do |r|
