@@ -30,7 +30,8 @@ module Woods
 
         app.middleware.use(
           Woods::Console::RackMiddleware,
-          path: config.console_mcp_path
+          path: config.console_mcp_path,
+          embedded_read_tools: config.console_embedded_read_tools
         )
       end
     end

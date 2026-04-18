@@ -39,16 +39,15 @@ end
 validator = Woods::Console::ModelValidator.new(registry: registry)
 safe_context = Woods::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
 
-redacted_columns = if Woods.respond_to?(:configuration) && Woods.configuration
-                     Array(Woods.configuration.console_redacted_columns)
-                   else
-                     []
-                   end
+config = Woods.configuration if Woods.respond_to?(:configuration)
+redacted_columns = config ? Array(config.console_redacted_columns) : []
+read_tools_enabled = config ? config.console_embedded_read_tools : false
 
 server = Woods::Console::Server.build_embedded(
   model_validator: validator,
   safe_context: safe_context,
-  redacted_columns: redacted_columns
+  redacted_columns: redacted_columns,
+  read_tools_enabled: read_tools_enabled
 )
 
 # Restore the protocol output for MCP transport.
