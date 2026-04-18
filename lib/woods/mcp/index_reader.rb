@@ -120,19 +120,39 @@ module Woods
         dirs.flat_map { |dir| read_index(dir) }
       end
 
+      # Default maximum number of unit files to load during phase-2 search.
+      # Override with WOODS_SEARCH_MAX_SCAN env var.
+      DEFAULT_SEARCH_MAX_SCAN = 500
+
       # Search units by case-insensitive pattern.
       #
       # Phase 1: match identifiers from index files (cheap).
       # Phase 2: lazy-load unit files for metadata/source_code matching.
       #
-      # @param query [String] Search pattern (treated as case-insensitive regex)
+      # The query is compiled as a raw Ruby regex with IGNORECASE. If the pattern
+      # is invalid, it falls back to an escaped literal match.
+      #
+      # A "broad" pattern is one that matches more than 50% of the entries in a
+      # type directory. Broad patterns still run but the result includes a :note.
+      #
+      # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500).
+      # When the cap is reached the result includes :partial => true.
+      #
+      # @param query [String] Search pattern (case-insensitive regex)
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param fields [Array<String>] Fields to search: "identifier", "metadata", "source_code"
       # @param limit [Integer] Maximum results to return
-      # @return [Array<Hash>] Matches with :identifier, :type, :match_field keys
+      # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
       def search(query, types: nil, fields: %w[identifier], limit: 20)
-        pattern = Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+        pattern = compile_search_pattern(query)
+        max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
+        max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
+        max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
+
         results = []
+        notes = []
+        phase2_scanned = 0
+        partial = false
 
         dirs = if types
                  types.filter_map { |t| TYPE_TO_DIR[t] }
@@ -143,6 +163,14 @@ module Woods
         dirs.each do |dir|
           type_name = DIR_TO_TYPE[dir]
           entries = read_index(dir)
+
+          # Broad-match detection: warn when pattern matches >50% of dir entries
+          if entries.size > 1
+            matching_count = entries.count { |e| pattern.match?(e['identifier']) }
+            if matching_count > entries.size / 2.0
+              notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
+            end
+          end
 
           entries.each do |entry|
             break if results.size >= limit
@@ -158,8 +186,15 @@ module Woods
             # Phase 2: metadata/source_code matching (requires loading full unit)
             next unless fields.include?('metadata') || fields.include?('source_code')
 
+            if phase2_scanned >= max_scan
+              partial = true
+              next
+            end
+
             unit = find_unit(id)
             next unless unit
+
+            phase2_scanned += 1
 
             if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
               results << { identifier: id, type: type_name, match_field: 'source_code' }
@@ -169,7 +204,10 @@ module Woods
           end
         end
 
-        results.first(limit)
+        response = { results: results.first(limit) }
+        response[:note] = notes.join('; ') unless notes.empty?
+        response[:partial] = true if partial
+        response
       end
 
       # BFS traversal of forward dependencies.
@@ -279,6 +317,20 @@ module Woods
       end
 
       private
+
+      # Compile a case-insensitive regex from a query string.
+      #
+      # Treats the query as a raw Ruby regex pattern. Falls back to an escaped
+      # literal match (with a :note field added by callers) when the pattern is
+      # invalid.
+      #
+      # @param query [String] Raw regex pattern
+      # @return [Regexp] Compiled case-insensitive pattern
+      def compile_search_pattern(query)
+        Regexp.new(query, Regexp::IGNORECASE)
+      rescue RegexpError
+        Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+      end
 
       # Memoized normalized edges — converts bare strings (old format) to hashes once.
       # Cleared by reload! alongside raw_graph_data.
