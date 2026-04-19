@@ -1,11 +1,82 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Woods Console MCP — disabled in this release.
+# Embedded console MCP server — runs inside a Rails environment.
 #
-# See CHANGELOG.md for the full rationale. Normal extraction and the
-# Index MCP server (woods-mcp) are unaffected.
+# Usage (via rake, recommended):
+#   bundle exec rake woods:console
+#
+# Usage (via rails runner):
+#   bundle exec rails runner "$(bundle show woods)/exe/woods-console"
+#
+# The rake task captures stdout before Rails boots and passes the fd via
+# $woods_protocol_out. When run via rails runner, this script
+# captures stdout itself to keep MCP protocol clean.
+#
+# Disabled by default. Set Woods.configuration.console_mcp_enabled = true
+# in the host application's Woods initializer to enable. Layer 1 blocked
+# tables, Layer 2 credential scanning, and Layer 3 column/EAV redaction are
+# all configured through Woods::Configuration — see docs/CONSOLE_MCP_SETUP.md.
 
-warn 'Woods Console MCP is disabled in this release. See CHANGELOG.md ' \
-     '(entry: "Console MCP disabled pending security review") for details.'
-exit 1
+# Check if the rake task already captured stdout for us.
+protocol_out = $woods_protocol_out # rubocop:disable Style/GlobalVars
+
+unless protocol_out
+  # Running via rails runner — capture stdout ourselves.
+  protocol_out = $stdout.dup
+  $stdout.reopen($stderr)
+end
+
+require 'woods/console/server'
+
+unless Woods.configuration.console_mcp_enabled
+  warn 'Woods Console MCP is disabled. Set ' \
+       'Woods.configuration.console_mcp_enabled = true to enable. ' \
+       'See docs/CONSOLE_MCP_SETUP.md for the full security posture.'
+  exit 1
+end
+
+# Ensure all application models are loaded for the registry.
+Rails.application.eager_load!
+
+registry = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+  next if model.abstract_class?
+  next unless model.table_exists?
+
+  hash[model.name] = model.column_names
+rescue StandardError
+  next
+end
+
+model_tables = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+  next if model.abstract_class?
+  next unless model.table_exists?
+
+  hash[model.name] = model.table_name
+rescue StandardError
+  next
+end
+
+validator = Woods::Console::ModelValidator.new(registry: registry)
+safe_context = Woods::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
+
+config = Woods.configuration
+redacted_columns = Array(config.console_redacted_columns)
+redacted_key_values = Array(config.console_redacted_key_values)
+read_tools_enabled = config.console_embedded_read_tools
+
+server = Woods::Console::Server.build_embedded(
+  model_validator: validator,
+  safe_context: safe_context,
+  redacted_columns: redacted_columns,
+  redacted_key_values: redacted_key_values,
+  read_tools_enabled: read_tools_enabled,
+  model_tables: model_tables
+)
+
+# Restore the protocol output for MCP transport.
+$stdout.reopen(protocol_out)
+protocol_out.close unless protocol_out.closed?
+
+transport = MCP::Server::Transports::StdioTransport.new(server)
+transport.open
