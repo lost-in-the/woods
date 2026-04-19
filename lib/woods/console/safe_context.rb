@@ -21,6 +21,9 @@ module Woods
     #   ctx.execute { |c| c.execute("SELECT count(*) FROM users") }
     #
     class SafeContext
+      # @return [Array<String>] Column names whose values are replaced with "[REDACTED]"
+      attr_reader :redacted_columns
+
       # @param connection [Object] Database connection (or mock)
       # @param timeout_ms [Integer] Statement timeout in milliseconds
       # @param redacted_columns [Array<String>] Column names whose values should be redacted
