@@ -135,5 +135,102 @@ RSpec.describe Woods::Console::Server do
       redacted = described_class.send(:apply_redaction, result, safe_ctx)
       expect(redacted).to eq(42)
     end
+
+    describe 'shape-aware redaction' do
+      let(:safe_ctx) do
+        Woods::Console::SafeContext.new(
+          connection: nil,
+          redacted_columns: %w[crypted_password salt]
+        )
+      end
+
+      it 'redacts records nested under `records` (sample / recent)' do
+        result = {
+          'records' => [
+            { 'id' => 1, 'subdomain' => 'test', 'crypted_password' => 'abcdef' * 8, 'salt' => 'fedcba' * 8 },
+            { 'id' => 2, 'subdomain' => 'other', 'crypted_password' => '0123' * 10, 'salt' => '4567' * 10 }
+          ]
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['records'].map { |r| r['crypted_password'] }).to all(eq('[REDACTED]'))
+        expect(redacted['records'].map { |r| r['salt'] }).to all(eq('[REDACTED]'))
+        expect(redacted['records'].map { |r| r['subdomain'] }).to eq(%w[test other])
+      end
+
+      it 'redacts a record nested under `record` (find)' do
+        result = {
+          'record' => { 'id' => 1, 'subdomain' => 'test', 'crypted_password' => 'deadbeef' * 5, 'salt' => 'cafe' * 10 }
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['record']['crypted_password']).to eq('[REDACTED]')
+        expect(redacted['record']['salt']).to eq('[REDACTED]')
+        expect(redacted['record']['subdomain']).to eq('test')
+      end
+
+      it 'handles `record` with a nil value (find with no match)' do
+        result = { 'record' => nil }
+        expect(described_class.send(:apply_redaction, result, safe_ctx)).to eq('record' => nil)
+      end
+
+      it 'redacts positional rows using `columns` header (sql / query)' do
+        result = {
+          'columns' => %w[id subdomain crypted_password salt],
+          'rows' => [[1, 'test', 'abcdef' * 8, 'fedcba' * 8]],
+          'count' => 1
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['rows']).to eq([[1, 'test', '[REDACTED]', '[REDACTED]']])
+        expect(redacted['columns']).to eq(%w[id subdomain crypted_password salt])
+        expect(redacted['count']).to eq(1)
+      end
+
+      it 'redacts positional multi-column values (pluck with multiple columns)' do
+        result = {
+          'columns' => %w[id subdomain crypted_password salt],
+          'values' => [[1, 'test', 'abcdef' * 8, 'fedcba' * 8]]
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['values']).to eq([[1, 'test', '[REDACTED]', '[REDACTED]']])
+      end
+
+      it 'redacts a flat values array (pluck with a single redacted column)' do
+        result = {
+          'columns' => %w[crypted_password],
+          'values' => %w[aaaa bbbb cccc]
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['values']).to eq(%w[[REDACTED] [REDACTED] [REDACTED]])
+      end
+
+      it 'leaves a flat values array untouched when the single column is not redacted' do
+        result = {
+          'columns' => %w[subdomain],
+          'values' => %w[alpha beta gamma]
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['values']).to eq(%w[alpha beta gamma])
+      end
+
+      it 'does not treat `console_schema` output as row data' do
+        # schema returns {columns: {col_name => meta, ...}} — columns is a Hash,
+        # not an Array, and there are no row/records keys, so redaction should
+        # fall through to top-level key redaction (which is a no-op here).
+        result = {
+          'columns' => { 'id' => { 'type' => 'integer' }, 'crypted_password' => { 'type' => 'string' } }
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted).to eq(result)
+      end
+
+      it 'leaves rows untouched when no column matches the redacted list' do
+        result = {
+          'columns' => %w[id subdomain],
+          'rows' => [[1, 'test'], [2, 'other']],
+          'count' => 2
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['rows']).to eq([[1, 'test'], [2, 'other']])
+      end
+    end
   end
 end

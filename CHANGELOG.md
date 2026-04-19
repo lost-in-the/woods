@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Documented `console_redacted_columns` scope limitation.** Redaction only walks the top level of a tool's result hash, so `console_sample`, `console_recent`, `console_find`, `console_pluck`, `console_sql`, and `console_query` return row data untouched even when a matching column name is configured (records are nested under `records` / `record`, or rows are positional arrays under `rows` / `values`). Affects every transport — stdio, Rack, and bridge. `docs/CONSOLE_MCP_SETUP.md` now details the affected tools and recommends treating redaction as best-effort until the fix lands. No code change in this release.
+- **`console_redacted_columns` now covers every tool that returns row data.** Redaction previously only walked top-level hash keys, so `console_sample`, `console_recent`, `console_find`, `console_pluck`, `console_sql`, and `console_query` returned configured credential columns in the clear — records were nested under `records` / `record`, and rows were positional arrays under `rows` / `values`. The server-level redaction pass is now shape-aware: it descends into `record` / `records` hashes and uses the `columns` header to redact positional rows. `console_pluck` now also includes a `columns` field in its response so positional redaction can key off of it. Affects every transport (stdio, Rack, bridge).
 
 ### Fixed
 
