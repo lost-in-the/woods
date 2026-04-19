@@ -164,7 +164,7 @@ module Woods
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = scope.distinct if params['distinct']
         values = scope.limit(limit).pluck(*columns.map(&:to_sym))
-        { 'values' => values }
+        { 'columns' => Array(columns), 'values' => values }
       end
 
       def handle_aggregate(params)

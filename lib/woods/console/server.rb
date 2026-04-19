@@ -158,23 +158,90 @@ module Woods
           ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: e.message)
         end
 
+        # Data-shape keys used by console tool responses. When any of these keys
+        # appear at the top of a Hash result we treat the value as row data and
+        # descend into it instead of redacting at the envelope level. Keeping
+        # this list narrow avoids accidentally recursing into schema payloads
+        # (e.g. `console_schema` returns {columns: {...}} where `columns` is a
+        # Hash of column metadata, not row values).
+        DATA_ENVELOPE_KEYS = %w[record records rows values].freeze
+        private_constant :DATA_ENVELOPE_KEYS
+
         # Apply SafeContext column redaction to a result value.
         #
-        # Handles Hash (single record) and Array<Hash> (multiple records).
-        # Non-Hash values are returned unchanged.
+        # Redaction is shape-aware:
+        #   - {record: Hash}          (find)         — redact the nested hash
+        #   - {records: [Hash]}       (sample, recent) — redact each nested hash
+        #   - {columns: [...], rows:   [[...]]}  (sql, query) — positional
+        #   - {columns: [...], values: [...|[...]]} (pluck)  — positional
+        #   - Plain Hash              — redact top-level keys
+        #   - Array<Hash>             — redact each hash
         #
-        # @param result [Object] The result from the bridge
+        # @param result [Object] The result from the bridge or embedded executor
         # @param safe_ctx [SafeContext] The context with redacted_columns configured
-        # @return [Object] Redacted result
+        # @return [Object] Redacted result, same shape as input
         def apply_redaction(result, safe_ctx)
           case result
           when Array
-            result.map { |item| item.is_a?(Hash) ? safe_ctx.redact(item) : item }
+            result.map { |item| item.is_a?(Hash) ? apply_redaction(item, safe_ctx) : item }
           when Hash
-            safe_ctx.redact(result)
+            redact_hash(result, safe_ctx)
           else
             result
           end
+        end
+
+        def redact_hash(hash, safe_ctx)
+          string_keyed = hash.transform_keys(&:to_s)
+          return safe_ctx.redact(string_keyed) unless (string_keyed.keys & DATA_ENVELOPE_KEYS).any?
+
+          mask = positional_mask(string_keyed['columns'], safe_ctx)
+          string_keyed.each_with_object({}) do |(key, value), out|
+            out[key] = redact_envelope_value(key, value, mask, safe_ctx)
+          end
+        end
+
+        def redact_envelope_value(key, value, mask, safe_ctx)
+          case key
+          when 'record'         then value.is_a?(Hash) ? safe_ctx.redact(value) : value
+          when 'records'        then redact_hash_array(value, safe_ctx)
+          when 'rows', 'values' then redact_positional(value, mask)
+          else                       value
+          end
+        end
+
+        def redact_hash_array(value, safe_ctx)
+          Array(value).map { |row| row.is_a?(Hash) ? safe_ctx.redact(row) : row }
+        end
+
+        # Precompute the positional redaction mask from a `columns` header.
+        # Returns nil when there is nothing to redact so callers can short-circuit.
+        def positional_mask(columns, safe_ctx)
+          return nil unless columns.is_a?(Array)
+
+          redacted = safe_ctx.redacted_columns
+          return nil if redacted.empty?
+
+          mask = columns.map { |name| redacted.include?(name.to_s) }
+          mask.any? ? mask : nil
+        end
+
+        # Redact positional row data using a precomputed column mask. Handles
+        # both nested arrays (multi-column pluck, sql/query rows) and flat
+        # scalar arrays (pluck with a single column — Rails collapses the
+        # result).
+        def redact_positional(rows, mask)
+          return rows if mask.nil? || !rows.is_a?(Array)
+
+          rows.map { |row| row.is_a?(Array) ? redact_row(row, mask) : redact_scalar(row, mask) }
+        end
+
+        def redact_row(row, mask)
+          row.each_with_index.map { |value, idx| mask[idx] ? '[REDACTED]' : value }
+        end
+
+        def redact_scalar(value, mask)
+          mask.first ? '[REDACTED]' : value
         end
 
         def build_console_renderer
