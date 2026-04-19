@@ -52,8 +52,8 @@ module Woods
       # @param disabled_patterns [Array<Symbol, String>] names to skip at scan
       #   time. Strings are coerced to Symbols.
       def initialize(disabled_patterns: [])
-        disabled = Array(disabled_patterns).map(&:to_sym).to_set
-        @active_patterns = PATTERNS.reject { |name, _| disabled.include?(name) }
+        disabled = Array(disabled_patterns).to_set(&:to_sym)
+        @active_patterns = PATTERNS.except(*disabled)
       end
 
       # Scan a value (String, Hash, Array, or any other object) for credentials.

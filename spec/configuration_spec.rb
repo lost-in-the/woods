@@ -71,12 +71,44 @@ RSpec.describe Woods::Configuration do
     it 'sets console_redacted_key_values to empty array' do
       expect(config.console_redacted_key_values).to eq([])
     end
+
+    it 'sets console_blocked_tables to empty array' do
+      expect(config.console_blocked_tables).to eq([])
+    end
+
+    it 'sets console_credential_scanning_enabled to true' do
+      expect(config.console_credential_scanning_enabled).to eq(true)
+    end
+
+    it 'sets console_disabled_scanner_patterns to empty array' do
+      expect(config.console_disabled_scanner_patterns).to eq([])
+    end
   end
 
   describe 'console MCP configuration' do
     it 'allows setting console_embedded_read_tools' do
       config.console_embedded_read_tools = true
       expect(config.console_embedded_read_tools).to eq(true)
+    end
+
+    it 'allows setting console_mcp_enabled' do
+      config.console_mcp_enabled = true
+      expect(config.console_mcp_enabled).to eq(true)
+    end
+
+    it 'allows setting console_blocked_tables' do
+      config.console_blocked_tables = %w[authorizations credentials]
+      expect(config.console_blocked_tables).to eq(%w[authorizations credentials])
+    end
+
+    it 'allows disabling console_credential_scanning_enabled' do
+      config.console_credential_scanning_enabled = false
+      expect(config.console_credential_scanning_enabled).to eq(false)
+    end
+
+    it 'allows setting console_disabled_scanner_patterns' do
+      config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
+      expect(config.console_disabled_scanner_patterns).to eq(%i[stripe_publishable_key])
     end
   end
 

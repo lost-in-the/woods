@@ -50,7 +50,7 @@ module Woods
       # @param blocked_tables [Array<String>] table names to block (case-insensitive).
       # @param model_tables [Hash{String=>String}] model name => table name.
       def initialize(blocked_tables:, model_tables:)
-        @blocked = Array(blocked_tables).map { |t| t.to_s.downcase }.to_set
+        @blocked = Array(blocked_tables).to_set { |t| t.to_s.downcase }
         @model_tables = model_tables || {}
       end
 
