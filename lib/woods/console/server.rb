@@ -189,7 +189,7 @@ module Woods
           if response['ok']
             result = response['result']
             result = apply_redaction(result, ctx.safe_ctx) if ctx&.safe_ctx
-            result, = ctx.credential_scanner.scan(result) if ctx&.credential_scanner
+            result = scan_for_credentials(result, request, ctx)
             text = renderer ? renderer.render_default(result) : JSON.pretty_generate(result)
             respond(text)
           else
@@ -201,6 +201,35 @@ module Woods
           end
         rescue ConnectionError => e
           ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: e.message)
+        end
+
+        # Run Layer 2 against the result and emit a structured log line when
+        # the scanner actually redacted anything. Returns the scanned result
+        # (or the original when the scanner isn't configured).
+        def scan_for_credentials(result, request, ctx)
+          return result unless ctx&.credential_scanner
+
+          scanned, counts = ctx.credential_scanner.scan(result)
+          log_credential_hits(request, counts) unless counts.empty?
+          scanned
+        end
+
+        def log_credential_hits(request, counts)
+          structured_logger.warn(
+            'console.credential_scan.hits',
+            tool: request['tool'],
+            counts: counts.transform_keys(&:to_s),
+            total: counts.values.sum
+          )
+        rescue StandardError
+          nil # Never let observability failures break a tool response.
+        end
+
+        def structured_logger
+          @structured_logger ||= begin
+            require 'woods/observability/structured_logger'
+            Woods::Observability::StructuredLogger.new
+          end
         end
 
         # Data-shape keys used by console tool responses. When any of these keys
@@ -766,11 +795,13 @@ module Woods
           integer_keys = integer_property_keys(properties)
           schema = { properties: properties }
           schema[:required] = required if required&.any?
+          log_gate_method = method(:log_table_gate_rejection)
           server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
             coerce_method.call(args, integer_keys)
             begin
               gate_method.call(ctx&.table_gate, args)
             rescue TableGateError => e
+              log_gate_method.call(name, args, e)
               next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: e.message)
             end
             request = tool_block.call(args)
@@ -793,6 +824,19 @@ module Woods
           gate.check_sql!(args[:sql]) if args[:sql]
           gate.check_model!(args[:model]) if args[:model]
           gate.check_table!(args[:table]) if args[:table]
+        end
+
+        def log_table_gate_rejection(tool_name, args, error)
+          structured_logger.warn(
+            'console.table_gate.rejected',
+            tool: tool_name,
+            model: args[:model],
+            table: args[:table],
+            has_sql: args[:sql] ? true : false,
+            message: error.message
+          )
+        rescue StandardError
+          nil
         end
 
         # Pre-compute property keys declared as integer in a schema.
