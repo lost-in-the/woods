@@ -61,16 +61,24 @@ module Woods
         @transport = nil
       end
 
+      DISABLED_BODY = JSON.generate(
+        error: 'woods_console_disabled',
+        message: 'Woods Console MCP is disabled in this release pending security review. ' \
+                 'See CHANGELOG.md for details.'
+      ).freeze
+
       # Rack interface — intercepts requests at the configured path.
+      #
+      # The Console MCP feature is disabled in this release; requests to the
+      # mounted path return 410 Gone. See CHANGELOG.md for the rationale.
+      # All other requests pass through to the wrapped app unchanged.
       #
       # @param env [Hash] Rack environment
       # @return [Array] Rack response triple
       def call(env)
         return @app.call(env) unless env['PATH_INFO'].start_with?(@path)
 
-        transport = ensure_transport
-        request = Rack::Request.new(env)
-        transport.handle_request(request)
+        [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]]
       end
 
       private
