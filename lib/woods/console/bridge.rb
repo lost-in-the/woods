@@ -134,7 +134,7 @@ module Woods
 
       def handle_pluck(params)
         @model_validator.validate_columns!(params['model'], params['columns']) if params['columns']
-        { 'values' => [] }
+        { 'columns' => Array(params['columns']), 'values' => [] }
       end
 
       def handle_aggregate(params)

@@ -385,30 +385,17 @@ Redaction replaces matching column values with `"[REDACTED]"` before the MCP res
 config.console_redacted_columns = %w[email phone_number date_of_birth ssn]
 ```
 
-#### Known limitation: redaction scope
+Redaction is shape-aware and covers every tool that returns row data:
 
-Redaction checks only top-level hash keys, so tools whose results nest row data under another key (`records`, `record`) or expose values positionally (`rows`, `values`) bypass redaction entirely. This affects **every transport** — stdio, Rack, and the bridge architecture — because all tool output flows through the same shallow redaction pass on the server.
+| Tool                                  | Output shape                                              | How redaction applies |
+| ------------------------------------- | --------------------------------------------------------- | --------------------- |
+| `console_find`                        | `{record: Hash}`                                          | Redacted column keys are replaced inside the nested record |
+| `console_sample`, `console_recent`    | `{records: [Hash, ...]}`                                  | Each record hash is redacted |
+| `console_sql`, `console_query`        | `{columns: [...], rows: [[...], ...], count: N}`          | Positional — rows are redacted by matching the `columns` header |
+| `console_pluck`                       | `{columns: [...], values: [[...], ...]}` or `{values: [...]}` for a single column | Positional — multi-column rows and flat single-column arrays both covered |
+| `console_count`, `console_aggregate`, `console_association_count`, `console_schema` | No row data | Nothing to redact |
 
-| Tool                       | Output shape                                 | Redacted? |
-| -------------------------- | -------------------------------------------- | --------- |
-| `console_count`            | `{count: N}`                                 | n/a — no row data |
-| `console_aggregate`        | `{value: N}` / `{count: N}`                  | n/a — no row data |
-| `console_association_count`| `{count: N}`                                 | n/a — no row data |
-| `console_schema`           | `{columns: [...]}`                           | n/a — no row data |
-| `console_sample`           | `{records: [{col: val, ...}, ...]}`          | **No** — records are nested one level deep |
-| `console_recent`           | `{records: [{col: val, ...}, ...]}`          | **No** — records are nested one level deep |
-| `console_find`             | `{record: {col: val, ...}}`                  | **No** — record is nested one level deep |
-| `console_pluck`            | `{values: [[...], ...]}`                     | **No** — rows are positional arrays |
-| `console_sql`              | `{columns: [...], rows: [[...], ...]}`       | **No** — rows are positional arrays |
-| `console_query`            | `{columns: [...], rows: [[...], ...]}`       | **No** — rows are positional arrays |
-
-Until this is fixed, treat `console_redacted_columns` as **best-effort**. Assume every column reachable by `sample`, `recent`, `find`, `pluck`, `sql`, and `query` is visible to the agent in its raw form, regardless of whether the name appears in `console_redacted_columns`.
-
-Practical guidance:
-
-- Keep plaintext secrets out of database columns where possible (prefer hashed, encrypted, or vault-referenced storage).
-- Only enable `console_embedded_read_tools = true` in environments where direct table access is already an acceptable ceiling (local dev, throwaway staging).
-- For production bridge deployments, prefer agent-side deny rules on the six affected tools over relying on column-name redaction.
+Redaction is defense-in-depth — prefer not storing plaintext secrets in database columns in the first place — but it keeps configured credential columns out of the agent's transcript when `console_sample`, `console_find`, or the Tier 4 read tools return matching rows.
 
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
