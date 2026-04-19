@@ -111,4 +111,73 @@ RSpec.describe Woods::Console::SafeContext do
       expect(ctx_no_redaction.redact(input)).to eq(input)
     end
   end
+
+  describe '#redact with key-value (EAV) patterns' do
+    let(:patterns) do
+      [
+        { key_column: 'key', value_column: 'value',
+          sensitive_keys: %w[stripe_access_token stripe_publishable_key] }
+      ]
+    end
+
+    subject(:ctx) do
+      described_class.new(connection: connection, redacted_key_values: patterns)
+    end
+
+    it 'redacts value when key matches sensitive list' do
+      input = { 'account_id' => 2, 'key' => 'stripe_access_token', 'value' => 'sk_live_abc' }
+      result = ctx.redact(input)
+      expect(result['value']).to eq('[REDACTED]')
+      expect(result['key']).to eq('stripe_access_token')
+      expect(result['account_id']).to eq(2)
+    end
+
+    it 'passes through rows whose key is not sensitive' do
+      input = { 'account_id' => 2, 'key' => 'timezone', 'value' => 'America/Chicago' }
+      expect(ctx.redact(input)).to eq(input)
+    end
+
+    it 'accepts string-keyed pattern hashes' do
+      string_patterns = [
+        { 'key_column' => 'name', 'value_column' => 'val',
+          'sensitive_keys' => %w[oauth_token] }
+      ]
+      ctx = described_class.new(connection: connection, redacted_key_values: string_patterns)
+      input = { 'name' => 'oauth_token', 'val' => 'secret123' }
+      expect(ctx.redact(input)['val']).to eq('[REDACTED]')
+    end
+
+    it 'combines column and key-value redaction in the same pass' do
+      ctx = described_class.new(
+        connection: connection,
+        redacted_columns: %w[password],
+        redacted_key_values: patterns
+      )
+      input = { 'password' => 'pw', 'key' => 'stripe_access_token', 'value' => 'sk_live' }
+      result = ctx.redact(input)
+      expect(result['password']).to eq('[REDACTED]')
+      expect(result['value']).to eq('[REDACTED]')
+    end
+
+    it 'coerces non-string key values before matching' do
+      # Even if the key cell deserializes as a symbol or integer, the comparison
+      # should still fire when to_s matches a sensitive entry.
+      input = { 'key' => :stripe_access_token, 'value' => 'sk_live' }
+      expect(ctx.redact(input)['value']).to eq('[REDACTED]')
+    end
+
+    it 'ignores patterns missing key_column, value_column, or sensitive_keys' do
+      # Well-formed, underspecified patterns should be dropped silently rather
+      # than raising — keeps misconfigured initializers from breaking the server.
+      ctx = described_class.new(
+        connection: connection,
+        redacted_key_values: [
+          { key_column: 'k', value_column: 'v' },                    # no sensitive_keys
+          { key_column: 'k', sensitive_keys: %w[a] },                # no value_column
+          { key_column: 'k', value_column: 'v', sensitive_keys: %w[x] }
+        ]
+      )
+      expect(ctx.redacted_key_values.size).to eq(1)
+    end
+  end
 end

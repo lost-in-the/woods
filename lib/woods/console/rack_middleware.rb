@@ -78,44 +78,41 @@ module Woods
       # Thread-safe lazy initialization of the MCP server and transport.
       #
       # @return [MCP::Server::Transports::StreamableHTTPTransport]
-      def ensure_transport # rubocop:disable Metrics/MethodLength
+      def ensure_transport
         return @transport if @transport
 
         @mutex.synchronize do
           return @transport if @transport
 
           require 'woods/console/server'
-
           Rails.application.eager_load!
 
-          registry = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
-            next if model.abstract_class?
-            next unless model.table_exists?
-
-            hash[model.name] = model.column_names
-          rescue StandardError
-            next
-          end
-
-          validator = ModelValidator.new(registry: registry)
-
-          config = Woods.configuration
-          redacted = Array(config.console_redacted_columns)
-
-          # Each HTTP request gets its own connection from the pool.
-          # SafeContext wraps that connection in a rolled-back transaction.
-          safe_context = SafeContext.new(connection: ActiveRecord::Base.connection)
-
-          server = Server.build_embedded(
-            model_validator: validator,
-            safe_context: safe_context,
-            redacted_columns: redacted,
-            read_tools_enabled: @embedded_read_tools
-          )
-
+          server = build_embedded_server
           @transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
           server.transport = @transport
           @transport
+        end
+      end
+
+      def build_embedded_server
+        config = Woods.configuration
+        Server.build_embedded(
+          model_validator: ModelValidator.new(registry: build_model_registry),
+          safe_context: SafeContext.new(connection: ActiveRecord::Base.connection),
+          redacted_columns: Array(config.console_redacted_columns),
+          redacted_key_values: Array(config.console_redacted_key_values),
+          read_tools_enabled: @embedded_read_tools
+        )
+      end
+
+      def build_model_registry
+        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+          next if model.abstract_class?
+          next unless model.table_exists?
+
+          hash[model.name] = model.column_names
+        rescue StandardError
+          next
         end
       end
     end

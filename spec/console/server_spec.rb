@@ -232,5 +232,104 @@ RSpec.describe Woods::Console::Server do
         expect(redacted['rows']).to eq([[1, 'test'], [2, 'other']])
       end
     end
+
+    describe 'EAV (key-value) redaction' do
+      # Models the real-world `authorizations` table where Stripe Connect
+      # tokens live as rows like {key: "stripe_access_token", value: "sk_..."}.
+      # Column-name redaction alone cannot protect these values — the column
+      # is called `value`, which would over-redact every unrelated row.
+      let(:safe_ctx) do
+        Woods::Console::SafeContext.new(
+          connection: nil,
+          redacted_key_values: [
+            { key_column: 'key', value_column: 'value',
+              sensitive_keys: %w[stripe_access_token stripe_publishable_key stripe_user_id] }
+          ]
+        )
+      end
+
+      it 'redacts value under `record` when key is sensitive' do
+        result = { 'record' => { 'id' => 1, 'key' => 'stripe_access_token', 'value' => 'sk_live_xyz' } }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['record']['value']).to eq('[REDACTED]')
+        expect(redacted['record']['key']).to eq('stripe_access_token')
+      end
+
+      it 'leaves non-sensitive key rows intact under `record`' do
+        result = { 'record' => { 'id' => 1, 'key' => 'timezone', 'value' => 'UTC' } }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['record']).to eq('id' => 1, 'key' => 'timezone', 'value' => 'UTC')
+      end
+
+      it 'redacts value across records (sample, recent)' do
+        result = {
+          'records' => [
+            { 'id' => 1, 'key' => 'stripe_access_token', 'value' => 'sk_live_a' },
+            { 'id' => 2, 'key' => 'timezone', 'value' => 'UTC' },
+            { 'id' => 3, 'key' => 'stripe_publishable_key', 'value' => 'pk_live_b' }
+          ]
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        values = redacted['records'].map { |r| r['value'] }
+        expect(values).to eq(['[REDACTED]', 'UTC', '[REDACTED]'])
+      end
+
+      it 'redacts positional rows (sql/query) when key column matches' do
+        result = {
+          'columns' => %w[id account_id key value],
+          'rows' => [
+            [1, 2, 'stripe_access_token',     'sk_live_xyz'],
+            [2, 2, 'timezone',                'America/Chicago'],
+            [3, 3, 'stripe_publishable_key',  'pk_live_abc']
+          ],
+          'count' => 3
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['rows'][0]).to eq([1, 2, 'stripe_access_token', '[REDACTED]'])
+        expect(redacted['rows'][1]).to eq([2, 2, 'timezone', 'America/Chicago'])
+        expect(redacted['rows'][2]).to eq([3, 3, 'stripe_publishable_key', '[REDACTED]'])
+      end
+
+      it 'redacts positional pluck values when key column matches' do
+        result = {
+          'columns' => %w[key value],
+          'values' => [
+            %w[stripe_access_token sk_live_xyz],
+            %w[timezone UTC]
+          ]
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['values']).to eq([
+                                           ['stripe_access_token', '[REDACTED]'],
+                                           ['timezone', 'UTC']
+                                         ])
+      end
+
+      it 'no-ops when the header lacks both key and value columns' do
+        # SELECT id FROM authorizations — no EAV cell to redact.
+        result = { 'columns' => %w[id], 'rows' => [[1], [2]], 'count' => 2 }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['rows']).to eq([[1], [2]])
+      end
+
+      it 'combines column and key-value rules on the same response' do
+        ctx = Woods::Console::SafeContext.new(
+          connection: nil,
+          redacted_columns: %w[crypted_password],
+          redacted_key_values: [
+            { key_column: 'key', value_column: 'value',
+              sensitive_keys: %w[stripe_access_token] }
+          ]
+        )
+        result = {
+          'columns' => %w[id crypted_password key value],
+          'rows' => [[1, 'hash1', 'stripe_access_token', 'sk_live'],
+                     [2, 'hash2', 'timezone',            'UTC']]
+        }
+        redacted = described_class.send(:apply_redaction, result, ctx)
+        expect(redacted['rows'][0]).to eq([1, '[REDACTED]', 'stripe_access_token', '[REDACTED]'])
+        expect(redacted['rows'][1]).to eq([2, '[REDACTED]', 'timezone', 'UTC'])
+      end
+    end
   end
 end

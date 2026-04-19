@@ -397,6 +397,48 @@ Redaction is shape-aware and covers every tool that returns row data:
 
 Redaction is defense-in-depth — prefer not storing plaintext secrets in database columns in the first place — but it keeps configured credential columns out of the agent's transcript when `console_sample`, `console_find`, or the Tier 4 read tools return matching rows.
 
+### `console_redacted_key_values`
+
+Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table — e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
+
+`console_redacted_key_values` takes one or more patterns that describe "when a row has `key_column` set to one of these names, redact its `value_column`":
+
+```ruby
+# Example / `authorizations` table — serves both MySQL and PostgreSQL apps.
+config.console_redacted_key_values = [
+  {
+    key_column:     'key',
+    value_column:   'value',
+    sensitive_keys: %w[stripe_access_token stripe_publishable_key stripe_user_id
+                       oauth_token refresh_token client_secret]
+  }
+]
+```
+
+```ruby
+# An app with a generic `settings` table on MySQL or PostgreSQL uses a different
+# column layout — patterns stack without interfering.
+config.console_redacted_key_values = [
+  { key_column: 'name', value_column: 'value',
+    sensitive_keys: %w[smtp_password slack_webhook_url] },
+  { key_column: 'key',  value_column: 'value',
+    sensitive_keys: %w[stripe_access_token oauth_token] }
+]
+```
+
+Behavior:
+
+| Response shape                                                        | EAV redaction applies when                                          |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `console_find` — `{record: {..., key: ..., value: ...}}`              | `record[key_column]` ∈ `sensitive_keys` → `record[value_column] = "[REDACTED]"` |
+| `console_sample`, `console_recent` — `{records: [{key:, value:}, ...]}` | Per-row — each record is evaluated against every configured pattern |
+| `console_sql`, `console_query` — `{columns: [...], rows: [[...]]}`    | Positional — `key_column` and `value_column` resolved to indexes once, per row lookup afterwards |
+| `console_pluck` — `{columns: [...], values: [[...]]}`                 | Same positional logic as `rows`                                     |
+
+A pattern is skipped silently when its `key_column` or `value_column` is absent from the current `columns` header, so unrelated queries pay nothing for the configuration. Comparison is case-sensitive and coerces the key cell through `to_s` before matching, so `:stripe_access_token` and `"stripe_access_token"` both fire.
+
+`console_redacted_columns` and `console_redacted_key_values` run in a single pass — configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
+
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
 By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:

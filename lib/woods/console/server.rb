@@ -42,7 +42,16 @@ module Woods
           connection_config = config['console'] || config
           conn_mgr = ConnectionManager.new(config: connection_config)
           redacted_columns = Array(config['redacted_columns'] || connection_config['redacted_columns'])
-          safe_ctx = redacted_columns.any? ? SafeContext.new(connection: nil, redacted_columns: redacted_columns) : nil
+          redacted_key_values = Array(
+            config['redacted_key_values'] || connection_config['redacted_key_values']
+          )
+          safe_ctx = if redacted_columns.any? || redacted_key_values.any?
+                       SafeContext.new(
+                         connection: nil,
+                         redacted_columns: redacted_columns,
+                         redacted_key_values: redacted_key_values
+                       )
+                     end
 
           build_server(conn_mgr, safe_ctx)
         end
@@ -55,10 +64,13 @@ module Woods
         # @param model_validator [ModelValidator] Validates model/column names
         # @param safe_context [SafeContext] Wraps queries in rolled-back transactions
         # @param redacted_columns [Array<String>] Column names to redact from output
+        # @param redacted_key_values [Array<Hash>] EAV redaction patterns. Each pattern:
+        #   {key_column:, value_column:, sensitive_keys: []}. See SafeContext for semantics.
         # @param connection [Object, nil] Database connection for adapter detection
         # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
         # @return [MCP::Server] Configured server ready for transport
-        def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil,
+        def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists
+                           redacted_key_values: [], connection: nil,
                            read_tools_enabled: false)
           require_relative 'embedded_executor'
 
@@ -66,9 +78,12 @@ module Woods
             model_validator: model_validator, safe_context: safe_context,
             connection: connection, read_tools_enabled: read_tools_enabled
           )
-          redact_ctx = if redacted_columns.any?
-                         SafeContext.new(connection: nil,
-                                         redacted_columns: redacted_columns)
+          redact_ctx = if redacted_columns.any? || redacted_key_values.any?
+                         SafeContext.new(
+                           connection: nil,
+                           redacted_columns: redacted_columns,
+                           redacted_key_values: redacted_key_values
+                         )
                        end
 
           build_server(executor, redact_ctx)
@@ -195,23 +210,32 @@ module Woods
           string_keyed = hash.transform_keys(&:to_s)
           return safe_ctx.redact(string_keyed) unless (string_keyed.keys & DATA_ENVELOPE_KEYS).any?
 
-          mask = positional_mask(string_keyed['columns'], safe_ctx)
+          plan = positional_plan(string_keyed['columns'], safe_ctx)
           string_keyed.each_with_object({}) do |(key, value), out|
-            out[key] = redact_envelope_value(key, value, mask, safe_ctx)
+            out[key] = redact_envelope_value(key, value, plan, safe_ctx)
           end
         end
 
-        def redact_envelope_value(key, value, mask, safe_ctx)
+        def redact_envelope_value(key, value, plan, safe_ctx)
           case key
           when 'record'         then value.is_a?(Hash) ? safe_ctx.redact(value) : value
           when 'records'        then redact_hash_array(value, safe_ctx)
-          when 'rows', 'values' then redact_positional(value, mask)
+          when 'rows', 'values' then redact_positional(value, plan)
           else                       value
           end
         end
 
         def redact_hash_array(value, safe_ctx)
           Array(value).map { |row| row.is_a?(Hash) ? safe_ctx.redact(row) : row }
+        end
+
+        # Precompute everything needed to redact positional rows for a given
+        # `columns` header: the column-name mask plus any EAV key-value rules
+        # resolved to column indexes. Returns a plain Hash so callers can pass
+        # it around without extra struct ceremony.
+        def positional_plan(columns, safe_ctx)
+          { mask: positional_mask(columns, safe_ctx),
+            kv_rules: positional_kv_rules(columns, safe_ctx) }
         end
 
         # Precompute the positional redaction mask from a `columns` header.
@@ -226,21 +250,51 @@ module Woods
           mask.any? ? mask : nil
         end
 
-        # Redact positional row data using a precomputed column mask. Handles
-        # both nested arrays (multi-column pluck, sql/query rows) and flat
-        # scalar arrays (pluck with a single column — Rails collapses the
-        # result).
-        def redact_positional(rows, mask)
-          return rows if mask.nil? || !rows.is_a?(Array)
+        # Resolve EAV patterns against a `columns` header into concrete index
+        # pairs. A rule only fires when both key_column and value_column are
+        # present in the header, and costs nothing per row otherwise.
+        def positional_kv_rules(columns, safe_ctx)
+          return [] unless columns.is_a?(Array)
 
-          rows.map { |row| row.is_a?(Array) ? redact_row(row, mask) : redact_scalar(row, mask) }
+          index = columns.each_with_index.to_h { |name, idx| [name.to_s, idx] }
+          safe_ctx.redacted_key_values.filter_map do |pattern|
+            key_idx = index[pattern['key_column']]
+            val_idx = index[pattern['value_column']]
+            next unless key_idx && val_idx
+
+            { key_idx: key_idx, val_idx: val_idx, sensitive: pattern['sensitive_keys'] }
+          end
         end
 
-        def redact_row(row, mask)
+        # Redact positional row data using a precomputed plan. Handles both
+        # nested arrays (multi-column pluck, sql/query rows) and flat scalar
+        # arrays (pluck with a single column — Rails collapses the result).
+        def redact_positional(rows, plan)
+          return rows unless rows.is_a?(Array)
+          return rows if plan[:mask].nil? && plan[:kv_rules].empty?
+
+          rows.map do |row|
+            row.is_a?(Array) ? redact_row(row, plan) : redact_scalar(row, plan[:mask])
+          end
+        end
+
+        def redact_row(row, plan)
+          result = apply_mask(row, plan[:mask])
+          plan[:kv_rules].each do |rule|
+            result[rule[:val_idx]] = '[REDACTED]' if rule[:sensitive].include?(row[rule[:key_idx]].to_s)
+          end
+          result
+        end
+
+        def apply_mask(row, mask)
+          return row.dup unless mask
+
           row.each_with_index.map { |value, idx| mask[idx] ? '[REDACTED]' : value }
         end
 
         def redact_scalar(value, mask)
+          return value unless mask
+
           mask.first ? '[REDACTED]' : value
         end
 

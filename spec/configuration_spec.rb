@@ -67,6 +67,10 @@ RSpec.describe Woods::Configuration do
     it 'sets console_redacted_columns to empty array' do
       expect(config.console_redacted_columns).to eq([])
     end
+
+    it 'sets console_redacted_key_values to empty array' do
+      expect(config.console_redacted_key_values).to eq([])
+    end
   end
 
   describe 'console MCP configuration' do
