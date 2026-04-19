@@ -33,7 +33,15 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
   before do
     stub_const('Woods::Console::EmbeddedExecutor', Class.new { def initialize(**); end })
     allow(Woods::Console::EmbeddedExecutor).to receive(:new).and_return(executor)
+    # Keep structured log lines out of test output unless an example opts in.
+    require 'woods/observability/structured_logger'
+    Woods::Console::Server.instance_variable_set(
+      :@structured_logger,
+      Woods::Observability::StructuredLogger.new(output: StringIO.new)
+    )
   end
+
+  after { Woods::Console::Server.instance_variable_set(:@structured_logger, nil) }
 
   def build(**overrides)
     Woods::Console::Server.build_embedded(
@@ -134,6 +142,65 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       expect(text).to include('sk_live_abcdefghijklmnopqrstuvwx')
       expect(text).to include('[REDACTED]')
       expect(text).not_to include('AKIAIOSFODNN7EXAMPLE')
+    end
+  end
+
+  describe 'observability' do
+    let(:log_output) { StringIO.new }
+    let(:captured_lines) { log_output.string.each_line.map { |line| JSON.parse(line) } }
+
+    before do
+      require 'woods/observability/structured_logger'
+      Woods::Console::Server.instance_variable_set(
+        :@structured_logger,
+        Woods::Observability::StructuredLogger.new(output: log_output)
+      )
+    end
+
+    after { Woods::Console::Server.instance_variable_set(:@structured_logger, nil) }
+
+    it 'emits console.credential_scan.hits when the scanner fires' do
+      server = build
+      allow(executor).to receive(:send_request).and_return(
+        'ok' => true,
+        'result' => { 'record' => { 'token' => 'sk_live_abcdefghijklmnopqrstuvwx' } }
+      )
+
+      call_tool(server, 'console_find', model: 'User', id: 1)
+
+      entry = captured_lines.find { |l| l['event'] == 'console.credential_scan.hits' }
+      expect(entry).to include(
+        'level' => 'warn',
+        'tool' => 'find',
+        'total' => 1,
+        'counts' => { 'stripe_secret_key' => 1 }
+      )
+    end
+
+    it 'does not emit when the scanner finds nothing' do
+      server = build
+      allow(executor).to receive(:send_request).and_return(
+        'ok' => true, 'result' => { 'record' => { 'email' => 'clean@example.com' } }
+      )
+
+      call_tool(server, 'console_find', model: 'User', id: 1)
+
+      expect(captured_lines).to be_empty
+    end
+
+    it 'emits console.table_gate.rejected when Layer 1 blocks a tool' do
+      Woods.configuration.console_blocked_tables = %w[authorizations]
+      server = build
+
+      call_tool(server, 'console_find', model: 'Authorization', id: 1)
+
+      entry = captured_lines.find { |l| l['event'] == 'console.table_gate.rejected' }
+      expect(entry).to include(
+        'level' => 'warn',
+        'tool' => 'console_find',
+        'model' => 'Authorization'
+      )
+      expect(entry['message']).to include('authorizations')
     end
   end
 
