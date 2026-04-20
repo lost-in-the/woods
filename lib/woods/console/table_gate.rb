@@ -44,7 +44,7 @@ module Woods
       # can compare against either the bare or qualified configured form.
       # ANSI-89 comma joins are handled separately — see FROM_CLAUSE.
       JOIN_REFERENCE = /
-        \bJOIN\s+
+        \b(?:STRAIGHT_)?JOIN\s+
         (?:
           (?:
             `(?<jschema_bt>[^`]+)` |
@@ -74,7 +74,7 @@ module Woods
         (?<clause>.+?)
         (?=
           \b(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|
-               JOIN|INNER|OUTER|LEFT|RIGHT|FULL|CROSS|FROM)\b
+               STRAIGHT_JOIN|JOIN|INNER|OUTER|LEFT|RIGHT|FULL|CROSS|FROM)\b
           | [;)]
           | \z
         )

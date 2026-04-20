@@ -45,6 +45,12 @@ RSpec.describe Woods::Console::TableGate do
           .to raise_error(Woods::Console::TableGateError)
       end
 
+      it 'rejects MySQL STRAIGHT_JOIN' do
+        sql = 'SELECT * FROM users STRAIGHT_JOIN authorizations ON users.id = authorizations.user_id'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
       it 'rejects backtick-quoted identifiers (MySQL)' do
         expect { gate.check_sql!('SELECT * FROM `authorizations`') }
           .to raise_error(Woods::Console::TableGateError)
