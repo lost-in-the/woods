@@ -227,8 +227,8 @@ module Woods
             counts: counts.transform_keys(&:to_s),
             total: counts.values.sum
           )
-        rescue StandardError
-          nil # Never let observability failures break a tool response.
+        rescue StandardError => e
+          handle_observability_failure(e)
         end
 
         def structured_logger
@@ -236,6 +236,20 @@ module Woods
             require 'woods/observability/structured_logger'
             Woods::Observability::StructuredLogger.new
           end
+        end
+
+        # Swallow observability failures so they never break a tool response,
+        # but emit a single warn so operators can see if the structured
+        # logging pipeline is broken. Subsequent failures stay silent to
+        # avoid flooding stderr.
+        def handle_observability_failure(error)
+          return if @observability_failure_reported
+
+          @observability_failure_reported = true
+          warn '[woods-console] structured logger failed ' \
+               "(#{error.class}: #{error.message}); further failures will be silent."
+        rescue StandardError
+          nil
         end
 
         # Data-shape keys used by console tool responses. When any of these keys
@@ -846,8 +860,8 @@ module Woods
             has_sql: args[:sql] ? true : false,
             message: error.message
           )
-        rescue StandardError
-          nil
+        rescue StandardError => e
+          handle_observability_failure(e)
         end
 
         # Pre-compute property keys declared as integer in a schema.
