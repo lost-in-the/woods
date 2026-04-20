@@ -157,6 +157,56 @@ RSpec.describe Woods::Console::TableGate do
       end
     end
 
+    context 'when a schema-qualified entry is on the block list' do
+      let(:gate) do
+        described_class.new(blocked_tables: %w[audit.authorizations], model_tables: {})
+      end
+
+      it 'rejects the matching schema-qualified bare reference' do
+        expect { gate.check_sql!('SELECT * FROM audit.authorizations') }
+          .to raise_error(Woods::Console::TableGateError, /audit\.authorizations/i)
+      end
+
+      it 'rejects the matching schema-qualified double-quoted reference' do
+        expect { gate.check_sql!('SELECT * FROM "audit"."authorizations"') }
+          .to raise_error(Woods::Console::TableGateError, /audit\.authorizations/i)
+      end
+
+      it 'rejects the matching schema-qualified backtick reference (MySQL)' do
+        expect { gate.check_sql!('SELECT * FROM `audit`.`authorizations`') }
+          .to raise_error(Woods::Console::TableGateError, /audit\.authorizations/i)
+      end
+
+      it 'allows references in a different schema' do
+        expect { gate.check_sql!('SELECT * FROM public.authorizations') }.not_to raise_error
+        expect { gate.check_sql!('SELECT * FROM "public"."authorizations"') }.not_to raise_error
+      end
+
+      it 'allows the bare table name (no schema)' do
+        expect { gate.check_sql!('SELECT * FROM authorizations') }.not_to raise_error
+      end
+    end
+
+    context 'when a bare entry is on the block list' do
+      let(:gate) do
+        described_class.new(blocked_tables: %w[authorizations], model_tables: {})
+      end
+
+      it 'continues to reject the bare reference' do
+        expect { gate.check_sql!('SELECT * FROM authorizations') }
+          .to raise_error(Woods::Console::TableGateError)
+      end
+
+      it 'continues to reject every schema-qualified variant (wildcard)' do
+        expect { gate.check_sql!('SELECT * FROM public.authorizations') }
+          .to raise_error(Woods::Console::TableGateError)
+        expect { gate.check_sql!('SELECT * FROM audit.authorizations') }
+          .to raise_error(Woods::Console::TableGateError)
+        expect { gate.check_sql!('SELECT * FROM "public"."authorizations"') }
+          .to raise_error(Woods::Console::TableGateError)
+      end
+    end
+
     context 'when multiple tables are blocked' do
       let(:gate) do
         described_class.new(blocked_tables: %w[authorizations secrets credentials], model_tables: {})

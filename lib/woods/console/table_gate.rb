@@ -100,21 +100,31 @@ module Woods
         )
       /xi
 
-      # @param blocked_tables [Array<String>] table names to block (case-insensitive).
+      # @param blocked_tables [Array<String>] table names to block
+      #   (case-insensitive). Bare names (`"authorizations"`) match every
+      #   schema; schema-qualified entries (`"audit.authorizations"`) only
+      #   match references that carry the same schema prefix.
       # @param model_tables [Hash{String=>String}] model name => table name.
       # @param model_reflections [Hash{String=>Hash{String=>String}}]
       #   model name => { association_name => target_table }. Used by
       #   #check_joins! and #check_association! to resolve association names
       #   before consulting the block list.
       def initialize(blocked_tables:, model_tables:, model_reflections: {})
-        @blocked = Array(blocked_tables).to_set { |t| t.to_s.downcase }
+        @blocked_bare = Set.new
+        @blocked_qualified = Set.new
+        Array(blocked_tables).each do |entry|
+          name = entry.to_s.downcase
+          next if name.empty?
+
+          name.include?('.') ? @blocked_qualified << name : @blocked_bare << name
+        end
         @model_tables = model_tables || {}
         @model_reflections = model_reflections || {}
       end
 
       # @return [Boolean] whether the gate has any tables to enforce.
       def active?
-        !@blocked.empty?
+        !(@blocked_bare.empty? && @blocked_qualified.empty?)
       end
 
       # @raise [TableGateError] if the SQL references a blocked table.
@@ -191,8 +201,16 @@ module Woods
 
       private
 
+      # Schema-qualified configured entries (e.g., `audit.authorizations`)
+      # match the incoming identifier verbatim, so a reference to
+      # `public.authorizations` is *not* blocked. Bare configured entries
+      # match every schema by comparing the schema-stripped form, preserving
+      # the original wildcard semantics.
       def blocked?(raw)
-        @blocked.include?(strip_schema(raw).downcase)
+        name = raw.to_s.downcase
+        return true if @blocked_qualified.include?(name)
+
+        @blocked_bare.include?(strip_schema(name))
       end
 
       # Match every JOIN token and reject blocked targets. When a quoted
