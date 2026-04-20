@@ -70,6 +70,38 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
     end
 
+    # Regression: ActiveRecord::Base.connection is deprecated in Rails 7.2 and
+    # removed in 8.0. The fallback in #active_connection must use the
+    # cross-version `connection_pool.with_connection` API instead.
+    context 'connection fallback (no injected connection)' do
+      let(:fallback_conn) { instance_double('Connection') }
+      let(:pool) { instance_double('ActiveRecord::ConnectionPool') }
+      let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
+
+      subject(:executor) do
+        described_class.new(model_validator: validator, safe_context: safe_context)
+      end
+
+      before do
+        allow(ar_base).to receive(:connection_pool).and_return(pool)
+        allow(pool).to receive(:with_connection).and_yield(fallback_conn)
+        allow(fallback_conn).to receive(:adapter_name).and_return('PostgreSQL')
+      end
+
+      it 'resolves the connection through connection_pool.with_connection' do
+        response = executor.send_request({ 'tool' => 'status', 'params' => {} })
+
+        expect(response['ok']).to be true
+        expect(response['result']['adapter']).to eq('PostgreSQL')
+        expect(pool).to have_received(:with_connection)
+      end
+
+      it 'never invokes the deprecated ActiveRecord::Base.connection' do
+        expect(ar_base).not_to receive(:connection)
+        executor.send_request({ 'tool' => 'status', 'params' => {} })
+      end
+    end
+
     context 'count tool' do
       let(:user_model) { class_double('User') }
       let(:relation) { instance_double('ActiveRecord::Relation') }

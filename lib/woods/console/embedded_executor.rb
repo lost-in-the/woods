@@ -396,9 +396,18 @@ module Woods
 
       # Return the database connection (injected or from ActiveRecord).
       #
+      # Falls back to `connection_pool.with_connection { |c| c }` instead of
+      # `ActiveRecord::Base.connection` because the latter is deprecated in
+      # Rails 7.2 and removed in 8.0. `with_connection` is the supported
+      # cross-version API (6.1 → 8.x); the connection is leased for the
+      # block but the per-thread pool cache keeps it usable for the
+      # immediately-following `select_all` call.
+      #
       # @return [Object] Database connection
       def active_connection
-        @connection || ActiveRecord::Base.connection
+        return @connection if @connection
+
+        ActiveRecord::Base.connection_pool.with_connection { |conn| conn }
       end
 
       # Recursively convert all Hash keys to strings.
