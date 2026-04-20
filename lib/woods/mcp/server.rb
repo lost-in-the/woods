@@ -181,17 +181,23 @@ module Woods
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'search',
-            description: 'Search code units by pattern. Matches against identifiers by default; can also search source_code and metadata fields.',
+            description: 'Find code units whose identifiers (or source/metadata) match a regex. ' \
+                         'Example: search("Worker|Job") returns all workers and jobs; search("^Post") ' \
+                         'returns units starting with "Post". Returns [{identifier, type, match_field}]. ' \
+                         'Use `lookup` for exact identifiers, `dependencies`/`dependents` for graph traversal. ' \
+                         'Gotchas: query is a Ruby regex — literal pipe needs escaping as \\|; ' \
+                         'types restricts which index directories are scanned (e.g. ["mailer"] scans only ' \
+                         'the mailers dir); invalid regex falls back to literal match.',
             input_schema: {
               properties: {
-                query: { type: 'string', description: 'Search pattern (case-insensitive regex)' },
+                query: { type: 'string', description: 'Case-insensitive Ruby regex pattern (e.g. "Worker|Job", "^Post", ".*Service$")' },
                 types: {
                   type: 'array', items: { type: 'string' },
-                  description: 'Filter to these types: model, controller, service, job, mailer, etc.'
+                  description: 'Restrict scan to these unit types: model, controller, service, job, mailer, etc.'
                 },
                 fields: {
                   type: 'array', items: { type: 'string' },
-                  description: 'Fields to search: identifier, source_code, metadata. Default: [identifier]'
+                  description: 'Fields to search: identifier (default), source_code, metadata'
                 },
                 limit: { type: 'integer', description: 'Maximum results (default: 20)' }
               },
@@ -201,17 +207,21 @@ module Woods
             types = coerce.call(types)
             fields = coerce.call(fields)
             limit = coerce_int.call(limit)
-            results = reader.search(
+            search_result = reader.search(
               query,
               types: types,
               fields: fields || %w[identifier],
               limit: limit || 20
             )
-            respond.call(renderer.render(:search, {
-                                           query: query,
-                                           result_count: results.size,
-                                           results: results
-                                         }))
+            results = search_result[:results]
+            payload = {
+              query: query,
+              result_count: results.size,
+              results: results
+            }
+            payload[:note] = search_result[:note] if search_result[:note]
+            payload[:partial] = true if search_result[:partial]
+            respond.call(renderer.render(:search, payload))
           end
         end
 
@@ -228,14 +238,20 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Filter to these types'
+                },
+                via: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Filter by relationship type (e.g. link_to, redirect_to, form_action, render, ' \
+                               'code_reference, belongs_to, has_many)'
                 }
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil|
             types = coerce.call(types)
+            via = coerce.call(via)
             depth = coerce_int.call(depth)
-            result = reader.send(reader_method, identifier, depth: depth || 2, types: types)
+            result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via)
             if result[:found] == false
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
@@ -456,12 +472,15 @@ module Woods
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'codebase_retrieve',
-            description: 'Retrieve relevant codebase context for a natural language query using semantic search. ' \
-                         'Returns ranked code units assembled into a token-budgeted context string.',
+            description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
+                         'Example: codebase_retrieve("how does billing work?") returns ranked source context. ' \
+                         'Returns a token-budgeted context string ready to paste into a prompt. ' \
+                         'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
+                         'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable.',
             input_schema: {
               properties: {
                 query: { type: 'string',
-                         description: 'Natural language query (e.g. "How does user authentication work?")' },
+                         description: 'Natural language question (e.g. "How does user authentication work?")' },
                 budget: { type: 'integer', description: 'Token budget for context assembly (default: 8000)' }
               },
               required: ['query']
@@ -473,8 +492,10 @@ module Woods
               respond.call(result.context)
             else
               respond.call(
-                'Semantic search is not available. Embedding provider is not configured. ' \
-                'Use the search tool for pattern-based search instead.'
+                'Semantic search is disabled — no embedding provider is configured. ' \
+                'To enable: set OPENAI_API_KEY, or run Ollama locally ' \
+                '(brew install ollama && ollama serve && ollama pull nomic-embed-text). ' \
+                'Use the `search` tool for pattern-based matching in the meantime.'
               )
             end
           end

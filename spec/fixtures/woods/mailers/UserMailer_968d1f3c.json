@@ -1,0 +1,16 @@
+{
+  "type": "mailer",
+  "identifier": "UserMailer",
+  "file_path": "app/mailers/user_mailer.rb",
+  "namespace": null,
+  "source_code": "class UserMailer < ApplicationMailer\n  def welcome_email(user)\n    @user = user\n    mail(to: @user.email, subject: 'Welcome!')\n  end\nend\n",
+  "metadata": {
+    "parent_class": "ApplicationMailer",
+    "actions": ["welcome_email"]
+  },
+  "dependencies": [],
+  "dependents": [],
+  "chunks": [],
+  "extracted_at": "2026-01-15T12:00:00Z",
+  "source_hash": "mailer123"
+}

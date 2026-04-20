@@ -71,7 +71,9 @@ module Woods
       # Attempt to build a retriever for semantic search.
       #
       # Auto-configures from environment variables when no explicit configuration
-      # exists. Returns nil if embedding is unavailable or setup fails.
+      # exists. Probes for OpenAI API key first, then checks for a reachable Ollama
+      # instance. Emits a one-line STDERR banner indicating whether semantic search
+      # is enabled and which provider is active.
       #
       # @return [Woods::Retriever, nil]
       def self.build_retriever
@@ -86,10 +88,55 @@ module Woods
           config.embedding_options = { api_key: openai_key }
         end
 
-        Woods::Builder.new(config).build_retriever if config.embedding_provider
+        if !config.embedding_provider && ollama_reachable?
+          config.vector_store = :in_memory
+          config.metadata_store = :in_memory
+          config.graph_store = :in_memory
+          config.embedding_provider = :ollama
+          config.embedding_options = {
+            base_url: ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434'),
+            model: ENV.fetch('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
+          }
+        end
+
+        if config.embedding_provider
+          retriever = Woods::Builder.new(config).build_retriever
+          warn "[woods-mcp] semantic search: enabled (#{config.embedding_provider})"
+          retriever
+        else
+          warn '[woods-mcp] semantic search: disabled — set OPENAI_API_KEY, ' \
+               'or run Ollama (brew install ollama && ollama serve)'
+          nil
+        end
       rescue StandardError => e
         warn "Note: Semantic search unavailable (#{e.message}). Using pattern-based search only."
         nil
+      end
+
+      # Check whether Ollama is reachable at the configured base URL.
+      #
+      # Uses a 500ms timeout so startup is not meaningfully delayed when Ollama
+      # is absent. Probes /api/tags (the documented list-models endpoint) so any
+      # running Ollama version responds. Treats any non-5xx response as reachable
+      # — we only care whether something is listening, not whether the response
+      # body is well-formed. Returns false on any network error or timeout.
+      #
+      # @return [Boolean]
+      def self.ollama_reachable?
+        require 'net/http'
+        require 'uri'
+
+        base_url = ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434')
+        uri = URI.parse(base_url)
+
+        Net::HTTP.start(uri.host, uri.port,
+                        open_timeout: 0.5, read_timeout: 0.5,
+                        use_ssl: uri.scheme == 'https') do |http|
+          response = http.get('/api/tags')
+          !response.is_a?(Net::HTTPServerError)
+        end
+      rescue StandardError
+        false
       end
     end
   end

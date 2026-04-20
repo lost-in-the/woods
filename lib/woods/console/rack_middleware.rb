@@ -10,8 +10,44 @@ module Woods
     # and all models are loaded. Uses ActiveRecord connection pool for thread
     # safety under Puma.
     #
-    # @example In config/application.rb or an initializer:
+    # == Basic setup (Tier 1 tools only)
+    #
+    # Add to config/application.rb or an initializer:
+    #
     #   config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
+    #
+    # This mounts 31 console tools at /mcp/console. By default, console_sql and
+    # console_query are blocked in embedded mode and return an "unsupported" error
+    # pointing users to enable the flag.
+    #
+    # == Enabling read tools (console_sql + console_query)
+    #
+    # Set embedded_read_tools: true to unlock the sql and query tools:
+    #
+    #   # config/initializers/woods_console.rb
+    #   Rails.application.config.middleware.use \
+    #     Woods::Console::RackMiddleware,
+    #     path: '/mcp/console',
+    #     embedded_read_tools: true
+    #
+    # Security posture with embedded_read_tools: true:
+    #
+    # 1. SqlValidator denylist — console_sql rejects INSERT/UPDATE/DELETE/DROP/TRUNCATE/
+    #    ALTER/CREATE/REPLACE and similar DML/DDL at the string level before any database
+    #    interaction. Only SELECT and WITH...SELECT are allowed.
+    #
+    # 2. SafeContext rollback — every request (including console_query) runs inside
+    #    a database transaction that is always rolled back on completion. Even if a
+    #    query somehow mutated state (e.g. a function with side effects), the rollback
+    #    ensures nothing persists.
+    #
+    # 3. Per-request connection pooling — each HTTP request draws a connection from
+    #    ActiveRecord::Base's pool and returns it after the response. No shared
+    #    mutable state leaks between requests.
+    #
+    # These three layers make embedded_read_tools: true safe for read-only workloads.
+    # If your threat model requires stricter isolation, use the bridge mode instead
+    # (docs/CONSOLE_MCP_SETUP.md) which runs the executor in a separate process.
     #
     class RackMiddleware
       # @param app [#call] The next Rack app in the middleware stack
@@ -25,16 +61,24 @@ module Woods
         @transport = nil
       end
 
+      DISABLED_BODY = JSON.generate(
+        error: 'woods_console_disabled',
+        message: 'Woods Console MCP is disabled in this release pending security review. ' \
+                 'See CHANGELOG.md for details.'
+      ).freeze
+
       # Rack interface — intercepts requests at the configured path.
+      #
+      # The Console MCP feature is disabled in this release; requests to the
+      # mounted path return 410 Gone. See CHANGELOG.md for the rationale.
+      # All other requests pass through to the wrapped app unchanged.
       #
       # @param env [Hash] Rack environment
       # @return [Array] Rack response triple
       def call(env)
         return @app.call(env) unless env['PATH_INFO'].start_with?(@path)
 
-        transport = ensure_transport
-        request = Rack::Request.new(env)
-        transport.handle_request(request)
+        [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]]
       end
 
       private
@@ -42,44 +86,41 @@ module Woods
       # Thread-safe lazy initialization of the MCP server and transport.
       #
       # @return [MCP::Server::Transports::StreamableHTTPTransport]
-      def ensure_transport # rubocop:disable Metrics/MethodLength
+      def ensure_transport
         return @transport if @transport
 
         @mutex.synchronize do
           return @transport if @transport
 
           require 'woods/console/server'
-
           Rails.application.eager_load!
 
-          registry = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
-            next if model.abstract_class?
-            next unless model.table_exists?
-
-            hash[model.name] = model.column_names
-          rescue StandardError
-            next
-          end
-
-          validator = ModelValidator.new(registry: registry)
-
-          config = Woods.configuration
-          redacted = Array(config.console_redacted_columns)
-
-          # Each HTTP request gets its own connection from the pool.
-          # SafeContext wraps that connection in a rolled-back transaction.
-          safe_context = SafeContext.new(connection: ActiveRecord::Base.connection)
-
-          server = Server.build_embedded(
-            model_validator: validator,
-            safe_context: safe_context,
-            redacted_columns: redacted,
-            read_tools_enabled: @embedded_read_tools
-          )
-
+          server = build_embedded_server
           @transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
           server.transport = @transport
           @transport
+        end
+      end
+
+      def build_embedded_server
+        config = Woods.configuration
+        Server.build_embedded(
+          model_validator: ModelValidator.new(registry: build_model_registry),
+          safe_context: SafeContext.new(connection: ActiveRecord::Base.connection),
+          redacted_columns: Array(config.console_redacted_columns),
+          redacted_key_values: Array(config.console_redacted_key_values),
+          read_tools_enabled: @embedded_read_tools
+        )
+      end
+
+      def build_model_registry
+        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+          next if model.abstract_class?
+          next unless model.table_exists?
+
+          hash[model.name] = model.column_names
+        rescue StandardError
+          next
         end
       end
     end

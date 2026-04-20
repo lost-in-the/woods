@@ -42,7 +42,16 @@ module Woods
           connection_config = config['console'] || config
           conn_mgr = ConnectionManager.new(config: connection_config)
           redacted_columns = Array(config['redacted_columns'] || connection_config['redacted_columns'])
-          safe_ctx = redacted_columns.any? ? SafeContext.new(connection: nil, redacted_columns: redacted_columns) : nil
+          redacted_key_values = Array(
+            config['redacted_key_values'] || connection_config['redacted_key_values']
+          )
+          safe_ctx = if redacted_columns.any? || redacted_key_values.any?
+                       SafeContext.new(
+                         connection: nil,
+                         redacted_columns: redacted_columns,
+                         redacted_key_values: redacted_key_values
+                       )
+                     end
 
           build_server(conn_mgr, safe_ctx)
         end
@@ -55,10 +64,13 @@ module Woods
         # @param model_validator [ModelValidator] Validates model/column names
         # @param safe_context [SafeContext] Wraps queries in rolled-back transactions
         # @param redacted_columns [Array<String>] Column names to redact from output
+        # @param redacted_key_values [Array<Hash>] EAV redaction patterns. Each pattern:
+        #   {key_column:, value_column:, sensitive_keys: []}. See SafeContext for semantics.
         # @param connection [Object, nil] Database connection for adapter detection
         # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
         # @return [MCP::Server] Configured server ready for transport
-        def build_embedded(model_validator:, safe_context:, redacted_columns: [], connection: nil,
+        def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists
+                           redacted_key_values: [], connection: nil,
                            read_tools_enabled: false)
           require_relative 'embedded_executor'
 
@@ -66,9 +78,12 @@ module Woods
             model_validator: model_validator, safe_context: safe_context,
             connection: connection, read_tools_enabled: read_tools_enabled
           )
-          redact_ctx = if redacted_columns.any?
-                         SafeContext.new(connection: nil,
-                                         redacted_columns: redacted_columns)
+          redact_ctx = if redacted_columns.any? || redacted_key_values.any?
+                         SafeContext.new(
+                           connection: nil,
+                           redacted_columns: redacted_columns,
+                           redacted_key_values: redacted_key_values
+                         )
                        end
 
           build_server(executor, redact_ctx)
@@ -158,23 +173,129 @@ module Woods
           ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: e.message)
         end
 
+        # Data-shape keys used by console tool responses. When any of these keys
+        # appear at the top of a Hash result we treat the value as row data and
+        # descend into it instead of redacting at the envelope level. Keeping
+        # this list narrow avoids accidentally recursing into schema payloads
+        # (e.g. `console_schema` returns {columns: {...}} where `columns` is a
+        # Hash of column metadata, not row values).
+        DATA_ENVELOPE_KEYS = %w[record records rows values].freeze
+        private_constant :DATA_ENVELOPE_KEYS
+
         # Apply SafeContext column redaction to a result value.
         #
-        # Handles Hash (single record) and Array<Hash> (multiple records).
-        # Non-Hash values are returned unchanged.
+        # Redaction is shape-aware:
+        #   - {record: Hash}          (find)         — redact the nested hash
+        #   - {records: [Hash]}       (sample, recent) — redact each nested hash
+        #   - {columns: [...], rows:   [[...]]}  (sql, query) — positional
+        #   - {columns: [...], values: [...|[...]]} (pluck)  — positional
+        #   - Plain Hash              — redact top-level keys
+        #   - Array<Hash>             — redact each hash
         #
-        # @param result [Object] The result from the bridge
+        # @param result [Object] The result from the bridge or embedded executor
         # @param safe_ctx [SafeContext] The context with redacted_columns configured
-        # @return [Object] Redacted result
+        # @return [Object] Redacted result, same shape as input
         def apply_redaction(result, safe_ctx)
           case result
           when Array
-            result.map { |item| item.is_a?(Hash) ? safe_ctx.redact(item) : item }
+            result.map { |item| item.is_a?(Hash) ? apply_redaction(item, safe_ctx) : item }
           when Hash
-            safe_ctx.redact(result)
+            redact_hash(result, safe_ctx)
           else
             result
           end
+        end
+
+        def redact_hash(hash, safe_ctx)
+          string_keyed = hash.transform_keys(&:to_s)
+          return safe_ctx.redact(string_keyed) unless (string_keyed.keys & DATA_ENVELOPE_KEYS).any?
+
+          plan = positional_plan(string_keyed['columns'], safe_ctx)
+          string_keyed.each_with_object({}) do |(key, value), out|
+            out[key] = redact_envelope_value(key, value, plan, safe_ctx)
+          end
+        end
+
+        def redact_envelope_value(key, value, plan, safe_ctx)
+          case key
+          when 'record'         then value.is_a?(Hash) ? safe_ctx.redact(value) : value
+          when 'records'        then redact_hash_array(value, safe_ctx)
+          when 'rows', 'values' then redact_positional(value, plan)
+          else                       value
+          end
+        end
+
+        def redact_hash_array(value, safe_ctx)
+          Array(value).map { |row| row.is_a?(Hash) ? safe_ctx.redact(row) : row }
+        end
+
+        # Precompute everything needed to redact positional rows for a given
+        # `columns` header: the column-name mask plus any EAV key-value rules
+        # resolved to column indexes. Returns a plain Hash so callers can pass
+        # it around without extra struct ceremony.
+        def positional_plan(columns, safe_ctx)
+          { mask: positional_mask(columns, safe_ctx),
+            kv_rules: positional_kv_rules(columns, safe_ctx) }
+        end
+
+        # Precompute the positional redaction mask from a `columns` header.
+        # Returns nil when there is nothing to redact so callers can short-circuit.
+        def positional_mask(columns, safe_ctx)
+          return nil unless columns.is_a?(Array)
+
+          redacted = safe_ctx.redacted_columns
+          return nil if redacted.empty?
+
+          mask = columns.map { |name| redacted.include?(name.to_s) }
+          mask.any? ? mask : nil
+        end
+
+        # Resolve EAV patterns against a `columns` header into concrete index
+        # pairs. A rule only fires when both key_column and value_column are
+        # present in the header, and costs nothing per row otherwise.
+        def positional_kv_rules(columns, safe_ctx)
+          return [] unless columns.is_a?(Array)
+
+          index = columns.each_with_index.to_h { |name, idx| [name.to_s, idx] }
+          safe_ctx.redacted_key_values.filter_map do |pattern|
+            key_idx = index[pattern['key_column']]
+            val_idx = index[pattern['value_column']]
+            next unless key_idx && val_idx
+
+            { key_idx: key_idx, val_idx: val_idx, sensitive: pattern['sensitive_keys'] }
+          end
+        end
+
+        # Redact positional row data using a precomputed plan. Handles both
+        # nested arrays (multi-column pluck, sql/query rows) and flat scalar
+        # arrays (pluck with a single column — Rails collapses the result).
+        def redact_positional(rows, plan)
+          return rows unless rows.is_a?(Array)
+          return rows if plan[:mask].nil? && plan[:kv_rules].empty?
+
+          rows.map do |row|
+            row.is_a?(Array) ? redact_row(row, plan) : redact_scalar(row, plan[:mask])
+          end
+        end
+
+        def redact_row(row, plan)
+          result = apply_mask(row, plan[:mask])
+          plan[:kv_rules].each do |rule|
+            result[rule[:val_idx]] = '[REDACTED]' if rule[:sensitive].include?(row[rule[:key_idx]].to_s)
+          end
+          result
+        end
+
+        def apply_mask(row, mask)
+          return row.dup unless mask
+
+          row.each_with_index.map { |value, idx| mask[idx] ? '[REDACTED]' : value }
+        end
+
+        def redact_scalar(value, mask)
+          return value unless mask
+
+          mask.first ? '[REDACTED]' : value
         end
 
         def build_console_renderer
@@ -187,18 +308,27 @@ module Woods
         end
 
         def define_count(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_count', 'Count records matching scope conditions',
-                              properties: { model: str_prop('Model name'), scope: obj_prop('Filter conditions') },
+          define_console_tool(server, conn_mgr, 'console_count', 'Count records matching scope conditions.',
+                              properties: {
+                                model: str_prop('Model name'),
+                                scope: obj_prop('Filter: {status: "paid", total_refund_gt: 0, ' \
+                                                'transaction_id_not_null: true}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.')
+                              },
                               required: ['model'], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_count(model: args[:model], scope: args[:scope])
           end
         end
 
         def define_sample(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_sample', 'Random sample of records',
+          define_console_tool(server, conn_mgr, 'console_sample', 'Random sample of records.',
                               properties: {
                                 model: str_prop('Model name'), limit: int_prop('Max records (default 5, max 25)'),
-                                columns: arr_prop('Columns to include'), scope: obj_prop('Filter conditions')
+                                columns: arr_prop('Columns to include'),
+                                scope: obj_prop('Filter: {status: "paid", amount_gt: 100}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.')
                               }, required: ['model'], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_sample(
               model: args[:model], scope: args[:scope], limit: args[:limit] || 5, columns: args[:columns]
@@ -219,10 +349,12 @@ module Woods
         end
 
         def define_pluck(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_pluck', 'Extract column values from records',
+          define_console_tool(server, conn_mgr, 'console_pluck', 'Extract column values from records.',
                               properties: {
                                 model: str_prop('Model name'), columns: arr_prop('Column names to pluck'),
-                                scope: obj_prop('Filter conditions'),
+                                scope: obj_prop('Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.'),
                                 limit: int_prop('Max records (default 100, max 1000)'),
                                 distinct: bool_prop('Return unique values only')
                               }, required: %w[model columns], safe_ctx: safe_ctx, renderer: renderer) do |args|
@@ -235,12 +367,17 @@ module Woods
 
         def define_aggregate(server, conn_mgr, safe_ctx = nil, renderer: nil)
           define_console_tool(server, conn_mgr, 'console_aggregate',
-                              'Run aggregate function (sum/avg/min/max) on a column',
+                              'Run aggregate function on a column. ' \
+                              'count omits column to count all rows. ' \
+                              'Supports scope predicates: {status: "paid", total_gt: 0}. ' \
+                              'For complex queries use console_query.',
                               properties: {
                                 model: str_prop('Model name'),
-                                function: str_prop('Aggregate function: sum, avg, minimum, maximum'),
-                                column: str_prop('Column to aggregate'), scope: obj_prop('Filter conditions')
-                              }, required: %w[model function column], safe_ctx: safe_ctx, renderer: renderer) do |args|
+                                function: str_prop('Aggregate function: sum, average, minimum, maximum, count'),
+                                column: str_prop('Column to aggregate (optional for count)'),
+                                scope: obj_prop('Filter conditions: {col: val} or predicate suffixes ' \
+                                                '(_gt, _lt, _in, _null, etc.)')
+                              }, required: %w[model function], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_aggregate(
               model: args[:model], function: args[:function], column: args[:column], scope: args[:scope]
             )
@@ -249,11 +386,13 @@ module Woods
 
         def define_association_count(server, conn_mgr, safe_ctx = nil, renderer: nil)
           define_console_tool(server, conn_mgr, 'console_association_count',
-                              'Count associated records for a specific record',
+                              'Count associated records for a specific record.',
                               properties: {
                                 model: str_prop('Model name'), id: int_prop('Record primary key'),
                                 association: str_prop('Association name'),
-                                scope: obj_prop('Filter on association')
+                                scope: obj_prop('Filter on association: {status: "paid", amount_gt: 0}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.')
                               }, required: %w[model id association], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_association_count(
               model: args[:model], id: args[:id], association: args[:association], scope: args[:scope]
@@ -272,13 +411,16 @@ module Woods
         end
 
         def define_recent(server, conn_mgr, safe_ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_recent', 'Recently created/updated records',
+          define_console_tool(server, conn_mgr, 'console_recent', 'Recently created/updated records.',
                               properties: {
                                 model: str_prop('Model name'),
                                 order_by: str_prop('Column to sort by (default: created_at)'),
                                 direction: str_prop('Sort direction: asc or desc (default: desc)'),
                                 limit: int_prop('Max records (default 10, max 50)'),
-                                scope: obj_prop('Filter conditions'), columns: arr_prop('Columns to include')
+                                scope: obj_prop('Filter: {status: "paid", total_gt: 0}. ' \
+                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                                'Complex queries: use console_query.'),
+                                columns: arr_prop('Columns to include')
                               }, required: ['model'], safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier1.console_recent(
               model: args[:model], order_by: args[:order_by] || 'created_at',
@@ -537,8 +679,13 @@ module Woods
 
         def define_sql(server, conn_mgr, safe_ctx = nil, renderer: nil)
           validator = SqlValidator.new
-          define_console_tool(server, conn_mgr, 'console_sql',
-                              'Execute read-only SQL (SELECT/WITH...SELECT only)',
+          sql_description = [
+            'Execute read-only SQL against the live database (SELECT/WITH...SELECT only).',
+            'SqlValidator blocks all DML/DDL. Every query runs inside a rolled-back transaction — no writes persist.',
+            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
+            'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
+          ].join(' ')
+          define_console_tool(server, conn_mgr, 'console_sql', sql_description,
                               properties: {
                                 sql: str_prop('SQL query (SELECT or WITH...SELECT only)'),
                                 limit: int_prop('Max rows returned (default unlimited, max 10000)')
@@ -547,15 +694,27 @@ module Woods
           end
         end
 
+        # rubocop:disable Metrics/MethodLength
         def define_query(server, conn_mgr, safe_ctx = nil, renderer: nil)
+          query_description = [
+            'Build and run a structured ActiveRecord query with optional joins, grouping, and ordering.',
+            'Example: {model: "Order", select: ["status", "COUNT(*) AS n"], group_by: ["status"]}.',
+            'Use console_count or console_aggregate for simple aggregates without a custom SELECT.',
+            'Use console_sql when you need raw SQL that the query builder cannot express.',
+            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
+            'Max 10,000 rows returned. Returns columns + rows arrays like a SQL result set.'
+          ].join(' ')
           props = {
-            model: str_prop('Model name'), select: arr_prop('Columns to select'),
-            joins: arr_prop('Associations to join'), group_by: arr_prop('Columns to group by'),
-            having: str_prop('HAVING clause'), order: obj_prop('Order specification'),
-            scope: obj_prop('Filter conditions'), limit: int_prop('Max rows (max 10000)')
+            model: str_prop('ActiveRecord model name (e.g. "Order")'),
+            select: arr_prop('Columns or expressions to select (e.g. ["status", "COUNT(*) AS n"])'),
+            joins: arr_prop('Association names to JOIN (e.g. ["line_items", "user"])'),
+            group_by: arr_prop('Columns to GROUP BY (e.g. ["status", "user_id"])'),
+            having: str_prop('HAVING filter applied after GROUP BY (e.g. "COUNT(*) > 5")'),
+            order: obj_prop('Order specification as {column => direction} (e.g. {"created_at" => "desc"})'),
+            scope: obj_prop('WHERE conditions as {column => value} or [sql, bind] array'),
+            limit: int_prop('Maximum rows to return (default 10000, hard max 10000)')
           }
-          define_console_tool(server, conn_mgr, 'console_query',
-                              'Enhanced query builder with joins and grouping',
+          define_console_tool(server, conn_mgr, 'console_query', query_description,
                               properties: props, required: %w[model select],
                               safe_ctx: safe_ctx, renderer: renderer) do |args|
             Tools::Tier4.console_query(
@@ -565,6 +724,7 @@ module Woods
             )
           end
         end
+        # rubocop:enable Metrics/MethodLength
 
         # Shared tool definition helper that wires block -> bridge -> response.
         # rubocop:disable Metrics/ParameterLists

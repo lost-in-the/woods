@@ -263,6 +263,36 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  describe 'tool: domain_clusters' do
+    it 'returns clusters from the graph' do
+      response = call_tool(server, 'domain_clusters')
+      data = parse_response(response)
+      expect(data).to have_key('clusters')
+      expect(data).to have_key('total')
+      expect(data['clusters']).to be_an(Array)
+    end
+
+    it 'respects min_size parameter' do
+      response = call_tool(server, 'domain_clusters', min_size: 100)
+      data = parse_response(response)
+      # With a very high min_size, all clusters should still be present
+      # (disconnected clusters are preserved, not dropped)
+      expect(data['clusters']).to be_an(Array)
+    end
+
+    it 'coerces string min_size' do
+      response = call_tool(server, 'domain_clusters', min_size: '3')
+      data = parse_response(response)
+      expect(data['clusters']).to be_an(Array)
+    end
+
+    it 'filters by types' do
+      response = call_tool(server, 'domain_clusters', types: ['model'])
+      data = parse_response(response)
+      expect(data['clusters']).to be_an(Array)
+    end
+  end
+
   describe 'tool: pagerank' do
     it 'returns ranked nodes with scores' do
       response = call_tool(server, 'pagerank')
@@ -308,7 +338,7 @@ RSpec.describe Woods::MCP::Server do
     it 'picks up changed data after reload' do
       # Read structure before reload
       pre = parse_response(call_tool(server, 'structure'))
-      expect(pre['manifest']['total_units']).to eq(8)
+      expect(pre['manifest']['total_units']).to eq(9)
 
       # Modify manifest on disk
       manifest_path = File.join(fixture_dir, 'manifest.json')
@@ -407,10 +437,11 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: codebase_retrieve' do
     context 'without retriever configured' do
-      it 'returns a fallback message' do
+      it 'returns an actionable fallback message' do
         response = call_tool(server, 'codebase_retrieve', query: 'How does authentication work?')
         text = response_text(response)
-        expect(text).to include('Semantic search is not available')
+        expect(text).to include('disabled')
+        expect(text).to include('OPENAI_API_KEY')
         expect(text).to include('search')
       end
     end
@@ -993,7 +1024,7 @@ RSpec.describe Woods::MCP::Server do
       # Without a retriever, the tool returns a fallback message regardless of budget,
       # but the coercion must not raise on the string value.
       response = call_tool(server, 'codebase_retrieve', query: 'test', budget: '4000')
-      expect(response_text(response)).to include('Semantic search is not available')
+      expect(response_text(response)).to include('disabled')
     end
   end
 

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'set'
+require 'woods'
 require 'woods/extractors/controller_extractor'
 
 RSpec.describe Woods::Extractors::ControllerExtractor do
@@ -31,7 +32,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
   # We test the private helpers by sending them through a fresh instance.
   # The extractor needs Rails.application.routes to initialize, so we stub that.
   let(:extractor) do
-    routes_double = double('Routes', routes: [])
+    routes_double = double('Routes', routes: [], named_routes: {})
     app_double = double('Application', routes: routes_double)
     stub_const('Rails', double('Rails', application: app_double))
     described_class.new
@@ -343,6 +344,77 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(chain[2][:kind]).to eq(:after)
       expect(chain[2][:filter]).to eq(:track_action)
       expect(chain[2][:except]).to eq(%w[index])
+    end
+  end
+
+  # ── redirect scanning (via scan_navigation_dependencies) ──────────
+
+  describe 'redirect scanning via scan_navigation_dependencies' do
+    let(:redirect_extractor) do
+      posts_route = double('Route',
+                           defaults: { controller: 'posts', action: 'index' },
+                           path: double(spec: double(to_s: '/posts(.:format)')),
+                           verb: 'GET')
+      new_post_route = double('Route',
+                              defaults: { controller: 'posts', action: 'new' },
+                              path: double(spec: double(to_s: '/posts/new(.:format)')),
+                              verb: 'GET')
+      users_route = double('Route',
+                           defaults: { controller: 'users', action: 'index' },
+                           path: double(spec: double(to_s: '/users(.:format)')),
+                           verb: 'GET')
+
+      named_routes = { posts: posts_route, new_post: new_post_route, users: users_route }
+      routes_double = double('Routes', routes: [], named_routes: named_routes)
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', application: app_double, root: Pathname.new('/app')))
+      described_class.new
+    end
+
+    before do
+      Woods.configure unless Woods.configuration
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+    end
+
+    it 'extracts redirect_to with _path helper' do
+      source = 'redirect_to posts_path'
+      result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+      expect(result).to include(a_hash_including(target: 'PostsController', via: :redirect_to))
+    end
+
+    it 'extracts redirect_to with _url helper' do
+      source = 'redirect_to users_url'
+      result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+      expect(result).to include(a_hash_including(target: 'UsersController', via: :redirect_to))
+    end
+
+    it 'deduplicates same controller' do
+      source = <<~RUBY
+        redirect_to posts_path
+        redirect_to new_post_path
+      RUBY
+      result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+      posts_deps = result.select { |d| d[:target] == 'PostsController' }
+      expect(posts_deps.size).to eq(1)
+    end
+
+    it 'skips unresolvable helpers' do
+      source = 'redirect_to nonexistent_path'
+      result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+      expect(result).to be_empty
+    end
+
+    it 'returns empty when config is disabled' do
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
+      source = 'redirect_to posts_path'
+      result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+      expect(result).to be_empty
+    end
+
+    it 'ignores redirect_to @model (polymorphic)' do
+      source = 'redirect_to @post'
+      result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+      expect(result).to be_empty
     end
   end
 end

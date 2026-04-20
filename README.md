@@ -22,7 +22,7 @@ The AI isn't bad — it just can't see what Rails is doing. Your 40-line model f
 
 **Woods fixes this by running inside Rails and extracting what's actually there.**
 
-See [Why Woods?](docs/WHY_CODEBASE_INDEX.md) for detailed before/after examples.
+See [Why Woods?](docs/WHY_WOODS.md) for detailed before/after examples.
 
 ---
 
@@ -110,6 +110,8 @@ Controller source gets a route map prepended showing the real HTTP verb + path +
 ### Dependency Graph
 
 34 extractors build a bidirectional graph: what each unit depends on, and what depends on it. Change a concern and trace every model it touches. Refactor a service and see every controller that calls it. PageRank scoring identifies the most important nodes in your codebase.
+
+Navigation edges (`link_to`, `redirect_to`, `form_action`) trace UI user journeys through the graph — filter with the `via` parameter on `dependencies`/`dependents` tools to isolate navigation paths from code references.
 
 ### Callback Side-Effect Analysis
 
@@ -214,6 +216,16 @@ Use the MCP `dependencies` tool to trace what a service triggers:
 
 Returns all job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks (e.g., `CheckoutService` → `Order` → `OrderConfirmationJob`).
 
+### Tracing UI Navigation
+
+Use the MCP `dependents` tool with `via` filtering to find what links to a controller:
+
+```json
+{ "tool": "dependents", "params": { "identifier": "OrdersController", "depth": 1, "via": ["link_to", "form_action"] } }
+```
+
+Returns view templates that navigate to `OrdersController` via `link_to` helpers or form submissions — isolating UI navigation edges from code references and other relationship types.
+
 ### Runtime-Generated Method Detection
 
 Because Woods runs inside the booted Rails process, it captures every method Rails generates dynamically — enum predicates, association builders, attribute accessors, and scope methods that static analysis tools cannot see:
@@ -298,7 +310,7 @@ See [MCP Servers](docs/MCP_SERVERS.md) for the full tool catalog and [MCP Tool C
 | **Models** | Schema, associations, validations, scopes, callbacks, enums | Concerns inlined, callback side-effects analyzed |
 | **Controllers** | Actions, filters, permitted params, response formats | Route map prepended, per-action filter chains |
 | **Services & Jobs** | Entry points, dependencies, retry config, queue names | Includes services, interactors, operations, commands |
-| **Views & Components** | ERB templates, Phlex components, ViewComponents | Partial references, slot definitions, prop interfaces |
+| **Views & Components** | ERB templates, Phlex components, ViewComponents | Partial references, slot definitions, prop interfaces, navigation edges (link_to, form_action) |
 | **Routes & Middleware** | Full route table, middleware stack order | Constraint resolution, engine mount points |
 | **GraphQL** | Types, mutations, resolvers, fields | Relay connections, argument definitions |
 | **Background Work** | Jobs, mailers, Action Cable channels, scheduled tasks | Queue configuration, retry policies |
@@ -496,7 +508,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Extract   │───>│   Resolve   │───>│   Write JSON         │  │
-│  │ 33 types   │    │   graph +   │    │   per unit           │  │
+│  │ 34 types   │    │   graph +   │    │   per unit           │  │
 │  │            │    │   git data  │    │                      │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
@@ -551,7 +563,7 @@ See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases
 | [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) | Deep dive | What each of the 34 extractors captures |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Pipeline stages, graph internals, retrieval |
 | [Backend Matrix](docs/BACKEND_MATRIX.md) | Infrastructure | Supported database, vector, and embedding combos |
-| [Why Woods?](docs/WHY_CODEBASE_INDEX.md) | Evaluation | Detailed before/after comparisons |
+| [Why Woods?](docs/WHY_WOODS.md) | Evaluation | Detailed before/after comparisons |
 
 ---
 
@@ -566,7 +578,7 @@ Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required 
 
 ```bash
 bin/setup                  # Install dependencies
-bundle exec rake spec      # Run tests (~2500 examples)
+bundle exec rake spec      # Run tests (~3300 examples)
 bundle exec rubocop        # Lint
 ```
 

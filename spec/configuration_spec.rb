@@ -55,6 +55,29 @@ RSpec.describe Woods::Configuration do
     it 'sets session_exclude_paths to empty array' do
       expect(config.session_exclude_paths).to eq([])
     end
+
+    it 'sets console_mcp_enabled to false' do
+      expect(config.console_mcp_enabled).to eq(false)
+    end
+
+    it 'sets console_embedded_read_tools to false' do
+      expect(config.console_embedded_read_tools).to eq(false)
+    end
+
+    it 'sets console_redacted_columns to empty array' do
+      expect(config.console_redacted_columns).to eq([])
+    end
+
+    it 'sets console_redacted_key_values to empty array' do
+      expect(config.console_redacted_key_values).to eq([])
+    end
+  end
+
+  describe 'console MCP configuration' do
+    it 'allows setting console_embedded_read_tools' do
+      config.console_embedded_read_tools = true
+      expect(config.console_embedded_read_tools).to eq(true)
+    end
   end
 
   describe 'session tracer configuration' do

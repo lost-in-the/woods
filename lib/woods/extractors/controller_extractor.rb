@@ -25,9 +25,11 @@ module Woods
       include AstSourceExtraction
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include RouteHelperResolver
 
       def initialize
         @routes_map = build_routes_map
+        build_route_helper_map
       end
 
       # Extract all controllers in the application
@@ -312,6 +314,9 @@ module Woods
           source.scan(%r{render\s+["'](\w+/\w+)["']}).flatten.uniq.each do |template|
             deps << { type: :view, target: template, via: :render }
           end
+
+          # redirect_to with named route helpers
+          deps.concat(scan_navigation_dependencies(source, via_type: :redirect_to))
         end
 
         deps.uniq { |d| [d[:type], d[:target]] }

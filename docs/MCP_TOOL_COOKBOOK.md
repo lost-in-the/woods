@@ -203,6 +203,22 @@ To find only which jobs depend on `User`:
 
 ---
 
+### "What views link to OrdersController?"
+
+**Tool:** `dependents` (Index Server)
+
+```json
+{
+  "identifier": "OrdersController",
+  "depth": 1,
+  "via": ["link_to", "form_action"]
+}
+```
+
+**What you'll get:** View templates and controllers that navigate to `OrdersController` via `link_to` helpers or form submissions. The `via` filter excludes code references and other relationship types, showing only UI navigation edges.
+
+---
+
 ### "What does User depend on?"
 
 **Tool:** `dependencies` (Index Server)
@@ -314,6 +330,22 @@ Search `source_code` when you want semantic matches, not just naming matches.
 ```
 
 This traces through the dependency graph: `CheckoutService` calls `Order#save!`, which triggers `after_commit :send_confirmation`, which enqueues `OrderConfirmationJob`. Without the graph, you'd need to manually follow callbacks across multiple files.
+
+---
+
+### "Where does UsersController redirect to?"
+
+**Tool:** `dependencies` (Index Server)
+
+```json
+{
+  "identifier": "UsersController",
+  "depth": 1,
+  "via": ["redirect_to"]
+}
+```
+
+**What you'll get:** Controllers that `UsersController` redirects to via `redirect_to` with named route helpers. Useful for tracing user flow after form submissions or authentication.
 
 ---
 
@@ -569,6 +601,34 @@ Start with performance metrics from the Console Server, then trace the code path
 
 ## Data Exploration (Console Server)
 
+### Scope predicates
+
+Tools that accept a `scope` parameter (`console_count`, `console_sample`, `console_pluck`, `console_aggregate`, `console_association_count`, `console_recent`) support Ransack-style predicate suffixes on hash keys. Plain keys are treated as equality, suffixed keys build safe Arel predicates. Column names are validated against the model's schema — SQL injection via column names is not possible.
+
+| Suffix | SQL equivalent | Example |
+|--------|----------------|---------|
+| `_eq` | `col = value` | `{ "status_eq": "paid" }` |
+| `_not_eq` | `col != value` | `{ "status_not_eq": "cancelled" }` |
+| `_gt` | `col > value` | `{ "total_cents_gt": 1000 }` |
+| `_gteq` | `col >= value` | `{ "created_at_gteq": "2026-01-01" }` |
+| `_lt` | `col < value` | `{ "total_cents_lt": 5000 }` |
+| `_lteq` | `col <= value` | `{ "created_at_lteq": "2026-12-31" }` |
+| `_in` | `col IN (…)` | `{ "status_in": ["paid", "refunded"] }` |
+| `_not_in` | `col NOT IN (…)` | `{ "status_not_in": ["cancelled"] }` |
+| `_null` | `col IS NULL` (value: `true`) / `IS NOT NULL` (value: `false`) | `{ "deleted_at_null": true }` |
+| `_not_null` | `col IS NOT NULL` (value: `true`) / `IS NULL` (value: `false`) | `{ "email_not_null": true }` |
+| `_present` | `col IS NOT NULL AND col != ''` (value: `true`) | `{ "name_present": true }` |
+| `_blank` | `col IS NULL OR col = ''` (value: `true`) | `{ "notes_blank": true }` |
+| `_matches` | `col LIKE value` | `{ "email_matches": "%@example.com" }` |
+
+Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equality. You can mix both in a single scope:
+
+```json
+{ "status": "paid", "total_cents_gt": 1000, "created_at_gteq": "2026-01-01" }
+```
+
+---
+
 ### "How many active users do we have?"
 
 **Tool:** `console_count` (Console Server)
@@ -636,7 +696,7 @@ Start with performance metrics from the Console Server, then trace the code path
 }
 ```
 
-**What you'll get:** A single aggregate value. Functions: `sum`, `avg`, `minimum`, `maximum`.
+**What you'll get:** A single aggregate value. Functions: `sum`, `avg`, `minimum`, `maximum`, `count`. The `column` parameter is required for every function except `count`, where it may be omitted to count all matching rows.
 
 ---
 

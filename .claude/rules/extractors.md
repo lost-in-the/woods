@@ -33,4 +33,5 @@ Rules:
 - Runtime introspection (reflection APIs, `descendants`, route helpers) is preferred over parsing when available
 - Handle missing directories gracefully — a host app may not have `app/interactors/`
 - Inlining concerns: resolve `include FooConcern` by reading the concern source and appending it to `source_code`. Track inlined concerns in `metadata[:inlined_concerns]`
+- Navigation edges: extractors that scan for `_path`/`_url` route helpers must include both `SharedDependencyScanner` and `RouteHelperResolver`, and call `build_route_helper_map` in their initializer. Use `scan_navigation_dependencies` for link/redirect edges and `scan_form_dependencies` for form submission edges.
 - YARD-document the class and all public methods

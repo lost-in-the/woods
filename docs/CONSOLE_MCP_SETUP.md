@@ -309,7 +309,7 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 | `console_sample` | Random sample of records (max 25) |
 | `console_find` | Find a record by primary key or unique column |
 | `console_pluck` | Extract column values with optional distinct (max 1000 rows) |
-| `console_aggregate` | Run `sum`, `average`, `minimum`, or `maximum` on a column |
+| `console_aggregate` | Run `sum`, `average`, `minimum`, `maximum`, or `count` on a column (column optional for `count`) |
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
@@ -368,19 +368,111 @@ Woods.configure do |config|
   # Column names to redact from all query results. Default: [].
   # Replaced with "[REDACTED]" in output.
   config.console_redacted_columns = %w[password_digest encrypted_password api_key ssn token]
+
+  # Unlock console_sql / console_query in the embedded executor. Default: false.
+  # Flows through to the Rack middleware AND the stdio entry point (rake / rails runner).
+  # See "Unlocking console_sql / console_query in embedded mode" below.
+  config.console_embedded_read_tools = false
 end
 ```
 
 ### `console_redacted_columns`
 
-Redaction applies to all tool results regardless of transport. When a result hash contains a redacted column, the value is replaced with `"[REDACTED]"` before the MCP response is sent.
+Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive — use the exact names from your database schema.
 
 ```ruby
 # Example: redact PII
 config.console_redacted_columns = %w[email phone_number date_of_birth ssn]
 ```
 
-The column names are matched by string, case-sensitive. Use the exact column names from your database schema.
+Redaction is shape-aware and covers every tool that returns row data:
+
+| Tool                                  | Output shape                                              | How redaction applies |
+| ------------------------------------- | --------------------------------------------------------- | --------------------- |
+| `console_find`                        | `{record: Hash}`                                          | Redacted column keys are replaced inside the nested record |
+| `console_sample`, `console_recent`    | `{records: [Hash, ...]}`                                  | Each record hash is redacted |
+| `console_sql`, `console_query`        | `{columns: [...], rows: [[...], ...], count: N}`          | Positional — rows are redacted by matching the `columns` header |
+| `console_pluck`                       | `{columns: [...], values: [[...], ...]}` or `{values: [...]}` for a single column | Positional — multi-column rows and flat single-column arrays both covered |
+| `console_count`, `console_aggregate`, `console_association_count`, `console_schema` | No row data | Nothing to redact |
+
+Redaction is defense-in-depth — prefer not storing plaintext secrets in database columns in the first place — but it keeps configured credential columns out of the agent's transcript when `console_sample`, `console_find`, or the Tier 4 read tools return matching rows.
+
+### `console_redacted_key_values`
+
+Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table — e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
+
+`console_redacted_key_values` takes one or more patterns that describe "when a row has `key_column` set to one of these names, redact its `value_column`":
+
+```ruby
+# Example / `authorizations` table — serves both MySQL and PostgreSQL apps.
+config.console_redacted_key_values = [
+  {
+    key_column:     'key',
+    value_column:   'value',
+    sensitive_keys: %w[stripe_access_token stripe_publishable_key stripe_user_id
+                       oauth_token refresh_token client_secret]
+  }
+]
+```
+
+```ruby
+# An app with a generic `settings` table on MySQL or PostgreSQL uses a different
+# column layout — patterns stack without interfering.
+config.console_redacted_key_values = [
+  { key_column: 'name', value_column: 'value',
+    sensitive_keys: %w[smtp_password slack_webhook_url] },
+  { key_column: 'key',  value_column: 'value',
+    sensitive_keys: %w[stripe_access_token oauth_token] }
+]
+```
+
+Behavior:
+
+| Response shape                                                        | EAV redaction applies when                                          |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `console_find` — `{record: {..., key: ..., value: ...}}`              | `record[key_column]` ∈ `sensitive_keys` → `record[value_column] = "[REDACTED]"` |
+| `console_sample`, `console_recent` — `{records: [{key:, value:}, ...]}` | Per-row — each record is evaluated against every configured pattern |
+| `console_sql`, `console_query` — `{columns: [...], rows: [[...]]}`    | Positional — `key_column` and `value_column` resolved to indexes once, per row lookup afterwards |
+| `console_pluck` — `{columns: [...], values: [[...]]}`                 | Same positional logic as `rows`                                     |
+
+A pattern is skipped silently when its `key_column` or `value_column` is absent from the current `columns` header, so unrelated queries pay nothing for the configuration. Comparison is case-sensitive and coerces the key cell through `to_s` before matching, so `:stripe_access_token` and `"stripe_access_token"` both fire.
+
+`console_redacted_columns` and `console_redacted_key_values` run in a single pass — configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
+
+### Unlocking `console_sql` / `console_query` in embedded mode
+
+By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:
+
+```ruby
+# config/initializers/woods.rb
+Woods.configure do |config|
+  config.console_mcp_enabled           = true     # mount the Rack middleware via Railtie
+  config.console_mcp_path              = '/mcp/console'
+  config.console_embedded_read_tools   = true     # unlock console_sql / console_query
+  config.console_redacted_columns      = %w[password_digest encrypted_password api_key token]
+end
+```
+
+This flag flows through to both the Rack middleware (Option C) and the stdio transports (Options A and B) automatically. To override per-mount (e.g., enable it on one mount but not another), pass `embedded_read_tools:` directly:
+
+```ruby
+Rails.application.config.middleware.use \
+  Woods::Console::RackMiddleware,
+  path: '/mcp/console',
+  embedded_read_tools: true
+```
+
+Security posture with the flag on:
+
+| Layer | What it enforces |
+|-------|------------------|
+| `SqlValidator` denylist | Rejects INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / REPLACE / UNION / multi-statement / comment-hidden injections before any DB interaction. Only `SELECT` and `WITH…SELECT` make it through. |
+| `SafeContext` rollback | Every request runs inside a database transaction that is always rolled back, so even side-effecting reads (functions, settings) cannot persist. |
+| Per-request connection pooling | Each HTTP request draws a fresh connection from `ActiveRecord::Base`'s pool — no shared mutable state between requests. |
+
+These three layers make `embedded_read_tools: true` safe for read-only workloads. If your threat model requires stricter process isolation, keep the flag off and use the bridge architecture (Option D) instead, which runs the executor in a separate process.
+
+All three embedded transports (Options A, B, and C) honour `console_embedded_read_tools` from `Woods.configure` — stdio rake, rails runner, and Rack middleware each read the flag at startup.
 
 ---
 
@@ -430,6 +522,8 @@ Each transaction sets a statement timeout before any query runs. The default is 
 
 Before any query runs, the model name is checked against the registry built from `ActiveRecord::Base.descendants`. Unrecognized model names raise `ValidationError` without touching the database. Column names are validated against the model's `column_names` before pluck, aggregate, and recent operations.
 
+Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) — see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.
+
 ---
 
 ## Troubleshooting
@@ -466,7 +560,10 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 
 ### Tier 2–4 tools return "unsupported in embedded mode"
 
-This is expected. The embedded executor (used in Options A–C) only implements the 9 Tier 1 tools. To use Tier 2–4 tools (`console_diagnose_model`, `console_eval`, `console_sql`, etc.), switch to the bridge architecture (Option D).
+The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus, when opted in, the two Tier 4 read tools `console_sql` and `console_query`.
+
+- For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
+- For everything else (`console_diagnose_model`, `console_eval`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
 
 ### Slow first request on HTTP/Rack middleware
 

@@ -173,6 +173,7 @@ end
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `precompute_flows` | Boolean | `false` | Pre-compute per-action request flow maps during extraction |
+| `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots (requires migrations 004+005) |
 
 ## Session Tracer Options
@@ -281,6 +282,21 @@ Additional extractors available (not in default set):
 | `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
 | `:libs` | LibExtractor | Ruby files in lib/ |
+
+## Environment Variables
+
+These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block — most exist so the MCP servers can self-configure when no explicit config is available.
+
+| Variable | Read by | Default | Purpose |
+|----------|---------|---------|---------|
+| `WOODS_DIR` | `woods-mcp` bootstrapper | `Dir.pwd` | Path to the extraction output directory. |
+| `WOODS_SEARCH_MAX_SCAN` | `woods-mcp` `search` tool | `500` | Cap on the number of unit files loaded during a phase-2 (metadata/source_code) search. When the cap is hit, the response includes `partial: true`. Set empty or unset to use the default. |
+| `WOODS_SNAPSHOTS` | `woods-mcp` bootstrapper | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
+| `OPENAI_API_KEY` | `woods-mcp` bootstrapper | — | When set and no embedding provider is configured, the MCP server auto-enables OpenAI-backed semantic search with in-memory stores. |
+| `OLLAMA_BASE_URL` | `woods-mcp` bootstrapper auto-detect | `http://localhost:11434` | Base URL the bootstrapper probes (`GET /api/tags`, 500ms timeout) when no embedding provider is configured. A reachable Ollama instance auto-enables local semantic search. |
+| `OLLAMA_EMBED_MODEL` | `woods-mcp` bootstrapper auto-detect | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
+
+The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 
 ## Database Compatibility
 

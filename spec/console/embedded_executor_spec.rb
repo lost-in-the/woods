@@ -39,19 +39,22 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
   describe '#send_request' do
     context 'unsupported tools' do
-      it 'returns unsupported error for Tier 2+ tools' do
+      it 'points Tier 2+ tools at the bridge architecture' do
         response = executor.send_request({ 'tool' => 'diagnose_model', 'params' => { 'model' => 'User' } })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/Not yet implemented in embedded mode/)
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include('diagnose_model')
+        expect(response['error']).to include('bridge architecture')
+        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'returns unsupported error for eval tool' do
+      it 'points eval at the bridge architecture' do
         response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'puts 1' } })
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include('bridge architecture')
       end
     end
 
@@ -266,6 +269,31 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['result']['value']).to eq(5.5)
       end
 
+      it 'runs count aggregate without column' do
+        allow(user_model).to receive(:count).with(no_args).and_return(99)
+
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'count' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['value']).to eq(99)
+      end
+
+      it 'runs count aggregate with column' do
+        allow(user_model).to receive(:count).with(:email).and_return(40)
+
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'count',
+                                                         'column' => 'email' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['value']).to eq(40)
+      end
+
       it 'rejects invalid aggregate function' do
         response = executor.send_request({
                                            'tool' => 'aggregate',
@@ -419,6 +447,45 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
     end
 
+    context 'predicate-suffix scope' do
+      let(:user_model) { class_double('User') }
+      let(:arel_table) { instance_double('Arel::Table') }
+      let(:arel_col)   { instance_double('Arel::Attributes::Attribute') }
+      let(:arel_node)  { instance_double('Arel::Nodes::GreaterThan') }
+      let(:scoped)     { instance_double('ActiveRecord::Relation') }
+
+      before do
+        stub_const('User', user_model)
+        allow(user_model).to receive(:arel_table).and_return(arel_table)
+        allow(arel_table).to receive(:[]).with('id').and_return(arel_col)
+        allow(arel_col).to receive(:gt).with(10).and_return(arel_node)
+        allow(user_model).to receive(:where).with(arel_node).and_return(scoped)
+        allow(scoped).to receive(:count).and_return(5)
+      end
+
+      it 'routes predicate-suffix keys through ScopePredicateParser' do
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => { 'id_gt' => 10 } }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['count']).to eq(5)
+        expect(arel_col).to have_received(:gt).with(10)
+      end
+
+      it 'rejects unknown column in predicate suffix' do
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => { 'evil_col_gt' => 0 } }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/Unknown column 'evil_col'/)
+        expect(response['error_type']).to eq('validation')
+      end
+    end
+
     context 'array-form scope' do
       let(:user_model) { class_double('User') }
       let(:scoped) { instance_double('ActiveRecord::Relation') }
@@ -483,14 +550,17 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     # ── Read tools (sql/query) gated by read_tools_enabled ──────────
 
     context 'read tools disabled (default)' do
-      it 'returns unsupported error for sql tool' do
+      it 'points sql at embedded_read_tools and the docs' do
         response = executor.send_request({ 'tool' => 'sql', 'params' => { 'sql' => 'SELECT 1' } })
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include("'sql'")
+        expect(response['error']).to include('embedded_read_tools: true')
+        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'returns unsupported error for query tool' do
+      it 'points query at embedded_read_tools and the docs' do
         response = executor.send_request({
                                            'tool' => 'query',
                                            'params' => { 'model' => 'User', 'select' => ['id'] }
@@ -498,6 +568,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
+        expect(response['error']).to include("'query'")
+        expect(response['error']).to include('embedded_read_tools: true')
       end
     end
 

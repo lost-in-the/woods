@@ -65,6 +65,7 @@ module Woods
         @dependency_graph = nil
         @graph_analysis = nil
         @raw_graph_data = nil
+        @normalized_graph_edges = nil
       end
 
       # @return [Hash] Parsed manifest.json
@@ -119,19 +120,39 @@ module Woods
         dirs.flat_map { |dir| read_index(dir) }
       end
 
+      # Default maximum number of unit files to load during phase-2 search.
+      # Override with WOODS_SEARCH_MAX_SCAN env var.
+      DEFAULT_SEARCH_MAX_SCAN = 500
+
       # Search units by case-insensitive pattern.
       #
       # Phase 1: match identifiers from index files (cheap).
       # Phase 2: lazy-load unit files for metadata/source_code matching.
       #
-      # @param query [String] Search pattern (treated as case-insensitive regex)
+      # The query is compiled as a raw Ruby regex with IGNORECASE. If the pattern
+      # is invalid, it falls back to an escaped literal match.
+      #
+      # A "broad" pattern is one that matches more than 50% of the entries in a
+      # type directory. Broad patterns still run but the result includes a :note.
+      #
+      # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500).
+      # When the cap is reached the result includes :partial => true.
+      #
+      # @param query [String] Search pattern (case-insensitive regex)
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param fields [Array<String>] Fields to search: "identifier", "metadata", "source_code"
       # @param limit [Integer] Maximum results to return
-      # @return [Array<Hash>] Matches with :identifier, :type, :match_field keys
+      # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
       def search(query, types: nil, fields: %w[identifier], limit: 20)
-        pattern = Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+        pattern = compile_search_pattern(query)
+        max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
+        max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
+        max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
+
         results = []
+        notes = []
+        phase2_scanned = 0
+        partial = false
 
         dirs = if types
                  types.filter_map { |t| TYPE_TO_DIR[t] }
@@ -142,6 +163,14 @@ module Woods
         dirs.each do |dir|
           type_name = DIR_TO_TYPE[dir]
           entries = read_index(dir)
+
+          # Broad-match detection: warn when pattern matches >50% of dir entries
+          if entries.size > 1
+            matching_count = entries.count { |e| pattern.match?(e['identifier']) }
+            if matching_count > entries.size / 2.0
+              notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
+            end
+          end
 
           entries.each do |entry|
             break if results.size >= limit
@@ -157,8 +186,15 @@ module Woods
             # Phase 2: metadata/source_code matching (requires loading full unit)
             next unless fields.include?('metadata') || fields.include?('source_code')
 
+            if phase2_scanned >= max_scan
+              partial = true
+              next
+            end
+
             unit = find_unit(id)
             next unless unit
+
+            phase2_scanned += 1
 
             if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
               results << { identifier: id, type: type_name, match_field: 'source_code' }
@@ -168,7 +204,10 @@ module Woods
           end
         end
 
-        results.first(limit)
+        response = { results: results.first(limit) }
+        response[:note] = notes.join('; ') unless notes.empty?
+        response[:partial] = true if partial
+        response
       end
 
       # BFS traversal of forward dependencies.
@@ -176,9 +215,10 @@ module Woods
       # @param identifier [String] Starting unit identifier
       # @param depth [Integer] Maximum traversal depth
       # @param types [Array<String>, nil] Filter to these singular type names
+      # @param via [Array<String>, nil] Filter to these relationship types (e.g. ["link_to", "redirect_to"])
       # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
-      def traverse_dependencies(identifier, depth: 2, types: nil)
-        traverse(identifier, depth: depth, types: types, direction: :forward)
+      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :forward)
       end
 
       # BFS traversal of reverse dependencies (dependents).
@@ -186,9 +226,10 @@ module Woods
       # @param identifier [String] Starting unit identifier
       # @param depth [Integer] Maximum traversal depth
       # @param types [Array<String>, nil] Filter to these singular type names
+      # @param via [Array<String>, nil] Filter to these relationship types (e.g. ["link_to", "redirect_to"])
       # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
-      def traverse_dependents(identifier, depth: 2, types: nil)
-        traverse(identifier, depth: depth, types: types, direction: :reverse)
+      def traverse_dependents(identifier, depth: 2, types: nil, via: nil)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :reverse)
       end
 
       # Search rails_source units by concept keyword.
@@ -277,6 +318,26 @@ module Woods
 
       private
 
+      # Compile a case-insensitive regex from a query string.
+      #
+      # Treats the query as a raw Ruby regex pattern. Falls back to an escaped
+      # literal match (with a :note field added by callers) when the pattern is
+      # invalid.
+      #
+      # @param query [String] Raw regex pattern
+      # @return [Regexp] Compiled case-insensitive pattern
+      def compile_search_pattern(query)
+        Regexp.new(query, Regexp::IGNORECASE)
+      rescue RegexpError
+        Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+      end
+
+      # Memoized normalized edges — converts bare strings (old format) to hashes once.
+      # Cleared by reload! alongside raw_graph_data.
+      def normalized_graph_edges
+        @normalized_graph_edges ||= normalize_all_edges(raw_graph_data['edges'] || {})
+      end
+
       # Build identifier → { type_dir, filename } map from all _index.json files.
       def identifier_map
         @identifier_map ||= build_identifier_map
@@ -340,13 +401,28 @@ module Woods
       end
 
       # BFS traversal in either direction.
-      def traverse(identifier, depth:, types:, direction:)
+      #
+      # Edges may be stored as bare strings (old format) or as
+      # +{"target" => "...", "via" => "..."}+ hashes (new format).
+      # This method handles both transparently.
+      #
+      # @param identifier [String] Starting unit identifier
+      # @param depth [Integer] Maximum traversal depth
+      # @param types [Array<String>, nil] Filter to these unit type names
+      # @param via [Array<String>, nil] Filter to these relationship types
+      # @param direction [:forward, :reverse] Traversal direction
+      # @return [Hash]
+      def traverse(identifier, depth:, types:, via:, direction:)
         graph_data = raw_graph_data
         nodes_data = graph_data['nodes'] || {}
 
         return { root: identifier, found: false, nodes: {} } unless nodes_data.key?(identifier)
 
+        # Normalize edges once per graph load — memoized alongside raw_graph_data
+        normalized_edges = normalized_graph_edges
+
         type_set = types&.to_set
+        via_set = via&.to_set
         visited = Set.new([identifier])
         queue = [[identifier, 0]]
         result_nodes = {}
@@ -355,12 +431,12 @@ module Woods
           current, current_depth = queue.shift
 
           neighbors = if direction == :forward
-                        (graph_data['edges'] || {})[current] || []
+                        resolve_forward_neighbors(normalized_edges, current, via_set)
                       else
-                        (graph_data['reverse'] || {})[current] || []
+                        resolve_reverse_neighbors(graph_data, normalized_edges, current, via_set)
                       end
 
-          # Filter by type if requested
+          # Filter by node type if requested
           filtered = if type_set
                        neighbors.select do |n|
                          node_meta = nodes_data[n]
@@ -388,6 +464,43 @@ module Woods
         end
 
         { root: identifier, found: true, nodes: result_nodes }
+      end
+
+      # Normalize all edge arrays once, converting bare strings to hashes.
+      #
+      # NOTE: This uses string keys ('target', 'via') because IndexReader
+      # operates on parsed JSON. DependencyGraph.normalize_edges uses symbol
+      # keys (:target, :via) for in-memory Ruby objects. The two normalizers
+      # are intentionally separate — do not merge them.
+      #
+      # @param raw_edges [Hash] Raw edges from graph JSON
+      # @return [Hash] Edges with all entries as { 'target' => ..., 'via' => ... } hashes
+      def normalize_all_edges(raw_edges)
+        raw_edges.transform_values do |entries|
+          entries.map { |e| e.is_a?(Hash) ? e : { 'target' => e } }
+        end
+      end
+
+      # Extract forward neighbor identifiers, optionally filtered by via type.
+      # Expects pre-normalized edges (all entries are hashes).
+      def resolve_forward_neighbors(normalized_edges, identifier, via_set)
+        edges = normalized_edges[identifier] || []
+        edges = edges.select { |e| via_set.include?(e['via']) } if via_set
+        edges.map { |e| e['target'] }
+      end
+
+      # Extract reverse neighbor identifiers, optionally filtered by via type.
+      # Reverse edges are stored as bare identifier arrays. When via filtering
+      # is requested, checks each dependent's pre-normalized forward edges to
+      # find those pointing at +identifier+ with a matching via type.
+      def resolve_reverse_neighbors(graph_data, normalized_edges, identifier, via_set)
+        dependents = (graph_data['reverse'] || {})[identifier] || []
+        return dependents unless via_set
+
+        dependents.select do |dep|
+          forward = normalized_edges[dep] || []
+          forward.any? { |e| e['target'] == identifier && via_set.include?(e['via']) }
+        end
       end
     end
   end

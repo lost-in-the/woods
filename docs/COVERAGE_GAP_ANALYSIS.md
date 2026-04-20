@@ -278,6 +278,6 @@ Remaining gap work:
 
 1. **Configuration semantic parsing** (~16-24 hours). `ConfigurationExtractor` and `BehavioralProfile` cover file scanning and runtime introspection. Remaining: semantic parsing of heterogeneous initializer content for structured metadata.
 
-2. **View template expansion** — HAML/Slim support, layout inheritance, partial dependency graphs. The ERB MVP is in place.
+2. **View template expansion** — HAML/Slim support, layout inheritance, partial dependency graphs. The ERB MVP is in place. Navigation edge extraction (`link_to`, `redirect_to`, `form_action`) is now supported via `RouteHelperResolver` — views and controllers emit edges to the controller targets of `_path`/`_url` route helpers.
 
 3. **Stimulus/Hotwire JavaScript** — frontend layer extraction, requires separate JS/TS parsing toolchain.
