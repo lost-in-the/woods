@@ -49,14 +49,21 @@ module Woods
       /xi
 
       # Matches a FROM clause and captures its body up to the next clause
-      # terminator. The body may be a single table, a comma-joined list, or
-      # a parenthesized subquery.
+      # terminator. The body may be a single table or a comma-joined list.
+      #
+      # An inner `FROM` is also a terminator — this is H-3 of the bypass
+      # series. Without it, a FROM-clause subquery like
+      # `FROM (SELECT * FROM blocked) AS a` would be swallowed by the outer
+      # clause's `.+?` match, and the inner `FROM blocked` would never be
+      # re-scanned because `.scan` advances past consumed input. Treating
+      # every `FROM` as its own independent scan match is what keeps CTEs,
+      # UNIONs, and nested subqueries in coverage.
       FROM_CLAUSE = /
         \bFROM\s+
         (?<clause>.+?)
         (?=
           \b(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|
-               JOIN|INNER|OUTER|LEFT|RIGHT|FULL|CROSS)\b
+               JOIN|INNER|OUTER|LEFT|RIGHT|FULL|CROSS|FROM)\b
           | [;)]
           | \z
         )

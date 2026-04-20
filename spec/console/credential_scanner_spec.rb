@@ -115,6 +115,126 @@ RSpec.describe Woods::Console::CredentialScanner do
       end
     end
 
+    context 'with GitHub fine-grained PATs' do
+      it 'redacts github_pat_ tokens at the exact length' do
+        pat = "github_pat_#{'A' * 82}"
+        value, counts = scanner.scan(pat)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:github_fine_grained_pat]).to eq(1)
+      end
+    end
+
+    context 'with SendGrid API keys' do
+      it 'redacts SG.xxx.yyy two-part keys' do
+        key = "SG.#{'a' * 22}.#{'b' * 43}"
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:sendgrid_api_key]).to eq(1)
+      end
+
+      it 'does not match short SG. prefixed strings' do
+        value, counts = scanner.scan('SG.short.nope')
+        expect(value).to eq('SG.short.nope')
+        expect(counts).to be_empty
+      end
+    end
+
+    context 'with Mailgun API keys' do
+      it 'redacts key-<32 hex> tokens' do
+        value, counts = scanner.scan("key-#{'a' * 32}")
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:mailgun_api_key]).to eq(1)
+      end
+
+      it 'does not match key- followed by non-hex or short strings' do
+        value, counts = scanner.scan('key-ABC')
+        expect(value).to eq('key-ABC')
+        expect(counts).to be_empty
+      end
+    end
+
+    context 'with Anthropic API keys' do
+      it 'redacts sk-ant-api prefixed keys' do
+        key = "sk-ant-api03-#{'a' * 80}"
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:anthropic_api_key]).to eq(1)
+      end
+
+      it 'redacts sk-ant-admin prefixed keys' do
+        key = "sk-ant-admin01-#{'b' * 80}"
+        value, = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+      end
+
+      it 'counts as anthropic not openai when both patterns could match' do
+        key = "sk-ant-api03-#{'a' * 80}"
+        _, counts = scanner.scan(key)
+        expect(counts[:anthropic_api_key]).to eq(1)
+        expect(counts[:openai_api_key]).to be_nil
+      end
+    end
+
+    context 'with OpenAI API keys' do
+      it 'redacts sk- prefixed keys with sufficient length' do
+        key = "sk-#{'a' * 48}"
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:openai_api_key]).to eq(1)
+      end
+
+      it 'redacts sk-proj- project-scoped keys' do
+        key = "sk-proj-#{'a' * 48}"
+        value, = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+      end
+    end
+
+    context 'with Shopify access tokens' do
+      it 'redacts shpat_ admin API tokens' do
+        value, counts = scanner.scan("shpat_#{'a' * 32}")
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:shopify_access_token]).to eq(1)
+      end
+
+      it 'redacts shpca_, shpss_, and shppa_ variants' do
+        %w[shpca_ shpss_ shppa_].each do |prefix|
+          value, = scanner.scan("#{prefix}#{'a' * 32}")
+          expect(value).to eq('[REDACTED]'), "Failed for prefix #{prefix}"
+        end
+      end
+    end
+
+    context 'with Square access tokens' do
+      it 'redacts sq0csp- secrets' do
+        token = "sq0csp-#{'a' * 43}"
+        value, counts = scanner.scan(token)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:square_access_token]).to eq(1)
+      end
+
+      it 'redacts sq0atp- access tokens' do
+        token = "sq0atp-#{'a' * 22}"
+        value, = scanner.scan(token)
+        expect(value).to eq('[REDACTED]')
+      end
+    end
+
+    context 'with PayPal access tokens' do
+      it 'redacts production access tokens' do
+        token = 'access_token$production$abc123xyz456$a1b2c3d4e5f6'
+        value, counts = scanner.scan(token)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:paypal_access_token]).to eq(1)
+      end
+
+      it 'redacts sandbox access tokens' do
+        token = 'access_token$sandbox$testclient$deadbeef123'
+        value, = scanner.scan(token)
+        expect(value).to eq('[REDACTED]')
+      end
+    end
+
     context 'when the string contains no credentials' do
       it 'returns the value unchanged' do
         value, counts = scanner.scan('Hello world, my account ID is acct_1Sx7cbE0QMvj9FH5')
@@ -224,8 +344,11 @@ RSpec.describe Woods::Console::CredentialScanner do
     it 'returns the full pattern name list' do
       expect(described_class.patterns).to include(
         :stripe_secret_key, :stripe_publishable_key, :stripe_webhook_secret,
-        :aws_access_key_id, :github_token, :google_oauth_token,
-        :jwt_token, :pem_private_key_block, :slack_token
+        :aws_access_key_id, :github_fine_grained_pat, :github_token,
+        :google_oauth_token, :jwt_token, :pem_private_key_block, :slack_token,
+        :sendgrid_api_key, :mailgun_api_key,
+        :anthropic_api_key, :openai_api_key,
+        :shopify_access_token, :square_access_token, :paypal_access_token
       )
     end
   end

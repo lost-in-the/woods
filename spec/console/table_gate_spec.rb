@@ -114,6 +114,24 @@ RSpec.describe Woods::Console::TableGate do
         sql = 'SELECT $$FROM authorizations$$ AS literal FROM users'
         expect { gate.check_sql!(sql) }.not_to raise_error
       end
+
+      it 'rejects a blocked table inside a CTE body' do
+        sql = 'WITH a AS (SELECT * FROM authorizations) SELECT * FROM a'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects a blocked table on the right side of UNION' do
+        sql = 'SELECT id FROM users UNION SELECT id FROM authorizations'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects a blocked table in a FROM-clause subquery' do
+        sql = 'SELECT * FROM (SELECT * FROM authorizations) AS a'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
     end
 
     context 'when multiple tables are blocked' do

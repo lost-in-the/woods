@@ -32,16 +32,28 @@ module Woods
       # High-specificity credential patterns. Each is word-boundary anchored
       # and bounded by a realistic minimum length so random short strings
       # cannot trigger a match.
+      #
+      # Order matters: more-specific patterns appear before less-specific
+      # alternatives (e.g., `anthropic_api_key` before `openai_api_key`)
+      # so the specific counter increments rather than the generic one.
       PATTERNS = {
         stripe_secret_key: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/,
         stripe_publishable_key: /\bpk_(?:live|test)_[A-Za-z0-9]{24,}\b/,
         stripe_webhook_secret: /\bwhsec_[A-Za-z0-9]{24,}\b/,
         aws_access_key_id: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+        github_fine_grained_pat: /\bgithub_pat_[A-Za-z0-9_]{82}\b/,
         github_token: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/,
         google_oauth_token: /\bya29\.[A-Za-z0-9_-]{20,}\b/,
         jwt_token: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
         pem_private_key_block: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/,
-        slack_token: /\bxox[abpr]-[A-Za-z0-9-]{10,}\b/
+        slack_token: /\bxox[abpr]-[A-Za-z0-9-]{10,}\b/,
+        sendgrid_api_key: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/,
+        mailgun_api_key: /\bkey-[a-f0-9]{32}\b/,
+        anthropic_api_key: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}\b/,
+        openai_api_key: %r{\bsk-(?:proj-)?[A-Za-z0-9/_-]{40,}\b},
+        shopify_access_token: /\bshp(?:at|ca|ss|pa)_[a-f0-9]{32}\b/,
+        square_access_token: /\bsq0[a-z]{3}-[A-Za-z0-9_-]{22,}\b/,
+        paypal_access_token: /\baccess_token\$(?:production|sandbox)\$[A-Za-z0-9]+\$[a-f0-9]+\b/
       }.freeze
 
       # @return [Array<Symbol>] every pattern name the scanner knows about.

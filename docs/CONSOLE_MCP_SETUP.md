@@ -433,10 +433,29 @@ Scanner hits emit a `console.credential_scan.hits` warn-level structured log lin
 
 Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive — use the exact names from your database schema.
 
+**Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, ~30 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.
+
+Extend or override rather than reassigning blindly:
+
 ```ruby
-# Example: redact PII
-config.console_redacted_columns = %w[email phone_number date_of_birth ssn]
+# Extend — keep all defaults plus app-specific columns
+config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[cart_token share_token]
+
+# Add PII on top of the credential defaults
+config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[email phone_number ssn]
+
+# Remove a default that over-redacts in your app (e.g., `token` is a non-secret slug)
+config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS - %w[token]
+
+# Replace entirely — only do this if you've audited the default list against your schema
+config.console_redacted_columns = %w[password_digest api_key]
 ```
+
+Columns intentionally **excluded** from the default list because they cause over-redaction in apps that use them legitimately:
+
+- `key` — ActiveStorage blob keys, EAV key columns, translation keys
+- `name` — universal non-secret identifier
+- PII columns (`ssn`, `tax_id`, `dob`) — org-specific compliance concern, prefer explicit opt-in
 
 Redaction is shape-aware and covers every tool that returns row data:
 
