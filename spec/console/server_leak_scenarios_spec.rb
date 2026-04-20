@@ -220,25 +220,30 @@ RSpec.describe 'Woods::Console::Server leak scenarios (fixture-driven)' do
         }
       )
 
-      # console_sql is a Tier 4 tool — register it via the embedded executor path
-      allow(executor).to receive(:send_request).and_return(
-        'ok' => true,
-        'result' => {
-          'columns' => %w[id email note],
-          'rows' => [
-            [1, 'clean@example.com', 'nothing to see here'],
-            [2, 'leak@example.com', "aws creds: #{aws_key}"]
-          ],
-          'count' => 2
-        }
-      )
-
       response = call_tool(server, 'console_sql', sql: 'SELECT id, email, note FROM users')
       text = response_text(response)
 
       expect(text).to include('[REDACTED]')
       expect(text).not_to include(aws_key)
       expect(text).to include('clean@example.com')
+    end
+  end
+
+  describe 'Scenario D2 — credential-shaped value echoed in error path' do
+    it 'redacts secrets that appear in executor error messages' do
+      server = build
+      allow(executor).to receive(:send_request).and_return(
+        'ok' => false,
+        'error' => "Mysql2::Error: value '#{aws_key}' violates check constraint",
+        'error_type' => 'execution'
+      )
+
+      response = call_tool(server, 'console_sql', sql: 'SELECT * FROM users')
+      text = response_text(response)
+
+      expect(response).to be_error
+      expect(text).to include('[REDACTED]')
+      expect(text).not_to include(aws_key)
     end
   end
 

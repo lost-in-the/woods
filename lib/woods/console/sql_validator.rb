@@ -28,7 +28,13 @@ module Woods
       ].freeze
 
       # Keywords that are forbidden anywhere in the SQL (not just at start).
-      BODY_FORBIDDEN_KEYWORDS = %w[UNION INTO COPY].freeze
+      #
+      # UNION / INTERSECT / EXCEPT are SQL set operators — any of them can graft
+      # a second SELECT onto a validated one, which defeats the "single SELECT"
+      # posture even though TableGate still catches references to blocked tables.
+      # INTO / COPY are PostgreSQL write vectors that must not appear in read
+      # contexts.
+      BODY_FORBIDDEN_KEYWORDS = %w[UNION INTERSECT EXCEPT INTO COPY].freeze
 
       # Dangerous functions that can be used for DoS or file access.
       DANGEROUS_FUNCTIONS = %w[
