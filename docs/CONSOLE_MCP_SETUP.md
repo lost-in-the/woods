@@ -476,7 +476,7 @@ Column-name redaction falls short when credentials are stored in a **key-value (
 `console_redacted_key_values` takes one or more patterns that describe "when a row has `key_column` set to one of these names, redact its `value_column`":
 
 ```ruby
-# Example / `authorizations` table — serves both MySQL and PostgreSQL apps.
+# Example: an `authorizations` table — pattern works on both MySQL and PostgreSQL.
 config.console_redacted_key_values = [
   {
     key_column:     'key',
