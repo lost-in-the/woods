@@ -84,6 +84,36 @@ RSpec.describe Woods::Console::TableGate do
         expect { gate.check_sql!('SELECT * FROM users JOIN orders ON users.id = orders.user_id') }
           .not_to raise_error
       end
+
+      it 'rejects an ANSI-89 comma-join' do
+        sql = 'SELECT * FROM users, authorizations WHERE users.id = authorizations.user_id'
+        expect { gate.check_sql!(sql) }.to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects a comma-join regardless of position in the list' do
+        sql = 'SELECT * FROM users, orders, authorizations'
+        expect { gate.check_sql!(sql) }.to raise_error(Woods::Console::TableGateError)
+      end
+
+      it 'rejects a schema-qualified comma-join' do
+        sql = 'SELECT * FROM users, public.authorizations'
+        expect { gate.check_sql!(sql) }.to raise_error(Woods::Console::TableGateError)
+      end
+
+      it 'rejects a quoted comma-join' do
+        sql = 'SELECT * FROM users, "authorizations"'
+        expect { gate.check_sql!(sql) }.to raise_error(Woods::Console::TableGateError)
+      end
+
+      it 'ignores blocked names hidden inside a PG dollar-quoted literal' do
+        sql = 'SELECT $tag$FROM authorizations$tag$ AS literal FROM users'
+        expect { gate.check_sql!(sql) }.not_to raise_error
+      end
+
+      it 'ignores blocked names hidden inside an unnamed dollar-quoted literal' do
+        sql = 'SELECT $$FROM authorizations$$ AS literal FROM users'
+        expect { gate.check_sql!(sql) }.not_to raise_error
+      end
     end
 
     context 'when multiple tables are blocked' do
@@ -130,6 +160,65 @@ RSpec.describe Woods::Console::TableGate do
         model_tables: { 'Authorization' => 'authorizations' }
       )
       expect { gate.check_model!('Authorization') }.to raise_error(Woods::Console::TableGateError)
+    end
+  end
+
+  describe '#check_joins!' do
+    let(:gate) do
+      described_class.new(
+        blocked_tables: %w[authorizations],
+        model_tables: { 'User' => 'users', 'Order' => 'orders' },
+        model_reflections: {
+          'User' => { 'authorizations' => 'authorizations', 'orders' => 'orders' },
+          'Order' => { 'user' => 'users' }
+        }
+      )
+    end
+
+    it 'rejects a join whose target table is blocked' do
+      expect { gate.check_joins!('User', [:authorizations]) }
+        .to raise_error(Woods::Console::TableGateError, /authorizations/)
+    end
+
+    it 'rejects a join passed as a string' do
+      expect { gate.check_joins!('User', ['authorizations']) }
+        .to raise_error(Woods::Console::TableGateError)
+    end
+
+    it 'allows non-blocked joins' do
+      expect { gate.check_joins!('User', [:orders]) }.not_to raise_error
+    end
+
+    it 'passes through unknown join names' do
+      expect { gate.check_joins!('User', [:unknown_assoc]) }.not_to raise_error
+    end
+
+    it 'is a no-op when joins is nil or empty' do
+      expect(gate.check_joins!('User', nil)).to be(true)
+      expect(gate.check_joins!('User', [])).to be(true)
+    end
+  end
+
+  describe '#check_association!' do
+    let(:gate) do
+      described_class.new(
+        blocked_tables: %w[authorizations],
+        model_tables: { 'User' => 'users' },
+        model_reflections: { 'User' => { 'authorizations' => 'authorizations', 'orders' => 'orders' } }
+      )
+    end
+
+    it 'rejects an association whose target table is blocked' do
+      expect { gate.check_association!('User', :authorizations) }
+        .to raise_error(Woods::Console::TableGateError)
+    end
+
+    it 'allows a non-blocked association' do
+      expect { gate.check_association!('User', :orders) }.not_to raise_error
+    end
+
+    it 'is a no-op when association is nil' do
+      expect(gate.check_association!('User', nil)).to be(true)
     end
   end
 

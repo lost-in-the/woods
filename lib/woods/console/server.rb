@@ -49,7 +49,7 @@ module Woods
             config['redacted_key_values'] || connection_config['redacted_key_values']
           )
           safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
-          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: {})
+          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: {}, model_reflections: {})
 
           build_server(conn_mgr, ctx)
         end
@@ -69,7 +69,8 @@ module Woods
         # @return [MCP::Server] Configured server ready for transport
         def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists
                            redacted_key_values: [], connection: nil,
-                           read_tools_enabled: false, model_tables: {})
+                           read_tools_enabled: false, model_tables: {},
+                           model_reflections: {})
           require_relative 'embedded_executor'
 
           executor = EmbeddedExecutor.new(
@@ -77,7 +78,8 @@ module Woods
             connection: connection, read_tools_enabled: read_tools_enabled
           )
           safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
-          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables)
+          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables,
+                                       model_reflections: model_reflections)
 
           build_server(executor, ctx)
         end
@@ -145,11 +147,15 @@ module Woods
         #
         # @param safe_ctx [SafeContext, nil] Layer 3 (column + EAV redaction)
         # @param model_tables [Hash{String=>String}] Model => table registry for Layer 1
+        # @param model_reflections [Hash{String=>Hash{String=>String}}] Model => { association => table }
         # @return [ResponseContext, nil]
-        def build_response_context(safe_ctx:, model_tables:)
+        def build_response_context(safe_ctx:, model_tables:, model_reflections: {})
           config = Woods.configuration if Woods.respond_to?(:configuration)
           blocked = Array(config&.console_blocked_tables)
-          table_gate = blocked.any? ? TableGate.new(blocked_tables: blocked, model_tables: model_tables) : nil
+          table_gate = if blocked.any?
+                         TableGate.new(blocked_tables: blocked, model_tables: model_tables,
+                                       model_reflections: model_reflections)
+                       end
 
           scanner = if config.nil? || config.console_credential_scanning_enabled != false
                       CredentialScanner.new(
@@ -811,19 +817,24 @@ module Woods
         # rubocop:enable Metrics/ParameterLists
 
         # Run the Layer 1 blocked-table gate against the arguments a tool was
-        # invoked with. Tools may arrive at tables through three different
-        # arg shapes — SQL string, model name, or raw table — so the gate
-        # checks every variant that's present. A no-op when the gate is nil.
+        # invoked with. Tools may arrive at tables through five different
+        # arg shapes — SQL string, model name, raw table, joined associations,
+        # or a single association name — so the gate checks every variant that's
+        # present. A no-op when the gate is nil.
         #
         # @param gate [TableGate, nil]
         # @param args [Hash] Tool arguments (symbol keys from MCP dispatch)
         # @raise [TableGateError] if any referenced identifier is blocked
-        def enforce_table_gate!(gate, args)
+        def enforce_table_gate!(gate, args) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           return unless gate
 
           gate.check_sql!(args[:sql]) if args[:sql]
           gate.check_model!(args[:model]) if args[:model]
           gate.check_table!(args[:table]) if args[:table]
+          gate.check_joins!(args[:model], args[:joins]) if args[:model] && args[:joins]
+          return unless args[:model] && args[:association]
+
+          gate.check_association!(args[:model], args[:association])
         end
 
         def log_table_gate_rejection(tool_name, args, error)

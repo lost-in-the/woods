@@ -132,7 +132,8 @@ module Woods
           redacted_columns: Array(config.console_redacted_columns),
           redacted_key_values: Array(config.console_redacted_key_values),
           read_tools_enabled: @embedded_read_tools,
-          model_tables: build_model_tables
+          model_tables: build_model_tables,
+          model_reflections: build_model_reflections
         )
       end
 
@@ -153,6 +154,32 @@ module Woods
           next unless model.table_exists?
 
           hash[model.name] = model.table_name
+        rescue StandardError
+          next
+        end
+      end
+
+      # Map every model to its association-name → target-table registry so
+      # TableGate can resolve `joins:` / `association:` arguments before the
+      # executor loads data. Polymorphic associations and anything that
+      # raises during reflection are skipped gracefully.
+      def build_model_reflections
+        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+          next if model.abstract_class?
+          next unless model.table_exists?
+
+          hash[model.name] = reflections_for(model)
+        rescue StandardError
+          next
+        end
+      end
+
+      def reflections_for(model)
+        model.reflect_on_all_associations.each_with_object({}) do |reflection, assoc_map|
+          next if reflection.polymorphic?
+
+          klass = reflection.klass
+          assoc_map[reflection.name.to_s] = klass.table_name if klass.respond_to?(:table_name)
         rescue StandardError
           next
         end
