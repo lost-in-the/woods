@@ -37,10 +37,21 @@ module Woods
     #   gate.check_joins!('User', [:authorizations])            # raises TableGateError
     #
     class TableGate # rubocop:disable Metrics/ClassLength
-      # Matches a JOIN token followed by its target identifier. ANSI-89
-      # comma joins are handled separately — see FROM_CLAUSE.
+      # Matches a JOIN token followed by its target identifier. The
+      # identifier may be schema-qualified in any of the quoting styles —
+      # `"schema"."table"`, `` `db`.`table` ``, or bare `schema.table` —
+      # and the optional schema prefix is captured separately so #blocked?
+      # can compare against either the bare or qualified configured form.
+      # ANSI-89 comma joins are handled separately — see FROM_CLAUSE.
       JOIN_REFERENCE = /
         \bJOIN\s+
+        (?:
+          (?:
+            `(?<jschema_bt>[^`]+)` |
+            "(?<jschema_dq>[^"]+)"
+          )
+          \.
+        )?
         (?:
           `(?<backtick>[^`]+)` |
           "(?<double>[^"]+)"   |
@@ -70,8 +81,18 @@ module Woods
       /xim
 
       # Matches a leading table identifier at the start of a FROM-list chunk.
+      # The identifier may carry an optional schema prefix in either quoting
+      # style — `"schema"."table"` or `` `db`.`table` `` — captured separately
+      # so #blocked? can match against bare or qualified configured forms.
       LEAD_IDENT = /
         \A
+        (?:
+          (?:
+            `(?<schema_bt>[^`]+)` |
+            "(?<schema_dq>[^"]+)"
+          )
+          \.
+        )?
         (?:
           `(?<backtick>[^`]+)` |
           "(?<double>[^"]+)"   |
@@ -174,11 +195,15 @@ module Woods
         @blocked.include?(strip_schema(raw).downcase)
       end
 
-      # Match every JOIN token and reject blocked targets.
+      # Match every JOIN token and reject blocked targets. When a quoted
+      # schema prefix is present (e.g., `"audit"."authorizations"`) the
+      # full qualified name is passed to #blocked? so a configured entry
+      # like `audit.authorizations` matches verbatim, while #strip_schema
+      # still falls back to the bare table name for bare configured entries.
       def check_join_tokens!(sql)
         sql.scan(JOIN_REFERENCE) do
           match = Regexp.last_match
-          raw = match[:backtick] || match[:double] || match[:bare]
+          raw = qualified_identifier(match)
           raise TableGateError, reject_message(raw) if blocked?(raw)
         end
       end
@@ -224,7 +249,8 @@ module Woods
         parts
       end
 
-      # Extract the table identifier at the start of a FROM-list chunk.
+      # Extract the table identifier at the start of a FROM-list chunk,
+      # joining a quoted schema prefix to the table when both are present.
       def lead_identifier(chunk)
         stripped = chunk.to_s.strip
         return nil if stripped.empty?
@@ -232,7 +258,21 @@ module Woods
         match = LEAD_IDENT.match(stripped)
         return nil unless match
 
-        match[:backtick] || match[:double] || match[:bare]
+        qualified_identifier(match)
+      end
+
+      # Combine a quoted-schema prefix with the table identifier captured
+      # by JOIN_REFERENCE / LEAD_IDENT into a single `schema.table` string.
+      # The match is expected to expose the schema via either `:jschema_bt`
+      # / `:jschema_dq` (JOIN_REFERENCE) or `:schema_bt` / `:schema_dq`
+      # (LEAD_IDENT). Bare-form identifiers (`schema.table` without quotes)
+      # arrive intact through the `:bare` capture and need no joining.
+      def qualified_identifier(match)
+        table = match[:backtick] || match[:double] || match[:bare]
+        schema = match.named_captures.values_at(
+          'schema_bt', 'schema_dq', 'jschema_bt', 'jschema_dq'
+        ).compact.first
+        schema ? "#{schema}.#{table}" : table
       end
 
       # Strip SQL comments, single-quoted string literals, and PG dollar-quoted

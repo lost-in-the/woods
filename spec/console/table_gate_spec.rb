@@ -60,6 +60,23 @@ RSpec.describe Woods::Console::TableGate do
           .to raise_error(Woods::Console::TableGateError)
       end
 
+      it 'rejects double-quoted schema-qualified references' do
+        expect { gate.check_sql!('SELECT * FROM "public"."authorizations"') }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects backtick-quoted schema-qualified references (MySQL)' do
+        expect { gate.check_sql!('SELECT * FROM `app`.`authorizations`') }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects double-quoted schema-qualified joins' do
+        sql = 'SELECT * FROM "audit"."authorizations" ' \
+              'JOIN users ON users.id = "audit"."authorizations".user_id'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
       it 'rejects references hidden behind line comments that remove a safe statement' do
         sql = "SELECT * FROM users\n-- other comment\nJOIN authorizations ON users.id = authorizations.user_id"
         expect { gate.check_sql!(sql) }.to raise_error(Woods::Console::TableGateError)
