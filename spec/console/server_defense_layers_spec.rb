@@ -21,6 +21,9 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
   let(:model_tables) { { 'User' => 'users', 'Authorization' => 'authorizations' } }
   let(:safe_context) { instance_double(Woods::Console::SafeContext) }
   let(:executor) { instance_double('Executor') }
+  # Stripe's documented test-key example — allowlisted by GitHub secret scanning
+  # and still matches `CredentialScanner`'s `stripe_secret_key` pattern.
+  let(:stripe_secret) { 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' }
 
   around do |example|
     previous = Woods.configuration
@@ -98,7 +101,7 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
         'result' => {
           'record' => {
             'id' => 1,
-            'credentials' => 'sk_live_abcdefghijklmnopqrstuvwx'
+            'credentials' => stripe_secret
           }
         }
       )
@@ -106,7 +109,7 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       response = call_tool(server, 'console_find', model: 'User', id: 1)
 
       expect(response_text(response)).to include('[REDACTED]')
-      expect(response_text(response)).not_to include('sk_live_abcdefghijklmnopqrstuvwx')
+      expect(response_text(response)).not_to include(stripe_secret)
     end
 
     it 'can be disabled via configuration' do
@@ -114,12 +117,12 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       server = build
       allow(executor).to receive(:send_request).and_return(
         'ok' => true,
-        'result' => { 'record' => { 'id' => 1, 'note' => 'sk_live_abcdefghijklmnopqrstuvwx' } }
+        'result' => { 'record' => { 'id' => 1, 'note' => stripe_secret } }
       )
 
       response = call_tool(server, 'console_find', model: 'User', id: 1)
 
-      expect(response_text(response)).to include('sk_live_abcdefghijklmnopqrstuvwx')
+      expect(response_text(response)).to include(stripe_secret)
     end
 
     it 'honors disabled_scanner_patterns to skip specific rules' do
@@ -130,7 +133,7 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
         'result' => {
           'record' => {
             'id' => 1,
-            'stripe' => 'sk_live_abcdefghijklmnopqrstuvwx',
+            'stripe' => stripe_secret,
             'aws' => 'AKIAIOSFODNN7EXAMPLE'
           }
         }
@@ -139,7 +142,7 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       response = call_tool(server, 'console_find', model: 'User', id: 1)
       text = response_text(response)
 
-      expect(text).to include('sk_live_abcdefghijklmnopqrstuvwx')
+      expect(text).to include(stripe_secret)
       expect(text).to include('[REDACTED]')
       expect(text).not_to include('AKIAIOSFODNN7EXAMPLE')
     end
@@ -163,7 +166,7 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       server = build
       allow(executor).to receive(:send_request).and_return(
         'ok' => true,
-        'result' => { 'record' => { 'token' => 'sk_live_abcdefghijklmnopqrstuvwx' } }
+        'result' => { 'record' => { 'token' => stripe_secret } }
       )
 
       call_tool(server, 'console_find', model: 'User', id: 1)

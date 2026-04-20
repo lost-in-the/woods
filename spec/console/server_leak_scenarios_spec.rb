@@ -94,11 +94,11 @@ RSpec.describe 'Woods::Console::Server leak scenarios (fixture-driven)' do
     response.content.first[:text]
   end
 
-  # Documented test fixtures — not real credentials. The alphabetic suffixes
-  # are obvious placeholders, and AKIAIOSFODNN7EXAMPLE is AWS's official
-  # example key from their documentation.
-  let(:stripe_live) { 'sk_live_abcdefghijklmnopqrstuvwx' }
-  let(:stripe_test) { 'sk_test_abcdefghijklmnopqrstuvwx' }
+  # Documented test fixtures — not real credentials. The `4eC39...` suffix is
+  # Stripe's own documentation example (allowlisted by GitHub secret scanning),
+  # and AKIAIOSFODNN7EXAMPLE is AWS's official example key.
+  let(:stripe_live) { 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' }
+  let(:stripe_test) { 'sk_test_4eC39HqLyjWDarjtT1zdp7dc' }
   let(:aws_key)     { 'AKIAIOSFODNN7EXAMPLE' }
 
   describe 'Scenario A — blocked table short-circuits before executor' do

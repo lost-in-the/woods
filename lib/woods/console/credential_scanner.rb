@@ -22,7 +22,7 @@ module Woods
     #
     # @example
     #   scanner = CredentialScanner.new
-    #   value, counts = scanner.scan('token is sk_live_abcdefghijklmnopqrstuvwx')
+    #   value, counts = scanner.scan('token is sk_test_4eC39HqLyjWDarjtT1zdp7dc')
     #   value  # => "token is [REDACTED]"
     #   counts # => { stripe_secret_key: 1 }
     #
