@@ -202,11 +202,11 @@ module Woods
             error_text = "#{response['error_type']}: #{response['error']}"
             ::MCP::Tool::Response.new(
               [{ type: 'text', text: error_text }],
-              error: error_text
+              error: true
             )
           end
         rescue ConnectionError => e
-          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: e.message)
+          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: true)
         end
 
         # Run Layer 2 against the result and emit a structured log line when
@@ -822,9 +822,13 @@ module Woods
               gate_method.call(ctx&.table_gate, args)
             rescue TableGateError => e
               log_gate_method.call(name, args, e)
-              next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: e.message)
+              next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
             end
-            request = tool_block.call(args)
+            begin
+              request = tool_block.call(args)
+            rescue SqlValidationError => e
+              next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
+            end
             bridge_method.call(conn_mgr, request.transform_keys(&:to_s), ctx, renderer: renderer)
           end
         end
