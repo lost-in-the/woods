@@ -823,7 +823,7 @@ module Woods
         # rubocop:enable Metrics/MethodLength
 
         # Shared tool definition helper that wires block -> bridge -> response.
-        # rubocop:disable Metrics/ParameterLists
+        # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
         def define_console_tool(server, conn_mgr, name, description, properties:, required: nil,
                                 ctx: nil, renderer: nil, &tool_block)
           bridge_method = method(:send_to_bridge)
@@ -849,7 +849,7 @@ module Woods
             bridge_method.call(conn_mgr, request.transform_keys(&:to_s), ctx, renderer: renderer)
           end
         end
-        # rubocop:enable Metrics/ParameterLists
+        # rubocop:enable Metrics/ParameterLists, Metrics/MethodLength
 
         # Run the Layer 1 blocked-table gate against the arguments a tool was
         # invoked with. Tools may arrive at tables through five different
