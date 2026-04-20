@@ -138,6 +138,18 @@ RSpec.describe Woods::Console::SqlValidator do
       end
     end
 
+    context 'with other set operators' do
+      it 'rejects SELECT with INTERSECT' do
+        expect { validator.validate!('SELECT id FROM users INTERSECT SELECT id FROM admins') }
+          .to raise_error(Woods::Console::SqlValidationError, /INTERSECT/i)
+      end
+
+      it 'rejects SELECT with EXCEPT' do
+        expect { validator.validate!('SELECT id FROM users EXCEPT SELECT id FROM admins') }
+          .to raise_error(Woods::Console::SqlValidationError, /EXCEPT/i)
+      end
+    end
+
     context 'with writable CTEs' do
       it 'rejects WITH...DELETE' do
         expect { validator.validate!('WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d') }

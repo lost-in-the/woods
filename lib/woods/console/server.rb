@@ -39,6 +39,21 @@ module Woods
       class << self # rubocop:disable Metrics/ClassLength
         # Build a configured MCP::Server with console tools using the bridge protocol.
         #
+        # ⚠ Layer 1 limitation in bridge mode:
+        # The server side of the bridge has no access to the remote app's
+        # `ActiveRecord::Base.descendants`, so model_tables and model_reflections
+        # are empty. `TableGate#check_sql!` still fires against the raw SQL
+        # argument of `console_sql`, but `check_model!`, `check_joins!`, and
+        # `check_association!` are effectively no-ops for tools that receive a
+        # model name rather than SQL (find, sample, count, etc.). A bridge-mode
+        # deployment therefore relies on Layer 2 (credential scanning) + Layer 3
+        # (column/EAV redaction) + Layer 4 (SqlValidator + SafeContext rollback)
+        # for non-SQL tool calls. If you need full Layer 1 coverage, use
+        # `build_embedded` (the stdio entry point `exe/woods-console` does this).
+        #
+        # See docs/CONSOLE_MCP_SETUP.md "Bridge vs. embedded defense coverage"
+        # for the full matrix.
+        #
         # @param config [Hash] Configuration hash (from YAML or env)
         # @return [MCP::Server] Configured server ready for transport
         def build(config:)
@@ -200,13 +215,15 @@ module Woods
             respond(text)
           else
             error_text = "#{response['error_type']}: #{response['error']}"
+            error_text = scan_for_credentials(error_text, request, ctx)
             ::MCP::Tool::Response.new(
               [{ type: 'text', text: error_text }],
               error: true
             )
           end
         rescue ConnectionError => e
-          ::MCP::Tool::Response.new([{ type: 'text', text: "Connection error: #{e.message}" }], error: true)
+          scanned = scan_for_credentials("Connection error: #{e.message}", request, ctx)
+          ::MCP::Tool::Response.new([{ type: 'text', text: scanned }], error: true)
         end
 
         # Run Layer 2 against the result and emit a structured log line when
