@@ -20,6 +20,21 @@ module Woods
     # console_query are blocked in embedded mode and return an "unsupported" error
     # pointing users to enable the flag.
     #
+    # == Enabling the feature
+    #
+    # The Console MCP is disabled by default. Enable it in your Woods initializer:
+    #
+    #   Woods.configure do |config|
+    #     config.console_mcp_enabled = true
+    #     config.console_blocked_tables = %w[authorizations credentials]
+    #     config.console_redacted_columns = %w[api_token password_digest]
+    #   end
+    #
+    # With the flag off, requests to the mounted path return 410 Gone so
+    # operators can see the endpoint exists but is gated. See
+    # docs/CONSOLE_MCP_SETUP.md for the full security posture (blocked tables,
+    # credential scanner, column/EAV redaction, SafeContext rollback).
+    #
     # == Enabling read tools (console_sql + console_query)
     #
     # Set embedded_read_tools: true to unlock the sql and query tools:
@@ -63,25 +78,32 @@ module Woods
 
       DISABLED_BODY = JSON.generate(
         error: 'woods_console_disabled',
-        message: 'Woods Console MCP is disabled in this release pending security review. ' \
-                 'See CHANGELOG.md for details.'
+        message: 'Woods Console MCP is disabled. Set ' \
+                 'Woods.configuration.console_mcp_enabled = true to enable. ' \
+                 'See docs/CONSOLE_MCP_SETUP.md for the full security posture.'
       ).freeze
 
       # Rack interface — intercepts requests at the configured path.
       #
-      # The Console MCP feature is disabled in this release; requests to the
-      # mounted path return 410 Gone. See CHANGELOG.md for the rationale.
-      # All other requests pass through to the wrapped app unchanged.
+      # Returns 410 Gone when Woods.configuration.console_mcp_enabled is false
+      # (the default). This keeps the middleware inert on hosts that have
+      # mounted it but not yet opted into the feature. All other requests at
+      # non-matching paths pass through to the wrapped app unchanged.
       #
       # @param env [Hash] Rack environment
       # @return [Array] Rack response triple
       def call(env)
         return @app.call(env) unless env['PATH_INFO'].start_with?(@path)
+        return [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]] unless enabled?
 
-        [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]]
+        ensure_transport.handle_request(Rack::Request.new(env))
       end
 
       private
+
+      def enabled?
+        Woods.configuration.console_mcp_enabled
+      end
 
       # Thread-safe lazy initialization of the MCP server and transport.
       #
@@ -109,7 +131,9 @@ module Woods
           safe_context: SafeContext.new(connection: ActiveRecord::Base.connection),
           redacted_columns: Array(config.console_redacted_columns),
           redacted_key_values: Array(config.console_redacted_key_values),
-          read_tools_enabled: @embedded_read_tools
+          read_tools_enabled: @embedded_read_tools,
+          model_tables: build_model_tables,
+          model_reflections: build_model_reflections
         )
       end
 
@@ -119,6 +143,43 @@ module Woods
           next unless model.table_exists?
 
           hash[model.name] = model.column_names
+        rescue StandardError
+          next
+        end
+      end
+
+      def build_model_tables
+        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+          next if model.abstract_class?
+          next unless model.table_exists?
+
+          hash[model.name] = model.table_name
+        rescue StandardError
+          next
+        end
+      end
+
+      # Map every model to its association-name → target-table registry so
+      # TableGate can resolve `joins:` / `association:` arguments before the
+      # executor loads data. Polymorphic associations and anything that
+      # raises during reflection are skipped gracefully.
+      def build_model_reflections
+        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+          next if model.abstract_class?
+          next unless model.table_exists?
+
+          hash[model.name] = reflections_for(model)
+        rescue StandardError
+          next
+        end
+      end
+
+      def reflections_for(model)
+        model.reflect_on_all_associations.each_with_object({}) do |reflection, assoc_map|
+          next if reflection.polymorphic?
+
+          klass = reflection.klass
+          assoc_map[reflection.name.to_s] = klass.table_name if klass.respond_to?(:table_name)
         rescue StandardError
           next
         end
