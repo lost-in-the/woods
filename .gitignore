@@ -38,3 +38,6 @@ bin/context7
 .grove/state.json
 .grove/state.json.bak
 .grove/.envrc
+
+# Frontend build dependencies (dev only)
+frontend/node_modules/

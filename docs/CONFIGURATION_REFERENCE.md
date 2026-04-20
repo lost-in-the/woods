@@ -193,6 +193,46 @@ config.session_store = Woods::SessionTracer::FileStore.new(
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```
 
+## Svelte Flow Visualization
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `svelte_flow_enabled` | Boolean | `false` | Mount the visualization middleware in the Rails app |
+| `svelte_flow_path` | String | `'/woods/visualize'` | URL path where the visualization UI is served |
+
+### Export Mode (No Configuration Needed)
+
+Generate Svelte Flow-compatible JSON files from extraction output:
+
+```bash
+bundle exec rake woods:svelte_flow_export
+# Or with the alias:
+bundle exec rake woods:map
+```
+
+Output is written to `{output_dir}/svelte_flow/` with dependency graph, domain clusters, and flow visualizations.
+
+### Server Mode
+
+Mount an interactive visualization page in your Rails app:
+
+```ruby
+Woods.configure do |config|
+  config.svelte_flow_enabled = true
+  config.svelte_flow_path = '/woods/visualize'  # default
+end
+```
+
+Visit `/woods/visualize` in your browser to see the interactive graph. The middleware serves a JSON API at `/woods/visualize/api/graph`, `/woods/visualize/api/clusters`, and `/woods/visualize/api/flows`.
+
+For flow visualizations, enable flow precomputation during extraction:
+
+```ruby
+config.precompute_flows = true
+```
+
+See [SVELTE_FLOW_VISUALIZATION.md](SVELTE_FLOW_VISUALIZATION.md) for the full integration guide.
+
 ## Gem Indexing
 
 Register additional gems to extract source from:

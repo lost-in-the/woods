@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, Svelte Flow visualization, and evaluation harness.
 
 ## Commands
 
@@ -20,7 +20,8 @@ bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
 bundle exec rake woods:clean             # Remove index output
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
-# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate)
+bundle exec rake woods:svelte_flow_export # Export Svelte Flow visualization JSON
+# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate), woods:map (svelte_flow_export)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
@@ -49,6 +50,7 @@ lib/
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
+│   ├── svelte_flow/                     # Svelte Flow visualization (Transformer, Exporter, RackMiddleware, assets)
 │   ├── mcp/                             # MCP Index Server (27 tools, 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
@@ -186,6 +188,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `CachingExtractor` scans controllers, models, and view templates (`.erb`) — the `file_type` parameter on `extract_caching_file` defaults to nil (auto-detected from path).
 - `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.
 - Notion export requires `notion_api_token` and `notion_database_ids` to be configured. If only one database ID is set, the other sync (columns or data_models) is skipped gracefully. Environment variable `NOTION_API_TOKEN` overrides config. The Notion API enforces 3 req/sec — `RateLimiter` handles this automatically.
+- Svelte Flow visualization requires extraction to have been run first — the exporter reads from `dependency_graph.json` and the `flows/` directory. Enable `precompute_flows` for flow visualizations. The `RackMiddleware` lazy-loads data on first request and caches with manifest staleness detection. Pre-built frontend assets ship with the gem — no Node.js required.
 - Navigation edge extraction (`link_to`, `redirect_to`, `form_action`) is gated by `extract_navigation_edges` config (default: true). Extractors that scan for navigation edges must include both `SharedDependencyScanner` and `RouteHelperResolver`, and call `build_route_helper_map` in their initializer.
 - `RouteHelperResolver` uses `IGNORED_HELPER_PREFIXES` to filter false positives from non-route `_path`/`_url` suffixes (e.g., `file_path`, `base_url`, `log_path`). Add new prefixes there when false positives are discovered in host apps.
 - `DependencyGraph` edges are stored as `[{ target:, via: }]` hashes (symbol keys). `IndexReader` normalizes from JSON to `[{ 'target' => ..., 'via' => ... }]` (string keys). The two normalizers (`DependencyGraph.normalize_edges` vs `IndexReader.normalize_all_edges`) are intentionally separate — do not merge them.

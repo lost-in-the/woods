@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`count` function in `console_aggregate`** — the `column` argument is optional when `function: "count"`, making it easy to count rows matching a scope in a single tool call.
 - **`embedded_read_tools` flag** on `Woods::Console::RackMiddleware` — opts `console_sql` and `console_query` into the embedded executor, with `SqlValidator` + `SafeContext` rollback + per-request connection pooling enforcing read-only safety.
 - **MCP worktree setup guide** (`docs/MCP_WORKTREE_SETUP.md`) — multi-worktree MCP configuration for simultaneous Claude Code sessions across branches.
+- **Svelte Flow visualization** — interactive graph visualization of dependencies, domain clusters, and request execution flows
+  - `Woods::SvelteFlow::Transformer` — orchestrates conversion of graph data to Svelte Flow node/edge format
+  - `Woods::SvelteFlow::Layout` — server-side DAG layout using Kahn's algorithm with PageRank tiebreaking
+  - `Woods::SvelteFlow::NodeBuilder` — maps graph nodes to Svelte Flow nodes with type coloring, hub/bridge/orphan badges
+  - `Woods::SvelteFlow::EdgeBuilder` — maps graph edges with cycle marking, boundary animations, and flow step connections
+  - `Woods::SvelteFlow::Exporter` — reads extraction output and writes Svelte Flow JSON files
+  - `Woods::SvelteFlow::RackMiddleware` — serves interactive visualization page and JSON API endpoints
+  - Pre-built canvas-based frontend with three views: Dependencies, Flows, Clusters
+  - New rake tasks: `woods:svelte_flow_export` (alias: `woods:map`)
+  - New config: `svelte_flow_enabled`, `svelte_flow_path`
+  - Integration guide: `docs/SVELTE_FLOW_VISUALIZATION.md`
 
 ### Changed
 

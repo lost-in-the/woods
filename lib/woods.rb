@@ -43,6 +43,7 @@ module Woods
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
+                  :svelte_flow_enabled, :svelte_flow_path,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options
@@ -73,6 +74,8 @@ module Woods
       @console_redacted_columns = []
       @console_redacted_key_values = []
       @console_embedded_read_tools = false
+      @svelte_flow_enabled = false
+      @svelte_flow_path = '/woods/visualize'
       @notion_api_token = nil
       @notion_database_ids = {}
       @unblocked_api_token = nil

@@ -672,4 +672,30 @@ namespace :woods do
 
   desc 'Relay findings to Unblocked (alias for unblocked_sync)'
   task relay: :unblocked_sync
+
+  desc 'Export Svelte Flow visualization data'
+  task svelte_flow_export: :environment do
+    require 'woods/svelte_flow/exporter'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    svelte_flow_dir = ENV.fetch('SVELTE_FLOW_OUTPUT', File.join(output_dir.to_s, 'svelte_flow'))
+
+    puts 'Exporting Svelte Flow visualization data...'
+    puts "  Index directory:  #{output_dir}"
+    puts "  Output directory: #{svelte_flow_dir}"
+    puts
+
+    exporter = Woods::SvelteFlow::Exporter.new(index_dir: output_dir.to_s, output_dir: svelte_flow_dir)
+    stats = exporter.export_all
+
+    puts 'Export complete!'
+    puts "  Nodes:    #{stats[:nodes]}"
+    puts "  Edges:    #{stats[:edges]}"
+    puts "  Clusters: #{stats[:clusters]}"
+    puts "  Flows:    #{stats[:flows]}"
+    puts "  Output:   #{stats[:output_dir]}"
+  end
+
+  desc 'Map the terrain — Svelte Flow export (alias for svelte_flow_export)'
+  task map: :svelte_flow_export
 end
