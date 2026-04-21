@@ -2,7 +2,7 @@ import { Button } from '@liam-hq/ui'
 import { DialogClose } from '@radix-ui/react-dialog'
 import { Command, defaultFilter } from 'cmdk'
 import { type FC, useCallback, useMemo, useState } from 'react'
-import { TableOptions, WoodsNodeOptions } from '../CommandPaletteOptions'
+import { EntryPointOptions, TableOptions, WoodsNodeOptions } from '../CommandPaletteOptions'
 import { TablePreview } from '../CommandPalettePreview/TablePreview'
 import { CommandPaletteFooter } from '../CommandPaletteFooter/CommandPaletteFooter'
 import { CommandPaletteSearchInput } from '../CommandPaletteSearchInput'
@@ -82,6 +82,7 @@ export const CommandPaletteContent: FC = () => {
           <Command.Empty>No results found.</Command.Empty>
           {inputMode.type === 'default' && (
             <>
+              <EntryPointOptions />
               <TableOptions suggestion={suggestion} />
               <WoodsNodeOptions
                 onSelectNode={handleFocusNode}
