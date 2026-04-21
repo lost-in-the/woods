@@ -173,13 +173,29 @@ module Woods
                                        model_reflections: model_reflections)
                        end
 
+          secret_index = build_credential_index(config)
           scanner = if config.nil? || config.console_credential_scanning_enabled != false
                       CredentialScanner.new(
-                        disabled_patterns: Array(config&.console_disabled_scanner_patterns)
+                        disabled_patterns: Array(config&.console_disabled_scanner_patterns),
+                        secret_index: secret_index
                       )
                     end
 
           ResponseContext.build(safe_ctx: safe_ctx, table_gate: table_gate, credential_scanner: scanner)
+        end
+
+        # Build the boot-time credential index from Rails.application's encrypted
+        # credentials. Returns nil when credential defense is disabled or when no
+        # Rails application is reachable (specs, non-Rails hosts) — the scanner
+        # then falls back to its pattern-only behavior.
+        #
+        # @param config [Woods::Configuration, nil]
+        # @return [CredentialIndex, nil]
+        def build_credential_index(config)
+          return nil unless config&.console_credential_defense_enabled
+          return nil unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
+
+          CredentialIndex.build(rails_app: Rails.application)
         end
 
         # Shared server construction used by both build() and build_embedded().

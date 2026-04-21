@@ -386,6 +386,20 @@ Woods.configure do |config|
   # false positives in your data (e.g. AWS access keys in documentation).
   config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
 
+  # Layer 2 augmentations — parse-time eval guard + boot-time credential index.
+  # Default: true. When true:
+  #   - Woods::Console::EvalGuard refuses console_eval payloads that reach
+  #     Rails.application.credentials, ENV, reflection escapes, or credential-
+  #     file reads at parse time (before the bridge sees the snippet).
+  #   - Woods::Console::CredentialIndex walks Rails.application.credentials.config
+  #     once at server boot and substring-redacts those values from every MCP
+  #     response — so credentials whose shape no scanner pattern recognizes
+  #     (Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook
+  #     signing keys) are still caught when their exact contents appear.
+  # See "console_credential_defense_enabled" section below for scope and
+  # multi-DB caveats.
+  config.console_credential_defense_enabled = true
+
   # Layer 3 — Column names to redact from all query results. Default: [].
   # Replaced with "[REDACTED]" in output.
   config.console_redacted_columns = %w[password_digest encrypted_password api_key ssn token]
@@ -428,6 +442,20 @@ Use this to wall off tables that shouldn't appear in agent context regardless of
 The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss — e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
 
 Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling the rule — `console_disabled_scanner_patterns` is an escape hatch, not a primary knob.
+
+### `console_credential_defense_enabled` (parse-time eval guard + boot-time credential index)
+
+Two complementary defenses share this flag, both gating credential exfiltration that the shape-pattern scanner cannot catch on its own:
+
+- **Parse-time eval guard.** `Woods::Console::EvalGuard` walks the normalized AST of every `console_eval` payload and raises before the bridge ever sees it when the snippet reaches `Rails.application.credentials.*`, `Rails.application.secrets.*`, `ENV` (any form), reflection escapes (`eval`, `instance_eval`, `send`, `const_get`, `binding`, etc.), or credential-file reads (`File.read('config/master.key')`, `File.read('config/credentials.yml.enc')`, etc.). Refusal yields a clean MCP error response (`error: true`) — no transport-level exception, no partial output. Unparseable payloads are also refused, since a snippet that won't parse can't be reasoned about.
+
+- **Boot-time credential index.** `Woods::Console::CredentialIndex` walks `Rails.application.credentials.config` once at server boot, collects every string leaf with length ≥ 12, and substring-redacts those values from every MCP response. This catches credentials whose *shape* the scanner doesn't recognize but whose *exact contents* Rails already knows — Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook signing keys, custom OAuth client secrets. Hits are marked `[REDACTED:credential]` (distinct from the scanner's `[REDACTED]`) and counted under a `:credential_index` key so audit output shows which layer caught the leak.
+
+**Multi-DB / sharded caveat.** The index reflects only the credentials available to the *Rails process* that boots the Console MCP server. A separate database that holds its own secrets (e.g., a vendored CMS app sharing the same Rails host) is not in scope — for those, lean on Layer 3 (`console_redacted_columns` / `console_redacted_key_values`) and Layer 1 (`console_blocked_tables`).
+
+**Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index — the server still boots and the parse-time eval guard plus every other defense layer remain in effect.
+
+Set the flag to `false` only if a legitimate workflow requires reading credentials through `console_eval`. The bridge-side enforcement (`SafeContext`, `SqlValidator`, blocked tables) remains in place either way.
 
 ### `console_redacted_columns`
 

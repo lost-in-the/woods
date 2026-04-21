@@ -2,6 +2,8 @@
 
 require 'set'
 
+require_relative 'credential_index'
+
 # @see Woods
 module Woods
   class Error < StandardError; end unless defined?(Woods::Error)
@@ -61,11 +63,24 @@ module Woods
         PATTERNS.keys
       end
 
+      # Counter key emitted when {CredentialIndex} substring-matches a value
+      # before any shape pattern fires. Distinct from pattern names so
+      # observability can tell the two layers apart.
+      INDEX_HIT = :credential_index
+
       # @param disabled_patterns [Array<Symbol, String>] names to skip at scan
       #   time. Strings are coerced to Symbols.
-      def initialize(disabled_patterns: [])
+      # @param secret_index [#match?, #redact, nil] Optional {CredentialIndex}
+      #   built from the host app's actual credentials. When present, every
+      #   string is run through the index *before* the pattern pass — so a
+      #   value whose shape no pattern recognizes (Twilio auth tokens,
+      #   hand-rolled HMAC keys, etc.) is still redacted when it matches a
+      #   stored credential exactly. Pass `nil` (or a `CredentialIndex#empty?`
+      #   index) to skip the substring layer.
+      def initialize(disabled_patterns: [], secret_index: nil)
         disabled = Array(disabled_patterns).to_set(&:to_sym)
         @active_patterns = PATTERNS.except(*disabled)
+        @secret_index = secret_index unless secret_index.respond_to?(:empty?) && secret_index.empty?
       end
 
       # Scan a value (String, Hash, Array, or any other object) for credentials.
@@ -96,12 +111,21 @@ module Woods
       end
 
       def scan_string(str, counts)
-        @active_patterns.inject(str) do |result, (name, pattern)|
-          result.gsub(pattern) do
+        result = redact_indexed_secrets(str, counts)
+        @active_patterns.inject(result) do |acc, (name, pattern)|
+          acc.gsub(pattern) do
             counts[name] = (counts[name] || 0) + 1
             REDACTED
           end
         end
+      end
+
+      def redact_indexed_secrets(str, counts)
+        return str unless @secret_index&.match?(str)
+
+        redacted = @secret_index.redact(str)
+        counts[INDEX_HIT] = (counts[INDEX_HIT] || 0) + redacted.scan(CredentialIndex::REDACTED).size
+        redacted
       end
     end
   end
