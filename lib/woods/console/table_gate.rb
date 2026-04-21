@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require 'woods/console/sql_noise_stripper'
 
 # @see Woods
 module Woods
@@ -312,13 +313,11 @@ module Woods
 
       # Strip SQL comments, single-quoted string literals, and PG dollar-quoted
       # literals so their contents cannot forge (or hide) a table reference.
-      # Dollar-quotes are stripped before single-quotes so stray apostrophes
-      # inside a dollar-quoted literal do not confuse the single-quote scanner.
+      # Delegates to {SqlNoiseStripper} for the actual stripping logic.
+      # MySQL backslash-escape (`\'`) is handled by the `:mysql` dialect.
       def strip_noise(sql)
-        out = sql.gsub(/--[^\n]*/, '')                  # line comments
-        out = out.gsub(%r{/\*.*?\*/}m, '')              # block comments
-        out = out.gsub(/\$(\w*)\$.*?\$\1\$/m, "''")     # PG dollar-quoted strings
-        out.gsub(/'(?:\\.|[^'])*'/, "''")               # single-quoted strings
+        out = SqlNoiseStripper.strip_comments(sql)
+        SqlNoiseStripper.strip_literals(out, dialect: :mysql)
       end
 
       def strip_schema(raw)
