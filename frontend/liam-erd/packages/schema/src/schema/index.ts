@@ -16,6 +16,8 @@ export type {
   Columns,
   Constraint,
   Constraints,
+  EntryPoint,
+  EntryPoints,
   Enum,
   Enums,
   Extension,
@@ -33,6 +35,8 @@ export type {
 export {
   columnSchema,
   constraintSchema,
+  entryPointSchema,
+  entryPointsSchema,
   enumNameSchema,
   enumSchema,
   enumValueSchema,

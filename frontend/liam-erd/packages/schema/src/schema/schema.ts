@@ -149,12 +149,24 @@ export type Extension = v.InferOutput<typeof extensionSchema>
 const extensionsSchema = v.record(extensionNameSchema, extensionSchema)
 export type Extensions = v.InferOutput<typeof extensionsSchema>
 
+export const entryPointSchema = v.object({
+  identifier: v.string(),
+  verb: v.literal('GET'),
+  path: v.string(),
+  action: v.string(),
+})
+export type EntryPoint = v.InferOutput<typeof entryPointSchema>
+
+export const entryPointsSchema = v.array(entryPointSchema)
+export type EntryPoints = v.InferOutput<typeof entryPointsSchema>
+
 // Schema definition for the entire database structure
 export const schemaSchema = v.object({
   tables: tablesSchema,
   enums: enumsSchema,
   extensions: extensionsSchema,
   nodes: v.optional(woodsNodesSchema),
+  entryPoints: v.optional(entryPointsSchema),
 })
 
 export type Schema = v.InferOutput<typeof schemaSchema>

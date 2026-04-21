@@ -19,9 +19,11 @@
     "@liam-hq/configs": "workspace:*",
     "@pgsql/types": "15.1.1",
     "@types/node": "22.17.1",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
   },
   "scripts": {
-    "build": "echo 'schema: source-only in woods fork (consumed by Vite directly)'"
+    "build": "echo 'schema: source-only in woods fork (consumed by Vite directly)'",
+    "test": "vitest --watch=false"
   }
 }
