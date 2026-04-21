@@ -16,6 +16,7 @@ require_relative 'credential_scanner'
 require_relative 'eval_guard'
 require_relative 'table_gate'
 require_relative 'response_context'
+require_relative 'tool_specs'
 
 module Woods
   module Console
@@ -30,13 +31,6 @@ module Woods
     #   transport.open
     #
     module Server # rubocop:disable Metrics/ModuleLength
-      TIER1_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
-      TIER2_TOOLS = %w[diagnose_model data_snapshot validate_record check_setting update_setting
-                       check_policy validate_with check_eligibility decorate].freeze
-      TIER3_TOOLS = %w[slow_endpoints error_rates throughput job_queues job_failures job_find
-                       job_schedule redis_info cache_stats channel_status].freeze
-      TIER4_TOOLS = %w[eval sql query].freeze
-
       class << self # rubocop:disable Metrics/ClassLength
         # Rebuild the boot-time credential index from fresh Rails credentials
         # and hot-swap it into the active scanner without restarting the process.
@@ -190,47 +184,124 @@ module Woods
           build_server(executor, ctx)
         end
 
+        # Register all tool specs for a given tier on the server.
+        #
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
+        # @param ctx [ResponseContext, nil] Optional context bundling response-safety layers
+        # @param tier [Integer] Tier number (1-4)
+        # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
+        # @return [void]
+        def register_tier_tools(server, conn_mgr, ctx, tier:, renderer: nil)
+          TOOL_SPECS.select { |spec| spec.tier == tier }.each do |spec|
+            register(spec, server, conn_mgr, ctx, renderer: renderer)
+          end
+        end
+
         # Register Tier 1 read-only tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
         # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [SafeContext, nil] Optional context for column redaction
+        # @param ctx [ResponseContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier1_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          TIER1_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, ctx, renderer: renderer) }
+          register_tier_tools(server, conn_mgr, ctx, tier: 1, renderer: renderer)
         end
 
         # Register Tier 2 domain-aware tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
         # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [SafeContext, nil] Optional context for column redaction
+        # @param ctx [ResponseContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier2_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          TIER2_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, ctx, renderer: renderer) }
+          register_tier_tools(server, conn_mgr, ctx, tier: 2, renderer: renderer)
         end
 
         # Register Tier 3 analytics tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
         # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [SafeContext, nil] Optional context for column redaction
+        # @param ctx [ResponseContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier3_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          TIER3_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, ctx, renderer: renderer) }
+          register_tier_tools(server, conn_mgr, ctx, tier: 3, renderer: renderer)
         end
 
         # Register Tier 4 guarded tools on the server.
         #
         # @param server [MCP::Server] The MCP server instance
         # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [SafeContext, nil] Optional context for column redaction
+        # @param ctx [ResponseContext, nil] Optional context for column redaction
         # @return [void]
         def register_tier4_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          TIER4_TOOLS.each { |tool| send(:"define_#{tool}", server, conn_mgr, ctx, renderer: renderer) }
+          register_tier_tools(server, conn_mgr, ctx, tier: 4, renderer: renderer)
         end
 
         private
+
+        # Register a single ToolSpec on the MCP server.
+        #
+        # Wires the spec's handler through the bridge/executor pipeline, table gate,
+        # integer coercion, and credential scanning. This is the single registration
+        # point that replaces the 29 individual define_<tool> methods.
+        #
+        # @param spec [ToolSpec] The tool specification
+        # @param server [MCP::Server] The MCP server instance
+        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
+        # @param ctx [ResponseContext, nil] Response context (table gate, scanner, safe_ctx)
+        # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
+        # @return [void]
+        def register(spec, server, conn_mgr, ctx, renderer: nil)
+          schema = spec_schema(spec)
+          tool_name = spec.name
+          handler = spec.handler
+          bridge_method = method(:send_to_bridge)
+          coerce_method = method(:coerce_integer_args!)
+          gate_method = method(:enforce_table_gate!)
+          log_gate_method = method(:log_table_gate_rejection)
+          dispatch_method = method(:dispatch_tool)
+          integer_keys = integer_property_keys(spec.properties)
+
+          server.define_tool(name: tool_name, description: spec.description,
+                             input_schema: schema) do |server_context:, **args|
+            coerce_method.call(args, integer_keys)
+            dispatch_method.call(gate_method, log_gate_method, tool_name, ctx, args) do
+              bridge_method.call(conn_mgr, handler.call(args).transform_keys(&:to_s), ctx, renderer: renderer)
+            end
+          end
+        end
+
+        # Build the JSON Schema object for a ToolSpec.
+        #
+        # @param spec [ToolSpec]
+        # @return [Hash]
+        def spec_schema(spec)
+          schema = { properties: spec.properties }
+          schema[:required] = spec.required if spec.required&.any?
+          schema
+        end
+
+        # Run the table-gate check then dispatch the tool handler, translating
+        # TableGateError, SqlValidationError, and ForbiddenExpressionError into
+        # MCP error responses.
+        #
+        # @param gate_method [Method]
+        # @param log_gate_method [Method]
+        # @param tool_name [String]
+        # @param ctx [ResponseContext, nil]
+        # @param args [Hash]
+        # @yield Executes the tool dispatch when gate passes
+        # @return [MCP::Tool::Response]
+        def dispatch_tool(gate_method, log_gate_method, tool_name, ctx, args)
+          gate_method.call(ctx&.table_gate, args)
+          yield
+        rescue TableGateError => e
+          log_gate_method.call(tool_name, args, e)
+          ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
+        rescue SqlValidationError, ForbiddenExpressionError => e
+          ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
+        end
 
         # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
         #
@@ -592,463 +663,6 @@ module Woods
           format == :json ? JsonConsoleRenderer.new : ConsoleResponseRenderer.new
         end
 
-        def define_count(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_count', 'Count records matching scope conditions.',
-                              properties: {
-                                model: str_prop('Model name'),
-                                scope: obj_prop('Filter: {status: "paid", total_refund_gt: 0, ' \
-                                                'transaction_id_not_null: true}. ' \
-                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                'Complex queries: use console_query.')
-                              },
-                              required: ['model'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_count(model: args[:model], scope: args[:scope])
-          end
-        end
-
-        def define_sample(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_sample', 'Random sample of records.',
-                              properties: {
-                                model: str_prop('Model name'), limit: int_prop('Max records (default 5, max 25)'),
-                                columns: arr_prop('Columns to include'),
-                                scope: obj_prop('Filter: {status: "paid", amount_gt: 100}. ' \
-                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                'Complex queries: use console_query.')
-                              }, required: ['model'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_sample(
-              model: args[:model], scope: args[:scope], limit: args[:limit] || 5, columns: args[:columns]
-            )
-          end
-        end
-
-        def define_find(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_find',
-                              'Find a single record by primary key or unique column',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Primary key value'),
-                                by: obj_prop('Unique column lookup'),
-                                columns: arr_prop('Columns to include')
-                              }, required: ['model'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_find(model: args[:model], id: args[:id], by: args[:by], columns: args[:columns])
-          end
-        end
-
-        def define_pluck(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_pluck', 'Extract column values from records.',
-                              properties: {
-                                model: str_prop('Model name'), columns: arr_prop('Column names to pluck'),
-                                scope: obj_prop('Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
-                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                'Complex queries: use console_query.'),
-                                limit: int_prop('Max records (default 100, max 1000)'),
-                                distinct: bool_prop('Return unique values only')
-                              }, required: %w[model columns], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_pluck(
-              model: args[:model], columns: args[:columns], scope: args[:scope],
-              limit: args[:limit] || 100, distinct: args[:distinct] || false
-            )
-          end
-        end
-
-        def define_aggregate(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_aggregate',
-                              'Run aggregate function on a column. ' \
-                              'count omits column to count all rows. ' \
-                              'Supports scope predicates: {status: "paid", total_gt: 0}. ' \
-                              'For complex queries use console_query.',
-                              properties: {
-                                model: str_prop('Model name'),
-                                function: str_prop('Aggregate function: sum, average, minimum, maximum, count'),
-                                column: str_prop('Column to aggregate (optional for count)'),
-                                scope: obj_prop('Filter conditions: {col: val} or predicate suffixes ' \
-                                                '(_gt, _lt, _in, _null, etc.)')
-                              }, required: %w[model function], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_aggregate(
-              model: args[:model], function: args[:function], column: args[:column], scope: args[:scope]
-            )
-          end
-        end
-
-        def define_association_count(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_association_count',
-                              'Count associated records for a specific record.',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Record primary key'),
-                                association: str_prop('Association name'),
-                                scope: obj_prop('Filter on association: {status: "paid", amount_gt: 0}. ' \
-                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                'Complex queries: use console_query.')
-                              }, required: %w[model id association], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_association_count(
-              model: args[:model], id: args[:id], association: args[:association], scope: args[:scope]
-            )
-          end
-        end
-
-        def define_schema(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_schema', 'Get database schema for a model',
-                              properties: {
-                                model: str_prop('Model name'),
-                                include_indexes: bool_prop('Include index information')
-                              }, required: ['model'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_schema(model: args[:model], include_indexes: args[:include_indexes] || false)
-          end
-        end
-
-        def define_recent(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_recent', 'Recently created/updated records.',
-                              properties: {
-                                model: str_prop('Model name'),
-                                order_by: str_prop('Column to sort by (default: created_at)'),
-                                direction: str_prop('Sort direction: asc or desc (default: desc)'),
-                                limit: int_prop('Max records (default 10, max 50)'),
-                                scope: obj_prop('Filter: {status: "paid", total_gt: 0}. ' \
-                                                'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                'Complex queries: use console_query.'),
-                                columns: arr_prop('Columns to include')
-                              }, required: ['model'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier1.console_recent(
-              model: args[:model], order_by: args[:order_by] || 'created_at',
-              direction: args[:direction] || 'desc', limit: args[:limit] || 10,
-              scope: args[:scope], columns: args[:columns]
-            )
-          end
-        end
-
-        def define_status(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_status',
-                              'System health check - list models and connection status',
-                              properties: {}, ctx: ctx, renderer: renderer) do |_args|
-            Tools::Tier1.console_status
-          end
-        end
-
-        # ── Tier 2 tool definitions ──────────────────────────────────────────
-
-        def define_diagnose_model(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_diagnose_model',
-                              'Diagnose a model: count, recent records, aggregates',
-                              properties: {
-                                model: str_prop('Model name'), scope: obj_prop('Filter conditions'),
-                                sample_size: int_prop('Sample records (default 5, max 25)')
-                              }, required: ['model'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_diagnose_model(
-              model: args[:model], scope: args[:scope], sample_size: args[:sample_size] || 5
-            )
-          end
-        end
-
-        def define_data_snapshot(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_data_snapshot',
-                              'Snapshot a record with associations for debugging',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Record primary key'),
-                                associations: arr_prop('Association names to include'),
-                                depth: int_prop('Association depth (default 1, max 3)')
-                              }, required: %w[model id], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_data_snapshot(
-              model: args[:model], id: args[:id],
-              associations: args[:associations], depth: args[:depth] || 1
-            )
-          end
-        end
-
-        def define_validate_record(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_validate_record',
-                              'Run validations on an existing record',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Record primary key'),
-                                attributes: obj_prop('Attributes to set before validating')
-                              }, required: %w[model id], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_validate_record(
-              model: args[:model], id: args[:id], attributes: args[:attributes]
-            )
-          end
-        end
-
-        def define_check_setting(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_check_setting',
-                              'Check a configuration setting value',
-                              properties: {
-                                key: str_prop('Setting key'), namespace: str_prop('Setting namespace')
-                              }, required: ['key'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_check_setting(key: args[:key], namespace: args[:namespace])
-          end
-        end
-
-        def define_update_setting(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_update_setting',
-                              'Update a configuration setting (requires confirmation)',
-                              properties: {
-                                key: str_prop('Setting key'), value: str_prop('New value'),
-                                namespace: str_prop('Setting namespace')
-                              }, required: %w[key value], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_update_setting(
-              key: args[:key], value: args[:value], namespace: args[:namespace]
-            )
-          end
-        end
-
-        def define_check_policy(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_check_policy',
-                              'Check authorization policy for a record and user',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Record primary key'),
-                                user_id: int_prop('User to check'), action: str_prop('Policy action')
-                              }, required: %w[model id user_id action],
-                              ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_check_policy(
-              model: args[:model], id: args[:id], user_id: args[:user_id], action: args[:action]
-            )
-          end
-        end
-
-        def define_validate_with(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_validate_with',
-                              'Validate attributes against a model without persisting',
-                              properties: {
-                                model: str_prop('Model name'), attributes: obj_prop('Attributes to validate'),
-                                context: str_prop('Validation context')
-                              }, required: %w[model attributes], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_validate_with(
-              model: args[:model], attributes: args[:attributes], context: args[:context]
-            )
-          end
-        end
-
-        def define_check_eligibility(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_check_eligibility',
-                              'Check feature eligibility for a record',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Record primary key'),
-                                feature: str_prop('Feature name')
-                              }, required: %w[model id feature], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_check_eligibility(
-              model: args[:model], id: args[:id], feature: args[:feature]
-            )
-          end
-        end
-
-        def define_decorate(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_decorate',
-                              'Invoke a decorator on a record and return computed attributes',
-                              properties: {
-                                model: str_prop('Model name'), id: int_prop('Record primary key'),
-                                methods: arr_prop('Decorator methods to call')
-                              }, required: %w[model id], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier2.console_decorate(model: args[:model], id: args[:id], methods: args[:methods])
-          end
-        end
-
-        # ── Tier 3 tool definitions ──────────────────────────────────────────
-
-        def define_slow_endpoints(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_slow_endpoints',
-                              'List slowest endpoints by response time',
-                              properties: {
-                                limit: int_prop('Max endpoints (default 10, max 100)'),
-                                period: str_prop('Time period (default: 1h)')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_slow_endpoints(limit: args[:limit] || 10, period: args[:period] || '1h')
-          end
-        end
-
-        def define_error_rates(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_error_rates',
-                              'Get error rates by controller or overall',
-                              properties: {
-                                period: str_prop('Time period (default: 1h)'),
-                                controller: str_prop('Filter by controller')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_error_rates(period: args[:period] || '1h', controller: args[:controller])
-          end
-        end
-
-        def define_throughput(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_throughput',
-                              'Get request throughput over time',
-                              properties: {
-                                period: str_prop('Time period (default: 1h)'),
-                                interval: str_prop('Aggregation interval (default: 5m)')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_throughput(
-              period: args[:period] || '1h', interval: args[:interval] || '5m'
-            )
-          end
-        end
-
-        def define_job_queues(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_job_queues',
-                              'Get job queue statistics',
-                              properties: {
-                                queue: str_prop('Filter by queue name')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_job_queues(queue: args[:queue])
-          end
-        end
-
-        def define_job_failures(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_job_failures',
-                              'List recent job failures',
-                              properties: {
-                                limit: int_prop('Max failures (default 10, max 100)'),
-                                queue: str_prop('Filter by queue name')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_job_failures(limit: args[:limit] || 10, queue: args[:queue])
-          end
-        end
-
-        def define_job_find(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_job_find',
-                              'Find a job by ID, optionally retry it (requires confirmation)',
-                              properties: {
-                                job_id: str_prop('Job identifier'),
-                                retry: bool_prop('Retry the job (requires confirmation)')
-                              }, required: ['job_id'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_job_find(job_id: args[:job_id], retry_job: args[:retry])
-          end
-        end
-
-        def define_job_schedule(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_job_schedule',
-                              'List scheduled/upcoming jobs',
-                              properties: {
-                                limit: int_prop('Max jobs (default 20, max 100)')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_job_schedule(limit: args[:limit] || 20)
-          end
-        end
-
-        def define_redis_info(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_redis_info',
-                              'Get Redis server information',
-                              properties: {
-                                section: str_prop('INFO section (e.g., memory, stats)')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_redis_info(section: args[:section])
-          end
-        end
-
-        def define_cache_stats(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_cache_stats',
-                              'Get cache store statistics',
-                              properties: {
-                                namespace: str_prop('Cache namespace filter')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_cache_stats(namespace: args[:namespace])
-          end
-        end
-
-        def define_channel_status(server, conn_mgr, ctx = nil, renderer: nil)
-          define_console_tool(server, conn_mgr, 'console_channel_status',
-                              'Get ActionCable channel status',
-                              properties: {
-                                channel: str_prop('Filter by channel name')
-                              }, ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier3.console_channel_status(channel: args[:channel])
-          end
-        end
-
-        # ── Tier 4 tool definitions ──────────────────────────────────────────
-
-        def define_eval(server, conn_mgr, ctx = nil, renderer: nil)
-          config = Woods.configuration if Woods.respond_to?(:configuration)
-          guard = EvalGuard.new if config&.console_credential_defense_enabled
-          description = [
-            'Propose arbitrary Ruby for execution against the live Rails runtime.',
-            'CURRENTLY DISABLED in embedded mode — the call will always return an instructional refusal.',
-            'Before invoking this tool, SHOW the user your proposed Ruby snippet and let them run it ' \
-            'manually. Do not retry on failure, and do not hide the snippet behind the tool call.',
-            'For most cases use console_query (model + select + joins/group_by/having/order) or ' \
-            'console_sql instead — both already support aggregates and scoped filters.'
-          ].join(' ')
-          define_console_tool(server, conn_mgr, 'console_eval', description,
-                              properties: {
-                                code: str_prop('Ruby code you propose to run (will be surfaced to the user first)'),
-                                timeout: int_prop('Timeout in seconds (default 10, max 30)')
-                              }, required: ['code'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier4.console_eval(code: args[:code], timeout: args[:timeout] || 10, guard: guard)
-          end
-        end
-
-        def define_sql(server, conn_mgr, ctx = nil, renderer: nil)
-          validator = SqlValidator.new
-          sql_description = [
-            'Execute read-only SQL against the live database (SELECT/WITH...SELECT only).',
-            'SqlValidator blocks all DML/DDL. Every query runs inside a rolled-back transaction — no writes persist.',
-            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
-            'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
-          ].join(' ')
-          define_console_tool(server, conn_mgr, 'console_sql', sql_description,
-                              properties: {
-                                sql: str_prop('SQL query (SELECT or WITH...SELECT only)'),
-                                limit: int_prop('Max rows returned (default unlimited, max 10000)')
-                              }, required: ['sql'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier4.console_sql(sql: args[:sql], validator: validator, limit: args[:limit])
-          end
-        end
-
-        # rubocop:disable Metrics/MethodLength
-        def define_query(server, conn_mgr, ctx = nil, renderer: nil)
-          query_description = [
-            'Build and run a structured ActiveRecord query with optional joins, grouping, and ordering.',
-            'Example: {model: "Order", select: ["status", "COUNT(*) AS n"], group_by: ["status"]}.',
-            'Use console_count or console_aggregate for simple aggregates without a custom SELECT.',
-            'Use console_sql when you need raw SQL that the query builder cannot express.',
-            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
-            'Max 10,000 rows returned. Returns columns + rows arrays like a SQL result set.'
-          ].join(' ')
-          props = {
-            model: str_prop('ActiveRecord model name (e.g. "Order")'),
-            select: arr_prop('Columns or expressions to select (e.g. ["status", "COUNT(*) AS n"])'),
-            joins: arr_prop('Association names to JOIN (e.g. ["line_items", "user"])'),
-            group_by: arr_prop('Columns to GROUP BY (e.g. ["status", "user_id"])'),
-            having: str_prop('HAVING filter applied after GROUP BY (e.g. "COUNT(*) > 5")'),
-            order: obj_prop('Order specification as {column => direction} (e.g. {"created_at" => "desc"})'),
-            scope: obj_prop('WHERE conditions as {column => value} or [sql, bind] array'),
-            limit: int_prop('Maximum rows to return (default 10000, hard max 10000)')
-          }
-          define_console_tool(server, conn_mgr, 'console_query', query_description,
-                              properties: props, required: %w[model select],
-                              ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier4.console_query(
-              model: args[:model], select: args[:select], joins: args[:joins],
-              group_by: args[:group_by], having: args[:having],
-              order: args[:order], scope: args[:scope], limit: args[:limit]
-            )
-          end
-        end
-        # rubocop:enable Metrics/MethodLength
-
-        # Shared tool definition helper that wires block -> bridge -> response.
-        # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
-        def define_console_tool(server, conn_mgr, name, description, properties:, required: nil,
-                                ctx: nil, renderer: nil, &tool_block)
-          bridge_method = method(:send_to_bridge)
-          coerce_method = method(:coerce_integer_args!)
-          gate_method = method(:enforce_table_gate!)
-          integer_keys = integer_property_keys(properties)
-          schema = { properties: properties }
-          schema[:required] = required if required&.any?
-          log_gate_method = method(:log_table_gate_rejection)
-          server.define_tool(name: name, description: description, input_schema: schema) do |server_context:, **args|
-            coerce_method.call(args, integer_keys)
-            begin
-              gate_method.call(ctx&.table_gate, args)
-            rescue TableGateError => e
-              log_gate_method.call(name, args, e)
-              next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
-            end
-            begin
-              request = tool_block.call(args)
-            rescue SqlValidationError, ForbiddenExpressionError => e
-              next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
-            end
-            bridge_method.call(conn_mgr, request.transform_keys(&:to_s), ctx, renderer: renderer)
-          end
-        end
-        # rubocop:enable Metrics/ParameterLists, Metrics/MethodLength
-
         # Run the Layer 1 blocked-table gate against the arguments a tool was
         # invoked with. Tools may arrive at tables through five different
         # arg shapes — SQL string, model name, raw table, joined associations,
@@ -1099,13 +713,6 @@ module Woods
         def coerce_integer_args!(args, keys)
           keys.each { |k| args[k] = args[k].to_i if args[k].is_a?(String) }
         end
-
-        # Schema property helpers for concise tool definitions.
-        def str_prop(desc)  = { type: 'string', description: desc }
-        def int_prop(desc)  = { type: 'integer', description: desc }
-        def obj_prop(desc)  = { type: 'object', description: desc }
-        def bool_prop(desc) = { type: 'boolean', description: desc }
-        def arr_prop(desc)  = { type: 'array', items: { type: 'string' }, description: desc }
       end
     end
   end
