@@ -451,6 +451,22 @@ Two complementary defenses share this flag, both gating credential exfiltration 
 
 - **Boot-time credential index.** `Woods::Console::CredentialIndex` walks `Rails.application.credentials.config` once at server boot, collects every string leaf with length ≥ 12, and substring-redacts those values from every MCP response. This catches credentials whose *shape* the scanner doesn't recognize but whose *exact contents* Rails already knows — Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook signing keys, custom OAuth client secrets. Hits are marked `[REDACTED:credential]` (distinct from the scanner's `[REDACTED]`) and counted under a `:credential_index` key so audit output shows which layer caught the leak.
 
+**Restart required after credential rotation.** The index is built once at process start and held in memory for the lifetime of the MCP process. When a host app rotates Rails credentials (`rails credentials:edit`), the MCP process keeps the pre-rotation secrets in its Set until the process is restarted — new secrets are not picked up automatically. Only the Layer 2 shape-pattern scanner (Stripe `sk_*`, AWS `AKIA*`, etc.) can catch newly-rotated values before restart.
+
+**Rebuild hook for rotation jobs.** If you rotate credentials from a Rake task or a deployment hook and want to avoid a full restart, call:
+
+```ruby
+Woods::Console::Server.rebuild_credential_index(rails_app: Rails.application)
+```
+
+This rebuilds the index from the current credentials and hot-swaps it into the active scanner. The swap is atomic on MRI — in-flight scans see either the old or the new index, never a partial one. The method is a no-op (returns `nil`) when no server has been built yet or when `console_credential_defense_enabled` is `false`.
+
+**Rotation warning.** At boot time, Woods checks whether any credentials file (`config/credentials.yml.enc`, `config/credentials/<env>.yml.enc`) was modified *after* the process started. When it detects this, it emits a `console.credential_index.stale` warn-level structured log line with the file path, mtime, and a hint to restart or call `rebuild_credential_index`. This check is on by default; disable it with:
+
+```ruby
+config.console_credential_rotation_warning = false
+```
+
 **Multi-DB / sharded caveat.** The index reflects only the credentials available to the *Rails process* that boots the Console MCP server. A separate database that holds its own secrets (e.g., a vendored CMS app sharing the same Rails host) is not in scope — for those, lean on Layer 3 (`console_redacted_columns` / `console_redacted_key_values`) and Layer 1 (`console_blocked_tables`).
 
 **Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index — the server still boots and the parse-time eval guard plus every other defense layer remain in effect.

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'woods/console/credential_index'
+require 'tempfile'
 
 RSpec.describe Woods::Console::CredentialIndex do
   # Minimal stub that mirrors `Rails.application.credentials.config` —

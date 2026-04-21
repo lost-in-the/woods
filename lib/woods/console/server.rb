@@ -38,6 +38,39 @@ module Woods
       TIER4_TOOLS = %w[eval sql query].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
+        # Rebuild the boot-time credential index from fresh Rails credentials
+        # and hot-swap it into the active scanner without restarting the process.
+        #
+        # Host rotation jobs should call this immediately after `rails credentials:edit`
+        # changes are deployed. The swap is atomic on MRI (GVL) — in-flight scans see
+        # either the old or the new index, never a partial one.
+        #
+        # Returns nil when:
+        # - `console_credential_defense_enabled` is false
+        # - No server has been built yet in this process (`build` / `build_embedded`
+        #   have not been called)
+        #
+        # Existing callers of `build` / `build_embedded` are unaffected — this is an
+        # additive class method with no required arguments beyond `rails_app`.
+        #
+        # @param rails_app [#credentials] The Rails application to re-read.
+        #   Defaults to `Rails.application` when `Rails` is defined, otherwise
+        #   the caller must supply it explicitly.
+        # @return [CredentialIndex, nil] The newly built index, or nil when
+        #   the rebuild was skipped.
+        def rebuild_credential_index(rails_app: nil)
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          return nil unless config&.console_credential_defense_enabled
+          return nil unless @active_scanner
+
+          target_app = rails_app || (defined?(Rails) && Rails.respond_to?(:application) ? Rails.application : nil)
+          return nil unless target_app
+
+          new_index = CredentialIndex.build(rails_app: target_app)
+          @active_scanner.replace_index!(new_index)
+          new_index
+        end
+
         # Build a configured MCP::Server with console tools using the bridge protocol.
         #
         # ⚠ Layer 1 limitation in bridge mode:
@@ -180,6 +213,7 @@ module Woods
                         secret_index: secret_index
                       )
                     end
+          @active_scanner = scanner
 
           ResponseContext.build(safe_ctx: safe_ctx, table_gate: table_gate, credential_scanner: scanner)
         end
@@ -189,13 +223,49 @@ module Woods
         # Rails application is reachable (specs, non-Rails hosts) — the scanner
         # then falls back to its pattern-only behavior.
         #
+        # When `console_credential_rotation_warning` is enabled (default: true),
+        # also emits a structured log warning if any credentials file on disk was
+        # modified after this process started — a strong signal that credentials
+        # were rotated without restarting the MCP process. Disable with:
+        #
+        #   config.console_credential_rotation_warning = false
+        #
         # @param config [Woods::Configuration, nil]
         # @return [CredentialIndex, nil]
         def build_credential_index(config)
           return nil unless config&.console_credential_defense_enabled
           return nil unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
 
-          CredentialIndex.build(rails_app: Rails.application)
+          index = CredentialIndex.build(rails_app: Rails.application)
+          maybe_warn_rotation(config, Rails.application)
+          index
+        end
+
+        # Emit a boot-time rotation warning when the credentials file mtime is
+        # newer than the process start time, indicating a rotation that was not
+        # followed by a restart. Only fires when Rails.root is available and
+        # `console_credential_rotation_warning` is not false.
+        #
+        # @param config [Woods::Configuration, nil]
+        # @param rails_app [#root] The Rails application (used to locate credential files).
+        # @return [void]
+        def maybe_warn_rotation(config, rails_app)
+          return if config&.console_credential_rotation_warning == false
+          return unless rails_app.respond_to?(:root) && rails_app.root
+
+          root = rails_app.root
+          candidates = [
+            root.join('config/credentials.yml.enc').to_s,
+            root.join("config/credentials/#{ENV.fetch('RAILS_ENV', 'production')}.yml.enc").to_s
+          ]
+
+          CredentialIndex.warn_if_credentials_rotated(
+            credentials_files: candidates,
+            process_start: CredentialIndex::PROCESS_START,
+            logger: structured_logger
+          )
+        rescue StandardError => e
+          handle_observability_failure(e)
         end
 
         # Shared server construction used by both build() and build_embedded().
