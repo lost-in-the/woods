@@ -42,6 +42,15 @@ module Woods
         stripe_secret_key: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/,
         stripe_publishable_key: /\bpk_(?:live|test)_[A-Za-z0-9]{24,}\b/,
         stripe_webhook_secret: /\bwhsec_[A-Za-z0-9]{24,}\b/,
+        # Stripe Connect account IDs are PII per Stripe's ToS even though they
+        # are not strictly secret — surfacing one in an MCP response leaks the
+        # connected merchant's identity.
+        stripe_connect_account_id: /\bacct_[A-Za-z0-9]{16,}\b/,
+        # Klaviyo private API keys use a bare `pk_` prefix with no live/test
+        # infix — they evade the Stripe publishable regex and grant full API
+        # access to the Klaviyo tenant. Order matters: stripe_publishable_key
+        # runs first so its more-specific match wins on Stripe values.
+        klaviyo_private_key: /\bpk_[A-Za-z0-9]{34}\b/,
         aws_access_key_id: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
         github_fine_grained_pat: /\bgithub_pat_[A-Za-z0-9_]{82}\b/,
         github_token: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/,
@@ -53,9 +62,27 @@ module Woods
         mailgun_api_key: /\bkey-[a-f0-9]{32}\b/,
         anthropic_api_key: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}\b/,
         openai_api_key: %r{\bsk-(?:proj-)?[A-Za-z0-9/_-]{40,}\b},
-        shopify_access_token: /\bshp(?:at|ca|ss|pa)_[a-f0-9]{32}\b/,
+        # `rt`/`ua` extend the existing alternation to cover refresh tokens
+        # (`shprt_`) and user-access tokens (`shpua_`) — the prefix list
+        # before this PR missed both.
+        shopify_access_token: /\bshp(?:at|ca|ss|pa|rt|ua)_[a-f0-9]{32}\b/,
         square_access_token: /\bsq0[a-z]{3}-[A-Za-z0-9_-]{22,}\b/,
-        paypal_access_token: /\baccess_token\$(?:production|sandbox)\$[A-Za-z0-9]+\$[a-f0-9]+\b/
+        paypal_access_token: /\baccess_token\$(?:production|sandbox)\$[A-Za-z0-9]+\$[a-f0-9]+\b/,
+        # Distinctive `00D<15-org-id>!<base64 payload>` shape — no FP risk
+        # and one of the highest-leverage additions per the research brief.
+        salesforce_access_token: /\b00D[A-Za-z0-9]{12}![A-Za-z0-9._]{80,250}\b/,
+        launchdarkly_sdk_key: /\bsdk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/,
+        launchdarkly_mobile_key: /\bmob-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/,
+        hubspot_private_app_token: Regexp.new(
+          '\bpat-(?:na1|na2|eu1|eu2|ap1)-' \
+          '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
+        ),
+        brevo_api_key: /\bxkeysib-[a-f0-9]{64}-[A-Za-z0-9]{16}\b/,
+        brevo_smtp_key: /\bxsmtpsib-[a-f0-9]{64}-[A-Za-z0-9]{16}\b/,
+        kit_api_key: /\bkit_[A-Za-z0-9]{20,}\b/,
+        twilio_account_sid: /\bAC[0-9a-fA-F]{32}\b/,
+        twilio_api_key_sid: /\bSK[0-9a-fA-F]{32}\b/,
+        twilio_verify_service_sid: /\bVA[0-9a-fA-F]{32}\b/
       }.freeze
 
       # @return [Array<Symbol>] every pattern name the scanner knows about.

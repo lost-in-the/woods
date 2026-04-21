@@ -197,11 +197,144 @@ RSpec.describe Woods::Console::CredentialScanner do
         expect(counts[:shopify_access_token]).to eq(1)
       end
 
-      it 'redacts shpca_, shpss_, and shppa_ variants' do
-        %w[shpca_ shpss_ shppa_].each do |prefix|
+      it 'redacts shpca_, shpss_, shppa_, shprt_, and shpua_ variants' do
+        # shprt_ (refresh tokens) and shpua_ (user-access tokens) were missing
+        # from the alternation before the Tier 1 hardening pass.
+        %w[shpca_ shpss_ shppa_ shprt_ shpua_].each do |prefix|
           value, = scanner.scan("#{prefix}#{'a' * 32}")
           expect(value).to eq('[REDACTED]'), "Failed for prefix #{prefix}"
         end
+      end
+    end
+
+    context 'with Stripe Connect account IDs' do
+      it 'redacts acct_<16+ alnum> identifiers as PII' do
+        value, counts = scanner.scan('acct_1Sx7cbE0QMvj9FH5')
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:stripe_connect_account_id]).to eq(1)
+      end
+
+      it 'does not match short acct_ prefixed strings' do
+        value, counts = scanner.scan('acct_short')
+        expect(value).to eq('acct_short')
+        expect(counts).to be_empty
+      end
+    end
+
+    context 'with Klaviyo private API keys' do
+      it 'redacts pk_<34 alnum> tokens' do
+        value, counts = scanner.scan("pk_#{'a' * 34}")
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:klaviyo_private_key]).to eq(1)
+      end
+
+      it 'counts a Stripe pk_live_* key as stripe_publishable_key, not klaviyo' do
+        # Stripe's `_` after `live` interrupts Klaviyo's 34-alnum run; pattern
+        # order also guarantees stripe_publishable_key consumes the match first.
+        _, counts = scanner.scan('pk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE')
+        expect(counts[:stripe_publishable_key]).to eq(1)
+        expect(counts[:klaviyo_private_key]).to be_nil
+      end
+    end
+
+    context 'with Salesforce access tokens' do
+      it 'redacts 00D<15 alnum>!<base64 payload> session IDs' do
+        token = "00D#{'a' * 12}!#{'A' * 90}"
+        value, counts = scanner.scan(token)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:salesforce_access_token]).to eq(1)
+      end
+
+      it 'does not match short 00D-prefixed strings' do
+        value, counts = scanner.scan('00Dabcdefghijkl!short')
+        expect(value).to eq('00Dabcdefghijkl!short')
+        expect(counts).to be_empty
+      end
+    end
+
+    context 'with LaunchDarkly keys' do
+      it 'redacts sdk-<UUID> SDK keys' do
+        key = 'sdk-12345678-1234-1234-1234-123456789012'
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:launchdarkly_sdk_key]).to eq(1)
+      end
+
+      it 'redacts mob-<UUID> mobile keys' do
+        key = 'mob-deadbeef-cafe-1234-5678-abcdef012345'
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:launchdarkly_mobile_key]).to eq(1)
+      end
+    end
+
+    context 'with HubSpot private app tokens' do
+      it 'redacts pat-<region>-<UUID> tokens' do
+        token = 'pat-na1-12345678-1234-1234-1234-123456789012'
+        value, counts = scanner.scan(token)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:hubspot_private_app_token]).to eq(1)
+      end
+
+      it 'redacts EU and AP region prefixes' do
+        %w[eu1 eu2 ap1 na2].each do |region|
+          token = "pat-#{region}-12345678-1234-1234-1234-123456789012"
+          value, = scanner.scan(token)
+          expect(value).to eq('[REDACTED]'), "Failed for region #{region}"
+        end
+      end
+    end
+
+    context 'with Brevo (Sendinblue) keys' do
+      it 'redacts xkeysib-<64 hex>-<16 alnum> API keys' do
+        key = "xkeysib-#{'a' * 64}-#{'b' * 16}"
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:brevo_api_key]).to eq(1)
+      end
+
+      it 'redacts xsmtpsib-<64 hex>-<16 alnum> SMTP keys' do
+        key = "xsmtpsib-#{'a' * 64}-#{'b' * 16}"
+        value, counts = scanner.scan(key)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:brevo_smtp_key]).to eq(1)
+      end
+    end
+
+    context 'with Kit (ConvertKit) API keys' do
+      it 'redacts kit_-prefixed tokens' do
+        value, counts = scanner.scan("kit_#{'a' * 24}")
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:kit_api_key]).to eq(1)
+      end
+
+      it 'does not match short kit_ prefixed strings' do
+        value, counts = scanner.scan('kit_short')
+        expect(value).to eq('kit_short')
+        expect(counts).to be_empty
+      end
+    end
+
+    context 'with Twilio identifiers' do
+      it 'redacts AC<32 hex> account SIDs' do
+        sid = "AC#{'a' * 32}"
+        value, counts = scanner.scan(sid)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:twilio_account_sid]).to eq(1)
+      end
+
+      it 'redacts SK<32 hex> API key SIDs' do
+        sid = "SK#{'b' * 32}"
+        value, counts = scanner.scan(sid)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:twilio_api_key_sid]).to eq(1)
+      end
+
+      it 'redacts VA<32 hex> Verify service SIDs' do
+        sid = "VA#{'c' * 32}"
+        value, counts = scanner.scan(sid)
+        expect(value).to eq('[REDACTED]')
+        expect(counts[:twilio_verify_service_sid]).to eq(1)
       end
     end
 
@@ -237,8 +370,8 @@ RSpec.describe Woods::Console::CredentialScanner do
 
     context 'when the string contains no credentials' do
       it 'returns the value unchanged' do
-        value, counts = scanner.scan('Hello world, my account ID is acct_1Sx7cbE0QMvj9FH5')
-        expect(value).to eq('Hello world, my account ID is acct_1Sx7cbE0QMvj9FH5')
+        value, counts = scanner.scan('Hello world, just plain prose with no secrets here')
+        expect(value).to eq('Hello world, just plain prose with no secrets here')
         expect(counts).to be_empty
       end
 
@@ -291,8 +424,9 @@ RSpec.describe Woods::Console::CredentialScanner do
         }
         value, counts = scanner.scan(input)
         expect(value.dig('records', 0, 'value')).to eq('[REDACTED]')
-        expect(value.dig('records', 1, 'value')).to eq('acct_1Sx7cbE0QMvj9FH5')
+        expect(value.dig('records', 1, 'value')).to eq('[REDACTED]')
         expect(counts[:stripe_secret_key]).to eq(1)
+        expect(counts[:stripe_connect_account_id]).to eq(1)
       end
 
       it 'scans positional row arrays' do
@@ -305,8 +439,9 @@ RSpec.describe Woods::Console::CredentialScanner do
         }
         value, counts = scanner.scan(input)
         expect(value['rows'][1][2]).to eq('[REDACTED]')
-        expect(value['rows'][0][2]).to eq('acct_1Sx7cbE0QMvj9FH5')
+        expect(value['rows'][0][2]).to eq('[REDACTED]')
         expect(counts[:stripe_secret_key]).to eq(1)
+        expect(counts[:stripe_connect_account_id]).to eq(1)
       end
     end
 
@@ -379,11 +514,15 @@ RSpec.describe Woods::Console::CredentialScanner do
     it 'returns the full pattern name list' do
       expect(described_class.patterns).to include(
         :stripe_secret_key, :stripe_publishable_key, :stripe_webhook_secret,
+        :stripe_connect_account_id, :klaviyo_private_key,
         :aws_access_key_id, :github_fine_grained_pat, :github_token,
         :google_oauth_token, :jwt_token, :pem_private_key_block, :slack_token,
         :sendgrid_api_key, :mailgun_api_key,
         :anthropic_api_key, :openai_api_key,
-        :shopify_access_token, :square_access_token, :paypal_access_token
+        :shopify_access_token, :square_access_token, :paypal_access_token,
+        :salesforce_access_token, :launchdarkly_sdk_key, :launchdarkly_mobile_key,
+        :hubspot_private_app_token, :brevo_api_key, :brevo_smtp_key, :kit_api_key,
+        :twilio_account_sid, :twilio_api_key_sid, :twilio_verify_service_sid
       )
     end
   end
