@@ -28,8 +28,8 @@ RSpec.describe Woods::Console::SafeContext do
       ctx.execute { |_c| 'result' }
     end
 
-    it 'sets statement timeout using PostgreSQL syntax' do
-      expect(connection).to receive(:execute).with("SET statement_timeout = '3000ms'")
+    it 'sets statement timeout using PostgreSQL transaction-scoped syntax' do
+      expect(connection).to receive(:execute).with("SET LOCAL statement_timeout = '3000ms'")
       ctx.execute { |_c| nil }
     end
 
@@ -77,11 +77,85 @@ RSpec.describe Woods::Console::SafeContext do
         allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
       end
 
-      it 'uses statement_timeout syntax with ms suffix' do
+      it 'uses transaction-scoped statement_timeout with ms suffix' do
         ctx = described_class.new(connection: connection, timeout_ms: 7500)
-        expect(connection).to receive(:execute).with("SET statement_timeout = '7500ms'")
+        expect(connection).to receive(:execute).with("SET LOCAL statement_timeout = '7500ms'")
         ctx.execute { |_c| nil }
       end
+    end
+  end
+
+  describe '#execute with pool:' do
+    let(:pool_connection) do
+      instance_double('PooledConnection').tap do |conn|
+        allow(conn).to receive(:adapter_name).and_return('PostgreSQL')
+        allow(conn).to receive(:execute)
+        allow(conn).to receive(:transaction) do |&block|
+          block.call
+        rescue ActiveRecord::Rollback
+          nil
+        end
+      end
+    end
+
+    let(:pool) do
+      instance_double('ConnectionPool').tap do |p|
+        allow(p).to receive(:with_connection).and_yield(pool_connection)
+      end
+    end
+
+    it 'leases a connection from the pool for each execute' do
+      ctx = described_class.new(pool: pool, timeout_ms: 1500)
+      expect(pool).to receive(:with_connection).twice.and_yield(pool_connection)
+      ctx.execute { |_c| nil }
+      ctx.execute { |_c| nil }
+    end
+
+    it 'yields the leased connection into the block' do
+      ctx = described_class.new(pool: pool)
+      yielded = nil
+      ctx.execute { |c| yielded = c }
+      expect(yielded).to be(pool_connection)
+    end
+
+    it 'wraps the leased connection in a transaction with SET LOCAL timeout' do
+      ctx = described_class.new(pool: pool, timeout_ms: 2500)
+      expect(pool_connection).to receive(:execute)
+        .with("SET LOCAL statement_timeout = '2500ms'")
+      ctx.execute { |_c| nil }
+    end
+
+    it 'exposes the leased connection via the thread-local for nested handlers' do
+      ctx = described_class.new(pool: pool)
+      observed = nil
+      ctx.execute do |_c|
+        observed = Thread.current[:woods_console_leased_connection]
+      end
+      expect(observed).to be(pool_connection)
+    end
+
+    it 'clears the thread-local after execute returns' do
+      ctx = described_class.new(pool: pool)
+      ctx.execute { |_c| nil }
+      expect(Thread.current[:woods_console_leased_connection]).to be_nil
+    end
+
+    it 'clears the thread-local even when the block raises' do
+      ctx = described_class.new(pool: pool)
+      expect { ctx.execute { |_c| raise 'boom' } }.to raise_error('boom')
+      expect(Thread.current[:woods_console_leased_connection]).to be_nil
+    end
+  end
+
+  describe '#execute' do
+    it 'raises ArgumentError when neither connection: nor pool: was supplied' do
+      ctx = described_class.new
+      expect { ctx.execute { |_c| nil } }
+        .to raise_error(ArgumentError, /connection.*pool/i)
+    end
+
+    it 'allows construction with neither connection: nor pool: for redaction-only use' do
+      expect { described_class.new(redacted_columns: %w[ssn]) }.not_to raise_error
     end
   end
 

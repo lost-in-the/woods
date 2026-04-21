@@ -124,26 +124,27 @@ module Woods
         end
       end
 
-      # Build the embedded MCP server. Connection acquisition uses
-      # `connection_pool.with_connection` rather than `ActiveRecord::Base.connection`
-      # because the latter is deprecated in Rails 7.2 and removed in 8.0;
-      # `with_connection` is the supported cross-version API (6.1 → 8.x).
-      # SafeContext still captures a connection at build time — converting it
-      # to per-request acquisition (and supporting multi-DB / sharded hosts)
-      # is tracked separately as `WOODS-CONSOLE-PERREQ-CONN`.
+      # Build the embedded MCP server. SafeContext is given the writing
+      # connection pool (not a connection) so each request leases a fresh
+      # connection via `pool.with_connection { ... }` and returns it to the
+      # pool when the rolled-back transaction completes. Capturing a
+      # connection at build time would leak it out of its lease and pin it
+      # for the lifetime of the process.
+      #
+      # Multi-DB / sharded hosts are still served from the writing pool
+      # only — extending SafeContext to route per role/shard is tracked as
+      # `WOODS-CONSOLE-PERREQ-CONN`.
       def build_embedded_server
         config = Woods.configuration
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          Server.build_embedded(
-            model_validator: ModelValidator.new(registry: build_model_registry),
-            safe_context: SafeContext.new(connection: conn),
-            redacted_columns: Array(config.console_redacted_columns),
-            redacted_key_values: Array(config.console_redacted_key_values),
-            read_tools_enabled: @embedded_read_tools,
-            model_tables: build_model_tables,
-            model_reflections: build_model_reflections
-          )
-        end
+        Server.build_embedded(
+          model_validator: ModelValidator.new(registry: build_model_registry),
+          safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
+          redacted_columns: Array(config.console_redacted_columns),
+          redacted_key_values: Array(config.console_redacted_key_values),
+          read_tools_enabled: @embedded_read_tools,
+          model_tables: build_model_tables,
+          model_reflections: build_model_reflections
+        )
       end
 
       def build_model_registry

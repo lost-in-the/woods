@@ -71,12 +71,15 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     end
 
     # Regression: ActiveRecord::Base.connection is deprecated in Rails 7.2 and
-    # removed in 8.0. The fallback in #active_connection must use the
-    # cross-version `connection_pool.with_connection` API instead.
-    context 'connection fallback (no injected connection)' do
-      let(:fallback_conn) { instance_double('Connection') }
+    # removed in 8.0. Under RackMiddleware, SafeContext leases a fresh
+    # connection per request and publishes it via Thread.current — handlers
+    # must pick that up rather than re-leasing or calling the deprecated
+    # method.
+    context 'connection resolution (no injected connection)' do
       let(:pool) { instance_double('ActiveRecord::ConnectionPool') }
+      let(:leased_conn) { instance_double('LeasedConnection') }
       let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
+      let(:safe_context) { Woods::Console::SafeContext.new(pool: pool) }
 
       subject(:executor) do
         described_class.new(model_validator: validator, safe_context: safe_context)
@@ -84,16 +87,22 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
       before do
         allow(ar_base).to receive(:connection_pool).and_return(pool)
-        allow(pool).to receive(:with_connection).and_yield(fallback_conn)
-        allow(fallback_conn).to receive(:adapter_name).and_return('PostgreSQL')
+        allow(pool).to receive(:with_connection).and_yield(leased_conn)
+        allow(leased_conn).to receive(:adapter_name).and_return('PostgreSQL')
+        allow(leased_conn).to receive(:execute) # SET LOCAL statement_timeout
+        allow(leased_conn).to receive(:transaction) do |&block|
+          block.call
+        rescue ActiveRecord::Rollback
+          nil
+        end
       end
 
-      it 'resolves the connection through connection_pool.with_connection' do
+      it 'reuses the connection leased by SafeContext for the request' do
         response = executor.send_request({ 'tool' => 'status', 'params' => {} })
 
         expect(response['ok']).to be true
         expect(response['result']['adapter']).to eq('PostgreSQL')
-        expect(pool).to have_received(:with_connection)
+        expect(pool).to have_received(:with_connection).once
       end
 
       it 'never invokes the deprecated ActiveRecord::Base.connection' do

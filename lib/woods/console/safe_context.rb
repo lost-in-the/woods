@@ -13,12 +13,29 @@ module Woods
     #
     # Safety layers:
     # - Every query runs inside a transaction that is always rolled back
-    # - Statement timeout prevents runaway queries
+    # - Statement timeout uses `SET LOCAL` so it cannot leak to the next
+    #   pool consumer
     # - Column redaction replaces sensitive values with "[REDACTED]"
     #
-    # @example
+    # Two construction modes are supported:
+    #
+    # - `connection:` — the legacy single-connection form. Useful in tests
+    #   and for callers that already manage their own connection lifecycle.
+    # - `pool:` — the per-request form. Each call to {#execute} leases a
+    #   fresh connection via `pool.with_connection { |c| ... }`, so the
+    #   connection is returned to the pool immediately after the block. The
+    #   leased connection is also exposed via
+    #   `Thread.current[:woods_console_leased_connection]` so dispatch
+    #   handlers (e.g. EmbeddedExecutor#active_connection) can reuse the
+    #   same connection without re-leasing.
+    #
+    # @example connection: form
     #   ctx = SafeContext.new(connection: conn, timeout_ms: 5000, redacted_columns: %w[ssn])
     #   ctx.execute { |c| c.execute("SELECT count(*) FROM users") }
+    #
+    # @example pool: form (per-request lease)
+    #   ctx = SafeContext.new(pool: ActiveRecord::Base.connection_pool)
+    #   ctx.execute { |c| c.select_all("SELECT count(*) FROM users") }
     #
     # @example Key-value (EAV) redaction
     #   ctx = SafeContext.new(
@@ -30,6 +47,12 @@ module Woods
     #   )
     #
     class SafeContext
+      # Thread-local key that exposes the connection currently leased for
+      # the in-flight #execute block. Handlers should prefer this over
+      # acquiring their own connection so every request stays on a single
+      # leased connection inside the rolled-back transaction.
+      LEASED_CONNECTION_KEY = :woods_console_leased_connection
+
       # @return [Array<String>] Column names whose values are replaced with "[REDACTED]"
       attr_reader :redacted_columns
 
@@ -37,7 +60,11 @@ module Woods
       #   string keys: 'key_column', 'value_column', 'sensitive_keys'.
       attr_reader :redacted_key_values
 
-      # @param connection [Object] Database connection (or mock)
+      # @param connection [Object, nil] Database connection (or mock).
+      #   Mutually exclusive with `pool:` — pass one or the other (or
+      #   neither, if this SafeContext is only being used for #redact).
+      # @param pool [#with_connection, nil] Connection pool to lease from
+      #   per request. Each {#execute} call wraps `pool.with_connection`.
       # @param timeout_ms [Integer] Statement timeout in milliseconds
       # @param redacted_columns [Array<String>] Column names whose values should be redacted
       # @param redacted_key_values [Array<Hash>] EAV-style redaction patterns.
@@ -45,8 +72,10 @@ module Woods
       #   sensitive_keys: %w[stripe_access_token ...]}. When a row's
       #   `key_column` cell matches one of `sensitive_keys`, the same row's
       #   `value_column` cell is replaced with "[REDACTED]".
-      def initialize(connection:, timeout_ms: 5000, redacted_columns: [], redacted_key_values: [])
+      def initialize(connection: nil, pool: nil, timeout_ms: 5000,
+                     redacted_columns: [], redacted_key_values: [])
         @connection = connection
+        @pool = pool
         @timeout_ms = timeout_ms
         @redacted_columns = redacted_columns.map(&:to_s)
         @redacted_key_values = normalize_key_value_patterns(redacted_key_values)
@@ -55,17 +84,25 @@ module Woods
       # Execute a block within a rolled-back transaction with statement timeout.
       #
       # The transaction is always rolled back to ensure read-only behavior.
+      # When constructed with `pool:`, each call leases a fresh connection
+      # via `pool.with_connection`. The leased connection is published as
+      # `Thread.current[LEASED_CONNECTION_KEY]` for the duration of the
+      # block and cleared in `ensure` (even on exceptions) so dispatch
+      # handlers can pick it up without re-leasing.
       #
       # @yield [connection] The database connection
       # @return [Object] The block's return value
-      def execute
-        result = nil
-        @connection.transaction do
-          set_timeout
-          result = yield(@connection)
-          raise ActiveRecord::Rollback
+      # @raise [ArgumentError] when neither `connection:` nor `pool:` was
+      #   supplied at construction time. Deferred to #execute so callers
+      #   that only use #redact can pass `connection: nil`.
+      def execute(&block)
+        if @pool
+          @pool.with_connection { |conn| run_with_timeout(conn, &block) }
+        elsif @connection
+          run_with_timeout(@connection, &block)
+        else
+          raise ArgumentError, 'SafeContext#execute requires connection: or pool: at construction time'
         end
-        result
       end
 
       # Replace values of redacted columns with "[REDACTED]".
@@ -88,6 +125,24 @@ module Woods
       end
 
       private
+
+      # Wrap one connection in a rolled-back transaction with timeout, and
+      # publish it via Thread.current so handlers can reuse it. Always
+      # clears the thread-local in ensure so a raise mid-block cannot leak
+      # a stale connection reference into the next request on this thread.
+      def run_with_timeout(connection)
+        previous = Thread.current[LEASED_CONNECTION_KEY]
+        Thread.current[LEASED_CONNECTION_KEY] = connection
+        result = nil
+        connection.transaction do
+          set_timeout(connection)
+          result = yield(connection)
+          raise ActiveRecord::Rollback
+        end
+        result
+      ensure
+        Thread.current[LEASED_CONNECTION_KEY] = previous
+      end
 
       def normalize_key_value_patterns(patterns)
         Array(patterns).filter_map { |pattern| normalize_pattern(pattern) }
@@ -120,15 +175,21 @@ module Woods
 
       # Set statement timeout on the connection.
       #
-      # PostgreSQL uses SET statement_timeout (applies to all statement types).
-      # MySQL uses SET max_execution_time (applies to SELECT only — MySQL limitation:
-      # DDL and DML statements cannot be time-limited via this variable).
+      # PostgreSQL uses `SET LOCAL statement_timeout` so the setting is
+      # scoped to the surrounding transaction and is automatically
+      # discarded on rollback — without LOCAL the timeout would persist on
+      # the pooled connection and bleed into the next consumer (host app
+      # request, background job, etc.). Safe here because every #execute
+      # is wrapped in a transaction.
+      #
+      # MySQL uses `SET max_execution_time` (applies to SELECT only — DDL
+      # and DML statements cannot be time-limited via this variable).
       def set_timeout(connection = @connection, timeout_ms = @timeout_ms)
         adapter = connection.adapter_name.downcase
         if adapter.include?('mysql')
           connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
         else
-          connection.execute("SET statement_timeout = '#{timeout_ms.to_i}ms'")
+          connection.execute("SET LOCAL statement_timeout = '#{timeout_ms.to_i}ms'")
         end
       rescue StandardError
         # Unsupported adapter — timeout enforcement is best-effort

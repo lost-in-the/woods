@@ -38,17 +38,22 @@ module Woods
     #
     class TableGate # rubocop:disable Metrics/ClassLength
       # Matches a JOIN token followed by its target identifier. The
-      # identifier may be schema-qualified in any of the quoting styles —
-      # `"schema"."table"`, `` `db`.`table` ``, or bare `schema.table` —
-      # and the optional schema prefix is captured separately so #blocked?
-      # can compare against either the bare or qualified configured form.
+      # identifier may be schema-qualified in any quoting style —
+      # `"schema"."table"`, `` `db`.`table` ``, bare `schema.table`, or the
+      # mixed `schema."table"` / `` schema.`table` `` forms — and the
+      # optional schema prefix is captured separately so #blocked? can
+      # compare against either the bare or qualified configured form.
+      # An optional `ONLY` keyword (PostgreSQL inheritance opt-out) is
+      # consumed before the identifier so it does not hide the table name.
       # ANSI-89 comma joins are handled separately — see FROM_CLAUSE.
       JOIN_REFERENCE = /
         \b(?:STRAIGHT_)?JOIN\s+
+        (?:ONLY\s+)?
         (?:
           (?:
             `(?<jschema_bt>[^`]+)` |
-            "(?<jschema_dq>[^"]+)"
+            "(?<jschema_dq>[^"]+)" |
+            (?<jschema_bare>\w+)
           )
           \.
         )?
@@ -81,15 +86,17 @@ module Woods
       /xim
 
       # Matches a leading table identifier at the start of a FROM-list chunk.
-      # The identifier may carry an optional schema prefix in either quoting
-      # style — `"schema"."table"` or `` `db`.`table` `` — captured separately
-      # so #blocked? can match against bare or qualified configured forms.
+      # The identifier may carry an optional schema prefix in any quoting
+      # style — `"schema"."table"`, `` `db`.`table` ``, or the mixed
+      # `schema."table"` / `` schema.`table` `` form — captured separately so
+      # #blocked? can match against bare or qualified configured forms.
       LEAD_IDENT = /
         \A
         (?:
           (?:
             `(?<schema_bt>[^`]+)` |
-            "(?<schema_dq>[^"]+)"
+            "(?<schema_dq>[^"]+)" |
+            (?<schema_bare>\w+)
           )
           \.
         )?
@@ -99,6 +106,12 @@ module Woods
           (?<bare>\w+(?:\.\w+)?)
         )
       /xi
+
+      # PostgreSQL ONLY keyword that appears between FROM and the table
+      # identifier. Strip it so the lead-identifier regex sees the table
+      # directly. Anchored with `\A` because callers strip leading
+      # whitespace first via #strip.
+      ONLY_PREFIX = /\AONLY\s+/i
 
       # @param blocked_tables [Array<String>] table names to block
       #   (case-insensitive). Bare names (`"authorizations"`) match every
@@ -268,9 +281,11 @@ module Woods
       end
 
       # Extract the table identifier at the start of a FROM-list chunk,
-      # joining a quoted schema prefix to the table when both are present.
+      # joining a schema prefix to the table when both are present. The
+      # PostgreSQL `ONLY` inheritance keyword is stripped first so it does
+      # not hide the table.
       def lead_identifier(chunk)
-        stripped = chunk.to_s.strip
+        stripped = chunk.to_s.strip.sub(ONLY_PREFIX, '')
         return nil if stripped.empty?
 
         match = LEAD_IDENT.match(stripped)
@@ -279,16 +294,18 @@ module Woods
         qualified_identifier(match)
       end
 
-      # Combine a quoted-schema prefix with the table identifier captured
-      # by JOIN_REFERENCE / LEAD_IDENT into a single `schema.table` string.
-      # The match is expected to expose the schema via either `:jschema_bt`
-      # / `:jschema_dq` (JOIN_REFERENCE) or `:schema_bt` / `:schema_dq`
-      # (LEAD_IDENT). Bare-form identifiers (`schema.table` without quotes)
-      # arrive intact through the `:bare` capture and need no joining.
+      # Combine a schema prefix with the table identifier captured by
+      # JOIN_REFERENCE / LEAD_IDENT into a single `schema.table` string.
+      # The match is expected to expose the schema via either the
+      # `jschema_*` (JOIN_REFERENCE) or `schema_*` (LEAD_IDENT) named
+      # captures — bare, backtick, and double-quote forms are all merged
+      # into one schema slot. A pre-merged `schema.table` bare identifier
+      # arrives intact through the `:bare` capture and needs no joining.
       def qualified_identifier(match)
         table = match[:backtick] || match[:double] || match[:bare]
         schema = match.named_captures.values_at(
-          'schema_bt', 'schema_dq', 'jschema_bt', 'jschema_dq'
+          'schema_bt', 'schema_dq', 'schema_bare',
+          'jschema_bt', 'jschema_dq', 'jschema_bare'
         ).compact.first
         schema ? "#{schema}.#{table}" : table
       end

@@ -155,6 +155,29 @@ RSpec.describe Woods::Console::TableGate do
         expect { gate.check_sql!(sql) }
           .to raise_error(Woods::Console::TableGateError, /authorizations/)
       end
+
+      it 'rejects FROM ONLY <table> (PostgreSQL inheritance keyword)' do
+        expect { gate.check_sql!('SELECT * FROM ONLY authorizations') }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects JOIN ONLY <table>' do
+        sql = 'SELECT * FROM users JOIN ONLY authorizations ON users.id = authorizations.user_id'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects mixed bare-schema with quoted table in FROM' do
+        expect { gate.check_sql!('SELECT * FROM audit."authorizations"') }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
+
+      it 'rejects mixed bare-schema with quoted table in JOIN' do
+        sql = 'SELECT * FROM users JOIN audit."authorizations" ON users.id = ' \
+              'audit."authorizations".user_id'
+        expect { gate.check_sql!(sql) }
+          .to raise_error(Woods::Console::TableGateError, /authorizations/)
+      end
     end
 
     context 'when a schema-qualified entry is on the block list' do
@@ -174,6 +197,11 @@ RSpec.describe Woods::Console::TableGate do
 
       it 'rejects the matching schema-qualified backtick reference (MySQL)' do
         expect { gate.check_sql!('SELECT * FROM `audit`.`authorizations`') }
+          .to raise_error(Woods::Console::TableGateError, /audit\.authorizations/i)
+      end
+
+      it 'rejects bare schema with quoted table' do
+        expect { gate.check_sql!('SELECT * FROM audit."authorizations"') }
           .to raise_error(Woods::Console::TableGateError, /audit\.authorizations/i)
       end
 
