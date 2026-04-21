@@ -2,6 +2,7 @@
 
 require 'json'
 require 'pathname'
+require 'woods/erd/entry_point_index_builder'
 
 module Woods
   class Error < StandardError; end unless defined?(Woods::Error)
@@ -53,6 +54,9 @@ module Woods
           nodes = build_nodes(non_model_layers, table_lookup)
           schema['nodes'] = nodes unless nodes.empty?
         end
+
+        entry_points = EntryPointIndexBuilder.new(@output_dir).build
+        schema['entryPoints'] = entry_points unless entry_points.empty?
 
         schema
       end

@@ -460,4 +460,43 @@ RSpec.describe Woods::Erd::SchemaGenerator do
       expect(schema['nodes']['Standalone']['dependencies']).to eq([])
     end
   end
+
+  describe '#generate with entry points' do
+    it 'includes entryPoints when routes directory is present' do
+      FileUtils.mkdir_p(File.join(output_dir, 'routes'))
+      FileUtils.mkdir_p(File.join(output_dir, 'controllers'))
+      FileUtils.mkdir_p(File.join(output_dir, 'models'))
+
+      route_unit = {
+        'type' => 'route',
+        'identifier' => 'r1',
+        'metadata' => { 'verb' => 'GET', 'path' => '/checkout',
+                        'controller' => 'CheckoutController', 'action' => 'new' }
+      }
+      File.write(File.join(output_dir, 'routes', 'r1.json'), JSON.generate(route_unit))
+
+      controller_unit = {
+        'type' => 'controller',
+        'identifier' => 'CheckoutController',
+        'metadata' => {}
+      }
+      File.write(File.join(output_dir, 'controllers', 'checkout.json'), JSON.generate(controller_unit))
+      write_model_unit('Dummy', { 'table_name' => 'dummies', 'table_exists' => true, 'columns' => [] })
+
+      schema = described_class.new(output_dir).generate
+
+      expect(schema['entryPoints']).to eq([
+                                            { 'identifier' => 'CheckoutController', 'verb' => 'GET',
+                                              'path' => '/checkout', 'action' => 'new' }
+                                          ])
+    end
+
+    it 'omits entryPoints when routes directory is missing' do
+      write_model_unit('Dummy', { 'table_name' => 'dummies', 'table_exists' => true, 'columns' => [] })
+
+      schema = described_class.new(output_dir).generate
+
+      expect(schema).not_to have_key('entryPoints')
+    end
+  end
 end
