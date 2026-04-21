@@ -54,11 +54,9 @@ module Woods
       #
       # @param model_name [String]
       # @param column_names [Array<String>]
-      # @return [true]
       # @raise [ValidationError] if any column is unknown
-      def validate_columns!(model_name, column_names) # rubocop:disable Naming/PredicateMethod
+      def validate_columns!(model_name, column_names)
         column_names.each { |col| validate_column!(model_name, col) }
-        true
       end
 
       # List all known model names.

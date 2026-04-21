@@ -313,8 +313,8 @@ RSpec.describe Woods::Console::TableGate do
     end
 
     it 'is a no-op when joins is nil or empty' do
-      expect(gate.check_joins!('User', nil)).to be(true)
-      expect(gate.check_joins!('User', [])).to be(true)
+      expect { gate.check_joins!('User', nil) }.not_to raise_error
+      expect { gate.check_joins!('User', []) }.not_to raise_error
     end
   end
 
@@ -337,7 +337,7 @@ RSpec.describe Woods::Console::TableGate do
     end
 
     it 'is a no-op when association is nil' do
-      expect(gate.check_association!('User', nil)).to be(true)
+      expect { gate.check_association!('User', nil) }.not_to raise_error
     end
   end
 
@@ -363,8 +363,8 @@ RSpec.describe Woods::Console::TableGate do
         .to raise_error(Woods::Console::TableGateError)
     end
 
-    it 'returns true on empty input (no-op)' do
-      expect(gate.check_table!(nil)).to be(true)
+    it 'is a no-op on empty input' do
+      expect { gate.check_table!(nil) }.not_to raise_error
     end
   end
 end

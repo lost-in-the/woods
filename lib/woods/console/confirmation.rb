@@ -52,9 +52,8 @@ module Woods
       # @param tool [String] Tool name
       # @param description [String] Human-readable description of the action
       # @param params [Hash] Tool parameters
-      # @return [true] if confirmed
       # @raise [ConfirmationDeniedError] if denied
-      def request_confirmation(tool:, description:, params:) # rubocop:disable Naming/PredicateMethod
+      def request_confirmation(tool:, description:, params:)
         approved = evaluate(tool: tool, description: description, params: params)
 
         @history << {
@@ -65,9 +64,9 @@ module Woods
           timestamp: Time.now.utc.iso8601
         }
 
-        raise ConfirmationDeniedError, "Confirmation denied for #{tool}: #{description}" unless approved
+        return if approved
 
-        true
+        raise ConfirmationDeniedError, "Confirmation denied for #{tool}: #{description}"
       end
 
       private
