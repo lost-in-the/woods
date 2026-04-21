@@ -411,6 +411,54 @@ RSpec.describe Woods::Console::CredentialScanner do
         value, = scanner.scan(input)
         expect(value).to eq({ token: '[REDACTED]' })
       end
+
+      # Item 1: credential-scanner-hash-keys-not-scanned
+      # EAV rows where the key column carries the credential name must be caught.
+      context 'with credential-shaped Hash keys (EAV key column gap)' do
+        it 'redacts a credential-shaped String key and preserves String key type' do
+          # e.g. {key: "value"} shape where the *key* is the credential
+          input = { 'sk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE' => 'some_value' }
+          value, counts = scanner.scan(input)
+          expect(value.keys.first).to eq('[REDACTED]')
+          expect(counts[:stripe_secret_key]).to eq(1)
+        end
+
+        it 'redacts a credential-shaped Symbol key and preserves Symbol key type' do
+          sym_key = :sk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE
+          input = { sym_key => 'some_value' }
+          value, counts = scanner.scan(input)
+          expect(value.keys.first).to eq(:'[REDACTED]')
+          expect(counts[:stripe_secret_key]).to eq(1)
+        end
+
+        it 'leaves non-credential String keys unchanged' do
+          input = { 'safe_key' => 'hello' }
+          value, = scanner.scan(input)
+          expect(value.keys.first).to eq('safe_key')
+        end
+
+        it 'leaves non-credential Symbol keys unchanged' do
+          input = { safe_key: 'hello' }
+          value, = scanner.scan(input)
+          expect(value.keys.first).to eq(:safe_key)
+        end
+
+        it 'leaves non-string, non-symbol keys (e.g. Integer) unchanged' do
+          input = { 42 => 'some_value' }
+          value, = scanner.scan(input)
+          expect(value.keys.first).to eq(42)
+        end
+
+        it 'scans both key and value independently' do
+          # Both key and value carry credentials — both must be redacted
+          input = { 'AKIAIOSFODNN7EXAMPLE' => 'sk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE' }
+          value, counts = scanner.scan(input)
+          expect(value.keys.first).to eq('[REDACTED]')
+          expect(value.values.first).to eq('[REDACTED]')
+          expect(counts[:aws_access_key_id]).to eq(1)
+          expect(counts[:stripe_secret_key]).to eq(1)
+        end
+      end
     end
 
     context 'with nested Hash/Array structures' do

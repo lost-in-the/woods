@@ -90,6 +90,24 @@ module Woods
         PATTERNS.keys
       end
 
+      # Replace the boot-time credential index with a freshly built one.
+      #
+      # Called by `Woods::Console::Server.rebuild_credential_index` after a
+      # host app rotates its Rails credentials. Thread-safe: the assignment
+      # is atomic on MRI (GVL) and the new index is fully constructed before
+      # being swapped in, so in-flight scans see either the old or the new
+      # index — never a partial one.
+      #
+      # @param new_index [CredentialIndex, nil] The replacement index.
+      # @return [void]
+      def replace_index!(new_index)
+        @secret_index = if new_index.respond_to?(:empty?) && new_index.empty?
+                          nil
+                        else
+                          new_index
+                        end
+      end
+
       # Counter key emitted when {CredentialIndex} substring-matches a value
       # before any shape pattern fires. Distinct from pattern names so
       # observability can tell the two layers apart.
@@ -131,9 +149,27 @@ module Woods
       def walk(value, counts)
         case value
         when String then scan_string(value, counts)
-        when Hash   then value.transform_values { |val| walk(val, counts) }
+        when Hash   then walk_hash(value, counts)
         when Array  then value.map { |item| walk(item, counts) }
         else value
+        end
+      end
+
+      # Walk a Hash, scanning both keys and values for credentials.
+      #
+      # Keys are scanned by coercing them to String, running the scan, then
+      # restoring the original key type — a Symbol key that carries a
+      # credential-shaped string is emitted as a Symbol after redaction
+      # (e.g. `:"[REDACTED]"`). String keys stay Strings. Non-String,
+      # non-Symbol keys (Integer, etc.) pass through unchanged.
+      def walk_hash(hash, counts)
+        hash.each_with_object({}) do |(key, val), out|
+          scanned_key = case key
+                        when String then scan_string(key, counts)
+                        when Symbol then scan_string(key.to_s, counts).to_sym
+                        else             key
+                        end
+          out[scanned_key] = walk(val, counts)
         end
       end
 
