@@ -19,15 +19,22 @@ module Woods
     #
     # Two construction modes are supported:
     #
-    # - `connection:` — the legacy single-connection form. Useful in tests
-    #   and for callers that already manage their own connection lifecycle.
-    # - `pool:` — the per-request form. Each call to {#execute} leases a
-    #   fresh connection via `pool.with_connection { |c| ... }`, so the
-    #   connection is returned to the pool immediately after the block. The
-    #   leased connection is also exposed via
-    #   `Thread.current[:woods_console_leased_connection]` so dispatch
-    #   handlers (e.g. EmbeddedExecutor#active_connection) can reuse the
-    #   same connection without re-leasing.
+    # - `connection:` — wraps the supplied connection in a single-use pool
+    #   adapter so the execution path is identical to the `pool:` form.
+    #   Useful in tests and for callers that already manage their own
+    #   connection lifecycle (e.g. bridge mode, `exe/woods-console`).
+    # - `pool:` — each call to {#execute} leases a fresh connection via
+    #   `pool.with_connection { |c| ... }`, so the connection is returned
+    #   to the pool immediately after the block. The leased connection is
+    #   also exposed via `Thread.current[:woods_console_leased_connection]`
+    #   so dispatch handlers (e.g. EmbeddedExecutor#active_connection) can
+    #   reuse the same connection without re-leasing.
+    #
+    # In both forms the connection is resolved *per {#execute} call* —
+    # SafeContext never holds a connection ivar. This is the key invariant
+    # for multi-DB / sharded hosts: if you supply a shard pool (or shard
+    # connection), the rolled-back transaction is opened on that shard's
+    # connection, not on the default pool.
     #
     # @example connection: form
     #   ctx = SafeContext.new(connection: conn, timeout_ms: 5000, redacted_columns: %w[ssn])
@@ -36,6 +43,11 @@ module Woods
     # @example pool: form (per-request lease)
     #   ctx = SafeContext.new(pool: ActiveRecord::Base.connection_pool)
     #   ctx.execute { |c| c.select_all("SELECT count(*) FROM users") }
+    #
+    # @example Shard pool — rollback covers the shard
+    #   shard_pool = ShardedModel.connection_pool
+    #   ctx = SafeContext.new(pool: shard_pool)
+    #   ctx.execute { |c| c.select_all("SELECT * FROM shard_table") }
     #
     # @example Key-value (EAV) redaction
     #   ctx = SafeContext.new(
@@ -53,6 +65,19 @@ module Woods
       # leased connection inside the rolled-back transaction.
       LEASED_CONNECTION_KEY = :woods_console_leased_connection
 
+      # Thin adapter that makes a bare connection look like a connection pool
+      # with a `with_connection` interface. Used internally when callers pass
+      # `connection:` so that {#execute} always flows through a single code
+      # path regardless of construction form.
+      #
+      # @api private
+      SingleConnectionPool = Struct.new(:connection) do
+        # @yield [Object] the wrapped connection
+        def with_connection(&block)
+          block.call(connection)
+        end
+      end
+
       # @return [Array<String>] Column names whose values are replaced with "[REDACTED]"
       attr_reader :redacted_columns
 
@@ -63,6 +88,8 @@ module Woods
       # @param connection [Object, nil] Database connection (or mock).
       #   Mutually exclusive with `pool:` — pass one or the other (or
       #   neither, if this SafeContext is only being used for #redact).
+      #   The connection is wrapped in {SingleConnectionPool} so execution
+      #   always flows through `pool.with_connection`.
       # @param pool [#with_connection, nil] Connection pool to lease from
       #   per request. Each {#execute} call wraps `pool.with_connection`.
       # @param timeout_ms [Integer] Statement timeout in milliseconds
@@ -74,8 +101,7 @@ module Woods
       #   `value_column` cell is replaced with "[REDACTED]".
       def initialize(connection: nil, pool: nil, timeout_ms: 5000,
                      redacted_columns: [], redacted_key_values: [])
-        @connection = connection
-        @pool = pool
+        @pool = pool || (connection && SingleConnectionPool.new(connection))
         @timeout_ms = timeout_ms
         @redacted_columns = redacted_columns.map(&:to_s)
         @redacted_key_values = normalize_key_value_patterns(redacted_key_values)
@@ -84,8 +110,8 @@ module Woods
       # Execute a block within a rolled-back transaction with statement timeout.
       #
       # The transaction is always rolled back to ensure read-only behavior.
-      # When constructed with `pool:`, each call leases a fresh connection
-      # via `pool.with_connection`. The leased connection is published as
+      # A fresh connection is leased from the pool on every call via
+      # `pool.with_connection`. The leased connection is published as
       # `Thread.current[LEASED_CONNECTION_KEY]` for the duration of the
       # block and cleared in `ensure` (even on exceptions) so dispatch
       # handlers can pick it up without re-leasing.
@@ -94,15 +120,11 @@ module Woods
       # @return [Object] The block's return value
       # @raise [ArgumentError] when neither `connection:` nor `pool:` was
       #   supplied at construction time. Deferred to #execute so callers
-      #   that only use #redact can pass `connection: nil`.
+      #   that only use #redact can construct with neither.
       def execute(&block)
-        if @pool
-          @pool.with_connection { |conn| run_with_timeout(conn, &block) }
-        elsif @connection
-          run_with_timeout(@connection, &block)
-        else
-          raise ArgumentError, 'SafeContext#execute requires connection: or pool: at construction time'
-        end
+        raise ArgumentError, 'SafeContext#execute requires connection: or pool: at construction time' unless @pool
+
+        @pool.with_connection { |conn| run_with_timeout(conn, &block) }
       end
 
       # Replace values of redacted columns with "[REDACTED]".
@@ -184,7 +206,7 @@ module Woods
       #
       # MySQL uses `SET max_execution_time` (applies to SELECT only — DDL
       # and DML statements cannot be time-limited via this variable).
-      def set_timeout(connection = @connection, timeout_ms = @timeout_ms)
+      def set_timeout(connection, timeout_ms = @timeout_ms)
         adapter = connection.adapter_name.downcase
         if adapter.include?('mysql')
           connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
