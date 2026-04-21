@@ -42,6 +42,12 @@ import {
 import { CardinalityMarkers } from './CardinalityMarkers'
 import { CommandPalette, CommandPaletteProvider } from './CommandPalette'
 import { ErrorDisplay } from './ErrorDisplay'
+import {
+  JourneyProvider,
+  JourneyBanner,
+  JourneyLegend,
+  type WalkableSchema,
+} from '../../../journey'
 import { FocusBanner } from './FocusBanner'
 import { LeftPane } from './LeftPane'
 import { RelationshipEdgeParticleMarker } from './RelationshipEdgeParticleMarker'
@@ -233,6 +239,7 @@ export const ERDRenderer: FC<Props> = ({
       <ToastProvider>
         <CommandPaletteProvider>
           {withAppBar && <AppBar />}
+          <JourneyProvider schema={schema as unknown as WalkableSchema}>
           <ReactFlowProvider>
             <ResizablePanelGroup
               direction="horizontal"
@@ -266,6 +273,8 @@ export const ERDRenderer: FC<Props> = ({
                 isResizing={isResizing}
               >
                 <main className={styles.main}>
+                  <JourneyBanner />
+                  <JourneyLegend />
                   <div className={styles.triggerWrapper}>
                     <SidebarTrigger />
                   </div>
@@ -318,6 +327,7 @@ export const ERDRenderer: FC<Props> = ({
             </ResizablePanelGroup>
             <CommandPalette />
           </ReactFlowProvider>
+          </JourneyProvider>
         </CommandPaletteProvider>
       </ToastProvider>
     </SidebarProvider>
