@@ -780,7 +780,8 @@ module Woods
         # ── Tier 4 tool definitions ──────────────────────────────────────────
 
         def define_eval(server, conn_mgr, ctx = nil, renderer: nil)
-          guard = EvalGuard.new if Woods.configuration.console_credential_defense_enabled
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          guard = EvalGuard.new if config&.console_credential_defense_enabled
           define_console_tool(server, conn_mgr, 'console_eval',
                               'Execute arbitrary Ruby code (requires confirmation)',
                               properties: {
