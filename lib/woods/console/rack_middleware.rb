@@ -108,7 +108,7 @@ module Woods
 
       # Thread-safe lazy initialization of the MCP server and transport.
       #
-      # @return [MCP::Server::Transports::StreamableHTTPTransport]
+      # @return [::MCP::Server::Transports::StreamableHTTPTransport]
       def ensure_transport
         return @transport if @transport
 
@@ -119,7 +119,7 @@ module Woods
           Rails.application.eager_load!
 
           server = build_embedded_server
-          @transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+          @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server)
           server.transport = @transport
           @transport
         end
