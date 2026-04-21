@@ -5,6 +5,7 @@ require 'woods'
 require 'woods/console/rack_middleware'
 require 'woods/console/safe_context'
 require 'woods/console/model_validator'
+require 'woods/observability/structured_logger'
 
 # Stub Server so we don't pull in the full MCP transport stack.
 unless defined?(Woods::Console::Server)
@@ -60,6 +61,64 @@ RSpec.describe Woods::Console::RackMiddleware do
 
       expect(Woods::Console::SafeContext).to have_received(:new)
         .with(hash_including(pool: pool))
+    end
+  end
+
+  describe '#build_model_introspection' do
+    let(:logger) { instance_double(Woods::Observability::StructuredLogger) }
+    let(:bad_model) do
+      m = class_double('BadModel')
+      allow(m).to receive(:name).and_return('BadModel')
+      allow(m).to receive(:abstract_class?).and_return(false)
+      allow(m).to receive(:table_exists?).and_return(true)
+      allow(m).to receive(:column_names).and_raise(StandardError, 'column boom')
+      m
+    end
+    let(:good_model) do
+      m = class_double('GoodModel')
+      allow(m).to receive(:name).and_return('GoodModel')
+      allow(m).to receive(:abstract_class?).and_return(false)
+      allow(m).to receive(:table_exists?).and_return(true)
+      allow(m).to receive(:column_names).and_return(['id'])
+      allow(m).to receive(:table_name).and_return('good_models')
+      allow(m).to receive(:reflect_on_all_associations).and_return([])
+      m
+    end
+
+    before do
+      allow(ar_base).to receive(:descendants).and_return([bad_model, good_model])
+      middleware.instance_variable_set(:@structured_logger, logger)
+      allow(logger).to receive(:debug)
+    end
+
+    it 'logs a debug event when a model raises during introspection' do
+      middleware.send(:build_model_introspection)
+
+      expect(logger).to have_received(:debug).with(
+        'console.model_introspection.skipped',
+        hash_including(model: 'BadModel', error_class: 'StandardError')
+      )
+    end
+
+    it 'includes the error message in the debug payload' do
+      middleware.send(:build_model_introspection)
+
+      expect(logger).to have_received(:debug).with(
+        'console.model_introspection.skipped',
+        hash_including(error_message: 'column boom')
+      )
+    end
+
+    it 'still includes the good model in the introspection result' do
+      result = middleware.send(:build_model_introspection)
+
+      expect(result[:registry]).to include('GoodModel')
+    end
+
+    it 'excludes the bad model from the introspection result' do
+      result = middleware.send(:build_model_introspection)
+
+      expect(result[:registry]).not_to include('BadModel')
     end
   end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'woods/observability/structured_logger'
 
 module Woods
   module Console
@@ -171,7 +172,13 @@ module Woods
           registry[model.name] = model.column_names
           tables[model.name] = model.table_name
           reflections[model.name] = reflections_for(model)
-        rescue StandardError
+        rescue StandardError => e
+          structured_logger.debug(
+            'console.model_introspection.skipped',
+            model: model.name,
+            error_class: e.class.name,
+            error_message: e.message
+          )
           next
         end
 
@@ -187,6 +194,10 @@ module Woods
         rescue StandardError
           next
         end
+      end
+
+      def structured_logger
+        @structured_logger ||= Woods::Observability::StructuredLogger.new
       end
     end
   end
