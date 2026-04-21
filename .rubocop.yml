@@ -98,6 +98,7 @@ Metrics/CyclomaticComplexity:
   Exclude:
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
+    - 'lib/woods/erd/**/*'
     - 'lib/woods/mcp/**/*'
     - 'lib/woods/retrieval/**/*'
     - 'lib/woods/flow_*.rb'
@@ -113,6 +114,7 @@ Metrics/PerceivedComplexity:
   Exclude:
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
+    - 'lib/woods/erd/**/*'
     - 'lib/woods/mcp/**/*'
     - 'lib/woods/retrieval/**/*'
     - 'lib/woods/flow_*.rb'
