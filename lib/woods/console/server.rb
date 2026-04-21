@@ -59,16 +59,28 @@ module Woods
         # @return [CredentialIndex, nil] The newly built index, or nil when
         #   the rebuild was skipped.
         def rebuild_credential_index(rails_app: nil)
-          config = Woods.configuration if Woods.respond_to?(:configuration)
-          return nil unless config&.console_credential_defense_enabled
+          return nil unless credential_defense_enabled?
           return nil unless @active_scanner
 
-          target_app = rails_app || (defined?(Rails) && Rails.respond_to?(:application) ? Rails.application : nil)
+          target_app = rails_app || default_rails_app
           return nil unless target_app
 
           new_index = CredentialIndex.build(rails_app: target_app)
           @active_scanner.replace_index!(new_index)
           new_index
+        end
+
+        # True when Woods is configured and credential defense is on.
+        def credential_defense_enabled?
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          config&.console_credential_defense_enabled ? true : false
+        end
+
+        # Resolves `Rails.application` when available, else nil.
+        def default_rails_app
+          return nil unless defined?(Rails) && Rails.respond_to?(:application)
+
+          Rails.application
         end
 
         # Build a configured MCP::Server with console tools using the bridge protocol.
