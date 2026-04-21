@@ -49,12 +49,35 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'points eval at the bridge architecture' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'puts 1' } })
+      it 'returns an instructional eval_disabled payload instead of a bare unsupported error' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
 
         expect(response['ok']).to be false
-        expect(response['error_type']).to eq('unsupported')
-        expect(response['error']).to include('bridge architecture')
+        expect(response['error_type']).to eq('eval_disabled')
+      end
+
+      it 'eval error explains why eval is disabled and names the query alternatives' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
+
+        error = response['error']
+        expect(error).to include('console_eval')
+        expect(error).to include('disabled')
+        expect(error).to include('console_query')
+        expect(error).to include('console_sql')
+      end
+
+      it 'eval error instructs the agent to surface its proposed snippet to the user before retrying' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
+
+        error = response['error']
+        expect(error).to match(/surface|present|show/i)
+        expect(error).to match(/first|manual/i)
+      end
+
+      it 'eval error points operators at the WOODS_CONSOLE_UNSAFE_EVAL opt-in flag' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
+
+        expect(response['error']).to include('WOODS_CONSOLE_UNSAFE_EVAL')
       end
     end
 
