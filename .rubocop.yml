@@ -4,6 +4,7 @@ AllCops:
   Exclude:
     - 'vendor/**/*'
     - 'tmp/**/*'
+    - 'bench/**/*'
 
 # ── Metrics exclusions ──
 # AST visitors, extractors, MCP registries, flow analysis, and core

@@ -40,6 +40,18 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 
 Historical design documents from the build phase are in [design/](design/) (see [design/README.md](design/README.md)).
 
+## Benchmarks
+
+The `bench/` directory contains opt-in benchmarks for console-layer components. Run any bench individually:
+
+```bash
+bundle exec ruby bench/credential_scanner_bench.rb
+bundle exec ruby bench/sql_validator_bench.rb
+bundle exec ruby bench/table_gate_bench.rb
+```
+
+These benchmarks are **not part of the test suite** and are never run in CI. They exist so performance claims can be proven or disproven without scaffolding from scratch. Each file documents what it measures, how to run it, and rough IPS targets at the top.
+
 ## Planned Documentation
 
 | Document | Scope |
