@@ -258,6 +258,29 @@ RSpec.describe Woods::Console::SafeContext do
         ctx.execute { |c| yielded = c }
         expect(yielded).to be(fixed_conn)
       end
+
+      it 'routes every execute call through pool.with_connection, never a captured ivar' do
+        # Regression guard: before the fix, SafeContext stored @connection and
+        # used it directly from #execute, bypassing any pool path. After the
+        # fix, the supplied connection is wrapped in SingleConnectionPool so
+        # every execute call must flow through pool.with_connection. This
+        # spec would fail if someone re-introduced a captured @connection
+        # that bypassed the pool — even if they tried to keep the ivar check
+        # elsewhere happy.
+        ctx = described_class.new(connection: fixed_conn)
+        pool = ctx.instance_variable_get(:@pool)
+        expect(pool).to respond_to(:with_connection)
+
+        call_count = 0
+        original = pool.method(:with_connection)
+        allow(pool).to receive(:with_connection) do |&block|
+          call_count += 1
+          original.call(&block)
+        end
+
+        3.times { ctx.execute { |_c| 'noop' } }
+        expect(call_count).to eq(3)
+      end
     end
   end
 
