@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'woods/console/sql_noise_stripper'
+
 # @see Woods
 module Woods
   class Error < StandardError; end unless defined?(Woods::Error)
@@ -44,15 +46,6 @@ module Woods
 
       # Allowed statement prefixes (case-insensitive).
       ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN)\b/i
-
-      # Regex to strip SQL line comments (--...).
-      LINE_COMMENT_PATTERN = /--[^\n]*/
-
-      # Regex to strip SQL block comments (/* ... */).
-      BLOCK_COMMENT_PATTERN = %r{/\*.*?\*/}m
-
-      # Regex to strip single-quoted string literals.
-      SINGLE_QUOTED_STRING_PATTERN = /'[^']*'/
 
       # Frozen map of forbidden keyword => regex matching the keyword at statement start.
       # Used by {#check_forbidden_keywords!} and {#check_forbidden_keywords_in_body!}.
@@ -132,11 +125,8 @@ module Woods
       # @param sql [String]
       # @return [Boolean]
       def contains_multiple_statements?(sql)
-        # Strip SQL comments before checking
-        stripped = sql.gsub(LINE_COMMENT_PATTERN, '') # line comments
-        stripped = stripped.gsub(BLOCK_COMMENT_PATTERN, '') # block comments
-        # Strip single-quoted strings to avoid false positives
-        stripped = stripped.gsub(SINGLE_QUOTED_STRING_PATTERN, '')
+        stripped = SqlNoiseStripper.strip_comments(sql)
+        stripped = SqlNoiseStripper.strip_literals(stripped)
         stripped.include?(';')
       end
 
@@ -186,9 +176,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_forbidden_keywords_in_body!(sql)
-        # Strip comments to reveal hidden statements
-        stripped = sql.gsub(LINE_COMMENT_PATTERN, '') # line comments
-        stripped = stripped.gsub(BLOCK_COMMENT_PATTERN, '') # block comments
+        stripped = SqlNoiseStripper.strip_comments(sql)
 
         # Check if any forbidden keyword appears anywhere (not just at start)
         FORBIDDEN_BODY_REGEXES.each do |keyword, body_pattern|
