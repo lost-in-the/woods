@@ -31,11 +31,61 @@ module Woods
 
   CONFIG_MUTEX = Mutex.new
 
+  # Console MCP secure defaults — Layer 3 column-name redaction.
+  #
+  # Columns named here are replaced with `[REDACTED]` in every MCP tool
+  # response. This list targets credential columns that appear with the
+  # same names across Devise, Doorkeeper, Rodauth, has_secure_password,
+  # devise-two-factor, OAuth integrations, and hand-rolled auth code.
+  #
+  # Intentionally omitted because they cause over-redaction in apps that
+  # use them for non-secret purposes:
+  #   - `key` — ActiveStorage blob keys, EAV key columns, translation keys
+  #   - `name` — universal non-secret identifier
+  #   - PII columns (`ssn`, `tax_id`, `dob`) — org-specific compliance concern
+  #
+  # Host apps extend this by reassigning `console_redacted_columns` to
+  # `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[extra_column]`, or
+  # override entirely to remove a default.
+  DEFAULT_CONSOLE_REDACTED_COLUMNS = %w[
+    password
+    password_digest
+    password_salt
+    encrypted_password
+    crypted_password
+    salt
+    otp_secret
+    encrypted_otp_secret
+    two_factor_secret
+    backup_codes
+    consumed_timestep
+    reset_password_token
+    confirmation_token
+    unlock_token
+    remember_token
+    invitation_token
+    access_token
+    refresh_token
+    auth_token
+    api_token
+    api_key
+    bearer_token
+    client_secret
+    webhook_secret
+    signing_secret
+    session_secret
+    private_key
+    encrypted_private_key
+    key_hash
+    token
+    secret
+  ].freeze
+
   # ════════════════════════════════════════════════════════════════════════
   # Configuration
   # ════════════════════════════════════════════════════════════════════════
 
-  class Configuration
+  class Configuration # rubocop:disable Metrics/ClassLength
     attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
@@ -43,6 +93,8 @@ module Woods
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
+                  :console_blocked_tables, :console_credential_scanning_enabled,
+                  :console_disabled_scanner_patterns, :console_credential_defense_enabled,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options
@@ -70,9 +122,13 @@ module Woods
       @session_exclude_paths = []
       @console_mcp_enabled = false
       @console_mcp_path = '/mcp/console'
-      @console_redacted_columns = []
+      @console_redacted_columns = DEFAULT_CONSOLE_REDACTED_COLUMNS.dup
       @console_redacted_key_values = []
       @console_embedded_read_tools = false
+      @console_blocked_tables = []
+      @console_credential_scanning_enabled = true
+      @console_disabled_scanner_patterns = []
+      @console_credential_defense_enabled = true
       @notion_api_token = nil
       @notion_database_ids = {}
       @unblocked_api_token = nil

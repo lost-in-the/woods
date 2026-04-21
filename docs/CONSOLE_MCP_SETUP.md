@@ -358,16 +358,58 @@ Set these in your Rails initializer:
 
 ```ruby
 Woods.configure do |config|
-  # Enable HTTP/Rack transport. Default: false.
-  # Has no effect on stdio (rake) or bridge transports.
+  # Master on/off switch for the Console MCP feature (Layer 0). Default: false.
+  # Applies to every transport: stdio (rake / rails runner), bridge, and Rack.
+  # When false, entry points exit with a "disabled" notice (stdio) or return
+  # 410 Gone (Rack). Set to true only after configuring the layers below that
+  # match your threat model.
   config.console_mcp_enabled = true
 
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
   config.console_mcp_path = '/mcp/console'
 
-  # Column names to redact from all query results. Default: [].
+  # Layer 1 — Table names that must never appear in a response. Default: [].
+  # Matched against :model (resolved via ActiveRecord), :table, and :sql args.
+  # A blocked table rejects the tool call at dispatch — before the executor runs.
+  # Case-insensitive.
+  config.console_blocked_tables = %w[authorizations credentials]
+
+  # Layer 2 — Content-shape credential scanner. Default: true.
+  # Walks the final response tree and replaces credential-shaped substrings
+  # (Stripe sk_*, AWS AKIA*, GCP private keys, GitHub ghp_*, generic high-entropy
+  # tokens) with "[REDACTED]". Runs regardless of column naming, so it catches
+  # leaks that column-based redaction alone would miss.
+  config.console_credential_scanning_enabled = true
+
+  # Layer 2 — Per-pattern opt-out. Default: [].
+  # Accepts a list of pattern symbols to skip. Useful when a rule produces
+  # false positives in your data (e.g. AWS access keys in documentation).
+  config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
+
+  # Layer 2 augmentations — parse-time eval guard + boot-time credential index.
+  # Default: true. When true:
+  #   - Woods::Console::EvalGuard refuses console_eval payloads that reach
+  #     Rails.application.credentials, ENV, reflection escapes, or credential-
+  #     file reads at parse time (before the bridge sees the snippet).
+  #   - Woods::Console::CredentialIndex walks Rails.application.credentials.config
+  #     once at server boot and substring-redacts those values from every MCP
+  #     response — so credentials whose shape no scanner pattern recognizes
+  #     (Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook
+  #     signing keys) are still caught when their exact contents appear.
+  # See "console_credential_defense_enabled" section below for scope and
+  # multi-DB caveats.
+  config.console_credential_defense_enabled = true
+
+  # Layer 3 — Column names to redact from all query results. Default: [].
   # Replaced with "[REDACTED]" in output.
   config.console_redacted_columns = %w[password_digest encrypted_password api_key ssn token]
+
+  # Layer 3 — EAV (key-value) redaction patterns. Default: [].
+  # See `console_redacted_key_values` section below for the pattern contract.
+  config.console_redacted_key_values = [
+    { key_column: 'key', value_column: 'value',
+      sensitive_keys: %w[stripe_access_token oauth_token] }
+  ]
 
   # Unlock console_sql / console_query in the embedded executor. Default: false.
   # Flows through to the Rack middleware AND the stdio entry point (rake / rails runner).
@@ -376,14 +418,72 @@ Woods.configure do |config|
 end
 ```
 
+### `console_mcp_enabled` (Layer 0 — feature gate)
+
+Until this flag is `true`, none of the transports route traffic:
+
+- `exe/woods-console-mcp` (bridge stdio) and `exe/woods-console` (embedded stdio) print a notice to stderr and exit 1. MCP clients see the process fail to start.
+- `Woods::Console::RackMiddleware` returns `410 Gone` with a JSON body pointing here. Non-matching paths pass through untouched.
+
+Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment — e.g. in `config/environments/development.rb` or a staging-only initializer — once the layers below are configured for that environment's threat model.
+
+### `console_blocked_tables` (Layer 1 — table gate)
+
+Entries are lowercased table names. A tool call is rejected at dispatch time when:
+
+- `:model` argument resolves to a model whose `table_name` is blocked
+- `:table` argument names a blocked table
+- `:sql` argument references a blocked table (matched on identifier tokens, case-insensitive)
+
+Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture — EAV credential stores (`authorizations`, `settings` with secrets), audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
+
+### `console_credential_scanning_enabled` / `console_disabled_scanner_patterns` (Layer 2 — content scanner)
+
+The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss — e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
+
+Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling the rule — `console_disabled_scanner_patterns` is an escape hatch, not a primary knob.
+
+### `console_credential_defense_enabled` (parse-time eval guard + boot-time credential index)
+
+Two complementary defenses share this flag, both gating credential exfiltration that the shape-pattern scanner cannot catch on its own:
+
+- **Parse-time eval guard.** `Woods::Console::EvalGuard` walks the normalized AST of every `console_eval` payload and raises before the bridge ever sees it when the snippet reaches `Rails.application.credentials.*`, `Rails.application.secrets.*`, `ENV` (any form), reflection escapes (`eval`, `instance_eval`, `send`, `const_get`, `binding`, etc.), or credential-file reads (`File.read('config/master.key')`, `File.read('config/credentials.yml.enc')`, etc.). Refusal yields a clean MCP error response (`error: true`) — no transport-level exception, no partial output. Unparseable payloads are also refused, since a snippet that won't parse can't be reasoned about.
+
+- **Boot-time credential index.** `Woods::Console::CredentialIndex` walks `Rails.application.credentials.config` once at server boot, collects every string leaf with length ≥ 12, and substring-redacts those values from every MCP response. This catches credentials whose *shape* the scanner doesn't recognize but whose *exact contents* Rails already knows — Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook signing keys, custom OAuth client secrets. Hits are marked `[REDACTED:credential]` (distinct from the scanner's `[REDACTED]`) and counted under a `:credential_index` key so audit output shows which layer caught the leak.
+
+**Multi-DB / sharded caveat.** The index reflects only the credentials available to the *Rails process* that boots the Console MCP server. A separate database that holds its own secrets (e.g., a vendored CMS app sharing the same Rails host) is not in scope — for those, lean on Layer 3 (`console_redacted_columns` / `console_redacted_key_values`) and Layer 1 (`console_blocked_tables`).
+
+**Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index — the server still boots and the parse-time eval guard plus every other defense layer remain in effect.
+
+Set the flag to `false` only if a legitimate workflow requires reading credentials through `console_eval`. The bridge-side enforcement (`SafeContext`, `SqlValidator`, blocked tables) remains in place either way.
+
 ### `console_redacted_columns`
 
 Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive — use the exact names from your database schema.
 
+**Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, ~30 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.
+
+Extend or override rather than reassigning blindly:
+
 ```ruby
-# Example: redact PII
-config.console_redacted_columns = %w[email phone_number date_of_birth ssn]
+# Extend — keep all defaults plus app-specific columns
+config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[cart_token share_token]
+
+# Add PII on top of the credential defaults
+config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[email phone_number ssn]
+
+# Remove a default that over-redacts in your app (e.g., `token` is a non-secret slug)
+config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS - %w[token]
+
+# Replace entirely — only do this if you've audited the default list against your schema
+config.console_redacted_columns = %w[password_digest api_key]
 ```
+
+Columns intentionally **excluded** from the default list because they cause over-redaction in apps that use them legitimately:
+
+- `key` — ActiveStorage blob keys, EAV key columns, translation keys
+- `name` — universal non-secret identifier
+- PII columns (`ssn`, `tax_id`, `dob`) — org-specific compliance concern, prefer explicit opt-in
 
 Redaction is shape-aware and covers every tool that returns row data:
 
@@ -404,7 +504,7 @@ Column-name redaction falls short when credentials are stored in a **key-value (
 `console_redacted_key_values` takes one or more patterns that describe "when a row has `key_column` set to one of these names, redact its `value_column`":
 
 ```ruby
-# Example / `authorizations` table — serves both MySQL and PostgreSQL apps.
+# Example: an `authorizations` table — pattern works on both MySQL and PostgreSQL.
 config.console_redacted_key_values = [
   {
     key_column:     'key',
@@ -478,7 +578,17 @@ All three embedded transports (Options A, B, and C) honour `console_embedded_rea
 
 ## Safety Model
 
-The embedded console implements multiple defense-in-depth layers. None of them depend on the transport option — they apply equally to stdio, Docker, and HTTP modes.
+The Console MCP ships with a five-layer defense-in-depth stack. Each layer is independently tunable and each runs regardless of transport (stdio, Docker, HTTP, bridge) — a misconfigured or disabled layer falls through to the next.
+
+| # | Layer | Knob | Fires at | Purpose |
+|---|-------|------|----------|---------|
+| 0 | Feature gate | `console_mcp_enabled` | Process start / request entry | Master on/off switch — feature is inert until an operator opts in |
+| 1 | Blocked tables | `console_blocked_tables` | Tool dispatch, before executor | Reject any tool call that touches a named table (model, table, or sql arg) |
+| 2 | Credential scanner | `console_credential_scanning_enabled`, `console_disabled_scanner_patterns` | After executor, before render | Content-shape redaction of credential-shaped strings anywhere in the response tree |
+| 3 | Column + EAV redaction | `console_redacted_columns`, `console_redacted_key_values` | After executor, before Layer 2 | Identity-based redaction by column name and by key/value row shape |
+| 4 | SqlValidator + SafeContext | built-in | Inside executor | SQL deny-list for `console_sql`; transaction-rollback for every request |
+
+Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks — `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2 — emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
 
 ### Rolled-Back Transactions
 

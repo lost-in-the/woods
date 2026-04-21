@@ -394,11 +394,35 @@ module Woods
         Arel.sql("#{func}()")
       end
 
-      # Return the database connection (injected or from ActiveRecord).
+      # Return the database connection for the in-flight request.
+      #
+      # Resolution order:
+      # 1. The connection leased by SafeContext for the current execute
+      #    block, published via `Thread.current[:woods_console_leased_connection]`.
+      #    This is the normal path under RackMiddleware — every dispatch
+      #    runs inside `SafeContext#execute`, which leases from
+      #    `ActiveRecord::Base.connection_pool` once per request and keeps
+      #    that connection on the calling thread until the rolled-back
+      #    transaction completes.
+      # 2. The connection injected at construction time (test fixtures,
+      #    bridge mode, anywhere SafeContext was built with `connection:`).
+      # 3. As a last resort, lease one from the writing pool. We do *not*
+      #    return the leased connection out of its `with_connection` block
+      #    (that would release it back to the pool while the caller still
+      #    holds the reference); instead, when nothing else has leased a
+      #    connection, fall through to `ActiveRecord::Base.lease_connection`
+      #    if it exists (Rails 7.2+) or `connection` (Rails <= 7.1).
+      #    Both paths keep the connection checked out for the calling
+      #    thread, which is correct outside the SafeContext lease.
       #
       # @return [Object] Database connection
       def active_connection
-        @connection || ActiveRecord::Base.connection
+        leased = Thread.current[SafeContext::LEASED_CONNECTION_KEY]
+        return leased if leased
+        return @connection if @connection
+
+        pool = ActiveRecord::Base.connection_pool
+        pool.respond_to?(:lease_connection) ? pool.lease_connection : ActiveRecord::Base.connection
       end
 
       # Recursively convert all Hash keys to strings.

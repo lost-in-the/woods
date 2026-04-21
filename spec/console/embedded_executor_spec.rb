@@ -70,6 +70,47 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
     end
 
+    # Regression: ActiveRecord::Base.connection is deprecated in Rails 7.2 and
+    # removed in 8.0. Under RackMiddleware, SafeContext leases a fresh
+    # connection per request and publishes it via Thread.current — handlers
+    # must pick that up rather than re-leasing or calling the deprecated
+    # method.
+    context 'connection resolution (no injected connection)' do
+      let(:pool) { instance_double('ActiveRecord::ConnectionPool') }
+      let(:leased_conn) { instance_double('LeasedConnection') }
+      let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
+      let(:safe_context) { Woods::Console::SafeContext.new(pool: pool) }
+
+      subject(:executor) do
+        described_class.new(model_validator: validator, safe_context: safe_context)
+      end
+
+      before do
+        allow(ar_base).to receive(:connection_pool).and_return(pool)
+        allow(pool).to receive(:with_connection).and_yield(leased_conn)
+        allow(leased_conn).to receive(:adapter_name).and_return('PostgreSQL')
+        allow(leased_conn).to receive(:execute) # SET LOCAL statement_timeout
+        allow(leased_conn).to receive(:transaction) do |&block|
+          block.call
+        rescue ActiveRecord::Rollback
+          nil
+        end
+      end
+
+      it 'reuses the connection leased by SafeContext for the request' do
+        response = executor.send_request({ 'tool' => 'status', 'params' => {} })
+
+        expect(response['ok']).to be true
+        expect(response['result']['adapter']).to eq('PostgreSQL')
+        expect(pool).to have_received(:with_connection).once
+      end
+
+      it 'never invokes the deprecated ActiveRecord::Base.connection' do
+        expect(ar_base).not_to receive(:connection)
+        executor.send_request({ 'tool' => 'status', 'params' => {} })
+      end
+    end
+
     context 'count tool' do
       let(:user_model) { class_double('User') }
       let(:relation) { instance_double('ActiveRecord::Relation') }

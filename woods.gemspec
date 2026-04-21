@@ -45,5 +45,10 @@ Gem::Specification.new do |spec|
 
   # Runtime dependencies
   spec.add_dependency 'mcp', '~> 0.6'
+  # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
+  # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
+  # Prism vs the parser gem — this dep guarantees the Prism path on the lower
+  # Ruby range so the guard's behavior stays consistent across the support matrix.
+  spec.add_dependency 'prism', '~> 1.4'
   spec.add_dependency 'railties', '>= 6.1'
 end

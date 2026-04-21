@@ -64,12 +64,37 @@ RSpec.describe Woods::Configuration do
       expect(config.console_embedded_read_tools).to eq(false)
     end
 
-    it 'sets console_redacted_columns to empty array' do
-      expect(config.console_redacted_columns).to eq([])
+    it 'seeds console_redacted_columns with the secure default list' do
+      expect(config.console_redacted_columns).to eq(Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS)
+    end
+
+    it 'returns a mutable copy of DEFAULT_CONSOLE_REDACTED_COLUMNS (so host app edits do not leak globally)' do
+      config.console_redacted_columns << 'custom_secret'
+      expect(Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS).not_to include('custom_secret')
+    end
+
+    it 'covers widely-used credential column names by default' do
+      expect(config.console_redacted_columns).to include(
+        'password', 'password_digest', 'encrypted_password',
+        'otp_secret', 'reset_password_token', 'access_token',
+        'refresh_token', 'api_key', 'client_secret', 'private_key'
+      )
     end
 
     it 'sets console_redacted_key_values to empty array' do
       expect(config.console_redacted_key_values).to eq([])
+    end
+
+    it 'sets console_blocked_tables to empty array' do
+      expect(config.console_blocked_tables).to eq([])
+    end
+
+    it 'sets console_credential_scanning_enabled to true' do
+      expect(config.console_credential_scanning_enabled).to eq(true)
+    end
+
+    it 'sets console_disabled_scanner_patterns to empty array' do
+      expect(config.console_disabled_scanner_patterns).to eq([])
     end
   end
 
@@ -77,6 +102,26 @@ RSpec.describe Woods::Configuration do
     it 'allows setting console_embedded_read_tools' do
       config.console_embedded_read_tools = true
       expect(config.console_embedded_read_tools).to eq(true)
+    end
+
+    it 'allows setting console_mcp_enabled' do
+      config.console_mcp_enabled = true
+      expect(config.console_mcp_enabled).to eq(true)
+    end
+
+    it 'allows setting console_blocked_tables' do
+      config.console_blocked_tables = %w[authorizations credentials]
+      expect(config.console_blocked_tables).to eq(%w[authorizations credentials])
+    end
+
+    it 'allows disabling console_credential_scanning_enabled' do
+      config.console_credential_scanning_enabled = false
+      expect(config.console_credential_scanning_enabled).to eq(false)
+    end
+
+    it 'allows setting console_disabled_scanner_patterns' do
+      config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
+      expect(config.console_disabled_scanner_patterns).to eq(%i[stripe_publishable_key])
     end
   end
 
