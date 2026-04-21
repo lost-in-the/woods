@@ -40,4 +40,41 @@ RSpec.describe Woods::Erd::EntryPointIndexBuilder do
                              'action' => 'new' }
                          ])
   end
+
+  it 'excludes non-GET routes' do
+    write_route(verb: 'POST', path: '/checkout', controller: 'CheckoutController', action: 'create')
+    write_controller('CheckoutController')
+
+    expect(described_class.new(output_dir).build).to be_empty
+  end
+
+  it 'excludes routes whose controller is not extracted' do
+    write_route(verb: 'GET', path: '/orphan', controller: 'UnknownController', action: 'index')
+
+    expect(described_class.new(output_dir).build).to be_empty
+  end
+
+  it 'preserves namespaced controller identifiers' do
+    write_route(verb: 'GET', path: '/admin/users', controller: 'Admin::UsersController', action: 'index')
+    write_controller('Admin::UsersController')
+
+    result = described_class.new(output_dir).build
+
+    expect(result.first['identifier']).to eq('Admin::UsersController')
+  end
+
+  it 'sorts entries by path ascending' do
+    write_controller('CartController')
+    write_controller('CheckoutController')
+    write_route(verb: 'GET', path: '/checkout', controller: 'CheckoutController', action: 'new', id: 'r2')
+    write_route(verb: 'GET', path: '/cart',     controller: 'CartController',     action: 'show', id: 'r1')
+
+    paths = described_class.new(output_dir).build.map { |e| e['path'] }
+
+    expect(paths).to eq(['/cart', '/checkout'])
+  end
+
+  it 'returns [] when routes directory is missing' do
+    expect(described_class.new(output_dir).build).to eq([])
+  end
 end
