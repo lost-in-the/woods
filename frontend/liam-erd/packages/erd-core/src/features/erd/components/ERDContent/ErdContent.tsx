@@ -9,9 +9,9 @@ import {
   useEdgesState,
   useNodesState,
 } from '@xyflow/react'
-import { type FC, useCallback, useContext, useMemo } from 'react'
+import { type FC, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTableSelection } from '@/features/erd/hooks'
-import type { DisplayArea } from '@/features/erd/types'
+import type { DisplayArea, WoodsNodeType } from '@/features/erd/types'
 import { selectTableLogEvent } from '@/features/gtm/utils'
 import { repositionTableLogEvent } from '@/features/gtm/utils/repositionTableLogEvent'
 import { MAX_ZOOM, MIN_ZOOM } from '@/features/reactflow/constants'
@@ -208,11 +208,63 @@ export const ERDContentInner: FC<Props> = ({
     [version],
   )
 
+  type ContextMenuState = { x: number; y: number; nodeId: string; isController: boolean }
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+
+  const handleNodeContextMenu: NodeMouseHandler<Node> = useCallback(
+    (event, node) => {
+      event.preventDefault()
+      const isController =
+        node.type === 'woodsNode' &&
+        (node as WoodsNodeType).data.type === 'controller'
+      if (!isController) return
+      setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, isController })
+    },
+    [],
+  )
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const handler = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Element)) {
+        closeContextMenu()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [contextMenu, closeContextMenu])
+
   const panOnDrag = [1, 2]
 
   return (
     <div className={styles.wrapper} data-loading={loading}>
       {loading && <Spinner className={styles.loading} />}
+      {contextMenu && contextMenu.isController && (
+        <div
+          ref={contextMenuRef}
+          className={styles.contextMenu}
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            type="button"
+            className={styles.contextMenuItem}
+            onClick={() => {
+              journeyCtx?.enterJourney({
+                identifier: contextMenu.nodeId,
+                verb: 'SYNTHETIC',
+                path: '',
+                action: '',
+              })
+              closeContextMenu()
+            }}
+          >
+            Start journey from here
+          </button>
+        </div>
+      )}
       <ReactFlow
         colorMode="dark"
         nodes={displayNodes}
@@ -230,6 +282,7 @@ export const ERDContentInner: FC<Props> = ({
         onNodeMouseEnter={handleMouseEnterNode}
         onNodeMouseLeave={handleMouseLeaveNode}
         onNodeDragStop={handleDragStopNode}
+        onNodeContextMenu={handleNodeContextMenu}
         panOnScroll
         panOnDrag={panOnDrag}
         deleteKeyCode={null} // Turn off because it does not want to be deleted
