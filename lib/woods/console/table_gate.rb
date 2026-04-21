@@ -32,53 +32,47 @@ module Woods
 
       def active? = !(@blocked_bare.empty? && @blocked_qualified.empty?)
 
-      def check_sql!(sql) # rubocop:disable Naming/PredicateMethod
-        return true unless active? && sql&.length&.positive?
+      def check_sql!(sql)
+        return unless active? && sql&.length&.positive?
 
         SqlTableScanner.identifiers_in(sql).each do |raw|
           raise TableGateError, reject_message(raw) if blocked?(raw)
         end
-        true
       end
 
       def check_model!(model_name)
-        return true unless active?
+        return unless active?
 
         table = @model_tables[model_name.to_s]
-        table.nil? || check_table!(table)
+        check_table!(table) unless table.nil?
       end
 
-      def check_table!(table_name) # rubocop:disable Naming/PredicateMethod
-        return true unless active?
-        return true if table_name.nil? || table_name.to_s.empty?
+      def check_table!(table_name)
+        return unless active?
+        return if table_name.nil? || table_name.to_s.empty?
         raise TableGateError, reject_message(table_name) if blocked?(table_name)
-
-        true
       end
 
-      def check_joins!(model_name, joins) # rubocop:disable Naming/PredicateMethod,Metrics/CyclomaticComplexity
-        return true unless active? && joins && Array(joins).any?
+      def check_joins!(model_name, joins) # rubocop:disable Metrics/CyclomaticComplexity
+        return unless active? && joins && Array(joins).any?
 
         reflections = @model_reflections[model_name.to_s]
-        return true unless reflections
+        return unless reflections
 
         Array(joins).each do |join|
           table = reflections[join.to_s]
           raise TableGateError, reject_message(table) if table && blocked?(table)
         end
-        true
       end
 
-      def check_association!(model_name, association) # rubocop:disable Naming/PredicateMethod
-        return true unless active? && association
+      def check_association!(model_name, association)
+        return unless active? && association
 
         reflections = @model_reflections[model_name.to_s]
-        return true unless reflections
+        return unless reflections
 
         table = reflections[association.to_s]
         raise TableGateError, reject_message(table) if table && blocked?(table)
-
-        true
       end
 
       private

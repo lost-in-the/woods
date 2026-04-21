@@ -19,8 +19,8 @@ module Woods
     #
     # @example
     #   validator = SqlValidator.new
-    #   validator.validate!('SELECT * FROM users')         # => true
-    #   validator.validate!('DELETE FROM users')            # => raises SqlValidationError
+    #   validator.validate!('SELECT * FROM users')         # passes
+    #   validator.validate!('DELETE FROM users')            # raises SqlValidationError
     #   validator.valid?('SELECT 1')                       # => true
     #
     class SqlValidator
@@ -71,9 +71,8 @@ module Woods
         [func, /\b#{func}\s*\(/i]
       end.freeze
 
-      # @return [true]
       # @raise [SqlValidationError] if the SQL is not a safe read-only statement
-      def validate!(sql) # rubocop:disable Naming/PredicateMethod
+      def validate!(sql)
         raise SqlValidationError, 'SQL is empty' if sql.nil? || sql.strip.empty?
 
         normalized = sql.strip
@@ -99,11 +98,9 @@ module Woods
         check_forbidden_keywords_in_body!(normalized)
 
         # Must start with an allowed prefix
-        unless normalized.match?(ALLOWED_PREFIXES)
-          raise SqlValidationError, 'Rejected: SQL must start with SELECT, WITH, or EXPLAIN'
-        end
+        return if normalized.match?(ALLOWED_PREFIXES)
 
-        true
+        raise SqlValidationError, 'Rejected: SQL must start with SELECT, WITH, or EXPLAIN'
       end
 
       # Check if SQL is valid without raising.

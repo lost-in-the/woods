@@ -82,7 +82,6 @@ module Woods
 
       class << self
         # @param code [String] Ruby source proposed for `console_eval`.
-        # @return [true] if the code passes every denial check.
         # @raise [ForbiddenExpressionError] on any denial or parse failure.
         def check!(code)
           new.check!(code)
@@ -94,15 +93,13 @@ module Woods
       end
 
       # @param code [String]
-      # @return [true]
       # @raise [ForbiddenExpressionError]
-      def check!(code) # rubocop:disable Naming/PredicateMethod
+      def check!(code)
         raise ForbiddenExpressionError, 'payload is empty' if code.nil? || code.strip.empty?
 
         tree = parse_or_refuse(code)
         scan_send_nodes(tree)
         scan_const_nodes(tree)
-        true
       end
 
       private
