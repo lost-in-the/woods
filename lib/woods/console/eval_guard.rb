@@ -27,7 +27,7 @@ module Woods
     #   EvalGuard.check!('User.count')                                # => true
     #   EvalGuard.check!('Rails.application.credentials.stripe.key')  # raises
     #
-    class EvalGuard
+    class EvalGuard # rubocop:disable Metrics/ClassLength
       # Receivers/calls whose presence in the AST is always a refusal.
       # Each entry is matched against the dotted source text of every send
       # node's receiver (and qualified call name) — so a denial of
