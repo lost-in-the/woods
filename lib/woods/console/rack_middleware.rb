@@ -136,52 +136,46 @@ module Woods
       # `WOODS-CONSOLE-PERREQ-CONN`.
       def build_embedded_server
         config = Woods.configuration
+        introspection = build_model_introspection
         Server.build_embedded(
-          model_validator: ModelValidator.new(registry: build_model_registry),
+          model_validator: ModelValidator.new(registry: introspection[:registry]),
           safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
           redacted_columns: Array(config&.console_redacted_columns),
           redacted_key_values: Array(config&.console_redacted_key_values),
           read_tools_enabled: @embedded_read_tools,
-          model_tables: build_model_tables,
-          model_reflections: build_model_reflections
+          model_tables: introspection[:tables],
+          model_reflections: introspection[:reflections]
         )
       end
 
-      def build_model_registry
-        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
-          next if model.abstract_class?
-          next unless model.table_exists?
-
-          hash[model.name] = model.column_names
-        rescue StandardError
-          next
-        end
-      end
-
-      def build_model_tables
-        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
-          next if model.abstract_class?
-          next unless model.table_exists?
-
-          hash[model.name] = model.table_name
-        rescue StandardError
-          next
-        end
-      end
-
+      # Walk ActiveRecord::Base.descendants once and collect the registry,
+      # table map, and reflection map in a single pass. Models that raise
+      # during introspection are silently skipped — same semantics as the
+      # three separate methods this replaces.
+      #
       # Map every model to its association-name → target-table registry so
       # TableGate can resolve `joins:` / `association:` arguments before the
       # executor loads data. Polymorphic associations and anything that
       # raises during reflection are skipped gracefully.
-      def build_model_reflections
-        ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
+      #
+      # @return [Hash] frozen hash with keys :registry, :tables, :reflections
+      def build_model_introspection
+        registry = {}
+        tables = {}
+        reflections = {}
+
+        ActiveRecord::Base.descendants.each do |model|
           next if model.abstract_class?
           next unless model.table_exists?
 
-          hash[model.name] = reflections_for(model)
+          registry[model.name] = model.column_names
+          tables[model.name] = model.table_name
+          reflections[model.name] = reflections_for(model)
         rescue StandardError
           next
         end
+
+        { registry: registry, tables: tables, reflections: reflections }.freeze
       end
 
       def reflections_for(model)
