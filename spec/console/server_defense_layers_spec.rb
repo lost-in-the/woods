@@ -112,8 +112,8 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       expect(response_text(response)).not_to include(stripe_secret)
     end
 
-    it 'can be disabled via configuration' do
-      Woods.configuration.console_credential_scanning_enabled = false
+    it 'can be disabled via the :all sentinel in console_disabled_scanner_patterns' do
+      Woods.configuration.console_disabled_scanner_patterns = %i[all]
       server = build
       allow(executor).to receive(:send_request).and_return(
         'ok' => true,
@@ -145,6 +145,27 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
       expect(text).to include(stripe_secret)
       expect(text).to include('[REDACTED]')
       expect(text).not_to include('AKIAIOSFODNN7EXAMPLE')
+    end
+
+    it 'the :all sentinel disables every pattern, not just one' do
+      Woods.configuration.console_disabled_scanner_patterns = %i[all]
+      server = build
+      allow(executor).to receive(:send_request).and_return(
+        'ok' => true,
+        'result' => {
+          'record' => {
+            'id' => 1,
+            'stripe' => stripe_secret,
+            'aws' => 'AKIAIOSFODNN7EXAMPLE'
+          }
+        }
+      )
+
+      response = call_tool(server, 'console_find', model: 'User', id: 1)
+      text = response_text(response)
+
+      expect(text).to include(stripe_secret)
+      expect(text).to include('AKIAIOSFODNN7EXAMPLE')
     end
   end
 

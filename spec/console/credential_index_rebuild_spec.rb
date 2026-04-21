@@ -36,7 +36,6 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
     config_dbl = instance_double(
       Woods::Configuration,
       console_credential_defense_enabled: true,
-      console_credential_scanning_enabled: true,
       console_disabled_scanner_patterns: [],
       console_blocked_tables: [],
       context_format: :markdown,
@@ -83,7 +82,6 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
     config_dbl = instance_double(
       Woods::Configuration,
       console_credential_defense_enabled: false,
-      console_credential_scanning_enabled: true,
       console_disabled_scanner_patterns: [],
       console_blocked_tables: [],
       context_format: :markdown,

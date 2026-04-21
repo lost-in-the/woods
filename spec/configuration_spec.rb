@@ -89,10 +89,6 @@ RSpec.describe Woods::Configuration do
       expect(config.console_blocked_tables).to eq([])
     end
 
-    it 'sets console_credential_scanning_enabled to true' do
-      expect(config.console_credential_scanning_enabled).to eq(true)
-    end
-
     it 'sets console_disabled_scanner_patterns to empty array' do
       expect(config.console_disabled_scanner_patterns).to eq([])
     end
@@ -114,14 +110,14 @@ RSpec.describe Woods::Configuration do
       expect(config.console_blocked_tables).to eq(%w[authorizations credentials])
     end
 
-    it 'allows disabling console_credential_scanning_enabled' do
-      config.console_credential_scanning_enabled = false
-      expect(config.console_credential_scanning_enabled).to eq(false)
-    end
-
     it 'allows setting console_disabled_scanner_patterns' do
       config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
       expect(config.console_disabled_scanner_patterns).to eq(%i[stripe_publishable_key])
+    end
+
+    it 'accepts the :all sentinel in console_disabled_scanner_patterns' do
+      config.console_disabled_scanner_patterns = %i[all]
+      expect(config.console_disabled_scanner_patterns).to eq(%i[all])
     end
   end
 

@@ -374,17 +374,17 @@ Woods.configure do |config|
   # Case-insensitive.
   config.console_blocked_tables = %w[authorizations credentials]
 
-  # Layer 2 — Content-shape credential scanner. Default: true.
-  # Walks the final response tree and replaces credential-shaped substrings
-  # (Stripe sk_*, AWS AKIA*, GCP private keys, GitHub ghp_*, generic high-entropy
-  # tokens) with "[REDACTED]". Runs regardless of column naming, so it catches
-  # leaks that column-based redaction alone would miss.
-  config.console_credential_scanning_enabled = true
-
-  # Layer 2 — Per-pattern opt-out. Default: [].
+  # Layer 2 — Content-shape credential scanner. Walks the final response tree
+  # and replaces credential-shaped substrings (Stripe sk_*, AWS AKIA*, GCP
+  # private keys, GitHub ghp_*, generic high-entropy tokens) with "[REDACTED]".
+  # Runs regardless of column naming, so it catches leaks that column-based
+  # redaction alone would miss. Default: [] (every pattern active).
+  #
   # Accepts a list of pattern symbols to skip. Useful when a rule produces
-  # false positives in your data (e.g. AWS access keys in documentation).
+  # false positives in your data. Pass the :all sentinel to disable the
+  # scanner entirely (no layer-2 processing runs).
   config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
+  # config.console_disabled_scanner_patterns = %i[all]  # disable scanner entirely
 
   # Layer 2 augmentations — parse-time eval guard + boot-time credential index.
   # Default: true. When true:
@@ -437,11 +437,13 @@ Entries are lowercased table names. A tool call is rejected at dispatch time whe
 
 Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture — EAV credential stores (`authorizations`, `settings` with secrets), audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
 
-### `console_credential_scanning_enabled` / `console_disabled_scanner_patterns` (Layer 2 — content scanner)
+### `console_disabled_scanner_patterns` (Layer 2 — content scanner)
 
 The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss — e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
 
-Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling the rule — `console_disabled_scanner_patterns` is an escape hatch, not a primary knob.
+Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling a rule — per-pattern opt-outs are an escape hatch, not a primary knob.
+
+Setting `console_disabled_scanner_patterns = %i[all]` disables the entire scanner. No layer-2 processing runs — Layer 3 (column + EAV redaction) and Layer 4 (SqlValidator + SafeContext) continue to fire. Use this only when the pattern scanner interferes with a legitimate workflow and the remaining layers cover the threat model; prefer a per-pattern opt-out otherwise.
 
 ### `console_credential_defense_enabled` (parse-time eval guard + boot-time credential index)
 
@@ -600,7 +602,7 @@ The Console MCP ships with a five-layer defense-in-depth stack. Each layer is in
 |---|-------|------|----------|---------|
 | 0 | Feature gate | `console_mcp_enabled` | Process start / request entry | Master on/off switch — feature is inert until an operator opts in |
 | 1 | Blocked tables | `console_blocked_tables` | Tool dispatch, before executor | Reject any tool call that touches a named table (model, table, or sql arg) |
-| 2 | Credential scanner | `console_credential_scanning_enabled`, `console_disabled_scanner_patterns` | After executor, before render | Content-shape redaction of credential-shaped strings anywhere in the response tree |
+| 2 | Credential scanner | `console_disabled_scanner_patterns` (`[:all]` to disable entirely) | After executor, before render | Content-shape redaction of credential-shaped strings anywhere in the response tree |
 | 3 | Column + EAV redaction | `console_redacted_columns`, `console_redacted_key_values` | After executor, before Layer 2 | Identity-based redaction by column name and by key/value row shape |
 | 4 | SqlValidator + SafeContext | built-in | Inside executor | SQL deny-list for `console_sql`; transaction-rollback for every request |
 

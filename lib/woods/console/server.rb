@@ -321,9 +321,12 @@ module Woods
                        end
 
           secret_index = build_credential_index(config)
-          scanner = if config.nil? || config.console_credential_scanning_enabled != false
+          disabled_patterns = Array(config&.console_disabled_scanner_patterns)
+          scanner = if disabled_patterns.include?(:all)
+                      nil
+                    else
                       CredentialScanner.new(
-                        disabled_patterns: Array(config&.console_disabled_scanner_patterns),
+                        disabled_patterns: disabled_patterns,
                         secret_index: secret_index
                       )
                     end
