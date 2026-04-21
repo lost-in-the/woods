@@ -76,6 +76,50 @@ module Woods
           config&.console_credential_defense_enabled ? true : false
         end
 
+        # True when the caller has opted into the unsafe `console_eval`
+        # scaffolding via `WOODS_CONSOLE_UNSAFE_EVAL=true` or an explicit
+        # `config.console_unsafe_eval_enabled = true`. Explicit config wins
+        # over the env var in both directions.
+        #
+        # NOTE: returning true here does NOT enable eval execution. The
+        # execution path is deliberately unimplemented (backlog
+        # unsafe-eval-opt-in). This predicate only governs the boot-time
+        # banner and the production-environment refusal below.
+        #
+        # @return [Boolean]
+        def unsafe_eval_enabled?
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          explicit = config&.console_unsafe_eval_enabled
+          return explicit if [true, false].include?(explicit)
+
+          ENV['WOODS_CONSOLE_UNSAFE_EVAL'] == 'true'
+        end
+
+        # Enforce the `console_eval` opt-in safety contract at boot.
+        #
+        # When `WOODS_CONSOLE_UNSAFE_EVAL` is on:
+        # - refuse outright in `Rails.env.production?` (non-negotiable),
+        # - otherwise emit a LOUD stderr banner so operators know the flag
+        #   is live even though eval remains unimplemented.
+        #
+        # Safe when Rails is not loaded (specs, non-Rails hosts).
+        #
+        # @return [void]
+        # @raise [Woods::ConfigurationError] when the flag is on in production.
+        def enforce_unsafe_eval_contract!
+          return unless unsafe_eval_enabled?
+
+          if defined?(Rails) && Rails.respond_to?(:env) && Rails.env.respond_to?(:production?) &&
+             Rails.env.production?
+            raise Woods::ConfigurationError,
+                  'WOODS_CONSOLE_UNSAFE_EVAL is set but Rails.env.production? is true. ' \
+                  'console_eval cannot be opted into in production. Unset the flag or ' \
+                  'restart in a non-production environment.'
+          end
+
+          warn unsafe_eval_banner
+        end
+
         # Resolves `Rails.application` when available, else nil.
         def default_rails_app
           return nil unless defined?(Rails) && Rails.respond_to?(:application)
@@ -133,6 +177,7 @@ module Woods
                            read_tools_enabled: false, model_tables: {},
                            model_reflections: {})
           require_relative 'embedded_executor'
+          enforce_unsafe_eval_contract!
 
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_context,
@@ -345,6 +390,23 @@ module Woods
           )
         rescue StandardError => e
           handle_observability_failure(e)
+        end
+
+        # Loud multi-line banner surfaced to stderr when the opt-in flag is
+        # recognised outside of production. Operators should see this every
+        # boot so an accidentally-persistent env var cannot go unnoticed.
+        #
+        # @return [String]
+        def unsafe_eval_banner
+          <<~BANNER
+
+            ================================================================================
+             WOODS_CONSOLE_UNSAFE_EVAL IS SET
+             console_eval opt-in scaffolding is active. Execution is STILL NOT IMPLEMENTED
+             (backlog: unsafe-eval-opt-in). The flag will also refuse to boot in
+             Rails.env.production?. If you did not mean to set this, unset the env var.
+            ================================================================================
+          BANNER
         end
 
         def structured_logger
@@ -892,10 +954,17 @@ module Woods
         def define_eval(server, conn_mgr, ctx = nil, renderer: nil)
           config = Woods.configuration if Woods.respond_to?(:configuration)
           guard = EvalGuard.new if config&.console_credential_defense_enabled
-          define_console_tool(server, conn_mgr, 'console_eval',
-                              'Execute arbitrary Ruby code (requires confirmation)',
+          description = [
+            'Propose arbitrary Ruby for execution against the live Rails runtime.',
+            'CURRENTLY DISABLED in embedded mode — the call will always return an instructional refusal.',
+            'Before invoking this tool, SHOW the user your proposed Ruby snippet and let them run it ' \
+            'manually. Do not retry on failure, and do not hide the snippet behind the tool call.',
+            'For most cases use console_query (model + select + joins/group_by/having/order) or ' \
+            'console_sql instead — both already support aggregates and scoped filters.'
+          ].join(' ')
+          define_console_tool(server, conn_mgr, 'console_eval', description,
                               properties: {
-                                code: str_prop('Ruby code to execute'),
+                                code: str_prop('Ruby code you propose to run (will be surfaced to the user first)'),
                                 timeout: int_prop('Timeout in seconds (default 10, max 30)')
                               }, required: ['code'], ctx: ctx, renderer: renderer) do |args|
             Tools::Tier4.console_eval(code: args[:code], timeout: args[:timeout] || 10, guard: guard)

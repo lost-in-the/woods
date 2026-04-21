@@ -57,11 +57,8 @@ module Woods
         tool = request['tool']
         params = request['params'] || {}
 
-        unless TIER1_TOOLS.include?(tool) || (@read_tools_enabled && EMBEDDED_READ_TOOLS.include?(tool))
-          return { 'ok' => false,
-                   'error' => unsupported_message(tool),
-                   'error_type' => 'unsupported' }
-        end
+        refusal = refusal_for(tool)
+        return refusal if refusal
 
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         result = @safe_context.execute { dispatch(tool, params) }
@@ -75,6 +72,19 @@ module Woods
       end
 
       private
+
+      # Return a pre-dispatch refusal hash for tools the executor cannot or
+      # will not run, else nil to let dispatch proceed.
+      #
+      # @param tool [String] Tool name
+      # @return [Hash, nil]
+      def refusal_for(tool)
+        if tool == 'eval'
+          { 'ok' => false, 'error' => eval_disabled_message, 'error_type' => 'eval_disabled' }
+        elsif !(TIER1_TOOLS.include?(tool) || (@read_tools_enabled && EMBEDDED_READ_TOOLS.include?(tool)))
+          { 'ok' => false, 'error' => unsupported_message(tool), 'error_type' => 'unsupported' }
+        end
+      end
 
       # Self-describing error for tools the embedded executor cannot run.
       #
@@ -93,6 +103,29 @@ module Woods
           "Tool '#{tool}' is not available in embedded mode — it requires the " \
             'bridge architecture (Option D in docs/CONSOLE_MCP_SETUP.md).'
         end
+      end
+
+      # Instructional error payload for console_eval. Execution is deliberately
+      # punted — the backlog item unsafe-eval-opt-in spells out the safety
+      # contract required before eval can ever run. Until then we return a
+      # structured refusal that:
+      #   1. names why eval is off (no safe execution path yet),
+      #   2. points the agent at console_query / console_sql as the usual
+      #      substitute (both already handle group_by/having/aggregates),
+      #   3. tells the agent to surface its proposed Ruby snippet to the
+      #      human before any retry — never silently re-invoke.
+      #
+      # @return [String] Multi-line actionable message.
+      def eval_disabled_message
+        <<~MSG.strip
+          console_eval is disabled — embedded mode has no safe execution path yet.
+          Use console_query (model + select + joins/group_by/having/order) or console_sql
+          for anything you were about to run. Both already support aggregates and scoping.
+          If you believe eval is still necessary, SHOW your proposed Ruby snippet to the
+          user first and let them run it manually — do not retry console_eval automatically.
+          Operators: opting in requires WOODS_CONSOLE_UNSAFE_EVAL=true, is rejected in
+          Rails.env.production?, and the execution wiring for that flag is not implemented.
+        MSG
       end
 
       # Route a tool name to its handler.

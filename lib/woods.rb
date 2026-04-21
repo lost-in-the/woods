@@ -95,7 +95,7 @@ module Woods
                   :console_redacted_key_values, :console_embedded_read_tools,
                   :console_blocked_tables, :console_credential_scanning_enabled,
                   :console_disabled_scanner_patterns, :console_credential_defense_enabled,
-                  :console_credential_rotation_warning,
+                  :console_credential_rotation_warning, :console_unsafe_eval_enabled,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options
@@ -131,6 +131,7 @@ module Woods
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true
       @console_credential_rotation_warning = true
+      @console_unsafe_eval_enabled = nil # nil = fall back to env WOODS_CONSOLE_UNSAFE_EVAL
       @notion_api_token = nil
       @notion_database_ids = {}
       @unblocked_api_token = nil
