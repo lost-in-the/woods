@@ -9,7 +9,7 @@ import {
   useEdgesState,
   useNodesState,
 } from '@xyflow/react'
-import { type FC, useCallback } from 'react'
+import { type FC, useCallback, useContext, useMemo } from 'react'
 import { useTableSelection } from '@/features/erd/hooks'
 import type { DisplayArea } from '@/features/erd/types'
 import { selectTableLogEvent } from '@/features/gtm/utils'
@@ -17,6 +17,7 @@ import { repositionTableLogEvent } from '@/features/gtm/utils/repositionTableLog
 import { MAX_ZOOM, MIN_ZOOM } from '@/features/reactflow/constants'
 import { useVersionOrThrow } from '@/providers'
 import { useUserEditingOrThrow } from '@/stores'
+import { JourneyContext } from '@/features/journey'
 import { highlightNodesAndEdges, isTableNode } from '../../utils'
 import {
   NonRelatedTableGroupNode,
@@ -61,6 +62,67 @@ export const ERDContentInner: FC<Props> = ({
   )
 
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(_edges)
+
+  const journeyCtx = useContext(JourneyContext)
+  const journeyNodeIds = useMemo(
+    () => (journeyCtx?.result ? journeyCtx.result.nodes : null),
+    [journeyCtx?.result],
+  )
+  const journeyEdges = useMemo(
+    () => journeyCtx?.result?.edges ?? null,
+    [journeyCtx?.result],
+  )
+  const entryPoint = journeyCtx?.entryPoint ?? null
+
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((node) => {
+        if (!journeyNodeIds) return node
+        let journeyClass: string
+        if (journeyNodeIds.has(node.id)) {
+          journeyClass =
+            node.id === entryPoint?.identifier ? 'erd-node--journey-entry' : ''
+        } else {
+          journeyClass = 'erd-node--outside-journey'
+        }
+        if (!journeyClass) return node
+        return {
+          ...node,
+          className: [node.className, journeyClass]
+            .filter(Boolean)
+            .join(' '),
+        }
+      }),
+    [nodes, journeyNodeIds, entryPoint],
+  )
+
+  const displayEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        const viaClass =
+          typeof edge.data?.['via'] === 'string'
+            ? `erd-edge--${edge.data['via']}`
+            : ''
+        const backEdgeClass =
+          journeyEdges?.find(
+            (e) =>
+              e.from === edge.source &&
+              e.to === edge.target &&
+              e.isBackEdge,
+          )
+            ? 'erd-edge--back-edge'
+            : ''
+        if (!viaClass && !backEdgeClass) return edge
+        return {
+          ...edge,
+          className: [edge.className, viaClass, backEdgeClass]
+            .filter(Boolean)
+            .join(' '),
+        }
+      }),
+    [edges, journeyEdges],
+  )
+
   const {
     state: { loading },
   } = useErdContentContext()
@@ -153,8 +215,8 @@ export const ERDContentInner: FC<Props> = ({
       {loading && <Spinner className={styles.loading} />}
       <ReactFlow
         colorMode="dark"
-        nodes={nodes}
-        edges={edges}
+        nodes={displayNodes}
+        edges={displayEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         edgesFocusable={false}
