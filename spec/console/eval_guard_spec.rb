@@ -91,6 +91,37 @@ RSpec.describe Woods::Console::EvalGuard do
         expect { described_class.check!('binding.local_variables') }
           .to raise_error(Woods::Console::ForbiddenExpressionError, /binding/)
       end
+
+      # PR #34 medium #2: AST-reachable reflection bypasses
+      it 'rejects instance_variable_get' do
+        expect { described_class.check!('User.first.instance_variable_get(:@attributes)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /instance_variable_get/)
+      end
+
+      it 'rejects method reference via .method' do
+        expect { described_class.check!('User.method(:delete_all)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /\bmethod\b/)
+      end
+
+      it 'rejects define_method' do
+        expect { described_class.check!('User.define_method(:pwn) { puts "ok" }') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /define_method/)
+      end
+
+      it 'rejects const_source_location' do
+        expect { described_class.check!('Object.const_source_location("User")') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /const_source_location/)
+      end
+
+      it 'rejects ObjectSpace._id2ref' do
+        expect { described_class.check!('ObjectSpace._id2ref(42)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /_id2ref/)
+      end
+
+      it 'rejects ObjectSpace.each_object' do
+        expect { described_class.check!('ObjectSpace.each_object(String).to_a') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /each_object/)
+      end
     end
 
     context 'with credential file reads' do
@@ -112,6 +143,27 @@ RSpec.describe Woods::Console::EvalGuard do
       it 'rejects Pathname.new(...).read on master.key' do
         expect { described_class.check!('Pathname.new("config/master.key").read') }
           .to raise_error(Woods::Console::ForbiddenExpressionError, /Pathname\.(?:new|read)/)
+      end
+
+      # PR #34 medium #3: chained receiver bypasses
+      it 'rejects File.open(credential_path).read chain' do
+        expect { described_class.check!('File.open("config/master.key").read') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /credential file/)
+      end
+
+      it 'rejects File.open(credential_path).readlines chain' do
+        expect { described_class.check!('File.open("config/credentials.yml.enc").readlines') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /credential file/)
+      end
+
+      it 'rejects Pathname.new(credential_path).open.read chain' do
+        expect { described_class.check!('Pathname.new("config/master.key").open.read') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /credential file/)
+      end
+
+      it 'rejects IO.open(credential_path).read chain' do
+        expect { described_class.check!('IO.open("config/credentials/production.yml.enc").read') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /credential file/)
       end
     end
 

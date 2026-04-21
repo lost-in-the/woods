@@ -45,19 +45,35 @@ module Woods
       DENIED_CONSTANTS = %w[ENV].freeze
 
       # Method names that escape the AST sandbox regardless of receiver.
+      #
+      # In addition to the obvious escapes (eval family, send, binding),
+      # this list covers AST-reachable bypasses identified in PR #34 review:
+      # - `instance_variable_get` — reads arbitrary ivars from any object
+      # - `method` — returns a callable Method object, enabling indirect dispatch
+      # - `define_method` — injects new methods at runtime
+      # - `const_source_location` — leaks load paths and gem install locations
+      # - `_id2ref` — dereferences arbitrary ObjectSpace objects by ID
+      # - `each_object` — enumerates all live objects in the VM heap
       DENIED_REFLECTION = %w[
         eval instance_eval class_eval module_eval
         send public_send const_get binding
+        instance_variable_get method define_method
+        const_source_location _id2ref each_object
       ].freeze
 
       # Receivers + method-name pairs that read credential files from disk.
       # Triggers when the receiver matches AND any literal argument source
       # contains a known credential path fragment. `Pathname.new(...)` is
       # included so `Pathname.new(...).read` chains are caught at construction.
+      #
+      # `open` is included for File and IO to catch chained patterns like
+      # `File.open("config/master.key").read` — the inner `File.open(path)`
+      # node is visited by `scan_send_nodes` and refused here before the
+      # outer `.read` call is even examined (PR #34 review medium #3).
       CREDENTIAL_FILE_READERS = {
-        'File' => %w[read binread readlines],
-        'IO' => %w[read binread readlines],
-        'Pathname' => %w[read binread new]
+        'File' => %w[read binread readlines open],
+        'IO' => %w[read binread readlines open],
+        'Pathname' => %w[read binread new open]
       }.freeze
       CREDENTIAL_PATH_HINTS = %w[
         master.key credentials.yml.enc credentials/
