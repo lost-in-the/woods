@@ -233,6 +233,80 @@ RSpec.describe Woods::Console::Server do
       end
     end
 
+    describe 'Layer 3 envelope-key coverage (regression for unlisted keys)' do
+      # Regression: apply_redaction previously only descended into a closed list
+      # of envelope keys (record, records, rows, values). Any other key —
+      # including `associations` returned by console_data_snapshot — was passed
+      # through without redaction, creating a blind spot for custom-named
+      # credential columns that also have no matching CredentialScanner shape.
+      let(:safe_ctx) do
+        Woods::Console::SafeContext.new(
+          connection: nil,
+          redacted_columns: %w[session_hmac internal_token_v2 webhook_secret_v3]
+        )
+      end
+
+      it 'redacts sensitive columns inside `associations` (console_data_snapshot shape)' do
+        # `data_snapshot` returns {record: {...}, associations: {name => [Hash, ...]}}
+        # The `associations` key was NOT in DATA_ENVELOPE_KEYS, so nested hashes
+        # were not walked and credentials leaked.
+        result = {
+          'record' => { 'id' => 1, 'name' => 'Order', 'session_hmac' => 'hmac-value-abc' },
+          'associations' => {
+            'tokens' => [
+              { 'id' => 10, 'internal_token_v2' => 'tok_secret_xyz', 'kind' => 'api' },
+              { 'id' => 11, 'internal_token_v2' => 'tok_secret_def', 'kind' => 'webhook' }
+            ],
+            'webhooks' => [
+              { 'id' => 20, 'webhook_secret_v3' => 'whsec_abc123', 'url' => 'https://example.com' }
+            ]
+          }
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+
+        # record key should still be redacted
+        expect(redacted['record']['session_hmac']).to eq('[REDACTED]')
+        expect(redacted['record']['name']).to eq('Order')
+
+        # associations key must now also be redacted
+        expect(redacted['associations']['tokens'][0]['internal_token_v2']).to eq('[REDACTED]')
+        expect(redacted['associations']['tokens'][1]['internal_token_v2']).to eq('[REDACTED]')
+        expect(redacted['associations']['webhooks'][0]['webhook_secret_v3']).to eq('[REDACTED]')
+
+        # safe columns must pass through
+        expect(redacted['associations']['tokens'][0]['kind']).to eq('api')
+        expect(redacted['associations']['webhooks'][0]['url']).to eq('https://example.com')
+      end
+
+      it 'redacts across all association names in the associations map' do
+        # Verifies that every association name's records are walked, not just the first.
+        result = {
+          'record' => { 'id' => 1, 'session_hmac' => 'hmac-root' },
+          'associations' => {
+            'tokens' => [{ 'id' => 10, 'internal_token_v2' => 'tok_secret_xyz' }],
+            'webhooks' => [{ 'id' => 20, 'webhook_secret_v3' => 'whsec_abc123' }],
+            'addresses' => [{ 'id' => 30, 'street' => '123 Main St' }]
+          }
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        expect(redacted['associations']['tokens'][0]['internal_token_v2']).to eq('[REDACTED]')
+        expect(redacted['associations']['webhooks'][0]['webhook_secret_v3']).to eq('[REDACTED]')
+        expect(redacted['associations']['addresses'][0]['street']).to eq('123 Main St')
+      end
+
+      it 'does not redact the non-row `columns` metadata in console_schema output' do
+        # Ensures recursive descent does not corrupt schema metadata payloads.
+        result = {
+          'columns' => { 'id' => { 'type' => 'integer' }, 'session_hmac' => { 'type' => 'string' } }
+        }
+        redacted = described_class.send(:apply_redaction, result, safe_ctx)
+        # The *key name* "session_hmac" in schema metadata should not be touched —
+        # only *values* of hash entries whose key is a redacted column should be redacted.
+        expect(redacted['columns'].keys).to include('session_hmac')
+        expect(redacted['columns']['session_hmac']).to eq('type' => 'string')
+      end
+    end
+
     describe 'EAV (key-value) redaction' do
       # Models the real-world `authorizations` table where Stripe Connect
       # tokens live as rows like {key: "stripe_access_token", value: "sk_..."}.

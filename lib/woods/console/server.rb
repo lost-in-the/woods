@@ -288,11 +288,20 @@ module Woods
 
         # Data-shape keys used by console tool responses. When any of these keys
         # appear at the top of a Hash result we treat the value as row data and
-        # descend into it instead of redacting at the envelope level. Keeping
-        # this list narrow avoids accidentally recursing into schema payloads
-        # (e.g. `console_schema` returns {columns: {...}} where `columns` is a
-        # Hash of column metadata, not row values).
-        DATA_ENVELOPE_KEYS = %w[record records rows values].freeze
+        # descend into it instead of redacting at the envelope level.
+        #
+        # Full recursive descent is intentionally NOT used here. Some tools return
+        # Hashes whose keys happen to be column names but whose values are metadata
+        # objects, not row data — e.g. `console_schema` returns
+        # {columns: {col_name => {type:..., null:...}}}. Recursing into that Hash
+        # would incorrectly replace schema metadata with "[REDACTED]" whenever a
+        # column name matches a redacted_columns entry. Keeping a closed list of
+        # envelope keys that carry actual row data is therefore the safer choice.
+        #
+        # When adding a new Tier 2/3 tool that returns row data under a new envelope
+        # key, add that key here AND add a matching `when` branch in
+        # `redact_envelope_value` that applies the appropriate redaction strategy.
+        DATA_ENVELOPE_KEYS = %w[record records rows values associations].freeze
         private_constant :DATA_ENVELOPE_KEYS
 
         # Apply SafeContext column redaction to a result value.
@@ -334,12 +343,31 @@ module Woods
           when 'record'         then value.is_a?(Hash) ? ctx.redact(value) : value
           when 'records'        then redact_hash_array(value, ctx)
           when 'rows', 'values' then redact_positional(value, plan)
+          when 'associations'   then redact_association_map(value, ctx)
           else                       value
           end
         end
 
         def redact_hash_array(value, ctx)
           Array(value).map { |row| row.is_a?(Hash) ? ctx.redact(row) : row }
+        end
+
+        # Redact an associations map returned by console_data_snapshot.
+        #
+        # The associations payload has the shape:
+        #   { "assoc_name" => [Hash, ...], ... }
+        # Each value is an Array of record Hashes. We redact each record
+        # the same way we handle `records` (column-name + EAV rules).
+        #
+        # @param value [Hash, nil] Association map
+        # @param ctx [SafeContext]
+        # @return [Hash, nil]
+        def redact_association_map(value, ctx)
+          return value unless value.is_a?(Hash)
+
+          value.each_with_object({}) do |(assoc_name, assoc_records), out|
+            out[assoc_name] = redact_hash_array(assoc_records, ctx)
+          end
         end
 
         # Precompute everything needed to redact positional rows for a given
