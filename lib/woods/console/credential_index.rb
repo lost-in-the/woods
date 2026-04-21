@@ -47,6 +47,11 @@ module Woods
     #     # => "token: [REDACTED:credential]"
     #
     class CredentialIndex
+      # Captured at require time so the mtime-check warning has a stable
+      # reference point even if the clock skews later. Frozen immediately
+      # to prevent accidental mutation.
+      PROCESS_START = Time.now.freeze
+
       # Substrings shorter than this are not added to the index. Below ~12
       # chars the false-positive rate climbs sharply (env names like
       # `production`, hostnames, version strings, etc.).
@@ -69,6 +74,18 @@ module Woods
       class << self
         # Build an index from a Rails application's encrypted credentials.
         #
+        # **Restart required after rotation.** The index is built once at
+        # server boot and held in memory for the life of the MCP process.
+        # When a host app rotates Rails credentials, the MCP process keeps
+        # the pre-rotation secrets in its frozen Set until the process
+        # restarts. New secrets added during rotation are NOT in the index
+        # — only Layer 2 shape patterns can catch them until restart.
+        #
+        # To trigger a rebuild without restarting, call
+        # `Woods::Console::Server.rebuild_credential_index` from a rotation
+        # job or initializer hook. See docs/CONSOLE_MCP_SETUP.md for the
+        # full restart guidance.
+        #
         # @param rails_app [#credentials] usually `Rails.application`.
         # @return [CredentialIndex] populated index, or an empty index when
         #   the credentials store can't be opened.
@@ -78,6 +95,42 @@ module Woods
           raise unless missing_key_error?(e)
 
           new(secrets: [])
+        end
+
+        # Emit a structured log warning when any of the given credentials
+        # files has a modification time newer than `process_start`. This
+        # catches the common "rotated credentials but forgot to restart"
+        # situation at boot time.
+        #
+        # Only files that actually exist on disk are checked; missing paths
+        # are silently skipped so CI and fresh-checkout environments (which
+        # have no credentials file) produce no noise.
+        #
+        # @param credentials_files [Array<String>] Paths to check (e.g.
+        #   `config/credentials.yml.enc`,
+        #   `config/credentials/production.yml.enc`).
+        # @param process_start [Time] When the current process started.
+        #   Typically `Woods::Console::CredentialIndex::PROCESS_START`.
+        # @param logger [#warn] A logger responding to `warn(event, **kwargs)`.
+        # @return [void]
+        def warn_if_credentials_rotated(credentials_files:, process_start:, logger:)
+          credentials_files.each do |path|
+            next unless File.exist?(path)
+
+            mtime = File.mtime(path)
+            next unless mtime > process_start
+
+            logger.warn(
+              'console.credential_index.stale',
+              credentials_file: path,
+              file_mtime: mtime.iso8601,
+              process_start: process_start.iso8601,
+              hint: 'Credentials file was modified after process start — ' \
+                    'restart the MCP process or call ' \
+                    'Woods::Console::Server.rebuild_credential_index to ' \
+                    'pick up rotated secrets.'
+            )
+          end
         end
 
         private
