@@ -45,6 +45,39 @@ module Woods
       # Allowed statement prefixes (case-insensitive).
       ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN)\b/i
 
+      # Regex to strip SQL line comments (--...).
+      LINE_COMMENT_PATTERN = /--[^\n]*/
+
+      # Regex to strip SQL block comments (/* ... */).
+      BLOCK_COMMENT_PATTERN = %r{/\*.*?\*/}m
+
+      # Regex to strip single-quoted string literals.
+      SINGLE_QUOTED_STRING_PATTERN = /'[^']*'/
+
+      # Frozen map of forbidden keyword => regex matching the keyword at statement start.
+      # Used by {#check_forbidden_keywords!} and {#check_forbidden_keywords_in_body!}.
+      FORBIDDEN_PREFIX_REGEXES = FORBIDDEN_KEYWORDS.to_h do |kw|
+        [kw, /\A\s*#{kw}\b/i]
+      end.freeze
+
+      # Frozen map of forbidden body keyword => regex matching the keyword anywhere.
+      # Used by {#check_body_forbidden_keywords!}.
+      BODY_FORBIDDEN_REGEXES = BODY_FORBIDDEN_KEYWORDS.to_h do |kw|
+        [kw, /\b#{kw}\b/i]
+      end.freeze
+
+      # Frozen map of forbidden keyword => regex matching the keyword anywhere in the body.
+      # Used by {#check_forbidden_keywords_in_body!} for the whole-body scan.
+      FORBIDDEN_BODY_REGEXES = FORBIDDEN_KEYWORDS.to_h do |kw|
+        [kw, /\b#{kw}\b/i]
+      end.freeze
+
+      # Frozen map of dangerous function name => regex matching a call to that function.
+      # Used by {#check_dangerous_functions!}.
+      DANGEROUS_FUNCTION_REGEXES = DANGEROUS_FUNCTIONS.to_h do |func|
+        [func, /\b#{func}\s*\(/i]
+      end.freeze
+
       # @return [true]
       # @raise [SqlValidationError] if the SQL is not a safe read-only statement
       def validate!(sql) # rubocop:disable Naming/PredicateMethod
@@ -100,10 +133,10 @@ module Woods
       # @return [Boolean]
       def contains_multiple_statements?(sql)
         # Strip SQL comments before checking
-        stripped = sql.gsub(/--[^\n]*/, '') # line comments
-        stripped = stripped.gsub(%r{/\*.*?\*/}m, '') # block comments
+        stripped = sql.gsub(LINE_COMMENT_PATTERN, '') # line comments
+        stripped = stripped.gsub(BLOCK_COMMENT_PATTERN, '') # block comments
         # Strip single-quoted strings to avoid false positives
-        stripped = stripped.gsub(/'[^']*'/, '')
+        stripped = stripped.gsub(SINGLE_QUOTED_STRING_PATTERN, '')
         stripped.include?(';')
       end
 
@@ -112,10 +145,8 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_forbidden_keywords!(sql)
-        FORBIDDEN_KEYWORDS.each do |keyword|
-          if sql.match?(/\A\s*#{keyword}\b/i)
-            raise SqlValidationError, "Rejected: #{keyword} statements are not allowed"
-          end
+        FORBIDDEN_PREFIX_REGEXES.each do |keyword, pattern|
+          raise SqlValidationError, "Rejected: #{keyword} statements are not allowed" if sql.match?(pattern)
         end
       end
 
@@ -124,8 +155,8 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_body_forbidden_keywords!(sql)
-        BODY_FORBIDDEN_KEYWORDS.each do |keyword|
-          raise SqlValidationError, "Rejected: #{keyword} is not allowed" if sql.match?(/\b#{keyword}\b/i)
+        BODY_FORBIDDEN_REGEXES.each do |keyword, pattern|
+          raise SqlValidationError, "Rejected: #{keyword} is not allowed" if sql.match?(pattern)
         end
       end
 
@@ -144,10 +175,8 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a dangerous function is found
       def check_dangerous_functions!(sql)
-        DANGEROUS_FUNCTIONS.each do |func|
-          if sql.match?(/\b#{func}\s*\(/i)
-            raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed"
-          end
+        DANGEROUS_FUNCTION_REGEXES.each do |func, pattern|
+          raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if sql.match?(pattern)
         end
       end
 
@@ -158,16 +187,16 @@ module Woods
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_forbidden_keywords_in_body!(sql)
         # Strip comments to reveal hidden statements
-        stripped = sql.gsub(/--[^\n]*/, '') # line comments
-        stripped = stripped.gsub(%r{/\*.*?\*/}m, '') # block comments
+        stripped = sql.gsub(LINE_COMMENT_PATTERN, '') # line comments
+        stripped = stripped.gsub(BLOCK_COMMENT_PATTERN, '') # block comments
 
         # Check if any forbidden keyword appears anywhere (not just at start)
-        FORBIDDEN_KEYWORDS.each do |keyword|
+        FORBIDDEN_BODY_REGEXES.each do |keyword, body_pattern|
           # Look for keyword as a whole word anywhere in the stripped SQL
-          next unless stripped.match?(/\b#{keyword}\b/i)
+          next unless stripped.match?(body_pattern)
 
           # Make sure it's not at the very start (already checked)
-          unless stripped.match?(/\A\s*#{keyword}\b/i)
+          unless stripped.match?(FORBIDDEN_PREFIX_REGEXES[keyword])
             raise SqlValidationError,
                   "Rejected: #{keyword} statements are not allowed (found in SQL body)"
           end
