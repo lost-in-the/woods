@@ -139,8 +139,8 @@ module Woods
         Server.build_embedded(
           model_validator: ModelValidator.new(registry: build_model_registry),
           safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
-          redacted_columns: Array(config.console_redacted_columns),
-          redacted_key_values: Array(config.console_redacted_key_values),
+          redacted_columns: Array(config&.console_redacted_columns),
+          redacted_key_values: Array(config&.console_redacted_key_values),
           read_tools_enabled: @embedded_read_tools,
           model_tables: build_model_tables,
           model_reflections: build_model_reflections
