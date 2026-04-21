@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`count` function in `console_aggregate`** — the `column` argument is optional when `function: "count"`, making it easy to count rows matching a scope in a single tool call.
 - **`embedded_read_tools` flag** on `Woods::Console::RackMiddleware` — opts `console_sql` and `console_query` into the embedded executor, with `SqlValidator` + `SafeContext` rollback + per-request connection pooling enforcing read-only safety.
 - **MCP worktree setup guide** (`docs/MCP_WORKTREE_SETUP.md`) — multi-worktree MCP configuration for simultaneous Claude Code sessions across branches.
+- **`pg_query` spike doc** (`docs/PG_QUERY_SPIKE.md`) — evaluation of an optional `pg_query`-backed AST identifier extractor alongside the existing regex `SqlTableScanner`. PostgreSQL hosts that opt into the gem would get AST-grade table extraction; MySQL and gem-less hosts continue on the regex path unchanged. Design-only — no implementation yet.
 
 ### Changed
 
