@@ -93,8 +93,8 @@ module Woods
                   :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
-                  :console_blocked_tables, :console_credential_scanning_enabled,
-                  :console_disabled_scanner_patterns, :console_credential_defense_enabled,
+                  :console_blocked_tables, :console_disabled_scanner_patterns,
+                  :console_credential_defense_enabled,
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
@@ -127,7 +127,6 @@ module Woods
       @console_redacted_key_values = []
       @console_embedded_read_tools = false
       @console_blocked_tables = []
-      @console_credential_scanning_enabled = true
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true
       @console_credential_rotation_warning = true
