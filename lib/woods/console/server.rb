@@ -13,6 +13,7 @@ require_relative 'audit_logger'
 require_relative 'confirmation'
 require_relative 'console_response_renderer'
 require_relative 'credential_scanner'
+require_relative 'eval_guard'
 require_relative 'table_gate'
 require_relative 'response_context'
 
@@ -763,13 +764,14 @@ module Woods
         # ── Tier 4 tool definitions ──────────────────────────────────────────
 
         def define_eval(server, conn_mgr, ctx = nil, renderer: nil)
+          guard = EvalGuard.new if Woods.configuration.console_credential_defense_enabled
           define_console_tool(server, conn_mgr, 'console_eval',
                               'Execute arbitrary Ruby code (requires confirmation)',
                               properties: {
                                 code: str_prop('Ruby code to execute'),
                                 timeout: int_prop('Timeout in seconds (default 10, max 30)')
                               }, required: ['code'], ctx: ctx, renderer: renderer) do |args|
-            Tools::Tier4.console_eval(code: args[:code], timeout: args[:timeout] || 10)
+            Tools::Tier4.console_eval(code: args[:code], timeout: args[:timeout] || 10, guard: guard)
           end
         end
 
@@ -843,7 +845,7 @@ module Woods
             end
             begin
               request = tool_block.call(args)
-            rescue SqlValidationError => e
+            rescue SqlValidationError, ForbiddenExpressionError => e
               next ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
             end
             bridge_method.call(conn_mgr, request.transform_keys(&:to_s), ctx, renderer: renderer)

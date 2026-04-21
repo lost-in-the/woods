@@ -85,7 +85,7 @@ module Woods
   # Configuration
   # ════════════════════════════════════════════════════════════════════════
 
-  class Configuration
+  class Configuration # rubocop:disable Metrics/ClassLength
     attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
@@ -94,7 +94,7 @@ module Woods
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
                   :console_blocked_tables, :console_credential_scanning_enabled,
-                  :console_disabled_scanner_patterns,
+                  :console_disabled_scanner_patterns, :console_credential_defense_enabled,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options
@@ -128,6 +128,7 @@ module Woods
       @console_blocked_tables = []
       @console_credential_scanning_enabled = true
       @console_disabled_scanner_patterns = []
+      @console_credential_defense_enabled = true
       @notion_api_token = nil
       @notion_database_ids = {}
       @unblocked_api_token = nil
