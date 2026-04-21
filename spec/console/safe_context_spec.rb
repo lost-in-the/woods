@@ -159,6 +159,131 @@ RSpec.describe Woods::Console::SafeContext do
     end
   end
 
+  describe 'multi-DB / shard pool coverage' do
+    # Acceptance: rollback occurs on a non-default pool when a sharded model is
+    # queried. SafeContext must NOT hold a captured connection ivar — it must
+    # resolve the connection per #execute call so that whichever pool (default,
+    # replica, or shard) is supplied, the rolled-back transaction covers that
+    # pool's connection.
+    #
+    # The gap the fix closes: when connection: was stored as @connection at
+    # init time, supplying a shard's pool to SafeContext and executing a block
+    # that queries the shard opened the transaction on the *captured* connection
+    # rather than on the connection leased from the shard pool — leaving shard
+    # writes unprotected by the rollback.
+
+    let(:shard_connection) do
+      instance_double('ShardConnection').tap do |conn|
+        allow(conn).to receive(:adapter_name).and_return('PostgreSQL')
+        allow(conn).to receive(:execute)
+        allow(conn).to receive(:transaction) do |&block|
+          block.call
+        rescue ActiveRecord::Rollback
+          nil
+        end
+      end
+    end
+
+    let(:shard_pool) do
+      instance_double('ShardPool').tap do |p|
+        allow(p).to receive(:with_connection).and_yield(shard_connection)
+      end
+    end
+
+    it 'opens a rolled-back transaction on the shard pool connection when pool: is a shard pool' do
+      ctx = described_class.new(pool: shard_pool, timeout_ms: 1000)
+      expect(shard_connection).to receive(:transaction)
+      ctx.execute { |_c| nil }
+    end
+
+    it 'does NOT hold a @connection ivar — connection state lives on the pool or is nil' do
+      ctx = described_class.new(pool: shard_pool)
+      expect(ctx.instance_variables).not_to include(:@connection)
+    end
+
+    it 'rolls back on the shard pool connection (not the default pool) when shard pool is given' do
+      rolled_back = false
+      allow(shard_connection).to receive(:transaction) do |&block|
+        block.call
+        # If we reach here without Rollback being raised, rolled_back stays false
+      rescue ActiveRecord::Rollback
+        rolled_back = true
+      end
+
+      ctx = described_class.new(pool: shard_pool, timeout_ms: 500)
+      ctx.execute { |_c| 'shard query here' }
+      expect(rolled_back).to be true
+    end
+
+    it 'exposes the shard connection via the thread-local inside the execute block' do
+      ctx = described_class.new(pool: shard_pool)
+      observed_conn = nil
+      ctx.execute { |_c| observed_conn = Thread.current[described_class::LEASED_CONNECTION_KEY] }
+      expect(observed_conn).to be(shard_connection)
+    end
+
+    context 'connection: form (legacy / test fixtures)' do
+      let(:fixed_conn) do
+        instance_double('FixedConnection').tap do |conn|
+          allow(conn).to receive(:adapter_name).and_return('PostgreSQL')
+          allow(conn).to receive(:execute)
+          allow(conn).to receive(:transaction) do |&block|
+            block.call
+          rescue ActiveRecord::Rollback
+            nil
+          end
+        end
+      end
+
+      it 'does NOT hold a @connection ivar when constructed with connection:' do
+        ctx = described_class.new(connection: fixed_conn)
+        expect(ctx.instance_variables).not_to include(:@connection)
+      end
+
+      it 'still wraps the supplied connection in a rolled-back transaction per execute call' do
+        rolled_back = false
+        allow(fixed_conn).to receive(:transaction) do |&block|
+          block.call
+        rescue ActiveRecord::Rollback
+          rolled_back = true
+        end
+        ctx = described_class.new(connection: fixed_conn)
+        ctx.execute { |_c| 'query' }
+        expect(rolled_back).to be true
+      end
+
+      it 'yields the supplied connection into the block' do
+        ctx = described_class.new(connection: fixed_conn)
+        yielded = nil
+        ctx.execute { |c| yielded = c }
+        expect(yielded).to be(fixed_conn)
+      end
+
+      it 'routes every execute call through pool.with_connection, never a captured ivar' do
+        # Regression guard: before the fix, SafeContext stored @connection and
+        # used it directly from #execute, bypassing any pool path. After the
+        # fix, the supplied connection is wrapped in SingleConnectionPool so
+        # every execute call must flow through pool.with_connection. This
+        # spec would fail if someone re-introduced a captured @connection
+        # that bypassed the pool — even if they tried to keep the ivar check
+        # elsewhere happy.
+        ctx = described_class.new(connection: fixed_conn)
+        pool = ctx.instance_variable_get(:@pool)
+        expect(pool).to respond_to(:with_connection)
+
+        call_count = 0
+        original = pool.method(:with_connection)
+        allow(pool).to receive(:with_connection) do |&block|
+          call_count += 1
+          original.call(&block)
+        end
+
+        3.times { ctx.execute { |_c| 'noop' } }
+        expect(call_count).to eq(3)
+      end
+    end
+  end
+
   describe '#redact' do
     subject(:ctx) do
       described_class.new(connection: connection, redacted_columns: %w[ssn password])
