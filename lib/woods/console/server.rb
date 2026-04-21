@@ -15,7 +15,9 @@ require_relative 'console_response_renderer'
 require_relative 'credential_scanner'
 require_relative 'eval_guard'
 require_relative 'table_gate'
+require_relative 'redactor'
 require_relative 'response_context'
+require_relative 'dispatch_pipeline'
 require_relative 'tool_specs'
 
 module Woods
@@ -242,9 +244,9 @@ module Woods
 
         # Register a single ToolSpec on the MCP server.
         #
-        # Wires the spec's handler through the bridge/executor pipeline, table gate,
-        # integer coercion, and credential scanning. This is the single registration
-        # point that replaces the 29 individual define_<tool> methods.
+        # Hands every tool a dedicated {DispatchPipeline} that owns the full
+        # args → gate → bridge → redact → scan → respond flow. The
+        # `define_tool` block stays a one-liner that delegates to the pipeline.
         #
         # @param spec [ToolSpec] The tool specification
         # @param server [MCP::Server] The MCP server instance
@@ -253,22 +255,19 @@ module Woods
         # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
         # @return [void]
         def register(spec, server, conn_mgr, ctx, renderer: nil)
-          schema = spec_schema(spec)
-          tool_name = spec.name
-          handler = spec.handler
-          bridge_method = method(:send_to_bridge)
-          coerce_method = method(:coerce_integer_args!)
-          gate_method = method(:enforce_table_gate!)
-          log_gate_method = method(:log_table_gate_rejection)
-          dispatch_method = method(:dispatch_tool)
-          integer_keys = integer_property_keys(spec.properties)
+          pipeline = DispatchPipeline.new(
+            tool_name: spec.name,
+            handler: spec.handler,
+            integer_keys: integer_property_keys(spec.properties),
+            conn_mgr: conn_mgr,
+            ctx: ctx || NullResponseContext.instance,
+            renderer: renderer,
+            logger: structured_logger
+          )
 
-          server.define_tool(name: tool_name, description: spec.description,
-                             input_schema: schema) do |server_context:, **args|
-            coerce_method.call(args, integer_keys)
-            dispatch_method.call(gate_method, log_gate_method, tool_name, ctx, args) do
-              bridge_method.call(conn_mgr, handler.call(args).transform_keys(&:to_s), ctx, renderer: renderer)
-            end
+          server.define_tool(name: spec.name, description: spec.description,
+                             input_schema: spec_schema(spec)) do |server_context:, **args|
+            pipeline.call(args)
           end
         end
 
@@ -282,25 +281,12 @@ module Woods
           schema
         end
 
-        # Run the table-gate check then dispatch the tool handler, translating
-        # TableGateError, SqlValidationError, and ForbiddenExpressionError into
-        # MCP error responses.
+        # Pre-compute property keys declared as integer in a schema.
         #
-        # @param gate_method [Method]
-        # @param log_gate_method [Method]
-        # @param tool_name [String]
-        # @param ctx [ResponseContext, nil]
-        # @param args [Hash]
-        # @yield Executes the tool dispatch when gate passes
-        # @return [MCP::Tool::Response]
-        def dispatch_tool(gate_method, log_gate_method, tool_name, ctx, args)
-          gate_method.call(ctx&.table_gate, args)
-          yield
-        rescue TableGateError => e
-          log_gate_method.call(tool_name, args, e)
-          ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
-        rescue SqlValidationError, ForbiddenExpressionError => e
-          ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
+        # @param properties [Hash] Tool schema properties
+        # @return [Array<Symbol>]
+        def integer_property_keys(properties)
+          properties.select { |_k, v| v[:type] == 'integer' }.keys.map(&:to_sym)
         end
 
         # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
@@ -416,53 +402,6 @@ module Woods
           server
         end
 
-        def respond(text)
-          ::MCP::Tool::Response.new([{ type: 'text', text: text }])
-        end
-
-        def send_to_bridge(conn_mgr, request, ctx = nil, renderer: nil)
-          response = conn_mgr.send_request(request)
-          if response['ok']
-            result = response['result']
-            result = apply_redaction(result, ctx.safe_ctx) if ctx&.safe_ctx
-            result = scan_for_credentials(result, request, ctx)
-            text = renderer ? renderer.render_default(result) : JSON.pretty_generate(result)
-            respond(text)
-          else
-            error_text = "#{response['error_type']}: #{response['error']}"
-            error_text = scan_for_credentials(error_text, request, ctx)
-            ::MCP::Tool::Response.new(
-              [{ type: 'text', text: error_text }],
-              error: true
-            )
-          end
-        rescue ConnectionError => e
-          scanned = scan_for_credentials("Connection error: #{e.message}", request, ctx)
-          ::MCP::Tool::Response.new([{ type: 'text', text: scanned }], error: true)
-        end
-
-        # Run Layer 2 against the result and emit a structured log line when
-        # the scanner actually redacted anything. Returns the scanned result
-        # (or the original when the scanner isn't configured).
-        def scan_for_credentials(result, request, ctx)
-          return result unless ctx&.credential_scanner
-
-          scanned, counts = ctx.credential_scanner.scan(result)
-          log_credential_hits(request, counts) unless counts.empty?
-          scanned
-        end
-
-        def log_credential_hits(request, counts)
-          structured_logger.warn(
-            'console.credential_scan.hits',
-            tool: request['tool'],
-            counts: counts.transform_keys(&:to_s),
-            total: counts.values.sum
-          )
-        rescue StandardError => e
-          handle_observability_failure(e)
-        end
-
         # Loud multi-line banner surfaced to stderr when the opt-in flag is
         # recognised outside of production. Operators should see this every
         # boot so an accidentally-persistent env var cannot go unnoticed.
@@ -501,157 +440,10 @@ module Woods
           nil
         end
 
-        # Data-shape keys used by console tool responses. When any of these keys
-        # appear at the top of a Hash result we treat the value as row data and
-        # descend into it instead of redacting at the envelope level.
-        #
-        # Full recursive descent is intentionally NOT used here. Some tools return
-        # Hashes whose keys happen to be column names but whose values are metadata
-        # objects, not row data — e.g. `console_schema` returns
-        # {columns: {col_name => {type:..., null:...}}}. Recursing into that Hash
-        # would incorrectly replace schema metadata with "[REDACTED]" whenever a
-        # column name matches a redacted_columns entry. Keeping a closed list of
-        # envelope keys that carry actual row data is therefore the safer choice.
-        #
-        # When adding a new Tier 2/3 tool that returns row data under a new envelope
-        # key, add that key here AND add a matching `when` branch in
-        # `redact_envelope_value` that applies the appropriate redaction strategy.
-        DATA_ENVELOPE_KEYS = %w[record records rows values associations].freeze
-        private_constant :DATA_ENVELOPE_KEYS
-
-        # Apply SafeContext column redaction to a result value.
-        #
-        # Redaction is shape-aware:
-        #   - {record: Hash}          (find)         — redact the nested hash
-        #   - {records: [Hash]}       (sample, recent) — redact each nested hash
-        #   - {columns: [...], rows:   [[...]]}  (sql, query) — positional
-        #   - {columns: [...], values: [...|[...]]} (pluck)  — positional
-        #   - Plain Hash              — redact top-level keys
-        #   - Array<Hash>             — redact each hash
-        #
-        # @param result [Object] The result from the bridge or embedded executor
-        # @param ctx [SafeContext] The context with redacted_columns configured
-        # @return [Object] Redacted result, same shape as input
+        # Legacy delegate to {Redactor.apply} — kept so the server's class-level
+        # spec can drive redaction without constructing a ResponseContext.
         def apply_redaction(result, ctx)
-          case result
-          when Array
-            result.map { |item| item.is_a?(Hash) ? apply_redaction(item, ctx) : item }
-          when Hash
-            redact_hash(result, ctx)
-          else
-            result
-          end
-        end
-
-        def redact_hash(hash, ctx)
-          string_keyed = hash.transform_keys(&:to_s)
-          return ctx.redact(string_keyed) unless (string_keyed.keys & DATA_ENVELOPE_KEYS).any?
-
-          plan = positional_plan(string_keyed['columns'], ctx)
-          string_keyed.each_with_object({}) do |(key, value), out|
-            out[key] = redact_envelope_value(key, value, plan, ctx)
-          end
-        end
-
-        def redact_envelope_value(key, value, plan, ctx)
-          case key
-          when 'record'         then value.is_a?(Hash) ? ctx.redact(value) : value
-          when 'records'        then redact_hash_array(value, ctx)
-          when 'rows', 'values' then redact_positional(value, plan)
-          when 'associations'   then redact_association_map(value, ctx)
-          else                       value
-          end
-        end
-
-        def redact_hash_array(value, ctx)
-          Array(value).map { |row| row.is_a?(Hash) ? ctx.redact(row) : row }
-        end
-
-        # Redact an associations map returned by console_data_snapshot.
-        #
-        # The associations payload has the shape:
-        #   { "assoc_name" => [Hash, ...], ... }
-        # Each value is an Array of record Hashes. We redact each record
-        # the same way we handle `records` (column-name + EAV rules).
-        #
-        # @param value [Hash, nil] Association map
-        # @param ctx [SafeContext]
-        # @return [Hash, nil]
-        def redact_association_map(value, ctx)
-          return value unless value.is_a?(Hash)
-
-          value.each_with_object({}) do |(assoc_name, assoc_records), out|
-            out[assoc_name] = redact_hash_array(assoc_records, ctx)
-          end
-        end
-
-        # Precompute everything needed to redact positional rows for a given
-        # `columns` header: the column-name mask plus any EAV key-value rules
-        # resolved to column indexes. Returns a plain Hash so callers can pass
-        # it around without extra struct ceremony.
-        def positional_plan(columns, ctx)
-          { mask: positional_mask(columns, ctx),
-            kv_rules: positional_kv_rules(columns, ctx) }
-        end
-
-        # Precompute the positional redaction mask from a `columns` header.
-        # Returns nil when there is nothing to redact so callers can short-circuit.
-        def positional_mask(columns, ctx)
-          return nil unless columns.is_a?(Array)
-
-          redacted = ctx.redacted_columns
-          return nil if redacted.empty?
-
-          mask = columns.map { |name| redacted.include?(name.to_s) }
-          mask.any? ? mask : nil
-        end
-
-        # Resolve EAV patterns against a `columns` header into concrete index
-        # pairs. A rule only fires when both key_column and value_column are
-        # present in the header, and costs nothing per row otherwise.
-        def positional_kv_rules(columns, ctx)
-          return [] unless columns.is_a?(Array)
-
-          index = columns.each_with_index.to_h { |name, idx| [name.to_s, idx] }
-          ctx.redacted_key_values.filter_map do |pattern|
-            key_idx = index[pattern['key_column']]
-            val_idx = index[pattern['value_column']]
-            next unless key_idx && val_idx
-
-            { key_idx: key_idx, val_idx: val_idx, sensitive: pattern['sensitive_keys'] }
-          end
-        end
-
-        # Redact positional row data using a precomputed plan. Handles both
-        # nested arrays (multi-column pluck, sql/query rows) and flat scalar
-        # arrays (pluck with a single column — Rails collapses the result).
-        def redact_positional(rows, plan)
-          return rows unless rows.is_a?(Array)
-          return rows if plan[:mask].nil? && plan[:kv_rules].empty?
-
-          rows.map do |row|
-            row.is_a?(Array) ? redact_row(row, plan) : redact_scalar(row, plan[:mask])
-          end
-        end
-
-        def redact_row(row, plan)
-          result = apply_mask(row, plan[:mask])
-          plan[:kv_rules].each do |rule|
-            result[rule[:val_idx]] = '[REDACTED]' if rule[:sensitive].include?(row[rule[:key_idx]].to_s)
-          end
-          result
-        end
-
-        def apply_mask(row, mask)
-          return row.dup unless mask
-
-          row.each_with_index.map { |value, idx| mask[idx] ? '[REDACTED]' : value }
-        end
-
-        def redact_scalar(value, mask)
-          return value unless mask
-
-          mask.first ? '[REDACTED]' : value
+          Redactor.apply(result, ctx)
         end
 
         def build_console_renderer
@@ -661,57 +453,6 @@ module Woods
                      :markdown
                    end
           format == :json ? JsonConsoleRenderer.new : ConsoleResponseRenderer.new
-        end
-
-        # Run the Layer 1 blocked-table gate against the arguments a tool was
-        # invoked with. Tools may arrive at tables through five different
-        # arg shapes — SQL string, model name, raw table, joined associations,
-        # or a single association name — so the gate checks every variant that's
-        # present. A no-op when the gate is nil.
-        #
-        # @param gate [TableGate, nil]
-        # @param args [Hash] Tool arguments (symbol keys from MCP dispatch)
-        # @raise [TableGateError] if any referenced identifier is blocked
-        def enforce_table_gate!(gate, args) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
-          return unless gate
-
-          gate.check_sql!(args[:sql]) if args[:sql]
-          gate.check_model!(args[:model]) if args[:model]
-          gate.check_table!(args[:table]) if args[:table]
-          gate.check_joins!(args[:model], args[:joins]) if args[:model] && args[:joins]
-          return unless args[:model] && args[:association]
-
-          gate.check_association!(args[:model], args[:association])
-        end
-
-        def log_table_gate_rejection(tool_name, args, error)
-          structured_logger.warn(
-            'console.table_gate.rejected',
-            tool: tool_name,
-            model: args[:model],
-            table: args[:table],
-            has_sql: args[:sql] ? true : false,
-            message: error.message
-          )
-        rescue StandardError => e
-          handle_observability_failure(e)
-        end
-
-        # Pre-compute property keys declared as integer in a schema.
-        #
-        # @param properties [Hash] Tool schema properties
-        # @return [Array<Symbol>]
-        def integer_property_keys(properties)
-          properties.select { |_k, v| v[:type] == 'integer' }.keys.map(&:to_sym)
-        end
-
-        # Coerce string values to integers for known integer keys.
-        #
-        # @param args [Hash] Tool arguments (mutated in place)
-        # @param keys [Array<Symbol>] Keys that should be integers
-        # @return [void]
-        def coerce_integer_args!(args, keys)
-          keys.each { |k| args[k] = args[k].to_i if args[k].is_a?(String) }
         end
       end
     end
