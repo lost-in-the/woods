@@ -17,6 +17,7 @@ require_relative 'eval_guard'
 require_relative 'table_gate'
 require_relative 'redactor'
 require_relative 'response_context'
+require_relative 'dispatch_pipeline'
 require_relative 'tool_specs'
 
 module Woods
@@ -243,9 +244,9 @@ module Woods
 
         # Register a single ToolSpec on the MCP server.
         #
-        # Wires the spec's handler through the bridge/executor pipeline, table gate,
-        # integer coercion, and credential scanning. This is the single registration
-        # point that replaces the 29 individual define_<tool> methods.
+        # Hands every tool a dedicated {DispatchPipeline} that owns the full
+        # args → gate → bridge → redact → scan → respond flow. The
+        # `define_tool` block stays a one-liner that delegates to the pipeline.
         #
         # @param spec [ToolSpec] The tool specification
         # @param server [MCP::Server] The MCP server instance
@@ -254,21 +255,19 @@ module Woods
         # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
         # @return [void]
         def register(spec, server, conn_mgr, ctx, renderer: nil)
-          schema = spec_schema(spec)
-          tool_name = spec.name
-          handler = spec.handler
-          bridge_method = method(:send_to_bridge)
-          coerce_method = method(:coerce_integer_args!)
-          log_gate_method = method(:log_table_gate_rejection)
-          dispatch_method = method(:dispatch_tool)
-          integer_keys = integer_property_keys(spec.properties)
+          pipeline = DispatchPipeline.new(
+            tool_name: spec.name,
+            handler: spec.handler,
+            integer_keys: integer_property_keys(spec.properties),
+            conn_mgr: conn_mgr,
+            ctx: ctx || NullResponseContext.instance,
+            renderer: renderer,
+            logger: structured_logger
+          )
 
-          server.define_tool(name: tool_name, description: spec.description,
-                             input_schema: schema) do |server_context:, **args|
-            coerce_method.call(args, integer_keys)
-            dispatch_method.call(log_gate_method, tool_name, ctx, args) do
-              bridge_method.call(conn_mgr, handler.call(args).transform_keys(&:to_s), ctx, renderer: renderer)
-            end
+          server.define_tool(name: spec.name, description: spec.description,
+                             input_schema: spec_schema(spec)) do |server_context:, **args|
+            pipeline.call(args)
           end
         end
 
@@ -282,25 +281,12 @@ module Woods
           schema
         end
 
-        # Run the table-gate check then dispatch the tool handler, translating
-        # TableGateError, SqlValidationError, and ForbiddenExpressionError into
-        # MCP error responses.
+        # Pre-compute property keys declared as integer in a schema.
         #
-        # @param gate_method [Method]
-        # @param log_gate_method [Method]
-        # @param tool_name [String]
-        # @param ctx [ResponseContext, nil]
-        # @param args [Hash]
-        # @yield Executes the tool dispatch when gate passes
-        # @return [MCP::Tool::Response]
-        def dispatch_tool(log_gate_method, tool_name, ctx, args)
-          ctx.enforce!(args)
-          yield
-        rescue TableGateError => e
-          log_gate_method.call(tool_name, args, e)
-          ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
-        rescue SqlValidationError, ForbiddenExpressionError => e
-          ::MCP::Tool::Response.new([{ type: 'text', text: e.message }], error: true)
+        # @param properties [Hash] Tool schema properties
+        # @return [Array<Symbol>]
+        def integer_property_keys(properties)
+          properties.select { |_k, v| v[:type] == 'integer' }.keys.map(&:to_sym)
         end
 
         # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
@@ -416,51 +402,6 @@ module Woods
           server
         end
 
-        def respond(text)
-          ::MCP::Tool::Response.new([{ type: 'text', text: text }])
-        end
-
-        def send_to_bridge(conn_mgr, request, ctx = NullResponseContext.instance, renderer: nil)
-          response = conn_mgr.send_request(request)
-          if response['ok']
-            result = ctx.redact(response['result'])
-            result = scan_for_credentials(result, request, ctx)
-            text = renderer ? renderer.render_default(result) : JSON.pretty_generate(result)
-            respond(text)
-          else
-            error_text = "#{response['error_type']}: #{response['error']}"
-            error_text = scan_for_credentials(error_text, request, ctx)
-            ::MCP::Tool::Response.new(
-              [{ type: 'text', text: error_text }],
-              error: true
-            )
-          end
-        rescue ConnectionError => e
-          scanned = scan_for_credentials("Connection error: #{e.message}", request, ctx)
-          ::MCP::Tool::Response.new([{ type: 'text', text: scanned }], error: true)
-        end
-
-        # Run Layer 2 against the result and emit a structured log line when
-        # the scanner actually redacted anything. Returns the scanned result
-        # (or the original when the scanner is not configured — NullResponseContext
-        # returns an empty counts hash, which suppresses logging).
-        def scan_for_credentials(result, request, ctx)
-          scanned, counts = ctx.scan(result)
-          log_credential_hits(request, counts) unless counts.empty?
-          scanned
-        end
-
-        def log_credential_hits(request, counts)
-          structured_logger.warn(
-            'console.credential_scan.hits',
-            tool: request['tool'],
-            counts: counts.transform_keys(&:to_s),
-            total: counts.values.sum
-          )
-        rescue StandardError => e
-          handle_observability_failure(e)
-        end
-
         # Loud multi-line banner surfaced to stderr when the opt-in flag is
         # recognised outside of production. Operators should see this every
         # boot so an accidentally-persistent env var cannot go unnoticed.
@@ -512,36 +453,6 @@ module Woods
                      :markdown
                    end
           format == :json ? JsonConsoleRenderer.new : ConsoleResponseRenderer.new
-        end
-
-        def log_table_gate_rejection(tool_name, args, error)
-          structured_logger.warn(
-            'console.table_gate.rejected',
-            tool: tool_name,
-            model: args[:model],
-            table: args[:table],
-            has_sql: args[:sql] ? true : false,
-            message: error.message
-          )
-        rescue StandardError => e
-          handle_observability_failure(e)
-        end
-
-        # Pre-compute property keys declared as integer in a schema.
-        #
-        # @param properties [Hash] Tool schema properties
-        # @return [Array<Symbol>]
-        def integer_property_keys(properties)
-          properties.select { |_k, v| v[:type] == 'integer' }.keys.map(&:to_sym)
-        end
-
-        # Coerce string values to integers for known integer keys.
-        #
-        # @param args [Hash] Tool arguments (mutated in place)
-        # @param keys [Array<Symbol>] Keys that should be integers
-        # @return [void]
-        def coerce_integer_args!(args, keys)
-          keys.each { |k| args[k] = args[k].to_i if args[k].is_a?(String) }
         end
       end
     end
