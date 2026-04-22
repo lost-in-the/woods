@@ -58,6 +58,27 @@ RSpec.describe Woods::MCP::Server do
       uris = templates.map(&:uri_template)
       expect(uris).to contain_exactly('codebase://unit/{identifier}', 'codebase://type/{type}')
     end
+
+    it 'warms the index reader cache by default' do
+      reader = Woods::MCP::IndexReader.new(fixture_dir)
+      allow(Woods::MCP::IndexReader).to receive(:new).and_return(reader)
+
+      described_class.build(index_dir: fixture_dir, response_format: :json)
+
+      # After build, the manifest is already memoized — reading it should not
+      # call File.read on manifest.json.
+      allow(File).to receive(:read).and_call_original
+      reader.manifest
+      expect(File).not_to have_received(:read)
+    end
+
+    it 'skips warmup when warmup: false' do
+      reader = Woods::MCP::IndexReader.new(fixture_dir)
+      allow(Woods::MCP::IndexReader).to receive(:new).and_return(reader)
+      expect(reader).not_to receive(:warmup!)
+
+      described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+    end
   end
 
   describe 'tool: lookup' do

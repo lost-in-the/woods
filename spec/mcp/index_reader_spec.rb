@@ -69,6 +69,51 @@ RSpec.describe Woods::MCP::IndexReader do
     end
   end
 
+  describe '#warmup!' do
+    it 'reports success for every step when artefacts are present' do
+      result = reader.warmup!
+
+      expect(result).to eq(
+        manifest: true,
+        summary: true,
+        dependency_graph: true,
+        graph_analysis: true,
+        identifier_map: true
+      )
+    end
+
+    it 'populates caches so subsequent accessors do not re-read from disk' do
+      reader.warmup!
+
+      # After warmup, calling a lazy accessor should not parse JSON again.
+      # Prove this by spying on File.read: subsequent calls hit zero reads.
+      allow(File).to receive(:read).and_call_original
+      reader.manifest
+      reader.dependency_graph
+      reader.graph_analysis
+
+      expect(File).not_to have_received(:read)
+    end
+
+    it 'is idempotent — second call reuses the memoized values' do
+      first_graph = reader.warmup! && reader.dependency_graph
+      second_graph = reader.warmup! && reader.dependency_graph
+
+      expect(first_graph).to equal(second_graph)
+    end
+
+    it 'records per-step exceptions without aborting the rest' do
+      # Force one step to raise. graph_analysis.json is optional and easy to target.
+      allow(reader).to receive(:graph_analysis).and_raise(StandardError, 'boom')
+
+      result = reader.warmup!
+
+      expect(result[:graph_analysis]).to be_a(StandardError)
+      expect(result[:manifest]).to be(true)
+      expect(result[:identifier_map]).to be(true)
+    end
+  end
+
   describe '#find_unit' do
     it 'returns full unit data for a valid identifier' do
       unit = reader.find_unit('Post')
