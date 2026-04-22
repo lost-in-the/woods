@@ -235,6 +235,7 @@ Use `framework` to search the Rails/gem source installed in the app — not docu
 
 | Tool | Key Parameters | Description |
 |------|---------------|-------------|
+| `woods_status` | _(none)_ | Diagnose whether the server is ready. Returns extraction metadata (last run, unit counts, git SHA, staleness seconds), retriever/embedding configuration, and feature flags. **Call first on cold connect.** |
 | `lookup` | `identifier`, `include_source`, `sections` | Full unit by exact identifier. `sections` filters which fields to return. |
 | `search` | `query`, `types`, `fields`, `limit` | Regex search across identifiers, source, or metadata. Returns `{ results: [...], note?, partial? }` — `note` flags broad patterns (>50% of a directory matched), `partial` means the phase-2 scan cap (`WOODS_SEARCH_MAX_SCAN`, default 500) was hit. Invalid regex falls back to literal match. Follow up with `lookup`. |
 | `dependencies` | `identifier`, `depth`, `types`, `via` | Forward dependency tree (BFS). What a unit depends on. |
