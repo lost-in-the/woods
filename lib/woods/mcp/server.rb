@@ -28,10 +28,14 @@ module Woods
         # @param retriever [Woods::Retriever, nil] Optional retriever for semantic search
         # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
         # @param feedback_store [Woods::Feedback::Store, nil] Optional feedback store
+        # @param warmup [Boolean] Pre-populate the index reader's caches during build,
+        #   shifting first-tool-call latency to startup. Default: true. Pass false for
+        #   tests or when startup time matters more than first-query latency.
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
-                  response_format: nil)
+                  response_format: nil, warmup: true)
           reader = IndexReader.new(index_dir)
+          reader.warmup! if warmup
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
           renderer = ToolResponseRenderer.for(format)

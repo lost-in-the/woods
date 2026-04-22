@@ -52,6 +52,34 @@ module Woods
         @identifier_map = nil
       end
 
+      # Pre-populate cached state so the first MCP tool call doesn't pay
+      # for disk reads + JSON parsing.
+      #
+      # Touches every lazy accessor: manifest, summary, dependency_graph,
+      # graph_analysis, and the identifier_map (which reads all _index.json
+      # files). Each step is individually rescued so a missing optional
+      # artefact (e.g. graph_analysis.json) never blocks the rest.
+      #
+      # Safe to call multiple times — lazy accessors short-circuit on the
+      # memoized value.
+      #
+      # @return [Hash] Per-step outcome: `{step => true | Exception}`
+      def warmup!
+        steps = {
+          manifest: -> { manifest },
+          summary: -> { summary },
+          dependency_graph: -> { dependency_graph },
+          graph_analysis: -> { graph_analysis },
+          identifier_map: -> { identifier_map }
+        }
+        steps.each_with_object({}) do |(step, runner), result|
+          runner.call
+          result[step] = true
+        rescue StandardError => e
+          result[step] = e
+        end
+      end
+
       # Clear all cached state so the next access re-reads from disk.
       #
       # @return [void]
