@@ -65,12 +65,22 @@ module Woods
 
         DEFAULT_MODEL = 'nomic-embed-text'
         DEFAULT_HOST = 'http://localhost:11434'
+        # Ollama caps embedding inputs at `num_ctx` tokens (default 2048),
+        # which truncates most real-world Rails units. nomic-embed-text
+        # supports up to 8192, matching the TextPreparer max_tokens default,
+        # so we lift the cap here to line the two up.
+        DEFAULT_NUM_CTX = 8192
 
         # @param model [String] Ollama model name (default: nomic-embed-text)
         # @param host [String] Ollama server URL (default: http://localhost:11434)
-        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST)
+        # @param num_ctx [Integer, nil] Ollama context window in tokens. `nil`
+        #   uses Ollama's default (2048 for most embedding models — usually
+        #   too small). Defaults to 8192, which matches nomic-embed-text's
+        #   max and the TextPreparer default.
+        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: DEFAULT_NUM_CTX)
           @model = model
           @host = host
+          @num_ctx = num_ctx
           @uri = URI("#{host}/api/embed")
         end
 
@@ -80,7 +90,7 @@ module Woods
         # @return [Array<Float>] the embedding vector
         # @raise [Woods::Error] if the API returns an error
         def embed(text)
-          response = post_request({ model: @model, input: text })
+          response = post_request(build_body(text))
           response['embeddings'].first
         end
 
@@ -90,7 +100,7 @@ module Woods
         # @return [Array<Array<Float>>] array of embedding vectors
         # @raise [Woods::Error] if the API returns an error
         def embed_batch(texts)
-          response = post_request({ model: @model, input: texts })
+          response = post_request(build_body(texts))
           response['embeddings']
         end
 
@@ -111,6 +121,15 @@ module Woods
         end
 
         private
+
+        # Build the JSON body for an `/api/embed` call. Adds `options.num_ctx`
+        # when configured — without it, Ollama silently truncates to 2048
+        # tokens and returns 400 when the input exceeds that default.
+        def build_body(input)
+          body = { model: @model, input: input }
+          body[:options] = { num_ctx: @num_ctx } if @num_ctx
+          body
+        end
 
         # Send a POST request to the Ollama API.
         #
