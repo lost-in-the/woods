@@ -17,10 +17,6 @@ const schema: WalkableSchema = {
   },
 }
 
-function wrapper(ui: ReactNode) {
-  return <JourneyProvider schema={schema}>{ui}</JourneyProvider>
-}
-
 function allProvidersWrapper(ui: ReactNode) {
   return (
     <NuqsTestingAdapter>
