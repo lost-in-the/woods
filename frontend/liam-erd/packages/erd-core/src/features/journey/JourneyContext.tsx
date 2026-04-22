@@ -1,4 +1,5 @@
 import { createContext, useMemo, useState, type ReactNode } from 'react'
+import type { ShowMode } from '@/schemas'
 import type { EdgeVia, WalkableSchema, WalkResult } from './walker'
 import { walk } from './walker'
 
@@ -9,15 +10,25 @@ export type EntryPoint = {
   action: string
 }
 
+export type ExploreSnapshot = {
+  showMode: ShowMode
+  hiddenNodeIds: string[]
+  activeTableName: string | null
+  viewport: { x: number; y: number; zoom: number } | null
+}
+
 export type JourneyContextValue = {
   entryPoint: EntryPoint | null
   maxDepth: number
   enabledEdgeTypes: Set<EdgeVia>
   result: WalkResult | null
+  snapshot: ExploreSnapshot | null
   enterJourney: (entry: EntryPoint) => void
   exitJourney: () => void
   setDepth: (depth: number) => void
   toggleEdgeType: (via: EdgeVia) => void
+  setEntryPoint: (entry: EntryPoint | null) => void
+  setSnapshot: (snapshot: ExploreSnapshot | null) => void
 }
 
 export const JourneyContext = createContext<JourneyContextValue | null>(null)
@@ -39,6 +50,7 @@ export function JourneyProvider({
   const [maxDepth, setMaxDepth] = useState(10)
   const [enabledEdgeTypes, setEnabledEdgeTypes] =
     useState<Set<EdgeVia>>(DEFAULT_EDGE_TYPES)
+  const [snapshot, setSnapshot] = useState<ExploreSnapshot | null>(null)
 
   const result = useMemo<WalkResult | null>(() => {
     if (!entryPoint) return null
@@ -53,6 +65,7 @@ export function JourneyProvider({
     maxDepth,
     enabledEdgeTypes,
     result,
+    snapshot,
     enterJourney: setEntryPoint,
     exitJourney: () => setEntryPoint(null),
     setDepth: setMaxDepth,
@@ -63,6 +76,8 @@ export function JourneyProvider({
         else next.add(via)
         return next
       }),
+    setEntryPoint,
+    setSnapshot,
   }
 
   return (
