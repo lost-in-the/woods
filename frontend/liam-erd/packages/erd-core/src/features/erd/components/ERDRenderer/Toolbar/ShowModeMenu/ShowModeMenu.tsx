@@ -8,9 +8,10 @@ import {
   DropdownMenuRoot,
   DropdownMenuTrigger,
 } from '@liam-hq/ui'
-import { type FC, useCallback } from 'react'
+import { type FC, useCallback, useContext } from 'react'
 import { safeParse } from 'valibot'
 import { toolbarActionLogEvent } from '@/features/gtm/utils'
+import { JourneyContext } from '@/features/journey'
 import { useVersionOrThrow } from '@/providers'
 import { type ShowMode, showModeSchema } from '@/schemas/showMode'
 import { useUserEditingOrThrow } from '@/stores'
@@ -24,6 +25,9 @@ const OPTION_LIST: { value: ShowMode; label: string }[] = [
 
 export const ShowModeMenu: FC = () => {
   const { showMode, setShowMode } = useUserEditingOrThrow()
+
+  const journey = useContext(JourneyContext)
+  const journeyActive = !!journey?.entryPoint
 
   const { version } = useVersionOrThrow()
 
@@ -58,6 +62,8 @@ export const ShowModeMenu: FC = () => {
             rightIcon={<ChevronDown />}
             data-testid="show-mode"
             aria-label="Show mode"
+            disabled={journeyActive}
+            title={journeyActive ? 'Controlled by Journey mode' : undefined}
           >
             {OPTION_LIST.find((opt) => opt.value === showMode)?.label}
           </Button>
