@@ -34,4 +34,19 @@ describe('schemaSchema', () => {
       }),
     ).toThrow()
   })
+
+  it('preserves entryPoints through safeParse with backend-shaped input', () => {
+    const raw = {
+      ...baseSchema,
+      entryPoints: [
+        { identifier: 'StaticPagesController', verb: 'GET', path: '/contact', action: 'contact' },
+      ],
+    }
+    const result = v.safeParse(schemaSchema, raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.output.entryPoints).toHaveLength(1)
+      expect(result.output.entryPoints?.[0]?.identifier).toBe('StaticPagesController')
+    }
+  })
 })
