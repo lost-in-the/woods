@@ -33,6 +33,13 @@ import { useInitialAutoLayout, useQueryParamsChanged } from './hooks'
 
 const NAV_VIAS: ReadonlySet<string> = new Set(['link_to', 'redirect_to', 'form_action'])
 
+// React Flow prefixes woods-node IDs with 'woods-' (see convertSchemaToNodes.ts:126)
+// while the journey walker keys by the raw schema-node identifier. Strip the prefix
+// before looking a node up in walk results.
+const WOODS_ID_PREFIX = 'woods-'
+const walkKeyFor = (nodeId: string): string =>
+  nodeId.startsWith(WOODS_ID_PREFIX) ? nodeId.slice(WOODS_ID_PREFIX.length) : nodeId
+
 const nodeTypes = {
   table: TableNode,
   nonRelatedTableGroup: NonRelatedTableGroupNode,
@@ -114,9 +121,9 @@ export const ERDContentInner: FC<Props> = ({
     if (!journeyNodeIds) return nodes
     // Journey mode: render only walked nodes, mark the entry point.
     return nodes
-      .filter((node) => journeyNodeIds.has(node.id))
+      .filter((node) => journeyNodeIds.has(walkKeyFor(node.id)))
       .map((node) => {
-        if (node.id !== journeyEntryPoint?.identifier) return node
+        if (walkKeyFor(node.id) !== journeyEntryPoint?.identifier) return node
         return {
           ...node,
           className: [node.className, 'erd-node--journey-entry']
@@ -148,8 +155,8 @@ export const ERDContentInner: FC<Props> = ({
           const backEdgeClass =
             journeyEdges?.find(
               (e) =>
-                e.from === edge.source &&
-                e.to === edge.target &&
+                e.from === walkKeyFor(edge.source) &&
+                e.to === walkKeyFor(edge.target) &&
                 e.isBackEdge,
             )
               ? 'erd-edge--back-edge'
