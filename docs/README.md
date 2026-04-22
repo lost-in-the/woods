@@ -27,6 +27,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 34 extractors captures, edge cases, example output |
 | [AGENT_GUIDE.md](AGENT_GUIDE.md) | Deep reference for AI agents — workflows, full tool table, relationship type catalog, gotchas |
 | [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
+| [RETRIEVAL_GUIDE.md](RETRIEVAL_GUIDE.md) | Query classification, search strategies, RRF ranking, token budget tuning, and troubleshooting |
 
 ## Reference
 
@@ -57,7 +58,6 @@ These benchmarks are **not part of the test suite** and are never run in CI. The
 
 | Document | Scope |
 |----------|-------|
-| RETRIEVAL_GUIDE.md | Query classification, search strategies, RRF ranking, token budget tuning |
 | API_REFERENCE.md | Key public classes and interfaces (may generate from YARD) |
 
 ## Documentation Principles
