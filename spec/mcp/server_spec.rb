@@ -773,10 +773,12 @@ RSpec.describe Woods::MCP::Server do
 
       after { Woods.configuration = nil }
 
-      it 'returns an error when session tracer is not configured' do
+      it 'returns a structured error when session tracer is not configured' do
         response = call_tool(server, 'session_trace', session_id: 'sess1')
-        data = parse_response(response)
-        expect(data['error']).to include('not configured')
+        expect(response_text(response)).to include('not configured')
+        expect(response.error?).to be(true)
+        expect(response.meta[:error_code]).to eq(:not_configured)
+        expect(response.meta[:config_key]).to eq('session_store')
       end
     end
 
@@ -831,11 +833,12 @@ RSpec.describe Woods::MCP::Server do
         expect(text).to include('Session: sess1')
       end
 
-      it 'returns an error hash when assembly raises' do
+      it 'returns a structured internal error when assembly raises' do
         allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'store unavailable')
         response = call_tool(server, 'session_trace', session_id: 'sess1')
-        data = parse_response(response)
-        expect(data['error']).to eq('store unavailable')
+        expect(response_text(response)).to include('store unavailable')
+        expect(response.error?).to be(true)
+        expect(response.meta[:error_code]).to eq(:internal_error)
       end
     end
   end
