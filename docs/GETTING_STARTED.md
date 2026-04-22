@@ -31,7 +31,11 @@ Then run the install generator:
 bundle exec rails generate woods:install
 ```
 
-This creates `config/initializers/woods.rb` with default configuration.
+This creates `config/initializers/woods.rb` with annotated default configuration, and a migration for Woods tables (`woods_units`, `woods_edges`, `woods_embeddings`). Run migrations after the generator:
+
+```bash
+bundle exec rails db:migrate
+```
 
 > **Important:** Woods requires a booted Rails environment for extraction. It uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) to produce accurate output. It cannot extract from source files alone.
 
