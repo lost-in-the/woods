@@ -171,6 +171,30 @@ RSpec.describe Woods::Embedding::Indexer do
         expect(stats[:processed]).to eq(1)
       end
     end
+
+    context 'when non-unit extraction output sits alongside unit files' do
+      # Real extraction output has _index.json listings (arrays) plus manifest /
+      # dependency_graph / graph_analysis summaries (hashes without a unit shape).
+      # Prior to the shape filter, these parsed into build_unit and crashed with
+      # TypeError: no implicit conversion of String into Integer.
+      before do
+        FileUtils.mkdir_p(File.join(output_dir, 'models'))
+        File.write(File.join(output_dir, 'models', '_index.json'),
+                   JSON.generate([{ 'identifier' => 'User', 'file_path' => 'app/models/user.rb' }]))
+        File.write(File.join(output_dir, 'manifest.json'),
+                   JSON.generate({ 'extracted_at' => '2026-04-22', 'unit_count' => 1 }))
+        File.write(File.join(output_dir, 'dependency_graph.json'),
+                   JSON.generate({ 'nodes' => [], 'edges' => [] }))
+        File.write(File.join(output_dir, 'graph_analysis.json'),
+                   JSON.generate({ 'orphans' => [], 'hubs' => [] }))
+      end
+
+      it 'processes only the unit file and ignores listings/summaries' do
+        stats = indexer.index_all
+        expect(stats[:processed]).to eq(1)
+        expect(stats[:errors]).to eq(0)
+      end
+    end
   end
 
   describe '#index_incremental' do
