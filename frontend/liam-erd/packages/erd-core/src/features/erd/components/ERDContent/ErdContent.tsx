@@ -11,8 +11,6 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import { type FC, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-
-const NAV_VIAS: ReadonlySet<string> = new Set(['link_to', 'redirect_to', 'form_action'])
 import { useTableSelection } from '@/features/erd/hooks'
 import type { DisplayArea, WoodsNodeType } from '@/features/erd/types'
 import { selectTableLogEvent } from '@/features/gtm/utils'
@@ -32,6 +30,8 @@ import {
 import styles from './ERDContent.module.css'
 import { ErdContentProvider, useErdContentContext } from './ErdContentContext'
 import { useInitialAutoLayout, useQueryParamsChanged } from './hooks'
+
+const NAV_VIAS: ReadonlySet<string> = new Set(['link_to', 'redirect_to', 'form_action'])
 
 const nodeTypes = {
   table: TableNode,
@@ -67,22 +67,22 @@ export const ERDContentInner: FC<Props> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(_edges)
 
   const journeyCtx = useContext(JourneyContext)
-  const journeyNodeIds = useMemo(
-    () => (journeyCtx?.result ? journeyCtx.result.nodes : null),
-    [journeyCtx?.result],
-  )
-  const journeyEdges = useMemo(
-    () => journeyCtx?.result?.edges ?? null,
-    [journeyCtx?.result],
-  )
-  const entryPoint = journeyCtx?.entryPoint ?? null
-
-  const reactFlow = useReactFlow()
-
   const journeyEntryPoint = journeyCtx?.entryPoint ?? null
   const journeySnapshot = journeyCtx?.snapshot ?? null
   const journeyResult = journeyCtx?.result ?? null
   const setSnapshotViewport = journeyCtx?.setSnapshotViewport
+
+  const journeyNodeIds = useMemo(
+    () => journeyResult?.nodes ?? null,
+    [journeyResult],
+  )
+  const journeyEdges = useMemo(
+    () => journeyResult?.edges ?? null,
+    [journeyResult],
+  )
+
+  const { activeTableName, navigationEdgesVisible } = useUserEditingOrThrow()
+  const reactFlow = useReactFlow()
 
   useEffect(() => {
     if (journeyEntryPoint && journeySnapshot && !journeySnapshot.viewport) {
@@ -117,7 +117,9 @@ export const ERDContentInner: FC<Props> = ({
         let journeyClass: string
         if (journeyNodeIds.has(node.id)) {
           journeyClass =
-            node.id === entryPoint?.identifier ? 'erd-node--journey-entry' : ''
+            node.id === journeyEntryPoint?.identifier
+              ? 'erd-node--journey-entry'
+              : ''
         } else {
           journeyClass = 'erd-node--outside-journey'
         }
@@ -129,7 +131,7 @@ export const ERDContentInner: FC<Props> = ({
             .join(' '),
         }
       }),
-    [nodes, journeyNodeIds, entryPoint],
+    [nodes, journeyNodeIds, journeyEntryPoint],
   )
 
   const displayEdges = useMemo(
@@ -174,7 +176,6 @@ export const ERDContentInner: FC<Props> = ({
   const {
     state: { loading },
   } = useErdContentContext()
-  const { activeTableName, navigationEdgesVisible } = useUserEditingOrThrow()
 
   const { selectTable, deselectTable } = useTableSelection()
 
