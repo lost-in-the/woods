@@ -59,7 +59,7 @@ module Woods
         graph_store: graph_store,
         embedding_provider: embedding_provider
       )
-      @ranker = Retrieval::Ranker.new(metadata_store: metadata_store)
+      @ranker = Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store)
       @assembler = Retrieval::ContextAssembler.new(metadata_store: metadata_store)
     end
 
