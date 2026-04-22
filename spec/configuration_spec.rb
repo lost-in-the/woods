@@ -56,6 +56,10 @@ RSpec.describe Woods::Configuration do
       expect(config.session_exclude_paths).to eq([])
     end
 
+    it 'sets session_tracer_allow_production to false' do
+      expect(config.session_tracer_allow_production).to eq(false)
+    end
+
     it 'sets console_mcp_enabled to false' do
       expect(config.console_mcp_enabled).to eq(false)
     end
@@ -142,6 +146,11 @@ RSpec.describe Woods::Configuration do
     it 'allows setting session_exclude_paths' do
       config.session_exclude_paths = ['/health', '/assets']
       expect(config.session_exclude_paths).to eq(['/health', '/assets'])
+    end
+
+    it 'allows setting session_tracer_allow_production' do
+      config.session_tracer_allow_production = true
+      expect(config.session_tracer_allow_production).to eq(true)
     end
   end
 
