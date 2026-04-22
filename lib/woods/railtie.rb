@@ -11,16 +11,27 @@ module Woods
 
     initializer 'woods.session_tracer' do |app|
       config = Woods.configuration
-      if config.session_tracer_enabled
-        require 'woods/session_tracer/middleware'
+      next unless config.session_tracer_enabled
 
-        app.middleware.use(
-          Woods::SessionTracer::Middleware,
-          store: config.session_store,
-          session_id_proc: config.session_id_proc,
-          exclude_paths: config.session_exclude_paths
-        )
+      if defined?(Rails) && Rails.env.production? && !config.session_tracer_allow_production
+        msg = '[Woods] session tracer disabled in production; ' \
+              'set `session_tracer_allow_production = true` to opt in.'
+        if defined?(Rails.logger) && Rails.logger
+          Rails.logger.warn(msg)
+        else
+          warn msg
+        end
+        next
       end
+
+      require 'woods/session_tracer/middleware'
+
+      app.middleware.use(
+        Woods::SessionTracer::Middleware,
+        store: config.session_store,
+        session_id_proc: config.session_id_proc,
+        exclude_paths: config.session_exclude_paths
+      )
     end
 
     initializer 'woods.console_mcp' do |app|

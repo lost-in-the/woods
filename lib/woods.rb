@@ -124,7 +124,8 @@ module Woods
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
-                  :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
+                  :session_tracer_enabled, :session_tracer_allow_production,
+                  :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
                   :console_blocked_tables, :console_disabled_scanner_patterns,
@@ -152,6 +153,7 @@ module Woods
       @enable_snapshots = false
       @context_format = :markdown
       @session_tracer_enabled = false
+      @session_tracer_allow_production = false
       @session_store = nil
       @session_id_proc = nil
       @session_exclude_paths = []
