@@ -151,6 +151,19 @@ See [docs/BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matri
 
 ---
 
+## When NOT to Use Woods
+
+Woods is not a universal fit. Skip it when:
+
+- **You're not building in Rails.** Woods leans hard on `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs — the value dries up outside Rails. For Django, Phoenix, or non-framework Ruby, other tools are a better fit.
+- **You need static analysis without booting.** Extraction requires a booted Rails environment because runtime introspection is the whole point. If your constraint is "can't boot the app" (locked-down CI, untrusted code review), static parsers are what you want.
+- **Production-only environments.** Extraction should run in development or CI. The Console Server is explicitly unsafe for production even with all five defense layers — it is a dev/staging tool.
+- **Row-level data is the goal.** Woods extracts schema and structure, not data. If you need to index row content for retrieval (customer records, documents, audit events), a different pipeline is appropriate.
+- **Tiny apps that already fit in context.** A 20-model app may not benefit — the LLM can probably read every file. Woods' win scales with monolith size and concern depth.
+- **You want a hosted service.** Woods is a gem, not a SaaS. Extraction output lives on your machines and the MCP servers run on your hardware. There is no cloud component.
+
+---
+
 ## Quick Start
 
 Install, extract, and connect in six steps:
