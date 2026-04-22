@@ -69,6 +69,15 @@ git add docs/superpowers/plans/2026-04-22-user-journey-v2.md
 git commit -m "Diagnose journey v2 Bug 1 (entryPoints runtime dropout)"
 ```
 
+**Task 1 findings (2026-04-22):**
+
+- (a) Raw response: `http://localhost:3010/woods/erd/schema.json` returns **16 entryPoints**, all shaped `{ identifier, verb: 'GET', path, action }` — matches Ruby emitter at `lib/woods/erd/entry_point_index_builder.rb:61-67`.
+- (b) `v.safeParse(schemaSchema, raw)` in `packages/schema`: **success: true**. Ran via a throwaway Vitest spec loading the live `schema.json` fixture. `result.output.entryPoints.length === 16` after parse — no field dropout.
+- (c) No issues: the `console.info(result.issues)` branch at `packages/cli/src/App.tsx:36` never fires. Parse is clean.
+- (d) **Root cause: not a data-flow bug.** Backend emits correctly, Valibot preserves the field, and the bundled `index-*.js` contains `entryPoints` code (`vendor/assets/liam-erd/assets/index-DreCKZEj.js`, rebuilt at commit c00d54a). The palette not showing an "Entry Points" group in the browser is either (i) cmdk's default filter hiding `Command.Group` when no items fuzzy-match the current query, or (ii) the cached bundle in the tester's browser predates the rebuild. The original spec's Valibot-omission hypothesis is disproven.
+
+**Implication for Task 2:** No production code fix needed. Task 2 is reduced to a defensive regression test that encodes the contract (schema with `entryPoints` must round-trip through `v.safeParse` without dropping the field), so the next refactor can't silently break it.
+
 ---
 
 ### Task 2: Fix the entryPoints runtime bug
