@@ -11,6 +11,8 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import { type FC, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+
+const NAV_VIAS: ReadonlySet<string> = new Set(['link_to', 'redirect_to', 'form_action'])
 import { useTableSelection } from '@/features/erd/hooks'
 import type { DisplayArea, WoodsNodeType } from '@/features/erd/types'
 import { selectTableLogEvent } from '@/features/gtm/utils'
@@ -132,35 +134,47 @@ export const ERDContentInner: FC<Props> = ({
 
   const displayEdges = useMemo(
     () =>
-      edges.map((edge) => {
-        const viaClass =
-          typeof edge.data?.['via'] === 'string'
-            ? `erd-edge--${edge.data['via']}`
-            : ''
-        const backEdgeClass =
-          journeyEdges?.find(
-            (e) =>
-              e.from === edge.source &&
-              e.to === edge.target &&
-              e.isBackEdge,
-          )
-            ? 'erd-edge--back-edge'
-            : ''
-        if (!viaClass && !backEdgeClass) return edge
-        return {
-          ...edge,
-          className: [edge.className, viaClass, backEdgeClass]
-            .filter(Boolean)
-            .join(' '),
-        }
-      }),
-    [edges, journeyEdges],
+      edges
+        .filter((edge) => {
+          // In journey mode, the journey walk result controls which edges are shown —
+          // never filter nav edges away from a journey walk.
+          if (journeyEdges !== null) return true
+          // Outside journey: hide nav edges when the toggle is off (default).
+          if (!navigationEdgesVisible) {
+            const via = edge.data?.['via']
+            if (typeof via === 'string' && NAV_VIAS.has(via)) return false
+          }
+          return true
+        })
+        .map((edge) => {
+          const viaClass =
+            typeof edge.data?.['via'] === 'string'
+              ? `erd-edge--${edge.data['via']}`
+              : ''
+          const backEdgeClass =
+            journeyEdges?.find(
+              (e) =>
+                e.from === edge.source &&
+                e.to === edge.target &&
+                e.isBackEdge,
+            )
+              ? 'erd-edge--back-edge'
+              : ''
+          if (!viaClass && !backEdgeClass) return edge
+          return {
+            ...edge,
+            className: [edge.className, viaClass, backEdgeClass]
+              .filter(Boolean)
+              .join(' '),
+          }
+        }),
+    [edges, journeyEdges, navigationEdgesVisible],
   )
 
   const {
     state: { loading },
   } = useErdContentContext()
-  const { activeTableName } = useUserEditingOrThrow()
+  const { activeTableName, navigationEdgesVisible } = useUserEditingOrThrow()
 
   const { selectTable, deselectTable } = useTableSelection()
 

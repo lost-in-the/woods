@@ -10,6 +10,7 @@ type ToolbarIconButtonProps = {
   label: string
   icon: ReactNode
   onClick?: MouseEventHandler
+  pressed?: boolean
 }
 
 export const ToolbarIconButton: FC<ToolbarIconButtonProps> = ({
@@ -19,6 +20,7 @@ export const ToolbarIconButton: FC<ToolbarIconButtonProps> = ({
   label,
   icon,
   onClick,
+  pressed,
 }) => {
   return (
     <ToolbarButton
@@ -33,6 +35,7 @@ export const ToolbarIconButton: FC<ToolbarIconButtonProps> = ({
         onClick={onClick}
         size={size}
         aria-label={label}
+        aria-pressed={pressed}
         data-testid={`toolbar-icon-button-${label}`}
       >
         {children}
