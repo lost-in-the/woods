@@ -2,28 +2,20 @@
 
 require 'spec_helper'
 
-# tool_specs.rb is loaded as part of the console server — stub the minimal
-# constants it references at load time so we can exercise the data table
-# without booting a full Rails environment.
-module Woods
-  module Console
-    module Server
-      module Tools
-        module Tier1; end
-        module Tier2; end
-        module Tier3; end
-        module Tier4; end
-      end
-
-      # Tier 4 handlers reference these at spec-definition time via `begin` blocks.
-      # rubocop:disable Lint/EmptyClass
-      class EvalGuard; end
-      class SqlValidator; end
-      # rubocop:enable Lint/EmptyClass
-    end
-  end
-end
-
+# tool_specs.rb is a pure data table. Tier 4 `handler:` values use `begin`
+# blocks that instantiate EvalGuard / SqlValidator at require-time, and
+# Tier 1–3 lambdas reference `Tools::TierN` (resolved lexically from
+# `Woods::Console::Server`). Loading the real dependencies — rather than
+# stubbing them here — prevents spec-order pollution: empty stubs at
+# `Woods::Console::Server::Tools::Tier1` or `Server::SqlValidator` would
+# shadow the real constants for every later spec that exercises the
+# server through its tool lambdas.
+require 'woods/console/eval_guard'
+require 'woods/console/sql_validator'
+require 'woods/console/tools/tier1'
+require 'woods/console/tools/tier2'
+require 'woods/console/tools/tier3'
+require 'woods/console/tools/tier4'
 require 'woods/console/tool_specs'
 
 RSpec.describe Woods::Console::Server do
