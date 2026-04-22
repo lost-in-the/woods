@@ -6,19 +6,36 @@ require 'woods'
 require 'woods/embedding/indexer'
 require 'woods/embedding/text_preparer'
 require 'woods/embedding/provider'
+require 'woods/storage/vector_store'
 
 RSpec.describe Woods::Embedding::Indexer do
+  # A small stub provider that returns deterministic vectors. Uses a real class
+  # so the indexer exercises actual call paths instead of RSpec's message
+  # tracking.
+  let(:stub_provider_class) do
+    Class.new do
+      attr_reader :embed_batch_calls
+
+      def initialize(vector: [0.1, 0.2])
+        @vector = vector
+        @embed_batch_calls = 0
+      end
+
+      def embed(_text)
+        @vector
+      end
+
+      def embed_batch(texts)
+        @embed_batch_calls += 1
+        Array.new(texts.length) { @vector }
+      end
+    end
+  end
+
   let(:output_dir) { '/tmp/claude/indexer_test' }
-
-  let(:provider) do
-    instance_double('Provider', embed: [0.1, 0.2], embed_batch: [[0.1, 0.2], [0.3, 0.4]])
-  end
-
+  let(:provider) { stub_provider_class.new }
   let(:text_preparer) { Woods::Embedding::TextPreparer.new }
-
-  let(:vector_store) do
-    instance_double('VectorStore', store: nil, store_batch: nil, delete: nil, count: 0)
-  end
+  let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
 
   let(:indexer) do
     described_class.new(
@@ -58,7 +75,6 @@ RSpec.describe Woods::Embedding::Indexer do
 
   before do
     FileUtils.mkdir_p(output_dir)
-    # Clean up any previous test files
     Dir.glob(File.join(output_dir, '*.json')).each { |f| File.delete(f) }
   end
 
@@ -78,21 +94,18 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(stats[:errors]).to eq(0)
     end
 
-    it 'calls embed_batch on the provider' do
+    it 'stores the embedded vector in the vector store' do
       indexer.index_all
-      expect(provider).to have_received(:embed_batch)
+
+      expect(vector_store.count).to eq(1)
+      results = vector_store.search([0.1, 0.2], limit: 1)
+      expect(results.first.id).to eq('User')
+      expect(results.first.metadata).to include(type: 'model', identifier: 'User')
     end
 
-    it 'stores vectors in the vector store via batch' do
+    it 'writes a checkpoint file keyed by identifier and source hash' do
       indexer.index_all
-      expect(vector_store).to have_received(:store_batch).with(
-        [hash_including(id: 'User', vector: [0.1, 0.2],
-                        metadata: hash_including(type: 'model', identifier: 'User'))]
-      )
-    end
 
-    it 'writes a checkpoint file' do
-      indexer.index_all
       checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
       expect(checkpoint['User']).to eq('abc123')
     end
@@ -102,9 +115,11 @@ RSpec.describe Woods::Embedding::Indexer do
         File.write(File.join(output_dir, 'payment_service.json'), JSON.generate(second_unit_data))
       end
 
-      it 'processes all units' do
+      it 'stores a vector for each unit' do
         stats = indexer.index_all
+
         expect(stats[:processed]).to eq(2)
+        expect(vector_store.count).to eq(2)
       end
     end
 
@@ -120,7 +135,6 @@ RSpec.describe Woods::Embedding::Indexer do
 
       before do
         File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked_data))
-        allow(provider).to receive(:embed_batch).and_return([[0.1, 0.2], [0.3, 0.4]])
       end
 
       it 'creates one embedding per chunk' do
@@ -128,12 +142,11 @@ RSpec.describe Woods::Embedding::Indexer do
         expect(stats[:processed]).to eq(2)
       end
 
-      it 'stores each chunk with a chunk suffix ID via batch' do
+      it 'stores each chunk under a chunk-suffixed id' do
         indexer.index_all
-        expect(vector_store).to have_received(:store_batch) do |entries|
-          ids = entries.map { |e| e[:id] }
-          expect(ids).to include('User#chunk_0', 'User#chunk_1')
-        end
+
+        stored_ids = vector_store.search([0.1, 0.2], limit: 10).map(&:id)
+        expect(stored_ids).to contain_exactly('User#chunk_0', 'User#chunk_1')
       end
     end
 
@@ -179,15 +192,13 @@ RSpec.describe Woods::Embedding::Indexer do
         File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
       end
 
-      it 'skips unchanged units' do
+      it 'skips unchanged units and does not embed them' do
         stats = indexer.index_incremental
+
         expect(stats[:processed]).to eq(0)
         expect(stats[:skipped]).to eq(1)
-      end
-
-      it 'does not call the provider' do
-        indexer.index_incremental
-        expect(provider).not_to have_received(:embed_batch)
+        expect(provider.embed_batch_calls).to eq(0)
+        expect(vector_store.count).to eq(0)
       end
     end
 
@@ -199,8 +210,10 @@ RSpec.describe Woods::Embedding::Indexer do
 
       it 'processes the changed unit' do
         stats = indexer.index_incremental
+
         expect(stats[:processed]).to eq(1)
         expect(stats[:skipped]).to eq(0)
+        expect(vector_store.count).to eq(1)
       end
     end
 
@@ -217,33 +230,57 @@ RSpec.describe Woods::Embedding::Indexer do
   end
 
   describe 'error handling' do
+    # Provider that always fails — a behavioural stub, not a mock spy.
+    let(:failing_provider_class) do
+      Class.new do
+        def initialize(message)
+          @message = message
+        end
+
+        def embed(_text)
+          raise StandardError, @message
+        end
+
+        def embed_batch(_texts)
+          raise StandardError, @message
+        end
+      end
+    end
+
     before do
       File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
-      allow(provider).to receive(:embed_batch).and_raise(StandardError, 'connection refused')
     end
 
     it 'raises Woods::Error on provider failure' do
-      expect { indexer.index_all }.to raise_error(
+      failing_indexer = described_class.new(
+        provider: failing_provider_class.new('connection refused'),
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        output_dir: output_dir,
+        batch_size: 2
+      )
+
+      expect { failing_indexer.index_all }.to raise_error(
         Woods::Error, /Embedding failed: connection refused/
       )
     end
 
-    it 'includes the error message in the raised exception' do
-      expect { indexer.index_all }.to raise_error(
-        Woods::Error, /connection refused/
-      )
-    end
-
     it 'increments error count in stats via embed_and_store' do
+      failing_indexer = described_class.new(
+        provider: failing_provider_class.new('network timeout'),
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        output_dir: output_dir,
+        batch_size: 2
+      )
+
       stats = { processed: 0, skipped: 0, errors: 0 }
       items = [{ id: 'User', text: 'class User; end', unit_data: unit_data,
                  source_hash: 'abc123', identifier: 'User' }]
       checkpoint = {}
 
-      allow(provider).to receive(:embed_batch).and_raise(StandardError, 'network timeout')
-
       expect do
-        indexer.send(:embed_and_store, items, checkpoint, stats)
+        failing_indexer.send(:embed_and_store, items, checkpoint, stats)
       end.to raise_error(Woods::Error, /network timeout/)
 
       expect(stats[:errors]).to eq(1)

@@ -28,6 +28,26 @@ RSpec.describe Woods::Console::DispatchPipeline do
     end
   end
 
+  # Hand-rolled recording logger. Each log call is captured as a data tuple so
+  # specs can assert on observable log output without RSpec message spies.
+  let(:recording_logger_class) do
+    Class.new do
+      attr_reader :events
+
+      def initialize
+        @events = []
+      end
+
+      def warn(event, payload = {})
+        @events << { level: :warn, event: event, payload: payload }
+      end
+
+      def info(event, payload = {})
+        @events << { level: :info, event: event, payload: payload }
+      end
+    end
+  end
+
   let(:ok_result) { { 'ok' => true, 'result' => { 'record' => { 'id' => 1 } } } }
   let(:error_result) { { 'ok' => false, 'error_type' => 'RuntimeError', 'error' => 'boom' } }
 
@@ -79,13 +99,14 @@ RSpec.describe Woods::Console::DispatchPipeline do
       scanner = Woods::Console::CredentialScanner.new
       response_ctx = Woods::Console::ResponseContext.build(credential_scanner: scanner)
       conn = conn_mgr.new('ok' => true, 'result' => 'token: sk_live_abcdefghijklmnopqrstuvwx')
-      logger = spy('logger')
+      logger = recording_logger_class.new
       pipeline = build_pipeline(conn: conn, ctx: response_ctx, logger: logger)
 
       response = pipeline.call({})
 
       expect(response.content.first[:text]).to include('[REDACTED')
-      expect(logger).to have_received(:warn).with('console.credential_scan.hits', anything)
+      credential_events = logger.events.select { |e| e[:event] == 'console.credential_scan.hits' }
+      expect(credential_events).not_to be_empty
     end
 
     it 'renders via the renderer when provided' do
@@ -114,14 +135,15 @@ RSpec.describe Woods::Console::DispatchPipeline do
       gate = Woods::Console::TableGate.new(blocked_tables: %w[users], model_tables: {})
       response_ctx = Woods::Console::ResponseContext.build(table_gate: gate)
       conn = conn_mgr.new(ok_result)
-      logger = spy('logger')
+      logger = recording_logger_class.new
       pipeline = build_pipeline(conn: conn, ctx: response_ctx, logger: logger)
 
       response = pipeline.call({ sql: 'SELECT * FROM users' })
 
       expect(response.error?).to be(true)
       expect(response.content.first[:text]).to include('users')
-      expect(logger).to have_received(:warn).with('console.table_gate.rejected', anything)
+      rejection_events = logger.events.select { |e| e[:event] == 'console.table_gate.rejected' }
+      expect(rejection_events).not_to be_empty
       expect(conn.calls).to be_empty
     end
 
