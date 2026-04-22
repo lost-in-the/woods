@@ -3,6 +3,8 @@
 require 'json'
 require 'digest'
 
+require_relative '../extracted_unit'
+
 module Woods
   module Embedding
     # Orchestrates the indexing pipeline: reads extracted units, prepares text,

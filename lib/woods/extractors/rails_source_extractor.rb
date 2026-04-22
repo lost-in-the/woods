@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../extracted_unit'
+
 module Woods
   module Extractors
     # RailsSourceExtractor indexes selected parts of the Rails framework
