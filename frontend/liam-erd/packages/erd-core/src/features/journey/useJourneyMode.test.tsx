@@ -146,15 +146,58 @@ describe('useJourneyMode', () => {
     expect(result.current.journey.snapshot).toBeNull()
   })
 
-  it('clears activeTableName on enterJourney (auto-exit Focus)', () => {
+  it('clears activeTableName on enterJourney (auto-exit Focus)', async () => {
     const { result } = renderHook(
       () => ({ journey: useJourneyMode(), user: useUserEditingOrThrow() }),
       { wrapper: ({ children }) => allProvidersWrapper(children) },
     )
-    act(() => result.current.user.setActiveTableName('users'))
+    await act(async () => result.current.user.setActiveTableName('users'))
     act(() =>
       result.current.journey.enterJourney({ identifier: 'X', verb: 'GET', path: '/x', action: 'show' }),
     )
     expect(result.current.user.activeTableName).toBeFalsy()
+  })
+
+  it('setSnapshotViewport merges viewport into existing snapshot without clobbering other fields', async () => {
+    const { result } = renderHook(
+      () => ({ journey: useJourneyMode(), user: useUserEditingOrThrow() }),
+      { wrapper: ({ children }) => allProvidersWrapper(children) },
+    )
+    await act(async () => {
+      result.current.user.setShowMode('TABLE_NAME')
+      await result.current.user.setActiveTableName('orders')
+    })
+    act(() => {
+      result.current.journey.enterJourney({
+        identifier: 'CheckoutController',
+        verb: 'GET',
+        path: '/checkout',
+        action: 'new',
+      })
+    })
+    // snapshot exists but viewport is null (filled by the viewport effect)
+    expect(result.current.journey.snapshot?.viewport).toBeNull()
+
+    const vp = { x: 100, y: 200, zoom: 1.5 }
+    act(() => {
+      result.current.journey.setSnapshotViewport(vp)
+    })
+
+    expect(result.current.journey.snapshot?.viewport).toEqual(vp)
+    // other snapshot fields must be preserved
+    expect(result.current.journey.snapshot?.showMode).toBe('TABLE_NAME')
+    expect(result.current.journey.snapshot?.activeTableName).toBe('orders')
+  })
+
+  it('setSnapshotViewport is a no-op when snapshot is null', async () => {
+    const { result } = renderHook(() => useJourneyMode(), {
+      wrapper: ({ children }) => allProvidersWrapper(children),
+    })
+    await act(async () => {})
+    // snapshot is null before enterJourney
+    act(() => {
+      result.current.setSnapshotViewport({ x: 0, y: 0, zoom: 1 })
+    })
+    expect(result.current.snapshot).toBeNull()
   })
 })

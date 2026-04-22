@@ -8,6 +8,7 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  useReactFlow,
 } from '@xyflow/react'
 import { type FC, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTableSelection } from '@/features/erd/hooks'
@@ -73,6 +74,31 @@ export const ERDContentInner: FC<Props> = ({
     [journeyCtx?.result],
   )
   const entryPoint = journeyCtx?.entryPoint ?? null
+
+  const reactFlow = useReactFlow()
+
+  useEffect(() => {
+    if (!journeyCtx) return
+    const { entryPoint: ep, snapshot, result, setSnapshotViewport } = journeyCtx
+
+    if (ep && snapshot && !snapshot.viewport) {
+      // Just entered journey: capture current viewport, then fit to subgraph
+      setSnapshotViewport(reactFlow.getViewport())
+      const walkedIds = Array.from(result?.nodes.keys() ?? [])
+      if (walkedIds.length > 0) {
+        reactFlow.fitView({
+          nodes: walkedIds.map((id) => ({ id })),
+          duration: 400,
+          padding: 0.2,
+        })
+      }
+    }
+
+    if (!ep && snapshot?.viewport) {
+      // Exiting journey: restore saved viewport
+      reactFlow.setViewport(snapshot.viewport, { duration: 400 })
+    }
+  }, [journeyCtx, reactFlow])
 
   const displayNodes = useMemo(
     () =>

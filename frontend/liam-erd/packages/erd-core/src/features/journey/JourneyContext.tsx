@@ -1,4 +1,4 @@
-import { createContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { ShowMode } from '@/schemas'
 import type { EdgeVia, WalkableSchema, WalkResult } from './walker'
 import { walk } from './walker'
@@ -29,6 +29,7 @@ export type JourneyContextValue = {
   toggleEdgeType: (via: EdgeVia) => void
   setEntryPoint: (entry: EntryPoint | null) => void
   setSnapshot: (snapshot: ExploreSnapshot | null) => void
+  setSnapshotViewport: (vp: { x: number; y: number; zoom: number }) => void
 }
 
 export const JourneyContext = createContext<JourneyContextValue | null>(null)
@@ -51,6 +52,13 @@ export function JourneyProvider({
   const [enabledEdgeTypes, setEnabledEdgeTypes] =
     useState<Set<EdgeVia>>(DEFAULT_EDGE_TYPES)
   const [snapshot, setSnapshot] = useState<ExploreSnapshot | null>(null)
+
+  const setSnapshotViewport = useCallback(
+    (vp: { x: number; y: number; zoom: number }) => {
+      setSnapshot((prev) => (prev ? { ...prev, viewport: vp } : prev))
+    },
+    [],
+  )
 
   const result = useMemo<WalkResult | null>(() => {
     if (!entryPoint) return null
@@ -78,6 +86,7 @@ export function JourneyProvider({
       }),
     setEntryPoint,
     setSnapshot,
+    setSnapshotViewport,
   }
 
   return (
