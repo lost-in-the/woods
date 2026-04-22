@@ -25,6 +25,48 @@ bundle exec rake woods:notion_sync       # Sync models/columns to Notion
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
 
+## Host app for integration testing: `woods-testbed`
+
+A Rails 8 sample app at `~/work/woods-testbed/rails-app` is the primary host for exercising the gem in a real Rails environment. Use it whenever a change needs to be validated against a booted Rails app — extractor output, MCP server behaviour, console tool dispatch, ERD middleware, initializer generation, smoke scripts.
+
+**Container:** `woods-testbed-app` (runs via Docker, already up — verify with `docker ps | grep woods-testbed-app`). The container bind-mounts the gem source at `/woods-gem` and the app source at `/app`. Changes to the gem under `~/lost-in-the/woods` are reflected immediately inside the container (no reinstall).
+
+**How to run commands inside it:**
+
+```bash
+# Extraction
+docker exec woods-testbed-app bash -lc 'cd /app && bin/rails woods:extract'
+docker exec woods-testbed-app bash -lc 'cd /app && bin/rails woods:stats'
+docker exec woods-testbed-app bash -lc 'cd /app && bin/rails woods:validate'
+
+# Console/rails runner (for smoke scripts and ad-hoc checks)
+docker exec woods-testbed-app bash -lc 'cd /app && bin/rails runner script/woods_smoke.rb'
+docker exec woods-testbed-app bash -lc 'cd /app && bin/rails runner script/woods_credentials_smoke.rb'
+
+# Interactive Rails console
+docker exec -it woods-testbed-app bash -lc 'cd /app && bin/rails console'
+```
+
+**Extraction output:** lands at `~/work/woods-testbed/rails-app/tmp/woods/` (host path — the mount makes it readable from both sides). Use it to verify extractor structure, dependency graphs, PageRank scores, chunking, and MCP-server input.
+
+**Woods initializer:** `~/work/woods-testbed/rails-app/config/initializers/woods_console.rb` configures console MCP + redacted columns + ERD. Modify it if a change needs new initializer fields, then re-run extraction.
+
+**Smoke scripts live in the testbed, not the gem.** `script/woods_smoke.rb` and `script/woods_credentials_smoke.rb` in the testbed are canonical end-to-end checks for Rails 8 boot, Console MCP pipeline (TableGate → redaction → credential scanning), and common fix regressions. Add new scripts there when a change needs ongoing smoke coverage.
+
+**The testbed is a playground — modify it freely.** Agents have permission to add models, migrations, controllers, initializers, smoke scripts, seeds, or any other Rails-app code needed to exercise gem functionality. It exists specifically to be reshaped for validation scenarios. No approval needed for testbed changes; only gem changes follow the normal review gate.
+
+**When to use woods-testbed vs. the other host apps:**
+- **`woods-testbed`** — default for post-rename work and Rails 8 validation. Small, fast, self-contained, runs in its own container.
+- **`~/work/test_app`** — version-specific integration specs in `spec/integration/` (Rails 8.1, SQLite, no Docker). Use when fixtures need to be committed or when the spec-based workflow matters.
+- **`~/work/compose-dev/admin`** — production-shaped MySQL app, large codebase. Use only when an issue demands real-world scale (namespace collisions, large callback chains, non-standard service dirs) that `woods-testbed` can't reproduce.
+
+**Gotchas:**
+- The testbed's gem mount source may point at a worktree (not main) — check `docker inspect woods-testbed-app --format '{{json .Mounts}}' | grep /woods-gem` if you need to confirm which branch is being exercised.
+- Some Ruby 3.3 deprecation warnings (`mutex_m` from minitest-5.15) are noise, not real problems.
+- The app boots with `bootsnap` — if a boot-time change doesn't take effect, clear `~/work/woods-testbed/rails-app/tmp/cache/bootsnap/` inside the container and retry.
+
+See `.claude/rules/integration-testing.md` for the full host-app reference.
+
 ## Architecture
 
 ```
