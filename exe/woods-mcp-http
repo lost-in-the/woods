@@ -17,6 +17,7 @@ require_relative '../lib/woods/dependency_graph'
 require_relative '../lib/woods/graph_analyzer'
 require_relative '../lib/woods/mcp/server'
 require_relative '../lib/woods/mcp/bootstrapper'
+require_relative '../lib/woods/mcp/bearer_auth'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
@@ -26,12 +27,24 @@ snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
 
 port = (ENV['PORT'] || 9292).to_i
 host = ENV['HOST'] || 'localhost'
+token = ENV.fetch('WOODS_MCP_HTTP_TOKEN', nil)
+token = nil if token && token.empty?
+
+loopback = %w[localhost 127.0.0.1 ::1].include?(host)
+if !loopback && token.nil?
+  abort "[woods-mcp-http] Refusing to bind #{host} without WOODS_MCP_HTTP_TOKEN. " \
+        'Either set HOST=localhost, set WOODS_MCP_HTTP_TOKEN, or see docs/MCP_HTTP_TRANSPORT.md#security.'
+end
+if loopback && token.nil?
+  warn '[woods-mcp-http] WARNING: running on loopback without a token; local processes can reach this server.'
+end
 
 server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport
 
-app = proc { |env| transport.handle_request(Rack::Request.new(env)) }
+inner = proc { |env| transport.handle_request(Rack::Request.new(env)) }
+app = token ? Woods::MCP::BearerAuth.new(inner, token: token) : inner
 
-warn "Woods MCP HTTP server starting on http://#{host}:#{port}"
+warn "Woods MCP HTTP server starting on http://#{host}:#{port} (auth: #{token ? 'bearer' : 'none'})"
 Rackup::Handler.default.run(app, Port: port, Host: host)

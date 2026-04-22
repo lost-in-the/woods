@@ -672,4 +672,13 @@ namespace :woods do
 
   desc 'Relay findings to Unblocked (alias for unblocked_sync)'
   task relay: :unblocked_sync
+
+  desc 'Generate a random bearer token for woods-mcp-http (WOODS_MCP_HTTP_TOKEN)'
+  task :generate_token do
+    require 'securerandom'
+    token = SecureRandom.hex(32)
+    puts token
+    warn 'Set WOODS_MCP_HTTP_TOKEN to this value in the environment where woods-mcp-http runs,'
+    warn 'and send it as `Authorization: Bearer <token>` from clients.'
+  end
 end

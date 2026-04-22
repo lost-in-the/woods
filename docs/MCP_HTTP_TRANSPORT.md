@@ -153,3 +153,41 @@ woods-mcp --http --port 8080  # HTTP on custom port
 - The MCP specification (2025-03-26) designates Streamable HTTP as the standard remote transport, replacing the earlier SSE-only transport
 - The next spec release (~June 2026) is expected to further formalize stateless transport patterns for horizontal scaling
 - The `mcp` gem tracks the spec closely; v0.6.0 already implements the full Streamable HTTP spec including stateless mode
+
+## Security
+
+The MCP gem does not authenticate at the transport layer, so `exe/woods-mcp-http` enforces authentication itself. The rules:
+
+| `HOST`                            | `WOODS_MCP_HTTP_TOKEN` set? | Result                                                      |
+|-----------------------------------|------------------------------|-------------------------------------------------------------|
+| `localhost` / `127.0.0.1` / `::1` | no                           | Boots with a warning; unauthenticated loopback access only  |
+| `localhost` / `127.0.0.1` / `::1` | yes                          | Boots; every request must present `Authorization: Bearer …` |
+| anything else                     | no                           | **Refuses to boot** — aborts with a pointer to this section |
+| anything else                     | yes                          | Boots; every request must present `Authorization: Bearer …` |
+
+This matches the posture used by other unauthenticated local servers (Redis `protected-mode`, Postgres `listen_addresses`): loopback works freely, non-loopback requires an explicit credential.
+
+### Generating a token
+
+```bash
+bundle exec rake woods:generate_token
+# prints a 64-char hex token to stdout
+```
+
+Any cryptographically random string works; `openssl rand -hex 32` is equivalent.
+
+### Running the server with a token
+
+```bash
+export WOODS_MCP_HTTP_TOKEN=$(bundle exec rake woods:generate_token 2>/dev/null)
+HOST=0.0.0.0 PORT=9292 bundle exec woods-mcp-http
+```
+
+Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request. Missing or mismatched tokens get `HTTP 401` with a `WWW-Authenticate: Bearer` header; comparison is constant-time (`Rack::Utils.secure_compare`).
+
+### Known limitations
+
+- **Plaintext tokens on the wire.** Bearer auth over HTTP leaks the token to anything on the network path. Terminate TLS at a reverse proxy (nginx, Caddy, Cloudflare) for any deployment beyond a single trusted host.
+- **No rotation primitive.** There is one static token. Rotating it requires restarting the server and updating clients. A rotation story is tracked separately and will likely arrive with a broader OAuth-shaped design.
+- **No per-client identity.** Every valid request is equally trusted; there are no scopes or audit trails. Treat the token as a shared secret for a trust boundary you already control.
+
