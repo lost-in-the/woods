@@ -51,5 +51,6 @@ app = token ? Woods::MCP::BearerAuth.new(inner, token: token) : inner
 app = Woods::MCP::OriginGuard.new(app, allowed_origins: allowed_origins)
 
 origin_summary = allowed_origins.empty? ? 'loopback' : allowed_origins.join(',')
-warn "Woods MCP HTTP server starting on http://#{host}:#{port} (auth: #{token ? 'bearer' : 'none'}, origins: #{origin_summary})"
+auth_mode = token ? 'bearer' : 'none'
+warn "Woods MCP HTTP server starting on http://#{host}:#{port} (auth: #{auth_mode}, origins: #{origin_summary})"
 Rackup::Handler.default.run(app, Port: port, Host: host)
