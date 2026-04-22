@@ -121,4 +121,63 @@ RSpec.describe Woods::Console::RackMiddleware do
       expect(result[:registry]).not_to include('BadModel')
     end
   end
+
+  describe '#check_blocked_tables_config!' do
+    subject(:middleware) { described_class.new(->(_env) { [200, {}, []] }) }
+
+    context 'when console_blocked_tables is non-empty' do
+      before do
+        allow(Woods.configuration).to receive(:console_blocked_tables)
+          .and_return(%w[sessions])
+      end
+
+      it 'does nothing' do
+        expect { middleware.send(:check_blocked_tables_config!) }.not_to raise_error
+      end
+    end
+
+    context 'when console_blocked_tables is empty in a non-production environment' do
+      before do
+        allow(Woods.configuration).to receive(:console_blocked_tables).and_return([])
+
+        rails_env = double('env', production?: false)
+        rails_double = class_double('Rails').as_stubbed_const
+        allow(rails_double).to receive(:env).and_return(rails_env)
+      end
+
+      it 'emits a warn instead of raising' do
+        expect { middleware.send(:check_blocked_tables_config!) }.not_to raise_error
+      end
+
+      it 'includes the remediation hint in the warning' do
+        warning = nil
+        allow(middleware).to receive(:warn) { |msg| warning = msg }
+
+        middleware.send(:check_blocked_tables_config!)
+
+        expect(warning).to include('console_blocked_tables')
+        expect(warning).to include('DEFAULT_CONSOLE_BLOCKED_TABLES')
+      end
+    end
+
+    context 'when console_blocked_tables is empty in production' do
+      before do
+        allow(Woods.configuration).to receive(:console_blocked_tables).and_return([])
+
+        rails_env = double('env', production?: true)
+        rails_double = class_double('Rails').as_stubbed_const
+        allow(rails_double).to receive(:env).and_return(rails_env)
+      end
+
+      it 'raises Woods::ConfigurationError' do
+        expect { middleware.send(:check_blocked_tables_config!) }
+          .to raise_error(Woods::ConfigurationError, /console_blocked_tables/)
+      end
+
+      it 'includes the remediation hint in the error message' do
+        expect { middleware.send(:check_blocked_tables_config!) }
+          .to raise_error(Woods::ConfigurationError, /DEFAULT_CONSOLE_BLOCKED_TABLES/)
+      end
+    end
+  end
 end
