@@ -80,19 +80,17 @@ git commit -m "Diagnose journey v2 Bug 1 (entryPoints runtime dropout)"
 
 ---
 
-### Task 2: Fix the entryPoints runtime bug
+### Task 2: Regression test for entryPoints schema round-trip
 
-Scope depends on Task 1 findings. Two common outcomes with their fixes below; pick the one that matches.
+Task 1 proved there is no production bug — backend emits 16 entries, Valibot parses them all, bundle contains the code. This task encodes the contract so a future refactor can't silently break it.
 
-**Files (both outcomes):**
-- Test: `packages/schema/src/schema/schema.test.ts`
+**Files:**
+- Test: `packages/schema/src/schema/schema.test.ts` (add a single test; create file if absent)
 
-- [ ] **Step 1: Write the failing regression test**
-
-Use a fixture that mirrors what the backend emits in the reproduction. Add to `schema.test.ts`:
+- [ ] **Step 1: Add the regression test**
 
 ```ts
-it('preserves entryPoints through safeParse when backend shape is exactly as emitted', () => {
+it('preserves entryPoints through safeParse with backend-shaped input', () => {
   const raw = {
     tables: {},
     enums: {},
@@ -110,25 +108,7 @@ it('preserves entryPoints through safeParse when backend shape is exactly as emi
 })
 ```
 
-If Task 1 revealed an actual failing entry (e.g., a missing field, a verb not equal to 'GET', a stray field), add a second test using that exact shape.
-
-- [ ] **Step 2: Run the test to confirm baseline**
-
-```
-pnpm --filter @liam-hq/schema test -- --run schema.test.ts
-```
-
-Expected: the synthetic test passes (if it fails, the schema module itself is broken — that becomes the fix target). The diagnostic-mirrored test either passes (meaning the bug is not in schema parsing) or fails (meaning it is).
-
-- [ ] **Step 3: Apply the fix**
-
-**Outcome A — backend emits a malformed entry.** Fix `lib/woods/erd/entry_point_index_builder.rb` to produce a consistent shape (e.g., coerce nil fields to empty strings, or skip entries lacking required fields). Add RSpec coverage.
-
-**Outcome B — Valibot schema is stricter than the backend shape.** Loosen the offending field (e.g., widen `verb: v.literal('GET')` to `verb: v.picklist(['GET'])` if that's not the issue; or accept an extra field the backend emits but the schema doesn't allow — Valibot's default is to error on unknown fields only if the schema is `v.strictObject`; confirm current behaviour before changing).
-
-**Outcome C — the endpoint the ERD fetches isn't `schema.json`.** The CLI fetches `./schema.json` relative to itself. If Rails serves the ERD from a path that masks `schema.json` with a different file, fix the Rails mount. Out-of-scope if it's purely a Rails routing issue; split to a separate task.
-
-- [ ] **Step 4: Re-run the test to confirm pass**
+- [ ] **Step 2: Run the test**
 
 ```
 pnpm --filter @liam-hq/schema test -- --run schema.test.ts
@@ -136,15 +116,11 @@ pnpm --filter @liam-hq/schema test -- --run schema.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Manual verification in the testbed**
-
-Rebuild the CLI (`pnpm --filter @liam-hq/cli build`), reload the ERD. Confirm the Entry Points group appears in ⌘K when the search matches a known entry point.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add packages/schema/src/schema/schema.test.ts <other modified files>
-git commit -m "Fix entryPoints dropout so ⌘K shows Entry Points group"
+git add packages/schema/src/schema/schema.test.ts
+git commit -m "Add entryPoints schema round-trip regression test"
 ```
 
 ---
