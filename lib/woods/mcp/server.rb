@@ -40,6 +40,31 @@ module Woods
 
           # Lambda captured by all tool blocks for building responses.
           respond = method(:text_response)
+          respond_err = method(:error_response)
+          op_missing = lambda do |tool|
+            error_response(
+              'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \
+              'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.',
+              code: :not_configured, config_key: 'operator',
+              doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool
+            )
+          end
+          fb_missing = lambda do |tool|
+            error_response(
+              'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \
+              'to enable retrieval feedback capture.',
+              code: :not_configured, config_key: 'feedback_store',
+              doc_link: 'docs/FEEDBACK_STORE.md', tool: tool
+            )
+          end
+          snap_missing = lambda do |tool|
+            error_response(
+              'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \
+              'and pass `snapshot_store:` to Woods::MCP::Server.build.',
+              code: :not_configured, config_key: 'enable_snapshots',
+              doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool
+            )
+          end
 
           server = ::MCP::Server.new(
             name: 'woods',
@@ -48,7 +73,7 @@ module Woods
             resource_templates: resource_templates
           )
 
-          define_lookup_tool(server, reader, respond, renderer)
+          define_lookup_tool(server, reader, respond, respond_err, renderer)
           define_search_tool(server, reader, respond, renderer)
           define_traversal_tool(server, reader, respond, renderer,
                                 name: 'dependencies',
@@ -67,13 +92,13 @@ module Woods
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
           define_reload_tool(server, reader, respond)
-          define_retrieve_tool(server, retriever, respond)
+          define_retrieve_tool(server, retriever, respond, respond_err)
           define_trace_flow_tool(server, reader, index_dir, respond, renderer)
-          define_session_trace_tool(server, reader, respond)
-          define_operator_tools(server, operator, respond)
-          define_feedback_tools(server, feedback_store, respond)
-          define_snapshot_tools(server, snapshot_store, respond)
-          define_notion_sync_tool(server, reader, index_dir, respond)
+          define_session_trace_tool(server, reader, respond, respond_err)
+          define_operator_tools(server, operator, respond, respond_err, op_missing)
+          define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing)
+          define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing)
+          define_notion_sync_tool(server, reader, index_dir, respond, respond_err)
           define_woods_status_tool(server, reader, retriever, index_dir, respond)
           register_resource_handler(server, reader)
 
@@ -84,6 +109,28 @@ module Woods
 
         def text_response(text)
           ::MCP::Tool::Response.new([{ type: 'text', text: text }])
+        end
+
+        # Build a structured error response that carries machine-readable
+        # metadata alongside the human-readable text. Agents can branch on
+        # `_meta.error_code` (e.g. `:not_configured`, `:not_found`,
+        # `:rate_limited`, `:unsupported_argument`) without parsing the text.
+        #
+        # @param message [String] Human-readable explanation
+        # @param code [Symbol] Stable error code (machine-readable)
+        # @param config_key [String, nil] Offending configuration key when relevant
+        # @param doc_link [String, nil] Relative docs path explaining the fix
+        # @param extra [Hash] Additional meta fields (e.g., identifier:, tool:)
+        def error_response(message, code:, config_key: nil, doc_link: nil, **extra)
+          meta = { error_code: code }
+          meta[:config_key] = config_key if config_key
+          meta[:doc_link] = doc_link if doc_link
+          meta.merge!(extra) unless extra.empty?
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: message }],
+            error: true,
+            meta: meta
+          )
         end
 
         def truncate_section(array, limit)
@@ -141,7 +188,7 @@ module Woods
           container["#{key}_offset"] = offset if offset.positive?
         end
 
-        def define_lookup_tool(server, reader, respond, renderer)
+        def define_lookup_tool(server, reader, respond, respond_err, renderer)
           coerce = method(:coerce_array)
           server.define_tool(
             name: 'lookup',
@@ -173,7 +220,13 @@ module Woods
               end
               respond.call(renderer.render(:lookup, filtered))
             else
-              respond.call("Unit not found: #{identifier}")
+              respond_err.call(
+                "Unit not found: #{identifier}",
+                code: :not_found,
+                identifier: identifier,
+                tool: 'lookup',
+                hint: 'Use `search` to find identifiers by pattern, then `lookup` on the exact match.'
+              )
             end
           end
         end
@@ -470,7 +523,7 @@ module Woods
           end
         end
 
-        def define_retrieve_tool(server, retriever, respond)
+        def define_retrieve_tool(server, retriever, respond, respond_err)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'codebase_retrieve',
@@ -493,11 +546,15 @@ module Woods
               result = retriever.retrieve(query, budget: budget || 8000)
               respond.call(result.context)
             else
-              respond.call(
+              respond_err.call(
                 'Semantic search is disabled — no embedding provider is configured. ' \
                 'To enable: set OPENAI_API_KEY, or run Ollama locally ' \
                 '(brew install ollama && ollama serve && ollama pull nomic-embed-text). ' \
-                'Use the `search` tool for pattern-based matching in the meantime.'
+                'Use the `search` tool for pattern-based matching in the meantime.',
+                code: :not_configured,
+                config_key: 'embedding_provider',
+                doc_link: 'docs/RETRIEVAL_GUIDE.md#configuring-retrieval',
+                tool: 'codebase_retrieve'
               )
             end
           end
@@ -540,7 +597,7 @@ module Woods
           end
         end
 
-        def define_session_trace_tool(server, reader, respond)
+        def define_session_trace_tool(server, reader, respond, respond_err)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'session_trace',
@@ -557,7 +614,16 @@ module Woods
             budget = coerce_int.call(budget)
             depth = coerce_int.call(depth)
             store = Woods.configuration.session_store
-            next respond.call(JSON.pretty_generate({ error: 'Session tracer not configured' })) unless store
+            unless store
+              next respond_err.call(
+                'Session tracer is not configured. Assign `session_store` (FileStore, RedisStore, or SolidCacheStore) ' \
+                'and set `session_tracer_enabled = true` in Woods.configure.',
+                code: :not_configured,
+                config_key: 'session_store',
+                doc_link: 'docs/SESSION_TRACER.md',
+                tool: 'session_trace'
+              )
+            end
 
             require_relative '../session_tracer/session_flow_assembler'
 
@@ -567,26 +633,31 @@ module Woods
             doc = assembler.assemble(session_id, budget: budget || 8000, depth: depth || 1)
             respond.call(doc.to_markdown)
           rescue StandardError => e
-            respond.call(JSON.pretty_generate({ error: e.message }))
+            respond_err.call(
+              "Session trace failed: #{e.message}",
+              code: :internal_error,
+              tool: 'session_trace',
+              session_id: session_id
+            )
           end
         end
 
-        def define_operator_tools(server, operator, respond)
-          define_pipeline_extract_tool(server, operator, respond)
-          define_pipeline_embed_tool(server, operator, respond)
-          define_pipeline_status_tool(server, operator, respond)
-          define_pipeline_diagnose_tool(server, operator, respond)
-          define_pipeline_repair_tool(server, operator, respond)
+        def define_operator_tools(server, operator, respond, respond_err, op_missing)
+          define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing)
+          define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing)
+          define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)
+          define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing)
+          define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing)
         end
 
-        def define_feedback_tools(server, feedback_store, respond)
-          define_retrieval_rate_tool(server, feedback_store, respond)
-          define_retrieval_report_gap_tool(server, feedback_store, respond)
-          define_retrieval_explain_tool(server, feedback_store, respond)
-          define_retrieval_suggest_tool(server, feedback_store, respond)
+        def define_feedback_tools(server, feedback_store, respond, _respond_err, fb_missing)
+          define_retrieval_rate_tool(server, feedback_store, respond, fb_missing)
+          define_retrieval_report_gap_tool(server, feedback_store, respond, fb_missing)
+          define_retrieval_explain_tool(server, feedback_store, respond, fb_missing)
+          define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing)
         end
 
-        def define_pipeline_extract_tool(server, operator, respond)
+        def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing)
           server.define_tool(
             name: 'pipeline_extract',
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
@@ -596,10 +667,17 @@ module Woods
               }
             }
           ) do |server_context:, incremental: nil|
-            next respond.call('Pipeline operator is not configured.') unless operator
+            next op_missing.call('pipeline_extract') unless operator
 
             guard = operator[:pipeline_guard]
-            next respond.call('Extraction is rate-limited. Try again later.') if guard && !guard.allow?(:extraction)
+            if guard && !guard.allow?(:extraction)
+              next respond_err.call(
+                'Extraction is rate-limited. Try again later.',
+                code: :rate_limited,
+                tool: 'pipeline_extract',
+                retry_after_seconds: 300
+              )
+            end
 
             guard&.record!(:extraction)
 
@@ -620,7 +698,7 @@ module Woods
           end
         end
 
-        def define_pipeline_embed_tool(server, operator, respond)
+        def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing)
           server.define_tool(
             name: 'pipeline_embed',
             description: 'Trigger embedding generation for extracted units. Checks rate limits before proceeding.',
@@ -630,10 +708,17 @@ module Woods
               }
             }
           ) do |server_context:, incremental: nil|
-            next respond.call('Pipeline operator is not configured.') unless operator
+            next op_missing.call('pipeline_embed') unless operator
 
             guard = operator[:pipeline_guard]
-            next respond.call('Embedding is rate-limited. Try again later.') if guard && !guard.allow?(:embedding)
+            if guard && !guard.allow?(:embedding)
+              next respond_err.call(
+                'Embedding is rate-limited. Try again later.',
+                code: :rate_limited,
+                tool: 'pipeline_embed',
+                retry_after_seconds: 300
+              )
+            end
 
             guard&.record!(:embedding)
 
@@ -662,23 +747,30 @@ module Woods
           end
         end
 
-        def define_pipeline_status_tool(server, operator, respond)
+        def define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)
           server.define_tool(
             name: 'pipeline_status',
             description: 'Get the current pipeline status: last extraction time, unit counts, staleness.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            next respond.call('Pipeline operator is not configured.') unless operator
+            next op_missing.call('pipeline_status') unless operator
 
             reporter = operator[:status_reporter]
-            next respond.call('Status reporter is not configured.') unless reporter
+            unless reporter
+              next respond_err.call(
+                'Status reporter is not configured.',
+                code: :not_configured,
+                config_key: 'operator.status_reporter',
+                tool: 'pipeline_status'
+              )
+            end
 
             status = reporter.report
             respond.call(JSON.pretty_generate(status))
           end
         end
 
-        def define_pipeline_diagnose_tool(server, operator, respond)
+        def define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing)
           server.define_tool(
             name: 'pipeline_diagnose',
             description: 'Classify a recent pipeline error and suggest remediation.',
@@ -690,10 +782,17 @@ module Woods
               required: %w[error_class error_message]
             }
           ) do |error_class:, error_message:, server_context:|
-            next respond.call('Pipeline operator is not configured.') unless operator
+            next op_missing.call('pipeline_diagnose') unless operator
 
             escalator = operator[:error_escalator]
-            next respond.call('Error escalator is not configured.') unless escalator
+            unless escalator
+              next respond_err.call(
+                'Error escalator is not configured.',
+                code: :not_configured,
+                config_key: 'operator.error_escalator',
+                tool: 'pipeline_diagnose'
+              )
+            end
 
             error = StandardError.new(error_message)
             # Set the class name in the error string for pattern matching
@@ -703,7 +802,7 @@ module Woods
           end
         end
 
-        def define_pipeline_repair_tool(server, operator, respond)
+        def define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing)
           server.define_tool(
             name: 'pipeline_repair',
             description: 'Attempt to repair pipeline state: clear stale locks, reset rate limits.',
@@ -718,7 +817,7 @@ module Woods
               required: ['action']
             }
           ) do |action:, server_context:|
-            next respond.call('Pipeline operator is not configured.') unless operator
+            next op_missing.call('pipeline_repair') unless operator
 
             case action
             when 'clear_locks'
@@ -727,17 +826,29 @@ module Woods
                 lock.release
                 respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks' }))
               else
-                respond.call('Pipeline lock is not configured.')
+                respond_err.call(
+                  'Pipeline lock is not configured.',
+                  code: :not_configured,
+                  config_key: 'operator.pipeline_lock',
+                  tool: 'pipeline_repair'
+                )
               end
             when 'reset_cooldowns'
               respond.call(JSON.pretty_generate({ repaired: true, action: 'reset_cooldowns' }))
             else
-              respond.call("Unknown repair action: #{action}")
+              respond_err.call(
+                "Unknown repair action: #{action}",
+                code: :unsupported_argument,
+                tool: 'pipeline_repair',
+                argument: 'action',
+                value: action,
+                allowed: %w[clear_locks reset_cooldowns]
+              )
             end
           end
         end
 
-        def define_retrieval_rate_tool(server, feedback_store, respond)
+        def define_retrieval_rate_tool(server, feedback_store, respond, fb_missing)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'retrieval_rate',
@@ -751,7 +862,7 @@ module Woods
               required: %w[query score]
             }
           ) do |query:, score:, server_context:, comment: nil|
-            next respond.call('Feedback store is not configured.') unless feedback_store
+            next fb_missing.call('retrieval_rate') unless feedback_store
 
             score = coerce_int.call(score)
             feedback_store.record_rating(query: query, score: score, comment: comment)
@@ -759,7 +870,7 @@ module Woods
           end
         end
 
-        def define_retrieval_report_gap_tool(server, feedback_store, respond)
+        def define_retrieval_report_gap_tool(server, feedback_store, respond, fb_missing)
           server.define_tool(
             name: 'retrieval_report_gap',
             description: 'Report a missing unit that should have appeared in retrieval results.',
@@ -772,7 +883,7 @@ module Woods
               required: %w[query missing_unit unit_type]
             }
           ) do |query:, missing_unit:, unit_type:, server_context:|
-            next respond.call('Feedback store is not configured.') unless feedback_store
+            next fb_missing.call('retrieval_report_gap') unless feedback_store
 
             feedback_store.record_gap(query: query, missing_unit: missing_unit, unit_type: unit_type)
             respond.call(JSON.pretty_generate({
@@ -783,13 +894,13 @@ module Woods
           end
         end
 
-        def define_retrieval_explain_tool(server, feedback_store, respond)
+        def define_retrieval_explain_tool(server, feedback_store, respond, fb_missing)
           server.define_tool(
             name: 'retrieval_explain',
             description: 'Get feedback statistics: average score, total ratings, gap count.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            next respond.call('Feedback store is not configured.') unless feedback_store
+            next fb_missing.call('retrieval_explain') unless feedback_store
 
             ratings = feedback_store.ratings
             gaps = feedback_store.gaps
@@ -803,13 +914,13 @@ module Woods
           end
         end
 
-        def define_retrieval_suggest_tool(server, feedback_store, respond)
+        def define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing)
           server.define_tool(
             name: 'retrieval_suggest',
             description: 'Analyze feedback to suggest improvements: detect patterns in low scores and missing units.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            next respond.call('Feedback store is not configured.') unless feedback_store
+            next fb_missing.call('retrieval_suggest') unless feedback_store
 
             require_relative '../feedback/gap_detector'
             detector = Woods::Feedback::GapDetector.new(feedback_store: feedback_store)
@@ -821,14 +932,14 @@ module Woods
           end
         end
 
-        def define_snapshot_tools(server, snapshot_store, respond)
-          define_list_snapshots_tool(server, snapshot_store, respond)
-          define_snapshot_diff_tool(server, snapshot_store, respond)
-          define_unit_history_tool(server, snapshot_store, respond)
-          define_snapshot_detail_tool(server, snapshot_store, respond)
+        def define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing)
+          define_list_snapshots_tool(server, snapshot_store, respond, snap_missing)
+          define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing)
+          define_unit_history_tool(server, snapshot_store, respond, snap_missing)
+          define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing)
         end
 
-        def define_list_snapshots_tool(server, snapshot_store, respond)
+        def define_list_snapshots_tool(server, snapshot_store, respond, snap_missing)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'list_snapshots',
@@ -840,7 +951,7 @@ module Woods
               }
             }
           ) do |server_context:, limit: nil, branch: nil|
-            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+            next snap_missing.call('list_snapshots') unless snapshot_store
 
             limit = coerce_int.call(limit)
             results = snapshot_store.list(limit: limit || 20, branch: branch)
@@ -848,7 +959,7 @@ module Woods
           end
         end
 
-        def define_snapshot_diff_tool(server, snapshot_store, respond)
+        def define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing)
           server.define_tool(
             name: 'snapshot_diff',
             description: 'Compare two extraction snapshots by git SHA. Returns lists of added, modified, and deleted units.',
@@ -860,7 +971,7 @@ module Woods
               required: %w[sha_a sha_b]
             }
           ) do |sha_a:, sha_b:, server_context:|
-            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+            next snap_missing.call('snapshot_diff') unless snapshot_store
 
             result = snapshot_store.diff(sha_a, sha_b)
             respond.call(JSON.pretty_generate({
@@ -873,7 +984,7 @@ module Woods
           end
         end
 
-        def define_unit_history_tool(server, snapshot_store, respond)
+        def define_unit_history_tool(server, snapshot_store, respond, snap_missing)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'unit_history',
@@ -886,7 +997,7 @@ module Woods
               required: ['identifier']
             }
           ) do |identifier:, server_context:, limit: nil|
-            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+            next snap_missing.call('unit_history') unless snapshot_store
 
             limit = coerce_int.call(limit)
             entries = snapshot_store.unit_history(identifier, limit: limit || 20)
@@ -898,7 +1009,7 @@ module Woods
           end
         end
 
-        def define_snapshot_detail_tool(server, snapshot_store, respond)
+        def define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing)
           server.define_tool(
             name: 'snapshot_detail',
             description: 'Get full metadata for a specific extraction snapshot by git SHA.',
@@ -909,18 +1020,24 @@ module Woods
               required: ['git_sha']
             }
           ) do |git_sha:, server_context:|
-            next respond.call('Snapshot store is not configured. Set enable_snapshots: true.') unless snapshot_store
+            next snap_missing.call('snapshot_detail') unless snapshot_store
 
             snapshot = snapshot_store.find(git_sha)
             if snapshot
               respond.call(JSON.pretty_generate(snapshot))
             else
-              respond.call("Snapshot not found for git SHA: #{git_sha}")
+              respond_err.call(
+                "Snapshot not found for git SHA: #{git_sha}",
+                code: :not_found,
+                tool: 'snapshot_detail',
+                git_sha: git_sha,
+                hint: 'Use `list_snapshots` to see available SHAs.'
+              )
             end
           end
         end
 
-        def define_notion_sync_tool(server, reader, index_dir, respond)
+        def define_notion_sync_tool(server, reader, index_dir, respond, respond_err)
           server.define_tool(
             name: 'notion_sync',
             description: 'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
@@ -932,11 +1049,23 @@ module Woods
           ) do |server_context:|
             config = Woods.configuration
             unless config.notion_api_token
-              next respond.call('Error: notion_api_token is not configured. Set it in Woods.configure.')
+              next respond_err.call(
+                'notion_api_token is not configured. Set it in Woods.configure or via the NOTION_API_TOKEN env var.',
+                code: :not_configured,
+                config_key: 'notion_api_token',
+                doc_link: 'docs/NOTION_EXPORT.md',
+                tool: 'notion_sync'
+              )
             end
 
             if (config.notion_database_ids || {}).empty?
-              next respond.call('Error: notion_database_ids is not configured. Set it in Woods.configure.')
+              next respond_err.call(
+                'notion_database_ids is not configured. Set it in Woods.configure.',
+                code: :not_configured,
+                config_key: 'notion_database_ids',
+                doc_link: 'docs/NOTION_EXPORT.md',
+                tool: 'notion_sync'
+              )
             end
 
             require_relative '../notion/exporter'
@@ -950,7 +1079,11 @@ module Woods
                                                 errors: stats[:errors].first(10)
                                               }))
           rescue StandardError => e
-            respond.call("Notion sync failed: #{e.message}")
+            respond_err.call(
+              "Notion sync failed: #{e.message}",
+              code: :api_error,
+              tool: 'notion_sync'
+            )
           end
         end
 

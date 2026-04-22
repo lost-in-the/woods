@@ -299,6 +299,19 @@ Use `framework` to search the Rails/gem source installed in the app — not docu
 | `reload` | — | Reload extraction data from disk without restarting the server. |
 | `notion_sync` | — | Sync models and columns to Notion. Requires `notion_api_token` and `notion_database_ids`. |
 
+### Structured Errors
+
+Tool failures return `isError: true` with machine-readable `_meta.error_code` so agents can branch without parsing prose. Common codes:
+
+| `error_code` | Meaning | Fix |
+|--------------|---------|-----|
+| `:not_configured` | A required config value is missing | Read `_meta.config_key` and `_meta.doc_link` |
+| `:not_found` | Unit, snapshot, or other entity doesn't exist | Check `_meta.identifier` / `_meta.git_sha`; use `search` or `list_snapshots` |
+| `:rate_limited` | PipelineGuard cooldown in effect | Wait `_meta.retry_after_seconds` and retry |
+| `:unsupported_argument` | Enum value not allowed | See `_meta.allowed` for valid values |
+| `:internal_error` | Assembly or rendering raised an exception | Inspect the text message |
+| `:api_error` | External API (e.g. Notion) failed | Inspect the text message |
+
 ### Console Server (selected tools)
 
 The Console Server has 4 tiers. Tier 1 (9 tools) is available in embedded mode; all 31 tools require the bridge architecture.
