@@ -81,6 +81,40 @@ module Woods
     secret
   ].freeze
 
+  # Console MCP secure defaults — Layer 1 table-level blocking.
+  #
+  # Tables named here are rejected outright before any SQL reaches the
+  # database. This list targets authentication and credential storage
+  # tables that carry secrets or session state across all major auth
+  # stacks (Devise, Doorkeeper, Rodauth, has_secure_password, Sorcery,
+  # OmniAuth, and hand-rolled token systems).
+  #
+  # Intentionally omitted to avoid over-blocking benign apps:
+  #   - `users` / `accounts` — many apps expose safe columns from these
+  #     tables and operators should decide explicitly.
+  #   - PII-heavy but auth-unrelated tables (`payments`, `addresses`) —
+  #     org-specific compliance concern, not a universal default.
+  #
+  # To keep the defaults and add more tables:
+  #   Woods.configure { |c| c.console_blocked_tables =
+  #     Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[extra_table] }
+  #
+  # To replace the defaults entirely (including removing entries):
+  #   Woods.configure { |c| c.console_blocked_tables = %w[only_this] }
+  #
+  # To disable Layer 1 (gate becomes inactive; other layers still apply):
+  #   Woods.configure { |c| c.console_blocked_tables = [] }
+  DEFAULT_CONSOLE_BLOCKED_TABLES = %w[
+    sessions
+    api_keys
+    credentials
+    oauth_applications
+    oauth_access_tokens
+    oauth_refresh_tokens
+    identities
+    active_storage_blobs
+  ].freeze
+
   # ════════════════════════════════════════════════════════════════════════
   # Configuration
   # ════════════════════════════════════════════════════════════════════════
@@ -126,7 +160,7 @@ module Woods
       @console_redacted_columns = DEFAULT_CONSOLE_REDACTED_COLUMNS.dup
       @console_redacted_key_values = []
       @console_embedded_read_tools = false
-      @console_blocked_tables = []
+      @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true
       @console_credential_rotation_warning = true

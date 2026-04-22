@@ -1,9 +1,67 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/table_gate'
 
 RSpec.describe Woods::Console::TableGate do
+  describe 'DEFAULT_CONSOLE_BLOCKED_TABLES' do
+    subject(:gate) do
+      described_class.new(
+        blocked_tables: Woods::DEFAULT_CONSOLE_BLOCKED_TABLES,
+        model_tables: {}
+      )
+    end
+
+    it 'is active (non-empty)' do
+      expect(gate).to be_active
+    end
+
+    it 'blocks sessions' do
+      expect { gate.check_sql!('SELECT * FROM sessions') }
+        .to raise_error(Woods::Console::TableGateError, /sessions/)
+    end
+
+    it 'blocks api_keys' do
+      expect { gate.check_sql!('SELECT * FROM api_keys') }
+        .to raise_error(Woods::Console::TableGateError, /api_keys/)
+    end
+
+    it 'blocks credentials' do
+      expect { gate.check_sql!('SELECT * FROM credentials') }
+        .to raise_error(Woods::Console::TableGateError, /credentials/)
+    end
+
+    it 'blocks oauth_applications' do
+      expect { gate.check_sql!('SELECT * FROM oauth_applications') }
+        .to raise_error(Woods::Console::TableGateError, /oauth_applications/)
+    end
+
+    it 'blocks oauth_access_tokens' do
+      expect { gate.check_sql!('SELECT * FROM oauth_access_tokens') }
+        .to raise_error(Woods::Console::TableGateError, /oauth_access_tokens/)
+    end
+
+    it 'blocks oauth_refresh_tokens' do
+      expect { gate.check_sql!('SELECT * FROM oauth_refresh_tokens') }
+        .to raise_error(Woods::Console::TableGateError, /oauth_refresh_tokens/)
+    end
+
+    it 'blocks identities' do
+      expect { gate.check_sql!('SELECT * FROM identities') }
+        .to raise_error(Woods::Console::TableGateError, /identities/)
+    end
+
+    it 'blocks active_storage_blobs' do
+      expect { gate.check_sql!('SELECT * FROM active_storage_blobs') }
+        .to raise_error(Woods::Console::TableGateError, /active_storage_blobs/)
+    end
+
+    it 'allows safe non-auth tables (e.g. products)' do
+      expect { gate.check_sql!('SELECT * FROM products') }.not_to raise_error
+    end
+  end
+
   describe '#check_sql!' do
     context 'when no tables are blocked' do
       let(:gate) { described_class.new(blocked_tables: [], model_tables: {}) }
@@ -13,6 +71,13 @@ RSpec.describe Woods::Console::TableGate do
       end
 
       it 'reports that the gate is inactive' do
+        expect(gate).not_to be_active
+      end
+
+      it 'remains entirely inactive even when DEFAULT_CONSOLE_BLOCKED_TABLES is non-empty' do
+        # Operators that explicitly set console_blocked_tables = [] intentionally
+        # disable Layer 1. The gate must honour that choice and stay inactive.
+        expect(Woods::DEFAULT_CONSOLE_BLOCKED_TABLES).not_to be_empty
         expect(gate).not_to be_active
       end
     end

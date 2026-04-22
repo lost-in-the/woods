@@ -115,6 +115,8 @@ module Woods
         @mutex.synchronize do
           return @transport if @transport
 
+          check_blocked_tables_config!
+
           require 'woods/console/server'
           Rails.application.eager_load!
 
@@ -123,6 +125,31 @@ module Woods
           server.transport = @transport
           @transport
         end
+      end
+
+      # Emit a prominent warning (or raise in production) when the Console MCP
+      # is enabled but no tables are blocked. An empty block list means Layer 1
+      # of the defense stack is fully inactive — every table in the database is
+      # reachable via console_sql, console_query, and the model tools.
+      #
+      # Remediation:
+      #   Woods.configure { |c| c.console_blocked_tables =
+      #     Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[your_sensitive_table] }
+      #
+      # @raise [Woods::ConfigurationError] in production environments
+      def check_blocked_tables_config!
+        return unless Woods.configuration.console_blocked_tables.empty?
+
+        message =
+          '[Woods Console] console_blocked_tables is empty — Layer 1 (table gate) is INACTIVE. ' \
+          'All tables are reachable via the Console MCP. ' \
+          'Set console_blocked_tables in your Woods initializer to restrict access. ' \
+          'Example: Woods.configure { |c| c.console_blocked_tables = ' \
+          'Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[your_table] }'
+
+        raise Woods::ConfigurationError, message if defined?(Rails) && Rails.env.production?
+
+        warn message
       end
 
       # Build the embedded MCP server. SafeContext is given the writing

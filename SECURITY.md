@@ -49,14 +49,7 @@ Extracted data is written to `tmp/woods/` by default. This directory contains yo
 
 ### Console Server
 
-The Console MCP Server provides live database access. It includes multiple safety layers:
-
-- **SafeContext** wraps all operations in a rolled-back transaction
-- **SqlValidator** rejects DML/DDL statements before execution
-- **Confirmation** gates guard destructive operations
-- **AuditLogger** records all operations to JSONL
-
-Despite these safeguards, the Console Server should only be used in development/staging environments, never in production.
+The Console MCP Server provides live database access through a five-layer defense-in-depth stack (feature gate, blocked tables, credential scanner, column redaction, and SqlValidator + rolled-back transactions). Tier 4 tools additionally require confirmation and are recorded in an audit log. Despite these safeguards, the Console Server should only be used in development/staging environments, never in production. See [docs/CONSOLE_MCP_SETUP.md — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
 
 ### MCP Transport
 

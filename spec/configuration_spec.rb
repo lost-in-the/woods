@@ -85,8 +85,8 @@ RSpec.describe Woods::Configuration do
       expect(config.console_redacted_key_values).to eq([])
     end
 
-    it 'sets console_blocked_tables to empty array' do
-      expect(config.console_blocked_tables).to eq([])
+    it 'sets console_blocked_tables to DEFAULT_CONSOLE_BLOCKED_TABLES' do
+      expect(config.console_blocked_tables).to eq(Woods::DEFAULT_CONSOLE_BLOCKED_TABLES)
     end
 
     it 'sets console_disabled_scanner_patterns to empty array' do

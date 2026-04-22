@@ -1,5 +1,13 @@
 # frozen_string_literal: true
 
+if ENV['COVERAGE']
+  require 'simplecov'
+  SimpleCov.start do
+    add_filter '/spec/'
+    minimum_coverage 88
+  end
+end
+
 require 'rspec'
 require 'active_support/core_ext/string/inflections'
 require 'woods/extracted_unit'
