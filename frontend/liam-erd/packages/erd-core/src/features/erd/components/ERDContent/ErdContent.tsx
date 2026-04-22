@@ -77,14 +77,16 @@ export const ERDContentInner: FC<Props> = ({
 
   const reactFlow = useReactFlow()
 
-  useEffect(() => {
-    if (!journeyCtx) return
-    const { entryPoint: ep, snapshot, result, setSnapshotViewport } = journeyCtx
+  const journeyEntryPoint = journeyCtx?.entryPoint ?? null
+  const journeySnapshot = journeyCtx?.snapshot ?? null
+  const journeyResult = journeyCtx?.result ?? null
+  const setSnapshotViewport = journeyCtx?.setSnapshotViewport
 
-    if (ep && snapshot && !snapshot.viewport) {
+  useEffect(() => {
+    if (journeyEntryPoint && journeySnapshot && !journeySnapshot.viewport) {
       // Just entered journey: capture current viewport, then fit to subgraph
-      setSnapshotViewport(reactFlow.getViewport())
-      const walkedIds = Array.from(result?.nodes.keys() ?? [])
+      setSnapshotViewport?.(reactFlow.getViewport())
+      const walkedIds = Array.from(journeyResult?.nodes.keys() ?? [])
       if (walkedIds.length > 0) {
         reactFlow.fitView({
           nodes: walkedIds.map((id) => ({ id })),
@@ -94,11 +96,17 @@ export const ERDContentInner: FC<Props> = ({
       }
     }
 
-    if (!ep && snapshot?.viewport) {
+    if (!journeyEntryPoint && journeySnapshot?.viewport) {
       // Exiting journey: restore saved viewport
-      reactFlow.setViewport(snapshot.viewport, { duration: 400 })
+      reactFlow.setViewport(journeySnapshot.viewport, { duration: 400 })
     }
-  }, [journeyCtx, reactFlow])
+  }, [
+    journeyEntryPoint,
+    journeySnapshot,
+    journeyResult,
+    setSnapshotViewport,
+    reactFlow,
+  ])
 
   const displayNodes = useMemo(
     () =>
