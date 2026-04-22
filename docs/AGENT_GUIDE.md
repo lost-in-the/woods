@@ -70,7 +70,7 @@ The Index Server reads from `tmp/woods/` and does not require Rails.
 }
 ```
 
-`woods-mcp-start` is a self-healing wrapper that validates `manifest.json` before starting and auto-restarts on failure. Use it for Claude Code.
+> Use `woods-mcp-start` on Claude Code for automatic restart after crashes. Use `woods-mcp` on Cursor, Windsurf, or other MCP clients.
 
 **Cursor** — add to `.cursor/mcp.json`:
 

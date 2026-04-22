@@ -39,6 +39,8 @@ Woods is a Ruby gem that extracts structured data from Rails applications via ru
 }
 ```
 
+> Use `woods-mcp-start` on Claude Code for automatic restart after crashes. Use `woods-mcp` on Cursor, Windsurf, or other MCP clients.
+
 **Console Server** (optional, requires live Rails):
 
 ```json
@@ -77,5 +79,5 @@ Run `bundle exec rake woods:extract` (or `docker compose exec app bundle exec ra
 - **Navigation edges** (`link_to`, `redirect_to`, `form_action`) trace UI user journeys. View templates produce `link_to` edges; controllers produce `redirect_to` edges; forms produce `form_action` edges.
 - **`search` accepts a `types` filter** to scope queries by unit type: `["model"]`, `["controller", "route"]`, etc.
 - **Graph analysis tools** (`graph_analysis` with `analysis:` set to `"orphans"`, `"hubs"`, `"cycles"`, `"bridges"`, or `"dead_ends"`) are the right tool for dead code detection and architecture analysis — not `search`.
-- **Console Server runs every query in a rolled-back transaction.** Writes appear to succeed but are silently discarded. SQL validation also blocks DML/DDL at the string level before any database interaction.
+- **Console Server safety model.** Every query runs in a rolled-back transaction — writes appear to succeed but are silently discarded. SQL validation blocks DML/DDL at the string level before any database interaction. Tier 4 tools additionally require confirmation and are recorded in an audit log. See [docs/CONSOLE_MCP_SETUP.md — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the full five-layer breakdown.
 - **Some unit types require full extraction to update** (routes, middleware, engines, state machines, events, factories). Incremental mode skips these.

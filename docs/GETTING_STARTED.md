@@ -158,6 +158,8 @@ Configure in your AI tool's MCP settings:
 }
 ```
 
+> Use `woods-mcp-start` on Claude Code for automatic restart after crashes. Use `woods-mcp` on Cursor, Windsurf, or other MCP clients.
+
 ### Console Server (live Rails queries)
 
 ```bash

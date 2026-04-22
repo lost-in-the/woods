@@ -35,7 +35,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "config",
-    "files": ["lib/codebase_index.rb"],
+    "files": ["lib/woods.rb"],
     "description": "Default extractors config only lists :models, :controllers, :services, :components. Missing: :jobs, :mailers, :graphql, :rails_source.",
     "status": "resolved"
   },

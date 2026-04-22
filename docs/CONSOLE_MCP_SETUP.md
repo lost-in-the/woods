@@ -608,6 +608,23 @@ The Console MCP ships with a five-layer defense-in-depth stack. Each layer is in
 
 Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks — `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2 — emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
 
+### Confirmation Gates
+
+Tier 4 tools (`console_eval`, `console_sql`, `console_query`) and any state-mutating Tier 2/3 operations (e.g., `console_update_setting`, retrying a job via `console_job_find`) require explicit confirmation before the executor runs. `Woods::Console::Confirmation` evaluates the request against the configured mode (`:auto_approve` for programmatic use, `:callback` for custom policies) and raises `ConfirmationDeniedError` if the check fails. The confirmation outcome — tool name, params, and granted/denied status — is recorded in the audit log.
+
+### Audit Log
+
+`Woods::Console::AuditLogger` appends a JSONL entry for every Tier 4 tool invocation. Each line records the tool name, parameters, confirmation status, result summary, and a UTC timestamp. The log path is configured when building the server:
+
+```ruby
+Woods::Console::Server.build_embedded(
+  audit_log_path: Rails.root.join('log/console_audit.jsonl'),
+  # ...
+)
+```
+
+This log is separate from the structured observability log lines (Layer 1/2 hooks) — it captures the full parameter set of every privileged call, giving operators an out-of-band audit trail independent of MCP wire traffic.
+
 ### Rolled-Back Transactions
 
 Every tool invocation runs inside a database transaction that is **always rolled back**:
