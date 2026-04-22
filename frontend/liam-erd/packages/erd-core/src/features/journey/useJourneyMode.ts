@@ -25,6 +25,7 @@ export function useJourneyMode(): JourneyContextValue {
         viewport: null, // filled in Task 7
       }
       setSnapshot(snap)
+      userEditing.setActiveTableName(null)
       setEntryPoint(entry)
     },
     [userEditing, setSnapshot, setEntryPoint],

@@ -145,4 +145,16 @@ describe('useJourneyMode', () => {
     expect(result.current.journey.entryPoint).toBeNull()
     expect(result.current.journey.snapshot).toBeNull()
   })
+
+  it('clears activeTableName on enterJourney (auto-exit Focus)', () => {
+    const { result } = renderHook(
+      () => ({ journey: useJourneyMode(), user: useUserEditingOrThrow() }),
+      { wrapper: ({ children }) => allProvidersWrapper(children) },
+    )
+    act(() => result.current.user.setActiveTableName('users'))
+    act(() =>
+      result.current.journey.enterJourney({ identifier: 'X', verb: 'GET', path: '/x', action: 'show' }),
+    )
+    expect(result.current.user.activeTableName).toBeFalsy()
+  })
 })
