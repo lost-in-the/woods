@@ -1,0 +1,29 @@
+name: woods-testbed
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: woods-testbed-app
+    container_name: woods-testbed-app
+    ports:
+      - "${TESTBED_PORT:-3010}:3000"
+    volumes:
+      # Host Rails app — stable location, not /tmp
+      - /Users/leah/work/woods-testbed/rails-app:/app
+      # Woods gem worktree — override with WOODS_GEM_PATH env var
+      # Default: the erd worktree. Switch worktrees without rebuilding the container.
+      # Example: WOODS_GEM_PATH=/Users/leah/lost-in-the/woods-flow docker compose up
+      - ${WOODS_GEM_PATH:-/Users/leah/lost-in-the/woods-erd}:/woods-gem:ro
+      # Shared bundle volume — survives container restarts and worktree switches
+      - bundle:/bundle
+    environment:
+      RAILS_ENV: development
+      WOODS_GEM_PATH: /woods-gem
+      # Silence bundler noise about the gem path changing across worktrees
+      BUNDLE_SILENCE_ROOT_WARNING: "1"
+
+volumes:
+  bundle:
+    name: woods-testbed-bundle

@@ -52,15 +52,29 @@ module Woods
 
       def project(unit, controllers)
         meta = unit['metadata'] || {}
-        return nil unless meta['verb'].to_s.upcase == 'GET'
-        return nil unless controllers.include?(meta['controller'])
+        verb = (meta['http_method'] || meta['verb']).to_s.upcase
+        return nil unless verb == 'GET'
+
+        controller_id = controller_identifier(unit)
+        return nil unless controller_id && controllers.include?(controller_id)
 
         {
-          'identifier' => meta['controller'],
+          'identifier' => controller_id,
           'verb' => 'GET',
           'path' => meta['path'].to_s,
           'action' => meta['action'].to_s
         }
+      end
+
+      # Resolve the controller class identifier from the route unit.
+      #
+      # Prefers the explicit controller dependency edge (target of type "controller"),
+      # which carries the full class name (e.g. "StaticPagesController"). Falls back
+      # to the short controller name from metadata for backwards compatibility.
+      def controller_identifier(unit)
+        deps = unit['dependencies'] || []
+        controller_dep = deps.find { |d| d['type'].to_s == 'controller' }
+        controller_dep&.fetch('target', nil)
       end
     end
   end

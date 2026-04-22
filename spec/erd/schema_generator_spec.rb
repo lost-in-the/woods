@@ -470,8 +470,8 @@ RSpec.describe Woods::Erd::SchemaGenerator do
       route_unit = {
         'type' => 'route',
         'identifier' => 'r1',
-        'metadata' => { 'verb' => 'GET', 'path' => '/checkout',
-                        'controller' => 'CheckoutController', 'action' => 'new' }
+        'metadata' => { 'http_method' => 'GET', 'path' => '/checkout', 'action' => 'new' },
+        'dependencies' => [{ 'type' => 'controller', 'target' => 'CheckoutController', 'via' => 'route_dispatch' }]
       }
       File.write(File.join(output_dir, 'routes', 'r1.json'), JSON.generate(route_unit))
 
