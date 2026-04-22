@@ -73,6 +73,7 @@ export const UserEditingProvider: FC<Props> = ({
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
   const [isPopstateInProgress, setIsPopstateInProgress] = useState(false)
   const [showDiff, setShowDiff] = useState(initialShowDiff)
+  const [navigationEdgesVisible, setNavigationEdgesVisible] = useState(false)
 
   useEffect(() => {
     setShowDiff(initialShowDiff)
@@ -215,6 +216,8 @@ export const UserEditingProvider: FC<Props> = ({
         setIsPopstateInProgress,
         showDiff,
         setShowDiff,
+        navigationEdgesVisible,
+        setNavigationEdgesVisible,
       }}
     >
       {children}

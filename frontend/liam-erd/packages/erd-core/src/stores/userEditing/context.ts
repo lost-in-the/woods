@@ -26,6 +26,8 @@ export type UserEditingContextValue = {
   setIsPopstateInProgress: (isPopstateInProgress: boolean) => void
   showDiff: boolean
   setShowDiff: (showDiff: boolean) => void
+  navigationEdgesVisible: boolean
+  setNavigationEdgesVisible: (visible: boolean) => void
 }
 
 export const UserEditingContext = createContext<UserEditingContextValue | null>(
