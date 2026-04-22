@@ -551,3 +551,18 @@ config.notion_database_ids = {
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
+| HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
+| HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ORIGINS="https://example.com"` |
+| Tool returns `error_code: :not_configured` | Feature flag or credential not set | Check `config_key` in `_meta` and the linked `doc_link` |
+| Tool returns `error_code: :rate_limited` | `PipelineGuard` 5-min cooldown hit | Wait `retry_after_seconds` from `_meta`, then retry |
+
+### First-Pass Diagnostics
+
+For a single-call health snapshot, call the Index Server's `woods_status` tool. It reports:
+
+- Extraction freshness (last run time, unit count, index version)
+- Console-bridge reachability
+- Which optional features are configured (embedding provider, Notion, session tracer)
+- Per-feature config-key hints for anything missing
+
+Agents cold-connecting to a server should call `woods_status` before any other tool — it eliminates most "why is this empty?" guesswork.
