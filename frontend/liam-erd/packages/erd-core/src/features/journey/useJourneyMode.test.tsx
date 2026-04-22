@@ -34,7 +34,7 @@ function allProvidersWrapper(ui: ReactNode) {
 describe('useJourneyMode', () => {
   it('is inactive by default', () => {
     const { result } = renderHook(() => useJourneyMode(), {
-      wrapper: ({ children }) => wrapper(children),
+      wrapper: ({ children }) => allProvidersWrapper(children),
     })
     expect(result.current.entryPoint).toBeNull()
     expect(result.current.result).toBeNull()
@@ -42,7 +42,7 @@ describe('useJourneyMode', () => {
 
   it('enters journey mode and computes the walk', () => {
     const { result } = renderHook(() => useJourneyMode(), {
-      wrapper: ({ children }) => wrapper(children),
+      wrapper: ({ children }) => allProvidersWrapper(children),
     })
 
     act(() => {
@@ -60,7 +60,7 @@ describe('useJourneyMode', () => {
 
   it('exits journey mode', () => {
     const { result } = renderHook(() => useJourneyMode(), {
-      wrapper: ({ children }) => wrapper(children),
+      wrapper: ({ children }) => allProvidersWrapper(children),
     })
 
     act(() => {
@@ -81,7 +81,7 @@ describe('useJourneyMode', () => {
 
   it('re-walks when depth changes', () => {
     const { result } = renderHook(() => useJourneyMode(), {
-      wrapper: ({ children }) => wrapper(children),
+      wrapper: ({ children }) => allProvidersWrapper(children),
     })
 
     act(() => {

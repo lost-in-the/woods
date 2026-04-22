@@ -1,5 +1,5 @@
 import { useCallback, useContext } from 'react'
-import { UserEditingContext } from '@/stores/userEditing/context'
+import { useUserEditingOrThrow } from '@/stores/userEditing/hooks'
 import {
   JourneyContext,
   type EntryPoint,
@@ -13,20 +13,18 @@ export function useJourneyMode(): JourneyContextValue {
     throw new Error('useJourneyMode must be used within a JourneyProvider')
   }
 
-  const userEditing = useContext(UserEditingContext)
+  const userEditing = useUserEditingOrThrow()
   const { setEntryPoint, setSnapshot } = ctx
 
   const enterJourney = useCallback(
     (entry: EntryPoint) => {
-      if (userEditing) {
-        const snap: ExploreSnapshot = {
-          showMode: userEditing.showMode,
-          hiddenNodeIds: userEditing.hiddenNodeIds,
-          activeTableName: userEditing.activeTableName,
-          viewport: null, // filled in Task 7
-        }
-        setSnapshot(snap)
+      const snap: ExploreSnapshot = {
+        showMode: userEditing.showMode,
+        hiddenNodeIds: userEditing.hiddenNodeIds,
+        activeTableName: userEditing.activeTableName,
+        viewport: null, // filled in Task 7
       }
+      setSnapshot(snap)
       setEntryPoint(entry)
     },
     [userEditing, setSnapshot, setEntryPoint],
