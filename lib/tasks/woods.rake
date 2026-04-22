@@ -354,33 +354,11 @@ namespace :woods do
   desc 'Embed all extracted units'
   task embed: :environment do
     require 'woods'
-    require 'woods/embedding/indexer'
-    require 'woods/embedding/text_preparer'
-    require 'woods/embedding/provider'
-    require 'woods/storage/vector_store'
+    require 'woods/tasks'
 
-    config = Woods.configuration
-    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-
-    provider = Woods::Embedding::Provider::Ollama.new
-    text_preparer = Woods::Embedding::TextPreparer.new
-    vector_store = Woods::Storage::VectorStore::InMemory.new
-
-    indexer = Woods::Embedding::Indexer.new(
-      provider: provider,
-      text_preparer: text_preparer,
-      vector_store: vector_store,
-      output_dir: output_dir
-    )
-
+    indexer = Woods::Tasks.build_embed_indexer
     puts 'Embedding all extracted units...'
-    stats = indexer.index_all
-
-    puts
-    puts 'Embedding complete!'
-    puts "  Processed: #{stats[:processed]}"
-    puts "  Skipped:   #{stats[:skipped]}"
-    puts "  Errors:    #{stats[:errors]}"
+    Woods::Tasks.print_embed_stats(indexer.index_all, mode: :full)
   end
 
   desc 'Nest the data — embed all units (alias for embed)'
@@ -389,33 +367,11 @@ namespace :woods do
   desc 'Embed changed units only (incremental)'
   task embed_incremental: :environment do
     require 'woods'
-    require 'woods/embedding/indexer'
-    require 'woods/embedding/text_preparer'
-    require 'woods/embedding/provider'
-    require 'woods/storage/vector_store'
+    require 'woods/tasks'
 
-    config = Woods.configuration
-    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-
-    provider = Woods::Embedding::Provider::Ollama.new
-    text_preparer = Woods::Embedding::TextPreparer.new
-    vector_store = Woods::Storage::VectorStore::InMemory.new
-
-    indexer = Woods::Embedding::Indexer.new(
-      provider: provider,
-      text_preparer: text_preparer,
-      vector_store: vector_store,
-      output_dir: output_dir
-    )
-
+    indexer = Woods::Tasks.build_embed_indexer
     puts 'Embedding changed units (incremental)...'
-    stats = indexer.index_incremental
-
-    puts
-    puts 'Incremental embedding complete!'
-    puts "  Processed: #{stats[:processed]}"
-    puts "  Skipped:   #{stats[:skipped]}"
-    puts "  Errors:    #{stats[:errors]}"
+    Woods::Tasks.print_embed_stats(indexer.index_incremental, mode: :incremental)
   end
 
   desc 'Hone the blade — incremental embedding (alias for embed_incremental)'
