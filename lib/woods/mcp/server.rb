@@ -2,6 +2,7 @@
 
 require 'logger'
 require 'mcp'
+require 'time'
 require 'set'
 require_relative 'index_reader'
 require_relative 'tool_response_renderer'
@@ -73,6 +74,7 @@ module Woods
           define_feedback_tools(server, feedback_store, respond)
           define_snapshot_tools(server, snapshot_store, respond)
           define_notion_sync_tool(server, reader, index_dir, respond)
+          define_woods_status_tool(server, reader, retriever, index_dir, respond)
           register_resource_handler(server, reader)
 
           server
@@ -984,6 +986,91 @@ module Woods
               mime_type: 'application/json'
             )
           ]
+        end
+
+        def define_woods_status_tool(server, reader, retriever, index_dir, respond)
+          server.define_tool(
+            name: 'woods_status',
+            description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
+                         '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
+                         'feature flags, and a ready flag. Call this first on cold connect to learn what the server knows.',
+            input_schema: { type: 'object', properties: {} }
+          ) do |server_context:|
+            _ = server_context
+            status = Woods::MCP::Server.build_status(reader: reader, retriever: retriever, index_dir: index_dir)
+            respond.call(JSON.pretty_generate(status))
+          end
+        end
+
+        public
+
+        # Build the woods_status payload. Exposed at module level so specs (and future
+        # console/unified-server entry points) can assemble the same shape without
+        # reaching through the MCP::Server internals.
+        def build_status(reader:, retriever:, index_dir:)
+          manifest = safe_manifest(reader)
+          extracted_at = manifest && manifest['extracted_at']
+          staleness = staleness_seconds(extracted_at)
+          config = Woods.configuration
+
+          {
+            ready: manifest && !manifest['counts'].to_h.empty?,
+            server: {
+              name: 'woods',
+              version: Woods::VERSION,
+              index_dir: index_dir.to_s
+            },
+            index: {
+              extracted_at: extracted_at,
+              staleness_seconds: staleness,
+              rails_version: manifest && manifest['rails_version'],
+              ruby_version: manifest && manifest['ruby_version'],
+              total_units: manifest && manifest['total_units'],
+              counts: (manifest && manifest['counts']) || {},
+              git_sha: manifest && manifest['git_sha'],
+              git_branch: manifest && manifest['git_branch'],
+              gemfile_lock_sha: manifest && manifest['gemfile_lock_sha'],
+              schema_sha: manifest && manifest['schema_sha']
+            },
+            retriever: {
+              configured: !retriever.nil?,
+              class: retriever&.class&.name
+            },
+            features: {
+              embedding_model: config.respond_to?(:embedding_model) ? config.embedding_model : nil,
+              embedding_provider: config.respond_to?(:embedding_provider) ? presence(config.embedding_provider) : nil,
+              vector_store: config.respond_to?(:vector_store) ? presence(config.vector_store) : nil,
+              session_tracer_enabled: config.respond_to?(:session_tracer_enabled) ? config.session_tracer_enabled : false,
+              snapshots_enabled: config.respond_to?(:enable_snapshots) ? config.enable_snapshots : false,
+              notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?,
+              console_mcp_enabled: config.respond_to?(:console_mcp_enabled) ? config.console_mcp_enabled : false
+            }
+          }
+        end
+
+        private
+
+        # Return a Hash of manifest content, or nil if unreadable.
+        def safe_manifest(reader)
+          reader.manifest
+        rescue StandardError
+          nil
+        end
+
+        # Seconds since extraction. Returns nil if timestamp is missing or unparsable.
+        def staleness_seconds(iso8601)
+          return nil if iso8601.nil? || iso8601.empty?
+
+          (Time.now - Time.parse(iso8601)).to_i
+        rescue ArgumentError
+          nil
+        end
+
+        def presence(value)
+          return nil if value.nil?
+          return nil if value.respond_to?(:empty?) && value.empty?
+
+          value.to_s
         end
 
         def register_resource_handler(server, reader)

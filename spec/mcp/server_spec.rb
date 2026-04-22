@@ -14,9 +14,9 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 28 tools' do
+    it 'registers 29 tools' do
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(28)
+      expect(tools.size).to eq(29)
     end
 
     it 'registers expected tool names' do
@@ -32,7 +32,8 @@ RSpec.describe Woods::MCP::Server do
         'retrieval_explain', 'retrieval_suggest',
         'list_snapshots', 'snapshot_diff',
         'unit_history', 'snapshot_detail',
-        'notion_sync'
+        'notion_sync',
+        'woods_status'
       )
     end
 
