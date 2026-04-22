@@ -18,6 +18,7 @@ require_relative '../lib/woods/graph_analyzer'
 require_relative '../lib/woods/mcp/server'
 require_relative '../lib/woods/mcp/bootstrapper'
 require_relative '../lib/woods/mcp/bearer_auth'
+require_relative '../lib/woods/mcp/origin_guard'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
@@ -43,8 +44,12 @@ server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, sn
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport
 
+allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
+
 inner = proc { |env| transport.handle_request(Rack::Request.new(env)) }
 app = token ? Woods::MCP::BearerAuth.new(inner, token: token) : inner
+app = Woods::MCP::OriginGuard.new(app, allowed_origins: allowed_origins)
 
-warn "Woods MCP HTTP server starting on http://#{host}:#{port} (auth: #{token ? 'bearer' : 'none'})"
+origin_summary = allowed_origins.empty? ? 'loopback' : allowed_origins.join(',')
+warn "Woods MCP HTTP server starting on http://#{host}:#{port} (auth: #{token ? 'bearer' : 'none'}, origins: #{origin_summary})"
 Rackup::Handler.default.run(app, Port: port, Host: host)
