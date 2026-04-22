@@ -155,5 +155,46 @@ RSpec.describe Woods::Embedding::Provider do
         end
       end
     end
+
+    describe 'context window (num_ctx)' do
+      before { allow(http_double).to receive(:request).and_return(success_response) }
+
+      # Regression — without `options.num_ctx`, Ollama caps embedding input at
+      # its 2048-token default and returns 400 ("the input length exceeds the
+      # context length") on most real-world Rails units. nomic-embed-text
+      # supports 8192, matching the TextPreparer default.
+      it 'defaults to sending options.num_ctx = 8192' do
+        provider.embed('text')
+        expect(http_double).to have_received(:request) do |req|
+          body = JSON.parse(req.body)
+          expect(body.dig('options', 'num_ctx')).to eq(8192)
+        end
+      end
+
+      it 'includes num_ctx in batch requests' do
+        allow(http_double).to receive(:request).and_return(batch_success_response)
+        provider.embed_batch(%w[a b])
+        expect(http_double).to have_received(:request) do |req|
+          body = JSON.parse(req.body)
+          expect(body.dig('options', 'num_ctx')).to eq(8192)
+        end
+      end
+
+      it 'honours a custom num_ctx' do
+        described_class.new(num_ctx: 4096).embed('text')
+        expect(http_double).to have_received(:request) do |req|
+          body = JSON.parse(req.body)
+          expect(body.dig('options', 'num_ctx')).to eq(4096)
+        end
+      end
+
+      it 'omits the options key entirely when num_ctx is nil' do
+        described_class.new(num_ctx: nil).embed('text')
+        expect(http_double).to have_received(:request) do |req|
+          body = JSON.parse(req.body)
+          expect(body).not_to have_key('options')
+        end
+      end
+    end
   end
 end
