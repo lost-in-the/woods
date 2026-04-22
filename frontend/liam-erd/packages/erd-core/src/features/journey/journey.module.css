@@ -69,10 +69,6 @@
   margin: 2px 0;
 }
 
-:global(.erd-node--outside-journey) {
-  opacity: 0.4;
-}
-
 :global(.erd-node--journey-entry) {
   outline: 2px solid #4a8acf;
   box-shadow: 0 0 16px rgba(74, 138, 207, 0.4);

@@ -110,29 +110,21 @@ export const ERDContentInner: FC<Props> = ({
     reactFlow,
   ])
 
-  const displayNodes = useMemo(
-    () =>
-      nodes.map((node) => {
-        if (!journeyNodeIds) return node
-        let journeyClass: string
-        if (journeyNodeIds.has(node.id)) {
-          journeyClass =
-            node.id === journeyEntryPoint?.identifier
-              ? 'erd-node--journey-entry'
-              : ''
-        } else {
-          journeyClass = 'erd-node--outside-journey'
-        }
-        if (!journeyClass) return node
+  const displayNodes = useMemo(() => {
+    if (!journeyNodeIds) return nodes
+    // Journey mode: render only walked nodes, mark the entry point.
+    return nodes
+      .filter((node) => journeyNodeIds.has(node.id))
+      .map((node) => {
+        if (node.id !== journeyEntryPoint?.identifier) return node
         return {
           ...node,
-          className: [node.className, journeyClass]
+          className: [node.className, 'erd-node--journey-entry']
             .filter(Boolean)
             .join(' '),
         }
-      }),
-    [nodes, journeyNodeIds, journeyEntryPoint],
-  )
+      })
+  }, [nodes, journeyNodeIds, journeyEntryPoint])
 
   const displayEdges = useMemo(
     () =>
