@@ -33,20 +33,20 @@ On enter:
 
 - **Snapshot** the current Explore state: `{ enabledLayers, focusedNodeId, viewport }`.
 - **Exit Focus mode** if active.
-- **Hide the Layers panel** (or render it disabled with a "Controlled by Journey mode" note — implementer choice). Journey owns node visibility.
+- **Disable the Layers panel** — keep it visible but non-interactive, with a "Controlled by Journey mode" note. Keeping it visible preserves spatial continuity so exiting feels like returning to the same UI, not a different one.
 - **Filter the canvas** to only nodes in the walk result. No dimmed context nodes.
 - **Auto-frame** the viewport on the walked subgraph.
 
 On exit:
 
 - Restore `{ enabledLayers, focusedNodeId, viewport }` from the snapshot.
-- Show the Layers panel again.
+- Re-enable the Layers panel (remove the disabled state and the "Controlled by Journey mode" note).
 
 ### Mode boundary rules
 
 | Rule | Explore | Journey |
 | --- | --- | --- |
-| Layers panel | Interactive | Hidden (or disabled) |
+| Layers panel | Interactive | Visible but disabled, with "Controlled by Journey mode" note |
 | Focus mode | Available | Unavailable (auto-exited on entry) |
 | Navigation edges toggle | Available | N/A (journey edges always shown) |
 | Entry point banner | Not shown | Shown; Exit button restores Explore |
@@ -81,7 +81,9 @@ Resolved by the mode split above. Journey mode does not consult the Layers panel
 
 ## New: Navigation edges toggle (Explore mode)
 
-A lightweight alternative for users who don't want the full walk. A single toggle — likely beside the Layers panel or in the canvas toolbar — that, when on, renders all edges whose `via` is `link_to`, `redirect_to`, or `form_action` on the current canvas. Off by default.
+A lightweight alternative for users who don't want the full walk. A single toggle **in the canvas toolbar** (beside zoom / fit controls) that, when on, renders all edges whose `via` is `link_to`, `redirect_to`, or `form_action` on the current canvas. Off by default.
+
+Rationale: burying this in the Layers select menu makes it invisible when the user has non-controller layers hidden — the exact moment they'd want to discover it. Toolbar placement makes it always reachable.
 
 This is not journey mode. No entry point, no walk, no highlighting. Just "show the route edges."
 
