@@ -1,19 +1,9 @@
 import { useJourneyMode } from './useJourneyMode'
 import styles from './journey.module.css'
-import type { EdgeVia } from './walker'
-
-const EDGE_TYPES: EdgeVia[] = ['link_to', 'redirect_to', 'form_action']
 
 export function JourneyBanner() {
-  const {
-    entryPoint,
-    maxDepth,
-    enabledEdgeTypes,
-    result,
-    exitJourney,
-    setDepth,
-    toggleEdgeType,
-  } = useJourneyMode()
+  const { entryPoint, maxDepth, result, exitJourney, setDepth } =
+    useJourneyMode()
 
   if (!entryPoint || !result) return null
 
@@ -47,16 +37,6 @@ export function JourneyBanner() {
             ))}
           </select>
         </label>
-        {EDGE_TYPES.map((via) => (
-          <label key={via}>
-            <input
-              type="checkbox"
-              checked={enabledEdgeTypes.has(via)}
-              onChange={() => toggleEdgeType(via)}
-            />
-            {via}
-          </label>
-        ))}
         <button
           type="button"
           className={styles.exitButton}

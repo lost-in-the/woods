@@ -1,6 +1,6 @@
 import { createContext, useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { ShowMode } from '@/schemas'
-import type { EdgeVia, WalkableSchema, WalkResult } from './walker'
+import type { WalkableSchema, WalkResult } from './walker'
 import { walk } from './walker'
 
 export type EntryPoint = {
@@ -20,25 +20,17 @@ export type ExploreSnapshot = {
 export type JourneyContextValue = {
   entryPoint: EntryPoint | null
   maxDepth: number
-  enabledEdgeTypes: Set<EdgeVia>
   result: WalkResult | null
   snapshot: ExploreSnapshot | null
   enterJourney: (entry: EntryPoint) => void
   exitJourney: () => void
   setDepth: (depth: number) => void
-  toggleEdgeType: (via: EdgeVia) => void
   setEntryPoint: (entry: EntryPoint | null) => void
   setSnapshot: (snapshot: ExploreSnapshot | null) => void
   setSnapshotViewport: (vp: { x: number; y: number; zoom: number }) => void
 }
 
 export const JourneyContext = createContext<JourneyContextValue | null>(null)
-
-const DEFAULT_EDGE_TYPES: Set<EdgeVia> = new Set<EdgeVia>([
-  'link_to',
-  'redirect_to',
-  'form_action',
-])
 
 export function JourneyProvider({
   schema,
@@ -49,8 +41,6 @@ export function JourneyProvider({
 }) {
   const [entryPoint, setEntryPoint] = useState<EntryPoint | null>(null)
   const [maxDepth, setMaxDepth] = useState(10)
-  const [enabledEdgeTypes, setEnabledEdgeTypes] =
-    useState<Set<EdgeVia>>(DEFAULT_EDGE_TYPES)
   const [snapshot, setSnapshot] = useState<ExploreSnapshot | null>(null)
 
   const setSnapshotViewport = useCallback(
@@ -62,28 +52,17 @@ export function JourneyProvider({
 
   const result = useMemo<WalkResult | null>(() => {
     if (!entryPoint) return null
-    return walk(schema, entryPoint.identifier, {
-      maxDepth,
-      edgeTypes: enabledEdgeTypes,
-    })
-  }, [schema, entryPoint, maxDepth, enabledEdgeTypes])
+    return walk(schema, entryPoint.identifier, { maxDepth })
+  }, [schema, entryPoint, maxDepth])
 
   const value: JourneyContextValue = {
     entryPoint,
     maxDepth,
-    enabledEdgeTypes,
     result,
     snapshot,
     enterJourney: setEntryPoint,
     exitJourney: () => setEntryPoint(null),
     setDepth: setMaxDepth,
-    toggleEdgeType: (via) =>
-      setEnabledEdgeTypes((prev) => {
-        const next = new Set(prev)
-        if (next.has(via)) next.delete(via)
-        else next.add(via)
-        return next
-      }),
     setEntryPoint,
     setSnapshot,
     setSnapshotViewport,
