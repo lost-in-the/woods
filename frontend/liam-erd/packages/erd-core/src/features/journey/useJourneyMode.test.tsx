@@ -120,4 +120,29 @@ describe('useJourneyMode', () => {
       viewport: null,
     })
   })
+
+  it('restores showMode and activeTableName on exitJourney', () => {
+    const { result } = renderHook(
+      () => ({ journey: useJourneyMode(), user: useUserEditingOrThrow() }),
+      { wrapper: ({ children }) => allProvidersWrapper(children) },
+    )
+    act(() => {
+      result.current.user.setShowMode('TABLE_NAME')
+      result.current.user.setActiveTableName('users')
+    })
+    act(() => {
+      result.current.journey.enterJourney({ identifier: 'X', verb: 'GET', path: '/x', action: 'show' })
+    })
+    act(() => {
+      result.current.user.setShowMode('ALL_FIELDS')
+      result.current.user.setActiveTableName(null)
+    })
+    act(() => {
+      result.current.journey.exitJourney()
+    })
+    expect(result.current.user.showMode).toBe('TABLE_NAME')
+    expect(result.current.user.activeTableName).toBe('users')
+    expect(result.current.journey.entryPoint).toBeNull()
+    expect(result.current.journey.snapshot).toBeNull()
+  })
 })

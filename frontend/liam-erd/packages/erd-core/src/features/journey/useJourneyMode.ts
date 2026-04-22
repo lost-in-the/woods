@@ -30,5 +30,18 @@ export function useJourneyMode(): JourneyContextValue {
     [userEditing, setSnapshot, setEntryPoint],
   )
 
-  return { ...ctx, enterJourney }
+  const { snapshot } = ctx
+
+  const exitJourney = useCallback(() => {
+    if (snapshot) {
+      userEditing.setShowMode(snapshot.showMode)
+      userEditing.setHiddenNodeIds(snapshot.hiddenNodeIds)
+      userEditing.setActiveTableName(snapshot.activeTableName)
+      // viewport restore happens in Task 7
+    }
+    setEntryPoint(null)
+    setSnapshot(null)
+  }, [snapshot, userEditing, setEntryPoint, setSnapshot])
+
+  return { ...ctx, enterJourney, exitJourney }
 }
