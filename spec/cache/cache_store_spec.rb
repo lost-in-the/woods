@@ -435,6 +435,27 @@ RSpec.describe Woods::Cache::CachedRetriever do
       expect(cached_retriever.graph_store).to be(graph_store)
     end
   end
+
+  # Regression — if reload refreshes the retriever's stores but leaves the
+  # context cache alone, codebase_retrieve returns cached results from the
+  # previous embed run until their TTL expires. Drop the :context namespace
+  # entries on reload so the next retrieve goes through the fresh pipeline.
+  describe '#invalidate_context_cache!' do
+    it 'clears only the :context cache namespace' do
+      allow(cache_store).to receive(:clear)
+
+      cached_retriever.invalidate_context_cache!
+
+      expect(cache_store).to have_received(:clear).with(namespace: :context)
+    end
+
+    it 'rescues and warns instead of propagating cache backend errors' do
+      allow(cache_store).to receive(:clear).and_raise(StandardError, 'redis down')
+
+      expect { cached_retriever.invalidate_context_cache! }
+        .to output(/context-cache invalidation failed/).to_stderr
+    end
+  end
 end
 
 # ── RedisCacheStore ────────────────────────────────────────────────────

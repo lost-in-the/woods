@@ -154,6 +154,22 @@ module Woods
       def metadata_store = @retriever.metadata_store
       def graph_store    = @retriever.graph_store
 
+      # Invalidate every cached context result. Called from the MCP +reload+
+      # tool after the retriever's stores have been re-hydrated from a fresh
+      # embed — otherwise cached results from the old embedding run would
+      # linger until their TTL expires and contradict the new stores.
+      #
+      # Embedding caches (query → vector) are NOT cleared: the query-vector
+      # mapping is deterministic for a given provider+model and survives any
+      # index reload. Only context results (query → ranked units) go stale.
+      #
+      # @return [void]
+      def invalidate_context_cache!
+        @cache_store.clear(namespace: :context)
+      rescue StandardError => e
+        warn("[Woods] CachedRetriever context-cache invalidation failed: #{e.message}")
+      end
+
       # Execute the retrieval pipeline with context-level caching.
       #
       # On cache hit, returns a RetrievalResult reconstructed from cached data
