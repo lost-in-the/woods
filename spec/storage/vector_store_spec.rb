@@ -129,8 +129,8 @@ RSpec.describe Woods::Storage::VectorStore do
       end
 
       it 'matches the reference zip/sum cosine computation bit-for-bit' do
-        # The while-loop kernel must produce identical results to the
-        # naive Enumerable implementation it replaced. Any drift here
+        # The strided while-loop kernel must produce identical results to
+        # the naive Enumerable implementation it replaced. Any drift here
         # means we silently shifted search rankings.
         rng = Random.new(12_345)
         ref = lambda { |a, b|
@@ -147,10 +147,28 @@ RSpec.describe Woods::Storage::VectorStore do
         query = Array.new(128) { rng.rand(-1.0..1.0) }
         results = fresh.search(query, limit: 50)
 
+        stored_by_id = {}
+        fresh.each_entry { |id, vec, _meta| stored_by_id[id] = vec }
+
         results.each do |r|
-          stored = fresh.instance_variable_get(:@entries)[r.id][:vector]
-          expect(r.score).to be_within(1e-12).of(ref.call(query, stored))
+          expect(r.score).to be_within(1e-12).of(ref.call(query, stored_by_id[r.id]))
         end
+      end
+
+      it 'rejects a query whose dimension disagrees with stored vectors' do
+        fresh = described_class.new
+        fresh.store('doc1', [1.0, 0.0], { type: 'model' })
+
+        expect { fresh.search([1.0, 0.0, 0.0]) }
+          .to raise_error(ArgumentError, /Vector dimension mismatch/)
+      end
+
+      it 'rejects a stored vector whose dimension disagrees with the first one' do
+        fresh = described_class.new
+        fresh.store('a', [1.0, 0.0, 0.0])
+
+        expect { fresh.store('b', [1.0, 0.0]) }
+          .to raise_error(ArgumentError, /Vector dimension mismatch/)
       end
 
       it 'allocates no per-pair objects during search' do
@@ -220,6 +238,81 @@ RSpec.describe Woods::Storage::VectorStore do
         store.delete_by_filter({ type: 'nonexistent' })
 
         expect(store.count).to eq(1)
+      end
+    end
+
+    # ── Persistence seams ───────────────────────────────────────────
+    # #each_entry and #bulk_load are the contract the Snapshotter
+    # (coming in a later PR) uses to hydrate a store from disk and
+    # iterate it for dumping. Behavior must be:
+    #   - each_entry yields (id, vector, metadata) for every live entry
+    #   - tombstoned (deleted) entries are skipped
+    #   - bulk_load is the round-trip dual — dump then load recreates
+    #     the same observable state
+    describe '#each_entry' do
+      it 'yields every live entry with id, vector, and metadata' do
+        store.store('a', [1.0, 0.0], { type: 'model' })
+        store.store('b', [0.0, 1.0], { type: 'service' })
+
+        yielded = []
+        store.each_entry { |id, vec, meta| yielded << [id, vec, meta] }
+
+        expect(yielded).to contain_exactly(
+          ['a', [1.0, 0.0], { type: 'model' }],
+          ['b', [0.0, 1.0], { type: 'service' }]
+        )
+      end
+
+      it 'skips deleted entries (tombstones)' do
+        store.store('a', [1.0, 0.0])
+        store.store('b', [0.0, 1.0])
+        store.delete('a')
+
+        ids = []
+        store.each_entry { |id, _, _| ids << id }
+
+        expect(ids).to eq(['b'])
+      end
+
+      it 'returns an Enumerator when called without a block' do
+        store.store('a', [1.0, 0.0])
+        expect(store.each_entry).to be_a(Enumerator)
+      end
+
+      it 'yields frozen id strings so downstream hashes are safe' do
+        store.store('doc1', [1.0, 0.0])
+
+        store.each_entry { |id, _, _| expect(id).to be_frozen }
+      end
+    end
+
+    describe '#bulk_load round-trip' do
+      it 'recreates the same observable state when fed each_entry output' do
+        store.store('a', [1.0, 0.0, 0.0], { type: 'model' })
+        store.store('b', [0.0, 1.0, 0.0], { type: 'service' })
+        store.store('c', [0.0, 0.0, 1.0], { type: 'controller' })
+
+        entries = store.each_entry.map { |id, vec, meta| { id: id, vector: vec, metadata: meta } }
+        rehydrated = described_class.new
+        rehydrated.bulk_load(entries)
+
+        query = [1.0, 0.0, 0.0]
+        original_results = store.search(query).map { |r| [r.id, r.score.round(9), r.metadata] }
+        reloaded_results = rehydrated.search(query).map { |r| [r.id, r.score.round(9), r.metadata] }
+
+        expect(reloaded_results).to eq(original_results)
+        expect(rehydrated.count).to eq(store.count)
+      end
+
+      it 'preserves insertion order so dump/load is deterministic' do
+        store.store('a', [1.0])
+        store.store('b', [1.0])
+        store.store('c', [1.0])
+
+        loaded = described_class.new
+        loaded.bulk_load(store.each_entry.map { |id, v, m| { id: id, vector: v, metadata: m } })
+
+        expect(loaded.each_entry.map { |id, _, _| id }).to eq(%w[a b c])
       end
     end
   end
