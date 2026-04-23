@@ -1,5 +1,12 @@
 # frozen_string_literal: true
 
+require_relative 'errors'
+require_relative 'bootstrap_state'
+require_relative 'provider_probe'
+require_relative '../index_artifact'
+require_relative '../resolved_config'
+require_relative '../storage/snapshotter'
+
 module Woods
   module MCP
     # Shared setup logic for MCP server executables.
@@ -68,58 +75,59 @@ module Woods
         end
       end
 
-      # Attempt to build a retriever for semantic search.
+      # Build a retriever for MCP semantic search.
       #
-      # Auto-configures from environment variables when no explicit configuration
-      # exists. Probes for OpenAI API key first, then checks for a reachable Ollama
-      # instance. Emits a one-line STDERR banner indicating whether semantic search
-      # is enabled and which provider is active.
+      # Flow:
+      #   1. Wrap output_dir in an IndexArtifact (owns path semantics).
+      #   2. If woods.json is present, resolve config from it; otherwise
+      #      either raise MissingArtifact or, if WOODS_ALLOW_AUTODETECT=1,
+      #      fall back to env-var auto-detect (deprecated path).
+      #   3. Build provider + stores from config (no mutation of
+      #      Woods.configuration — the host's initializer stays intact).
+      #   4. Hydrate in-memory stores from dumps (stubs in PR 2; real in PR 3).
+      #   5. Probe the provider. If reachable, state :hydrated. If unreachable,
+      #      state :degraded — retriever is still returned, queries will
+      #      retry on first use.
       #
-      # @return [Woods::Retriever, nil]
-      def self.build_retriever
-        config = Woods.configuration
+      # Config-invalid failures raise typed BootstrapError subclasses;
+      # exe/woods-mcp's top-level catches them and prints a one-line
+      # operator message. Dependency-unreachable failures start degraded
+      # and surface via woods_status.
+      #
+      # @param index_dir [String, nil] Path to the extraction output directory.
+      #   When nil, uses Woods.configuration.output_dir.
+      # @return [Array(Woods::Retriever, Woods::MCP::BootstrapState)]
+      # @raise [Woods::MCP::BootstrapError] on config-invalid (missing
+      #   credentials, dimension mismatch, unsupported artifact, missing
+      #   artifact with autodetect off).
+      def self.build_retriever(index_dir: nil)
+        state = BootstrapState.new
+        state.mark(:hydrating)
 
-        openai_key = ENV.fetch('OPENAI_API_KEY', nil)
-        if !config.embedding_provider && openai_key
-          config.vector_store = :in_memory
-          config.metadata_store = :in_memory
-          config.graph_store = :in_memory
-          config.embedding_provider = :openai
-          config.embedding_options = { api_key: openai_key }
-        end
+        artifact = build_artifact(index_dir)
+        config = resolve_or_autodetect(artifact)
+        return [nil, state] unless config.embedding_provider
 
-        if !config.embedding_provider && ollama_reachable?
-          config.vector_store = :in_memory
-          config.metadata_store = :in_memory
-          config.graph_store = :in_memory
-          config.embedding_provider = :ollama
-          config.embedding_options = {
-            host: ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434'),
-            model: ENV.fetch('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
-          }
-        end
+        resolved = ResolvedConfig.from_configuration(config)
+        retriever = build_retriever_from_config(config, resolved, artifact)
+        probe_and_mark_state(config, state)
+        warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})"
 
-        if config.embedding_provider
-          retriever = Woods::Builder.new(config).build_retriever
-          warn "[woods-mcp] semantic search: enabled (#{config.embedding_provider})"
-          retriever
-        else
-          warn '[woods-mcp] semantic search: disabled — set OPENAI_API_KEY, ' \
-               'or run Ollama (brew install ollama && ollama serve)'
-          nil
-        end
-      rescue StandardError => e
-        warn "Note: Semantic search unavailable (#{e.message}). Using pattern-based search only."
-        nil
+        [retriever, state]
+      end
+
+      # Backwards-compatible wrapper — existing callers (exe/woods-mcp and
+      # exe/woods-mcp-http) just want the retriever. They rescue typed
+      # BootstrapError at their own top level; we do not catch here.
+      def self.build_retriever_compat(index_dir: nil)
+        retriever, _state = build_retriever(index_dir: index_dir)
+        retriever
       end
 
       # Check whether Ollama is reachable at the configured base URL.
       #
-      # Uses a 500ms timeout so startup is not meaningfully delayed when Ollama
-      # is absent. Probes /api/tags (the documented list-models endpoint) so any
-      # running Ollama version responds. Treats any non-5xx response as reachable
-      # — we only care whether something is listening, not whether the response
-      # body is well-formed. Returns false on any network error or timeout.
+      # Kept for the legacy auto-detect path only. New code should use
+      # {Woods::MCP::ProviderProbe.reachable!} via the ResolvedConfig flow.
       #
       # @return [Boolean]
       def self.ollama_reachable?
@@ -138,6 +146,91 @@ module Woods
       rescue StandardError
         false
       end
+
+      # Resolve an IndexArtifact from the passed dir or Woods.configuration.
+      def self.build_artifact(index_dir)
+        dir = index_dir || Woods.configuration.output_dir
+        IndexArtifact.new(dir) if dir
+      end
+      private_class_method :build_artifact
+
+      # If the artifact has a woods.json, read it. Otherwise either
+      # raise MissingArtifact or — when WOODS_ALLOW_AUTODETECT=1 —
+      # fall through to env-var auto-detect. The env flag is opt-in
+      # because silent fallback was the failure mode we eliminated.
+      def self.resolve_or_autodetect(artifact)
+        config = Woods.configuration
+
+        if artifact && !artifact.fresh?
+          # Real config snapshot reading lands in PR 3 — for now, if the
+          # artifact has a woods.json we trust the host's initializer
+          # (which configured the provider) and skip autodetect.
+          return config
+        end
+
+        return config if config.embedding_provider
+
+        if ENV['WOODS_ALLOW_AUTODETECT'] != '1'
+          raise MissingArtifact.new(
+            'No woods.json found and WOODS_ALLOW_AUTODETECT is unset. ' \
+            'Run `bundle exec rake woods:extract` in your host app, or set ' \
+            'WOODS_ALLOW_AUTODETECT=1 to probe env vars (deprecated).',
+            details: { output_dir: artifact&.output_dir&.to_s }
+          )
+        end
+
+        warn '[woods-mcp] deprecated_autodetect: falling back to env-var auto-detect (no woods.json found)'
+        autodetect_config(config)
+      end
+      private_class_method :resolve_or_autodetect
+
+      # Legacy env-var auto-detect path. Only reachable when
+      # WOODS_ALLOW_AUTODETECT=1 and no woods.json is present. Mutates
+      # Woods.configuration — not great, but preserves the shape the
+      # HTTP entry point was written against. To be removed alongside
+      # the env-var path in a later PR.
+      def self.autodetect_config(config)
+        openai_key = ENV.fetch('OPENAI_API_KEY', nil)
+        if openai_key
+          config.vector_store = :in_memory
+          config.metadata_store = :in_memory
+          config.graph_store = :in_memory
+          config.embedding_provider = :openai
+          config.embedding_options = { api_key: openai_key }
+        elsif ollama_reachable?
+          config.vector_store = :in_memory
+          config.metadata_store = :in_memory
+          config.graph_store = :in_memory
+          config.embedding_provider = :ollama
+          config.embedding_options = {
+            host: ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434'),
+            model: ENV.fetch('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
+          }
+        end
+
+        config
+      end
+      private_class_method :autodetect_config
+
+      def self.build_retriever_from_config(config, _resolved, _artifact)
+        # Snapshotter hydration is stubbed in PR 2 — the Builder constructs
+        # empty InMemory stores, same as before. PR 3 wires in the real
+        # Snapshotter.load_or_empty call after build so the returned
+        # retriever sees hydrated vectors.
+        Woods::Builder.new(config).build_retriever
+      end
+      private_class_method :build_retriever_from_config
+
+      def self.probe_and_mark_state(config, state)
+        provider = Woods::Builder.new(config).build_embedding_provider
+        ProviderProbe.reachable!(provider)
+        state.mark(:hydrated)
+      rescue ProviderUnreachable => e
+        state.mark(:degraded, reason: e)
+        warn "[woods-mcp] provider unreachable at boot: #{e.url} (#{e.reason}); " \
+             'starting degraded — will retry on first query'
+      end
+      private_class_method :probe_and_mark_state
     end
   end
 end

@@ -22,9 +22,15 @@ require_relative '../lib/woods/mcp/origin_guard'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
-index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
-retriever = Woods::MCP::Bootstrapper.build_retriever
-snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
+begin
+  index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
+  retriever, _bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+  snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
+rescue Woods::MCP::BootstrapError => e
+  warn "[woods-mcp-http] #{e.class.name.split('::').last}: #{e.message}"
+  warn "[woods-mcp-http] details: #{e.details.inspect}" if e.respond_to?(:details) && !e.details.empty?
+  exit 2
+end
 
 port = (ENV['PORT'] || 9292).to_i
 host = ENV['HOST'] || 'localhost'
