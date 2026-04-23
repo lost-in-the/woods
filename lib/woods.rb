@@ -133,7 +133,8 @@ module Woods
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
-                  :cache_store, :cache_options
+                  :cache_store, :cache_options,
+                  :dump_retention_count
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
                 :cache_enabled
 
@@ -175,6 +176,7 @@ module Woods
       @cache_enabled = false
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
+      @dump_retention_count = 3
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods

@@ -439,4 +439,224 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(recorded_texts).to all(satisfy { |t| t.length <= budget })
     end
   end
+
+  # Persistence is activated only when the vector store responds to #each_entry
+  # and #bulk_load (the in-memory seam). Snapshotter::Vector and ::Metadata are
+  # in-flight work from other teammates; we use instance_doubles so these specs
+  # don't depend on their real implementations landing first.
+  describe 'persistence after index_all' do
+    require 'woods/index_artifact'
+    require 'woods/storage/snapshotter'
+
+    let(:persistable_store) do
+      store = Woods::Storage::VectorStore::InMemory.new
+      allow(store).to receive(:each_entry).and_yield('User', [0.1, 0.2], { type: 'model' })
+      allow(store).to receive(:bulk_load)
+      store
+    end
+
+    # Snapshotters are modules whose implementations land in a parallel PR.
+    # Use plain doubles so these specs don't depend on the real implementations.
+    let(:vector_snapshotter) { double('Snapshotter::Vector') }
+    let(:metadata_snapshotter) { double('Snapshotter::Metadata') }
+
+    let(:resolved_config) do
+      double('ResolvedConfig',
+             to_snapshot_json: { 'schema_version' => 1, 'gem_version' => '0.0.1',
+                                 'created_at' => '2026-04-22T00:00:00Z',
+                                 'embedding_provider' => {}, 'stores' => {} })
+    end
+
+    let(:persistent_indexer) do
+      described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: persistable_store,
+        output_dir: output_dir,
+        batch_size: 2,
+        metadata_store: nil,
+        resolved_config: resolved_config,
+        dump_retention_count: 3
+      )
+    end
+
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+    end
+
+    it 'calls Snapshotter::Vector.dump with the store and a dump_dir under dumps/' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+
+      expect(vector_snapshotter).to receive(:dump) do |store, _artifact, dump_dir|
+        expect(store).to eq(persistable_store)
+        expect(dump_dir.to_s).to include('dumps')
+      end
+
+      persistent_indexer.index_all
+    end
+
+    it 'writes woods.json to output_dir after a successful run' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+
+      persistent_indexer.index_all
+
+      config_path = File.join(output_dir, 'woods.json')
+      expect(File.exist?(config_path)).to be true
+      parsed = JSON.parse(File.read(config_path))
+      expect(parsed['schema_version']).to eq(1)
+    end
+
+    it 'flips the latest pointer after a successful run' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+
+      persistent_indexer.index_all
+
+      latest_path = File.join(output_dir, 'dumps', 'latest')
+      expect(File.exist?(latest_path)).to be true
+      latest = File.read(latest_path).strip
+      expect(latest).not_to be_empty
+      expect(File.directory?(File.join(output_dir, 'dumps', latest))).to be true
+    end
+
+    it 'does not call Snapshotter for metadata when metadata_store is nil' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+
+      expect(metadata_snapshotter).not_to receive(:dump)
+
+      persistent_indexer.index_all
+    end
+
+    context 'when metadata_store is provided and supports the seam' do
+      let(:persistable_metadata_store) do
+        store = double('MetadataStore::InMemory')
+        allow(store).to receive(:each_entry)
+        allow(store).to receive(:bulk_load)
+        store
+      end
+
+      let(:indexer_with_metadata) do
+        described_class.new(
+          provider: provider,
+          text_preparer: text_preparer,
+          vector_store: persistable_store,
+          output_dir: output_dir,
+          batch_size: 2,
+          metadata_store: persistable_metadata_store,
+          resolved_config: resolved_config,
+          dump_retention_count: 3
+        )
+      end
+
+      it 'calls Snapshotter::Metadata.dump when metadata_store has the seam' do
+        stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+        stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+        allow(vector_snapshotter).to receive(:dump)
+
+        expect(metadata_snapshotter).to receive(:dump) do |store, _artifact, dump_dir|
+          expect(store).to eq(persistable_metadata_store)
+          expect(dump_dir.to_s).to include('dumps')
+        end
+
+        indexer_with_metadata.index_all
+      end
+    end
+
+    context 'when vector_store does not support the persistence seam' do
+      let(:non_persistable_store) do
+        double('SomeExternalStore')
+        # does NOT respond to each_entry / bulk_load
+      end
+
+      let(:non_persistent_indexer) do
+        described_class.new(
+          provider: provider,
+          text_preparer: text_preparer,
+          vector_store: non_persistable_store,
+          output_dir: output_dir,
+          batch_size: 2,
+          resolved_config: resolved_config,
+          dump_retention_count: 3
+        )
+      end
+
+      before do
+        allow(non_persistable_store).to receive(:store_batch)
+      end
+
+      it 'does not attempt persistence' do
+        stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+        expect(vector_snapshotter).not_to receive(:dump)
+
+        non_persistent_indexer.index_all
+      end
+
+      it 'does not write woods.json' do
+        stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+
+        non_persistent_indexer.index_all
+
+        expect(File.exist?(File.join(output_dir, 'woods.json'))).to be false
+      end
+    end
+
+    context 'dump retention' do
+      let(:indexer_with_retention) do
+        described_class.new(
+          provider: provider,
+          text_preparer: text_preparer,
+          vector_store: persistable_store,
+          output_dir: output_dir,
+          batch_size: 2,
+          resolved_config: resolved_config,
+          dump_retention_count: 2
+        )
+      end
+
+      it 'prunes old dump directories beyond the retention count' do
+        stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+        stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+        allow(vector_snapshotter).to receive(:dump)
+
+        dumps_dir = File.join(output_dir, 'dumps')
+        FileUtils.mkdir_p(dumps_dir)
+
+        # Pre-create two old dump directories with earlier timestamps
+        old_dirs = %w[2026-04-20T00-00-00Z 2026-04-21T00-00-00Z].map do |name|
+          dir = File.join(dumps_dir, name)
+          FileUtils.mkdir_p(dir)
+          dir
+        end
+
+        indexer_with_retention.index_all
+
+        # After index_all with retention 2, the new dump is kept plus one old one
+        remaining = Dir.glob(File.join(dumps_dir, '*/'))
+                       .map { |d| File.basename(d.chomp('/')) }
+                       .reject { |n| n == 'latest' }
+
+        expect(remaining.length).to eq(2)
+        # The oldest directory should have been pruned
+        expect(File.exist?(old_dirs.first)).to be false
+      end
+    end
+  end
+
+  describe 'dump_retention_count default' do
+    it 'defaults to 3' do
+      idx = described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        output_dir: output_dir
+      )
+      expect(idx.instance_variable_get(:@dump_retention_count)).to eq(3)
+    end
+  end
 end
