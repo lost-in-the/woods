@@ -25,7 +25,7 @@ JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Val
 
 begin
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
-  retriever, _bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+  retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
   snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
 rescue Woods::MCP::BootstrapError => e
   warn "[woods-mcp] #{e.class.name.split('::').last}: #{e.message}"
@@ -33,7 +33,10 @@ rescue Woods::MCP::BootstrapError => e
   exit 2
 end
 
-server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
+server = Woods::MCP::Server.build(
+  index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
+  bootstrap_state: bootstrap_state
+)
 
 # Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
 if ENV['MCP_PROTOCOL_VERSION']

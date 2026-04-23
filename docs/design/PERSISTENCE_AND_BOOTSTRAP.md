@@ -1,8 +1,15 @@
 # Persistence, Bootstrap Flow, and Query Performance
 
-**Status:** Draft — pending sign-off.
+**Status:** Implemented — PRs #73, #74, #75, #76, #77, and the current status-surface PR.
 **Scope:** Fix multi-process (Shape 2) index serving end-to-end. Covers control-flow decomposition of `MCP::Bootstrapper`, on-disk persistence format for the in-memory stores, and the query-path allocation bug that shipped alongside them.
 **Non-goals:** Alternate durable backends beyond what already exists (pgvector, Qdrant, SQLite), distributed/sharded embedding, booting Rails inside `woods-mcp`, native C extensions.
+
+## Deferred to follow-ups
+
+Two plan items were explicitly scope-cut during implementation:
+
+- **Streaming append during embed** (§3.4). Compact-at-end is the current path. For admin's minutes-scale embed this is fine; worth revisiting at 10× scale when a crash at hour N of N+1 genuinely hurts. TODO marker in `Indexer#persist_snapshot`.
+- **Full woods-testbed integration spec.** The subprocess-based round-trip in `spec/integration/persistence_round_trip_spec.rb` proves the dump/load contract. A testbed-hosted end-to-end that boots `woods-mcp` and issues a semantic query against a real Ollama is a separate effort that needs the testbed repo wired in.
 
 ---
 

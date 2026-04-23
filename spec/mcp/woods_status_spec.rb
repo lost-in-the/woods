@@ -50,6 +50,47 @@ RSpec.describe 'woods_status tool' do
         :notion_configured, :console_mcp_enabled
       )
     end
+
+    it 'reports bootstrap=nil when no BootstrapState is passed (backwards compat)' do
+      expect(status[:bootstrap]).to be_nil
+    end
+
+    it 'surfaces BootstrapState when provided' do
+      require 'woods/mcp/bootstrap_state'
+      state = Woods::MCP::BootstrapState.new
+      state.mark(:hydrating)
+      state.mark(:hydrated)
+
+      s = Woods::MCP::Server.build_status(
+        reader: reader, retriever: nil, index_dir: fixture_dir,
+        bootstrap_state: state
+      )
+      expect(s[:bootstrap]).to include(status: :hydrated)
+      expect(s[:bootstrap][:hydrated_at]).not_to be_nil
+    end
+
+    it 'surfaces degraded state with reason class + message' do
+      require 'woods/mcp/bootstrap_state'
+      require 'woods/mcp/errors'
+      state = Woods::MCP::BootstrapState.new
+      state.mark(:hydrating)
+      reason = Woods::MCP::ProviderUnreachable.new(
+        url: 'http://host.docker.internal:11434',
+        reason: 'connection_refused'
+      )
+      state.mark(:degraded, reason: reason)
+
+      s = Woods::MCP::Server.build_status(
+        reader: reader, retriever: nil, index_dir: fixture_dir,
+        bootstrap_state: state
+      )
+      expect(s[:bootstrap][:status]).to eq(:degraded)
+      # BootstrapState.to_h formats reason as "<ClassName>: <message>"
+      # — a single human-readable line that's grep-friendly for operators.
+      expect(s[:bootstrap][:reason]).to include('Woods::MCP::ProviderUnreachable')
+      expect(s[:bootstrap][:reason]).to include('connection_refused')
+      expect(s[:bootstrap][:degraded_since]).not_to be_nil
+    end
   end
 
   describe 'missing-manifest resilience' do
