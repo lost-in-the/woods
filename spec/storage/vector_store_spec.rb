@@ -127,6 +127,57 @@ RSpec.describe Woods::Storage::VectorStore do
           ArgumentError, /Vector dimension mismatch \(2 vs 3\)/
         )
       end
+
+      it 'matches the reference zip/sum cosine computation bit-for-bit' do
+        # The while-loop kernel must produce identical results to the
+        # naive Enumerable implementation it replaced. Any drift here
+        # means we silently shifted search rankings.
+        rng = Random.new(12_345)
+        ref = lambda { |a, b|
+          dot = a.zip(b).sum { |x, y| x * y }
+          mag_a = Math.sqrt(a.sum { |x| x**2 })
+          mag_b = Math.sqrt(b.sum { |x| x**2 })
+          mag_a.zero? || mag_b.zero? ? 0.0 : dot / (mag_a * mag_b)
+        }
+
+        fresh = described_class.new
+        50.times do |i|
+          fresh.store("v_#{i}", Array.new(128) { rng.rand(-1.0..1.0) })
+        end
+        query = Array.new(128) { rng.rand(-1.0..1.0) }
+        results = fresh.search(query, limit: 50)
+
+        results.each do |r|
+          stored = fresh.instance_variable_get(:@entries)[r.id][:vector]
+          expect(r.score).to be_within(1e-12).of(ref.call(query, stored))
+        end
+      end
+
+      it 'allocates no per-pair objects during search' do
+        # The whole point of the while-loop kernel. The baseline
+        # zip/sum produced ~770 allocations per cosine call, ~9.8M for
+        # a 12 k-entry search. The while-loop must be well under
+        # per-entry allocation — we allow a small constant for the
+        # SearchResult objects and sort scaffolding, but the inner
+        # loop itself must be clean.
+        fresh = described_class.new
+        1000.times { |i| fresh.store("v_#{i}", Array.new(256) { rand(-1.0..1.0) }) }
+        query = Array.new(256) { rand(-1.0..1.0) }
+
+        # Warm caches and stabilise inline constants.
+        3.times { fresh.search(query, limit: 10) }
+        GC.start
+
+        before = GC.stat(:total_allocated_objects)
+        fresh.search(query, limit: 10)
+        allocations = GC.stat(:total_allocated_objects) - before
+
+        # Realistic bound: ~1 SearchResult per candidate + sort overhead
+        # + a handful of bookkeeping objects. The OLD path produced ~770k
+        # allocations for 1000 candidates; the new path must be under
+        # ~3× the candidate count. 5× gives headroom for Ruby version drift.
+        expect(allocations).to be < 5000
+      end
     end
 
     describe '#delete' do

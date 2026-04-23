@@ -143,23 +143,42 @@ module Woods
 
         # Compute cosine similarity between two vectors.
         #
+        # Uses a single-pass while loop over Array indices rather than
+        # Enumerable methods. The previous `vec_a.zip(vec_b).sum { |x, y|
+        # x * y }` allocated a 768-element Array-of-2-element-Arrays plus
+        # a block invocation per pair — about 770 transient objects per
+        # call, ~9.8M allocations per 12 k-entry search, enough to wake
+        # the minor GC every second query. The while loop produces zero
+        # per-pair allocations. See bench/vector_query_and_serialization.rb.
+        #
+        # Flonums (MRI 2.0+) mean intermediate Float arithmetic is heap-free
+        # for doubles whose exponent fits in 62 bits, which embedding
+        # vectors always satisfy.
+        #
         # @param vec_a [Array<Float>] First vector
         # @param vec_b [Array<Float>] Second vector
         # @return [Float] Cosine similarity between -1.0 and 1.0
         # @raise [ArgumentError] if vectors have different dimensions
         def cosine_similarity(vec_a, vec_b)
-          unless vec_a.length == vec_b.length
-            raise ArgumentError,
-                  "Vector dimension mismatch (#{vec_a.length} vs #{vec_b.length})"
-          end
+          len = vec_a.length
+          raise ArgumentError, "Vector dimension mismatch (#{len} vs #{vec_b.length})" unless len == vec_b.length
 
-          dot = vec_a.zip(vec_b).sum { |x, y| x * y }
-          mag_a = Math.sqrt(vec_a.sum { |x| x**2 })
-          mag_b = Math.sqrt(vec_b.sum { |x| x**2 })
+          i = 0
+          dot = 0.0
+          mag_a = 0.0
+          mag_b = 0.0
+          while i < len
+            a = vec_a[i]
+            b = vec_b[i]
+            dot += a * b
+            mag_a += a * a
+            mag_b += b * b
+            i += 1
+          end
 
           return 0.0 if mag_a.zero? || mag_b.zero?
 
-          dot / (mag_a * mag_b)
+          dot / (Math.sqrt(mag_a) * Math.sqrt(mag_b))
         end
       end
     end
