@@ -168,6 +168,13 @@ module Woods
         metadata_count = refill_in_memory_metadata_store(retriever, config, resolved, artifact)
         graph_count = refill_in_memory_graph_store(retriever, config, artifact)
 
+        # Context-cache entries from the previous embed run no longer agree
+        # with the refreshed stores. Drop them so the next codebase_retrieve
+        # call goes through the full pipeline with the new data. Embedding
+        # caches (query → vector) survive — that mapping is deterministic
+        # for a given provider+model.
+        retriever.invalidate_context_cache! if retriever.respond_to?(:invalidate_context_cache!)
+
         { vectors: vectors_count, metadata: metadata_count, graph: graph_count }
       end
 
@@ -203,16 +210,17 @@ module Woods
 
       # GraphStore::Memory doesn't expose a +clear!+/+bulk_load+ pair today
       # — a fresh run hands it an entirely new DependencyGraph from disk.
-      # Swap the inner graph in place so SearchExecutor / Ranker / MCP tools
-      # keep their references to the same wrapper and see the new graph.
+      # Swap the inner graph via +replace_graph+ so SearchExecutor / Ranker /
+      # MCP tools keep their references to the same wrapper and see the new
+      # graph (no closure references break).
       def self.refill_in_memory_graph_store(retriever, config, artifact)
         gs = retriever.respond_to?(:graph_store) ? retriever.graph_store : nil
-        return 0 unless gs.is_a?(Woods::Storage::GraphStore::Memory)
+        return 0 unless gs.respond_to?(:replace_graph)
 
         fresh = hydrated_graph_store(config, artifact)
-        return 0 unless fresh
+        return 0 if fresh.nil?
 
-        gs.instance_variable_set(:@graph, fresh.instance_variable_get(:@graph))
+        gs.replace_graph(fresh.graph)
         1
       end
       private_class_method :refill_in_memory_graph_store

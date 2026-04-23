@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+# Ruby 3.2 autoloads Set, but the gem supports >= 3.0 — make the require
+# explicit so +filter_by_type+ works on the whole supported range.
+require 'set'
+
 require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
