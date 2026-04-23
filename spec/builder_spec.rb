@@ -87,6 +87,34 @@ RSpec.describe Woods::Builder do
       end
     end
 
+    describe ':shared_filesystem preset' do
+      subject(:config) { described_class.preset_config(:shared_filesystem) }
+
+      # Shape 2 in the persistence plan: rake embed writes to output_dir,
+      # separate MCP server reads the dump. All stores :in_memory;
+      # persistence is via the Snapshotter, not SQLite. Works on MySQL
+      # and Postgres hosts that don't bundle the sqlite3 gem.
+      it 'returns a Configuration' do
+        expect(config).to be_a(Woods::Configuration)
+      end
+
+      it 'sets vector_store to :in_memory (persisted via Snapshotter)' do
+        expect(config.vector_store).to eq(:in_memory)
+      end
+
+      it 'sets metadata_store to :in_memory (no sqlite3 gem required)' do
+        expect(config.metadata_store).to eq(:in_memory)
+      end
+
+      it 'sets graph_store to :in_memory' do
+        expect(config.graph_store).to eq(:in_memory)
+      end
+
+      it 'sets embedding_provider to :ollama' do
+        expect(config.embedding_provider).to eq(:ollama)
+      end
+    end
+
     describe 'invalid preset' do
       it 'raises ArgumentError' do
         expect { described_class.preset_config(:invalid) }

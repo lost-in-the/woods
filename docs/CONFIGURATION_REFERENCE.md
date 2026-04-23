@@ -175,14 +175,47 @@ it. The `_index.json` manifest under `output_dir` is the durable
 metadata for the index MCP server, so this is a reasonable default
 for hosts that don't bundle `sqlite3`.
 
+## Deployment Shapes
+
+Woods supports three deployment shapes — pick the preset that matches yours.
+
+| Shape | When | Preset |
+|---|---|---|
+| **Single-process** | Embed + query in one Ruby VM (dev console, tests, `rails runner` scripts). Simplest. | `:local` |
+| **Shared filesystem** | Rake task runs `woods:embed`, separate `woods-mcp` server reads the dump. Common with MCP sidecars. | `:shared_filesystem` |
+| **Distributed** | Vectors live in an external service (pgvector / Qdrant) queried by both the embed process and the MCP server. Highest durability, highest ops cost. | `:postgresql` or `:production` |
+
+### Shape 2 setup (`:shared_filesystem`)
+
+```ruby
+Woods.configure_with_preset(:shared_filesystem) do |config|
+  config.output_dir = Rails.root.join('tmp/woods')
+  config.embedding_options = {
+    model: 'nomic-embed-text',
+    host:  ENV.fetch('WOODS_OLLAMA_URL', 'http://localhost:11434')
+  }
+end
+```
+
+The embed run writes `woods.json` + `dumps/<ISO8601>/vectors.bin` + `metadata.msgpack` under `output_dir`. The MCP server reads them at boot — no sqlite3 gem required, no pgvector/Qdrant service needed. Dump retention defaults to the last 3 (configurable via `config.dump_retention_count`).
+
+Requirements:
+- `output_dir` must be set and readable by both the embed process and the MCP server.
+- The MCP server must know the same `output_dir` (pass via `woods-mcp <DIR>` or set `WOODS_DIR`).
+
 ## Presets
 
 For quick setup, use named presets that configure storage + embedding together:
 
 ```ruby
-# Local development — no external services needed
+# Local development — no external services needed (requires sqlite3 gem)
 Woods.configure_with_preset(:local)
 # → in_memory vectors, SQLite metadata, in_memory graph, Ollama embeddings
+
+# Shared filesystem — rake embed → separate MCP server reads the dump.
+# No sqlite3 gem needed; works on MySQL/Postgres-only hosts.
+Woods.configure_with_preset(:shared_filesystem)
+# → in_memory everything + Snapshotter-based persistence via output_dir
 
 # PostgreSQL — requires pgvector extension and OpenAI API key
 Woods.configure_with_preset(:postgresql)

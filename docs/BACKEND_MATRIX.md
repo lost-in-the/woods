@@ -8,6 +8,29 @@ The goal is that an agent or developer reading this document can make an informe
 
 ---
 
+## Persistence Story
+
+Every backend combination falls into one of three shapes based on how data survives process boundaries. The right shape depends on whether the embed process and the query process share a Ruby VM, a filesystem, or neither.
+
+| Shape | Vector store | Metadata store | Durability | Right preset |
+|---|---|---|---|---|
+| **Single-process** | `:in_memory` | `:in_memory` or `:sqlite` | Lives and dies with the Ruby VM | `:local` |
+| **Shared filesystem** | `:in_memory` + `Snapshotter` dump to `output_dir` | `:in_memory` + `Snapshotter` dump to `output_dir` | Process-local, hydrated from disk on MCP boot; dumps retained per `dump_retention_count` (default 3) | `:shared_filesystem` |
+| **Distributed** | `:pgvector`, `:qdrant` | `:sqlite` (or future `:mysql`/`:postgresql`) | Fully external; multiple processes read/write concurrently | `:postgresql`, `:production` |
+
+The shape determines the capability matrix:
+
+| Capability | Single-process | Shared filesystem | Distributed |
+|---|---|---|---|
+| Survives process restart | No | Yes (via dump) | Yes (backend) |
+| Multi-writer embedding | No | No (single writer assumed) | Yes (backend-dependent) |
+| Requires sqlite3 gem in host | With `:local` | No | With `:local`/`:postgresql`/`:production` |
+| Requires external service | No | No | Yes |
+| Cross-machine query | No | No | Yes |
+| `woods.json` schema-versioned config snapshot | — | Yes | Host config used directly |
+
+---
+
 ## Vector Stores
 
 ### pgvector (PostgreSQL Extension)

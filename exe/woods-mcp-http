@@ -24,7 +24,7 @@ require_relative '../lib/woods/embedding/indexer'
 
 begin
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
-  retriever, _bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+  retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
   snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
 rescue Woods::MCP::BootstrapError => e
   warn "[woods-mcp-http] #{e.class.name.split('::').last}: #{e.message}"
@@ -46,7 +46,10 @@ if loopback && token.nil?
   warn '[woods-mcp-http] WARNING: running on loopback without a token; local processes can reach this server.'
 end
 
-server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
+server = Woods::MCP::Server.build(
+  index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
+  bootstrap_state: bootstrap_state
+)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport
 

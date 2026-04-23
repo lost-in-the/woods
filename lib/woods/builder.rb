@@ -32,13 +32,23 @@ module Woods
   class Builder # rubocop:disable Metrics/ClassLength
     # Named presets mapping to default adapter types.
     #
-    # :local      — fully local, no external services required
-    # :postgresql — pgvector for vectors, OpenAI for embeddings
-    # :production — Qdrant for vectors, OpenAI for embeddings
+    # :local              — fully local, no external services required (requires sqlite3 gem)
+    # :shared_filesystem  — Shape 2: rake embed → separate MCP server reads from disk.
+    #                       All stores in-memory + persisted to output_dir via the
+    #                       Snapshotter. No sqlite3 gem needed. Requires output_dir set
+    #                       AND readable by both the embed process and the MCP server.
+    # :postgresql         — pgvector for vectors, OpenAI for embeddings
+    # :production         — Qdrant for vectors, OpenAI for embeddings
     PRESETS = {
       local: {
         vector_store: :in_memory,
         metadata_store: :sqlite,
+        graph_store: :in_memory,
+        embedding_provider: :ollama
+      },
+      shared_filesystem: {
+        vector_store: :in_memory,
+        metadata_store: :in_memory,
         graph_store: :in_memory,
         embedding_provider: :ollama
       },

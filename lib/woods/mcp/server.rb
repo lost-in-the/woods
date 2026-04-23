@@ -29,12 +29,17 @@ module Woods
         # @param retriever [Woods::Retriever, nil] Optional retriever for semantic search
         # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
         # @param feedback_store [Woods::Feedback::Store, nil] Optional feedback store
+        # @param bootstrap_state [Woods::MCP::BootstrapState, nil] Optional state
+        #   from the bootstrap flow. When provided, woods_status reports the
+        #   hydrated/degraded/failed lifecycle plus the reason so operators can
+        #   diagnose "why is semantic search disabled" without reading the Ruby
+        #   source. Nil just means the caller didn't go through Bootstrapper.
         # @param warmup [Boolean] Pre-populate the index reader's caches during build,
         #   shifting first-tool-call latency to startup. Default: true. Pass false for
         #   tests or when startup time matters more than first-query latency.
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
-                  response_format: nil, warmup: true)
+                  bootstrap_state: nil, response_format: nil, warmup: true)
           reader = IndexReader.new(index_dir)
           reader.warmup! if warmup
           config = Woods.configuration
@@ -104,7 +109,7 @@ module Woods
           define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing)
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing)
           define_notion_sync_tool(server, reader, index_dir, respond, respond_err)
-          define_woods_status_tool(server, reader, retriever, index_dir, respond)
+          define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
 
           server
@@ -1121,16 +1126,20 @@ module Woods
           ]
         end
 
-        def define_woods_status_tool(server, reader, retriever, index_dir, respond)
+        def define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           server.define_tool(
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
-                         'feature flags, and a ready flag. Call this first on cold connect to learn what the server knows.',
+                         'bootstrap state (hydrated / degraded / failed + reason), feature flags, and a ready flag. ' \
+                         'Call this first on cold connect to learn what the server knows.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
             _ = server_context
-            status = Woods::MCP::Server.build_status(reader: reader, retriever: retriever, index_dir: index_dir)
+            status = Woods::MCP::Server.build_status(
+              reader: reader, retriever: retriever, index_dir: index_dir,
+              bootstrap_state: bootstrap_state
+            )
             respond.call(JSON.pretty_generate(status))
           end
         end
@@ -1140,7 +1149,7 @@ module Woods
         # Build the woods_status payload. Exposed at module level so specs (and future
         # console/unified-server entry points) can assemble the same shape without
         # reaching through the MCP::Server internals.
-        def build_status(reader:, retriever:, index_dir:)
+        def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
           staleness = staleness_seconds(extracted_at)
@@ -1169,6 +1178,7 @@ module Woods
               configured: !retriever.nil?,
               class: retriever&.class&.name
             },
+            bootstrap: bootstrap_state&.to_h,
             features: {
               embedding_model: config.respond_to?(:embedding_model) ? config.embedding_model : nil,
               embedding_provider: config.respond_to?(:embedding_provider) ? presence(config.embedding_provider) : nil,
