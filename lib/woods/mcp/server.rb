@@ -2,6 +2,7 @@
 
 require 'logger'
 require 'mcp'
+require 'open3'
 require 'time'
 require 'set'
 require_relative '../tasks'
@@ -39,7 +40,7 @@ module Woods
         #   tests or when startup time matters more than first-query latency.
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
-                  bootstrap_state: nil, response_format: nil, warmup: true)
+                  bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil)
           reader = IndexReader.new(index_dir)
           reader.warmup! if warmup
           config = Woods.configuration
@@ -101,14 +102,20 @@ module Woods
           define_pagerank_tool(server, reader, respond, renderer)
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
-          define_reload_tool(server, reader, respond)
+          define_reload_tool(server, reader, respond, retriever_reloader)
           define_retrieve_tool(server, retriever, respond, respond_err)
           define_trace_flow_tool(server, reader, index_dir, respond, renderer)
-          define_session_trace_tool(server, reader, respond, respond_err)
-          define_operator_tools(server, operator, respond, respond_err, op_missing)
-          define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing)
-          define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing)
-          define_notion_sync_tool(server, reader, index_dir, respond, respond_err)
+          # Conditionally register collaborator-dependent tools. Historically
+          # all 15 stubs were registered unconditionally and returned
+          # isError: true when the wiring was missing — that added token
+          # noise to every LLM turn's tool catalog and invited the model to
+          # try tools guaranteed to fail. Only register when the collaborator
+          # is wired, so tools/list reflects what the server can actually do.
+          define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired?
+          define_operator_tools(server, operator, respond, respond_err, op_missing) if operator
+          define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store
+          define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
+          define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired?
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
 
@@ -116,6 +123,28 @@ module Woods
         end
 
         private
+
+        # Session tracer requires a configured session_store on Woods.configuration.
+        # The tool reads the store inside its handler; skipping registration when
+        # the store is absent keeps tools/list honest.
+        def session_tracer_wired?
+          config = Woods.configuration
+          return false unless config
+
+          config.respond_to?(:session_store) && !config.session_store.nil?
+        end
+
+        # Notion export needs both an API token and at least one database ID.
+        # NOTION_API_TOKEN env var overrides the config token (see
+        # docs/NOTION_EXPORT.md).
+        def notion_wired?
+          config = Woods.configuration
+          return false unless config
+
+          token = ENV['NOTION_API_TOKEN'] || (config.respond_to?(:notion_api_token) ? config.notion_api_token : nil)
+          ids = config.respond_to?(:notion_database_ids) ? config.notion_database_ids : nil
+          token && !token.empty? && ids && !ids.empty?
+        end
 
         def text_response(text)
           ::MCP::Tool::Response.new([{ type: 'text', text: text }])
@@ -204,20 +233,34 @@ module Woods
             name: 'lookup',
             description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \
                          'dependencies, and dependents. Use include_source: false to omit source_code. ' \
-                         'Use sections to select specific keys (type, identifier, file_path, namespace are always included).',
+                         'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \
+                         '`name` is accepted as an alias for `identifier` for discoverability.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
                               description: 'Exact unit identifier (e.g. "Post", "PostsController", "Api::V1::HealthController")' },
+                name: { type: 'string', description: 'Alias for `identifier`. Either one works.' },
                 include_source: { type: 'boolean', description: 'Include source_code in response (default: true)' },
                 sections: {
                   type: 'array', items: { type: 'string' },
                   description: 'Select specific keys to return (e.g. ["metadata", "dependencies"]). Always includes type, identifier, file_path, namespace.'
                 }
-              },
-              required: ['identifier']
+              }
+              # NOTE: 'identifier' is not listed as required — `name` is an
+              # accepted alias. The handler validates that one of the two
+              # was provided.
             }
-          ) do |identifier:, server_context:, include_source: nil, sections: nil|
+          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil|
+            identifier ||= name
+            if identifier.nil? || identifier.empty?
+              next respond_err.call(
+                'lookup requires `identifier` (or its alias `name`).',
+                code: :unsupported_argument,
+                tool: 'lookup',
+                argument: 'identifier',
+                hint: 'Pass identifier: "PostsController" (or name: "PostsController").'
+              )
+            end
             sections = coerce.call(sections)
             unit = reader.find_unit(identifier)
             if unit
@@ -515,45 +558,77 @@ module Woods
           end
         end
 
-        def define_reload_tool(server, reader, respond)
+        def define_reload_tool(server, reader, respond, retriever_reloader)
           server.define_tool(
             name: 'reload',
-            description: 'Reload extraction data from disk. Use after re-running extraction to pick up changes ' \
-                         'without restarting the server.',
+            description: 'Reload extraction data from disk. Use after re-running extraction or woods:embed to pick ' \
+                         'up changes without restarting the server. Refreshes the JSON index (manifest, dependency ' \
+                         'graph, unit cache) AND re-hydrates the retriever\'s in-memory vector/metadata/graph ' \
+                         'stores from the latest dumps. Durable backends (pgvector, Qdrant) are auto-refreshed ' \
+                         'externally — their counts in the response reflect the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
             reader.reload!
             manifest = reader.manifest
-            respond.call(JSON.pretty_generate({
-                                                reloaded: true,
-                                                extracted_at: manifest['extracted_at'],
-                                                total_units: manifest['total_units'],
-                                                counts: manifest['counts']
-                                              }))
+            payload = {
+              reloaded: true,
+              extracted_at: manifest['extracted_at'],
+              total_units: manifest['total_units'],
+              counts: manifest['counts']
+            }
+            if retriever_reloader
+              begin
+                payload[:retriever] = retriever_reloader.call
+              rescue StandardError => e
+                payload[:retriever] = { error: "#{e.class}: #{e.message}" }
+              end
+            end
+            respond.call(JSON.pretty_generate(payload))
           end
         end
 
         def define_retrieve_tool(server, retriever, respond, respond_err)
           coerce_int = method(:coerce_integer)
+          coerce = method(:coerce_array)
           server.define_tool(
             name: 'codebase_retrieve',
             description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
                          'Example: codebase_retrieve("how does billing work?") returns ranked source context. ' \
                          'Returns a token-budgeted context string ready to paste into a prompt. ' \
                          'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
-                         'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable.',
+                         'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable. ' \
+                         'By default excludes test_mappings (~33% of a typical index) so spec filenames do not ' \
+                         'dominate semantic rank; pass types: ["test_mapping"] to opt back in.',
             input_schema: {
               properties: {
                 query: { type: 'string',
                          description: 'Natural language question (e.g. "How does user authentication work?")' },
-                budget: { type: 'integer', description: 'Token budget for context assembly (default: 8000)' }
+                budget: { type: 'integer', description: 'Token budget for context assembly (default: 8000). ' \
+                                                        '`limit` is accepted as an alias for discoverability.' },
+                limit: { type: 'integer', description: 'Alias for `budget`. Either one works.' },
+                types: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
+                               'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion.'
+                },
+                exclude_types: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Additional types to exclude on top of the default test_mapping exclusion.'
+                }
               },
               required: ['query']
             }
-          ) do |query:, server_context:, budget: nil|
-            budget = coerce_int.call(budget)
+          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil|
+            budget = coerce_int.call(budget) || coerce_int.call(limit)
+            types = coerce.call(types)
+            exclude_types = coerce.call(exclude_types)
             if retriever
-              result = retriever.retrieve(query, budget: budget || 8000)
+              result = retriever.retrieve(
+                query,
+                budget: budget || 8000,
+                types: types,
+                exclude_types: exclude_types
+              )
               respond.call(result.context)
             else
               respond_err.call(
@@ -1149,11 +1224,23 @@ module Woods
         # Build the woods_status payload. Exposed at module level so specs (and future
         # console/unified-server entry points) can assemble the same shape without
         # reaching through the MCP::Server internals.
+        #
+        # +features.embedding_model+ / +features.embedding_provider+ /
+        # +features.vector_store+ prefer the ResolvedConfig captured at embed time
+        # (+bootstrap_state.resolved_config+, which is read back from +woods.json+)
+        # over +Woods.configuration+, whose defaults can contradict the actual
+        # provider in use. Without this, operators debugging "wrong provider" see
+        # status claiming +embedding_model: "text-embedding-3-small"+ next to
+        # +embedding_provider: "ollama"+ and reasonably distrust every field.
         def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
           staleness = staleness_seconds(extracted_at)
-          config = Woods.configuration
+          # Tolerate a nil Woods.configuration — specs that reset it between
+          # runs can leave a transient nil window, and build_status should
+          # still produce a readable payload during that window.
+          config = Woods.configuration || Woods::Configuration.new
+          resolved = bootstrap_state&.resolved_config
 
           {
             ready: manifest && !manifest['counts'].to_h.empty?,
@@ -1162,36 +1249,117 @@ module Woods
               version: Woods::VERSION,
               index_dir: index_dir.to_s
             },
-            index: {
-              extracted_at: extracted_at,
-              staleness_seconds: staleness,
-              rails_version: manifest && manifest['rails_version'],
-              ruby_version: manifest && manifest['ruby_version'],
-              total_units: manifest && manifest['total_units'],
-              counts: (manifest && manifest['counts']) || {},
-              git_sha: manifest && manifest['git_sha'],
-              git_branch: manifest && manifest['git_branch'],
-              gemfile_lock_sha: manifest && manifest['gemfile_lock_sha'],
-              schema_sha: manifest && manifest['schema_sha']
-            },
+            index: index_section(manifest, extracted_at, staleness, index_dir),
             retriever: {
               configured: !retriever.nil?,
               class: retriever&.class&.name
             },
             bootstrap: bootstrap_state&.to_h,
-            features: {
-              embedding_model: config.respond_to?(:embedding_model) ? config.embedding_model : nil,
-              embedding_provider: config.respond_to?(:embedding_provider) ? presence(config.embedding_provider) : nil,
-              vector_store: config.respond_to?(:vector_store) ? presence(config.vector_store) : nil,
-              session_tracer_enabled: config.respond_to?(:session_tracer_enabled) ? config.session_tracer_enabled : false,
-              snapshots_enabled: config.respond_to?(:enable_snapshots) ? config.enable_snapshots : false,
-              notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?,
-              console_mcp_enabled: config.respond_to?(:console_mcp_enabled) ? config.console_mcp_enabled : false
-            }
+            features: features_from(config, resolved)
           }
         end
 
         private
+
+        # Assemble the +index+ sub-hash of woods_status, including a staleness
+        # gate that compares +manifest.git_sha+ against the current HEAD. The
+        # manifest captures +git_sha+ / +gemfile_lock_sha+ / +schema_sha+ at
+        # extraction time; until this change nothing compared them against the
+        # live working tree, so an agent asking questions after 40 uncommitted
+        # changes and an MCP restart silently got pre-change answers.
+        #
+        # +git_sha_matches_head+ is a tri-state:
+        #   - true      — manifest.git_sha == current HEAD
+        #   - false     — mismatch (stale)
+        #   - nil       — couldn't resolve (not a git repo, git unavailable,
+        #                 or manifest has no git_sha)
+        #
+        # When stale, +head_git_sha+ carries the live HEAD so operators can
+        # diff directly. This is an observability signal, not a hard gate —
+        # hard-refusing responses would be much more disruptive than a loudly-
+        # visible staleness flag that agents can branch on.
+        def index_section(manifest, extracted_at, staleness, index_dir)
+          base = {
+            extracted_at: extracted_at,
+            staleness_seconds: staleness,
+            rails_version: manifest && manifest['rails_version'],
+            ruby_version: manifest && manifest['ruby_version'],
+            total_units: manifest && manifest['total_units'],
+            counts: (manifest && manifest['counts']) || {},
+            git_sha: manifest && manifest['git_sha'],
+            git_branch: manifest && manifest['git_branch'],
+            gemfile_lock_sha: manifest && manifest['gemfile_lock_sha'],
+            schema_sha: manifest && manifest['schema_sha']
+          }
+
+          manifest_sha = manifest && manifest['git_sha']
+          head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
+          return base unless head_sha
+
+          base[:head_git_sha] = head_sha
+          base[:git_sha_matches_head] = (manifest_sha == head_sha)
+          base
+        end
+
+        # Resolve the current HEAD SHA for the git repo containing +index_dir+.
+        # Returns nil when git is unavailable or +index_dir+ is not in a repo —
+        # callers treat nil as "can't compare" rather than "mismatch".
+        def resolve_head_sha(index_dir)
+          return nil unless index_dir
+
+          dir = index_dir.to_s
+          return nil unless File.directory?(dir)
+
+          output, status = Open3.capture2('git', '-C', dir, 'rev-parse', 'HEAD')
+          status.success? ? output.strip : nil
+        rescue StandardError
+          nil
+        end
+
+        # Assemble the +features+ sub-hash of woods_status, preferring the
+        # ResolvedConfig captured at embed time over live {Woods::Configuration}.
+        #
+        # Fields that read from resolved+config (when present): embedding_model,
+        # embedding_provider, vector_store. Everything else is host-process
+        # state (snapshots_enabled, notion_configured, session_tracer_enabled)
+        # and comes from the running config.
+        #
+        # +console_mcp_enabled+ is intentionally omitted — the index MCP process
+        # has no visibility into the host Rails app's Woods initializer, so
+        # historic status payloads always reported +false+ regardless of the
+        # actual console MCP state. Advertising a misleading field is worse
+        # than not advertising it at all.
+        def features_from(config, resolved)
+          provider_hash = resolved&.embedding_provider || {}
+          resolved_provider = resolved_provider_symbol(provider_hash[:class])
+          resolved_model = provider_hash[:model]
+          resolved_vector = resolved&.stores&.dig(:vector_store)
+
+          {
+            embedding_model: resolved_model || (config.respond_to?(:embedding_model) ? config.embedding_model : nil),
+            embedding_provider: presence(resolved_provider ||
+              (config.respond_to?(:embedding_provider) ? config.embedding_provider : nil)),
+            vector_store: presence(resolved_vector ||
+              (config.respond_to?(:vector_store) ? config.vector_store : nil)),
+            session_tracer_enabled: config.respond_to?(:session_tracer_enabled) ? config.session_tracer_enabled : false,
+            snapshots_enabled: config.respond_to?(:enable_snapshots) ? config.enable_snapshots : false,
+            notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?
+          }
+        end
+
+        # Convert a fully-qualified provider class name (as serialised in
+        # woods.json — e.g. +"Woods::Embedding::Provider::Ollama"+) into the
+        # short symbol form used by +Woods.configuration.embedding_provider+
+        # (+:ollama+, +:openai+). Returns nil when +class_name+ is unknown or
+        # absent so callers fall back to the live config value.
+        def resolved_provider_symbol(class_name)
+          return nil if class_name.nil? || class_name.empty?
+
+          case class_name
+          when /Ollama\z/ then :ollama
+          when /OpenAI\z/ then :openai
+          end
+        end
 
         # Return a Hash of manifest content, or nil if unreadable.
         def safe_manifest(reader)

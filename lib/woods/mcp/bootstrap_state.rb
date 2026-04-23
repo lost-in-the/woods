@@ -35,11 +35,18 @@ module Woods
       # @return [Time, nil] set when status transitions to +:degraded+
       attr_reader :degraded_since
 
+      # @return [Woods::ResolvedConfig, nil] captured at embed time and read
+      #   back from +woods.json+ during boot. Used by +woods_status+ to report
+      #   the provider/model actually in play instead of the stale defaults on
+      #   {Woods.configuration}.
+      attr_accessor :resolved_config
+
       def initialize
         @status = :initializing
         @reason = nil
         @hydrated_at = nil
         @degraded_since = nil
+        @resolved_config = nil
       end
 
       # Transition to a new status.
