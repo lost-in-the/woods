@@ -188,6 +188,12 @@ module Woods
           entries.each { |id, meta| @data[id] = meta }
         end
 
+        # Drop every stored entry. Used by the MCP +reload+ tool to pick up a
+        # fresh embed run without restarting the process. Safe on an empty store.
+        def clear!
+          @data = {}
+        end
+
         private
 
         # Match the SQLite adapter's string-key contract regardless of how

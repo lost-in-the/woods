@@ -46,9 +46,13 @@ if loopback && token.nil?
   warn '[woods-mcp-http] WARNING: running on loopback without a token; local processes can reach this server.'
 end
 
+retriever_reloader = lambda do
+  Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir)
+end
+
 server = Woods::MCP::Server.build(
   index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
-  bootstrap_state: bootstrap_state
+  bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
 )
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport

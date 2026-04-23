@@ -161,6 +161,20 @@ module Woods
           entries.each { |entry| store(entry[:id], entry[:vector], entry[:metadata] || {}) }
         end
 
+        # Drop every stored entry, restoring the store to its post-+new+ state.
+        #
+        # Used by the MCP +reload+ tool to pick up a fresh embed run without
+        # restarting the process. A subsequent +#bulk_load+ then repopulates
+        # from disk. Safe on an already-empty store.
+        def clear!
+          @dim = nil
+          @ids = []
+          @vectors_flat = []
+          @metadata = []
+          @id_to_index = {}
+          @tombstones = Set.new
+        end
+
         # @see Interface#each_entry
         def each_entry(&block)
           return enum_for(:each_entry) unless block
