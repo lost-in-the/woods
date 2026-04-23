@@ -126,6 +126,15 @@ RSpec.describe Woods::Embedding::Provider do
       it 'uses the conservative fallback for unknown models' do
         expect(described_class.new(model: 'mystery-embed').max_input_tokens).to eq(2048)
       end
+
+      # Regression for the silent-chunk-drop bug fixed alongside the
+      # build_chunker guard. all-minilm has a 512-token context (NOT
+      # the 384 embedding dimension and NOT the 256 some sources cite);
+      # a 256-token budget would push max_chars negative and cause
+      # SemanticChunker to drop every chunk silently.
+      it 'reports 512 for all-minilm (the model context, not the dimension)' do
+        expect(described_class.new(model: 'all-minilm').max_input_tokens).to eq(512)
+      end
     end
 
     describe 'error handling' do

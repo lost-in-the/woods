@@ -685,13 +685,6 @@ RSpec.describe Woods::MCP::Server do
       described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
     end
 
-    let(:mock_builder) do
-      double('Builder').tap do |b|
-        allow(b).to receive(:build_embedding_provider).and_return(double('provider'))
-        allow(b).to receive(:build_vector_store).and_return(double('vector_store'))
-      end
-    end
-
     let(:mock_indexer) do
       double('Indexer').tap do |i|
         allow(i).to receive(:index_all)
@@ -699,15 +692,11 @@ RSpec.describe Woods::MCP::Server do
       end
     end
 
-    let(:text_preparer_class) { double('TextPreparerClass', new: double('text_preparer')) }
-    let(:indexer_class) { double('IndexerClass', new: mock_indexer) }
-
     before do
-      mock_config = Struct.new(:output_dir).new(fixture_dir)
-      Woods.configuration = mock_config
-      allow(Woods::Builder).to receive(:new).and_return(mock_builder)
-      stub_const('Woods::Embedding::TextPreparer', text_preparer_class)
-      stub_const('Woods::Embedding::Indexer', indexer_class)
+      # The MCP pipeline_embed tool now delegates to Woods::Tasks.build_embed_indexer
+      # so it picks up the same provider-tuned chunker/text-preparer wiring as
+      # the rake task path. Stub at that seam.
+      allow(Woods::Tasks).to receive(:build_embed_indexer).and_return(mock_indexer)
     end
 
     after do

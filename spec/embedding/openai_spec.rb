@@ -122,8 +122,8 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
   end
 
   describe '#max_input_tokens' do
-    it 'returns the OpenAI embedding model budget' do
-      expect(provider.max_input_tokens).to eq(8192)
+    it 'returns the OpenAI embedding model budget (8191 — the actual API cap)' do
+      expect(provider.max_input_tokens).to eq(8191)
     end
   end
 

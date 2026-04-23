@@ -152,7 +152,7 @@ exe/
 - All extractors return `Array<ExtractedUnit>`
 - Use `Rails.root.join()` for paths, never string concatenation
 - JSON output uses string keys, snake_case
-- Token estimation: `(string.length / 4.0).ceil` — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md.
+- Token estimation: `(string.length / 4.0).ceil` for the OpenAI path — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md. The Ollama path uses 1.5 chars/token (BERT WordPiece) — see `Builder#chars_per_token_for` and `docs/EMBEDDING_MODELS.md`.
 - Error handling: raise `Woods::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
 
 ## Testing

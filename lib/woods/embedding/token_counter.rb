@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module Woods
   module Embedding
     # Exact or estimated token counts for embedding inputs.
@@ -99,8 +101,32 @@ module Woods
         nil
       end
 
+      # Per-process dedup so multiple TokenCounter instances (one per
+      # retriever build, plus one per chunker, plus tests) don't each
+      # spam the same fallback warning. The mutex keeps the dedup set
+      # consistent under the same concurrent-first-call pattern that
+      # the per-instance load mutex protects against.
+      @warned_messages = Set.new
+      @warned_mutex = Mutex.new
+
+      class << self
+        attr_reader :warned_messages, :warned_mutex
+
+        # Reset the per-process warning dedup. For tests only — production
+        # callers should never need to clear it.
+        def reset_warned!
+          @warned_mutex.synchronize { @warned_messages.clear }
+        end
+      end
+
       def warn_once(message)
-        Kernel.warn("[woods] #{message}")
+        full = "[woods] #{message}"
+        self.class.warned_mutex.synchronize do
+          return if self.class.warned_messages.include?(full)
+
+          self.class.warned_messages << full
+        end
+        Kernel.warn(full)
       end
     end
   end

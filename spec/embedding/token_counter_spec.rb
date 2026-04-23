@@ -17,6 +17,11 @@ end
 RSpec.describe Woods::Embedding::TokenCounter do
   subject(:counter) { described_class.new }
 
+  # warn_once dedupes warnings per-process, so any spec that asserts
+  # Kernel.warn fires must start from a clean slate — otherwise an
+  # earlier example's warning would suppress this one.
+  before { described_class.reset_warned! }
+
   describe '#count' do
     it 'returns 0 for nil' do
       expect(counter.count(nil)).to eq(0)

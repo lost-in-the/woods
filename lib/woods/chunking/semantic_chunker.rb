@@ -190,16 +190,21 @@ module Woods
         )
       end
 
-      # Slice any chunk whose content exceeds `@max_chars` into
+      # Slice any chunk whose content exceeds the active budget into
       # line-balanced sub-chunks. Preserves chunk_type with a `_part_N`
       # suffix so downstream consumers can see they came from the same
       # section.
+      #
+      # When `@max_chars` is nil but a token verifier is wired up, we
+      # still need to walk every chunk — `oversize?` will fall through
+      # to the token check. Skipping when only `@max_chars` is missing
+      # leaves the token-based path unreachable from this method.
       #
       # @param chunks [Array<Chunk>]
       # @param unit [ExtractedUnit]
       # @return [Array<Chunk>]
       def enforce_char_limit(chunks, unit)
-        return chunks unless @max_chars
+        return chunks unless enforcement_active?
 
         chunks.flat_map { |chunk| split_oversize_chunk(chunk, unit) }
       end

@@ -77,6 +77,19 @@ module Woods
         @provider.model_name
       end
 
+      # Delegate the per-provider input cap so Builder's chunker / text
+      # preparer wiring keeps working when the cache wrapper is in front
+      # of the provider. Without this, `respond_to?(:max_input_tokens)`
+      # returns true (inherited from Interface) but the call raises
+      # NotImplementedError.
+      #
+      # @return [Integer, nil]
+      def max_input_tokens
+        return @provider.max_input_tokens if @provider.respond_to?(:max_input_tokens)
+
+        nil
+      end
+
       private
 
       # Split texts into cached hits and uncached misses.

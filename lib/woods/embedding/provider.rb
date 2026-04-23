@@ -92,11 +92,22 @@ module Woods
           'mxbai-embed-large' => 512,
           'snowflake-arctic-embed' => 512,
           'snowflake-arctic-embed2' => 8192,
-          'all-minilm' => 256
+          # all-minilm: 512 is the model's context length, NOT the 384
+          # embedding dimension and NOT the 256 some sources confuse with
+          # the dimension. With a 256-token budget the chunker formula
+          # produces a negative max_chars and silently drops every chunk.
+          'all-minilm' => 512
         }.freeze
 
         # Fallback when the configured model isn't in the registry.
         FALLBACK_NUM_CTX = 2048
+
+        # Default read timeout for /api/embed. The previous 30s default
+        # was too short for batched embed calls on cold models — Ollama
+        # has to load the model on first call, and an N-item batch can
+        # easily exceed 30s on a CPU-only host. 120s leaves headroom
+        # without wedging the whole pipeline on a genuinely dead server.
+        DEFAULT_READ_TIMEOUT = 120
 
         # @param model [String] Ollama model name (default: nomic-embed-text).
         #   Set to `"bge-m3"` or `"snowflake-arctic-embed2"` for an 8192-token
@@ -107,10 +118,14 @@ module Woods
         #   context from `MODEL_CONTEXT_LENGTHS`, falling back to 2048 for
         #   unknown models. Set explicitly only if running a model with a
         #   known-larger native context that isn't in the registry yet.
-        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil)
+        # @param read_timeout [Integer] HTTP read timeout in seconds.
+        #   Bump this for slow / cold-start hosts or very large batches.
+        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil,
+                       read_timeout: DEFAULT_READ_TIMEOUT)
           @model = model
           @host = host
           @num_ctx = num_ctx || MODEL_CONTEXT_LENGTHS.fetch(model, FALLBACK_NUM_CTX)
+          @read_timeout = read_timeout
           @uri = URI("#{host}/api/embed")
         end
 
@@ -151,11 +166,11 @@ module Woods
         end
 
         # Maximum input length Ollama will accept — tracks the configured
-        # context window. `nil` when `num_ctx` is disabled, signalling that
-        # the model's own default applies and the caller should treat the
-        # budget as unknown.
+        # context window. Always populated: the constructor resolves
+        # `num_ctx` to the model's registry entry or {FALLBACK_NUM_CTX},
+        # so this method never returns nil for an Ollama provider.
         #
-        # @return [Integer, nil]
+        # @return [Integer]
         def max_input_tokens
           @num_ctx
         end
@@ -210,7 +225,7 @@ module Woods
           http = Net::HTTP.new(@uri.host, @uri.port)
           http.use_ssl = @uri.scheme == 'https'
           http.open_timeout = 10
-          http.read_timeout = 30
+          http.read_timeout = @read_timeout
           http.keep_alive_timeout = 30
           http.start
           @http_client = http
