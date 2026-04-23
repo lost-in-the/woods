@@ -24,11 +24,12 @@ module Woods
           'text-embedding-3-small' => 1536,
           'text-embedding-3-large' => 3072
         }.freeze
-        # OpenAI embedding models currently share an 8191-token input cap
-        # across text-embedding-3-small / -3-large / ada-002. We round down
-        # to 8192 to match the industry-standard budget — the tiktoken
-        # heuristic lives in TextPreparer.
-        MAX_INPUT_TOKENS = 8192
+        # OpenAI embedding models share an 8191-token input cap across
+        # text-embedding-3-small / -3-large / ada-002. The chunker uses
+        # this as a hard ceiling — the actual chunk size lands well
+        # below it once chars-per-token estimation and the prefix
+        # allowance are factored in (see Builder#build_chunker).
+        MAX_INPUT_TOKENS = 8191
 
         # @param api_key [String] OpenAI API key
         # @param model [String] OpenAI embedding model name (default: text-embedding-3-small)

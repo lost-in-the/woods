@@ -69,6 +69,18 @@ module Woods
         @provider.model_name
       end
 
+      # Delegate the per-provider input cap. The retry wrapper does not
+      # change the provider's budget, so just hand through whatever the
+      # inner provider reports. Without this, `respond_to?` returns true
+      # via Interface but the call raises NotImplementedError.
+      #
+      # @return [Integer, nil]
+      def max_input_tokens
+        return @provider.max_input_tokens if @provider.respond_to?(:max_input_tokens)
+
+        nil
+      end
+
       private
 
       # Execute a block with retry logic and exponential backoff.

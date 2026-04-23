@@ -226,6 +226,35 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  # ── Builder#build_chunker — budget guard ──────────────────────────────
+
+  describe '#build_chunker budget guard' do
+    let(:config) { Woods::Configuration.new }
+    let(:builder) { described_class.new(config) }
+
+    # A provider whose context window leaves no headroom after the
+    # CHUNKER_PREFIX_ALLOWANCE (512 chars). Without the guard, the
+    # negative max_chars lands in SemanticChunker#slice_by_lines and
+    # silently drops every chunk — see PR #70 review notes.
+    let(:tiny_provider) do
+      Class.new(Woods::Embedding::Provider::Ollama) do
+        def initialize
+          super(model: 'tiny-test-model', num_ctx: 64)
+        end
+      end.new
+    end
+
+    it 'raises ArgumentError when max_chars would be non-positive' do
+      expect { builder.build_chunker(tiny_provider) }
+        .to raise_error(ArgumentError, /no room for the chunk prefix/)
+    end
+
+    it 'still builds a chunker when the budget leaves positive headroom' do
+      reasonable = Woods::Embedding::Provider::Ollama.new(model: 'all-minilm')
+      expect { builder.build_chunker(reasonable) }.not_to raise_error
+    end
+  end
+
   # ── Builder#build_vector_store — unknown type ────────────────────────
 
   describe '#build_vector_store with unknown type' do
@@ -382,11 +411,11 @@ RSpec.describe Woods::Builder do
       expect(preparer.max_tokens).to eq(4096)
     end
 
-    it 'uses 4.0 chars/token and the 8192 cap for OpenAI providers' do
+    it 'uses 4.0 chars/token and the 8191 cap for OpenAI providers' do
       provider = Woods::Embedding::Provider::OpenAI.new(api_key: 'sk-test')
       preparer = builder.build_text_preparer(provider)
       expect(preparer.chars_per_token).to eq(4.0)
-      expect(preparer.max_tokens).to eq(8192)
+      expect(preparer.max_tokens).to eq(8191)
     end
 
     it 'falls back to the preparer default when the provider has no budget' do

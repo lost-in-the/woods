@@ -161,7 +161,7 @@ module Woods
     # When the optional `tokenizers` gem is installed, pass a
     # {Embedding::TokenCounter} and `max_tokens` so the chunker can
     # verify every slice with the real tokenizer and re-split any piece
-    # that still exceeds `num_ctx`. See docs/EMBEDDING_CHUNK_SIZING.md.
+    # that still exceeds `num_ctx`. See docs/EMBEDDING_MODELS.md.
     #
     # Ollama v0.13.5+ stopped honouring `truncate: true` on `/api/embed`
     # (ollama/ollama#14186), so any chunk that exceeds `num_ctx` returns
@@ -174,6 +174,13 @@ module Woods
     def build_chunker(provider)
       budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
       max_chars = ((budget * chars_per_token_for(provider)).floor - CHUNKER_PREFIX_ALLOWANCE if budget)
+
+      # Guard against a budget so small that the prefix allowance leaves
+      # no room for content. Without this, SemanticChunker#slice_by_lines
+      # passes a negative repeat count to String#scan, which returns []
+      # — every chunk becomes empty and is silently dropped, producing
+      # zero embeddings with no error. Surface the misconfiguration loudly.
+      raise ArgumentError, chunker_budget_message(provider, budget) if max_chars && max_chars <= 0
 
       token_counter = token_counter_for(provider)
       max_tokens = token_counter && budget ? budget - PREFIX_TOKEN_ALLOWANCE : nil
@@ -220,6 +227,14 @@ module Woods
       when Embedding::Provider::Ollama then 1.5
       else Embedding::TextPreparer::DEFAULT_CHARS_PER_TOKEN
       end
+    end
+
+    # Diagnostic for the build_chunker budget guard.
+    def chunker_budget_message(provider, budget)
+      "embedding model '#{provider.respond_to?(:model) ? provider.model : provider.class}' " \
+        "reports a max_input_tokens of #{budget}, which leaves no room for " \
+        "the chunk prefix (#{CHUNKER_PREFIX_ALLOWANCE} chars). Configure a " \
+        'model with a larger native context, or set num_ctx explicitly.'
     end
 
     # Instantiate the metadata store adapter specified by the configuration.

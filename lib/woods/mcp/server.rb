@@ -4,6 +4,7 @@ require 'logger'
 require 'mcp'
 require 'time'
 require 'set'
+require_relative '../tasks'
 require_relative 'index_reader'
 require_relative 'tool_response_renderer'
 
@@ -727,17 +728,12 @@ module Woods
             guard&.record!(:embedding)
 
             Thread.new do
-              config = Woods.configuration
-              builder = Woods::Builder.new(config)
-              provider = builder.build_embedding_provider
-              text_preparer = Woods::Embedding::TextPreparer.new
-              vector_store = builder.build_vector_store
-              indexer = Woods::Embedding::Indexer.new(
-                provider: provider,
-                text_preparer: text_preparer,
-                vector_store: vector_store,
-                output_dir: config.output_dir
-              )
+              # Share the rake-task wiring so the MCP path picks up the
+              # provider-tuned TextPreparer + token-aware chunker. Without
+              # this, MCP-triggered embedding still hit Ollama's "input
+              # length exceeds context length" error after the rake path
+              # was fixed in PR #70.
+              indexer = Woods::Tasks.build_embed_indexer
               incremental ? indexer.index_incremental : indexer.index_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
