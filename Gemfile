@@ -18,8 +18,27 @@ group :development, :test do
   gem 'rubocop-rails', '~> 2.19'
   gem 'rubocop-rspec', '~> 3.9'
   gem 'simplecov', '~> 0.22', require: false
-  gem 'sqlite3', '>= 1.4'
+  # sqlite3 2.0+ requires RubyGems >= 3.3.22, which Ruby 3.0.7 doesn't ship
+  # (it's stuck on 3.2.33). Pin to the 1.x line on 3.0 so the matrix row
+  # can still resolve; everywhere else we get the latest.
+  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
+    gem 'sqlite3', '>= 1.4'
+  else
+    gem 'sqlite3', '>= 1.4', '< 2.0'
+  end
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'
+  # Optional: exact token counting for the Ollama embedding path. Uses the
+  # `bert-base-uncased` WordPiece tokenizer that nomic-embed-text is built
+  # on, so we can size chunks to num_ctx without char-ratio guessing.
+  # Users running OpenAI don't need this. Users on Ollama install it in
+  # their own Gemfile to opt into exact sizing (see docs/CONFIGURATION_REFERENCE).
+  # Gated to Ruby >= 3.1 — the gem itself requires 3.1+, and the TokenCounter
+  # falls back to a chars/token ratio when the gem is absent.
+  # Note: `install_if` still resolves the gem during `bundle lock`, so on
+  # Ruby 3.0 we have to skip the declaration entirely or lock fails before
+  # install runs. Pinned to 0.5.x — tokenizers 0.6 requires Ruby 3.2+,
+  # which would break our 3.1 CI matrix row.
+  gem 'tokenizers', '~> 0.5.0' if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
 end

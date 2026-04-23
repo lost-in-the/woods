@@ -8,11 +8,22 @@ RSpec.describe Woods::Tasks do
   describe '.build_embed_indexer' do
     let(:fake_provider) { instance_double(Woods::Embedding::Provider::Ollama) }
     let(:fake_vector_store) { instance_double(Woods::Storage::VectorStore::InMemory) }
+    let(:fake_text_preparer) { instance_double(Woods::Embedding::TextPreparer) }
+    let(:fake_chunker) { instance_double(Woods::Chunking::SemanticChunker) }
     let(:captured) { {} }
 
+    # Guard against random-seed ordering: this spec file mocks at the
+    # Builder level, which needs Woods.configuration to be non-nil when
+    # build_embed_indexer runs. Other specs in the suite happen to call
+    # Woods.configure, but we cannot rely on order — Ruby 3.1 CI already
+    # tripped on this under a different seed.
     before do
+      Woods.configure { |c| c.output_dir ||= '/tmp/woods-tasks-default' }
+
       allow_any_instance_of(Woods::Builder).to receive(:build_embedding_provider).and_return(fake_provider)
       allow_any_instance_of(Woods::Builder).to receive(:build_vector_store).and_return(fake_vector_store)
+      allow_any_instance_of(Woods::Builder).to receive(:build_text_preparer).and_return(fake_text_preparer)
+      allow_any_instance_of(Woods::Builder).to receive(:build_chunker).and_return(fake_chunker)
 
       allow(Woods::Embedding::Indexer).to receive(:new).and_wrap_original do |original, **kwargs|
         captured.merge!(kwargs)
@@ -29,7 +40,8 @@ RSpec.describe Woods::Tasks do
 
       expect(captured[:provider]).to be(fake_provider)
       expect(captured[:vector_store]).to be(fake_vector_store)
-      expect(captured[:text_preparer]).to be_a(Woods::Embedding::TextPreparer)
+      expect(captured[:text_preparer]).to be(fake_text_preparer)
+      expect(captured[:chunker]).to be(fake_chunker)
     end
 
     it 'uses config.output_dir by default' do

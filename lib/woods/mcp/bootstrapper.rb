@@ -94,7 +94,7 @@ module Woods
           config.graph_store = :in_memory
           config.embedding_provider = :ollama
           config.embedding_options = {
-            base_url: ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434'),
+            host: ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434'),
             model: ENV.fetch('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
           }
         end

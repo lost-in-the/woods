@@ -53,11 +53,14 @@ Woods.configure do |config|
   # config.embedding_model    = 'text-embedding-3-small'
   # config.embedding_options  = { api_key: ENV['OPENAI_API_KEY'] }
 
-  # Ollama (local, no API key needed):
+  # Ollama (local, no API key needed). `num_ctx` is auto-selected per model
+  # (nomic-embed-text → 2048, bge-m3 → 8192). Install `gem "tokenizers"` for
+  # exact BERT WordPiece token counting on dense Ruby source. See
+  # docs/EMBEDDING_MODELS.md for the full model comparison.
   # config.embedding_provider = :ollama
-  # config.embedding_model    = 'nomic-embed-text'
   # config.embedding_options  = {
-  #   base_url: ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
+  #   model: 'nomic-embed-text',
+  #   host: ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
   # }
 
   # ── Storage ─────────────────────────────────────────────────────────────

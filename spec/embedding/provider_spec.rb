@@ -114,6 +114,20 @@ RSpec.describe Woods::Embedding::Provider do
       end
     end
 
+    describe '#max_input_tokens' do
+      it 'tracks an explicit num_ctx override' do
+        expect(described_class.new(num_ctx: 4096).max_input_tokens).to eq(4096)
+      end
+
+      it 'falls back to the registry for the configured model' do
+        expect(described_class.new(model: 'bge-m3').max_input_tokens).to eq(8192)
+      end
+
+      it 'uses the conservative fallback for unknown models' do
+        expect(described_class.new(model: 'mystery-embed').max_input_tokens).to eq(2048)
+      end
+    end
+
     describe 'error handling' do
       let(:error_response) do
         instance_double(Net::HTTPInternalServerError, code: '500', body: 'model not found')
@@ -159,28 +173,36 @@ RSpec.describe Woods::Embedding::Provider do
     describe 'context window (num_ctx)' do
       before { allow(http_double).to receive(:request).and_return(success_response) }
 
-      # Regression — without `options.num_ctx`, Ollama caps embedding input at
-      # its 2048-token default and returns 400 ("the input length exceeds the
-      # context length") on most real-world Rails units. nomic-embed-text
-      # supports 8192, matching the TextPreparer default.
-      it 'defaults to sending options.num_ctx = 8192' do
+      # Regression — Ollama's `/api/embed` enforces the model's native context
+      # length regardless of `options.num_ctx` (see ollama/ollama#14186). We
+      # advertise the native ceiling so the chunker sizes inputs correctly —
+      # for nomic-embed-text that's 2048.
+      it 'defaults to the native context for nomic-embed-text' do
         provider.embed('text')
         expect(http_double).to have_received(:request) do |req|
           body = JSON.parse(req.body)
-          expect(body.dig('options', 'num_ctx')).to eq(8192)
+          expect(body.dig('options', 'num_ctx')).to eq(2048)
         end
       end
 
-      it 'includes num_ctx in batch requests' do
-        allow(http_double).to receive(:request).and_return(batch_success_response)
-        provider.embed_batch(%w[a b])
+      it 'auto-selects num_ctx from the registry for known models' do
+        described_class.new(model: 'bge-m3').embed('text')
         expect(http_double).to have_received(:request) do |req|
           body = JSON.parse(req.body)
           expect(body.dig('options', 'num_ctx')).to eq(8192)
         end
       end
 
-      it 'honours a custom num_ctx' do
+      it 'includes the registry num_ctx in batch requests' do
+        allow(http_double).to receive(:request).and_return(batch_success_response)
+        described_class.new(model: 'bge-m3').embed_batch(%w[a b])
+        expect(http_double).to have_received(:request) do |req|
+          body = JSON.parse(req.body)
+          expect(body.dig('options', 'num_ctx')).to eq(8192)
+        end
+      end
+
+      it 'honours an explicit num_ctx override' do
         described_class.new(num_ctx: 4096).embed('text')
         expect(http_double).to have_received(:request) do |req|
           body = JSON.parse(req.body)
@@ -188,11 +210,11 @@ RSpec.describe Woods::Embedding::Provider do
         end
       end
 
-      it 'omits the options key entirely when num_ctx is nil' do
-        described_class.new(num_ctx: nil).embed('text')
+      it 'falls back to the conservative default for unknown models' do
+        described_class.new(model: 'mystery-embed').embed('text')
         expect(http_double).to have_received(:request) do |req|
           body = JSON.parse(req.body)
-          expect(body).not_to have_key('options')
+          expect(body.dig('options', 'num_ctx')).to eq(2048)
         end
       end
     end

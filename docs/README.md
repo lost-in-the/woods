@@ -28,6 +28,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [AGENT_GUIDE.md](AGENT_GUIDE.md) | Deep reference for AI agents — workflows, full tool table, relationship type catalog, gotchas |
 | [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
 | [RETRIEVAL_GUIDE.md](RETRIEVAL_GUIDE.md) | Query classification, search strategies, RRF ranking, token budget tuning, and troubleshooting |
+| [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) | Picking an Ollama embedding model — context windows, dimensions, tradeoffs, and how the context-length registry works |
 
 ## Reference
 

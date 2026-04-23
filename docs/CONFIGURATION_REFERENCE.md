@@ -44,8 +44,10 @@ Woods.configure do |config|
     config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
   else
     config.embedding_provider = :ollama
-    config.embedding_model = 'nomic-embed-text'
-    config.embedding_options = { base_url: ENV.fetch('OLLAMA_URL', 'http://localhost:11434') }
+    config.embedding_options = {
+      model: 'nomic-embed-text',
+      host: ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
+    }
   end
 end
 ```
@@ -88,11 +90,25 @@ config.embedding_options = {
 
 ```ruby
 config.embedding_provider = :ollama
-config.embedding_model = 'nomic-embed-text'
 config.embedding_options = {
-  base_url: 'http://localhost:11434'
+  model: 'nomic-embed-text',
+  host: 'http://localhost:11434'
+  # num_ctx: 2048  # Optional override — see below
 }
 ```
+
+The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `snowflake-arctic-embed2` → 8192, `mxbai-embed-large` → 512, `all-minilm` → 256). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
+
+**Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
+
+**Optional exact tokenization.** Install the [`tokenizers`](https://github.com/ankane/tokenizers-ruby) gem alongside Woods to get BERT WordPiece token counting. Without it, Woods falls back to a chars/token ratio, which under-counts dense Ruby source (CamelCase constants, callback DSLs) and can silently over-pack chunks. Recommended for any Ollama setup.
+
+```ruby
+# Gemfile (optional)
+gem 'tokenizers', '~> 0.5'
+```
+
+See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full model comparison and the procedure for adding a new model to the registry.
 
 ## Storage Options
 

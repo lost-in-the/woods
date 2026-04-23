@@ -400,7 +400,7 @@ Woods.configure do |config|
     config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
   else
     config.embedding_provider = :ollama
-    config.embedding_options = { base_url: 'http://localhost:11434' }
+    config.embedding_options = { model: 'nomic-embed-text', host: 'http://localhost:11434' }
   end
 end
 ```
