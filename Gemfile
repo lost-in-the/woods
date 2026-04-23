@@ -40,7 +40,5 @@ group :development, :test do
   # Ruby 3.0 we have to skip the declaration entirely or lock fails before
   # install runs. Pinned to 0.5.x — tokenizers 0.6 requires Ruby 3.2+,
   # which would break our 3.1 CI matrix row.
-  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
-    gem 'tokenizers', '~> 0.5.0'
-  end
+  gem 'tokenizers', '~> 0.5.0' if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
 end
