@@ -36,9 +36,11 @@ group :development, :test do
   # their own Gemfile to opt into exact sizing (see docs/CONFIGURATION_REFERENCE).
   # Gated to Ruby >= 3.1 — the gem itself requires 3.1+, and the TokenCounter
   # falls back to a chars/token ratio when the gem is absent.
-  install_if -> { Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1') } do
-    # Pinned to 0.5.x — tokenizers 0.6 requires Ruby 3.2+, which would
-    # break our 3.1 CI matrix row.
+  # Note: `install_if` still resolves the gem during `bundle lock`, so on
+  # Ruby 3.0 we have to skip the declaration entirely or lock fails before
+  # install runs. Pinned to 0.5.x — tokenizers 0.6 requires Ruby 3.2+,
+  # which would break our 3.1 CI matrix row.
+  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
     gem 'tokenizers', '~> 0.5.0'
   end
 end
