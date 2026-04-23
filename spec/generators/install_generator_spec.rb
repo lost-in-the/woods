@@ -45,48 +45,46 @@ RSpec.describe 'Install generator initializer template' do
   let(:template_path) do
     File.expand_path('../../lib/generators/woods/templates/woods.rb.tt', __dir__)
   end
+  # The template file has Unicode box-drawing characters in section headers
+  # (── and em-dashes). Force UTF-8 so regex matches don't raise
+  # "invalid byte sequence in US-ASCII" on environments where
+  # Encoding.default_external is US-ASCII.
+  let(:content) { File.read(template_path, encoding: 'UTF-8') }
 
   it 'template file exists' do
     expect(File.exist?(template_path)).to be true
   end
 
   it 'template calls Woods.configure' do
-    content = File.read(template_path)
     expect(content).to include('Woods.configure do |config|')
   end
 
   it 'template sets output_dir relative to Rails.root' do
-    content = File.read(template_path)
     expect(content).to include('Rails.root.join')
     expect(content).to include('tmp/woods')
   end
 
   it 'template mentions configure_with_preset idiom' do
-    content = File.read(template_path)
     expect(content).to include('configure_with_preset')
   end
 
   it 'template covers console_mcp options' do
-    content = File.read(template_path)
     expect(content).to include('console_mcp_enabled')
     expect(content).to include('console_redacted_columns')
   end
 
   it 'template keeps console MCP disabled by default' do
-    content = File.read(template_path)
     # The enable line must be commented out
     expect(content).to match(/^\s*#\s*config\.console_mcp_enabled\s*=\s*false/)
   end
 
   it 'template mentions all three defense layers' do
-    content = File.read(template_path)
     expect(content).to include('Layer 1')
     expect(content).to include('Layer 2')
     expect(content).to include('Layer 3')
   end
 
   it 'has frozen_string_literal comment' do
-    content = File.read(template_path)
     expect(content).to start_with('# frozen_string_literal: true')
   end
 end
