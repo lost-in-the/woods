@@ -111,7 +111,7 @@ module Woods
       # @return [Woods::Configuration]
       def self.apply_stored_config(config, stored, artifact:, env: ENV)
         if config.embedding_provider
-          live = ResolvedConfig.from_configuration(config)
+          live = live_resolved_config(config)
           live.assert_compatible!(stored)
           config
         else
@@ -119,6 +119,21 @@ module Woods
         end
       end
       private_class_method :apply_stored_config
+
+      # Build a ResolvedConfig from the live host config, probing the
+      # provider's dimension when possible. Tolerant of probe failures
+      # (unreachable Ollama): falls back to the declared-only path so
+      # {ResolvedConfig#assert_compatible!} surfaces a typed
+      # {DimensionMismatch} instead of a raw +Errno::ECONNREFUSED+
+      # escaping the caller's {BootstrapError} rescue.
+      def self.live_resolved_config(config)
+        require_relative '../builder'
+        provider = Woods::Builder.new(config).build_embedding_provider
+        ResolvedConfig.from_configuration(config, provider: provider)
+      rescue StandardError
+        ResolvedConfig.from_configuration(config)
+      end
+      private_class_method :live_resolved_config
 
       # Populate a blank {Woods::Configuration} from a stored {ResolvedConfig}.
       #

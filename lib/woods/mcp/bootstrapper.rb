@@ -5,6 +5,7 @@ require_relative 'bootstrap_state'
 require_relative 'config_resolver'
 require_relative 'provider_probe'
 require_relative '../index_artifact'
+require_relative '../builder'
 require_relative '../resolved_config'
 require_relative '../storage/snapshotter'
 
@@ -111,7 +112,17 @@ module Woods
                                                  ollama_probe: method(:ollama_reachable?))
         return [nil, state] unless config.embedding_provider
 
-        resolved = ResolvedConfig.from_configuration(config)
+        # Build the provider once so {ResolvedConfig.from_configuration} can
+        # probe +provider.dimensions+ — without this, Ollama's runtime-only
+        # dimension never makes it into +resolved+ and the downstream
+        # Snapshotter.load_or_empty validation compares stored-vs-0.
+        #
+        # The probe is tolerant: if the provider is unreachable we still
+        # need a non-nil +resolved+ so the MCP server can start degraded
+        # (see the "provider unreachable" branch below). Snapshotter then
+        # surfaces a DimensionMismatch only if there's actually a stored
+        # artifact to validate against.
+        resolved = build_resolved_config(config)
         retriever = build_retriever_from_config(config, resolved, artifact)
         probe_and_mark_state(config, state)
         warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})"
@@ -141,6 +152,18 @@ module Woods
       def self.ollama_reachable?
         ConfigResolver.send(:ollama_reachable?)
       end
+
+      # Build a ResolvedConfig from the live host config, probing the
+      # provider for its dimension when possible. A provider that can't
+      # be reached (Ollama down) falls back to the declared-only path so
+      # the MCP server can still come up degraded.
+      def self.build_resolved_config(config)
+        provider = Woods::Builder.new(config).build_embedding_provider
+        ResolvedConfig.from_configuration(config, provider: provider)
+      rescue StandardError
+        ResolvedConfig.from_configuration(config)
+      end
+      private_class_method :build_resolved_config
 
       # Resolve an IndexArtifact from the passed dir or Woods.configuration.
       def self.build_artifact(index_dir)

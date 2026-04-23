@@ -174,6 +174,49 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
     end
 
+    context 'woods.json present, host omits declared dimension (Ollama case)' do
+      it 'probes the live provider and validates against stored dimension' do
+        Dir.mktmpdir do |dir|
+          write_woods_json(dir)
+          artifact = Woods::IndexArtifact.new(dir)
+          cfg = Woods::Configuration.new
+          cfg.vector_store = :in_memory
+          cfg.metadata_store = :in_memory
+          cfg.graph_store = :in_memory
+          cfg.embedding_provider = :ollama
+          cfg.embedding_options = { host: 'http://localhost:11434', model: 'nomic-embed-text' }
+
+          probe_provider = instance_double(Woods::Embedding::Provider::Ollama, dimensions: 768)
+          allow_any_instance_of(Woods::Builder).to receive(:build_embedding_provider).and_return(probe_provider)
+
+          expect { described_class.resolve(cfg, artifact: artifact) }.not_to raise_error
+        end
+      end
+
+      it 'falls back gracefully when the provider probe raises, surfacing a typed mismatch' do
+        Dir.mktmpdir do |dir|
+          write_woods_json(dir)
+          artifact = Woods::IndexArtifact.new(dir)
+          cfg = Woods::Configuration.new
+          cfg.vector_store = :in_memory
+          cfg.metadata_store = :in_memory
+          cfg.graph_store = :in_memory
+          cfg.embedding_provider = :ollama
+          cfg.embedding_options = { host: 'http://localhost:11434', model: 'nomic-embed-text' }
+
+          probe_provider = instance_double(Woods::Embedding::Provider::Ollama)
+          allow(probe_provider).to receive(:dimensions).and_raise(Errno::ECONNREFUSED)
+          allow_any_instance_of(Woods::Builder).to receive(:build_embedding_provider).and_return(probe_provider)
+
+          # Untyped network error must not escape — it's converted to a typed
+          # DimensionMismatch (0 vs stored 768) the caller's BootstrapError
+          # rescue can handle.
+          expect { described_class.resolve(cfg, artifact: artifact) }
+            .to raise_error(Woods::MCP::DimensionMismatch)
+        end
+      end
+    end
+
     context 'woods.json present, live config has different provider model' do
       it 'raises Woods::MCP::ConfigMismatch' do
         Dir.mktmpdir do |dir|
