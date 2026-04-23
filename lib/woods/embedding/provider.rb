@@ -49,6 +49,16 @@ module Woods
         def model_name
           raise NotImplementedError
         end
+
+        # Return the maximum input length the provider will accept for a
+        # single text, in tokens. Used by the indexer to decide when a unit
+        # must be chunked before embedding.
+        #
+        # @return [Integer, nil] token budget, or nil if the provider has no hard cap
+        # @raise [NotImplementedError] if not implemented by the provider
+        def max_input_tokens
+          raise NotImplementedError
+        end
       end
 
       # Ollama adapter for local embeddings via the Ollama HTTP API.
@@ -65,22 +75,42 @@ module Woods
 
         DEFAULT_MODEL = 'nomic-embed-text'
         DEFAULT_HOST = 'http://localhost:11434'
-        # Ollama caps embedding inputs at `num_ctx` tokens (default 2048),
-        # which truncates most real-world Rails units. nomic-embed-text
-        # supports up to 8192, matching the TextPreparer max_tokens default,
-        # so we lift the cap here to line the two up.
-        DEFAULT_NUM_CTX = 8192
 
-        # @param model [String] Ollama model name (default: nomic-embed-text)
+        # Ollama enforces the model's native context length on `/api/embed`
+        # regardless of the `num_ctx` override — we've validated this
+        # against 0.15.x for nomic-embed-text (rejects >2048) and bge-m3
+        # (accepts up to 8192, silently truncates above). Advertise the
+        # native ceiling so the chunker can size inputs correctly. Models
+        # outside this registry fall back to Ollama's conservative 2048
+        # default.
+        #
+        # See `docs/EMBEDDING_MODELS.md` for the tradeoff matrix and
+        # instructions for adding a new model here.
+        MODEL_CONTEXT_LENGTHS = {
+          'nomic-embed-text' => 2048,
+          'bge-m3' => 8192,
+          'mxbai-embed-large' => 512,
+          'snowflake-arctic-embed' => 512,
+          'snowflake-arctic-embed2' => 8192,
+          'all-minilm' => 256
+        }.freeze
+
+        # Fallback when the configured model isn't in the registry.
+        FALLBACK_NUM_CTX = 2048
+
+        # @param model [String] Ollama model name (default: nomic-embed-text).
+        #   Set to `"bge-m3"` or `"snowflake-arctic-embed2"` for an 8192-token
+        #   context and skip most chunking for dense Rails units.
         # @param host [String] Ollama server URL (default: http://localhost:11434)
-        # @param num_ctx [Integer, nil] Ollama context window in tokens. `nil`
-        #   uses Ollama's default (2048 for most embedding models — usually
-        #   too small). Defaults to 8192, which matches nomic-embed-text's
-        #   max and the TextPreparer default.
-        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: DEFAULT_NUM_CTX)
+        # @param num_ctx [Integer, nil] Ollama context window in tokens. When
+        #   `nil` (the default), the provider picks the model's native
+        #   context from `MODEL_CONTEXT_LENGTHS`, falling back to 2048 for
+        #   unknown models. Set explicitly only if running a model with a
+        #   known-larger native context that isn't in the registry yet.
+        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil)
           @model = model
           @host = host
-          @num_ctx = num_ctx
+          @num_ctx = num_ctx || MODEL_CONTEXT_LENGTHS.fetch(model, FALLBACK_NUM_CTX)
           @uri = URI("#{host}/api/embed")
         end
 
@@ -118,6 +148,16 @@ module Woods
         # @return [String] the Ollama model name
         def model_name
           @model
+        end
+
+        # Maximum input length Ollama will accept — tracks the configured
+        # context window. `nil` when `num_ctx` is disabled, signalling that
+        # the model's own default applies and the caller should treat the
+        # budget as unknown.
+        #
+        # @return [Integer, nil]
+        def max_input_tokens
+          @num_ctx
         end
 
         private

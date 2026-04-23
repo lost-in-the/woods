@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ollama embedding no longer fails with `400 "the input length exceeds the context length"`.** Two issues compounded into a single runtime failure when indexing real Rails codebases against Ollama: (a) the provider hard-coded `num_ctx = 8192` for every model, but Ollama's `/api/embed` enforces each model's *native* context length regardless of `options.num_ctx` ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) — `nomic-embed-text`'s native ceiling is 2048, and any request larger than that was rejected outright; (b) the indexer's "does this unit need chunking?" check was based on a chars/token estimate that under-counts dense Ruby source (CamelCase constants, callback DSLs, symbol-heavy code), so chunks that looked safe by char count still exceeded the token budget.
+
+### Added
+
+- **Per-model context-length registry (`Woods::Embedding::Provider::Ollama::MODEL_CONTEXT_LENGTHS`).** `num_ctx` is now auto-selected from the configured model name: `nomic-embed-text` → 2048, `bge-m3` → 8192, `snowflake-arctic-embed2` → 8192, `mxbai-embed-large` → 512, `snowflake-arctic-embed` → 512, `all-minilm` → 256. Unknown models fall back to 2048 (Ollama's embedding default). Explicit `num_ctx:` overrides continue to win when set. `Provider::Ollama#max_input_tokens` reports the selected value so the chunker can size inputs correctly.
+- **`Woods::Embedding::TokenCounter` — optional exact-token accounting via the `tokenizers` gem.** Loads the `bert-base-uncased` WordPiece tokenizer (the base every BERT-family embedding model uses) and re-verifies every chunk client-side. Catches the 10–20% gap between char-based estimates and Ollama's internal count on dense Ruby source. Falls back to a 1.5 chars/token ratio when the gem isn't installed, so Woods works unchanged without it — `gem 'tokenizers', '~> 0.5'` is recommended for any Ollama setup.
+- **Token-aware `Indexer#needs_chunking?`.** When a `TokenCounter` is present, the indexer consults it before deciding to chunk — a char-count-safe but token-count-over-budget unit now gets split instead of sent to Ollama and rejected.
+- **New `docs/EMBEDDING_MODELS.md`** — comparison of the five supported Ollama embedding models (context, dimensions, disk size), instructions for switching models (including the dimension-change re-index requirement), a walkthrough of the `num_ctx` regression and how Woods works around it, and the procedure for adding a new model to the context-length registry.
+
+### Changed
+
+- **Ollama embedding configuration — `base_url:` keyword corrected to `host:` in user docs.** `Woods::Embedding::Provider::Ollama#initialize` has always accepted `host:` (never `base_url:`), but several doc examples showed `base_url:` — following them would raise `ArgumentError` on boot. `CONFIGURATION_REFERENCE.md`, `TROUBLESHOOTING.md`, `FAQ.md`, `GETTING_STARTED.md`, and top-level `README.md` snippets are corrected. No code change — this is documentation catching up to long-standing code.
+- **`BACKEND_MATRIX.md`** — Ollama section expanded to a full model table with native context, dimensions, and disk weights for each supported model; adds a "Self-hosted + large units" selection-guidance row pointing to `bge-m3`.
+
 ### Security
 
 - **Console MCP re-enabled behind a five-layer defense-in-depth stack.** The feature was previously disabled at its entry points after an audit flagged a Stripe Connect credential leak via the `authorizations` EAV table. It now ships gated on a new `console_mcp_enabled` config flag (default `false`) and runs through five independent safety layers, so a single misconfigured layer cannot leak secrets:

@@ -337,18 +337,26 @@ All backends work with both MySQL and PostgreSQL application databases. pgvector
 Two embedding providers are supported:
 
 - **OpenAI** — `text-embedding-3-small` (1536 dimensions, default) or `text-embedding-3-large`. Requires an `OPENAI_API_KEY`. Billed per token.
-- **Ollama** — Any locally installed model (e.g., `nomic-embed-text`, `mxbai-embed-large`). Runs locally, no API key or cost. Requires Ollama to be running at `localhost:11434`.
+- **Ollama** — Any locally installed model (e.g., `nomic-embed-text`, `bge-m3`, `mxbai-embed-large`). Runs locally, no API key or cost. Requires Ollama to be running at `localhost:11434`.
 
 ```ruby
 # OpenAI
 config.embedding_provider = :openai
-config.embedding_model = 'text-embedding-3-small'
-config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
+config.embedding_options = {
+  api_key: ENV['OPENAI_API_KEY'],
+  model: 'text-embedding-3-small'
+}
 
-# Ollama
+# Ollama — default (2048-token context)
 config.embedding_provider = :ollama
-config.embedding_model = 'nomic-embed-text'
+config.embedding_options = { model: 'nomic-embed-text' }
+
+# Ollama — bge-m3 (8192-token context, fewer chunks per unit)
+config.embedding_provider = :ollama
+config.embedding_options = { model: 'bge-m3' }
 ```
+
+See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the Ollama model comparison and the procedure for adding a new model.
 
 ---
 

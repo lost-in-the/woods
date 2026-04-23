@@ -22,4 +22,10 @@ group :development, :test do
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'
+  # Optional: exact token counting for the Ollama embedding path. Uses the
+  # `bert-base-uncased` WordPiece tokenizer that nomic-embed-text is built
+  # on, so we can size chunks to num_ctx without char-ratio guessing.
+  # Users running OpenAI don't need this. Users on Ollama install it in
+  # their own Gemfile to opt into exact sizing (see docs/CONFIGURATION_REFERENCE).
+  gem 'tokenizers', '~> 0.5'
 end

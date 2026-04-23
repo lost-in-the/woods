@@ -19,11 +19,25 @@ module Woods
     #   chunks = preparer.prepare_chunks(unit)
     class TextPreparer
       DEFAULT_MAX_TOKENS = 8192
+      # 4.0 matches tiktoken (cl100k_base) averages for Ruby source — see
+      # docs/TOKEN_BENCHMARK.md. It's the right ratio for OpenAI models.
+      # BERT/WordPiece tokenizers (nomic-embed-text, bge-*) run hotter on
+      # code, closer to 2.5 chars/token, so callers embedding with those
+      # models should override this to keep truncation honest.
+      DEFAULT_CHARS_PER_TOKEN = 4.0
 
       # @param max_tokens [Integer] maximum token budget for prepared text
-      def initialize(max_tokens: DEFAULT_MAX_TOKENS)
+      # @param chars_per_token [Float] tokenizer-calibrated char/token ratio
+      def initialize(max_tokens: DEFAULT_MAX_TOKENS, chars_per_token: DEFAULT_CHARS_PER_TOKEN)
         @max_tokens = max_tokens
+        @chars_per_token = chars_per_token
       end
+
+      # @return [Float] configured chars-per-token ratio
+      attr_reader :chars_per_token
+
+      # @return [Integer] configured token budget
+      attr_reader :max_tokens
 
       # Prepare text for embedding from an ExtractedUnit.
       #
@@ -98,13 +112,18 @@ module Woods
 
       # Truncate text to fit within the token budget.
       #
+      # Uses the configured `chars_per_token` ratio to estimate both the
+      # token count and the safe character cap. Truncation is a last
+      # resort — by the time text reaches here the chunker should have
+      # already split oversize units into pieces that fit.
+      #
       # @param text [String] the text to truncate
       # @return [String] text within token limits
       def enforce_token_limit(text)
-        estimated = (text.length / 4.0).ceil
+        estimated = (text.length / @chars_per_token).ceil
         return text if estimated <= @max_tokens
 
-        max_chars = (@max_tokens * 4.0).floor
+        max_chars = (@max_tokens * @chars_per_token).floor
         text[0...max_chars]
       end
     end

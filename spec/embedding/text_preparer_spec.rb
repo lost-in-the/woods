@@ -161,6 +161,24 @@ RSpec.describe Woods::Embedding::TextPreparer do
       result = preparer.prepare(unit)
       expect(result).to include('validates :email, presence: true')
     end
+
+    context 'with a provider-tuned chars_per_token ratio' do
+      # nomic-embed-text (BERT WordPiece) runs ~2.5 chars/token on code —
+      # much hotter than the default tiktoken-calibrated 4.0. Provider-
+      # specific ratios keep truncation honest for non-OpenAI embedders.
+      subject(:nomic_preparer) do
+        described_class.new(max_tokens: 8192, chars_per_token: 2.5)
+      end
+
+      it 'truncates more aggressively for BERT-style tokenizers' do
+        result = nomic_preparer.prepare(large_unit)
+        expect(result.length).to be <= (8192 * 2.5).floor
+      end
+
+      it 'exposes the configured ratio' do
+        expect(nomic_preparer.chars_per_token).to eq(2.5)
+      end
+    end
   end
 
   describe '#prepare_chunks' do

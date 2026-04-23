@@ -19,15 +19,21 @@ module Woods
     # silently ignored configuration, which was invisible until the provider
     # tried to reach an unreachable default host.
     #
+    # The TextPreparer and SemanticChunker are tuned to the selected
+    # provider so oversize units are split into chunks that fit the
+    # provider's input budget (e.g. Ollama's num_ctx, OpenAI's 8k cap).
+    #
     # @return [Embedding::Indexer]
     def build_embed_indexer
       config = Woods.configuration
       builder = Builder.new(config)
+      provider = builder.build_embedding_provider
 
       Embedding::Indexer.new(
-        provider: builder.build_embedding_provider,
-        text_preparer: Embedding::TextPreparer.new,
+        provider: provider,
+        text_preparer: builder.build_text_preparer(provider),
         vector_store: builder.build_vector_store,
+        chunker: builder.build_chunker(provider),
         output_dir: ENV.fetch('WOODS_OUTPUT', config.output_dir)
       )
     end

@@ -365,4 +365,82 @@ RSpec.describe Woods::Builder do
       described_class.new(config).build_retriever
     end
   end
+
+  describe '#build_text_preparer' do
+    let(:config) { Woods::Configuration.new }
+    subject(:builder) { described_class.new(config) }
+
+    it 'uses 1.5 chars/token for Ollama providers (BERT/WordPiece on dense Rails source)' do
+      provider = Woods::Embedding::Provider::Ollama.new
+      preparer = builder.build_text_preparer(provider)
+      expect(preparer.chars_per_token).to eq(1.5)
+    end
+
+    it 'tracks the Ollama provider num_ctx as max_tokens' do
+      provider = Woods::Embedding::Provider::Ollama.new(num_ctx: 4096)
+      preparer = builder.build_text_preparer(provider)
+      expect(preparer.max_tokens).to eq(4096)
+    end
+
+    it 'uses 4.0 chars/token and the 8192 cap for OpenAI providers' do
+      provider = Woods::Embedding::Provider::OpenAI.new(api_key: 'sk-test')
+      preparer = builder.build_text_preparer(provider)
+      expect(preparer.chars_per_token).to eq(4.0)
+      expect(preparer.max_tokens).to eq(8192)
+    end
+
+    it 'falls back to the preparer default when the provider has no budget' do
+      provider = instance_double(Woods::Embedding::Provider::Ollama,
+                                 max_input_tokens: nil, model_name: 'custom')
+      preparer = builder.build_text_preparer(provider)
+      expect(preparer.max_tokens).to eq(Woods::Embedding::TextPreparer::DEFAULT_MAX_TOKENS)
+    end
+  end
+
+  describe '#build_chunker' do
+    let(:config) { Woods::Configuration.new }
+    subject(:builder) { described_class.new(config) }
+
+    it 'sizes max_chars from provider budget and tokenizer ratio' do
+      provider = Woods::Embedding::Provider::Ollama.new(num_ctx: 8192)
+      chunker = builder.build_chunker(provider)
+
+      # Stub a unit that exceeds the budget and confirm splitting happens.
+      unit = Woods::ExtractedUnit.new(
+        type: :service, identifier: 'Big', file_path: 's.rb'
+      )
+      body = (['    something_long_enough(a, b, c)'] * 2500).join("\n")
+      unit.source_code = "class Big\n  def call\n#{body}\n  end\nend"
+      unit.metadata = {}
+
+      chunks = chunker.chunk(unit)
+      # 8192 * 1.5 - 512 = 11776 chars
+      expect(chunks.map(&:content)).to all(satisfy { |c| c.length <= 11_776 })
+    end
+
+    it 'disables the safety net when the provider advertises no budget' do
+      provider = Woods::Embedding::Provider::Ollama.new(num_ctx: nil)
+      chunker = builder.build_chunker(provider)
+      # A tiny unit should still produce exactly one :whole chunk.
+      unit = Woods::ExtractedUnit.new(type: :service, identifier: 'Tiny', file_path: 't.rb')
+      unit.source_code = "class Tiny\nend"
+      unit.metadata = {}
+      expect(chunker.chunk(unit).size).to eq(1)
+    end
+
+    it 'wires a TokenCounter for Ollama providers' do
+      provider = Woods::Embedding::Provider::Ollama.new(num_ctx: 8192)
+      chunker = builder.build_chunker(provider)
+      counter = chunker.instance_variable_get(:@token_counter)
+      max_tokens = chunker.instance_variable_get(:@max_tokens)
+      expect(counter).to be_a(Woods::Embedding::TokenCounter)
+      expect(max_tokens).to eq(8192 - 256)
+    end
+
+    it 'skips the TokenCounter for OpenAI (tiktoken ratios are stable)' do
+      provider = Woods::Embedding::Provider::OpenAI.new(api_key: 'sk-test')
+      chunker = builder.build_chunker(provider)
+      expect(chunker.instance_variable_get(:@token_counter)).to be_nil
+    end
+  end
 end

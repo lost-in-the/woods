@@ -331,8 +331,40 @@ For 429 — embedding generation is automatically retried with backoff. If rate 
 3. If using a non-default port, update config:
 
 ```ruby
-config.embedding_options = { base_url: 'http://localhost:11434' }
+config.embedding_options = { host: 'http://localhost:11434' }
 ```
+
+---
+
+### Ollama `400 "the input length exceeds the context length"`
+
+**Symptom:** `rake woods:embed` fails with `Ollama API error: 400 {"error":"the input length exceeds the context length"}`. Individual chunks may look smaller than the configured `num_ctx`.
+
+**Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source — so chunks that look safe by char count still trip the 2048-token ceiling.
+
+**Fix:** Upgrade to Woods 1.3+ and install the `tokenizers` gem:
+
+```ruby
+# Gemfile
+gem 'woods', '~> 1.3'
+gem 'tokenizers', '~> 0.5'   # exact BERT WordPiece token counting
+```
+
+Woods now:
+
+1. Advertises the native context ceiling per model (2048 for `nomic-embed-text`, 8192 for `bge-m3`/`snowflake-arctic-embed2`, etc.) so the chunker sizes inputs correctly.
+2. Uses the real BERT tokenizer to verify every chunk, catching the 10–20% gap between char-based estimates and Ollama's internal count.
+
+If you want fewer chunks per unit and have the disk space, switch to a larger-context model:
+
+```ruby
+config.embedding_options = {
+  model: 'bge-m3',       # 8192 native context, 1024 dims
+  host: 'http://localhost:11434'
+}
+```
+
+Pull the model first (`ollama pull bge-m3`) and **drop the vector index before re-embedding** — the dimension change (768 → 1024) is incompatible with existing vectors. See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full tradeoff matrix.
 
 ---
 

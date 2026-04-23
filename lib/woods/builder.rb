@@ -8,6 +8,9 @@ require_relative 'storage/metadata_store'
 require_relative 'storage/graph_store'
 require_relative 'embedding/provider'
 require_relative 'embedding/openai'
+require_relative 'embedding/text_preparer'
+require_relative 'embedding/token_counter'
+require_relative 'chunking/semantic_chunker'
 
 module Woods
   # Builder reads a {Configuration} and instantiates the appropriate adapters,
@@ -120,7 +123,104 @@ module Woods
       end
     end
 
+    # Build a {Embedding::TextPreparer} calibrated to a given provider.
+    #
+    # OpenAI embedders use tiktoken (cl100k_base) — 4.0 chars/token is a
+    # good conservative average. Ollama BERT/WordPiece tokenizers
+    # (nomic-embed-text, bge-*) run much hotter on dense Ruby/Rails
+    # source — long CamelCase constants, docstrings, callback DSLs, and
+    # heavy symbol use all sit below 2.0 chars/token in practice.
+    # Empirically, a 16 KB chunk of `ActionMailer::Base` still blows the
+    # 8192-token budget at 2.0 chars/token, so we budget at 1.5 to stay
+    # clear of tokenizer surprises even on the densest Rails internals.
+    #
+    # `max_tokens` tracks the provider's actual input budget when it
+    # reports one, falling back to the TextPreparer default otherwise.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Embedding::TextPreparer]
+    def build_text_preparer(provider)
+      chars_per_token = chars_per_token_for(provider)
+      budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
+      max_tokens = budget || Embedding::TextPreparer::DEFAULT_MAX_TOKENS
+
+      Embedding::TextPreparer.new(max_tokens: max_tokens, chars_per_token: chars_per_token)
+    end
+
+    # Build a {Chunking::SemanticChunker} sized to a given provider.
+    #
+    # `max_chars` is derived from the provider's input budget and the
+    # matching chars-per-token ratio, minus the context-prefix
+    # allowance the Indexer accounts for separately. Units that exceed
+    # this ceiling get sliced so no single chunk can blow the provider's
+    # input cap.
+    #
+    # For Ollama (and other BERT/WordPiece-backed models), char-based
+    # estimation is unreliable — CamelCase, `::` separators, and symbol
+    # literals tokenize much denser than chars/token averages suggest.
+    # When the optional `tokenizers` gem is installed, pass a
+    # {Embedding::TokenCounter} and `max_tokens` so the chunker can
+    # verify every slice with the real tokenizer and re-split any piece
+    # that still exceeds `num_ctx`. See docs/EMBEDDING_CHUNK_SIZING.md.
+    #
+    # Ollama v0.13.5+ stopped honouring `truncate: true` on `/api/embed`
+    # (ollama/ollama#14186), so any chunk that exceeds `num_ctx` returns
+    # a 400 rather than being silently truncated. Exact client-side
+    # sizing is the only reliable path until the regression is fixed
+    # upstream.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Chunking::SemanticChunker]
+    def build_chunker(provider)
+      budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
+      max_chars = ((budget * chars_per_token_for(provider)).floor - CHUNKER_PREFIX_ALLOWANCE if budget)
+
+      token_counter = token_counter_for(provider)
+      max_tokens = token_counter && budget ? budget - PREFIX_TOKEN_ALLOWANCE : nil
+
+      Chunking::SemanticChunker.new(
+        max_chars: max_chars,
+        token_counter: token_counter,
+        max_tokens: max_tokens
+      )
+    end
+
+    # Character allowance reserved for the TextPreparer context prefix
+    # ([type] id / namespace / file / deps) — kept in sync with the
+    # Indexer's own PREFIX_CHAR_ALLOWANCE constant.
+    CHUNKER_PREFIX_ALLOWANCE = 512
+    private_constant :CHUNKER_PREFIX_ALLOWANCE
+
+    # Token-side sibling of {CHUNKER_PREFIX_ALLOWANCE}. Reserved for the
+    # TextPreparer prefix when tokenizer-driven sizing is active — a bit
+    # generous to cover long file paths and dep lists.
+    PREFIX_TOKEN_ALLOWANCE = 256
+    private_constant :PREFIX_TOKEN_ALLOWANCE
+
     private
+
+    # Return a TokenCounter for providers that benefit from exact token
+    # counting. OpenAI's tiktoken ratios are already stable at 4.0
+    # chars/token on code, so it doesn't need this.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Embedding::TokenCounter, nil]
+    def token_counter_for(provider)
+      return unless provider.is_a?(Embedding::Provider::Ollama)
+
+      Embedding::TokenCounter.new
+    end
+
+    # Tokenizer-calibrated chars/token ratio for the given provider.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Float]
+    def chars_per_token_for(provider)
+      case provider
+      when Embedding::Provider::Ollama then 1.5
+      else Embedding::TextPreparer::DEFAULT_CHARS_PER_TOKEN
+      end
+    end
 
     # Instantiate the metadata store adapter specified by the configuration.
     #

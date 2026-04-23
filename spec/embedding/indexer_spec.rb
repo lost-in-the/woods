@@ -317,4 +317,126 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(stats).to eq({ processed: 0, skipped: 0, errors: 0 })
     end
   end
+
+  # Regression — Ollama rejects inputs over its num_ctx (default 2048,
+  # we configure 8192). Without auto-chunking, real-world services with
+  # >~20 KB of source hit "400 the input length exceeds the context
+  # length" and the whole embed run aborts. The Indexer must chunk
+  # oversize units before sending them to the provider.
+  describe 'auto-chunking for oversize units' do
+    let(:budget_provider_class) do
+      Class.new(stub_provider_class) do
+        def max_input_tokens
+          8192
+        end
+      end
+    end
+
+    let(:nomic_preparer) do
+      Woods::Embedding::TextPreparer.new(max_tokens: 8192, chars_per_token: 2.5)
+    end
+
+    let(:provider) { budget_provider_class.new }
+    let(:text_preparer) { nomic_preparer }
+
+    let(:chunker) { Woods::Chunking::SemanticChunker.new(threshold: 10, max_chars: 20_000) }
+
+    let(:indexer) do
+      described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        output_dir: output_dir,
+        chunker: chunker,
+        batch_size: 4
+      )
+    end
+
+    let(:huge_service) do
+      body = (['    work_on(item)'] * 4000).join("\n")
+      {
+        'type' => 'service',
+        'identifier' => 'BigService',
+        'file_path' => 'app/services/big_service.rb',
+        'namespace' => nil,
+        'source_code' => "class BigService\n  def call(item)\n#{body}\n  end\n  def other; :ok; end\nend",
+        'dependencies' => [],
+        'chunks' => [],
+        'source_hash' => 'big123'
+      }
+    end
+
+    before do
+      File.write(File.join(output_dir, 'big_service.json'), JSON.generate(huge_service))
+    end
+
+    it 'splits oversize units into multiple embeddings' do
+      stats = indexer.index_all
+      expect(stats[:processed]).to be > 1
+    end
+
+    it 'stores each chunk under a #chunk_N id' do
+      indexer.index_all
+      ids = vector_store.search([0.1, 0.2], limit: 100).map(&:id)
+      expect(ids).to all(match(/\ABigService#chunk_\d+\z/))
+    end
+
+    it 'respects the provider char budget on every embedded text' do
+      recorded_texts = []
+      allow(provider).to receive(:embed_batch).and_wrap_original do |orig, texts|
+        recorded_texts.concat(texts)
+        orig.call(texts)
+      end
+
+      indexer.index_all
+      budget = 8192 * 2.5
+      expect(recorded_texts).to all(satisfy { |t| t.length <= budget })
+    end
+
+    it 'skips chunking when the provider advertises no budget' do
+      no_budget_provider = stub_provider_class.new # no max_input_tokens method
+      small_indexer = described_class.new(
+        provider: no_budget_provider,
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        output_dir: output_dir,
+        chunker: chunker,
+        batch_size: 4
+      )
+      stats = small_indexer.index_all
+      # Provider without a budget => no auto-chunking, unit goes whole.
+      expect(stats[:processed]).to eq(1)
+    end
+
+    # Regression — `rails_source` units arrive from extraction with
+    # `chunks` already populated. Those chunks are not sized against
+    # the embedding provider's budget, so the Indexer must re-enforce
+    # the chunker's max_chars ceiling on them before sending. Prior
+    # to this the oversize pre-existing chunk hit Ollama unchanged and
+    # produced `400 the input length exceeds the context length`.
+    it 'splits oversize pre-existing chunks so none exceed the char budget' do
+      huge_line = 'x' * 30_000
+      pre_chunked_unit = {
+        'type' => 'rails_source',
+        'identifier' => 'Rails::Big',
+        'file_path' => '/gems/rails/big.rb',
+        'namespace' => nil,
+        'source_code' => 'class Big; end',
+        'dependencies' => [],
+        'chunks' => [{ 'content' => huge_line, 'chunk_type' => 'section' }],
+        'source_hash' => 'rails123'
+      }
+      File.write(File.join(output_dir, 'rails_big.json'), JSON.generate(pre_chunked_unit))
+
+      recorded_texts = []
+      allow(provider).to receive(:embed_batch).and_wrap_original do |orig, texts|
+        recorded_texts.concat(texts)
+        orig.call(texts)
+      end
+
+      indexer.index_all
+      budget = 8192 * 2.5
+      expect(recorded_texts).to all(satisfy { |t| t.length <= budget })
+    end
+  end
 end

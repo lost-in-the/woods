@@ -287,17 +287,25 @@ config.vector_store = :sqlite_faiss
 
 **Best for:** Code-specific retrieval where embedding quality matters. Code 3's 32K token window is significant — many extracted units exceed 8K tokens, especially with inlined concerns. The lower dimensionality (1024 vs 1536) also reduces vector storage costs.
 
-### Ollama / Nomic-embed-text (Self-hosted)
+### Ollama (Self-hosted)
 
-**Dimensions:** 768 (nomic-embed-text) / varies by model
-**Max tokens:** 8192 (nomic)
+| Model | Native context | Dimensions | Weights | Notes |
+|---|---|---|---|---|
+| `nomic-embed-text` (default) | 2048 | 768 | 274 MB | General-purpose, ships with Ollama |
+| `bge-m3` | **8192** | 1024 | 1.2 GB | Fewer chunks per unit, stronger code-search benchmarks |
+| `snowflake-arctic-embed2` | 8192 | 1024 | 1.2 GB | Multilingual variant of bge-m3 |
+| `mxbai-embed-large` | 512 | 1024 | 670 MB | Best for short text |
+| `all-minilm` | 256 | 384 | 46 MB | Tight-memory environments |
+
 **Cost:** Hardware only
 **Latency:** ~200ms single (GPU), ~2s single (CPU)
 
 **Strengths:** Fully self-hosted, no data leaves infrastructure, no API costs, works offline.
-**Weaknesses:** Requires GPU for reasonable performance (CPU is 10x slower), lower quality than commercial models, smaller dimensions may reduce retrieval precision.
+**Weaknesses:** Requires GPU for reasonable performance (CPU is 10× slower). `nomic-embed-text`'s 2048-token ceiling requires chunking most real-world Rails units — switch to `bge-m3` for fewer chunks if disk space allows.
 
 **Best for:** Security-sensitive environments, air-gapped networks, cost-sensitive at scale.
+
+> Ollama's `/api/embed` enforces the model's native context length regardless of the `options.num_ctx` override ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). Woods advertises the native ceiling per model so the chunker sizes inputs correctly — see [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md).
 
 ### Anthropic Embeddings
 
@@ -312,6 +320,7 @@ config.vector_store = :sqlite_faiss
 | **Best for large units** | Voyage Code 3 (32K context) |
 | **Lowest cost** | Ollama + nomic-embed-text |
 | **No external dependencies** | Ollama + nomic-embed-text |
+| **Self-hosted + large units** | Ollama + bge-m3 |
 | **Maximum quality** | OpenAI text-embedding-3-large |
 
 **Critical consideration:** Embedding dimensions must match across your entire index. Changing embedding providers requires a full re-index. Choose carefully at the start.
