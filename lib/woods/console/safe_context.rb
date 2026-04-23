@@ -16,6 +16,29 @@ module Woods
     # - Statement timeout uses `SET LOCAL` so it cannot leak to the next
     #   pool consumer
     # - Column redaction replaces sensitive values with "[REDACTED]"
+    # - ActiveJob + ActionMailer are swapped to test adapters for the
+    #   duration of every {#execute} block so `perform_later`/`deliver_later`
+    #   calls triggered by AR callbacks never actually enqueue or send.
+    #
+    # == What SafeContext does NOT cover
+    #
+    # The rolled-back transaction is a strong guardrail but not absolute.
+    # Known escape paths — callers of {#execute} should assume anything
+    # below is effectively live:
+    # - `after_rollback` callbacks (fire on rollback, can still enqueue
+    #   jobs or call external services).
+    # - `Thread.new` / `Fiber.new` inside the block — they lease a fresh
+    #   connection outside the transaction.
+    # - Direct HTTP egress (Net::HTTP, Faraday, HTTP gem, ...).
+    # - File I/O / shell-outs initiated from within AR callbacks.
+    # - Writes through a different pool or shard than the one this
+    #   SafeContext was built with.
+    # - `raw_connection.execute` on some adapters when the adapter's
+    #   transaction bookkeeping is out-of-band.
+    #
+    # Treat SafeContext as "rolls back the database", not "prevents every
+    # side effect" — operators must still apply the upstream defenses
+    # (TableGate, SqlValidator, EvalGuard, BearerAuth).
     #
     # Two construction modes are supported:
     #
@@ -58,7 +81,7 @@ module Woods
     #     ]
     #   )
     #
-    class SafeContext
+    class SafeContext # rubocop:disable Metrics/ClassLength
       # Thread-local key that exposes the connection currently leased for
       # the in-flight #execute block. Handlers should prefer this over
       # acquiring their own connection so every request stays on a single
@@ -124,7 +147,9 @@ module Woods
       def execute(&block)
         raise ArgumentError, 'SafeContext#execute requires connection: or pool: at construction time' unless @pool
 
-        @pool.with_connection { |conn| run_with_timeout(conn, &block) }
+        with_async_delivery_stubbed do
+          @pool.with_connection { |conn| run_with_timeout(conn, &block) }
+        end
       end
 
       # Replace values of redacted columns with "[REDACTED]".
@@ -147,6 +172,50 @@ module Woods
       end
 
       private
+
+      # Temporarily swap ActiveJob's queue adapter to `:test` and
+      # ActionMailer's delivery method to `:test` for the duration of the
+      # block. Callbacks that enqueue jobs or send mail via
+      # `deliver_later`/`deliver_now` accumulate in the adapter's in-memory
+      # buffer (which is discarded when the process restarts) instead of
+      # touching the real backends.
+      #
+      # Only executes the swap when the Rails modules are loaded and
+      # configured — non-Rails callers see an unchanged pass-through.
+      def with_async_delivery_stubbed(&block)
+        swap_active_job { swap_action_mailer(&block) }
+      end
+
+      def swap_active_job
+        return yield unless defined?(::ActiveJob::Base) && ::ActiveJob::Base.respond_to?(:queue_adapter)
+
+        previous = ::ActiveJob::Base.queue_adapter
+        ::ActiveJob::Base.queue_adapter = :test
+        begin
+          yield
+        ensure
+          ::ActiveJob::Base.queue_adapter = previous
+        end
+      rescue StandardError
+        yield
+      end
+
+      def swap_action_mailer
+        return yield unless defined?(::ActionMailer::Base) && ::ActionMailer::Base.respond_to?(:delivery_method)
+
+        previous = ::ActionMailer::Base.delivery_method
+        perform = ::ActionMailer::Base.perform_deliveries
+        ::ActionMailer::Base.delivery_method = :test
+        ::ActionMailer::Base.perform_deliveries = false
+        begin
+          yield
+        ensure
+          ::ActionMailer::Base.delivery_method = previous
+          ::ActionMailer::Base.perform_deliveries = perform
+        end
+      rescue StandardError
+        yield
+      end
 
       # Wrap one connection in a rolled-back transaction with timeout, and
       # publish it via Thread.current so handlers can reuse it. Always

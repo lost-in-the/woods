@@ -92,8 +92,9 @@ module Woods
 
         candidates.group_by(&:source).each_value do |source_candidates|
           ranked = source_candidates.sort_by { |c| -c.score }
-          ranked.each_with_index do |candidate, rank|
-            rrf_scores[candidate.identifier] += 1.0 / (RRF_K + rank)
+          ranked.each_with_index do |candidate, idx|
+            # RRF is 1-based (Cormack et al., 2009): top-ranked doc uses rank 1, not 0.
+            rrf_scores[candidate.identifier] += 1.0 / (RRF_K + idx + 1)
             metadata_map[candidate.identifier] ||= candidate.metadata
           end
         end
@@ -105,7 +106,9 @@ module Woods
       #
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map)
-        original_by_id = candidates.index_by(&:identifier)
+        # Plain-Ruby `index_by` substitute — the ActiveSupport version
+        # isn't loaded when the gem runs outside a Rails boot.
+        original_by_id = candidates.each_with_object({}) { |c, h| h[c.identifier] ||= c }
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(

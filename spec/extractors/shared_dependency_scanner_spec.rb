@@ -456,4 +456,44 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result).to all(satisfy { |d| d[:via] == :form_action })
     end
   end
+
+  # ── Graph resolution: constantize + short names (closes the Carts::Shipping gap) ──
+
+  describe 'constantize / short-name resolution' do
+    it 'resolves .constantize string-literal arguments to model targets' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User Carts::Shipping])
+
+      source = '"Carts::Shipping".constantize.new'
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Carts::Shipping')
+    end
+
+    it 'resolves const_get(...) string-literal arguments to model targets' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User Carts::Shipping])
+
+      source = 'klass = Object.const_get("Carts::Shipping")'
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Carts::Shipping')
+    end
+
+    it 'ignores .constantize on unknown string literals' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User])
+
+      source = '"NotAModel".constantize'
+      result = scanner.scan_model_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'resolves bare short names to fully-qualified owners when unambiguous' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[Carts::Shipping])
+      allow(Woods::ModelNameCache).to receive(:short_names_regex)
+        .and_return(/(?<![:.\w])Shipping\b/)
+      allow(Woods::ModelNameCache).to receive(:resolve_short_name)
+        .with('Shipping').and_return('Carts::Shipping')
+
+      source = 'Shipping.new(cart_id: 1)'
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Carts::Shipping')
+    end
+  end
 end

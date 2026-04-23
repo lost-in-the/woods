@@ -4,6 +4,7 @@ require_relative 'bridge'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'scope_predicate_parser'
+require_relative 'table_gate'
 
 module Woods
   module Console
@@ -36,11 +37,19 @@ module Woods
       # @param safe_context [SafeContext] Wraps execution in rolled-back transaction
       # @param connection [Object, nil] Database connection for adapter detection
       # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
-      def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false)
+      # @param table_gate [TableGate, nil] Enforces console_blocked_tables on every
+      #   model/join/association/SQL access pre-execution. When nil, no table-level
+      #   gate runs — an explicit signal from the server builder that no tables are
+      #   configured as blocked. Callers should pass the live gate from
+      #   {Server#build_response_context} so embedded mode matches the bridge's
+      #   defense-in-depth posture.
+      def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false,
+                     table_gate: nil)
         @model_validator = model_validator
         @safe_context = safe_context
         @connection = connection
         @read_tools_enabled = read_tools_enabled
+        @table_gate = table_gate
       end
 
       # Execute a tool request and return a response hash.
@@ -152,6 +161,42 @@ module Woods
         raise ValidationError, 'Missing required parameter: model' unless model
 
         @model_validator.validate_model!(model)
+        # Pre-execution table-gate check: refuse every tool invocation that
+        # targets a model backed by a blocked table.
+        gate_model!(model)
+      end
+
+      # Apply the TableGate (if wired) to model/SQL/join access. Raises
+      # {ValidationError} with the TableGate's message so refusals look
+      # identical to ModelValidator violations at the protocol boundary.
+      def gate_model!(model)
+        return unless @table_gate
+
+        begin
+          @table_gate.check_model!(model)
+        rescue TableGateError => e
+          raise ValidationError, e.message
+        end
+      end
+
+      def gate_sql!(sql)
+        return unless @table_gate
+
+        begin
+          @table_gate.check_sql!(sql)
+        rescue TableGateError => e
+          raise ValidationError, e.message
+        end
+      end
+
+      def gate_joins!(model, joins)
+        return unless @table_gate && joins
+
+        begin
+          @table_gate.check_joins!(model, joins)
+        rescue TableGateError => e
+          raise ValidationError, e.message
+        end
       end
 
       # Resolve a model name string to an ActiveRecord class.
@@ -294,6 +339,9 @@ module Woods
 
         require_relative 'sql_validator'
         SqlValidator.new.validate!(sql)
+        # Post-validation, pre-execution TableGate — blocks every configured
+        # table even if the sql is otherwise well-formed.
+        gate_sql!(sql)
 
         limit = params['limit'] ? [params['limit'].to_i, MAX_SQL_LIMIT].min : nil
         query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
@@ -310,6 +358,7 @@ module Woods
       # @return [Hash] Columns and rows
       def handle_query(params)
         validate_model!(params)
+        gate_joins!(params['model'], params['joins'])
         model = resolve_model(params['model'])
         relation = build_query_relation(model, params)
         result = active_connection.select_all(relation.to_sql)
@@ -322,24 +371,171 @@ module Woods
       # @param params [Hash] Query parameters (select, joins, scope, group_by, having, order, limit)
       # @return [ActiveRecord::Relation]
       def build_query_relation(model, params)
-        relation = apply_query_clauses(model.all, params)
+        relation = apply_query_clauses(model, params)
         limit = params['limit'] ? [params['limit'].to_i, MAX_QUERY_LIMIT].min : MAX_QUERY_LIMIT
         relation.limit(limit)
       end
 
+      # Optional aggregate-expression wrappers accepted inside a `select`.
+      # Anything else must be a bare column name validated against the model.
+      # Matching is case-insensitive; the trailing `AS alias` is optional and
+      # the alias itself must be an identifier — it can't carry SQL.
+      SAFE_SELECT_EXPR = /
+        \A\s*
+        (?:(SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(\*|\w+(?:\.\w+)?)\s*\)|(\w+(?:\.\w+)?))
+        (?:\s+AS\s+(\w+))?
+        \s*\z
+      /ix
+      private_constant :SAFE_SELECT_EXPR
+
       # Apply select/joins/scope/group/having/order clauses to a relation.
       #
-      # @param relation [ActiveRecord::Relation]
+      # Validates every user-supplied column/alias through the ModelValidator
+      # and limits aggregate expressions to a small allowlist. Without this
+      # pass, `select`/`having`/`order`/`group_by` strings reach AR as raw SQL
+      # fragments and an attacker can exfiltrate columns via a crafted
+      # `having: "1=1 UNION SELECT password_digest FROM users"`. SafeContext
+      # rollback does not stop SELECT-based reads.
+      #
+      # @param model [Class] ActiveRecord model class
       # @param params [Hash]
       # @return [ActiveRecord::Relation]
-      def apply_query_clauses(relation, params) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-        relation = relation.select(params['select']) if params['select']
+      # @raise [ValidationError] on unsafe column/expression input
+      def apply_query_clauses(model, params) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+        model_name = params['model']
+        relation = model.all
+
+        relation = relation.select(*validated_select(params['select'], model_name)) if params['select']
         relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
-        relation = apply_scope(relation, params['scope'], model_name: params['model'])
-        relation = relation.group(params['group_by']) if params['group_by']&.any?
-        relation = relation.having(params['having']) if params['having']
-        relation = relation.order(params['order']) if params['order']
+        relation = apply_scope(relation, params['scope'], model_name: model_name)
+        relation = relation.group(*validated_columns(params['group_by'], model_name)) if params['group_by']&.any?
+        relation = relation.having(*validated_having(params['having'], model_name)) if params['having']
+        relation = relation.order(validated_order(params['order'], model_name)) if params['order']
         relation
+      end
+
+      # Normalize `select:` into an array of safe expressions. Each element
+      # must be a column name (optionally qualified and/or aliased) or a
+      # whitelisted aggregate call over a column.
+      #
+      # @param select [String, Array<String>]
+      # @param model_name [String]
+      # @return [Array<String>]
+      def validated_select(select, model_name)
+        Array(select).flat_map { |s| s.to_s.split(',') }.map do |expr|
+          validate_select_expression!(expr.strip, model_name)
+        end
+      end
+
+      def validate_select_expression!(expr, model_name)
+        match = SAFE_SELECT_EXPR.match(expr)
+        raise ValidationError, "Rejected select expression: #{expr.inspect}" unless match
+
+        _fn, fn_arg, bare_col, _alias = match.captures
+        column = bare_col || fn_arg
+        validate_column_reference!(column, model_name) unless column == '*'
+        expr
+      end
+
+      # Validate group_by entries — bare columns only (no functions, no SQL).
+      #
+      # @param columns [String, Array<String>]
+      # @param model_name [String]
+      # @return [Array<String>]
+      def validated_columns(columns, model_name)
+        Array(columns).flat_map { |c| c.to_s.split(',') }.map do |col|
+          col = col.strip
+          validate_column_reference!(col, model_name)
+          col
+        end
+      end
+
+      # Validate and bind-wrap `having:` so nothing reaches SQL as raw string
+      # fragments. Accepts:
+      #   - Hash (e.g. `{total: 100}`) — AR builds a `=` predicate safely.
+      #   - Array `[sql, *binds]` where the sql string is either
+      #     `"<col> <op> ?"` or `"<AGG>(<col_or_*>) <op> ?"` with a known
+      #     operator and validated column.
+      # Anything else is rejected — raw strings (e.g. `"1=1 UNION SELECT
+      # password_digest FROM users"`) used to flow straight through and
+      # enable SELECT-based exfiltration despite the SafeContext rollback.
+      HAVING_AGG_TEMPLATE = /
+        \A\s*
+        (?:
+          (?<col>\w+(?:\.\w+)?)
+          |
+          (?<agg>SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(?<arg>\*|\w+(?:\.\w+)?)\s*\)
+        )
+        \s*(?<op>=|!=|<>|<=|>=|<|>)\s*\?\s*\z
+      /ix
+      private_constant :HAVING_AGG_TEMPLATE
+
+      def validated_having(having, model_name) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        case having
+        when Hash
+          raise ValidationError, 'having: empty hash' if having.empty?
+
+          having.each_key { |k| validate_column_reference!(k.to_s, model_name) }
+          [having]
+        when Array
+          raise ValidationError, 'having: array must be [sql_with_placeholders, *binds]' if having.empty?
+
+          template = having.first.to_s
+          match = HAVING_AGG_TEMPLATE.match(template)
+          raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
+
+          # Validate any referenced columns through ModelValidator so
+          # aggregate args can't reach the db without a column check.
+          col = match[:col] || match[:arg]
+          validate_column_reference!(col, model_name) if col && col != '*'
+
+          having
+        else
+          raise ValidationError, "having: unsupported type #{having.class}"
+        end
+      end
+
+      # Validate `order:` — only Hash `{col => :asc|:desc}` or bare column name.
+      def validated_order(order, model_name)
+        case order
+        when Hash
+          order.each_key { |k| validate_column_reference!(k.to_s, model_name) }
+          order.transform_values do |dir|
+            dir_sym = dir.to_s.downcase.to_sym
+            unless %i[asc desc].include?(dir_sym)
+              raise ValidationError, "order direction must be :asc or :desc (got #{dir.inspect})"
+            end
+
+            dir_sym
+          end
+        when String, Symbol
+          col = order.to_s.strip
+          validate_column_reference!(col, model_name)
+          col
+        else
+          raise ValidationError, "order: unsupported type #{order.class}"
+        end
+      end
+
+      # Strict column-reference check. `table.col` is allowed when the table
+      # is known to the ModelValidator via its registry (checked through the
+      # public validate_column! path); bare column is validated against the
+      # active model.
+      def validate_column_reference!(column, model_name)
+        if column.include?('.')
+          table, col = column.split('.', 2)
+          unless safe_identifier?(table) && safe_identifier?(col)
+            raise ValidationError, "Rejected column reference: #{column.inspect}"
+          end
+        else
+          raise ValidationError, "Rejected column reference: #{column.inspect}" unless safe_identifier?(column)
+
+          @model_validator.validate_column!(model_name, column)
+        end
+      end
+
+      def safe_identifier?(name)
+        name.is_a?(String) && name.match?(/\A[a-zA-Z_][a-zA-Z0-9_]*\z/)
       end
 
       # ── Helpers ──────────────────────────────────────────────────────────

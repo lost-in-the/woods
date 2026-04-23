@@ -25,10 +25,16 @@ module Woods
         # @param url [String] Qdrant server URL
         # @param collection [String] Collection name
         # @param api_key [String, nil] Optional API key for authentication
-        def initialize(url:, collection:, api_key: nil)
+        # @param dimensions [Integer, nil] Expected vector dimension. When set,
+        #   {#store_batch}/{#store} pre-validate every vector's length before
+        #   sending the HTTP request — Qdrant returns a 400 on mismatch, but
+        #   detecting it client-side avoids wasted network round-trips and
+        #   keeps error shape consistent with the pgvector adapter.
+        def initialize(url:, collection:, api_key: nil, dimensions: nil)
           @url = url
           @collection = collection
           @api_key = api_key
+          @dimensions = dimensions
           @uri = URI(url)
         end
 
@@ -36,6 +42,7 @@ module Woods
         #
         # @param dimensions [Integer] Vector dimensionality
         def ensure_collection!(dimensions:)
+          @dimensions ||= dimensions
           body = {
             vectors: {
               size: dimensions,
@@ -52,6 +59,7 @@ module Woods
         # @param metadata [Hash] Optional payload metadata
         # @see Interface#store
         def store(id, vector, metadata = {})
+          validate_dimensions!(vector) if @dimensions
           body = {
             points: [
               {
@@ -72,8 +80,17 @@ module Woods
         # the upstream chunk size.
         #
         # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
+        # @raise [Woods::Error] if any entry's vector doesn't match the configured
+        #   dimension. Validation runs before the HTTP request so partial-batch
+        #   state is impossible on dimension mismatch.
         def store_batch(entries)
           return if entries.empty?
+
+          if @dimensions
+            entries.each_with_index do |entry, idx|
+              validate_dimensions!(entry[:vector], index: idx)
+            end
+          end
 
           body = {
             points: entries.map do |entry|
@@ -129,6 +146,20 @@ module Woods
         end
 
         private
+
+        # Ensure the provided vector matches the store's configured dimension.
+        #
+        # @param vector [Array<Numeric>]
+        # @param index [Integer, nil] position in the batch
+        # @raise [Woods::Error] on dimension mismatch
+        def validate_dimensions!(vector, index: nil)
+          return if vector.respond_to?(:length) && vector.length == @dimensions
+
+          where = index ? " (entry #{index})" : ''
+          got = vector.respond_to?(:length) ? vector.length : vector.class
+          raise Woods::Error,
+                "Vector dimension mismatch#{where}: got #{got}, expected #{@dimensions}"
+        end
 
         # Build a Qdrant filter from metadata key-value pairs.
         #

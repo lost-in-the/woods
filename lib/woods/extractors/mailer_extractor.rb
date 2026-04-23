@@ -23,9 +23,11 @@ module Woods
       include AstSourceExtraction
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include RouteHelperResolver
 
       def initialize
         @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
+        build_route_helper_map
       end
 
       # Extract all mailers in the application

@@ -90,27 +90,42 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response['ok']).to be true
-      expect(relation).to have_received(:select).with(['status', 'COUNT(*) AS total'])
-      expect(relation).to have_received(:group).with(['status'])
+      expect(relation).to have_received(:select).with('status', 'COUNT(*) AS total')
+      expect(relation).to have_received(:group).with('status')
       expect(response['result']['rows']).to eq([['paid', 500], ['pending', 200]])
     end
   end
 
   describe 'having clause' do
-    it 'applies HAVING condition to grouped query' do
+    it 'applies a parameterized HAVING condition to a grouped query' do
       response = executor.send_request({
                                          'tool' => 'query',
                                          'params' => {
                                            'model' => 'Order',
                                            'select' => ['status', 'SUM(amount) AS total'],
                                            'group_by' => ['status'],
-                                           'having' => 'SUM(amount) > 100'
+                                           'having' => ['SUM(amount) > ?', 100]
                                          }
                                        })
 
       expect(response['ok']).to be true
-      expect(relation).to have_received(:group).with(['status'])
-      expect(relation).to have_received(:having).with('SUM(amount) > 100')
+      expect(relation).to have_received(:group).with('status')
+      expect(relation).to have_received(:having).with('SUM(amount) > ?', 100)
+    end
+
+    it 'rejects raw-string having clauses (SQL fragment injection vector)' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'group_by' => ['status'],
+                                           'having' => '1=1 UNION SELECT password_digest FROM users'
+                                         }
+                                       })
+
+      expect(response['ok']).to be false
+      expect(response['error_type']).to eq('validation')
     end
   end
 
@@ -126,7 +141,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response['ok']).to be true
-      expect(relation).to have_received(:group).with(%w[status user_id])
+      expect(relation).to have_received(:group).with('status', 'user_id')
     end
   end
 
@@ -142,7 +157,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response['ok']).to be true
-      expect(relation).to have_received(:order).with({ 'created_at' => 'desc' })
+      expect(relation).to have_received(:order).with({ 'created_at' => :desc })
     end
 
     it 'supports ascending order' do
@@ -156,7 +171,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response['ok']).to be true
-      expect(relation).to have_received(:order).with({ 'id' => 'asc' })
+      expect(relation).to have_received(:order).with({ 'id' => :asc })
     end
   end
 

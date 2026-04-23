@@ -43,7 +43,10 @@ module Woods
         # @param text [String] the text to embed
         # @return [Array<Float>] the embedding vector
         # @raise [Woods::Error] if the API returns an error
+        # @raise [ArgumentError] if the text is nil or empty (OpenAI rejects these with 400)
         def embed(text)
+          raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
+
           response = post_request({ model: @model, input: text })
           response['data'].first['embedding']
         end
@@ -55,7 +58,13 @@ module Woods
         # @param texts [Array<String>] the texts to embed
         # @return [Array<Array<Float>>] array of embedding vectors
         # @raise [Woods::Error] if the API returns an error
-        def embed_batch(texts)
+        # @raise [ArgumentError] if the array is empty or any element is nil/empty
+        def embed_batch(texts) # rubocop:disable Metrics/CyclomaticComplexity
+          raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
+          if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
+            raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
+          end
+
           response = post_request({ model: @model, input: texts })
           response['data']
             .sort_by { |item| item['index'] }

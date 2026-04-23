@@ -251,7 +251,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 ### Index Server — Reads Pre-Extracted Data (No Rails Required)
 
-27 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. Reads static JSON from disk — fast, no Rails boot needed.
+28 tools for code lookup, dependency traversal, semantic search, graph analysis, and more (27 always-on + a conditional Notion tool when export is configured). Reads static JSON from disk — fast, no Rails boot needed.
 
 **Claude Code** — add to `.mcp.json` in your project root:
 

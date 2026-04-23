@@ -34,7 +34,7 @@ module Woods
   #   result.strategy       # => :vector
   #   result.tokens_used    # => 4200
   #
-  class Retriever
+  class Retriever # rubocop:disable Metrics/ClassLength
     # Diagnostic trace for retrieval quality analysis.
     RetrievalTrace = Struct.new(:classification, :strategy, :candidate_count,
                                 :ranked_count, :tokens_used, :elapsed_ms,
@@ -76,8 +76,33 @@ module Woods
         embedding_provider: embedding_provider
       )
       @ranker = Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store)
-      @assembler = Retrieval::ContextAssembler.new(metadata_store: metadata_store)
+      # Match truncation sizing to the embedding provider's tokenizer so
+      # Ollama-indexed corpora (ratio ~1.5) don't get over-truncated by
+      # an OpenAI-sized default (4.0). Unknown/missing providers fall
+      # back to the OpenAI-friendly default.
+      chars_per_token = infer_chars_per_token(embedding_provider)
+      @assembler = Retrieval::ContextAssembler.new(
+        metadata_store: metadata_store,
+        chars_per_token: chars_per_token
+      )
     end
+
+    # Infer the chars-per-token ratio from an embedding provider's model.
+    # Ollama WordPiece-style tokenizers (nomic-embed-text, bge-*,
+    # mxbai-embed-*, snowflake-arctic-*) run hotter on Ruby source than
+    # tiktoken; 1.5 is the project's calibrated value — see
+    # {Woods::Builder#chars_per_token_for} and docs/EMBEDDING_MODELS.md.
+    #
+    # @param provider [Object, nil]
+    # @return [Float]
+    def infer_chars_per_token(provider)
+      return Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN unless provider.respond_to?(:model_name)
+
+      model = provider.model_name.to_s
+      ollama_patterns = /\A(nomic-embed|bge-|mxbai-embed|snowflake-arctic|all-minilm)/
+      model.match?(ollama_patterns) ? 1.5 : Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN
+    end
+    private :infer_chars_per_token
 
     # Unit types excluded from retrieval by default. +test_mapping+ units
     # make up ~33% of a typical index and lexically dominate semantic rank

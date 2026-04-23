@@ -786,6 +786,14 @@ module Woods
 
             guard&.record!(:extraction)
 
+            unless Woods::MCP::Server.send(:pipeline_start, :extraction)
+              next respond_err.call(
+                'Extraction pipeline is already running. Wait for it to complete.',
+                code: :already_running,
+                tool: 'pipeline_extract'
+              )
+            end
+
             Thread.new do
               extractor = Woods::Extractor.new(
                 output_dir: Woods.configuration.output_dir
@@ -794,6 +802,8 @@ module Woods
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline extract failed: #{e.message}")
+            ensure
+              Woods::MCP::Server.send(:pipeline_finish, :extraction)
             end
 
             respond.call(JSON.pretty_generate({
@@ -827,6 +837,14 @@ module Woods
 
             guard&.record!(:embedding)
 
+            unless Woods::MCP::Server.send(:pipeline_start, :embedding)
+              next respond_err.call(
+                'Embedding pipeline is already running. Wait for it to complete.',
+                code: :already_running,
+                tool: 'pipeline_embed'
+              )
+            end
+
             Thread.new do
               # Share the rake-task wiring so the MCP path picks up the
               # provider-tuned TextPreparer + token-aware chunker. Without
@@ -838,6 +856,8 @@ module Woods
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline embed failed: #{e.message}")
+            ensure
+              Woods::MCP::Server.send(:pipeline_finish, :embedding)
             end
 
             respond.call(JSON.pretty_generate({
@@ -845,6 +865,26 @@ module Woods
                                                 message: 'Embedding pipeline started in background thread'
                                               }))
           end
+        end
+
+        # Acquire a pipeline-kind lock atomically. Returns false when
+        # another thread is already running that kind of pipeline (so the
+        # caller can refuse the new request instead of racing the running
+        # pipeline). Module-level state — a single MCP server process
+        # serializes its own pipelines.
+        def pipeline_start(kind)
+          @pipeline_mutex ||= Mutex.new
+          @pipeline_in_flight ||= {}
+          @pipeline_mutex.synchronize do
+            return false if @pipeline_in_flight[kind]
+
+            @pipeline_in_flight[kind] = true
+            true
+          end
+        end
+
+        def pipeline_finish(kind)
+          @pipeline_mutex&.synchronize { @pipeline_in_flight&.delete(kind) }
         end
 
         def define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)

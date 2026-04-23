@@ -175,13 +175,20 @@ module Woods
           require_relative 'embedded_executor'
           enforce_unsafe_eval_contract!
 
-          executor = EmbeddedExecutor.new(
-            model_validator: model_validator, safe_context: safe_context,
-            connection: connection, read_tools_enabled: read_tools_enabled
-          )
           safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
           ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables,
                                        model_reflections: model_reflections)
+
+          # Wire the same TableGate into the executor so sql/query are blocked
+          # PRE-execution against console_blocked_tables (previously TableGate
+          # was only consulted on the render path, leaving the defense inert
+          # for the sql and query tools).
+          table_gate = ctx&.table_gate
+          executor = EmbeddedExecutor.new(
+            model_validator: model_validator, safe_context: safe_context,
+            connection: connection, read_tools_enabled: read_tools_enabled,
+            table_gate: table_gate
+          )
 
           build_server(executor, ctx)
         end

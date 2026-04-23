@@ -132,12 +132,36 @@ RSpec.describe Woods::Resilience::RetryableProvider do
         )
       end
 
-      it 'sleeps with exponentially growing delays between retries' do
+      it 'uses exponentially growing delay ceilings with full jitter, capped' do
         delays = record_sleep_on(retryable)
+
+        # Force jitter to its maximum so the assertion is deterministic —
+        # sleep ≈ ceiling where ceiling = min(BACKOFF_BASE * 2**attempt, 30).
+        allow(retryable).to receive(:rand).and_return(1.0)
 
         retryable.embed('hello')
 
-        expect(delays).to eq([0.2, 0.4]) # 2^1 * 0.1, 2^2 * 0.1
+        # 2 retries observed with maximum jitter hit each time:
+        #   attempt 1: 0.1 * 2 = 0.2
+        #   attempt 2: 0.1 * 4 = 0.4
+        expect(delays).to eq([0.2, 0.4])
+      end
+
+      it 'caps individual delays at MAX_BACKOFF_SECONDS regardless of attempt' do
+        # Synthetic very-high attempt via direct helper — exercises the
+        # min(..., 30) cap. rand forced to 1.0 to eliminate randomness.
+        allow(retryable).to receive(:rand).and_return(1.0)
+        expect(retryable.send(:backoff_seconds, 20)).to be <= Woods::Resilience::RetryableProvider::MAX_BACKOFF_SECONDS
+      end
+
+      it 'applies jitter — delays are bounded above by the ceiling' do
+        delays = record_sleep_on(retryable)
+        allow(retryable).to receive(:rand).and_return(0.5)
+
+        retryable.embed('hello')
+
+        expect(delays[0]).to be <= 0.2
+        expect(delays[1]).to be <= 0.4
       end
     end
   end

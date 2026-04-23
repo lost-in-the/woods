@@ -379,4 +379,55 @@ RSpec.describe Woods::Console::SafeContext do
       expect(ctx.redacted_key_values.size).to eq(1)
     end
   end
+
+  describe 'async-delivery stubbing during #execute (F-7)' do
+    it 'swaps ActiveJob.queue_adapter to :test inside the block and restores after' do
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      fake_aj = Class.new do
+        class << self
+          attr_accessor :queue_adapter
+        end
+      end
+      fake_aj.queue_adapter = :sidekiq
+      stub_const('ActiveJob::Base', fake_aj)
+
+      ctx = described_class.new(connection: connection)
+      observed = nil
+      ctx.execute { |_c| observed = fake_aj.queue_adapter }
+
+      expect(observed).to eq(:test)
+      expect(fake_aj.queue_adapter).to eq(:sidekiq)
+    end
+
+    it 'swaps ActionMailer delivery to :test and disables perform_deliveries inside the block' do
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      fake_am = Class.new do
+        class << self
+          attr_accessor :delivery_method, :perform_deliveries
+        end
+      end
+      fake_am.delivery_method = :smtp
+      fake_am.perform_deliveries = true
+      stub_const('ActionMailer::Base', fake_am)
+
+      ctx = described_class.new(connection: connection)
+      observed_method = nil
+      observed_perform = nil
+      ctx.execute do |_c|
+        observed_method = fake_am.delivery_method
+        observed_perform = fake_am.perform_deliveries
+      end
+
+      expect(observed_method).to eq(:test)
+      expect(observed_perform).to be false
+      expect(fake_am.delivery_method).to eq(:smtp)
+      expect(fake_am.perform_deliveries).to be true
+    end
+
+    it 'is a no-op when neither ActiveJob nor ActionMailer is loaded' do
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      ctx = described_class.new(connection: connection)
+      expect { ctx.execute { |_c| 1 + 1 } }.not_to raise_error
+    end
+  end
 end

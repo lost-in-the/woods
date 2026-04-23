@@ -40,25 +40,80 @@ module Woods
         Devise.secret_key
       ].freeze
 
-      # Constants whose bare reference (or use as a receiver) is denied —
-      # `ENV`, `ENV['X']`, and `ENV.fetch('X')` all fall under this.
-      DENIED_CONSTANTS = %w[ENV].freeze
+      # Constants whose bare reference (or use as a receiver) is denied.
+      #
+      # - `ENV` — reads host secrets as a string-keyed hash.
+      # - Threading: `Thread`, `Fiber`, `Ractor`, `Process` — concurrent
+      #   execution escapes the rolled-back transaction (the spawned block
+      #   leases its own connection outside SafeContext's tx).
+      # - Deserialization: `Marshal`, `YAML`, `Psych` — unsafe load paths
+      #   can execute arbitrary code during object instantiation.
+      # - Network: `Net`, `Socket`, `TCPSocket`, `UDPSocket`, `URI`,
+      #   `OpenURI`, `Resolv`, `Faraday`, `HTTP` — every HTTP/network egress
+      #   point available in a standard Rails install.
+      # - File I/O: `File`, `FileUtils`, `IO`, `Dir`, `Pathname`,
+      #   `Tempfile`, `StringIO`, `BasicObject` — broad filesystem access.
+      # - Kernel-ish: `Kernel`, `Object`, `ObjectSpace`, `GC`,
+      #   `RubyVM`, `TracePoint`, `Gem`, `Bundler`.
+      # File/IO/Pathname are intentionally NOT in this list — legitimate
+      # non-credential file reads are a core use case. Credential-path
+      # access is handled by CREDENTIAL_FILE_READERS below, and shell-exec
+      # attempts (`Kernel.open("|cmd")`, backticks, `%x{}`) are caught by
+      # the backtick textual check in #check! and the DENIED_REFLECTION
+      # entries for `system`/`exec`/`popen`/etc.
+      DENIED_CONSTANTS = %w[
+        ENV
+        Thread Fiber Ractor Process Mutex ConditionVariable Queue SizedQueue
+        Marshal YAML Psych
+        Net Socket TCPSocket UDPSocket UNIXSocket URI OpenURI Resolv Faraday HTTP
+        ObjectSpace GC RubyVM TracePoint
+        Gem Bundler
+      ].freeze
 
       # Method names that escape the AST sandbox regardless of receiver.
       #
-      # In addition to the obvious escapes (eval family, send, binding),
-      # this list covers AST-reachable bypasses identified in PR #34 review:
-      # - `instance_variable_get` — reads arbitrary ivars from any object
-      # - `method` — returns a callable Method object, enabling indirect dispatch
-      # - `define_method` — injects new methods at runtime
-      # - `const_source_location` — leaks load paths and gem install locations
-      # - `_id2ref` — dereferences arbitrary ObjectSpace objects by ID
-      # - `each_object` — enumerates all live objects in the VM heap
+      # Covers, in order:
+      # - Eval family: the classic `eval`/`instance_eval`/`class_eval`/
+      #   `module_eval` plus `binding` (which enables reconstructing an eval
+      #   in the caller's scope).
+      # - Dynamic dispatch: `send` / `public_send` / `__send__` / `method` /
+      #   `public_method` (returns a callable, indirect dispatch) and the
+      #   `const_get` / `const_set` / `remove_const` / `define_method` /
+      #   `define_singleton_method` / `alias_method` / `undef_method` /
+      #   `remove_method` / `method_defined?` / `prepend` / `include_module`
+      #   reflection family.
+      # - State mutation: `instance_variable_set` / `instance_variable_get`,
+      #   `class_variable_set` / `class_variable_get` / `freeze` / `taint`.
+      # - Object-space escapes: `_id2ref`, `each_object`, `const_source_location`.
+      # - System / process: `system`, `exec`, `spawn`, `fork`, `popen`, `%x{}`
+      #   (AST method name `backtick` / xstr) so they can't be invoked
+      #   implicitly.
+      # - File / IO: `open` (bare Kernel#open — the File-specific reader is
+      #   handled separately via CREDENTIAL_FILE_READERS, but the bare
+      #   `Kernel.open("|shell-command")` form is how most shellshock-style
+      #   escapes slip through).
+      # - Network: `URI.open` (when called as `open` on URI, the AST method
+      #   name is `open` so the string match above catches it). HTTP / Socket
+      #   constants are denied separately via DENIED_CONSTANTS.
+      # - Loader: `load`, `require`, `require_relative`, `autoload`.
+      # - Unsafe deserialization: `unsafe_load` / `_load` (Marshal.load and
+      #   YAML.load are denied via DENIED_CONSTANTS + method gate below).
+      # - Threading escapes from SafeContext's rollback: `new` on Thread /
+      #   Fiber / Process is denied via DENIED_CONSTANTS so the
+      #   {Kernel.fork, Thread.new} pair can't slip past.
       DENIED_REFLECTION = %w[
-        eval instance_eval class_eval module_eval
-        send public_send const_get binding
-        instance_variable_get method define_method
-        const_source_location _id2ref each_object
+        eval instance_eval class_eval module_eval binding
+        send public_send __send__ method public_method
+        const_get const_set remove_const define_method define_singleton_method
+        alias_method undef_method remove_method method_defined? singleton_method
+        instance_variable_get instance_variable_set
+        class_variable_get class_variable_set
+        _id2ref each_object const_source_location instance_variables
+        prepend include_module
+        system exec spawn fork popen popen2 popen2e popen3 backtick
+        require require_relative autoload
+        unsafe_load _load
+        taint untaint
       ].freeze
 
       # Receivers + method-name pairs that read credential files from disk.
@@ -96,6 +151,15 @@ module Woods
       # @raise [ForbiddenExpressionError]
       def check!(code)
         raise ForbiddenExpressionError, 'payload is empty' if code.nil? || code.strip.empty?
+
+        # Fail-safe textual check for backtick literals (` `cmd` ` and
+        # `%x{cmd}`) — the AST flavor of these is `:xstr`/`:xstr_heredoc`,
+        # which {Woods::Ast::Parser} may normalize differently across
+        # Prism/parser-gem backends. A source-level refusal is both cheap
+        # and impossible to evade via AST normalization.
+        if code.include?('`') || code =~ /%x[{<|!@#(\[]/
+          raise ForbiddenExpressionError, 'payload contains a shell-execution literal (backtick or %x)'
+        end
 
         tree = parse_or_refuse(code)
         scan_send_nodes(tree)

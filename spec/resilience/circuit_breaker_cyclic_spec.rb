@@ -41,8 +41,8 @@ RSpec.describe Woods::Resilience::CircuitBreaker, 'cyclic / re-entrant scenarios
       3.times { breaker.call { raise StandardError, 'fail' } rescue nil } # rubocop:disable Style/RescueModifier
       expect(breaker.state).to eq(:open)
 
-      # Simulate timeout elapsed — half_open probe succeeds → closed
-      allow(Time).to receive(:now).and_return(Time.now + 1.0)
+      # Real sleep past reset_timeout (0.05s) — breaker uses a monotonic clock.
+      sleep 0.08
       breaker.call { 'recovered' }
 
       expect(breaker.state).to eq(:closed)
@@ -52,8 +52,7 @@ RSpec.describe Woods::Resilience::CircuitBreaker, 'cyclic / re-entrant scenarios
       # Drive to :open
       3.times { breaker.call { raise StandardError } rescue nil } # rubocop:disable Style/RescueModifier
 
-      frozen_now = Time.now
-      allow(Time).to receive(:now).and_return(frozen_now + 1.0)
+      sleep 0.08 # past reset_timeout 0.05
 
       # half_open probe fails
       breaker.call { raise StandardError, 'still broken' } rescue nil # rubocop:disable Style/RescueModifier
@@ -85,7 +84,7 @@ RSpec.describe Woods::Resilience::CircuitBreaker, 'cyclic / re-entrant scenarios
     it 'half_open succeeds then re-entering does not re-open the circuit' do
       3.times { breaker.call { raise StandardError } rescue nil } # rubocop:disable Style/RescueModifier
 
-      allow(Time).to receive(:now).and_return(Time.now + 1.0)
+      sleep 0.08 # past reset_timeout 0.05
 
       # Successful half-open probe — resets state
       breaker.call { 'probe ok' }

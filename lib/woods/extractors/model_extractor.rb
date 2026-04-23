@@ -530,7 +530,12 @@ module Woods
               conditions: format_callback_conditions(cb)
             }
           end
-        rescue NoMethodError
+        rescue StandardError
+          # Widen beyond NoMethodError per CLAUDE.md — callback-chain
+          # introspection can raise a variety of errors across Rails
+          # versions (NameError, TypeError, LoadError for missing
+          # concerns), and silently swallowing only NoMethodError left
+          # the rest to crash extraction.
           []
         end.compact
       end

@@ -25,8 +25,28 @@ module Woods
     #
     class SqlValidator
       # Forbidden statement prefixes (case-insensitive).
+      #
+      # Expanded beyond DML/DDL to cover:
+      # - PG procedural (`DO`, `CALL`) which can run arbitrary plpgsql.
+      # - Session-state mutation (`SET`, `RESET`) — `SET ROLE`, `SET search_path`
+      #   can swap out the effective permission set for the rest of the session
+      #   even under rollback.
+      # - Admin/cluster ops (`VACUUM`, `ANALYZE`, `CLUSTER`, `REINDEX`,
+      #   `REFRESH`, `LOCK`) which are reads in the English-language sense
+      #   but carry side effects or heavy locks.
+      # - Async signalling (`LISTEN`, `NOTIFY`).
+      # - Prepared-statement lifecycle (`PREPARE`, `EXECUTE`, `DEALLOCATE`).
+      # - Transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`,
+      #   `RELEASE`, `START`) — SafeContext already owns the surrounding
+      #   transaction; inner tx control would corrupt it.
+      # - File I/O vectors (`LOAD`, `HANDLER`, `COPY`).
       FORBIDDEN_KEYWORDS = %w[
         INSERT UPDATE DELETE DROP ALTER TRUNCATE CREATE GRANT REVOKE
+        DO CALL SET RESET LISTEN NOTIFY
+        VACUUM ANALYZE CLUSTER REINDEX REFRESH LOCK
+        PREPARE EXECUTE DEALLOCATE
+        BEGIN COMMIT ROLLBACK SAVEPOINT RELEASE START
+        LOAD HANDLER COPY
       ].freeze
 
       # Keywords that are forbidden anywhere in the SQL (not just at start).
@@ -45,7 +65,13 @@ module Woods
       ].freeze
 
       # Allowed statement prefixes (case-insensitive).
-      ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN)\b/i
+      #
+      # `EXPLAIN ANALYZE` actually executes the planned query on PostgreSQL
+      # (and the MySQL 8.0+ `EXPLAIN ANALYZE` does the same) — explicitly
+      # reject the `ANALYZE` variant so SafeContext doesn't silently trust
+      # "we're just planning, not running" for what is a side-effectful
+      # execution.
+      ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN(?!\s+ANALYZE))\b/i
 
       # Frozen map of forbidden keyword => regex matching the keyword at statement start.
       # Used by {#check_forbidden_keywords!} and {#check_forbidden_keywords_in_body!}.

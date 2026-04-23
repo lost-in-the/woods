@@ -23,6 +23,7 @@ module Woods
     class PhlexExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include RouteHelperResolver
 
       # Common Phlex base classes to look for
       PHLEX_BASES = %w[
@@ -33,6 +34,10 @@ module Woods
 
       def initialize
         @component_base = find_component_base
+        # Precompute the _path/_url → controller#action map once per
+        # extraction run so navigation edges resolve to real targets
+        # instead of the unresolved helper literal.
+        build_route_helper_map
       end
 
       # Extract all Phlex/ViewComponent components

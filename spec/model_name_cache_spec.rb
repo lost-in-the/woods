@@ -58,4 +58,53 @@ RSpec.describe Woods::ModelNameCache do
       expect(described_class.model_names).to eq(%w[Order Product])
     end
   end
+
+  describe '.resolve_short_name' do
+    it 'resolves a bare inner class name to its fully-qualified owner' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+
+      expect(described_class.resolve_short_name('Shipping')).to eq('Carts::Shipping')
+    end
+
+    it 'returns nil for ambiguous short names (collision across namespaces)' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [
+                          double(name: 'Carts::Shipping'),
+                          double(name: 'Orders::Shipping')
+                        ]))
+
+      expect(described_class.resolve_short_name('Shipping')).to be_nil
+    end
+
+    it 'returns a top-level name as itself' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [double(name: 'User')]))
+
+      expect(described_class.resolve_short_name('User')).to eq('User')
+    end
+  end
+
+  describe '.short_names_regex' do
+    it 'matches bare short names only when not preceded by :: or a word char' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+
+      regex = described_class.short_names_regex
+      expect('Shipping.new').to match(regex)
+      expect(' Shipping.new').to match(regex)
+      # preceded by :: — already handled by the full-name regex, avoid double-count
+      expect('Carts::Shipping.new').not_to match(regex)
+      # preceded by word char — part of another identifier, not our match
+      expect('AwsShipping.new').not_to match(regex)
+    end
+
+    it 'does not include names with no namespace (they already match the full regex)' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [double(name: 'User')]))
+
+      # short name == full name, so nothing to add via short-names regex
+      expect('User').not_to match(described_class.short_names_regex)
+    end
+  end
 end

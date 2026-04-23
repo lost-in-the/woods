@@ -26,9 +26,11 @@ module Woods
     class ViewComponentExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include RouteHelperResolver
 
       def initialize
         @component_base = find_component_base
+        build_route_helper_map
       end
 
       # Extract all ViewComponent components
