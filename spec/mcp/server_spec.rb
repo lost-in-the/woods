@@ -14,27 +14,47 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 29 tools' do
+    it 'registers 14 tools when no optional collaborators are wired' do
+      # Without operator / feedback_store / snapshot_store / session_store /
+      # notion config, the 15 collaborator-dependent tools (5 pipeline_*, 4
+      # retrieval_*, 4 snapshot/history, session_trace, notion_sync) are
+      # intentionally NOT registered — advertising them in tools/list when
+      # they're guaranteed to error just wastes LLM context. Core tools that
+      # only need the on-disk index remain advertised.
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(29)
+      expect(tools.size).to eq(14)
     end
 
-    it 'registers expected tool names' do
+    it 'registers the always-on tool names when no optional collaborators are wired' do
       tools = server.instance_variable_get(:@tools)
       expect(tools.keys).to contain_exactly(
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'domain_clusters', 'pagerank', 'framework',
         'recent_changes', 'reload', 'codebase_retrieve',
-        'trace_flow', 'session_trace',
-        'pipeline_extract', 'pipeline_embed', 'pipeline_status',
-        'pipeline_diagnose', 'pipeline_repair',
-        'retrieval_rate', 'retrieval_report_gap',
-        'retrieval_explain', 'retrieval_suggest',
-        'list_snapshots', 'snapshot_diff',
-        'unit_history', 'snapshot_detail',
-        'notion_sync',
+        'trace_flow',
         'woods_status'
       )
+    end
+
+    it 'registers pipeline_* tools when operator is wired' do
+      operator = { status_reporter: double('reporter'), pipeline_guard: nil, pipeline_lock: nil, error_escalator: nil }
+      srv = described_class.build(index_dir: fixture_dir, operator: operator)
+      tools = srv.instance_variable_get(:@tools)
+      expect(tools.keys).to include('pipeline_extract', 'pipeline_embed', 'pipeline_status',
+                                    'pipeline_diagnose', 'pipeline_repair')
+    end
+
+    it 'registers retrieval_* tools when feedback_store is wired' do
+      srv = described_class.build(index_dir: fixture_dir, feedback_store: double('fb'))
+      tools = srv.instance_variable_get(:@tools)
+      expect(tools.keys).to include('retrieval_rate', 'retrieval_report_gap',
+                                    'retrieval_explain', 'retrieval_suggest')
+    end
+
+    it 'registers snapshot_* tools when snapshot_store is wired' do
+      srv = described_class.build(index_dir: fixture_dir, snapshot_store: double('snap'))
+      tools = srv.instance_variable_get(:@tools)
+      expect(tools.keys).to include('list_snapshots', 'snapshot_diff', 'unit_history', 'snapshot_detail')
     end
 
     it 'registers 2 resources' do
@@ -123,6 +143,17 @@ RSpec.describe Woods::MCP::Server do
       expect(data).to have_key('source_code')
       expect(data).to have_key('metadata')
       expect(data).to have_key('dependencies')
+    end
+
+    it 'accepts `name` as an alias for `identifier`' do
+      response = call_tool(server, 'lookup', name: 'Post')
+      data = parse_response(response)
+      expect(data['identifier']).to eq('Post')
+    end
+
+    it 'returns a typed error when neither identifier nor name is provided' do
+      response = call_tool(server, 'lookup')
+      expect(response_text(response)).to include('lookup requires')
     end
   end
 
@@ -378,6 +409,38 @@ RSpec.describe Woods::MCP::Server do
         File.write(manifest_path, original_content)
       end
     end
+
+    # Regression — reload used to only refresh reader state. If you ran
+    # `woods:embed` while the MCP server was up, reload picked up the new
+    # manifest.json / dependency_graph.json but the in-memory vectors and
+    # metadata still reflected the previous embed run, which meant
+    # codebase_retrieve returned the old results until an MCP restart.
+    it 'invokes the retriever reloader and surfaces its stats' do
+      reloader = double('reloader', call: { vectors: 100, metadata: 100, graph: 1 })
+      server_with_reloader = described_class.build(
+        index_dir: fixture_dir, response_format: :json, retriever_reloader: reloader
+      )
+
+      response = call_tool(server_with_reloader, 'reload')
+      data = parse_response(response)
+
+      expect(reloader).to have_received(:call)
+      expect(data['retriever']).to include('vectors' => 100, 'metadata' => 100, 'graph' => 1)
+    end
+
+    it 'reports the reloader error instead of raising when re-hydration fails' do
+      reloader = double('reloader')
+      allow(reloader).to receive(:call).and_raise(StandardError, 'dump missing')
+
+      server_with_reloader = described_class.build(
+        index_dir: fixture_dir, response_format: :json, retriever_reloader: reloader
+      )
+
+      response = call_tool(server_with_reloader, 'reload')
+      data = parse_response(response)
+      expect(data['reloaded']).to be true
+      expect(data['retriever']['error']).to include('dump missing')
+    end
   end
 
   describe 'tool: framework' do
@@ -492,12 +555,33 @@ RSpec.describe Woods::MCP::Server do
 
       it 'calls the retriever with the query and default budget' do
         call_tool(server_with_retriever, 'codebase_retrieve', query: 'How does the User model work?')
-        expect(retriever).to have_received(:retrieve).with('How does the User model work?', budget: 8000)
+        expect(retriever).to have_received(:retrieve)
+          .with('How does the User model work?', budget: 8000, types: nil, exclude_types: nil)
       end
 
       it 'passes a custom budget to the retriever' do
         call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model', budget: 4000)
-        expect(retriever).to have_received(:retrieve).with('User model', budget: 4000)
+        expect(retriever).to have_received(:retrieve)
+          .with('User model', budget: 4000, types: nil, exclude_types: nil)
+      end
+
+      it 'rejects `limit` with a helpful typed error (avoids silent near-empty budget)' do
+        response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model', limit: 10)
+        expect(response.error?).to be(true)
+        text = response_text(response)
+        expect(text).to include('codebase_retrieve uses `budget`')
+        expect(text).to include('result-count')
+        expect(response.meta[:error_code]).to eq(:unsupported_argument)
+        expect(response.meta[:argument]).to eq('limit')
+        expect(retriever).not_to have_received(:retrieve)
+      end
+
+      it 'forwards types: and exclude_types: through to the retriever' do
+        call_tool(server_with_retriever, 'codebase_retrieve',
+                  query: 'billing', types: %w[service], exclude_types: %w[rails_source])
+        expect(retriever).to have_received(:retrieve).with(
+          'billing', budget: 8000, types: %w[service], exclude_types: %w[rails_source]
+        )
       end
 
       it 'returns the context from the retrieval result' do
@@ -513,9 +597,9 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: pipeline_status' do
     context 'without operator configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'pipeline_status')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when operator is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('pipeline_status')
       end
     end
 
@@ -551,9 +635,9 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: pipeline_extract' do
     context 'without operator configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'pipeline_extract')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when operator is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('pipeline_extract')
       end
     end
 
@@ -590,9 +674,9 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: pipeline_embed' do
     context 'without operator configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'pipeline_embed')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when operator is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('pipeline_embed')
       end
     end
 
@@ -783,12 +867,11 @@ RSpec.describe Woods::MCP::Server do
 
       after { Woods.configuration = nil }
 
-      it 'returns a structured error when session tracer is not configured' do
-        response = call_tool(server, 'session_trace', session_id: 'sess1')
-        expect(response_text(response)).to include('not configured')
-        expect(response.error?).to be(true)
-        expect(response.meta[:error_code]).to eq(:not_configured)
-        expect(response.meta[:config_key]).to eq('session_store')
+      it 'is not registered in tools/list when session_store is missing' do
+        # Rebuild server so the session_tracer_wired? check sees the mock config.
+        srv = described_class.build(index_dir: fixture_dir, response_format: :json)
+        tools = srv.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('session_trace')
       end
     end
 
@@ -855,9 +938,9 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: pipeline_repair' do
     context 'without operator configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'pipeline_repair', action: 'clear_locks')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when operator is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('pipeline_repair')
       end
     end
   end
@@ -866,9 +949,9 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: retrieval_rate' do
     context 'without feedback store configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'retrieval_rate', query: 'test', score: 4)
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when feedback_store is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('retrieval_rate')
       end
     end
 
@@ -895,19 +978,18 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: retrieval_report_gap' do
     context 'without feedback store configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'retrieval_report_gap',
-                             query: 'payments', missing_unit: 'PaymentService', unit_type: 'service')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when feedback_store is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('retrieval_report_gap')
       end
     end
   end
 
   describe 'tool: retrieval_explain' do
     context 'without feedback store configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'retrieval_explain')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when feedback_store is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('retrieval_explain')
       end
     end
 
@@ -939,9 +1021,9 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: retrieval_suggest' do
     context 'without feedback store configured' do
-      it 'returns not configured message' do
-        response = call_tool(server, 'retrieval_suggest')
-        expect(response_text(response)).to include('not configured')
+      it 'is not registered in tools/list when feedback_store is missing' do
+        tools = server.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('retrieval_suggest')
       end
     end
   end

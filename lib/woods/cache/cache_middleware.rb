@@ -145,17 +145,47 @@ module Woods
         @context_ttl = context_ttl
       end
 
+      # Expose the wrapped stores so the MCP +reload+ tool and
+      # {Woods::MCP::Bootstrapper.reload_stores!} can re-hydrate caches in
+      # place regardless of whether caching is enabled. Without these
+      # delegations, reload is a silent no-op when +cache_enabled+ is true —
+      # the bootstrapper would see +nil+ stores on the wrapper and skip.
+      def vector_store   = @retriever.vector_store
+      def metadata_store = @retriever.metadata_store
+      def graph_store    = @retriever.graph_store
+
+      # Invalidate every cached context result. Called from the MCP +reload+
+      # tool after the retriever's stores have been re-hydrated from a fresh
+      # embed — otherwise cached results from the old embedding run would
+      # linger until their TTL expires and contradict the new stores.
+      #
+      # Embedding caches (query → vector) are NOT cleared: the query-vector
+      # mapping is deterministic for a given provider+model and survives any
+      # index reload. Only context results (query → ranked units) go stale.
+      #
+      # @return [void]
+      def invalidate_context_cache!
+        @cache_store.clear(namespace: :context)
+      rescue StandardError => e
+        warn("[Woods] CachedRetriever context-cache invalidation failed: #{e.message}")
+      end
+
       # Execute the retrieval pipeline with context-level caching.
       #
       # On cache hit, returns a RetrievalResult reconstructed from cached data
       # without running any pipeline stages. On miss, delegates to the real
       # retriever and caches the serializable parts of the result.
       #
+      # Cache key includes +types:+ / +exclude_types:+ so a run with a
+      # narrower type filter doesn't return a broader-filter cached result.
+      #
       # @param query [String] Natural language query
       # @param budget [Integer] Token budget
+      # @param types [Array<String, Symbol>, nil] Include-only filter
+      # @param exclude_types [Array<String, Symbol>, nil] Additional exclusions
       # @return [Retriever::RetrievalResult]
-      def retrieve(query, budget: 8000)
-        key = context_key(query, budget)
+      def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
+        key = context_key(query, budget, types: types, exclude_types: exclude_types)
         cached = @cache_store.read(key)
 
         if cached
@@ -170,7 +200,7 @@ module Woods
           )
         end
 
-        result = @retriever.retrieve(query, budget: budget)
+        result = @retriever.retrieve(query, budget: budget, types: types, exclude_types: exclude_types)
 
         begin
           @cache_store.write(key, serialize_result(result), ttl: @context_ttl)
@@ -185,11 +215,23 @@ module Woods
 
       # Build a cache key for a context result.
       #
+      # Includes the type filter kwargs so distinct filter combinations miss
+      # each other — a lookup with +types: ["service"]+ must not return a
+      # previously-cached broad result.
+      #
       # @param query [String]
       # @param budget [Integer]
+      # @param types [Array<String, Symbol>, nil]
+      # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
-      def context_key(query, budget)
-        Cache.cache_key(:context, query, budget.to_s)
+      def context_key(query, budget, types: nil, exclude_types: nil)
+        Cache.cache_key(:context, query, budget.to_s, fingerprint(types), fingerprint(exclude_types))
+      end
+
+      def fingerprint(types)
+        return '' if types.nil? || types.empty?
+
+        types.map(&:to_s).sort.join(',')
       end
 
       # Serialize a RetrievalResult to a JSON-safe hash.

@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+# Ruby 3.2 autoloads Set, but the gem supports >= 3.0 — make the require
+# explicit so +filter_by_type+ works on the whole supported range.
+require 'set'
+
 require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
@@ -43,13 +47,25 @@ module Woods
     # Unit types queried for the structural context overview.
     STRUCTURAL_TYPES = %w[model controller service job mailer component graphql].freeze
 
+    # Direct handles to the injected stores. The sub-components
+    # ({Retrieval::SearchExecutor}, {Retrieval::Ranker},
+    # {Retrieval::ContextAssembler}) hold their own references too, but those
+    # are implementation details — callers that want to mutate store contents
+    # (e.g. the MCP +reload+ tool) read through these accessors. All three
+    # refer to the same Ruby objects the sub-components were initialised with,
+    # so in-place +#clear!+ + +#bulk_load+ propagates through the entire
+    # pipeline without re-instantiating sub-components.
+    attr_reader :vector_store, :metadata_store, :graph_store
+
     # @param vector_store [Storage::VectorStore::Interface] Vector store adapter
     # @param metadata_store [Storage::MetadataStore::Interface] Metadata store adapter
     # @param graph_store [Storage::GraphStore::Interface] Graph store adapter
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
     def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil)
+      @vector_store = vector_store
       @metadata_store = metadata_store
+      @graph_store = graph_store
       @formatter = formatter
 
       @classifier = Retrieval::QueryClassifier.new
@@ -63,20 +79,32 @@ module Woods
       @assembler = Retrieval::ContextAssembler.new(metadata_store: metadata_store)
     end
 
+    # Unit types excluded from retrieval by default. +test_mapping+ units
+    # make up ~33% of a typical index and lexically dominate semantic rank
+    # for production queries ("stripe webhook" often surfaces
+    # stripe_webhook_spec.rb above the actual controller). Callers can
+    # override by passing +types:+ (include-only) or an explicit +exclude_types:+.
+    DEFAULT_EXCLUDE_TYPES = %w[test_mapping].freeze
+
     # Execute the full retrieval pipeline for a natural language query.
     #
-    # Pipeline: classify -> execute -> rank -> assemble -> format
+    # Pipeline: classify -> execute -> rank -> filter -> assemble -> format
     #
     # @param query [String] Natural language query
     # @param budget [Integer] Token budget for context assembly
+    # @param types [Array<String, Symbol>, nil] If set, restrict results to these
+    #   unit types (overrides DEFAULT_EXCLUDE_TYPES).
+    # @param exclude_types [Array<String, Symbol>, nil] Additional types to
+    #   exclude. Applied on top of DEFAULT_EXCLUDE_TYPES unless +types:+ is set.
     # @return [RetrievalResult] Complete retrieval result
-    def retrieve(query, budget: 8000)
+    def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
       classification = @classifier.classify(query)
       execution_result = @executor.execute(query: query, classification: classification)
       ranked = @ranker.rank(execution_result.candidates, classification: classification)
-      assembled = assemble_context(ranked, classification, budget)
+      filtered = filter_by_type(ranked, types: types, exclude_types: exclude_types)
+      assembled = assemble_context(filtered, classification, budget)
 
       elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
 
@@ -84,7 +112,7 @@ module Woods
         classification: classification,
         strategy: execution_result.strategy,
         candidate_count: execution_result.candidates.size,
-        ranked_count: ranked.size,
+        ranked_count: filtered.size,
         tokens_used: assembled.tokens_used,
         elapsed_ms: elapsed_ms
       )
@@ -93,6 +121,53 @@ module Woods
     end
 
     private
+
+    # Filter ranked candidates by type, using an include-list when +types+
+    # is set and an exclude-list otherwise (default: +DEFAULT_EXCLUDE_TYPES+,
+    # extended by any +exclude_types+ the caller adds).
+    #
+    # Candidate type comes from either the metadata store (when populated)
+    # or the candidate's inline +metadata+ hash — both are probed so the
+    # filter still works on graph-expansion candidates that carry no
+    # vector-store metadata.
+    #
+    # @param candidates [Array<Candidate>]
+    # @param types [Array<String, Symbol>, nil]
+    # @param exclude_types [Array<String, Symbol>, nil]
+    # @return [Array<Candidate>]
+    def filter_by_type(candidates, types:, exclude_types:)
+      allowed = normalize_type_list(types)
+      return candidates.select { |c| allowed.include?(candidate_type(c)) } if allowed
+
+      excluded = (normalize_type_list(exclude_types) || Set.new) | DEFAULT_EXCLUDE_TYPES.to_set
+      return candidates if excluded.empty?
+
+      candidates.reject { |c| excluded.include?(candidate_type(c)) }
+    end
+
+    def normalize_type_list(list)
+      return nil if list.nil? || list.empty?
+
+      list.to_set(&:to_s)
+    end
+
+    def candidate_type(candidate)
+      inline = type_from_hash(candidate.metadata)
+      return inline if inline
+
+      # Fall back to the metadata store lookup so graph-expansion candidates
+      # (which come in with metadata: {}) still get type-filtered.
+      type_from_hash(@metadata_store.find(candidate.identifier)) || ''
+    rescue StandardError
+      ''
+    end
+
+    def type_from_hash(hash)
+      return nil unless hash
+
+      value = hash[:type] || hash['type']
+      value&.to_s
+    end
 
     # Assemble token-budgeted context from ranked candidates.
     #

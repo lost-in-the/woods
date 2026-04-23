@@ -78,6 +78,11 @@ module Woods
       class Memory
         include Interface
 
+        # The wrapped graph. Exposed so reload paths can peel the raw
+        # graph out of a freshly-hydrated wrapper and {#replace_graph}
+        # it into the live one.
+        attr_reader :graph
+
         # @param graph [DependencyGraph, nil] Existing graph to wrap, or nil to create a new one
         def initialize(graph = nil)
           @graph = graph || DependencyGraph.new
@@ -88,6 +93,17 @@ module Woods
         # @param unit [ExtractedUnit] The unit to register
         def register(unit)
           @graph.register(unit)
+        end
+
+        # Replace the wrapped graph in place. Used by the MCP +reload+ tool
+        # so tool closures that captured this wrapper see a fresh graph
+        # without needing to re-instantiate the wrapper (and break the
+        # closure references).
+        #
+        # @param graph [DependencyGraph]
+        # @return [void]
+        def replace_graph(graph)
+          @graph = graph
         end
 
         # @see Interface#dependencies_of

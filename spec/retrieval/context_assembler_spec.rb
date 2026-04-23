@@ -430,4 +430,59 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       expect(described_class::MIN_USEFUL_TOKENS).to eq(200)
     end
   end
+
+  # ── Chunked-identifier collapsing ─────────────────────────────────
+  describe 'chunked identifier handling' do
+    # Regression — the Indexer stores chunked units under +User#chunk_0+,
+    # +User#chunk_1+, ... in the vector store but under +User+ in the
+    # metadata store. Without normalisation, +find_batch+ misses every
+    # chunked candidate and the context assembler drops them to nil.
+    it 'looks up metadata under the base identifier for #chunk_N candidates' do
+      allow(metadata_store).to receive(:find).with('BigService').and_return(
+        unit_data(identifier: 'BigService', type: :service, file_path: 'app/services/big_service.rb')
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'BigService#chunk_0', score: 0.9)],
+        classification: classification
+      )
+
+      expect(result.context).to include('BigService')
+      expect(result.sources.first[:identifier]).to eq('BigService')
+    end
+
+    it 'deduplicates multiple chunks of the same unit, keeping the highest score' do
+      allow(metadata_store).to receive(:find).with('BigService').and_return(
+        unit_data(identifier: 'BigService', type: :service, file_path: 'app/services/big_service.rb',
+                  source_code: 'class BigService; end')
+      )
+
+      result = assembler.assemble(
+        candidates: [
+          candidate(identifier: 'BigService#chunk_0', score: 0.7),
+          candidate(identifier: 'BigService#chunk_1', score: 0.9),
+          candidate(identifier: 'BigService#chunk_2', score: 0.6)
+        ],
+        classification: classification
+      )
+
+      # Unit appears exactly once in context
+      expect(result.context.scan('## BigService').size).to eq(1)
+      # Source attribution preserves the highest score
+      expect(result.sources.first[:score]).to eq(0.9)
+    end
+
+    it 'leaves unchunked identifiers unchanged' do
+      allow(metadata_store).to receive(:find).with('User').and_return(
+        unit_data(identifier: 'User', type: :model)
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'User', score: 0.95)],
+        classification: classification
+      )
+
+      expect(result.sources.first[:identifier]).to eq('User')
+    end
+  end
 end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'search_executor'
+
 module Woods
   module Retrieval
     # Transforms ranked search candidates into a token-budgeted context string
@@ -54,6 +56,13 @@ module Woods
         sources = []
         tokens_used = 0
 
+        # Collapse +User#chunk_0+, +User#chunk_1+, … back to their base unit
+        # BEFORE metadata lookup and section assembly. Chunk IDs are an
+        # embedding-side concern — the metadata store is keyed by the base
+        # identifier, and callers don't want the same unit formatted twice
+        # just because multiple chunks matched the query.
+        candidates = collapse_chunk_candidates(candidates)
+
         # Pre-fetch all candidate metadata in one batch query
         @unit_cache = @metadata_store.find_batch(candidates.map(&:identifier))
 
@@ -77,6 +86,46 @@ module Woods
       end
 
       private
+
+      # Suffix the Indexer appends when a single unit is split into multiple
+      # embedding vectors (rails_source and other large units). Separator
+      # is +#+ so it can never collide with a Ruby constant (+::+) or a
+      # method ref (+#instance_method+) in an identifier.
+      CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
+      private_constant :CHUNK_SUFFIX_PATTERN
+
+      # Strip the +#chunk_N+ suffix from an identifier, if present.
+      # +User#chunk_3+ → +User+; +User+ stays +User+.
+      def base_identifier(identifier)
+        identifier.sub(CHUNK_SUFFIX_PATTERN, '')
+      end
+
+      # Rewrite every candidate to point at its base identifier and keep only
+      # the highest-scoring candidate per base unit. Preserves original score
+      # ordering on the output so downstream +sort_by(-score)+ gets the same
+      # input it would on an unchunked corpus.
+      def collapse_chunk_candidates(candidates)
+        best = {}
+        candidates.each do |c|
+          base = base_identifier(c.identifier)
+          rewritten = c.identifier == base ? c : rewrite_identifier(c, base)
+          best[base] = rewritten if best[base].nil? || rewritten.score > best[base].score
+        end
+        best.values
+      end
+
+      # Return a clone of +candidate+ with its identifier replaced. Kept as
+      # its own method so the Candidate struct shape is referenced in exactly
+      # one place — if SearchExecutor::Candidate grows fields, this is the
+      # only spot to update.
+      def rewrite_identifier(candidate, new_identifier)
+        SearchExecutor::Candidate.new(
+          identifier: new_identifier,
+          score: candidate.score,
+          source: candidate.source,
+          metadata: candidate.metadata
+        )
+      end
 
       # Add structural context section if provided.
       #

@@ -197,6 +197,96 @@ RSpec.describe Woods::Embedding::Indexer do
     end
   end
 
+  # Regression — the Indexer accepted a +metadata_store:+ kwarg and persisted
+  # it at end-of-run, but never wrote to it during embedding. The downstream
+  # effect was that every vector-search hit in +codebase_retrieve+ missed on
+  # the empty metadata store and ContextAssembler dropped every candidate to
+  # nil, emitting "" with no error. See commit-message body for full context.
+  describe 'metadata_store population' do
+    let(:metadata_store) { Woods::Storage::MetadataStore::InMemory.new }
+
+    let(:indexer_with_metadata) do
+      described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        metadata_store: metadata_store,
+        output_dir: output_dir,
+        batch_size: 2
+      )
+    end
+
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+      File.write(File.join(output_dir, 'payment_service.json'), JSON.generate(second_unit_data))
+    end
+
+    it 'stores one metadata record per unit keyed by identifier' do
+      indexer_with_metadata.index_all
+
+      expect(metadata_store.count).to eq(2)
+      expect(metadata_store.find('User')).to include('type' => 'model',
+                                                     'file_path' => 'app/models/user.rb')
+      expect(metadata_store.find('PaymentService')).to include('type' => 'service')
+    end
+
+    it 'preserves source_code so ContextAssembler#format_unit can render content' do
+      indexer_with_metadata.index_all
+
+      record = metadata_store.find('User')
+      expect(record['source_code']).to include('class User')
+    end
+
+    it 'keys chunked units by the base identifier (the ContextAssembler collapses #chunk_N ids)' do
+      # The Indexer stores under the base identifier; the vector store still
+      # stores per-chunk entries (User#chunk_0, User#chunk_1). Retrieval
+      # normalises chunk ids back to the base before metadata lookup — see
+      # Woods::Retrieval::ContextAssembler#collapse_chunk_candidates.
+      chunked = unit_data.merge(
+        'chunks' => [
+          { 'chunk_index' => 0, 'content' => 'chunk one' },
+          { 'chunk_index' => 1, 'content' => 'chunk two' }
+        ]
+      )
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked))
+
+      indexer_with_metadata.index_all
+
+      expect(metadata_store.find('User')).not_to be_nil
+      expect(metadata_store.find('User#chunk_0')).to be_nil
+    end
+
+    it 'is a no-op when metadata_store is nil (pre-persistence-arc hosts)' do
+      nil_indexer = described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: vector_store,
+        metadata_store: nil,
+        output_dir: output_dir,
+        batch_size: 2
+      )
+
+      expect { nil_indexer.index_all }.not_to raise_error
+    end
+
+    context 'in incremental mode' do
+      before do
+        File.write(File.join(output_dir, 'checkpoint.json'),
+                   JSON.generate('User' => 'abc123', 'PaymentService' => 'stale'))
+      end
+
+      it 'repopulates metadata for units whose embedding is skipped' do
+        # The checkpoint says User is unchanged — embedding skips it — but
+        # the metadata store is a fresh empty in-memory store this run, so
+        # metadata must still be written or retrieval sees a void.
+        indexer_with_metadata.index_incremental
+
+        expect(metadata_store.find('User')).not_to be_nil
+        expect(metadata_store.find('PaymentService')).not_to be_nil
+      end
+    end
+  end
+
   describe '#index_incremental' do
     before do
       File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
@@ -538,6 +628,7 @@ RSpec.describe Woods::Embedding::Indexer do
         store = double('MetadataStore::InMemory')
         allow(store).to receive(:each_entry)
         allow(store).to receive(:bulk_load)
+        allow(store).to receive(:store) # called by persist_unit_metadata
         store
       end
 

@@ -84,9 +84,18 @@ module Woods
 
       # Probe the OpenAI API endpoint.
       #
-      # A 401 Unauthorized response is treated as +ProviderUnreachable+ with
-      # +reason: "unauthorized"+ — the key is invalid and the provider cannot
-      # serve requests.
+      # The probe sends an unauthenticated +GET /v1/models+ so it deliberately
+      # expects a 401 from a healthy OpenAI. Anything that is not a plain 401
+      # or 2xx/3xx means the provider cannot be used from this host:
+      #
+      # - +401 Unauthorized+ → +reason: "unauthorized"+. The expected response
+      #   for an unauthed probe; starts :degraded so the first real query
+      #   carries the API key and surfaces credential errors precisely.
+      # - +403 Forbidden+ → +reason: "forbidden"+. Seen when the edge
+      #   intercepts the request before OpenAI's auth layer (geoblock,
+      #   corporate proxy). Subsequent embed calls will 403 too, so treating
+      #   this as reachable would give operators a false-green status.
+      # - +5xx+ → +reason: "http_500"+.
       #
       # @param provider [Woods::Embedding::Provider::OpenAI]
       # @raise [Woods::MCP::ProviderUnreachable]
@@ -97,22 +106,28 @@ module Woods
                   open_timeout: OPENAI_OPEN_TIMEOUT,
                   read_timeout: OPENAI_READ_TIMEOUT,
                   use_ssl: true) do |response|
-          if response.is_a?(Net::HTTPUnauthorized)
-            raise Woods::MCP::ProviderUnreachable.new(
-              url: base_url,
-              reason: 'unauthorized'
-            )
-          end
+          reason = openai_unreachable_reason(response)
+          next unless reason
 
-          if response.is_a?(Net::HTTPServerError)
-            raise Woods::MCP::ProviderUnreachable.new(
-              url: base_url,
-              reason: 'http_500'
-            )
-          end
+          raise Woods::MCP::ProviderUnreachable.new(url: base_url, reason: reason)
         end
       end
       private_class_method :probe_openai!
+
+      # Map an HTTP response from +GET /v1/models+ to a ProviderUnreachable
+      # reason string, or nil when the response signals a healthy provider.
+      #
+      # Uses +is_a?+ (not +case/when+) so RSpec stubs via
+      # +allow(response).to receive(:is_a?).with(...)+ compose cleanly —
+      # +case/when+ goes through +Module#===+ which some mocks don't round-trip.
+      def self.openai_unreachable_reason(response)
+        return 'unauthorized' if response.is_a?(Net::HTTPUnauthorized)
+        return 'forbidden' if response.is_a?(Net::HTTPForbidden)
+        return 'http_500' if response.is_a?(Net::HTTPServerError)
+
+        nil
+      end
+      private_class_method :openai_unreachable_reason
 
       # Execute +GET path+ against +base_url+ and yield the response to the
       # caller's block for provider-specific checks.

@@ -142,6 +142,7 @@ RSpec.describe Woods::MCP::ProviderProbe do
       it 'returns the provider unchanged' do
         response = instance_double(Net::HTTPOK)
         allow(response).to receive(:is_a?).with(Net::HTTPUnauthorized).and_return(false)
+        allow(response).to receive(:is_a?).with(Net::HTTPForbidden).and_return(false)
         allow(response).to receive(:is_a?).with(Net::HTTPServerError).and_return(false)
         stub_net_http('api.openai.com', 443, response)
 
@@ -152,6 +153,7 @@ RSpec.describe Woods::MCP::ProviderProbe do
       it 'probes GET /v1/models over TLS' do
         response = instance_double(Net::HTTPOK)
         allow(response).to receive(:is_a?).with(Net::HTTPUnauthorized).and_return(false)
+        allow(response).to receive(:is_a?).with(Net::HTTPForbidden).and_return(false)
         allow(response).to receive(:is_a?).with(Net::HTTPServerError).and_return(false)
         http_double = stub_net_http('api.openai.com', 443, response)
         allow(http_double).to receive(:use_ssl=).with(true)
@@ -172,6 +174,25 @@ RSpec.describe Woods::MCP::ProviderProbe do
           .to raise_error(Woods::MCP::ProviderUnreachable) do |err|
             expect(err.url).to eq('https://api.openai.com')
             expect(err.reason).to eq('unauthorized')
+          end
+      end
+    end
+
+    context 'when OpenAI returns 403 Forbidden' do
+      # Observed when an edge proxy (corporate firewall, geo-blocked region)
+      # intercepts the probe before it reaches OpenAI's auth layer. Treating
+      # 403 as reachable would give operators a false-green status — the
+      # real embed calls will 403 the same way.
+      it 'raises ProviderUnreachable with reason: "forbidden"' do
+        response = instance_double(Net::HTTPForbidden)
+        allow(response).to receive(:is_a?).with(Net::HTTPUnauthorized).and_return(false)
+        allow(response).to receive(:is_a?).with(Net::HTTPForbidden).and_return(true)
+        stub_net_http('api.openai.com', 443, response)
+
+        expect { described_class.reachable!(openai_provider) }
+          .to raise_error(Woods::MCP::ProviderUnreachable) do |err|
+            expect(err.url).to eq('https://api.openai.com')
+            expect(err.reason).to eq('forbidden')
           end
       end
     end

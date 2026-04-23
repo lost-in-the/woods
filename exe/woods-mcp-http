@@ -11,6 +11,15 @@
 # them via the Model Context Protocol (Streamable HTTP transport).
 # Requires the `rackup` gem and a Rack-compatible server (e.g., puma).
 
+# Suppress json-schema MultiJSON deprecation before any require chain that
+# could transitively load json-schema. See exe/woods-mcp for the full rationale.
+begin
+  require 'json-schema'
+  JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Validator.respond_to?(:use_multi_json=)
+rescue LoadError
+  # json-schema isn't in every bundle.
+end
+
 require 'rackup'
 require_relative '../lib/woods'
 require_relative '../lib/woods/dependency_graph'
@@ -46,9 +55,13 @@ if loopback && token.nil?
   warn '[woods-mcp-http] WARNING: running on loopback without a token; local processes can reach this server.'
 end
 
+retriever_reloader = lambda do
+  Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir)
+end
+
 server = Woods::MCP::Server.build(
   index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
-  bootstrap_state: bootstrap_state
+  bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
 )
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
 server.transport = transport

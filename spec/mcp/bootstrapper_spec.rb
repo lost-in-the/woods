@@ -826,4 +826,86 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
   end
+
+  # Regression — the Indexer accepted a graph_store kwarg and dumped it
+  # empty at end of run, but never populated it. Retrieval's :hybrid
+  # strategy called @graph_store.dependencies_of on the empty store and
+  # got [] back, silently dropping the graph-expansion step. The fix
+  # hydrates the retriever's graph_store from dependency_graph.json on
+  # disk, which extraction has always written with the real graph.
+  describe 'graph store hydration' do
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'returns a populated GraphStore::Memory when dependency_graph.json exists' do
+      require 'woods/index_artifact'
+      require 'woods/storage/graph_store'
+
+      Woods.configuration.graph_store = :in_memory
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        graph_data = {
+          'nodes' => {
+            'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb', 'namespace' => nil },
+            'Organization' => { 'type' => 'model', 'file_path' => 'app/models/organization.rb', 'namespace' => nil }
+          },
+          'edges' => { 'User' => [{ 'target' => 'Organization', 'via' => 'belongs_to' }] },
+          'reverse' => { 'Organization' => ['User'] },
+          'type_index' => { 'model' => %w[User Organization] }
+        }
+        File.write(File.join(dir, 'dependency_graph.json'), JSON.generate(graph_data))
+
+        store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
+
+        expect(store).to be_a(Woods::Storage::GraphStore::Memory)
+        expect(store.dependencies_of('User')).to include('Organization')
+        expect(store.dependents_of('Organization')).to include('User')
+      end
+    end
+
+    it 'returns nil when dependency_graph.json is missing' do
+      require 'woods/index_artifact'
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
+        expect(store).to be_nil
+      end
+    end
+
+    it 'returns nil when graph_store is not :in_memory (durable backends are not hydrated)' do
+      require 'woods/index_artifact'
+
+      Woods.configuration.graph_store = :pgvector
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        File.write(File.join(dir, 'dependency_graph.json'), JSON.generate('nodes' => {}, 'edges' => {}))
+        store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
+        expect(store).to be_nil
+      end
+    end
+
+    it 'returns nil and warns when dependency_graph.json is malformed' do
+      require 'woods/index_artifact'
+
+      Woods.configuration.graph_store = :in_memory
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        File.write(File.join(dir, 'dependency_graph.json'), 'not valid json')
+
+        expect do
+          store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
+          expect(store).to be_nil
+        end.to output(/graph hydration failed/).to_stderr
+      end
+    end
+  end
 end

@@ -104,6 +104,7 @@ module Woods
 
       def process_batch(batch, checkpoint, stats, incremental:)
         to_embed = batch.each_with_object([]) do |unit_data, items|
+          persist_unit_metadata(unit_data)
           if incremental && checkpoint[unit_data['identifier']] == unit_data['source_hash']
             stats[:skipped] += 1
             next
@@ -112,6 +113,20 @@ module Woods
         end
 
         embed_and_store(to_embed, checkpoint, stats)
+      end
+
+      # Persist a unit's metadata under its base identifier so retrieval can
+      # resolve vector-search hits back to their unit data. Without this,
+      # the metadata store is left empty at end of run — Snapshotter::Metadata
+      # dumps a header with record_count: 0 and every MCP +codebase_retrieve+
+      # call silently returns empty text, because ContextAssembler#find_batch
+      # misses every candidate identifier. No-op when metadata_store is nil
+      # (hosts that don't configure one). Stored under the base identifier,
+      # not the chunk-suffixed id — chunks are an embedding-side concern only.
+      def persist_unit_metadata(unit_data)
+        return unless @metadata_store
+
+        @metadata_store.store(unit_data['identifier'], unit_data)
       end
 
       def collect_embed_items(unit_data, items)

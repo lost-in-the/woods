@@ -176,6 +176,83 @@ RSpec.describe Woods::Retriever do
     end
   end
 
+  # ── Type filtering ──────────────────────────────────────────────
+
+  describe 'type filtering' do
+    # Regression — test_mapping units make up ~33% of a typical index and
+    # lexically dominate semantic rank on production queries. The Retriever
+    # now default-excludes them unless the caller explicitly opts back in
+    # via types:. Callers can also add more exclusions via exclude_types:.
+    let(:mixed_candidates) do
+      [
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'StripeWebhooksController', score: 0.9, source: :vector,
+          metadata: { type: 'controller' }
+        ),
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'StripeWebhooksControllerSpec', score: 0.85, source: :vector,
+          metadata: { type: 'test_mapping' }
+        ),
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'Stripe::Webhook', score: 0.8, source: :vector,
+          metadata: { type: 'rails_source' }
+        )
+      ]
+    end
+
+    before do
+      allow(ranker_double).to receive(:rank).and_return(mixed_candidates)
+    end
+
+    it 'excludes test_mapping candidates by default' do
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        types = kwargs[:candidates].map { |c| c.metadata[:type] }
+        expect(types).not_to include('test_mapping')
+        assembled_context
+      end
+
+      retriever.retrieve('stripe webhook')
+    end
+
+    it 'opts test_mappings back in when types: explicitly includes them' do
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        types = kwargs[:candidates].map { |c| c.metadata[:type] }
+        expect(types).to include('test_mapping')
+        expect(types).not_to include('controller', 'rails_source')
+        assembled_context
+      end
+
+      retriever.retrieve('stripe webhook', types: %w[test_mapping])
+    end
+
+    it 'accepts exclude_types: for additional exclusions on top of the default' do
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        types = kwargs[:candidates].map { |c| c.metadata[:type] }
+        expect(types).to eq(%w[controller])
+        assembled_context
+      end
+
+      retriever.retrieve('stripe webhook', exclude_types: %w[rails_source])
+    end
+
+    it 'falls back to metadata_store lookup when candidate metadata has no :type' do
+      # Graph-expansion candidates come in with metadata: {} — the filter
+      # must still resolve their type via the metadata store.
+      bare_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'Orphan', score: 0.5, source: :graph_expansion, metadata: {}
+      )
+      allow(ranker_double).to receive(:rank).and_return([bare_candidate])
+      allow(metadata_store).to receive(:find).with('Orphan').and_return('type' => 'test_mapping')
+
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        expect(kwargs[:candidates]).to be_empty
+        assembled_context
+      end
+
+      retriever.retrieve('orphan')
+    end
+  end
+
   # ── Pipeline integration ─────────────────────────────────────────
 
   describe 'pipeline flow' do

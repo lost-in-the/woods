@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 require_relative 'errors'
 require_relative 'bootstrap_state'
 require_relative 'config_resolver'
@@ -123,6 +125,7 @@ module Woods
         # surfaces a DimensionMismatch only if there's actually a stored
         # artifact to validate against.
         resolved = build_resolved_config(config)
+        state.resolved_config = resolved
         retriever = build_retriever_from_config(config, resolved, artifact)
         probe_and_mark_state(config, state)
         warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})"
@@ -137,6 +140,90 @@ module Woods
         retriever, _state = build_retriever(index_dir: index_dir)
         retriever
       end
+
+      # Refresh a live retriever's in-memory stores from the latest dumps on
+      # disk. Used by the MCP +reload+ tool so agents can pick up a fresh embed
+      # run without restarting the process. The retriever instance is preserved
+      # (tool closures kept their reference) — only the stores are mutated.
+      #
+      # No-op when:
+      #   - +retriever+ is nil (no embedding provider configured)
+      #   - stores are durable (pgvector / Qdrant auto-refresh externally)
+      #   - +woods.json+ is absent (Shape-1 deployments don't use Snapshotter)
+      #
+      # @param retriever [Woods::Retriever, nil]
+      # @param index_dir [String, Pathname]
+      # @return [Hash] Stats — +{ vectors:, metadata:, graph: }+ record counts
+      # @raise [Woods::MCP::BootstrapError] surfaced from ConfigResolver / Snapshotter
+      def self.reload_stores!(retriever, index_dir:)
+        return { vectors: 0, metadata: 0, graph: 0 } unless retriever
+
+        artifact = build_artifact(index_dir)
+        config, _source = ConfigResolver.resolve(Woods.configuration,
+                                                 artifact: artifact,
+                                                 ollama_probe: method(:ollama_reachable?))
+        resolved = build_resolved_config(config)
+
+        vectors_count = refill_in_memory_vector_store(retriever, config, resolved, artifact)
+        metadata_count = refill_in_memory_metadata_store(retriever, config, resolved, artifact)
+        graph_count = refill_in_memory_graph_store(retriever, config, artifact)
+
+        # Context-cache entries from the previous embed run no longer agree
+        # with the refreshed stores. Drop them so the next codebase_retrieve
+        # call goes through the full pipeline with the new data. Embedding
+        # caches (query → vector) survive — that mapping is deterministic
+        # for a given provider+model.
+        retriever.invalidate_context_cache! if retriever.respond_to?(:invalidate_context_cache!)
+
+        { vectors: vectors_count, metadata: metadata_count, graph: graph_count }
+      end
+
+      # Retriever (and CachedRetriever) expose public +vector_store+ /
+      # +metadata_store+ / +graph_store+ readers so this helper never pokes
+      # private state. Durable backends don't implement +clear!+/+bulk_load+
+      # — they return 0 silently because they're already refreshed externally.
+      def self.refill_in_memory_vector_store(retriever, config, resolved, artifact)
+        vs = retriever.respond_to?(:vector_store) ? retriever.vector_store : nil
+        return 0 unless vs.respond_to?(:clear!) && vs.respond_to?(:bulk_load)
+
+        fresh = hydrated_vector_store(config, resolved, artifact)
+        return 0 unless fresh
+
+        vs.clear!
+        vs.bulk_load(fresh.each_entry.map { |id, vec, meta| { id: id, vector: vec, metadata: meta } })
+        vs.respond_to?(:count) ? vs.count : 0
+      end
+      private_class_method :refill_in_memory_vector_store
+
+      def self.refill_in_memory_metadata_store(retriever, config, resolved, artifact)
+        ms = retriever.respond_to?(:metadata_store) ? retriever.metadata_store : nil
+        return 0 unless ms.respond_to?(:clear!) && ms.respond_to?(:bulk_load)
+
+        fresh = hydrated_metadata_store(config, resolved, artifact)
+        return 0 unless fresh
+
+        ms.clear!
+        ms.bulk_load(fresh.each_entry)
+        ms.respond_to?(:count) ? ms.count : 0
+      end
+      private_class_method :refill_in_memory_metadata_store
+
+      # GraphStore::Memory doesn't expose a +clear!+/+bulk_load+ pair today
+      # — a fresh run hands it an entirely new DependencyGraph from disk.
+      # Swap the inner graph via +replace_graph+ so SearchExecutor / Ranker /
+      # MCP tools keep their references to the same wrapper and see the new
+      # graph (no closure references break).
+      def self.refill_in_memory_graph_store(retriever, config, artifact)
+        gs = retriever.respond_to?(:graph_store) ? retriever.graph_store : nil
+        return 0 unless gs.respond_to?(:replace_graph)
+
+        fresh = hydrated_graph_store(config, artifact)
+        return 0 if fresh.nil?
+
+        gs.replace_graph(fresh.graph)
+        1
+      end
+      private_class_method :refill_in_memory_graph_store
 
       # Check whether Ollama is reachable at the configured base URL.
       #
@@ -175,6 +262,7 @@ module Woods
       def self.build_retriever_from_config(config, resolved, artifact)
         vector_store = hydrated_vector_store(config, resolved, artifact)
         metadata_store = hydrated_metadata_store(config, resolved, artifact)
+        graph_store = hydrated_graph_store(config, artifact)
 
         # Cross-populate the vector store's per-entry metadata cache from
         # the metadata store. The WVF1 binary format stores only id + float
@@ -186,10 +274,45 @@ module Woods
         populate_vector_metadata(vector_store, metadata_store) if vector_store && metadata_store
 
         Woods::Builder.new(config).build_retriever(
-          vector_store: vector_store, metadata_store: metadata_store
+          vector_store: vector_store, metadata_store: metadata_store,
+          graph_store: graph_store
         )
       end
       private_class_method :build_retriever_from_config
+
+      # Hydrate an in-memory graph store from +dependency_graph.json+ on disk.
+      #
+      # The Indexer doesn't populate the graph store — it accepts the kwarg,
+      # dumps it empty at end of run, and moves on. But +dependency_graph.json+
+      # is already written at extraction time with the full graph. Loading it
+      # here via {DependencyGraph.from_h} turns the retriever's +:hybrid+
+      # strategy from a silent no-op (empty graph → no graph expansion) into
+      # a working graph-expansion source.
+      #
+      # Durable backends other than +:in_memory+ aren't supported here (the
+      # gem only ships +GraphStore::Memory+). Returns nil when the dependency
+      # graph file is absent or unreadable so Builder falls back to a fresh
+      # empty store — the pre-fix behaviour.
+      #
+      # @param config [Woods::Configuration]
+      # @param artifact [Woods::IndexArtifact, nil]
+      # @return [Woods::Storage::GraphStore::Memory, nil]
+      def self.hydrated_graph_store(config, artifact)
+        return nil unless artifact
+        return nil unless config.graph_store == :in_memory
+
+        graph_json = artifact.output_dir.join('dependency_graph.json')
+        return nil unless graph_json.exist?
+
+        require_relative '../dependency_graph'
+        require_relative '../storage/graph_store'
+        graph = Woods::DependencyGraph.from_h(JSON.parse(graph_json.read))
+        Woods::Storage::GraphStore::Memory.new(graph)
+      rescue StandardError => e
+        warn "[woods-mcp] graph hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        nil
+      end
+      private_class_method :hydrated_graph_store
 
       # Back-fill the vector store's per-entry metadata hashes from the
       # metadata store. Only makes sense when both are in-memory — durable
