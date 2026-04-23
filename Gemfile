@@ -27,5 +27,11 @@ group :development, :test do
   # on, so we can size chunks to num_ctx without char-ratio guessing.
   # Users running OpenAI don't need this. Users on Ollama install it in
   # their own Gemfile to opt into exact sizing (see docs/CONFIGURATION_REFERENCE).
-  gem 'tokenizers', '~> 0.5'
+  # Gated to Ruby >= 3.1 — the gem itself requires 3.1+, and the TokenCounter
+  # falls back to a chars/token ratio when the gem is absent.
+  install_if -> { Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1') } do
+    # Pinned to 0.5.x — tokenizers 0.6 requires Ruby 3.2+, which would
+    # break our 3.1 CI matrix row.
+    gem 'tokenizers', '~> 0.5.0'
+  end
 end
