@@ -163,6 +163,31 @@ module Woods
           @data.size
         end
 
+        # Iterate over every stored entry, yielding +(id, metadata)+ pairs.
+        #
+        # Persistence seam for {Snapshotter::Metadata}. Yields the raw internal
+        # hash (including +updated_at+) so the Snapshotter can reconstruct state
+        # faithfully on load.
+        #
+        # @yield [id, metadata] id is a String; metadata is a Hash with string keys
+        # @return [Enumerator] when no block given
+        def each_entry(&block)
+          return enum_for(:each_entry) unless block
+
+          @data.each(&block)
+        end
+
+        # Hydrate the store from a pre-serialized dump.
+        #
+        # Dual of {#each_entry} — Snapshotter feeds the deserialized dump contents
+        # through this method to restore the store in a new process.
+        #
+        # @param entries [Enumerable<Array(String, Hash)>] Pairs of +[id, metadata]+
+        # @return [void]
+        def bulk_load(entries)
+          entries.each { |id, meta| @data[id] = meta }
+        end
+
         private
 
         # Match the SQLite adapter's string-key contract regardless of how

@@ -2,6 +2,7 @@
 
 require 'json'
 require 'digest'
+require 'fileutils'
 
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
@@ -11,14 +12,31 @@ module Woods
     # Orchestrates the indexing pipeline: reads extracted units, prepares text,
     # generates embeddings, and stores vectors. Supports full and incremental
     # modes with checkpoint-based resumability.
+    #
+    # When the vector store is an in-memory adapter (responds to +#each_entry+
+    # and +#bulk_load+) and +output_dir+ is set, a successful {#index_all} run
+    # also persists the stores to disk via the Snapshotter pair and atomically
+    # flips the +dumps/latest+ pointer. Persistent backends (pgvector, Qdrant)
+    # see zero behaviour change — no Snapshotter is invoked.
     class Indexer # rubocop:disable Metrics/ClassLength
       # @param chunker [Chunking::SemanticChunker, nil] Splits oversize units
-      #   into semantically coherent chunks before embedding. `nil` disables
+      #   into semantically coherent chunks before embedding. +nil+ disables
       #   chunking — units go to the provider whole (useful in tests).
       # @param checkpoint_interval [Integer] Save checkpoint every N batches (default: 10)
+      # @param metadata_store [#each_entry, #bulk_load, nil] Optional metadata store.
+      #   When present alongside an in-memory vector store, both are persisted
+      #   at the end of a successful {#index_all} run.
+      # @param resolved_config [Woods::ResolvedConfig, nil] Captured config for
+      #   +woods.json+ — written to +output_dir+ on {#index_all} completion.
+      # @param dump_retention_count [Integer] Number of completed dump directories
+      #   to keep under +output_dir/dumps/+. Older dumps are removed after a
+      #   successful {#index_all} run (default: 3).
       def initialize(provider:, text_preparer:, vector_store:, output_dir:, # rubocop:disable Metrics/ParameterLists
                      chunker: Chunking::SemanticChunker.new,
-                     batch_size: 32, checkpoint_interval: 10)
+                     batch_size: 32, checkpoint_interval: 10,
+                     metadata_store: nil,
+                     resolved_config: nil,
+                     dump_retention_count: 3)
         @provider = provider
         @text_preparer = text_preparer
         @vector_store = vector_store
@@ -26,12 +44,23 @@ module Woods
         @chunker = chunker
         @batch_size = batch_size
         @checkpoint_interval = checkpoint_interval
+        @metadata_store = metadata_store
+        @resolved_config = resolved_config
+        @dump_retention_count = dump_retention_count
       end
 
       # Index all extracted units (full mode). Returns stats hash.
+      #
+      # When the vector store is an in-memory adapter, persists the embedded
+      # vectors (and metadata, if a metadata store was provided) to disk under
+      # +output_dir/dumps/<timestamp>/+ and atomically flips the +latest+
+      # pointer. Writes +woods.json+ when +resolved_config+ was supplied.
+      #
       # @return [Hash] Stats with :processed, :skipped, :errors counts
       def index_all
-        process_units(load_units, incremental: false)
+        stats = process_units(load_units, incremental: false)
+        persist_snapshot if persistable?
+        stats
       end
 
       # Index only changed units (incremental mode). Returns stats hash.
@@ -130,7 +159,7 @@ module Woods
         char_budget.positive? && source.length > char_budget
       end
 
-      # Ask the chunker's real tokenizer whether `source` already exceeds
+      # Ask the chunker's real tokenizer whether +source+ already exceeds
       # the token budget. Returns false when the chunker wasn't built with
       # one (e.g., OpenAI path), leaving the char-based check in charge.
       def chunker_token_oversize?(source)
@@ -140,7 +169,7 @@ module Woods
       end
 
       # Populate unit.chunks from the configured chunker. The chunker's
-      # own `max_chars` safety net is what guarantees each chunk fits,
+      # own +max_chars+ safety net is what guarantees each chunk fits,
       # so we pass the same char budget through here.
       def apply_chunking(unit)
         unit.chunks = @chunker.chunk(unit).map do |chunk|
@@ -200,6 +229,60 @@ module Woods
 
       def save_checkpoint(checkpoint)
         File.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+      end
+
+      # Returns true when the vector store is an in-memory adapter that supports
+      # the persistence seam (+#each_entry+ / +#bulk_load+) and output_dir is set.
+      # Persistent backends (pgvector, Qdrant) never respond to +#each_entry+.
+      def persistable?
+        @output_dir &&
+          @vector_store.respond_to?(:each_entry) &&
+          @vector_store.respond_to?(:bulk_load)
+      end
+
+      # Persist stores to a timestamped dump directory, write +woods.json+,
+      # flip the +latest+ pointer, then prune old dumps.
+      def persist_snapshot
+        require_relative '../index_artifact'
+        require_relative '../storage/snapshotter'
+
+        artifact = IndexArtifact.new(@output_dir)
+        dump_dir = artifact.new_dump_dir
+
+        Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir)
+
+        if @metadata_store.respond_to?(:each_entry) && @metadata_store.respond_to?(:bulk_load)
+          Storage::Snapshotter::Metadata.dump(@metadata_store, artifact, dump_dir)
+        end
+
+        artifact.write_config(@resolved_config) if @resolved_config
+
+        artifact.promote(dump_dir)
+
+        prune_old_dumps(artifact)
+      end
+
+      # Remove old dump directories beyond the retention window.
+      #
+      # Keeps the +@dump_retention_count+ most-recently-created directories
+      # (sorted by name, which is a UTC timestamp so lexicographic order equals
+      # chronological order). The current +latest+ directory is always kept.
+      def prune_old_dumps(artifact)
+        return if @dump_retention_count.nil? || @dump_retention_count <= 0
+
+        dumps_root = artifact.dumps_root
+        return unless dumps_root.exist?
+
+        dirs = sorted_dump_dirs(dumps_root)
+        excess = dirs.length - @dump_retention_count
+        dirs.first(excess).each { |dir| FileUtils.rm_rf(dir) } if excess.positive?
+      end
+
+      def sorted_dump_dirs(dumps_root)
+        dumps_root.children
+                  .select(&:directory?)
+                  .sort_by(&:basename)
+                  .map(&:to_s)
       end
     end
   end

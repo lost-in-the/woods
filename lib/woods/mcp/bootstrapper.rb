@@ -2,6 +2,7 @@
 
 require_relative 'errors'
 require_relative 'bootstrap_state'
+require_relative 'config_resolver'
 require_relative 'provider_probe'
 require_relative '../index_artifact'
 require_relative '../resolved_config'
@@ -105,7 +106,9 @@ module Woods
         state.mark(:hydrating)
 
         artifact = build_artifact(index_dir)
-        config = resolve_or_autodetect(artifact)
+        config, _source = ConfigResolver.resolve(Woods.configuration,
+                                                 artifact: artifact,
+                                                 ollama_probe: method(:ollama_reachable?))
         return [nil, state] unless config.embedding_provider
 
         resolved = ResolvedConfig.from_configuration(config)
@@ -126,25 +129,17 @@ module Woods
 
       # Check whether Ollama is reachable at the configured base URL.
       #
-      # Kept for the legacy auto-detect path only. New code should use
-      # {Woods::MCP::ProviderProbe.reachable!} via the ResolvedConfig flow.
+      # Kept for backwards compatibility with existing specs. Delegates to
+      # {Woods::MCP::ConfigResolver} and is passed as the +ollama_probe:+
+      # callable in {.build_retriever} so that specs stubbing this method
+      # continue to intercept Ollama checks in the autodetect path.
+      #
+      # New code should use {Woods::MCP::ProviderProbe.reachable!} via the
+      # ResolvedConfig flow.
       #
       # @return [Boolean]
       def self.ollama_reachable?
-        require 'net/http'
-        require 'uri'
-
-        base_url = ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434')
-        uri = URI.parse(base_url)
-
-        Net::HTTP.start(uri.host, uri.port,
-                        open_timeout: 0.5, read_timeout: 0.5,
-                        use_ssl: uri.scheme == 'https') do |http|
-          response = http.get('/api/tags')
-          !response.is_a?(Net::HTTPServerError)
-        end
-      rescue StandardError
-        false
+        ConfigResolver.send(:ollama_reachable?)
       end
 
       # Resolve an IndexArtifact from the passed dir or Woods.configuration.
@@ -153,64 +148,6 @@ module Woods
         IndexArtifact.new(dir) if dir
       end
       private_class_method :build_artifact
-
-      # If the artifact has a woods.json, read it. Otherwise either
-      # raise MissingArtifact or — when WOODS_ALLOW_AUTODETECT=1 —
-      # fall through to env-var auto-detect. The env flag is opt-in
-      # because silent fallback was the failure mode we eliminated.
-      def self.resolve_or_autodetect(artifact)
-        config = Woods.configuration
-
-        if artifact && !artifact.fresh?
-          # Real config snapshot reading lands in PR 3 — for now, if the
-          # artifact has a woods.json we trust the host's initializer
-          # (which configured the provider) and skip autodetect.
-          return config
-        end
-
-        return config if config.embedding_provider
-
-        if ENV['WOODS_ALLOW_AUTODETECT'] != '1'
-          raise MissingArtifact.new(
-            'No woods.json found and WOODS_ALLOW_AUTODETECT is unset. ' \
-            'Run `bundle exec rake woods:extract` in your host app, or set ' \
-            'WOODS_ALLOW_AUTODETECT=1 to probe env vars (deprecated).',
-            details: { output_dir: artifact&.output_dir&.to_s }
-          )
-        end
-
-        warn '[woods-mcp] deprecated_autodetect: falling back to env-var auto-detect (no woods.json found)'
-        autodetect_config(config)
-      end
-      private_class_method :resolve_or_autodetect
-
-      # Legacy env-var auto-detect path. Only reachable when
-      # WOODS_ALLOW_AUTODETECT=1 and no woods.json is present. Mutates
-      # Woods.configuration — not great, but preserves the shape the
-      # HTTP entry point was written against. To be removed alongside
-      # the env-var path in a later PR.
-      def self.autodetect_config(config)
-        openai_key = ENV.fetch('OPENAI_API_KEY', nil)
-        if openai_key
-          config.vector_store = :in_memory
-          config.metadata_store = :in_memory
-          config.graph_store = :in_memory
-          config.embedding_provider = :openai
-          config.embedding_options = { api_key: openai_key }
-        elsif ollama_reachable?
-          config.vector_store = :in_memory
-          config.metadata_store = :in_memory
-          config.graph_store = :in_memory
-          config.embedding_provider = :ollama
-          config.embedding_options = {
-            host: ENV.fetch('OLLAMA_BASE_URL', 'http://localhost:11434'),
-            model: ENV.fetch('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
-          }
-        end
-
-        config
-      end
-      private_class_method :autodetect_config
 
       def self.build_retriever_from_config(config, _resolved, _artifact)
         # Snapshotter hydration is stubbed in PR 2 — the Builder constructs

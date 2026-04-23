@@ -139,16 +139,18 @@ module Woods
     # Atomically writes a resolved config hash as +woods.json+.
     #
     # Accepts either a +ResolvedConfig+ (responds to +#to_snapshot_json+) or
-    # a plain +Hash+.
+    # a plain +Hash+. When +#to_snapshot_json+ returns a +Hash+, it is
+    # serialized to JSON automatically — callers need not pre-serialize.
     #
     # @param resolved_config_hash [#to_snapshot_json, Hash]
     # @return [void]
     def write_config(resolved_config_hash)
-      json = if resolved_config_hash.respond_to?(:to_snapshot_json)
-               resolved_config_hash.to_snapshot_json
-             else
-               JSON.pretty_generate(resolved_config_hash)
-             end
+      raw = if resolved_config_hash.respond_to?(:to_snapshot_json)
+              resolved_config_hash.to_snapshot_json
+            else
+              resolved_config_hash
+            end
+      json = raw.is_a?(String) ? raw : JSON.pretty_generate(raw)
       atomic_write(config_path, json)
     end
 
