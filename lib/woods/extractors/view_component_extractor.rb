@@ -301,8 +301,16 @@ module Woods
           deps << { type: :stimulus_controller, target: controller, via: :html_attribute }
         end
 
-        # URL helpers
+        # Navigation edges — resolve _path / _url helpers to real controllers
+        # via RouteHelperResolver (wired through the include + build_route_helper_map
+        # call in #initialize). Replaces the older unresolved-route emission.
+        deps.concat(scan_navigation_dependencies(source))
+        deps.concat(scan_form_dependencies(source))
+        # Keep the raw-helper fallback for helpers that don't resolve (e.g.,
+        # engine-mounted routes outside the main routes table).
         source.scan(/(\w+)_(?:path|url)/).flatten.uniq.each do |route|
+          next if route.match?(/\A(file|base|asset|image|javascript|stylesheet|font|video|audio)\z/)
+
           deps << { type: :route, target: route, via: :url_helper }
         end
 

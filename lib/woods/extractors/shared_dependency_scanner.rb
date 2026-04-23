@@ -33,11 +33,11 @@ module Woods
       # Three passes:
       # 1. Fully-qualified names via the main `\b(?:Foo|Bar::Baz)\b` regex.
       # 2. `.constantize` / `const_get(...)` string-literal arguments —
-      #    a `"Carts::Shipping".constantize` used to return zero edges
+      #    a `"Library::Book".constantize` used to return zero edges
       #    because the scan ran over raw source and the regex didn't pick
       #    up the quoted constant. Now we extract the string argument and
       #    resolve it.
-      # 3. Bare short names (e.g. `Shipping` inside `module Carts`)
+      # 3. Bare short names (e.g. `Book` inside `module Library`)
       #    resolved through {ModelNameCache.resolve_short_name} when
       #    unambiguous.
       #
@@ -56,10 +56,11 @@ module Woods
         if ModelNameCache.respond_to?(:short_names_regex) && ModelNameCache.respond_to?(:resolve_short_name)
           # Strip `#` line comments before scanning so references inside
           # YARD docstrings / TODO comments don't generate ghost edges.
-          # Ruby string literals can still carry the name; the tightened
-          # lookahead in `short_names_regex` filters bare `"Shipping"`
-          # by requiring a constant-use context after the match.
-          scannable = source.gsub(/#[^\n]*/, '')
+          # The negative lookahead `(?!\{)` keeps Ruby's `#{...}` string
+          # interpolation intact — stripping blindly would eat every model
+          # reference inside `"Book: #{Library::Book.new}"` etc., which
+          # is a common ERB/Phlex/string pattern.
+          scannable = source.gsub(/#(?!\{)[^\n]*/, '')
           scannable.scan(ModelNameCache.short_names_regex).each do |short|
             resolved = ModelNameCache.resolve_short_name(short)
             targets << resolved if resolved
@@ -70,8 +71,8 @@ module Woods
       end
 
       # Extract string-literal arguments passed to `.constantize` or
-      # `const_get(...)`. Matches both `"Carts::Shipping".constantize`
-      # and `Object.const_get("Carts::Shipping")` / `const_get("...")`.
+      # `const_get(...)`. Matches both `"Library::Book".constantize`
+      # and `Object.const_get("Library::Book")` / `const_get("...")`.
       # Only returns names actually present in {ModelNameCache.model_names}
       # so non-model uses (e.g. `"String".constantize` in infra code) do
       # not produce ghost edges.

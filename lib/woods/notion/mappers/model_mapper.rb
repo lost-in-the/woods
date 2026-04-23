@@ -99,7 +99,11 @@ module Woods
         def redact_credentials(text)
           return text if text.empty?
 
-          scanner.scan(text)
+          # CredentialScanner#scan returns `[redacted_value, match_counts]`.
+          # Unpack the tuple — returning the whole Array would serialize to
+          # Notion as a stringified `["text...", {}]` blob.
+          redacted, _counts = scanner.scan(text)
+          redacted
         rescue StandardError
           # Scanner construction or scan failure — fail closed: return an
           # empty description rather than risk leaking anything.

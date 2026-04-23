@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # This file is a pure data table — 31 ToolSpec entries across 4 tiers
-# (8 read-only / 8 domain-aware / 12 analytics / 3 guarded).
+# (9 read-only / 9 domain-aware / 10 analytics / 3 guarded).
 # Metrics/ModuleLength is disabled here because the module body is almost
 # entirely declarative data, not imperative logic. Decomposition would just
 # scatter the tool catalogue across many files with no readability gain.

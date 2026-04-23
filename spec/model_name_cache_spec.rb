@@ -62,19 +62,19 @@ RSpec.describe Woods::ModelNameCache do
   describe '.resolve_short_name' do
     it 'resolves a bare inner class name to its fully-qualified owner' do
       stub_const('ActiveRecord::Base',
-                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+                 double('AR::Base', descendants: [double(name: 'Library::Book')]))
 
-      expect(described_class.resolve_short_name('Shipping')).to eq('Carts::Shipping')
+      expect(described_class.resolve_short_name('Book')).to eq('Library::Book')
     end
 
     it 'returns nil for ambiguous short names (collision across namespaces)' do
       stub_const('ActiveRecord::Base',
                  double('AR::Base', descendants: [
-                          double(name: 'Carts::Shipping'),
-                          double(name: 'Orders::Shipping')
+                          double(name: 'Library::Book'),
+                          double(name: 'Catalog::Book')
                         ]))
 
-      expect(described_class.resolve_short_name('Shipping')).to be_nil
+      expect(described_class.resolve_short_name('Book')).to be_nil
     end
 
     it 'returns a top-level name as itself' do
@@ -88,15 +88,15 @@ RSpec.describe Woods::ModelNameCache do
   describe '.short_names_regex' do
     it 'matches bare short names only when not preceded by :: or a word char' do
       stub_const('ActiveRecord::Base',
-                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+                 double('AR::Base', descendants: [double(name: 'Library::Book')]))
 
       regex = described_class.short_names_regex
-      expect('Shipping.new').to match(regex)
-      expect(' Shipping.new').to match(regex)
+      expect('Book.new').to match(regex)
+      expect(' Book.new').to match(regex)
       # preceded by :: — already handled by the full-name regex, avoid double-count
-      expect('Carts::Shipping.new').not_to match(regex)
+      expect('Library::Book.new').not_to match(regex)
       # preceded by word char — part of another identifier, not our match
-      expect('AwsShipping.new').not_to match(regex)
+      expect('RareBook.new').not_to match(regex)
     end
 
     it 'does not include names with no namespace (they already match the full regex)' do
@@ -107,29 +107,28 @@ RSpec.describe Woods::ModelNameCache do
       expect('User').not_to match(described_class.short_names_regex)
     end
 
-    # False-positive guards — ghost edges from prose / string literals were
-    # the reason the agent's graph reported "0 dependents" before PR #81
-    # and are exactly what the tightened lookahead is meant to prevent.
+    # False-positive guards — ghost edges from prose / string literals are
+    # exactly what the tightened lookahead is meant to prevent.
     it 'does NOT match short names appearing in prose without a use-context' do
       stub_const('ActiveRecord::Base',
-                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+                 double('AR::Base', descendants: [double(name: 'Library::Book')]))
 
       regex = described_class.short_names_regex
-      # YARD / freeform comment context ("- rewrite Shipping later")
-      expect('rewrite Shipping later').not_to match(regex)
+      # YARD / freeform comment context ("- rewrite Book later")
+      expect('rewrite Book later').not_to match(regex)
       # Bare string literal with no follow-up method call
-      expect('"Shipping"').not_to match(regex)
+      expect('"Book"').not_to match(regex)
     end
 
     it 'matches short names used as class references in common Ruby forms' do
       stub_const('ActiveRecord::Base',
-                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+                 double('AR::Base', descendants: [double(name: 'Library::Book')]))
 
       regex = described_class.short_names_regex
-      expect('Shipping.new(cart_id: 1)').to match(regex)
-      expect('Shipping::INNER_CONST').to match(regex)
-      expect('scope.push(Shipping)').to match(regex)
-      expect('method_returns_shipping = Shipping').to match(regex)
+      expect('Book.new(isbn: "x")').to match(regex)
+      expect('Book::INNER_CONST').to match(regex)
+      expect('scope.push(Book)').to match(regex)
+      expect('method_returns_book = Book').to match(regex)
     end
   end
 end

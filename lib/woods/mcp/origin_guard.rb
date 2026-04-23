@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module Woods
   module MCP
     # Rack middleware that rejects browser-origin requests from unexpected sources.
@@ -22,7 +24,7 @@ module Woods
 
       def initialize(app, allowed_origins: nil)
         @app = app
-        @allowed = Array(allowed_origins).compact.reject(&:empty?).map { |o| normalize(o) }
+        @allowed = Array(allowed_origins).compact.reject { |o| o.to_s.strip.empty? }.map { |o| normalize(o) }
         @allowed = DEFAULT_ALLOWED.dup if @allowed.empty?
       end
 

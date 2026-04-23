@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (28-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
 
 ## Commands
 
@@ -115,8 +115,8 @@ lib/
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
-│   ├── mcp/                             # MCP Index Server (28 tools — 27 always-on + Notion conditional, 2 resources, 2 templates)
-│   ├── console/                         # Console MCP Server (31 tools across 4 tiers: 8 read-only / 8 domain-aware / 12 analytics / 3 guarded; job/cache adapters)
+│   ├── mcp/                             # MCP Index Server (29 tools — 14 always-on + 15 wiring-conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion; 2 resources, 2 templates)
+│   ├── console/                         # Console MCP Server (31 tools across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
 │   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
@@ -235,7 +235,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `eager_load!` aborts completely on a single `NameError` (e.g., `app/graphql/` referencing an uninstalled gem). Zeitwerk processes dirs alphabetically, so a failure in `graphql/` prevents `models/` from loading. The gem falls back to per-directory loading via `EXTRACTION_DIRECTORIES` when this happens.
 - `CallbackChain#size` does not exist on any Rails version (7.0–8.1) — `CallbackChain` includes `Enumerable` but never defines `#size`. Use `#count` instead.
 - `git_available?` is memoized — won't detect git becoming available mid-extraction (acceptable tradeoff).
-- Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit. Three passes resolve references: (1) fully-qualified names via the whole-word regex; (2) string literals passed to `.constantize` / `const_get(...)` when the literal matches a known model; (3) bare short names (e.g., `Shipping` inside `module Carts` for a `Carts::Shipping` model) via `ModelNameCache.resolve_short_name` when unambiguous. Ambiguous short names (same inner class across multiple namespaces) are skipped to avoid false positives.
+- Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit. Three passes resolve references: (1) fully-qualified names via the whole-word regex; (2) string literals passed to `.constantize` / `const_get(...)` when the literal matches a known model; (3) bare short names (e.g., `Book` inside `module Library` for a `Library::Book` model) via `ModelNameCache.resolve_short_name` when unambiguous. Ambiguous short names (same inner class across multiple namespaces) are skipped to avoid false positives.
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.

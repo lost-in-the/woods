@@ -9,23 +9,23 @@ module Woods
   #
   # Provides two resolution layers:
   # 1. {.model_names_regex} — whole-word match against every fully-qualified
-  #    model name. Catches `User`, `Carts::Shipping`, and `"Carts::Shipping"`
+  #    model name. Catches `User`, `Library::Book`, and `"Library::Book"`
   #    (as a string literal) because `\b` treats `:` and `"` as boundaries.
   # 2. {.resolve_short_name} — when source references the bare inner name
-  #    (e.g. `Shipping.new` inside `module Carts`), resolve it back to its
+  #    (e.g. `Book.new` inside `module Library`), resolve it back to its
   #    fully-qualified owner when the short name is unambiguous. Needed
-  #    because the cache holds `Carts::Shipping` but the source writes
-  #    `Shipping` after a `module Carts` opens.
+  #    because the cache holds `Library::Book` but the source writes
+  #    `Book` after a `module Library` opens.
   #
   # @example
   #   Woods::ModelNameCache.model_names
-  #   # => ["User", "Carts::Shipping", ...]
+  #   # => ["User", "Library::Book", ...]
   #
   #   Woods::ModelNameCache.model_names_regex
-  #   # => /\b(?:User|Carts::Shipping|...)\b/
+  #   # => /\b(?:User|Library::Book|...)\b/
   #
-  #   Woods::ModelNameCache.resolve_short_name("Shipping")
-  #   # => "Carts::Shipping"   (or nil when ambiguous)
+  #   Woods::ModelNameCache.resolve_short_name("Book")
+  #   # => "Library::Book"   (or nil when ambiguous)
   #
   module ModelNameCache
     class << self
@@ -49,8 +49,8 @@ module Woods
         @short_name_map ||= build_short_name_map
       end
 
-      # Resolve a bare short name (e.g. `Shipping`) to its fully-qualified
-      # owner (`Carts::Shipping`) when unambiguous. Returns nil otherwise.
+      # Resolve a bare short name (e.g. `Book`) to its fully-qualified
+      # owner (`Library::Book`) when unambiguous. Returns nil otherwise.
       #
       # @param short [String]
       # @return [String, nil]
@@ -59,8 +59,8 @@ module Woods
       end
 
       # Regex matching bare short names of namespaced models. Used by the
-      # dependency scanner to surface references like `Shipping.new`
-      # inside the `Carts` module, which the full-name regex misses.
+      # dependency scanner to surface references like `Book.new`
+      # inside the `Library` module, which the full-name regex misses.
       #
       # @return [Regexp]
       def short_names_regex
@@ -113,12 +113,12 @@ module Woods
 
         # Match the short name only when:
         # - NOT preceded by `::`, `.`, or another word char (avoids
-        #   double-counting the full-name hit + rejects `MyShipping`).
+        #   double-counting the full-name hit + rejects `RareBook`).
         # - Followed by a recognisable constant-use context: method call
         #   (`.` / `(`), namespace (`::`), list boundary (`,` / `)` / `]`),
         #   or end-of-line. This filters out mentions inside sentences
-        #   (" ... update Shipping later") and inside string literals
-        #   that lack a follow-up method call (`"Shipping"` alone).
+        #   (" ... update Book later") and inside string literals
+        #   that lack a follow-up method call (`"Book"` alone).
         names = unambiguous.map { |n| Regexp.escape(n) }.join('|')
         /(?<![:.\w])(?:#{names})\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/
       end

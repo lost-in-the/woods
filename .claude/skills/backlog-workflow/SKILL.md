@@ -44,8 +44,6 @@ against `woods-testbed` per `.claude/rules/integration-testing.md`.
 
 1. Update `docs/backlog.json`:
    - Flip `status` from `ready` (or `in-progress`) to `resolved`.
-   - Add a `resolved_at` timestamp (ISO 8601 date).
-   - Add a `resolved_by` PR ref or commit SHA if one exists.
 2. Cross-check sibling docs — if the item is referenced in
    `COVERAGE_GAP_ANALYSIS.md` or `USE_CASES_AND_FEATURE_GAPS.md`, move
    its line to a "Resolved" section or strike it.
@@ -57,27 +55,32 @@ When implementing reveals new bugs, gaps, or follow-ups:
 
 1. Do **not** expand scope of the current item. Keep the PR focused.
 2. Append a new backlog entry to `docs/backlog.json` with:
-   - Unique id (next integer after the current max).
+   - Unique id in the existing `B-NNN` format (next zero-padded integer
+     after the current max).
    - `status: "ready"` if actionable, `"needs-triage"` if unclear.
    - Brief rationale that references the item you discovered it from.
 3. Mention the new id in the PR description so reviewers see the trail.
 
 ## Format reference
 
-Backlog entries look like:
+Backlog entries follow the shape already in `docs/backlog.json`:
 
 ```json
 {
-  "id": 42,
+  "id": "B-042",
   "title": "Short imperative title",
+  "severity": "critical | high | medium | low",
+  "category": "code-bug | config | docs | test-gap | security",
+  "layer": "extraction | retrieval | storage | mcp | console | ...",
+  "files": ["lib/woods/..."],
   "description": "One-paragraph rationale + acceptance criteria.",
-  "status": "ready",
-  "effort": "S",
-  "owner": null,
-  "resolved_at": null,
-  "resolved_by": null
+  "status": "ready | in-progress | resolved | needs-triage"
 }
 ```
+
+Required fields: `id`, `title`, `severity`, `category`, `layer`,
+`files`, `description`, `status`. Optional fields the repo already
+uses sparingly (keep them when present): nothing beyond the above.
 
 ## Anti-patterns
 

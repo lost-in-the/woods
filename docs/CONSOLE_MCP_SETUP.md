@@ -575,9 +575,12 @@ always run:
    level.
 2. `TableGate` refuses any SQL, model, or join that touches a
    `console_blocked_tables` entry.
-3. `SafeContext` wraps every request in a rolled-back transaction and
-   swaps ActiveJob + ActionMailer to test adapters for the duration of
-   the block.
+3. `SafeContext` wraps every request in a rolled-back transaction with
+   a short statement timeout. **It does NOT cover async side effects** —
+   ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP
+   egress, `Thread.new`-spawned work, `after_rollback` callbacks, and
+   writes through a different shard all execute as live. Treat the
+   Console MCP as an admin-trust boundary, not a sandbox.
 4. `CredentialScanner` + column/EAV redaction scrub results.
 
 If your threat model needs embedded-mode read-tool gating, deploy via

@@ -275,9 +275,26 @@ module Woods
           raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}"
         end
 
+        # Defense-in-depth: the parent model passed validate_model!'s
+        # gate_model! check, but the association may target a different
+        # table that's on console_blocked_tables (e.g. `Post belongs_to
+        # :user` where `users` is blocked). Gate the association target
+        # explicitly before reading any rows from it.
+        gate_association!(params['model'], association_name)
+
         scope = record.public_send(association_name)
         scope = apply_scope(scope, params['scope'])
         { 'count' => scope.count }
+      end
+
+      def gate_association!(model_name, association)
+        return unless @table_gate && association
+
+        begin
+          @table_gate.check_association!(model_name, association)
+        rescue TableGateError => e
+          raise ValidationError, e.message
+        end
       end
 
       def handle_schema(params)
@@ -361,7 +378,13 @@ module Woods
         gate_joins!(params['model'], params['joins'])
         model = resolve_model(params['model'])
         relation = build_query_relation(model, params)
-        result = active_connection.select_all(relation.to_sql)
+        sql = relation.to_sql
+        # Defense-in-depth: re-run TableGate on the final rendered SQL. The
+        # per-clause validators above are the primary defense; this catches
+        # anything they missed (e.g. AR rewriting a scope into a subquery
+        # that touches a blocked table through a less-obvious join).
+        gate_sql!(sql)
+        result = active_connection.select_all(sql)
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       end
 
@@ -517,15 +540,25 @@ module Woods
         end
       end
 
-      # Strict column-reference check. `table.col` is allowed when the table
-      # is known to the ModelValidator via its registry (checked through the
-      # public validate_column! path); bare column is validated against the
-      # active model.
+      # Strict column-reference check. `table.col` is allowed only when the
+      # table identifier is a safe Ruby identifier AND is not on
+      # `console_blocked_tables` (via TableGate). Earlier iterations checked
+      # only `safe_identifier?` on both halves, so a caller could smuggle a
+      # blocked-table reference into `select`/`order`/`having` via a
+      # qualified column like `users.password_digest`. Bare columns validate
+      # against the active model through ModelValidator.
       def validate_column_reference!(column, model_name)
         if column.include?('.')
           table, col = column.split('.', 2)
           unless safe_identifier?(table) && safe_identifier?(col)
             raise ValidationError, "Rejected column reference: #{column.inspect}"
+          end
+
+          # Gate the table side through TableGate if one is configured.
+          begin
+            @table_gate&.check_table!(table)
+          rescue TableGateError => e
+            raise ValidationError, e.message
           end
         else
           raise ValidationError, "Rejected column reference: #{column.inspect}" unless safe_identifier?(column)

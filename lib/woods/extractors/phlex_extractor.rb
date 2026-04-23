@@ -245,10 +245,13 @@ module Woods
           deps << { type: :stimulus_controller, target: controller, via: :html_attribute }
         end
 
-        # URL helpers
-        source.scan(/(\w+)_(?:path|url)/).flatten.uniq.each do |route|
-          deps << { type: :route, target: route, via: :url_helper }
-        end
+        # Navigation edges — resolve _path / _url helpers to real controllers
+        # via RouteHelperResolver (wired through the include + build_route_helper_map
+        # call in #initialize). Replaces an earlier manual regex that emitted
+        # unresolved {type: :route, target: 'users'} edges; the graph now
+        # gets {type: :controller, target: 'UsersController', via: :link_to}.
+        deps.concat(scan_navigation_dependencies(source))
+        deps.concat(scan_form_dependencies(source))
 
         deps.uniq { |d| [d[:type], d[:target]] }
       end

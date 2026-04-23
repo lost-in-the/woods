@@ -403,9 +403,15 @@ module Woods
     def extract_all_concurrent
       # Pre-compute ModelNameCache to avoid race on lazy memoization.
       # Multiple threads calling model_names concurrently could trigger
-      # duplicate compute_model_names calls without this warm-up.
+      # duplicate compute_model_names calls without this warm-up. All four
+      # derived caches must be warmed — `short_name_map` and
+      # `short_names_regex` were added for the three-pass dependency
+      # scanner and are reached from every extractor that calls
+      # `scan_model_dependencies`.
       ModelNameCache.model_names
       ModelNameCache.model_names_regex
+      ModelNameCache.short_name_map if ModelNameCache.respond_to?(:short_name_map)
+      ModelNameCache.short_names_regex if ModelNameCache.respond_to?(:short_names_regex)
 
       results_mutex = Mutex.new
       threads = EXTRACTORS.map do |type, extractor_class|

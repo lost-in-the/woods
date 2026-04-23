@@ -52,7 +52,13 @@ module Woods
           timestamp: Time.now.utc.iso8601
         }
 
-        File.open(@path, 'a') { |f| f.puts(JSON.generate(entry)) }
+        # Exclusive flock around the append — concurrent Tier-4 invocations
+        # across Puma threads would otherwise interleave bytes and produce
+        # malformed JSONL lines (integrity hit on audit review).
+        File.open(@path, File::WRONLY | File::APPEND | File::CREAT, 0o644) do |f|
+          f.flock(File::LOCK_EX)
+          f.puts(JSON.generate(entry))
+        end
       end
 
       private
