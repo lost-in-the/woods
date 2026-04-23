@@ -18,7 +18,14 @@ group :development, :test do
   gem 'rubocop-rails', '~> 2.19'
   gem 'rubocop-rspec', '~> 3.9'
   gem 'simplecov', '~> 0.22', require: false
-  gem 'sqlite3', '>= 1.4'
+  # sqlite3 2.0+ requires RubyGems >= 3.3.22, which Ruby 3.0.7 doesn't ship
+  # (it's stuck on 3.2.33). Pin to the 1.x line on 3.0 so the matrix row
+  # can still resolve; everywhere else we get the latest.
+  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
+    gem 'sqlite3', '>= 1.4'
+  else
+    gem 'sqlite3', '>= 1.4', '< 2.0'
+  end
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'
