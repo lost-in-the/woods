@@ -100,5 +100,37 @@ RSpec.describe 'MCP CLI integration' do
         expect(err).to match(/No manifest\.json/)
       end
     end
+
+    # ── BootstrapError rescue — typed exception surface ────────────
+    # When build_retriever raises a typed BootstrapError, the
+    # top-level rescue in exe/woods-mcp must print the class name
+    # (grep-friendly for operators), the message, and exit with a
+    # distinct nonzero code (2) so ops tooling can distinguish "bad
+    # config" from "missing directory" (exit 1).
+    describe 'BootstrapError handling' do
+      it 'exits 2 with MissingArtifact class name when woods.json is absent and autodetect is not opted in' do
+        Dir.mktmpdir do |dir|
+          FileUtils.touch(File.join(dir, 'manifest.json')) # pass the dir-exists check
+          env = {
+            'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
+            'WOODS_ALLOW_AUTODETECT' => nil,
+            'OPENAI_API_KEY' => nil,
+            # Point Ollama at a dead port so the autodetect path — if it
+            # somehow fires — won't accidentally find a running local
+            # Ollama and obscure the test.
+            'OLLAMA_BASE_URL' => 'http://127.0.0.1:19999'
+          }
+
+          # The fixture has a manifest, so resolve_index_dir passes;
+          # build_retriever runs and hits MissingArtifact because there's
+          # no woods.json and autodetect isn't opted in.
+          _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, dir)
+
+          expect(status.exitstatus).to eq(2)
+          expect(err).to match(/MissingArtifact/)
+          expect(err).to match(/WOODS_ALLOW_AUTODETECT/)
+        end
+      end
+    end
   end
 end
