@@ -1,8 +1,16 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'time'
 
 module Woods
+  # Same conditional-define pattern used elsewhere in the gem so this
+  # file can be required in isolation (e.g. by specs that bypass the
+  # full lib/woods.rb load) without tripping NameError on the friendly
+  # missing-sqlite3 raise below.
+  class Error < StandardError; end unless defined?(Woods::Error)
+  class ConfigurationError < Error; end unless defined?(Woods::ConfigurationError)
+
   module Storage
     # MetadataStore provides an interface for storing and querying unit metadata.
     #
@@ -85,6 +93,88 @@ module Woods
         end
       end
 
+      # Pure-Ruby metadata store backed by a hash. No external dependencies,
+      # no persistence — vectors and metadata both live in the building
+      # process and die with it. Suitable for hosts that don't bundle the
+      # `sqlite3` gem (e.g., MySQL- or Postgres-only Rails apps), and for
+      # short-lived processes that rebuild the index per run.
+      #
+      # @example
+      #   store = InMemory.new
+      #   store.store("User", { type: "model", namespace: "Admin" })
+      #   store.find("User")  # => { "type" => "model", "namespace" => "Admin" }
+      #
+      class InMemory
+        include Interface
+
+        def initialize
+          @data = {}
+        end
+
+        # @see Interface#store
+        def store(id, metadata)
+          @data[id] = stringify_keys(metadata).merge('updated_at' => Time.now.iso8601)
+        end
+
+        # @see Interface#find
+        def find(id)
+          record = @data[id]
+          return nil unless record
+
+          record.except('updated_at')
+        end
+
+        # @see Interface#find_batch
+        def find_batch(ids)
+          ids.each_with_object({}) do |id, result|
+            data = find(id)
+            result[id] = data if data
+          end
+        end
+
+        # @see Interface#find_by_type
+        def find_by_type(type)
+          target = type.to_s
+          @data.each_with_object([]) do |(id, record), out|
+            next unless record['type'].to_s == target
+
+            out << record.except('updated_at').merge('id' => id)
+          end
+        end
+
+        # @see Interface#search
+        def search(query, fields: nil)
+          needle = query.to_s
+          @data.each_with_object([]) do |(id, record), out|
+            haystacks = fields ? fields.map { |f| record[f.to_s] } : [JSON.generate(record)]
+            next unless haystacks.compact.any? { |h| h.to_s.include?(needle) }
+
+            out << record.except('updated_at').merge('id' => id)
+          end
+        end
+
+        # @see Interface#delete
+        def delete(id)
+          @data.delete(id)
+        end
+
+        # @see Interface#count
+        def count
+          @data.size
+        end
+
+        private
+
+        # Match the SQLite adapter's string-key contract regardless of how
+        # the caller serialises the input hash. Without this, find/search
+        # consumers that expect string keys (the SQLite path round-trips
+        # through JSON, which always returns strings) would break under
+        # symbol-keyed test fixtures.
+        def stringify_keys(hash)
+          hash.each_with_object({}) { |(k, v), out| out[k.to_s] = v }
+        end
+      end
+
       # SQLite-backed metadata store using the JSON1 extension.
       #
       # Stores unit metadata as JSON in a single table with type indexing
@@ -100,7 +190,14 @@ module Woods
 
         # @param db_path [String] Path to the SQLite database file, or ":memory:" for in-memory
         def initialize(db_path = ':memory:')
-          require 'sqlite3'
+          begin
+            require 'sqlite3'
+          rescue LoadError
+            raise Woods::ConfigurationError,
+                  'metadata_store: :sqlite requires the sqlite3 gem in your Gemfile. ' \
+                  "Add `gem 'sqlite3'` and re-bundle, or set " \
+                  "`config.metadata_store = :in_memory` if you don't need cross-process persistence."
+          end
           @db = ::SQLite3::Database.new(db_path)
           @db.results_as_hash = true
           create_table
