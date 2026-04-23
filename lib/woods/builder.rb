@@ -274,6 +274,8 @@ module Woods
         'model with a larger native context, or set num_ctx explicitly.'
     end
 
+    public
+
     # Instantiate the metadata store adapter specified by the configuration.
     #
     # @return [Storage::MetadataStore::Interface] Metadata store adapter instance
@@ -296,6 +298,8 @@ module Woods
       else raise ArgumentError, "Unknown graph_store: #{@config.graph_store}"
       end
     end
+
+    private
 
     # Build a cache store from configuration, or nil if caching is disabled.
     #

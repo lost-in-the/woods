@@ -72,7 +72,7 @@ module Woods
         stored = read_stored_config(artifact)
 
         if stored
-          [apply_stored_config(config, stored, artifact: artifact), :snapshot]
+          [apply_stored_config(config, stored, artifact: artifact, env: env), :snapshot]
         elsif config.embedding_provider
           # Host initializer configured a provider; no woods.json to validate
           # against. Trust the host config and proceed.
@@ -109,13 +109,13 @@ module Woods
       # @param stored [Woods::ResolvedConfig]
       # @param artifact [Woods::IndexArtifact]
       # @return [Woods::Configuration]
-      def self.apply_stored_config(config, stored, artifact:)
+      def self.apply_stored_config(config, stored, artifact:, env: ENV)
         if config.embedding_provider
           live = ResolvedConfig.from_configuration(config)
           live.assert_compatible!(stored)
           config
         else
-          populate_from_stored(config, stored, artifact: artifact)
+          populate_from_stored(config, stored, artifact: artifact, env: env)
         end
       end
       private_class_method :apply_stored_config
@@ -130,11 +130,12 @@ module Woods
       # @param stored [Woods::ResolvedConfig]
       # @param artifact [Woods::IndexArtifact]
       # @return [Woods::Configuration]
-      def self.populate_from_stored(config, stored, artifact:)
+      def self.populate_from_stored(config, stored, artifact:, env: ENV)
         config.vector_store = stored.stores[:vector_store] || :in_memory
         config.metadata_store = stored.stores[:metadata_store] || :in_memory
         config.graph_store = stored.stores[:graph_store] || :in_memory
-        config.embedding_provider = provider_symbol(stored.embedding_provider[:class])
+        provider_sym = provider_symbol(stored.embedding_provider[:class])
+        config.embedding_provider = provider_sym
 
         opts = {}
         opts[:model] = stored.embedding_provider[:model] if stored.embedding_provider[:model]
@@ -142,6 +143,26 @@ module Woods
         opts[:num_ctx] = stored.embedding_provider[:num_ctx] if stored.embedding_provider[:num_ctx]
         opts[:read_timeout] = stored.embedding_provider[:read_timeout] if stored.embedding_provider[:read_timeout]
         opts[:dimension] = stored.embedding_provider[:dimension] if stored.embedding_provider[:dimension]&.positive?
+
+        # OpenAI needs an api_key to construct. `woods.json` deliberately
+        # never stores credentials; pull from env here so the standalone
+        # MCP server can boot against an OpenAI-embedded index. Raise a
+        # typed error if the env var is missing — previously the generic
+        # ArgumentError from OpenAI.new(**opts) wasn't a BootstrapError
+        # and the top-level rescue in exe/woods-mcp wouldn't catch it.
+        if provider_sym == :openai
+          api_key = env.fetch('OPENAI_API_KEY', nil)
+          if api_key.nil? || api_key.empty?
+            raise Woods::MCP::MissingCredential.new(
+              'woods.json says the index was embedded with OpenAI but OPENAI_API_KEY is unset. ' \
+              'Export the key before starting the MCP server, or re-embed with a different provider.',
+              details: { provider: 'openai', missing_env_var: 'OPENAI_API_KEY' }
+            )
+          end
+
+          opts[:api_key] = api_key
+        end
+
         config.embedding_options = opts unless opts.empty?
 
         warn "[woods-mcp] config_source: loaded from woods.json (#{artifact.config_path})"

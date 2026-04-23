@@ -153,11 +153,42 @@ module Woods
         vector_store = hydrated_vector_store(config, resolved, artifact)
         metadata_store = hydrated_metadata_store(config, resolved, artifact)
 
+        # Cross-populate the vector store's per-entry metadata cache from
+        # the metadata store. The WVF1 binary format stores only id + float
+        # blob (no per-vector hash) — it's numeric-only to keep dumps
+        # mmap-friendly. The metadata lives in metadata.msgpack, and
+        # InMemory::VectorStore#search uses its per-entry metadata for
+        # filter predicates. Without this back-fill, a type-filtered
+        # search returns zero results after a dump/reload.
+        populate_vector_metadata(vector_store, metadata_store) if vector_store && metadata_store
+
         Woods::Builder.new(config).build_retriever(
           vector_store: vector_store, metadata_store: metadata_store
         )
       end
       private_class_method :build_retriever_from_config
+
+      # Back-fill the vector store's per-entry metadata hashes from the
+      # metadata store. Only makes sense when both are in-memory — durable
+      # backends return nil from the hydration helpers and never reach
+      # this path.
+      def self.populate_vector_metadata(vector_store, metadata_store)
+        return unless vector_store.respond_to?(:each_entry) && vector_store.respond_to?(:store)
+        return unless metadata_store.respond_to?(:find)
+
+        # Collect (id, vector) pairs in one pass; overwriting via #store
+        # re-triggers the metadata update path without changing the
+        # underlying flat buffer (store semantics: same id → overwrite
+        # vector + metadata in place).
+        entries = vector_store.each_entry.map { |id, vec, _meta| [id, vec] }
+        entries.each do |id, vec|
+          meta = metadata_store.find(id)
+          next if meta.nil? || (meta.respond_to?(:empty?) && meta.empty?)
+
+          vector_store.store(id, vec, meta)
+        end
+      end
+      private_class_method :populate_vector_metadata
 
       # Return a hydrated InMemory vector store when Shape 2 applies
       # (in-memory configured + artifact on disk + resolved config) —
@@ -168,7 +199,10 @@ module Woods
         return nil unless config.vector_store == :in_memory
 
         Woods::Storage::Snapshotter::Vector.load_or_empty(artifact, resolved_config: resolved)
-      rescue Woods::MCP::BootstrapError
+      rescue Woods::MCP::BootstrapError, ArgumentError
+        # Config-invalid failures — ArgumentError signals a misconfigured
+        # output_dir (dump_dir outside dumps_root) or a programming bug,
+        # not a transient I/O issue. Operators must see these.
         raise
       rescue StandardError => e
         warn "[woods-mcp] vector hydration failed (#{e.class}: #{e.message}); starting with empty store"
@@ -181,7 +215,7 @@ module Woods
         return nil unless config.metadata_store == :in_memory
 
         Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact, resolved_config: resolved)
-      rescue Woods::MCP::BootstrapError
+      rescue Woods::MCP::BootstrapError, ArgumentError
         raise
       rescue StandardError => e
         warn "[woods-mcp] metadata hydration failed (#{e.class}: #{e.message}); starting with empty store"

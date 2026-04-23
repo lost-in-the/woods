@@ -659,4 +659,101 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(idx.instance_variable_get(:@dump_retention_count)).to eq(3)
     end
   end
+
+  describe 'dump retention boundary: zero and nil disable pruning' do
+    # dump_retention_count = 0 or nil must leave all existing dump directories intact.
+    # The prune_old_dumps method guards on `nil? || <= 0` before touching anything.
+
+    require 'woods/index_artifact'
+    require 'woods/storage/snapshotter'
+
+    let(:persistable_store) do
+      store = Woods::Storage::VectorStore::InMemory.new
+      allow(store).to receive(:each_entry).and_return([])
+      allow(store).to receive(:bulk_load)
+      store
+    end
+
+    let(:vector_snapshotter) { double('Snapshotter::Vector') }
+    let(:metadata_snapshotter) { double('Snapshotter::Metadata') }
+
+    let(:resolved_config) do
+      double('ResolvedConfig',
+             to_snapshot_json: { 'schema_version' => 1, 'gem_version' => '0.0.1',
+                                 'created_at' => '2026-04-22T00:00:00Z',
+                                 'embedding_provider' => {}, 'stores' => {} })
+    end
+
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+    end
+
+    def pre_create_dump_dirs(count)
+      dumps_dir = File.join(output_dir, 'dumps')
+      FileUtils.mkdir_p(dumps_dir)
+      (1..count).map do |i|
+        name = format('2026-04-%02dT00-00-00Z', i)
+        dir = File.join(dumps_dir, name)
+        FileUtils.mkdir_p(dir)
+        dir
+      end
+    end
+
+    context 'when dump_retention_count = 0' do
+      let(:indexer_zero_retention) do
+        described_class.new(
+          provider: provider,
+          text_preparer: text_preparer,
+          vector_store: persistable_store,
+          output_dir: output_dir,
+          batch_size: 2,
+          resolved_config: resolved_config,
+          dump_retention_count: 0
+        )
+      end
+
+      it 'keeps all existing dump directories (5 pre-existing + 1 new = 6 total)' do
+        old_dirs = pre_create_dump_dirs(5)
+
+        indexer_zero_retention.index_all
+
+        remaining = Dir.glob(File.join(output_dir, 'dumps', '*/'))
+                       .map { |d| File.basename(d.chomp('/')) }
+                       .reject { |n| n == 'latest' }
+
+        expect(remaining.length).to eq(6) # 5 old + 1 created by index_all
+        old_dirs.each { |dir| expect(File.exist?(dir)).to be true }
+      end
+    end
+
+    context 'when dump_retention_count = nil' do
+      let(:indexer_nil_retention) do
+        described_class.new(
+          provider: provider,
+          text_preparer: text_preparer,
+          vector_store: persistable_store,
+          output_dir: output_dir,
+          batch_size: 2,
+          resolved_config: resolved_config,
+          dump_retention_count: nil
+        )
+      end
+
+      it 'keeps all existing dump directories (5 pre-existing + 1 new = 6 total)' do
+        old_dirs = pre_create_dump_dirs(5)
+
+        indexer_nil_retention.index_all
+
+        remaining = Dir.glob(File.join(output_dir, 'dumps', '*/'))
+                       .map { |d| File.basename(d.chomp('/')) }
+                       .reject { |n| n == 'latest' }
+
+        expect(remaining.length).to eq(6) # 5 old + 1 created by index_all
+        old_dirs.each { |dir| expect(File.exist?(dir)).to be true }
+      end
+    end
+  end
 end
