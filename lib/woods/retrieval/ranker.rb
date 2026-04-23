@@ -107,8 +107,13 @@ module Woods
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map)
         # Plain-Ruby `index_by` substitute — the ActiveSupport version
-        # isn't loaded when the gem runs outside a Rails boot.
-        original_by_id = candidates.each_with_object({}) { |c, h| h[c.identifier] ||= c }
+        # isn't loaded when the gem runs outside a Rails boot. Preserve
+        # last-wins semantics to match ActiveSupport's `Enumerable#index_by`
+        # so the merged candidate's `source` continues to reflect the
+        # final source a given identifier appeared in (relevant when
+        # observability/debug tools read `.source` on an RRF result).
+        original_by_id = {}
+        candidates.each { |c| original_by_id[c.identifier] = c }
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(

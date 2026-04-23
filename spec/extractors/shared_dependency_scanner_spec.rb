@@ -487,13 +487,25 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
     it 'resolves bare short names to fully-qualified owners when unambiguous' do
       allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[Carts::Shipping])
       allow(Woods::ModelNameCache).to receive(:short_names_regex)
-        .and_return(/(?<![:.\w])Shipping\b/)
+        .and_return(/(?<![:.\w])Shipping\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/)
       allow(Woods::ModelNameCache).to receive(:resolve_short_name)
         .with('Shipping').and_return('Carts::Shipping')
 
       source = 'Shipping.new(cart_id: 1)'
       result = scanner.scan_model_dependencies(source)
       expect(result.map { |d| d[:target] }).to include('Carts::Shipping')
+    end
+
+    it 'strips `#` line comments before short-name scanning (no ghost edges)' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[Carts::Shipping])
+      allow(Woods::ModelNameCache).to receive(:short_names_regex)
+        .and_return(/(?<![:.\w])Shipping\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/)
+      # Scanner must NOT ask the cache to resolve a name pulled out of
+      # a comment — if it does, the test fails loudly.
+      expect(Woods::ModelNameCache).not_to receive(:resolve_short_name)
+
+      source = "# TODO: rewrite Shipping.new later\nUser.find(1)\n"
+      scanner.scan_model_dependencies(source)
     end
   end
 end

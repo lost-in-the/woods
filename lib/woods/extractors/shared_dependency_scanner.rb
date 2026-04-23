@@ -54,7 +54,13 @@ module Woods
         # `model_names_regex` still work. Real extraction runs always
         # have the full API.
         if ModelNameCache.respond_to?(:short_names_regex) && ModelNameCache.respond_to?(:resolve_short_name)
-          source.scan(ModelNameCache.short_names_regex).each do |short|
+          # Strip `#` line comments before scanning so references inside
+          # YARD docstrings / TODO comments don't generate ghost edges.
+          # Ruby string literals can still carry the name; the tightened
+          # lookahead in `short_names_regex` filters bare `"Shipping"`
+          # by requiring a constant-use context after the match.
+          scannable = source.gsub(/#[^\n]*/, '')
+          scannable.scan(ModelNameCache.short_names_regex).each do |short|
             resolved = ModelNameCache.resolve_short_name(short)
             targets << resolved if resolved
           end
@@ -75,8 +81,10 @@ module Woods
       def extract_constantize_targets(source)
         return [] unless ModelNameCache.respond_to?(:model_names)
 
-        targets = []
         known = ModelNameCache.model_names.to_set
+        return [] if known.empty?
+
+        targets = []
         source.scan(/(["'])([A-Z][\w:]*)\1\s*\.\s*constantize\b/) do |_quote, name|
           targets << name if known.include?(name)
         end

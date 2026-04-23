@@ -380,8 +380,8 @@ RSpec.describe Woods::Console::SafeContext do
     end
   end
 
-  describe 'async-delivery stubbing during #execute (F-7)' do
-    it 'swaps ActiveJob.queue_adapter to :test inside the block and restores after' do
+  describe 'does NOT touch ActiveJob / ActionMailer class state (F-7 boundary)' do
+    it 'leaves ActiveJob.queue_adapter alone during #execute' do
       allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
       fake_aj = Class.new do
         class << self
@@ -395,11 +395,15 @@ RSpec.describe Woods::Console::SafeContext do
       observed = nil
       ctx.execute { |_c| observed = fake_aj.queue_adapter }
 
-      expect(observed).to eq(:test)
+      # Earlier iteration swapped to :test mid-block; that raced with
+      # concurrent host-app requests in the same Puma worker. We now
+      # leave it alone — callers must treat callback-triggered enqueues
+      # as live. (Docs: lib/woods/console/safe_context.rb class comment.)
+      expect(observed).to eq(:sidekiq)
       expect(fake_aj.queue_adapter).to eq(:sidekiq)
     end
 
-    it 'swaps ActionMailer delivery to :test and disables perform_deliveries inside the block' do
+    it 'leaves ActionMailer delivery_method alone during #execute' do
       allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
       fake_am = Class.new do
         class << self
@@ -418,16 +422,10 @@ RSpec.describe Woods::Console::SafeContext do
         observed_perform = fake_am.perform_deliveries
       end
 
-      expect(observed_method).to eq(:test)
-      expect(observed_perform).to be false
+      expect(observed_method).to eq(:smtp)
+      expect(observed_perform).to be true
       expect(fake_am.delivery_method).to eq(:smtp)
       expect(fake_am.perform_deliveries).to be true
-    end
-
-    it 'is a no-op when neither ActiveJob nor ActionMailer is loaded' do
-      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
-      ctx = described_class.new(connection: connection)
-      expect { ctx.execute { |_c| 1 + 1 } }.not_to raise_error
     end
   end
 end

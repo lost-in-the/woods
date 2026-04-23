@@ -111,9 +111,16 @@ module Woods
         unambiguous = short_name_map.select { |short, full| full && short != full }.keys
         return /(?!)/ if unambiguous.empty?
 
-        # Match the short name only when NOT preceded by `::` — otherwise
-        # we double-count the full-name hit from the main regex.
-        /(?<![:.\w])(?:#{unambiguous.map { |n| Regexp.escape(n) }.join('|')})\b/
+        # Match the short name only when:
+        # - NOT preceded by `::`, `.`, or another word char (avoids
+        #   double-counting the full-name hit + rejects `MyShipping`).
+        # - Followed by a recognisable constant-use context: method call
+        #   (`.` / `(`), namespace (`::`), list boundary (`,` / `)` / `]`),
+        #   or end-of-line. This filters out mentions inside sentences
+        #   (" ... update Shipping later") and inside string literals
+        #   that lack a follow-up method call (`"Shipping"` alone).
+        names = unambiguous.map { |n| Regexp.escape(n) }.join('|')
+        /(?<![:.\w])(?:#{names})\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/
       end
     end
   end

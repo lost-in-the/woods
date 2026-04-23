@@ -784,8 +784,10 @@ module Woods
               )
             end
 
-            guard&.record!(:extraction)
-
+            # Acquire the in-process lock BEFORE recording to the guard.
+            # Otherwise a refused "already running" request still resets
+            # the cooldown clock and blocks the next legitimate attempt
+            # for the full 5-minute window once the current run finishes.
             unless Woods::MCP::Server.send(:pipeline_start, :extraction)
               next respond_err.call(
                 'Extraction pipeline is already running. Wait for it to complete.',
@@ -793,6 +795,9 @@ module Woods
                 tool: 'pipeline_extract'
               )
             end
+
+            # Lock acquired — now it's safe to record the run.
+            guard&.record!(:extraction)
 
             Thread.new do
               extractor = Woods::Extractor.new(
@@ -835,8 +840,8 @@ module Woods
               )
             end
 
-            guard&.record!(:embedding)
-
+            # Acquire the in-process lock first so a refused "already
+            # running" request doesn't burn the cooldown clock.
             unless Woods::MCP::Server.send(:pipeline_start, :embedding)
               next respond_err.call(
                 'Embedding pipeline is already running. Wait for it to complete.',
@@ -844,6 +849,8 @@ module Woods
                 tool: 'pipeline_embed'
               )
             end
+
+            guard&.record!(:embedding)
 
             Thread.new do
               # Share the rake-task wiring so the MCP path picks up the

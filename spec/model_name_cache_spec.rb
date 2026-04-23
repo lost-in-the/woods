@@ -106,5 +106,30 @@ RSpec.describe Woods::ModelNameCache do
       # short name == full name, so nothing to add via short-names regex
       expect('User').not_to match(described_class.short_names_regex)
     end
+
+    # False-positive guards — ghost edges from prose / string literals were
+    # the reason the agent's graph reported "0 dependents" before PR #81
+    # and are exactly what the tightened lookahead is meant to prevent.
+    it 'does NOT match short names appearing in prose without a use-context' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+
+      regex = described_class.short_names_regex
+      # YARD / freeform comment context ("- rewrite Shipping later")
+      expect('rewrite Shipping later').not_to match(regex)
+      # Bare string literal with no follow-up method call
+      expect('"Shipping"').not_to match(regex)
+    end
+
+    it 'matches short names used as class references in common Ruby forms' do
+      stub_const('ActiveRecord::Base',
+                 double('AR::Base', descendants: [double(name: 'Carts::Shipping')]))
+
+      regex = described_class.short_names_regex
+      expect('Shipping.new(cart_id: 1)').to match(regex)
+      expect('Shipping::INNER_CONST').to match(regex)
+      expect('scope.push(Shipping)').to match(regex)
+      expect('method_returns_shipping = Shipping').to match(regex)
+    end
   end
 end

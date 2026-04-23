@@ -16,15 +16,20 @@ module Woods
     # - Statement timeout uses `SET LOCAL` so it cannot leak to the next
     #   pool consumer
     # - Column redaction replaces sensitive values with "[REDACTED]"
-    # - ActiveJob + ActionMailer are swapped to test adapters for the
-    #   duration of every {#execute} block so `perform_later`/`deliver_later`
-    #   calls triggered by AR callbacks never actually enqueue or send.
     #
     # == What SafeContext does NOT cover
     #
     # The rolled-back transaction is a strong guardrail but not absolute.
     # Known escape paths — callers of {#execute} should assume anything
     # below is effectively live:
+    # - `ActiveJob` / `ActionMailer` async deliveries. Earlier versions
+    #   tried to swap the global queue_adapter/delivery_method to `:test`
+    #   for the block's duration, but those settings are process-wide
+    #   class state: in a Puma worker serving both the host app and the
+    #   Console MCP, a concurrent host request would briefly see the
+    #   test adapter and silently drop real jobs / mail. We now leave
+    #   them alone — treat callback-triggered enqueues / deliveries as
+    #   live.
     # - `after_rollback` callbacks (fire on rollback, can still enqueue
     #   jobs or call external services).
     # - `Thread.new` / `Fiber.new` inside the block — they lease a fresh
@@ -81,7 +86,7 @@ module Woods
     #     ]
     #   )
     #
-    class SafeContext # rubocop:disable Metrics/ClassLength
+    class SafeContext
       # Thread-local key that exposes the connection currently leased for
       # the in-flight #execute block. Handlers should prefer this over
       # acquiring their own connection so every request stays on a single
@@ -147,9 +152,16 @@ module Woods
       def execute(&block)
         raise ArgumentError, 'SafeContext#execute requires connection: or pool: at construction time' unless @pool
 
-        with_async_delivery_stubbed do
-          @pool.with_connection { |conn| run_with_timeout(conn, &block) }
-        end
+        # NOTE: on async side effects: earlier iterations of SafeContext
+        # tried to swap `ActiveJob::Base.queue_adapter` / `ActionMailer::Base
+        # .delivery_method` to `:test` for the duration of this block.
+        # That's unsafe — those settings are process-wide class state, so
+        # any concurrent request served by the SAME Puma worker (the host
+        # app running alongside the Console MCP) would race and briefly
+        # see the test adapter, silently dropping real jobs and mail.
+        # The gap is documented in the class docstring instead; operators
+        # must treat callback-triggered enqueues / deliveries as live.
+        @pool.with_connection { |conn| run_with_timeout(conn, &block) }
       end
 
       # Replace values of redacted columns with "[REDACTED]".
@@ -172,50 +184,6 @@ module Woods
       end
 
       private
-
-      # Temporarily swap ActiveJob's queue adapter to `:test` and
-      # ActionMailer's delivery method to `:test` for the duration of the
-      # block. Callbacks that enqueue jobs or send mail via
-      # `deliver_later`/`deliver_now` accumulate in the adapter's in-memory
-      # buffer (which is discarded when the process restarts) instead of
-      # touching the real backends.
-      #
-      # Only executes the swap when the Rails modules are loaded and
-      # configured — non-Rails callers see an unchanged pass-through.
-      def with_async_delivery_stubbed(&block)
-        swap_active_job { swap_action_mailer(&block) }
-      end
-
-      def swap_active_job
-        return yield unless defined?(::ActiveJob::Base) && ::ActiveJob::Base.respond_to?(:queue_adapter)
-
-        previous = ::ActiveJob::Base.queue_adapter
-        ::ActiveJob::Base.queue_adapter = :test
-        begin
-          yield
-        ensure
-          ::ActiveJob::Base.queue_adapter = previous
-        end
-      rescue StandardError
-        yield
-      end
-
-      def swap_action_mailer
-        return yield unless defined?(::ActionMailer::Base) && ::ActionMailer::Base.respond_to?(:delivery_method)
-
-        previous = ::ActionMailer::Base.delivery_method
-        perform = ::ActionMailer::Base.perform_deliveries
-        ::ActionMailer::Base.delivery_method = :test
-        ::ActionMailer::Base.perform_deliveries = false
-        begin
-          yield
-        ensure
-          ::ActionMailer::Base.delivery_method = previous
-          ::ActionMailer::Base.perform_deliveries = perform
-        end
-      rescue StandardError
-        yield
-      end
 
       # Wrap one connection in a rolled-back transaction with timeout, and
       # publish it via Thread.current so handlers can reuse it. Always
