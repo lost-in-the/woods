@@ -249,5 +249,581 @@ RSpec.describe Woods::MCP::Bootstrapper do
         end
       end
     end
+
+    context 'when a Snapshotter dump exists in output_dir' do
+      # Shape-2 payoff: a previous embed wrote vectors + metadata via
+      # the Snapshotter; the Bootstrapper hydrates in-memory stores from
+      # those dumps at boot. Without this wiring, admin would embed,
+      # restart MCP, and still see empty stores.
+      it 'hydrates the retriever from the latest dump' do
+        require 'woods/resolved_config'
+        require 'woods/index_artifact'
+        require 'woods/storage/snapshotter'
+
+        Woods.configuration.vector_store = :in_memory
+        Woods.configuration.metadata_store = :in_memory
+        Woods.configuration.graph_store = :in_memory
+        Woods.configuration.embedding_provider = :ollama
+        Woods.configuration.embedding_options = {
+          host: 'http://127.0.0.1:19999',
+          model: 'nomic-embed-text',
+          dimension: 4
+        }
+
+        Dir.mktmpdir do |dir|
+          # Simulate what the Indexer does at end-of-embed.
+          source_vs = Woods::Storage::VectorStore::InMemory.new
+          source_vs.store('Foo', [0.5, 0.5, 0.5, 0.5], { 'type' => 'model' })
+          source_vs.store('Bar', [0.1, 0.2, 0.3, 0.4], { 'type' => 'service' })
+
+          source_ms = Woods::Storage::MetadataStore::InMemory.new
+          source_ms.store('Foo', { 'type' => 'model' })
+          source_ms.store('Bar', { 'type' => 'service' })
+
+          artifact = Woods::IndexArtifact.new(dir)
+          resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration)
+          dump_dir = artifact.new_dump_dir
+
+          Woods::Storage::Snapshotter::Vector.dump(source_vs, artifact, dump_dir, resolved_config: resolved)
+          Woods::Storage::Snapshotter::Metadata.dump(source_ms, artifact, dump_dir, resolved_config: resolved)
+          artifact.write_config(resolved.to_snapshot_json)
+          artifact.promote(dump_dir)
+
+          retriever, _state = described_class.build_retriever(index_dir: dir)
+          expect(retriever).not_to be_nil
+
+          # Retriever doesn't expose vector_store publicly. Fetch via
+          # the SearchExecutor it composes — if the Bootstrapper fed a
+          # hydrated store through, it lives here. This is the key
+          # assertion: dumps on disk → retriever sees them.
+          executor = retriever.instance_variable_get(:@executor)
+          vs = executor.instance_variable_get(:@vector_store)
+          ms = retriever.instance_variable_get(:@metadata_store)
+
+          expect(vs.count).to eq(2)
+          expect(ms.count).to eq(2)
+          expect(vs.each_entry.map { |id, _, _| id }).to contain_exactly('Foo', 'Bar')
+        end
+      end
+    end
+  end
+
+  describe 'failure-mode: hydration soft-failures' do
+    # hydrated_vector_store and hydrated_metadata_store rescue non-BootstrapError
+    # StandardErrors with a warn, returning nil so Builder constructs an empty store.
+    # BootstrapError and ArgumentError are NOT swallowed — they propagate.
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before do
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+    end
+
+    it 'returns a non-nil retriever when vector hydration raises a transient StandardError' do
+      Dir.mktmpdir do |dir|
+        allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(
+          RuntimeError, 'simulated I/O error'
+        )
+        expect do
+          retriever, = described_class.build_retriever(index_dir: dir)
+          expect(retriever).not_to be_nil
+        end.to output(/vector hydration failed/).to_stderr
+      end
+    end
+
+    it 'returns a non-nil retriever when metadata hydration raises a transient StandardError' do
+      Dir.mktmpdir do |dir|
+        allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+          RuntimeError, 'simulated I/O error'
+        )
+        expect do
+          retriever, = described_class.build_retriever(index_dir: dir)
+          expect(retriever).not_to be_nil
+        end.to output(/metadata hydration failed/).to_stderr
+      end
+    end
+
+    it 'propagates BootstrapError from vector hydration (not swallowed)' do
+      Dir.mktmpdir do |dir|
+        allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(
+          Woods::MCP::UnsupportedArtifact, 'schema version too new'
+        )
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact)
+      end
+    end
+
+    it 'propagates ArgumentError from vector hydration (not swallowed)' do
+      Dir.mktmpdir do |dir|
+        allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(
+          ArgumentError, 'dump_dir outside dumps_root'
+        )
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(ArgumentError)
+      end
+    end
+  end
+
+  describe 'failure-mode: config-invalid errors from ConfigResolver' do
+    # ConfigResolver raises typed BootstrapError subclasses for config-shape
+    # problems. build_retriever must not swallow them.
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'propagates UnsupportedArtifact when woods.json has a future schema_version' do
+      require 'woods/index_artifact'
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        future_config = {
+          'schema_version' => 999,
+          'gem_version' => '99.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 4
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(future_config)
+
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /schema_version 999/)
+      end
+    end
+
+    it 'propagates DimensionMismatch when live provider dimension differs from woods.json' do
+      require 'woods/index_artifact'
+      require 'woods/resolved_config'
+
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 768
+      }
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        # woods.json says 384 dimensions; live config says 768 — mismatch
+        stored_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 384
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(stored_config)
+
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::MCP::DimensionMismatch)
+      end
+    end
+
+    it 'propagates MissingCredential when woods.json says OpenAI but OPENAI_API_KEY is unset' do
+      require 'woods/index_artifact'
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        openai_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::OpenAI',
+            'model' => 'text-embedding-3-small',
+            'dimension' => 1536
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(openai_config)
+
+        old_key = ENV.delete('OPENAI_API_KEY')
+        begin
+          expect { described_class.build_retriever(index_dir: dir) }
+            .to raise_error(Woods::MCP::MissingCredential, /OPENAI_API_KEY/)
+        ensure
+          ENV['OPENAI_API_KEY'] = old_key if old_key
+        end
+      end
+    end
+
+    it 'propagates ConfigMismatch when live provider class differs from woods.json' do
+      require 'woods/index_artifact'
+
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 768
+      }
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        # woods.json says OpenAI; live config says Ollama — class mismatch
+        stored_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::OpenAI',
+            'model' => 'text-embedding-3-small',
+            'dimension' => 768
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(stored_config)
+
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::MCP::ConfigMismatch)
+      end
+    end
+
+    it 'rejects woods.json with schema_version=0 (version.positive? guard)' do
+      require 'woods/index_artifact'
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        zero_version_config = {
+          'schema_version' => 0,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 4
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(zero_version_config)
+
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /schema_version 0/)
+      end
+    end
+
+    it 'accepts woods.json with schema_version=1 without raising' do
+      require 'woods/index_artifact'
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        valid_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 4,
+            'host' => 'http://127.0.0.1:19999'
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(valid_config)
+
+        # Ollama unreachable → starts degraded but does not raise
+        expect { described_class.build_retriever(index_dir: dir) }
+          .not_to raise_error
+      end
+    end
+  end
+
+  describe 'failure-mode: populate_vector_metadata edge cases' do
+    # populate_vector_metadata back-fills metadata into vector store entries
+    # after a dump/reload cycle. These specs exercise the two gap cases that
+    # can arise: empty metadata store and ids present in vectors but not in metadata.
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before do
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+    end
+
+    def write_artifact(dir, vector_entries:, metadata_entries:)
+      require 'woods/resolved_config'
+      require 'woods/index_artifact'
+      require 'woods/storage/snapshotter'
+
+      source_vs = Woods::Storage::VectorStore::InMemory.new
+      vector_entries.each { |id, vec, meta| source_vs.store(id, vec, meta || {}) }
+
+      source_ms = Woods::Storage::MetadataStore::InMemory.new
+      metadata_entries.each { |id, meta| source_ms.store(id, meta) }
+
+      artifact = Woods::IndexArtifact.new(dir)
+      resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration)
+      dump_dir = artifact.new_dump_dir
+
+      Woods::Storage::Snapshotter::Vector.dump(source_vs, artifact, dump_dir, resolved_config: resolved)
+      Woods::Storage::Snapshotter::Metadata.dump(source_ms, artifact, dump_dir, resolved_config: resolved)
+      artifact.write_config(resolved.to_snapshot_json)
+      artifact.promote(dump_dir)
+    end
+
+    it 'vector entries survive with empty metadata hashes when metadata store is empty' do
+      Dir.mktmpdir do |dir|
+        write_artifact(
+          dir,
+          vector_entries: [
+            ['A', [1.0, 0.0, 0.0, 0.0], {}],
+            ['B', [0.0, 1.0, 0.0, 0.0], {}],
+            ['C', [0.0, 0.0, 1.0, 0.0], {}],
+            ['D', [0.0, 0.0, 0.0, 1.0], {}],
+            ['E', [0.7, 0.7, 0.0, 0.0], {}]
+          ],
+          metadata_entries: [] # empty metadata store
+        )
+
+        retriever, = described_class.build_retriever(index_dir: dir)
+        expect(retriever).not_to be_nil
+
+        executor = retriever.instance_variable_get(:@executor)
+        vs = executor.instance_variable_get(:@vector_store)
+        expect(vs.count).to eq(5)
+      end
+    end
+
+    it 'ids in vector store but absent from metadata store keep empty metadata hash (no raise)' do
+      Dir.mktmpdir do |dir|
+        write_artifact(
+          dir,
+          vector_entries: [
+            ['A', [1.0, 0.0, 0.0, 0.0], {}],
+            ['B', [0.0, 1.0, 0.0, 0.0], {}],
+            ['D', [0.0, 0.0, 0.0, 1.0], {}] # D has no metadata entry
+          ],
+          metadata_entries: [
+            ['A', { 'type' => 'model' }],
+            ['B', { 'type' => 'service' }],
+            ['C', { 'type' => 'controller' }] # C has metadata but no vector
+          ]
+        )
+
+        expect { described_class.build_retriever(index_dir: dir) }.not_to raise_error
+
+        retriever, = described_class.build_retriever(index_dir: dir)
+        executor = retriever.instance_variable_get(:@executor)
+        vs = executor.instance_variable_get(:@vector_store)
+
+        # All 3 vector entries survive
+        expect(vs.count).to eq(3)
+        # A and B got their metadata back-filled; D keeps empty hash
+        ids = vs.each_entry.map { |id, _, _| id }
+        expect(ids).to contain_exactly('A', 'B', 'D')
+      end
+    end
+  end
+
+  describe 'failure-mode: durable backends bypass Snapshotter' do
+    # When config.vector_store is not :in_memory (e.g. :pgvector), the
+    # hydrated_vector_store helper returns nil early. Snapshotter::Vector.load_or_empty
+    # must never be called — durable backends are already persistent.
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'does not call Snapshotter::Vector.load_or_empty when vector_store is :pgvector' do
+      require 'woods/index_artifact'
+
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        # Write a valid woods.json so ConfigResolver doesn't raise MissingArtifact
+        valid_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 4,
+            'host' => 'http://127.0.0.1:19999'
+          },
+          'stores' => { 'vector_store' => 'pgvector',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(valid_config)
+
+        expect(Woods::Storage::Snapshotter::Vector).not_to receive(:load_or_empty)
+
+        # pgvector construction will likely fail — rescue any error that isn't
+        # about Snapshotter being called (we only care about the negative assertion)
+        described_class.build_retriever(index_dir: dir) rescue nil # rubocop:disable Style/RescueModifier
+      end
+    end
+  end
+
+  describe 'scenario: woods.json present + matching host config uses :snapshot source' do
+    # ConfigResolver.resolve returns [:snapshot, config] when woods.json is present,
+    # regardless of whether the host has a provider configured. When the host config
+    # matches, no ConfigMismatch is raised and the source tag is :snapshot.
+    # This spec exercises the happy path through apply_stored_config.
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'succeeds and does not mutate the config object identity' do
+      require 'woods/index_artifact'
+      require 'woods/mcp/config_resolver'
+
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        # woods.json that exactly matches the live host config
+        matching_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 4,
+            'host' => 'http://127.0.0.1:19999'
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(matching_config)
+
+        config_before = Woods.configuration
+        # Degrade gracefully — provider unreachable is fine for this test
+        described_class.build_retriever(index_dir: dir) rescue nil # rubocop:disable Style/RescueModifier
+
+        # Config identity must not change: build_retriever must not replace
+        # Woods.configuration with a new object
+        expect(Woods.configuration).to equal(config_before)
+      end
+    end
+
+    it 'resolves to :snapshot source when woods.json matches host config' do
+      require 'woods/index_artifact'
+      require 'woods/mcp/config_resolver'
+
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+
+      Dir.mktmpdir do |dir|
+        artifact = Woods::IndexArtifact.new(dir)
+        matching_config = {
+          'schema_version' => 1,
+          'gem_version' => '1.0.0',
+          'created_at' => '2026-01-01T00:00:00Z',
+          'embedding_provider' => {
+            'class' => 'Woods::Embedding::Provider::Ollama',
+            'model' => 'nomic-embed-text',
+            'dimension' => 4,
+            'host' => 'http://127.0.0.1:19999'
+          },
+          'stores' => { 'vector_store' => 'in_memory',
+                        'metadata_store' => 'in_memory',
+                        'graph_store' => 'in_memory' }
+        }
+        artifact.write_config(matching_config)
+
+        _resolved, source = Woods::MCP::ConfigResolver.resolve(
+          Woods.configuration,
+          artifact: artifact
+        )
+        expect(source).to eq(:snapshot)
+      end
+    end
   end
 end

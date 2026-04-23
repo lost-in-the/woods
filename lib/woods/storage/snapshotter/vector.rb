@@ -86,22 +86,36 @@ module Woods
             hydrate_store(parse_idx(idx_path), floats, header[:dimension])
           end
 
-          def parse_header(bin_data, bin_path)
-            if bin_data.bytesize < 20
-              raise Woods::MCP::UnsupportedArtifact.new(
-                "#{bin_path}: file too short to contain a valid WVF1 header",
-                details: { path: bin_path.to_s, found: bin_data.byteslice(0, 4) }
-              )
-            end
+          def parse_header(bin_data, bin_path) # rubocop:disable Metrics/AbcSize
+            # Minimum header is 28 bytes (magic + schema_version + dimension
+            # + vector_count + gem_version_length + model_name_length) plus
+            # the variable-length gem_version and model_name strings. A
+            # truncated header past the u32 guard below would produce a
+            # confusing NoMethodError on nil.unpack; raise a typed error
+            # with the file path instead.
+            raise_truncated(bin_path, bin_data.bytesize, 28) if bin_data.bytesize < 28
+
             magic = bin_data.byteslice(0, 4)
             schema_version, dimension = bin_data.byteslice(4, 8).unpack('L<L<')
             vector_count = bin_data.byteslice(12, 8).unpack1('Q<')
             gv_len = bin_data.byteslice(20, 4).unpack1('L<')
+            raise_truncated(bin_path, bin_data.bytesize, 24 + gv_len + 4) if bin_data.bytesize < 24 + gv_len + 4
+
             off = 24 + gv_len
             mn_len = bin_data.byteslice(off, 4).unpack1('L<')
+            raise_truncated(bin_path, bin_data.bytesize, off + 4 + mn_len) if bin_data.bytesize < off + 4 + mn_len
+
             off += 4 + mn_len
             [{ magic: magic, schema_version: schema_version,
                dimension: dimension, vector_count: vector_count }, off]
+          end
+
+          def raise_truncated(path, actual, expected)
+            raise Woods::MCP::UnsupportedArtifact.new(
+              "#{path}: file truncated (got #{actual} bytes, need at least #{expected}) — " \
+              'dump may have been interrupted mid-write; re-run woods:embed',
+              details: { path: path.to_s, actual_bytes: actual, needed_bytes: expected }
+            )
           end
 
           def parse_idx(idx_path)

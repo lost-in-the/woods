@@ -206,7 +206,12 @@ module Woods
       private
 
       def validate_schema_version!(version)
-        return if version == SCHEMA_VERSION_SUPPORTED
+        # Forwards-compatibility rule: accept any version at or below the
+        # supported ceiling. An older dump (schema_version 1) must still
+        # load cleanly on a newer gem (schema_version 2), matching the
+        # behaviour of the binary snapshotters (vectors.bin, metadata.msgpack)
+        # which both use `<=`.
+        return if version.positive? && version <= SCHEMA_VERSION_SUPPORTED
 
         raise Woods::MCP::UnsupportedArtifact.new(
           "woods.json schema_version #{version} is not supported (supported: #{SCHEMA_VERSION_SUPPORTED})",

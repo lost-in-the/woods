@@ -109,7 +109,7 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
-      it 'maps OpenAI class name back to :openai symbol' do
+      it 'maps OpenAI class name back to :openai symbol when OPENAI_API_KEY is in env' do
         Dir.mktmpdir do |dir|
           openai_hash = woods_json_hash.merge(
             'embedding_provider' => {
@@ -120,8 +120,28 @@ RSpec.describe Woods::MCP::ConfigResolver do
           )
           write_woods_json(dir, openai_hash)
           artifact = Woods::IndexArtifact.new(dir)
-          config, = described_class.resolve(blank_config, artifact: artifact)
+          config, = described_class.resolve(
+            blank_config, artifact: artifact, env: { 'OPENAI_API_KEY' => 'sk-test' }
+          )
           expect(config.embedding_provider).to eq(:openai)
+          expect(config.embedding_options[:api_key]).to eq('sk-test')
+        end
+      end
+
+      it 'raises MissingCredential when OpenAI snapshot is loaded without OPENAI_API_KEY' do
+        Dir.mktmpdir do |dir|
+          openai_hash = woods_json_hash.merge(
+            'embedding_provider' => {
+              'class' => 'Woods::Embedding::Provider::OpenAI',
+              'model' => 'text-embedding-3-small',
+              'dimension' => 1536
+            }
+          )
+          write_woods_json(dir, openai_hash)
+          artifact = Woods::IndexArtifact.new(dir)
+          expect do
+            described_class.resolve(blank_config, artifact: artifact, env: {})
+          end.to raise_error(Woods::MCP::MissingCredential, /OPENAI_API_KEY/)
         end
       end
     end

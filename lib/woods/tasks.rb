@@ -3,6 +3,7 @@
 require_relative 'builder'
 require_relative 'embedding/indexer'
 require_relative 'embedding/text_preparer'
+require_relative 'resolved_config'
 
 module Woods
   # Small helpers invoked from `lib/tasks/woods.rake`.
@@ -29,13 +30,37 @@ module Woods
       builder = Builder.new(config)
       provider = builder.build_embedding_provider
 
+      # Wire the persistence-arc pieces (resolved_config, metadata_store,
+      # dump_retention_count) so Indexer#persist_snapshot can write
+      # woods.json, dump metadata, and honour the user's retention setting.
+      # Without these kwargs, embed writes vectors.bin + latest pointer but
+      # never writes woods.json — which breaks the standalone woods-mcp
+      # Shape-2 boot path entirely.
+      #
+      # metadata_store and resolved_config are nil-safe — hosts that don't
+      # configure metadata or that pre-date the persistence arc still work.
       Embedding::Indexer.new(
         provider: provider,
         text_preparer: builder.build_text_preparer(provider),
         vector_store: builder.build_vector_store,
+        metadata_store: config.metadata_store ? builder.build_metadata_store : nil,
+        resolved_config: build_resolved_config(config),
         chunker: builder.build_chunker(provider),
+        dump_retention_count: config.dump_retention_count,
         output_dir: ENV.fetch('WOODS_OUTPUT', config.output_dir)
       )
+    end
+
+    # Build a ResolvedConfig snapshot from the live Woods::Configuration.
+    # Returns nil if the configuration doesn't have enough to produce one
+    # (pre-persistence-arc hosts) so the Indexer falls back to the legacy
+    # dump-without-woods.json behaviour.
+    def build_resolved_config(config)
+      return nil unless config.embedding_provider
+
+      ResolvedConfig.from_configuration(config)
+    rescue StandardError
+      nil
     end
 
     # Print an indexer stats hash in the format the rake tasks have historically
