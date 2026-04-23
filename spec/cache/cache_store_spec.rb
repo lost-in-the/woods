@@ -331,7 +331,7 @@ RSpec.describe Woods::Cache::CachedRetriever do
   describe '#retrieve' do
     it 'delegates to the real retriever on cache miss' do
       allow(retriever).to receive(:retrieve)
-        .with('How does User work?', budget: 8000)
+        .with('How does User work?', budget: 8000, types: nil, exclude_types: nil)
         .and_return(retrieval_result)
 
       result = cached_retriever.retrieve('How does User work?')
@@ -342,7 +342,7 @@ RSpec.describe Woods::Cache::CachedRetriever do
 
     it 'returns cached result on cache hit' do
       allow(retriever).to receive(:retrieve)
-        .with('How does User work?', budget: 8000)
+        .with('How does User work?', budget: 8000, types: nil, exclude_types: nil)
         .and_return(retrieval_result)
 
       cached_retriever.retrieve('How does User work?')
@@ -364,8 +364,10 @@ RSpec.describe Woods::Cache::CachedRetriever do
         strategy: :keyword, tokens_used: 20, budget: 8000, trace: nil
       )
 
-      allow(retriever).to receive(:retrieve).with('query A', budget: 8000).and_return(result_a)
-      allow(retriever).to receive(:retrieve).with('query B', budget: 8000).and_return(result_b)
+      allow(retriever).to receive(:retrieve)
+        .with('query A', budget: 8000, types: nil, exclude_types: nil).and_return(result_a)
+      allow(retriever).to receive(:retrieve)
+        .with('query B', budget: 8000, types: nil, exclude_types: nil).and_return(result_b)
 
       cached_retriever.retrieve('query A')
       cached_retriever.retrieve('query B')
@@ -383,14 +385,54 @@ RSpec.describe Woods::Cache::CachedRetriever do
         strategy: :vector, tokens_used: 50, budget: 16_000, trace: nil
       )
 
-      allow(retriever).to receive(:retrieve).with('query', budget: 2000).and_return(result_small)
-      allow(retriever).to receive(:retrieve).with('query', budget: 16_000).and_return(result_large)
+      allow(retriever).to receive(:retrieve)
+        .with('query', budget: 2000, types: nil, exclude_types: nil).and_return(result_small)
+      allow(retriever).to receive(:retrieve)
+        .with('query', budget: 16_000, types: nil, exclude_types: nil).and_return(result_large)
 
       r1 = cached_retriever.retrieve('query', budget: 2000)
       r2 = cached_retriever.retrieve('query', budget: 16_000)
 
       expect(r1.context).to eq('small')
       expect(r2.context).to eq('large')
+    end
+
+    # Regression — the type filter kwargs must participate in the cache key,
+    # otherwise a narrow `types: ["service"]` lookup returns a previously
+    # cached broad result.
+    it 'treats different types: filters as different cache keys' do
+      result_svc = Woods::Retriever::RetrievalResult.new(
+        context: 'svc', sources: [], classification: nil,
+        strategy: :vector, tokens_used: 5, budget: 8000, trace: nil
+      )
+      result_all = Woods::Retriever::RetrievalResult.new(
+        context: 'all', sources: [], classification: nil,
+        strategy: :vector, tokens_used: 50, budget: 8000, trace: nil
+      )
+
+      allow(retriever).to receive(:retrieve)
+        .with('q', budget: 8000, types: %w[service], exclude_types: nil).and_return(result_svc)
+      allow(retriever).to receive(:retrieve)
+        .with('q', budget: 8000, types: nil, exclude_types: nil).and_return(result_all)
+
+      svc = cached_retriever.retrieve('q', types: %w[service])
+      all = cached_retriever.retrieve('q')
+
+      expect(svc.context).to eq('svc')
+      expect(all.context).to eq('all')
+    end
+
+    it 'exposes wrapped stores for MCP reload' do
+      vector_store = double('VectorStore')
+      metadata_store = double('MetadataStore')
+      graph_store = double('GraphStore')
+      allow(retriever).to receive(:vector_store).and_return(vector_store)
+      allow(retriever).to receive(:metadata_store).and_return(metadata_store)
+      allow(retriever).to receive(:graph_store).and_return(graph_store)
+
+      expect(cached_retriever.vector_store).to be(vector_store)
+      expect(cached_retriever.metadata_store).to be(metadata_store)
+      expect(cached_retriever.graph_store).to be(graph_store)
     end
   end
 end

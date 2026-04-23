@@ -171,9 +171,12 @@ module Woods
         { vectors: vectors_count, metadata: metadata_count, graph: graph_count }
       end
 
+      # Retriever (and CachedRetriever) expose public +vector_store+ /
+      # +metadata_store+ / +graph_store+ readers so this helper never pokes
+      # private state. Durable backends don't implement +clear!+/+bulk_load+
+      # — they return 0 silently because they're already refreshed externally.
       def self.refill_in_memory_vector_store(retriever, config, resolved, artifact)
-        vs = retriever.instance_variable_get(:@vector_store) ||
-             retriever.instance_variable_get(:@executor)&.instance_variable_get(:@vector_store)
+        vs = retriever.respond_to?(:vector_store) ? retriever.vector_store : nil
         return 0 unless vs.respond_to?(:clear!) && vs.respond_to?(:bulk_load)
 
         fresh = hydrated_vector_store(config, resolved, artifact)
@@ -186,7 +189,7 @@ module Woods
       private_class_method :refill_in_memory_vector_store
 
       def self.refill_in_memory_metadata_store(retriever, config, resolved, artifact)
-        ms = retriever.instance_variable_get(:@metadata_store)
+        ms = retriever.respond_to?(:metadata_store) ? retriever.metadata_store : nil
         return 0 unless ms.respond_to?(:clear!) && ms.respond_to?(:bulk_load)
 
         fresh = hydrated_metadata_store(config, resolved, artifact)
@@ -198,9 +201,12 @@ module Woods
       end
       private_class_method :refill_in_memory_metadata_store
 
+      # GraphStore::Memory doesn't expose a +clear!+/+bulk_load+ pair today
+      # — a fresh run hands it an entirely new DependencyGraph from disk.
+      # Swap the inner graph in place so SearchExecutor / Ranker / MCP tools
+      # keep their references to the same wrapper and see the new graph.
       def self.refill_in_memory_graph_store(retriever, config, artifact)
-        executor = retriever.instance_variable_get(:@executor)
-        gs = executor&.instance_variable_get(:@graph_store)
+        gs = retriever.respond_to?(:graph_store) ? retriever.graph_store : nil
         return 0 unless gs.is_a?(Woods::Storage::GraphStore::Memory)
 
         fresh = hydrated_graph_store(config, artifact)

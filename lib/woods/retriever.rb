@@ -43,13 +43,25 @@ module Woods
     # Unit types queried for the structural context overview.
     STRUCTURAL_TYPES = %w[model controller service job mailer component graphql].freeze
 
+    # Direct handles to the injected stores. The sub-components
+    # ({Retrieval::SearchExecutor}, {Retrieval::Ranker},
+    # {Retrieval::ContextAssembler}) hold their own references too, but those
+    # are implementation details — callers that want to mutate store contents
+    # (e.g. the MCP +reload+ tool) read through these accessors. All three
+    # refer to the same Ruby objects the sub-components were initialised with,
+    # so in-place +#clear!+ + +#bulk_load+ propagates through the entire
+    # pipeline without re-instantiating sub-components.
+    attr_reader :vector_store, :metadata_store, :graph_store
+
     # @param vector_store [Storage::VectorStore::Interface] Vector store adapter
     # @param metadata_store [Storage::MetadataStore::Interface] Metadata store adapter
     # @param graph_store [Storage::GraphStore::Interface] Graph store adapter
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
     def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil)
+      @vector_store = vector_store
       @metadata_store = metadata_store
+      @graph_store = graph_store
       @formatter = formatter
 
       @classifier = Retrieval::QueryClassifier.new
