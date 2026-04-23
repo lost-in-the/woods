@@ -3,6 +3,17 @@
 require 'spec_helper'
 require 'woods/embedding/token_counter'
 
+# Pre-load tokenizers so stub_const('Tokenizers', fake) below isn't racing
+# with try_load's `require 'tokenizers'`. Without this pre-load, the gem's
+# top-level `module Tokenizers` re-opens the stubbed module under random
+# test orderings, leaking the real `from_pretrained` onto the fake.
+begin
+  require 'tokenizers'
+rescue LoadError
+  # gem absent (Ruby 3.0 row): try_load hits its LoadError branch, which
+  # is the equivalent failure path for these specs.
+end
+
 RSpec.describe Woods::Embedding::TokenCounter do
   subject(:counter) { described_class.new }
 
