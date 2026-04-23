@@ -42,9 +42,13 @@ RSpec.describe 'MCP tool structured errors' do
   end
 
   describe 'pipeline_extract' do
-    it 'returns :not_configured when operator is nil' do
-      response = call_tool(server, 'pipeline_extract')
-      expect_error(response, code: :not_configured, config_key: 'operator')
+    # The tool is not registered when operator is nil — that's the "correct
+    # cliff-avoidance contract". An explicit operator with a missing
+    # component (e.g. no :status_reporter) still registers the tool and
+    # returns :not_configured, which we verify elsewhere.
+    it 'is not registered when operator is nil' do
+      tools = server.instance_variable_get(:@tools)
+      expect(tools.keys).not_to include('pipeline_extract')
     end
   end
 
@@ -59,16 +63,16 @@ RSpec.describe 'MCP tool structured errors' do
   end
 
   describe 'retrieval_rate' do
-    it 'returns :not_configured when feedback_store is nil' do
-      response = call_tool(server, 'retrieval_rate', query: 'q', score: 4)
-      expect_error(response, code: :not_configured, config_key: 'feedback_store')
+    it 'is not registered when feedback_store is nil' do
+      tools = server.instance_variable_get(:@tools)
+      expect(tools.keys).not_to include('retrieval_rate')
     end
   end
 
   describe 'list_snapshots' do
-    it 'returns :not_configured when snapshot_store is nil' do
-      response = call_tool(server, 'list_snapshots')
-      expect_error(response, code: :not_configured, config_key: 'enable_snapshots')
+    it 'is not registered when snapshot_store is nil' do
+      tools = server.instance_variable_get(:@tools)
+      expect(tools.keys).not_to include('list_snapshots')
     end
   end
 
@@ -95,9 +99,10 @@ RSpec.describe 'MCP tool structured errors' do
 
     after { Woods.configuration = nil }
 
-    it 'returns :not_configured with config_key=notion_api_token when token is missing' do
-      response = call_tool(server, 'notion_sync')
-      expect_error(response, code: :not_configured, config_key: 'notion_api_token')
+    it 'is not registered when notion_api_token is missing' do
+      srv = Woods::MCP::Server.build(index_dir: fixture_dir)
+      tools = srv.instance_variable_get(:@tools)
+      expect(tools.keys).not_to include('notion_sync')
     end
   end
 
@@ -113,9 +118,10 @@ RSpec.describe 'MCP tool structured errors' do
 
     after { Woods.configuration = nil }
 
-    it 'returns :not_configured with config_key=session_store when store is missing' do
-      response = call_tool(server, 'session_trace', session_id: 'any')
-      expect_error(response, code: :not_configured, config_key: 'session_store')
+    it 'is not registered when session_store is missing' do
+      srv = Woods::MCP::Server.build(index_dir: fixture_dir)
+      tools = srv.instance_variable_get(:@tools)
+      expect(tools.keys).not_to include('session_trace')
     end
   end
 end
