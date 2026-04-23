@@ -149,14 +149,45 @@ module Woods
       end
       private_class_method :build_artifact
 
-      def self.build_retriever_from_config(config, _resolved, _artifact)
-        # Snapshotter hydration is stubbed in PR 2 — the Builder constructs
-        # empty InMemory stores, same as before. PR 3 wires in the real
-        # Snapshotter.load_or_empty call after build so the returned
-        # retriever sees hydrated vectors.
-        Woods::Builder.new(config).build_retriever
+      def self.build_retriever_from_config(config, resolved, artifact)
+        vector_store = hydrated_vector_store(config, resolved, artifact)
+        metadata_store = hydrated_metadata_store(config, resolved, artifact)
+
+        Woods::Builder.new(config).build_retriever(
+          vector_store: vector_store, metadata_store: metadata_store
+        )
       end
       private_class_method :build_retriever_from_config
+
+      # Return a hydrated InMemory vector store when Shape 2 applies
+      # (in-memory configured + artifact on disk + resolved config) —
+      # otherwise nil, which tells Builder to construct a fresh one.
+      # Durable backends (pgvector, Qdrant) never match this path.
+      def self.hydrated_vector_store(config, resolved, artifact)
+        return nil unless artifact && resolved
+        return nil unless config.vector_store == :in_memory
+
+        Woods::Storage::Snapshotter::Vector.load_or_empty(artifact, resolved_config: resolved)
+      rescue Woods::MCP::BootstrapError
+        raise
+      rescue StandardError => e
+        warn "[woods-mcp] vector hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        nil
+      end
+      private_class_method :hydrated_vector_store
+
+      def self.hydrated_metadata_store(config, resolved, artifact)
+        return nil unless artifact && resolved
+        return nil unless config.metadata_store == :in_memory
+
+        Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact, resolved_config: resolved)
+      rescue Woods::MCP::BootstrapError
+        raise
+      rescue StandardError => e
+        warn "[woods-mcp] metadata hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        nil
+      end
+      private_class_method :hydrated_metadata_store
 
       def self.probe_and_mark_state(config, state)
         provider = Woods::Builder.new(config).build_embedding_provider

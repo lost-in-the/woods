@@ -91,16 +91,24 @@ module Woods
     # {Cache::CachedEmbeddingProvider} and the retriever is wrapped with
     # {Cache::CachedRetriever} for transparent caching of expensive operations.
     #
+    # Callers that need stores pre-populated from a dump (the Shape-2
+    # MCP-serve path) can inject them via +vector_store:+ / +metadata_store:+.
+    # Without these, fresh empty stores are constructed from config. This
+    # is how the Bootstrapper hydrates from `Snapshotter.load_or_empty`
+    # without Builder needing to know the Snapshotter exists.
+    #
+    # @param vector_store [Storage::VectorStore::Interface, nil]
+    # @param metadata_store [Storage::MetadataStore::Interface, nil]
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
-    def build_retriever
+    def build_retriever(vector_store: nil, metadata_store: nil)
       provider = build_embedding_provider
       cache = build_cache_store
 
       provider = wrap_with_embedding_cache(provider, cache) if cache
 
       retriever = Retriever.new(
-        vector_store: build_vector_store,
-        metadata_store: build_metadata_store,
+        vector_store: vector_store || build_vector_store,
+        metadata_store: metadata_store || build_metadata_store,
         graph_store: build_graph_store,
         embedding_provider: provider
       )
@@ -123,15 +131,34 @@ module Woods
 
     # Instantiate the embedding provider specified by the configuration.
     #
+    # Strips `embedding_options` keys that belong to the ResolvedConfig layer
+    # (like `:dimension`) before splatting into the provider's constructor —
+    # those keys are useful for the Snapshotter's schema header but
+    # aren't part of the provider's API.
+    #
     # @return [Embedding::Provider::Interface] Embedding provider instance
     # @raise [ArgumentError] if the configured type is not recognized
     def build_embedding_provider
+      opts = provider_kwargs
       case @config.embedding_provider
-      when :openai then Embedding::Provider::OpenAI.new(**(@config.embedding_options || {}))
-      when :ollama then Embedding::Provider::Ollama.new(**(@config.embedding_options || {}))
+      when :openai then Embedding::Provider::OpenAI.new(**opts)
+      when :ollama then Embedding::Provider::Ollama.new(**opts)
       else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
       end
     end
+
+    # Kwargs accepted by embedding provider constructors — everything in
+    # `embedding_options` except metadata fields that live there for
+    # ResolvedConfig bookkeeping.
+    SNAPSHOT_ONLY_KEYS = %i[dimension].freeze
+    private_constant :SNAPSHOT_ONLY_KEYS
+
+    def provider_kwargs
+      opts = (@config.embedding_options || {}).transform_keys(&:to_sym)
+      SNAPSHOT_ONLY_KEYS.each { |k| opts.delete(k) }
+      opts
+    end
+    private :provider_kwargs
 
     # Build a {Embedding::TextPreparer} calibrated to a given provider.
     #

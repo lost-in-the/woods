@@ -249,5 +249,62 @@ RSpec.describe Woods::MCP::Bootstrapper do
         end
       end
     end
+
+    context 'when a Snapshotter dump exists in output_dir' do
+      # Shape-2 payoff: a previous embed wrote vectors + metadata via
+      # the Snapshotter; the Bootstrapper hydrates in-memory stores from
+      # those dumps at boot. Without this wiring, admin would embed,
+      # restart MCP, and still see empty stores.
+      it 'hydrates the retriever from the latest dump' do
+        require 'woods/resolved_config'
+        require 'woods/index_artifact'
+        require 'woods/storage/snapshotter'
+
+        Woods.configuration.vector_store = :in_memory
+        Woods.configuration.metadata_store = :in_memory
+        Woods.configuration.graph_store = :in_memory
+        Woods.configuration.embedding_provider = :ollama
+        Woods.configuration.embedding_options = {
+          host: 'http://127.0.0.1:19999',
+          model: 'nomic-embed-text',
+          dimension: 4
+        }
+
+        Dir.mktmpdir do |dir|
+          # Simulate what the Indexer does at end-of-embed.
+          source_vs = Woods::Storage::VectorStore::InMemory.new
+          source_vs.store('Foo', [0.5, 0.5, 0.5, 0.5], { 'type' => 'model' })
+          source_vs.store('Bar', [0.1, 0.2, 0.3, 0.4], { 'type' => 'service' })
+
+          source_ms = Woods::Storage::MetadataStore::InMemory.new
+          source_ms.store('Foo', { 'type' => 'model' })
+          source_ms.store('Bar', { 'type' => 'service' })
+
+          artifact = Woods::IndexArtifact.new(dir)
+          resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration)
+          dump_dir = artifact.new_dump_dir
+
+          Woods::Storage::Snapshotter::Vector.dump(source_vs, artifact, dump_dir, resolved_config: resolved)
+          Woods::Storage::Snapshotter::Metadata.dump(source_ms, artifact, dump_dir, resolved_config: resolved)
+          artifact.write_config(resolved.to_snapshot_json)
+          artifact.promote(dump_dir)
+
+          retriever, _state = described_class.build_retriever(index_dir: dir)
+          expect(retriever).not_to be_nil
+
+          # Retriever doesn't expose vector_store publicly. Fetch via
+          # the SearchExecutor it composes — if the Bootstrapper fed a
+          # hydrated store through, it lives here. This is the key
+          # assertion: dumps on disk → retriever sees them.
+          executor = retriever.instance_variable_get(:@executor)
+          vs = executor.instance_variable_get(:@vector_store)
+          ms = retriever.instance_variable_get(:@metadata_store)
+
+          expect(vs.count).to eq(2)
+          expect(ms.count).to eq(2)
+          expect(vs.each_entry.map { |id, _, _| id }).to contain_exactly('Foo', 'Bar')
+        end
+      end
+    end
   end
 end
