@@ -157,6 +157,24 @@ config.metadata_store_options = {
 }
 ```
 
+Requires the `sqlite3` gem in your host bundle. Rails apps backed by
+MySQL or PostgreSQL won't have it by default — selecting `:sqlite`
+without it raises `Woods::ConfigurationError` with install
+instructions. For MySQL/Postgres-only hosts, use `:in_memory` (below)
+unless cross-process metadata persistence matters.
+
+### In-Memory Metadata
+
+```ruby
+config.metadata_store = :in_memory
+```
+
+Pure-Ruby hash-backed store. No external dependencies, no persistence
+— vectors and metadata both live in the building process and die with
+it. The `_index.json` manifest under `output_dir` is the durable
+metadata for the index MCP server, so this is a reasonable default
+for hosts that don't bundle `sqlite3`.
+
 ## Presets
 
 For quick setup, use named presets that configure storage + embedding together:
