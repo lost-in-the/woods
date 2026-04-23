@@ -99,8 +99,13 @@ module Woods
     #
     # @param vector_store [Storage::VectorStore::Interface, nil]
     # @param metadata_store [Storage::MetadataStore::Interface, nil]
+    # @param graph_store [Storage::GraphStore::Interface, nil] Pre-populated
+    #   graph store. Without this, the retriever gets a fresh empty graph,
+    #   which silently degrades +:hybrid+ retrieval (graph expansion returns
+    #   no candidates). The Bootstrapper hydrates from +dependency_graph.json+
+    #   on disk and passes the populated store here.
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
-    def build_retriever(vector_store: nil, metadata_store: nil)
+    def build_retriever(vector_store: nil, metadata_store: nil, graph_store: nil)
       provider = build_embedding_provider
       cache = build_cache_store
 
@@ -109,7 +114,7 @@ module Woods
       retriever = Retriever.new(
         vector_store: vector_store || build_vector_store,
         metadata_store: metadata_store || build_metadata_store,
-        graph_store: build_graph_store,
+        graph_store: graph_store || build_graph_store,
         embedding_provider: provider
       )
 
