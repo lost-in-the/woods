@@ -31,6 +31,12 @@ RSpec.configure do |config|
   config.order = :random
   Kernel.srand config.seed
 
+  # Perf-tagged specs (see spec/performance/) are wall-clock regression
+  # guards — measurably jittery on shared CI runners. Excluded from the
+  # default suite; opt in with `rspec --tag perf` from a dedicated job
+  # against a predictable box.
+  config.filter_run_excluding(perf: true) unless ENV['WOODS_RUN_PERF_SPECS']
+
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
   end
