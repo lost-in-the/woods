@@ -64,16 +64,29 @@ module Woods
 
     # Capture the current {Woods::Configuration} as a {ResolvedConfig}.
     #
+    # The +provider:+ kwarg lets callers pass a live embedding provider so
+    # the dimension is discovered at runtime instead of being read from a
+    # declared-only field. This matters for Ollama — dimensions come from
+    # the model, not the config — and doesn't hurt OpenAI, whose provider
+    # exposes the same +#dimensions+ interface.
+    #
+    # When +provider:+ is omitted, dimension falls back to
+    # +config.embedding_options[:dimension]+ (useful for specs and for
+    # offline ResolvedConfig construction where no provider exists).
+    #
     # @param config [Woods::Configuration]
     # @param gem_version [String] Defaults to {Woods::VERSION}
+    # @param provider [#dimensions, nil] Optional live provider to probe
+    #   for dimension when +config.embedding_options[:dimension]+ is absent.
     # @return [ResolvedConfig]
-    def self.from_configuration(config, gem_version: nil) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+    def self.from_configuration(config, gem_version: nil, provider: nil) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
       require_relative 'version'
 
       opts = config.embedding_options || {}
-      dim = opts[:dimension] || opts['dimension']
+      declared_dim = opts[:dimension] || opts['dimension']
+      dim = declared_dim || (provider.respond_to?(:dimensions) ? provider.dimensions : nil)
 
-      provider = {
+      provider_hash = {
         class: resolve_provider_class(config.embedding_provider),
         model: (opts[:model] || opts['model'] || config.embedding_model).to_s,
         dimension: dim.to_i,
@@ -86,7 +99,7 @@ module Woods
         schema_version: SCHEMA_VERSION_SUPPORTED,
         gem_version: (gem_version || Woods::VERSION).to_s,
         created_at: Time.now.utc,
-        embedding_provider: provider,
+        embedding_provider: provider_hash,
         stores: {
           vector_store: config.vector_store,
           metadata_store: config.metadata_store,

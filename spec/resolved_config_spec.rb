@@ -267,4 +267,43 @@ RSpec.describe Woods::ResolvedConfig do
       expect(config.stores).to be_frozen
     end
   end
+
+  describe '.from_configuration' do
+    let(:host_config) do
+      instance_double(
+        Woods::Configuration,
+        embedding_provider: :ollama,
+        embedding_model: 'nomic-embed-text',
+        embedding_options: { host: 'http://ollama:11434' },
+        vector_store: :in_memory,
+        metadata_store: :in_memory,
+        graph_store: :in_memory
+      )
+    end
+
+    it 'probes the live provider for its dimension when declared config omits it' do
+      provider = instance_double(Woods::Embedding::Provider::Ollama, dimensions: 768)
+
+      resolved = described_class.from_configuration(host_config, provider: provider)
+
+      expect(resolved.dimension).to eq(768)
+    end
+
+    it 'prefers a declared dimension over the live provider probe' do
+      declared = host_config.embedding_options.merge(dimension: 1024)
+      allow(host_config).to receive(:embedding_options).and_return(declared)
+      provider = instance_double(Woods::Embedding::Provider::Ollama)
+
+      resolved = described_class.from_configuration(host_config, provider: provider)
+
+      expect(resolved.dimension).to eq(1024)
+      expect(provider).not_to have_received(:dimensions) if provider.respond_to?(:dimensions)
+    end
+
+    it 'falls back to zero when no provider is supplied and config omits dimension' do
+      resolved = described_class.from_configuration(host_config)
+
+      expect(resolved.dimension).to eq(0)
+    end
+  end
 end

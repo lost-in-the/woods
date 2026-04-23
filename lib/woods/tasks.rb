@@ -44,7 +44,7 @@ module Woods
         text_preparer: builder.build_text_preparer(provider),
         vector_store: builder.build_vector_store,
         metadata_store: config.metadata_store ? builder.build_metadata_store : nil,
-        resolved_config: build_resolved_config(config),
+        resolved_config: build_resolved_config(config, provider: provider),
         chunker: builder.build_chunker(provider),
         dump_retention_count: config.dump_retention_count,
         output_dir: ENV.fetch('WOODS_OUTPUT', config.output_dir)
@@ -55,10 +55,15 @@ module Woods
     # Returns nil if the configuration doesn't have enough to produce one
     # (pre-persistence-arc hosts) so the Indexer falls back to the legacy
     # dump-without-woods.json behaviour.
-    def build_resolved_config(config)
+    #
+    # Passes the live +provider+ so {ResolvedConfig.from_configuration} can
+    # probe +provider.dimensions+ — without this, Ollama snapshots record
+    # +dimension: 0+ and every subsequent MCP boot fails a spurious
+    # dimension-mismatch check against the real stored vectors.
+    def build_resolved_config(config, provider: nil)
       return nil unless config.embedding_provider
 
-      ResolvedConfig.from_configuration(config)
+      ResolvedConfig.from_configuration(config, provider: provider)
     rescue StandardError
       nil
     end
