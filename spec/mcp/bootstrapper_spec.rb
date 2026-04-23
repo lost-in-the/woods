@@ -182,4 +182,72 @@ RSpec.describe Woods::MCP::Bootstrapper do
       old ? ENV['OLLAMA_BASE_URL'] = old : ENV.delete('OLLAMA_BASE_URL')
     end
   end
+
+  describe '.build_retriever' do
+    # The decomposed build_retriever returns [retriever, BootstrapState].
+    # It refuses to silently auto-detect anymore — no woods.json + no
+    # explicit opt-in raises MissingArtifact. Callers rescue the typed
+    # error at the top level (see exe/woods-mcp).
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    context 'when no woods.json exists and autodetect is not opted in' do
+      it 'raises Woods::MCP::MissingArtifact with an actionable message' do
+        Dir.mktmpdir do |dir|
+          expect { described_class.build_retriever(index_dir: dir) }
+            .to raise_error(Woods::MCP::MissingArtifact, /WOODS_ALLOW_AUTODETECT/)
+        end
+      end
+    end
+
+    context 'when no woods.json exists and WOODS_ALLOW_AUTODETECT=1 is set' do
+      it 'falls through to env-var auto-detect (deprecated path)' do
+        ENV['WOODS_ALLOW_AUTODETECT'] = '1'
+        ENV.delete('OPENAI_API_KEY')
+        # Stub the Ollama reachability check — the machine running the
+        # spec might have Ollama listening on localhost, which would
+        # otherwise cause autodetect to succeed and defeat the test.
+        allow(described_class).to receive(:ollama_reachable?).and_return(false)
+
+        Dir.mktmpdir do |dir|
+          # No credentials, no Ollama — auto-detect finds nothing and
+          # returns a nil retriever instead of raising. The caller
+          # diagnoses via BootstrapState.
+          retriever, state = described_class.build_retriever(index_dir: dir)
+          expect(retriever).to be_nil
+          expect(state).to be_a(Woods::MCP::BootstrapState)
+        end
+      ensure
+        ENV.delete('WOODS_ALLOW_AUTODETECT')
+      end
+    end
+
+    context 'when the host initializer already set an embedding_provider' do
+      it 'skips autodetect and trusts the host config' do
+        Woods.configuration.vector_store = :in_memory
+        Woods.configuration.metadata_store = :in_memory
+        Woods.configuration.graph_store = :in_memory
+        Woods.configuration.embedding_provider = :ollama
+        Woods.configuration.embedding_options = {
+          host: 'http://127.0.0.1:19999',
+          model: 'nomic-embed-text'
+        }
+
+        Dir.mktmpdir do |dir|
+          # Provider is unreachable (nothing on :19999) → starts degraded
+          # rather than raising. Retriever comes back non-nil.
+          retriever, state = described_class.build_retriever(index_dir: dir)
+          expect(retriever).not_to be_nil
+          expect(state.status).to eq(:degraded)
+          expect(state.reason).to be_a(Woods::MCP::ProviderUnreachable)
+        end
+      end
+    end
+  end
 end
