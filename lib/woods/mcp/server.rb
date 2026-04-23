@@ -598,14 +598,15 @@ module Woods
                          'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
                          'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable. ' \
                          'By default excludes test_mappings (~33% of a typical index) so spec filenames do not ' \
-                         'dominate semantic rank; pass types: ["test_mapping"] to opt back in.',
+                         'dominate semantic rank; pass types: ["test_mapping"] to opt back in. ' \
+                         'Parameter: use `budget` for the token budget (not `limit` — that means result count ' \
+                         'on sibling tools, and mapping it here would silently produce a near-empty response).',
             input_schema: {
               properties: {
                 query: { type: 'string',
                          description: 'Natural language question (e.g. "How does user authentication work?")' },
-                budget: { type: 'integer', description: 'Token budget for context assembly (default: 8000). ' \
-                                                        '`limit` is accepted as an alias for discoverability.' },
-                limit: { type: 'integer', description: 'Alias for `budget`. Either one works.' },
+                budget: { type: 'integer',
+                          description: 'Token budget for context assembly (default: 8000).' },
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
@@ -619,7 +620,26 @@ module Woods
               required: ['query']
             }
           ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil|
-            budget = coerce_int.call(budget) || coerce_int.call(limit)
+            # `limit` isn't declared in the schema but clients still send it
+            # because sibling tools (search, recent_changes, pagerank) use
+            # `limit` as a result count. Mapping it to `budget` here would
+            # silently produce a near-empty response (limit: 10 → 10-token
+            # budget). Surface a helpful typed error instead.
+            unless limit.nil?
+              next respond_err.call(
+                'codebase_retrieve uses `budget` (token budget, default 8000), not `limit`. ' \
+                '`limit` is the result-count parameter on sibling tools (search, recent_changes, pagerank). ' \
+                "Pass `budget: #{coerce_int.call(limit)}` if you meant a #{coerce_int.call(limit)}-token context, " \
+                'or drop the kwarg entirely for the default 8000.',
+                code: :unsupported_argument,
+                tool: 'codebase_retrieve',
+                argument: 'limit',
+                hint: 'Use `budget:` for tokens. Retrieval does not cap by result count — the token budget ' \
+                      'governs how many ranked units fit in the returned context.'
+              )
+            end
+
+            budget = coerce_int.call(budget)
             types = coerce.call(types)
             exclude_types = coerce.call(exclude_types)
             if retriever
@@ -1304,15 +1324,22 @@ module Woods
         # Resolve the current HEAD SHA for the git repo containing +index_dir+.
         # Returns nil when git is unavailable or +index_dir+ is not in a repo —
         # callers treat nil as "can't compare" rather than "mismatch".
+        #
+        # Uses +capture2e+ so git's "fatal: not a git repository" stderr banner
+        # does not leak through the MCP stdio transport. MCP clients that parse
+        # stderr for protocol framing can't tolerate stray lines.
         def resolve_head_sha(index_dir)
           return nil unless index_dir
 
           dir = index_dir.to_s
           return nil unless File.directory?(dir)
 
-          output, status = Open3.capture2('git', '-C', dir, 'rev-parse', 'HEAD')
+          output, status = Open3.capture2e('git', '-C', dir, 'rev-parse', 'HEAD')
           status.success? ? output.strip : nil
-        rescue StandardError
+        rescue Errno::ENOENT, Errno::EACCES
+          # git not installed or not executable on this host — equivalent to
+          # "can't compare". Any other exception is a genuine bug and should
+          # propagate.
           nil
         end
 

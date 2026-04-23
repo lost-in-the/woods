@@ -565,10 +565,15 @@ RSpec.describe Woods::MCP::Server do
           .with('User model', budget: 4000, types: nil, exclude_types: nil)
       end
 
-      it 'accepts `limit` as an alias for `budget`' do
-        call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model', limit: 4000)
-        expect(retriever).to have_received(:retrieve)
-          .with('User model', budget: 4000, types: nil, exclude_types: nil)
+      it 'rejects `limit` with a helpful typed error (avoids silent near-empty budget)' do
+        response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model', limit: 10)
+        expect(response.error?).to be(true)
+        text = response_text(response)
+        expect(text).to include('codebase_retrieve uses `budget`')
+        expect(text).to include('result-count')
+        expect(response.meta[:error_code]).to eq(:unsupported_argument)
+        expect(response.meta[:argument]).to eq('limit')
+        expect(retriever).not_to have_received(:retrieve)
       end
 
       it 'forwards types: and exclude_types: through to the retriever' do

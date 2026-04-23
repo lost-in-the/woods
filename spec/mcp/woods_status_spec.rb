@@ -109,8 +109,8 @@ RSpec.describe 'woods_status tool' do
 
     def stub_git_head(head:, status_ok: true)
       process_status = instance_double(Process::Status, success?: status_ok)
-      allow(Open3).to receive(:capture2).with('git', '-C', anything, 'rev-parse', 'HEAD')
-                                        .and_return(["#{head}\n", process_status])
+      allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'rev-parse', 'HEAD')
+                                         .and_return(["#{head}\n", process_status])
     end
 
     it 'reports git_sha_matches_head=true when manifest.git_sha matches HEAD' do
