@@ -237,7 +237,11 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(record['source_code']).to include('class User')
     end
 
-    it 'keys chunked units by the base identifier (not the #chunk_N id)' do
+    it 'keys chunked units by the base identifier (the ContextAssembler collapses #chunk_N ids)' do
+      # The Indexer stores under the base identifier; the vector store still
+      # stores per-chunk entries (User#chunk_0, User#chunk_1). Retrieval
+      # normalises chunk ids back to the base before metadata lookup — see
+      # Woods::Retrieval::ContextAssembler#collapse_chunk_candidates.
       chunked = unit_data.merge(
         'chunks' => [
           { 'chunk_index' => 0, 'content' => 'chunk one' },
