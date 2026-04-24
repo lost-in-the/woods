@@ -193,6 +193,29 @@ RSpec.describe Woods::MCP::Server do
       data = parse_response(response)
       expect(data['result_count']).to be >= 1
     end
+
+    it 'filters by exact_prefix (case-insensitive, literal)' do
+      response = call_tool(server, 'search', query: '.', exact_prefix: 'Post')
+      data = parse_response(response)
+      identifiers = data['results'].map { |r| r['identifier'] }
+      expect(identifiers).to include('Post', 'PostsController')
+      expect(identifiers).not_to include('Comment', 'UserMailer')
+    end
+
+    it 'filters by exact_suffix (case-insensitive, literal)' do
+      response = call_tool(server, 'search', query: '.', exact_suffix: 'Controller')
+      data = parse_response(response)
+      identifiers = data['results'].map { |r| r['identifier'] }
+      expect(identifiers).to eq(['PostsController'])
+    end
+
+    it 'combines exact_prefix with regex query' do
+      response = call_tool(server, 'search', query: 'Post|Comment', exact_prefix: 'Post')
+      data = parse_response(response)
+      identifiers = data['results'].map { |r| r['identifier'] }
+      expect(identifiers).to include('Post')
+      expect(identifiers).not_to include('Comment')
+    end
   end
 
   describe 'tool: dependencies' do

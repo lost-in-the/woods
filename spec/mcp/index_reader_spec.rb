@@ -305,6 +305,80 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(identifiers).to include('UserMailer')
       expect(identifiers).not_to include('Post', 'PostsController')
     end
+
+    describe 'exact_prefix / exact_suffix filters' do
+      it 'restricts identifier matches to those starting with exact_prefix' do
+        results = reader.search('.', exact_prefix: 'Post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+        expect(identifiers).not_to include('Comment', 'UserMailer', 'Publishable')
+      end
+
+      it 'restricts identifier matches to those ending with exact_suffix' do
+        results = reader.search('.', exact_suffix: 'Controller')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'is case-insensitive for prefix matching' do
+        results = reader.search('.', exact_prefix: 'post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'is case-insensitive for suffix matching' do
+        results = reader.search('.', exact_suffix: 'controller')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'treats prefix as a literal string (no regex metacharacter handling)' do
+        # "External::" contains "::" which would be regex noise if escaped naively.
+        # The filter must match literally.
+        results = reader.search('.', exact_prefix: 'External::')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['External::Analytics'])
+      end
+
+      it 'combines with regex query via AND' do
+        # Query matches "Post" OR "Comment"; prefix restricts to starts-with-Post.
+        results = reader.search('Post|Comment', exact_prefix: 'Post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController')
+        expect(identifiers).not_to include('Comment')
+      end
+
+      it 'combines exact_prefix and exact_suffix together' do
+        results = reader.search('.', exact_prefix: 'Post', exact_suffix: 'Controller')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'ignores blank exact_prefix values' do
+        results = reader.search('Post', exact_prefix: '')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'ignores blank exact_suffix values' do
+        results = reader.search('Post', exact_suffix: '')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'applies to source_code matches by filtering on identifier' do
+        # "has_many" matches Post.source_code, but Post starts with "Post".
+        # Suffix "Comment" should exclude it.
+        results = reader.search('has_many', fields: %w[source_code], exact_suffix: 'Comment')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).not_to include('Post')
+      end
+
+      it 'returns no results when prefix excludes every candidate' do
+        result = reader.search('.', exact_prefix: 'NoSuchPrefix')
+        expect(result[:results]).to be_empty
+      end
+    end
   end
 
   describe '#traverse_dependencies' do

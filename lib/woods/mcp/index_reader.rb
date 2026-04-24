@@ -166,13 +166,23 @@ module Woods
       # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500).
       # When the cap is reached the result includes :partial => true.
       #
+      # The optional +exact_prefix+ / +exact_suffix+ filters restrict results to
+      # identifiers whose start/end matches the given string literally (case-
+      # insensitive). They are ANDed with the +query+ regex and are safer than
+      # hand-escaping regex anchors — metacharacters like +::+ are treated as
+      # literal text.
+      #
       # @param query [String] Search pattern (case-insensitive regex)
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param fields [Array<String>] Fields to search: "identifier", "metadata", "source_code"
       # @param limit [Integer] Maximum results to return
+      # @param exact_prefix [String, nil] Literal identifier prefix filter (case-insensitive)
+      # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
-      def search(query, types: nil, fields: %w[identifier], limit: 20)
+      def search(query, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
         pattern = compile_search_pattern(query)
+        prefix = blank_string?(exact_prefix) ? nil : exact_prefix.downcase
+        suffix = blank_string?(exact_suffix) ? nil : exact_suffix.downcase
         max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
         max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
         max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
@@ -194,7 +204,9 @@ module Woods
 
           # Broad-match detection: warn when pattern matches >50% of dir entries
           if entries.size > 1
-            matching_count = entries.count { |e| pattern.match?(e['identifier']) }
+            matching_count = entries.count do |e|
+              identifier_passes_filters?(e['identifier'], pattern, prefix, suffix)
+            end
             if matching_count > entries.size / 2.0
               notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
             end
@@ -204,6 +216,7 @@ module Woods
             break if results.size >= limit
 
             id = entry['identifier']
+            next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
             # Phase 1: identifier matching
             if fields.include?('identifier') && pattern.match?(id)
@@ -358,6 +371,30 @@ module Woods
         Regexp.new(query, Regexp::IGNORECASE)
       rescue RegexpError
         Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+      end
+
+      # Case-insensitive literal prefix/suffix check on an identifier.
+      # Nil filters are treated as "no restriction".
+      def identifier_passes_prefix_suffix?(identifier, prefix, suffix)
+        return false unless identifier
+
+        downcased = identifier.downcase
+        return false if prefix && !downcased.start_with?(prefix)
+        return false if suffix && !downcased.end_with?(suffix)
+
+        true
+      end
+
+      # Combined regex + prefix/suffix check used only by broad-match detection,
+      # which reports how many identifiers would actually surface.
+      def identifier_passes_filters?(identifier, pattern, prefix, suffix)
+        return false unless identifier_passes_prefix_suffix?(identifier, prefix, suffix)
+
+        pattern.match?(identifier)
+      end
+
+      def blank_string?(value)
+        value.nil? || (value.respond_to?(:empty?) && value.empty?)
       end
 
       # Memoized normalized edges — converts bare strings (old format) to hashes once.

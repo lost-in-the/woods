@@ -298,7 +298,9 @@ module Woods
                          'Use `lookup` for exact identifiers, `dependencies`/`dependents` for graph traversal. ' \
                          'Gotchas: query is a Ruby regex — literal pipe needs escaping as \\|; ' \
                          'types restricts which index directories are scanned (e.g. ["mailer"] scans only ' \
-                         'the mailers dir); invalid regex falls back to literal match.',
+                         'the mailers dir); invalid regex falls back to literal match. ' \
+                         'For plain prefix/suffix matching on namespaces, prefer exact_prefix / exact_suffix ' \
+                         '(literal, case-insensitive) over escaping regex anchors.',
             input_schema: {
               properties: {
                 query: { type: 'string', description: 'Case-insensitive Ruby regex pattern (e.g. "Worker|Job", "^Post", ".*Service$")' },
@@ -310,11 +312,21 @@ module Woods
                   type: 'array', items: { type: 'string' },
                   description: 'Fields to search: identifier (default), source_code, metadata'
                 },
-                limit: { type: 'integer', description: 'Maximum results (default: 20)' }
+                limit: { type: 'integer', description: 'Maximum results (default: 20)' },
+                exact_prefix: {
+                  type: 'string',
+                  description: 'Literal (non-regex) case-insensitive identifier prefix filter. ' \
+                               'Use for namespace scoping like "Next::Settings::" without escaping regex metacharacters.'
+                },
+                exact_suffix: {
+                  type: 'string',
+                  description: 'Literal (non-regex) case-insensitive identifier suffix filter. ' \
+                               'Use for suffix matching like "Controller" without escaping regex metacharacters.'
+                }
               },
               required: ['query']
             }
-          ) do |query:, server_context:, types: nil, fields: nil, limit: nil|
+          ) do |query:, server_context:, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil|
             types = coerce.call(types)
             fields = coerce.call(fields)
             limit = coerce_int.call(limit)
@@ -322,7 +334,9 @@ module Woods
               query,
               types: types,
               fields: fields || %w[identifier],
-              limit: limit || 20
+              limit: limit || 20,
+              exact_prefix: exact_prefix,
+              exact_suffix: exact_suffix
             )
             results = search_result[:results]
             payload = {
