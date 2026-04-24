@@ -12,6 +12,11 @@ module Woods
     # :allowed_origins. Requests without an Origin header (curl, server-to-server,
     # MCP stdio clients) are allowed through — bearer auth still gates them.
     #
+    # Port-matching: an allow-list entry WITHOUT a port (`http://localhost`)
+    # matches that host on any port. An entry WITH a port (`http://localhost:3000`)
+    # requires an exact port match. Specify explicit ports when port isolation
+    # matters.
+    #
     # Also answers CORS preflight (OPTIONS) with the matching allow-list.
     class OriginGuard
       DEFAULT_ALLOWED = %w[
@@ -21,6 +26,8 @@ module Woods
 
       ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS'
       ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id'
+
+      FORBIDDEN_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' }, id: nil }.to_json.freeze
 
       def initialize(app, allowed_origins: nil)
         @app = app
@@ -32,7 +39,7 @@ module Woods
         origin = env['HTTP_ORIGIN']
         method = env['REQUEST_METHOD']
 
-        return forbidden(origin) if origin && !origin_allowed?(origin)
+        return forbidden if origin && !origin_allowed?(origin)
 
         return preflight(origin) if method == 'OPTIONS'
 
@@ -48,6 +55,8 @@ module Woods
       end
 
       def origin_allowed?(origin)
+        return false if origin.match?(/[[:cntrl:]]/)
+
         @allowed.include?(normalize(origin)) || @allowed.include?(normalize(origin).sub(/:\d+\z/, ''))
       end
 
@@ -66,9 +75,8 @@ module Woods
         }
       end
 
-      def forbidden(origin)
-        body = { jsonrpc: '2.0', error: { code: -32_002, message: "Origin not allowed: #{origin}" }, id: nil }.to_json
-        [403, { 'content-type' => 'application/json' }, [body]]
+      def forbidden
+        [403, { 'content-type' => 'application/json' }, [FORBIDDEN_BODY]]
       end
     end
   end
