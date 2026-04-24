@@ -163,16 +163,25 @@ module Woods
         @parser = parser
       end
 
-      # Textual token for class-variable (`@@foo = …`) and global-variable
-      # (`$foo = …`) assignments. {Woods::Ast::Parser} doesn't normalize
-      # cvasgn / gvasgn to a dedicated node type, so we catch them at the
-      # source level the same way shell-execution literals are caught.
-      # Instance-variable writes (`@foo = …`) ARE normalized to `:ivasgn`
-      # and are refused via the AST walk — see {#scan_assignment_nodes}.
+      # Textual token for class-variable (`@@foo`) and global-variable
+      # (`$foo`) writes. {Woods::Ast::Parser} doesn't normalize cvasgn /
+      # gvasgn to a dedicated node type, so we catch them at the source
+      # level the same way shell-execution literals are caught. Instance-
+      # variable writes (`@foo`) ARE normalized to `:ivasgn` and are
+      # refused via the AST walk — see {#scan_assignment_nodes}.
+      #
+      # Covers plain assignment (`=`) AND op-assign forms (`+=`, `-=`,
+      # `*=`, `/=`, `%=`, `**=`, `<<=`, `>>=`, `|=`, `&=`, `^=`, `||=`,
+      # `&&=`) — all of which are writes. Excludes the non-assignment
+      # `==`, `=~`, `=>` forms via the trailing negative lookahead.
+      OP_ASSIGN_SUFFIX = %r{(?:\|\|?|&&?|<<|>>|\*\*?|[-+/%^])?=(?![=~>])}
+      private_constant :OP_ASSIGN_SUFFIX
+
       CLASS_OR_GLOBAL_VAR_ASSIGNMENT = /
         (?:^|[^\w])         # not mid-identifier
         (@@\w+|\$\w+)       # @@cvar or $gvar
-        \s*=(?!=)           # single `=`, not `==`
+        \s*
+        #{OP_ASSIGN_SUFFIX.source}
       /x
       private_constant :CLASS_OR_GLOBAL_VAR_ASSIGNMENT
 

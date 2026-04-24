@@ -266,6 +266,39 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(summary).to eq('#<FakeRelation>')
       end
 
+      it 'resolves top-level model constants from within the throwaway sandbox' do
+        user_model = class_double('User', count: 42)
+        stub_const('User', user_model)
+
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
+
+        expect(response['ok']).to be true
+        expect(response['result']['result']).to eq('42')
+      end
+
+      # SyntaxError is a ScriptError, not a StandardError — it would
+      # otherwise skip every rescue in execute_and_audit / send_request
+      # and crash the MCP dispatch loop. eval_in_sandbox translates it
+      # to ValidationError.
+      it 'turns a Ruby SyntaxError into a validation refusal instead of crashing' do
+        # Bypass EvalGuard (whose Prism parser would otherwise catch it)
+        # by handing in a guard that no-ops — we're asserting the
+        # executor-level defense here.
+        noguard = described_class.new(
+          model_validator: validator, safe_context: safe_context, connection: connection,
+          eval_guard: instance_double(Woods::Console::EvalGuard, check!: nil),
+          confirmation: confirmation, audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+
+        # Unclosed string literal — Ruby's parser rejects this even though
+        # Prism might handle it differently across versions.
+        response = noguard.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'x = "unclosed' } })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to match(/could not be parsed by Ruby/)
+      end
+
       it 'confirms with the full (bounded) code, not just the first line' do
         captured = nil
         callback_conf = Woods::Console::Confirmation.new(

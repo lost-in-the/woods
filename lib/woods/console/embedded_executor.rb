@@ -317,12 +317,23 @@ module Woods
       # would silence the audit log by writing to the executor's own
       # instance variables (EvalGuard denies the reflection APIs but does
       # not catch the syntactic `@ivar = value` form on its own — that's
-      # plugged separately in {EvalGuard#refuse_variable_assignment!}).
+      # plugged separately in {EvalGuard#scan_assignment_nodes}).
       # Top-level constants (User, Rails, ActiveRecord::Base, etc.) still
       # resolve because constant lookup on `instance_eval(String)` uses
-      # the lexical scope of the caller, which reaches `::Object`.
+      # the receiver's class hierarchy, and Object (the throwaway's class)
+      # holds every top-level constant.
+      #
+      # SyntaxError / ScriptError don't descend from StandardError, so
+      # they'd otherwise escape every rescue in `execute_and_audit` and
+      # `send_request` — crashing the MCP dispatch loop. EvalGuard's
+      # parser should reject unparseable payloads upstream, but Prism's
+      # parser and Ruby's parser don't always agree; we translate the
+      # script-level errors to ValidationError so the normal refusal
+      # path owns them.
       def eval_in_sandbox(code)
         Object.new.instance_eval(code, '(console_eval)', 1)
+      rescue ScriptError => e
+        raise ValidationError, "console_eval payload could not be parsed by Ruby: #{e.class}: #{e.message}"
       end
 
       def audit(params:, confirmed:, result_summary:)
