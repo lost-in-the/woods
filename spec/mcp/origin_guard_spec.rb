@@ -40,6 +40,30 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(parsed['error']['message']).to match(/Origin not allowed/)
     end
 
+    it 'does not echo the rejected origin value in the response body' do
+      malicious = 'http://evil.example.com/<script>alert(1)</script>'
+      _status, _headers, body = call(middleware, origin: malicious)
+      expect(body.first).not_to include('evil.example.com')
+      expect(body.first).not_to include('<script>')
+    end
+
+    it 'returns a spec-compliant JSON-RPC error envelope on rejection' do
+      _status, headers, body = call(middleware, origin: 'http://evil.example.com')
+      expect(headers['content-type']).to eq('application/json')
+      parsed = JSON.parse(body.first)
+      expect(parsed).to include('jsonrpc' => '2.0', 'id' => nil)
+      expect(parsed['error']).to include('code' => -32_002, 'message' => 'Origin not allowed')
+    end
+
+    it 'rejects origins with CRLF / control characters without reflecting them' do
+      malicious = "http://localhost\r\nX-Injected: yes"
+      status, headers, body = call(middleware, origin: malicious)
+      expect(status).to eq(403)
+      expect(headers).not_to have_key('X-Injected')
+      expect(body.first).not_to include("\r\n")
+      expect(body.first).not_to include('X-Injected')
+    end
+
     it 'adds CORS headers to allowed responses' do
       _status, headers, = call(middleware, origin: 'http://localhost')
       expect(headers['access-control-allow-origin']).to eq('http://localhost')
@@ -86,7 +110,9 @@ RSpec.describe Woods::MCP::OriginGuard do
       status, _headers, body = call(middleware, host: 'attacker.example.com')
       expect(status).to eq(403)
       parsed = JSON.parse(body.first)
-      expect(parsed['error']['message']).to match(/Host not allowed/)
+      expect(parsed['error']['message']).to eq('Host not allowed')
+      # Rejection body must NOT echo the attacker-controlled header value.
+      expect(body.first).not_to include('attacker.example.com')
     end
 
     it 'allows configured non-loopback hosts' do

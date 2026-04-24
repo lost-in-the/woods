@@ -55,6 +55,7 @@ Metrics/ClassLength:
     - 'lib/woods/flow_*.rb'
     - 'lib/woods/flow_analysis/**/*'
     - 'lib/woods/ruby_analyzer/**/*'
+    - 'lib/woods/cache/cache_middleware.rb'
     - 'lib/woods/extractor.rb'
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'

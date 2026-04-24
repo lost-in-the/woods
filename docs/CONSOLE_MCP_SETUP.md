@@ -451,6 +451,8 @@ Two complementary defenses share this flag, both gating credential exfiltration 
 
 - **Parse-time eval guard.** `Woods::Console::EvalGuard` walks the normalized AST of every `console_eval` payload and raises before the bridge ever sees it when the snippet reaches `Rails.application.credentials.*`, `Rails.application.secrets.*`, `ENV` (any form), reflection escapes (`eval`, `instance_eval`, `send`, `const_get`, `binding`, etc.), or credential-file reads (`File.read('config/master.key')`, `File.read('config/credentials.yml.enc')`, etc.). Refusal yields a clean MCP error response (`error: true`) — no transport-level exception, no partial output. Unparseable payloads are also refused, since a snippet that won't parse can't be reasoned about.
 
+  **Reachability note (v0.1).** In the shipped embedded-executor transports (Options A–C) `console_eval` is refused unconditionally at dispatch — see [`console_eval` is permanently disabled in embedded mode](#console_eval-is-permanently-disabled-in-embedded-mode) below — so the EvalGuard code path described here is reached only from the in-development bridge-process mode. The class is retained as the pre-execution gate for bridge mode and for the planned `WOODS_CONSOLE_UNSAFE_EVAL` opt-in (tracked in issue #87 / the `unsafe-eval-opt-in` backlog item). Treat the denylist as authoritative — bridge-mode rollout will adopt it verbatim.
+
 - **Boot-time credential index.** `Woods::Console::CredentialIndex` walks `Rails.application.credentials.config` once at server boot, collects every string leaf with length ≥ 12, and substring-redacts those values from every MCP response. This catches credentials whose *shape* the scanner doesn't recognize but whose *exact contents* Rails already knows — Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook signing keys, custom OAuth client secrets. Hits are marked `[REDACTED:credential]` (distinct from the scanner's `[REDACTED]`) and counted under a `:credential_index` key so audit output shows which layer caught the leak.
 
 **Restart required after credential rotation.** The index is built once at process start and held in memory for the lifetime of the MCP process. When a host app rotates Rails credentials (`rails credentials:edit`), the MCP process keeps the pre-rotation secrets in its Set until the process is restarted — new secrets are not picked up automatically. Only the Layer 2 shape-pattern scanner (Stripe `sk_*`, AWS `AKIA*`, etc.) can catch newly-rotated values before restart.
@@ -740,6 +742,16 @@ The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus
 
 - For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
 - For everything else (`console_diagnose_model`, `console_eval`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
+
+### `console_eval` is permanently disabled in embedded mode
+
+Calling `console_eval` through any embedded-executor transport (Options A–C) returns `error_type: "eval_disabled"` regardless of configuration. The refusal is hard-coded in `EmbeddedExecutor#refusal_for` and fires before dispatch reaches the Tier 4 handler, so `console_credential_defense_enabled` and `WOODS_CONSOLE_UNSAFE_EVAL` have no effect on this path in v0.1.
+
+Implications for operators and contributors:
+
+- **There is no v0.1 opt-in.** The `WOODS_CONSOLE_UNSAFE_EVAL` / `Rails.env.production?` language in the refusal message describes the *future* contract; the opt-in execution wiring is not implemented. Tracked in issue #87 and the `unsafe-eval-opt-in` backlog item.
+- **`Woods::Console::EvalGuard` is scaffold for bridge mode.** The class, its denylist, and its spec are intentionally retained as the pre-execution gate for Option D (bridge process) and for the future opt-in flag. Do not delete it; do not wire it into the embedded path without delivering the full opt-in contract (flag gate + production rejection + confirmation flow).
+- **Run arbitrary Ruby by switching to the bridge architecture** (Option D) once it ships, or by asking the human operator to paste the snippet into a local `rails console` — the error message the agent sees already instructs it to do so.
 
 ### Slow first request on HTTP/Rack middleware
 

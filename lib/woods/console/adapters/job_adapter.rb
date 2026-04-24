@@ -34,10 +34,14 @@ module Woods
 
         # Find a job by its ID.
         #
-        # @param id [Object] Job ID
+        # A nil id is dropped from the bridge request so downstream tools see
+        # a missing parameter rather than an explicit `nil` — symmetric with
+        # `CacheAdapter.stats(namespace: nil)`.
+        #
+        # @param id [Object, nil] Job ID
         # @return [Hash] Bridge request
         def find_job(id:)
-          { tool: "#{prefix}_find_job", params: { id: id } }
+          { tool: "#{prefix}_find_job", params: { id: id }.compact }
         end
 
         # List scheduled jobs.
@@ -51,10 +55,12 @@ module Woods
 
         # Retry a failed job.
         #
-        # @param id [Object] Job ID
+        # A nil id is dropped from the bridge request — see #find_job.
+        #
+        # @param id [Object, nil] Job ID
         # @return [Hash] Bridge request
         def retry_job(id:)
-          { tool: "#{prefix}_retry_job", params: { id: id } }
+          { tool: "#{prefix}_retry_job", params: { id: id }.compact }
         end
 
         private

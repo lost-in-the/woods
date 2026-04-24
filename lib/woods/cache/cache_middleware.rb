@@ -5,6 +5,89 @@ require_relative 'cache_store'
 
 module Woods
   module Cache
+    # Raised by {InflightEntry#await} when the owning thread aborted before
+    # either fulfilling or rejecting the entry — for example on `Interrupt`,
+    # `Thread#kill`, or a non-StandardError exception that bypasses the explicit
+    # `rescue`. Waiters receive this instead of blocking forever.
+    #
+    # @api private
+    class OwnerAbortedError < StandardError
+      def initialize(msg = 'embedding fetch owner aborted before fulfill')
+        super
+      end
+    end
+
+    # Per-text in-flight entry used for single-flight coordination in
+    # {CachedEmbeddingProvider#embed_batch}. When thread A is already fetching an
+    # embedding for text T, thread B's miss for T attaches to A's entry and waits
+    # on its condition variable rather than issuing a parallel provider call.
+    # See issue #88.
+    #
+    # @api private
+    class InflightEntry
+      def initialize
+        @mutex = Mutex.new
+        @cond = ConditionVariable.new
+        @done = false
+        @value = nil
+        @error = nil
+        @waiter_count = 0
+      end
+
+      # Publish the computed value and wake every waiter. Idempotent — a second
+      # call (e.g. from an `ensure` that rejects unfulfilled entries) is a no-op
+      # so the hardening in {CachedEmbeddingProvider#fetch_and_fulfill} is safe.
+      def fulfill(value)
+        @mutex.synchronize do
+          return if @done
+
+          @value = value
+          @done = true
+          @cond.broadcast
+        end
+      end
+
+      # Publish an exception so waiters fail fast instead of blocking forever.
+      # Idempotent — see {#fulfill}.
+      def reject(error)
+        @mutex.synchronize do
+          return if @done
+
+          @error = error
+          @done = true
+          @cond.broadcast
+        end
+      end
+
+      # Block until {#fulfill} or {#reject} is called, then return the value
+      # (or re-raise the error) to the waiting thread. `@waiter_count` is bumped
+      # under the mutex so tests can deterministically wait for "N threads have
+      # attached to this entry" instead of polling coarse Thread#status values.
+      def await
+        @mutex.synchronize do
+          @waiter_count += 1
+          begin
+            @cond.wait(@mutex) until @done
+          ensure
+            @waiter_count -= 1
+          end
+        end
+        raise @error if @error
+
+        @value
+      end
+
+      # Number of threads currently blocked in {#await}. Thread-safe observation
+      # used primarily by concurrent specs to synchronize without relying on
+      # `Thread#status` (which can transiently report 'sleep' on unrelated
+      # mutex contention — see issue #94 CI flake on MRI 3.1/3.2).
+      #
+      # @return [Integer]
+      def waiter_count
+        @mutex.synchronize { @waiter_count }
+      end
+    end
+
     # Decorator that wraps an embedding provider with cache-through logic.
     #
     # Implements the same {Embedding::Provider::Interface} so it can be
@@ -27,15 +110,23 @@ module Woods
         @provider = provider
         @cache_store = cache_store
         @ttl = ttl
+        @inflight = {}
+        @inflight_mutex = Mutex.new
       end
 
       # Embed a single text, returning a cached vector when available.
       #
+      # Shares the per-text single-flight map with {#embed_batch}, so concurrent
+      # `embed("x")` / `embed_batch(["x", ...])` misses for the same text all
+      # attach to the same in-flight entry and produce exactly one provider call.
+      #
       # @param text [String] Text to embed
       # @return [Array<Float>] Embedding vector
       def embed(text)
-        key = embedding_key(text)
-        @cache_store.fetch(key, ttl: @ttl) { @provider.embed(text) }
+        cached = @cache_store.read(embedding_key(text))
+        return cached unless cached.nil?
+
+        with_single_flight(text) { @provider.embed(text) }
       end
 
       # Embed a batch of texts, using cached vectors for any previously seen texts.
@@ -43,22 +134,20 @@ module Woods
       # Only texts that are not already cached are sent to the real provider.
       # Results are merged back in original order.
       #
+      # Uses per-text single-flight to prevent cache-miss stampedes: when N threads
+      # concurrently miss on the same text, exactly one calls the provider while
+      # the others attach to its {InflightEntry} and wait. See issue #88.
+      #
       # @param texts [Array<String>] Texts to embed
       # @return [Array<Array<Float>>] Embedding vectors (same order as input)
       def embed_batch(texts)
         results, misses, miss_indices = partition_cached(texts)
+        return results if misses.empty?
 
-        if misses.any?
-          fresh_vectors = @provider.embed_batch(misses)
-          misses.each_with_index do |text, i|
-            results[miss_indices[i]] = fresh_vectors[i]
-            begin
-              @cache_store.write(embedding_key(text), fresh_vectors[i], ttl: @ttl)
-            rescue StandardError => e
-              warn("[Woods] CachedEmbeddingProvider cache write failed: #{e.message}")
-            end
-          end
-        end
+        to_fetch, to_fetch_positions, our_entries, awaiting = claim_inflight(misses)
+
+        fetch_and_fulfill(to_fetch, to_fetch_positions, our_entries, results, miss_indices)
+        await_others(awaiting, results, miss_indices)
 
         results
       end
@@ -91,6 +180,160 @@ module Woods
       end
 
       private
+
+      # Run a provider block for a single text under the shared single-flight map.
+      # The first thread to miss on `text` becomes the owner, runs the block, caches
+      # the result, and fulfills the entry. Concurrent callers for the same text
+      # wait on the same entry. Errors propagate to waiters via {InflightEntry#reject}.
+      #
+      # @param text [String]
+      # @yieldreturn [Array<Float>] the freshly computed embedding vector
+      # @return [Array<Float>]
+      def with_single_flight(text)
+        entry, owner = claim_single(text)
+        return entry.await unless owner
+
+        begin
+          vector = yield
+          write_cache(text, vector)
+          entry.fulfill(vector)
+          vector
+        rescue StandardError => e
+          entry.reject(e)
+          raise
+        ensure
+          entry.reject(OwnerAbortedError.new)
+          clear_inflight([text])
+        end
+      end
+
+      # Single-text counterpart of {#claim_inflight}. Returns the entry for `text`
+      # and a boolean indicating whether the current thread is the owner.
+      #
+      # @param text [String]
+      # @return [Array(InflightEntry, Boolean)]
+      def claim_single(text)
+        @inflight_mutex.synchronize do
+          existing = @inflight[text]
+          return [existing, false] if existing
+
+          entry = InflightEntry.new
+          @inflight[text] = entry
+          [entry, true]
+        end
+      end
+
+      # Claim ownership of miss texts that no other thread is currently fetching.
+      # Returns four arrays describing the split of `misses`:
+      #
+      # - `to_fetch` — texts this thread owns and will hand to the provider
+      # - `to_fetch_positions` — each owned text's index into `misses`
+      # - `our_entries` — {InflightEntry} instances this thread will fulfill/reject
+      # - `awaiting` — `[position, entry]` pairs for texts already being fetched
+      #   by another thread; this thread will block on `entry.await` instead of
+      #   calling the provider
+      #
+      # The inflight map is only held during this bookkeeping — not during the
+      # provider call or the subsequent waits.
+      #
+      # @param misses [Array<String>]
+      # @return [Array(Array<String>, Array<Integer>, Array<InflightEntry>, Array<Array>)]
+      def claim_inflight(misses)
+        to_fetch = []
+        to_fetch_positions = []
+        our_entries = []
+        awaiting = []
+
+        @inflight_mutex.synchronize do
+          misses.each_with_index do |text, pos|
+            existing = @inflight[text]
+            if existing
+              awaiting << [pos, existing]
+            else
+              entry = InflightEntry.new
+              @inflight[text] = entry
+              our_entries << entry
+              to_fetch << text
+              to_fetch_positions << pos
+            end
+          end
+        end
+
+        [to_fetch, to_fetch_positions, our_entries, awaiting]
+      end
+
+      # Call the provider for owned texts, write each vector to the cache, and
+      # fulfill the owned entries so waiters wake with the fresh vector.
+      #
+      # The `ensure` block guarantees every owned entry reaches a terminal state
+      # and leaves the inflight map, even under paths the `rescue` misses —
+      # non-StandardError exceptions, `Thread#kill`, or a future refactor that
+      # introduces a raise into the fulfill loop. {InflightEntry#fulfill} /
+      # {InflightEntry#reject} are idempotent, so the fallback reject on
+      # already-fulfilled entries is a no-op.
+      #
+      # @return [void]
+      def fetch_and_fulfill(to_fetch, to_fetch_positions, our_entries, results, miss_indices)
+        return if to_fetch.empty?
+
+        begin
+          fresh_vectors = @provider.embed_batch(to_fetch)
+          # Reject a malformed provider response up-front rather than silently
+          # fulfilling waiters with `nil` (or masking a missing tail vector by
+          # under-writing the cache).
+          if fresh_vectors.size != to_fetch.size
+            raise ArgumentError,
+                  "provider returned #{fresh_vectors.size} vectors for #{to_fetch.size} texts"
+          end
+        rescue StandardError => e
+          our_entries.each { |entry| entry.reject(e) }
+          raise
+        end
+
+        to_fetch.each_with_index do |text, i|
+          vector = fresh_vectors[i]
+          results[miss_indices[to_fetch_positions[i]]] = vector
+          write_cache(text, vector)
+          our_entries[i].fulfill(vector)
+        end
+      ensure
+        our_entries.each { |entry| entry.reject(OwnerAbortedError.new) }
+        clear_inflight(to_fetch)
+      end
+
+      # Block on entries owned by other threads, then slot their fulfilled vectors
+      # into `results`. Any exception from a sibling thread's provider call is
+      # re-raised here via {InflightEntry#await}.
+      #
+      # @param awaiting [Array<Array>] pairs of `[position_in_misses, InflightEntry]`
+      # @param results [Array]
+      # @param miss_indices [Array<Integer>]
+      # @return [void]
+      def await_others(awaiting, results, miss_indices)
+        awaiting.each do |pos, entry|
+          results[miss_indices[pos]] = entry.await
+        end
+      end
+
+      # Remove the given texts from the inflight map.
+      #
+      # @param texts [Array<String>]
+      # @return [void]
+      def clear_inflight(texts)
+        @inflight_mutex.synchronize { texts.each { |t| @inflight.delete(t) } }
+      end
+
+      # Write one vector to the cache, warning on backend failure rather than
+      # propagating — a transient cache write error must not fail the embed call.
+      #
+      # @param text [String]
+      # @param vector [Array<Float>]
+      # @return [void]
+      def write_cache(text, vector)
+        @cache_store.write(embedding_key(text), vector, ttl: @ttl)
+      rescue StandardError => e
+        warn("[Woods] CachedEmbeddingProvider cache write failed: #{e.message}")
+      end
 
       # Split texts into cached hits and uncached misses.
       #

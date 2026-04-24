@@ -9,8 +9,9 @@ require_relative 'table_gate'
 
 module Woods
   module Console
-    # Drop-in replacement for ConnectionManager + Bridge that executes
-    # queries directly via ActiveRecord instead of a separate bridge process.
+    # Drop-in replacement for ConnectionManager + the bridge process that
+    # executes queries directly via ActiveRecord instead of going over the
+    # JSON-lines protocol (see {StubBridge} for the protocol scaffold).
     #
     # Implements the same `send_request(Hash) -> Hash` interface as
     # ConnectionManager, so all existing tool definitions in Server work
@@ -24,7 +25,7 @@ module Woods
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
       AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
 
-      TIER1_TOOLS = Bridge::TIER1_TOOLS
+      TIER1_TOOLS = StubBridge::TIER1_TOOLS
 
       # Tools gated behind the read_tools_enabled flag.
       # sql/query have existing safety gates (SqlValidator, SafeContext rollback)
@@ -111,6 +112,15 @@ module Woods
 
       # Return a pre-dispatch refusal hash for tools the executor cannot or
       # will not run, else nil to let dispatch proceed.
+      #
+      # `eval` is refused unconditionally here — the branch short-circuits
+      # before reaching the Tier 4 handler, so {Woods::Console::EvalGuard}
+      # is intentionally not consulted on this path. EvalGuard remains the
+      # intended pre-execution gate for bridge mode and for the planned
+      # `WOODS_CONSOLE_UNSAFE_EVAL` opt-in (issue #87 / `unsafe-eval-opt-in`
+      # backlog). Do not call EvalGuard from here without also delivering
+      # the opt-in wiring — a partial wire-up would silently imply eval
+      # is runnable when it still isn't.
       #
       # @param tool [String] Tool name
       # @return [Hash, nil]

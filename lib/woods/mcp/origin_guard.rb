@@ -21,6 +21,11 @@ module Woods
     # also requiring Host to appear in the allow-list (or to be a loopback
     # address), we close that gap even when Rails is bound to 0.0.0.0.
     #
+    # Port-matching: an allow-list entry WITHOUT a port (`http://localhost`)
+    # matches that host on any port. An entry WITH a port (`http://localhost:3000`)
+    # requires an exact port match. Specify explicit ports when port isolation
+    # matters.
+    #
     # Also answers CORS preflight (OPTIONS) with the matching allow-list.
     class OriginGuard
       DEFAULT_ALLOWED = %w[
@@ -36,6 +41,13 @@ module Woods
       ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS'
       ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id'
 
+      # Response bodies are emitted as constants so the rejected Origin /
+      # Host value is NEVER echoed back to the caller — preventing a
+      # stored-XSS / log-injection surface where an attacker-supplied
+      # header ended up embedded in the JSON error.
+      FORBIDDEN_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' }, id: nil }.to_json.freeze
+      FORBIDDEN_HOST_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Host not allowed' }, id: nil }.to_json.freeze
+
       def initialize(app, allowed_origins: nil)
         @app = app
         @allowed = Array(allowed_origins).compact.reject { |o| o.to_s.strip.empty? }.map { |o| normalize(o) }
@@ -48,8 +60,8 @@ module Woods
         method = env['REQUEST_METHOD']
         host = env['HTTP_HOST']
 
-        return forbidden(origin) if origin && !origin_allowed?(origin)
-        return forbidden_host(host) if host && !host_allowed?(host)
+        return forbidden if origin && !origin_allowed?(origin)
+        return forbidden_host if host && !host_allowed?(host)
 
         return preflight(origin) if method == 'OPTIONS'
 
@@ -88,6 +100,8 @@ module Woods
       end
 
       def origin_allowed?(origin)
+        return false if origin.match?(/[[:cntrl:]]/)
+
         @allowed.include?(normalize(origin)) || @allowed.include?(normalize(origin).sub(/:\d+\z/, ''))
       end
 
@@ -106,14 +120,12 @@ module Woods
         }
       end
 
-      def forbidden(origin)
-        body = { jsonrpc: '2.0', error: { code: -32_002, message: "Origin not allowed: #{origin}" }, id: nil }.to_json
-        [403, { 'content-type' => 'application/json' }, [body]]
+      def forbidden
+        [403, { 'content-type' => 'application/json' }, [FORBIDDEN_BODY]]
       end
 
-      def forbidden_host(host)
-        body = { jsonrpc: '2.0', error: { code: -32_002, message: "Host not allowed: #{host}" }, id: nil }.to_json
-        [403, { 'content-type' => 'application/json' }, [body]]
+      def forbidden_host
+        [403, { 'content-type' => 'application/json' }, [FORBIDDEN_HOST_BODY]]
       end
     end
   end
