@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'json'
+require 'tmpdir'
 require 'woods/console/embedded_executor'
 
 RSpec.describe Woods::Console::EmbeddedExecutor do
@@ -78,6 +80,251 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
 
         expect(response['error']).to include('WOODS_CONSOLE_UNSAFE_EVAL')
+      end
+    end
+
+    # ── Opt-in path: five-control console_eval wiring ─────────────────────
+    #
+    # When unsafe_eval_enabled is true, console_eval runs the full
+    # guard → confirmation → SafeContext → timeout → audit contract.
+    # See backlog B-053 and docs/CONSOLE_MCP_SETUP.md.
+    context 'console_eval opt-in path' do
+      let(:audit_path) { File.join(Dir.mktmpdir, 'audit.jsonl') }
+      let(:audit_logger) { Woods::Console::AuditLogger.new(path: audit_path) }
+      let(:eval_guard) { Woods::Console::EvalGuard.new }
+      let(:confirmation) { Woods::Console::Confirmation.new(mode: :auto_approve) }
+
+      subject(:executor) do
+        described_class.new(
+          model_validator: validator, safe_context: safe_context,
+          connection: connection,
+          eval_guard: eval_guard, confirmation: confirmation,
+          audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+      end
+
+      def audit_entries
+        File.readlines(audit_path).map { |l| JSON.parse(l) }
+      rescue Errno::ENOENT
+        []
+      end
+
+      it 'executes a benign expression and records a confirmed audit entry' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
+
+        expect(response['ok']).to be true
+        expect(response['result']['result']).to eq('2')
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be true
+        expect(audit_entries.first['tool']).to eq('console_eval')
+      end
+
+      it 'refuses credential-reaching payloads via EvalGuard and audits the refusal' do
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => 'Rails.application.credentials.stripe' }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to match(/EvalGuard|denied call chain/i)
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be false
+        expect(audit_entries.first['result_summary']).to match(/guard-refused/)
+      end
+
+      it 'refuses when confirmation denies and records a denied audit entry' do
+        denied_exec = described_class.new(
+          model_validator: validator, safe_context: safe_context, connection: connection,
+          eval_guard: eval_guard,
+          confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
+          audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+
+        response = denied_exec.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/confirmation/i)
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be false
+        expect(audit_entries.first['result_summary']).to match(/denied/)
+      end
+
+      it 'times out long-running code and audits the execution error' do
+        # Use a stubbed Timeout.timeout to avoid a real sleep in the suite.
+        allow(Timeout).to receive(:timeout).and_raise(Timeout::Error, 'execution expired')
+
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => 'sleep 99', 'timeout' => 1 }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('execution')
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be true
+        expect(audit_entries.first['result_summary']).to match(/error:Timeout::Error/)
+      end
+
+      it 'rejects an empty payload before reaching the guard' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '' } })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to match(/Missing required parameter: code/)
+        # No audit entry — nothing to record yet (we hadn't built audit_params).
+        expect(audit_entries).to be_empty
+      end
+
+      # Review finding: a payload assigning to executor ivars used to be
+      # able to silence the audit log for this run and every subsequent
+      # run on the same executor. EvalGuard now refuses the syntactic
+      # assignment, and eval_in_sandbox runs in a throwaway receiver so
+      # even if the guard is bypassed, the write lands on the throwaway.
+      it 'refuses @audit_logger = nil bypass payload at the guard' do
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => '@audit_logger = nil; 1' }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/instance variable/)
+        # Audit still writes the refusal — silencing failed.
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be false
+
+        # And the executor's own @audit_logger is unchanged.
+        expect(executor.instance_variable_get(:@audit_logger)).to eq(audit_logger)
+      end
+
+      it 'isolates eval from executor instance variables even if the guard missed something' do
+        # Bypass EvalGuard's ivar check by constructing the executor
+        # without a guard — the sandbox isolation is what we're
+        # asserting here, not the guard.
+        ungated = described_class.new(
+          model_validator: validator, safe_context: safe_context, connection: connection,
+          eval_guard: instance_double(Woods::Console::EvalGuard, check!: nil),
+          confirmation: confirmation, audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+
+        response = ungated.send_request({
+                                          'tool' => 'eval',
+                                          'params' => { 'code' => '@audit_logger = nil; 42' }
+                                        })
+
+        expect(response['ok']).to be true
+        # Audit entry still written — @audit_logger on the throwaway, not the executor.
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be true
+        expect(ungated.instance_variable_get(:@audit_logger)).to eq(audit_logger)
+      end
+
+      it 'rejects non-integer timeout values instead of silently clamping to 1' do
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => '1 + 1', 'timeout' => 'forever' }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/timeout must be a positive integer/)
+      end
+
+      it 'rejects timeout: 0 instead of silently clamping to 1' do
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => '1 + 1', 'timeout' => 0 }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/timeout must be a positive integer/)
+      end
+
+      it 'reduces a complex return value to its class name in the audit summary' do
+        # Something that looks like an AR relation — we don't actually
+        # need ActiveRecord here, just an object whose #inspect would
+        # normally trigger I/O. A class that raises on #inspect proves
+        # we never call it.
+        fake_relation_class = Class.new do
+          def inspect
+            raise 'inspect should not be called'
+          end
+
+          def self.name
+            'FakeRelation'
+          end
+        end
+        complex = fake_relation_class.new
+
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
+
+        # Control: a primitive keeps its inspect form.
+        expect(response['result']['result']).to eq('2')
+
+        # Reduction path: the complex object goes through #<ClassName>
+        # without calling inspect.
+        summary = executor.send(:audit_summary, complex)
+        expect(summary).to eq('#<FakeRelation>')
+      end
+
+      it 'resolves top-level model constants from within the throwaway sandbox' do
+        user_model = class_double('User', count: 42)
+        stub_const('User', user_model)
+
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
+
+        expect(response['ok']).to be true
+        expect(response['result']['result']).to eq('42')
+      end
+
+      # SyntaxError is a ScriptError, not a StandardError — it would
+      # otherwise skip every rescue in execute_and_audit / send_request
+      # and crash the MCP dispatch loop. eval_in_sandbox translates it
+      # to ValidationError.
+      it 'turns a Ruby SyntaxError into a validation refusal instead of crashing' do
+        # Bypass EvalGuard (whose Prism parser would otherwise catch it)
+        # by handing in a guard that no-ops — we're asserting the
+        # executor-level defense here.
+        noguard = described_class.new(
+          model_validator: validator, safe_context: safe_context, connection: connection,
+          eval_guard: instance_double(Woods::Console::EvalGuard, check!: nil),
+          confirmation: confirmation, audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+
+        # Unclosed string literal — Ruby's parser rejects this even though
+        # Prism might handle it differently across versions.
+        response = noguard.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'x = "unclosed' } })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to match(/could not be parsed by Ruby/)
+      end
+
+      it 'confirms with the full (bounded) code, not just the first line' do
+        captured = nil
+        callback_conf = Woods::Console::Confirmation.new(
+          mode: :callback,
+          callback: lambda { |req|
+            captured = req
+            true
+          }
+        )
+        exec = described_class.new(
+          model_validator: validator, safe_context: safe_context, connection: connection,
+          eval_guard: eval_guard, confirmation: callback_conf,
+          audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+
+        multi_line = <<~RUBY.strip
+          x = 1
+          y = 2
+          x + y
+        RUBY
+
+        exec.send_request({ 'tool' => 'eval', 'params' => { 'code' => multi_line } })
+
+        expect(captured[:description]).to include('x = 1')
+        expect(captured[:description]).to include('y = 2')
+        expect(captured[:description]).to include('x + y')
       end
     end
 

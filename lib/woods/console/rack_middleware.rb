@@ -69,10 +69,20 @@ module Woods
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the MCP endpoint (default: '/mcp/console')
       # @param embedded_read_tools [Boolean] Enable sql/query tools in embedded mode (default: false)
-      def initialize(app, path: '/mcp/console', embedded_read_tools: false)
+      # @param unsafe_eval_confirmation [Confirmation, nil] Approval callback for the
+      #   `console_eval` opt-in. Required when `WOODS_CONSOLE_UNSAFE_EVAL=true` (or
+      #   `config.console_unsafe_eval_enabled = true`); the server refuses to boot
+      #   without it. Takes precedence over `config.console_unsafe_eval_confirmation`.
+      # @param unsafe_eval_audit_log_path [String, Pathname, nil] JSONL audit log
+      #   path for every `console_eval` run. Required on the opt-in path. Takes
+      #   precedence over `config.console_unsafe_eval_audit_log_path`.
+      def initialize(app, path: '/mcp/console', embedded_read_tools: false,
+                     unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil)
         @app = app
         @path = path
         @embedded_read_tools = embedded_read_tools
+        @unsafe_eval_confirmation = unsafe_eval_confirmation
+        @unsafe_eval_audit_log_path = unsafe_eval_audit_log_path
         @mutex = Mutex.new
         @transport = nil
       end
@@ -172,7 +182,9 @@ module Woods
           redacted_key_values: Array(config&.console_redacted_key_values),
           read_tools_enabled: @embedded_read_tools,
           model_tables: introspection[:tables],
-          model_reflections: introspection[:reflections]
+          model_reflections: introspection[:reflections],
+          unsafe_eval_confirmation: @unsafe_eval_confirmation,
+          unsafe_eval_audit_log_path: @unsafe_eval_audit_log_path
         )
       end
 

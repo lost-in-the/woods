@@ -451,7 +451,7 @@ Two complementary defenses share this flag, both gating credential exfiltration 
 
 - **Parse-time eval guard.** `Woods::Console::EvalGuard` walks the normalized AST of every `console_eval` payload and raises before the bridge ever sees it when the snippet reaches `Rails.application.credentials.*`, `Rails.application.secrets.*`, `ENV` (any form), reflection escapes (`eval`, `instance_eval`, `send`, `const_get`, `binding`, etc.), or credential-file reads (`File.read('config/master.key')`, `File.read('config/credentials.yml.enc')`, etc.). Refusal yields a clean MCP error response (`error: true`) — no transport-level exception, no partial output. Unparseable payloads are also refused, since a snippet that won't parse can't be reasoned about.
 
-  **Reachability note (v0.1).** In the shipped embedded-executor transports (Options A–C) `console_eval` is refused unconditionally at dispatch — see [`console_eval` is permanently disabled in embedded mode](#console_eval-is-permanently-disabled-in-embedded-mode) below — so the EvalGuard code path described here is reached only from the in-development bridge-process mode. The class is retained as the pre-execution gate for bridge mode and for the planned `WOODS_CONSOLE_UNSAFE_EVAL` opt-in (tracked in issue #87 / the `unsafe-eval-opt-in` backlog item). Treat the denylist as authoritative — bridge-mode rollout will adopt it verbatim.
+  **Reachability (v0.2).** EvalGuard is the first of five controls on the embedded `console_eval` opt-in — see [`console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)](#console_eval-opt-in-woods_console_unsafe_eval) below. On hosts that haven't opted in, `console_eval` still short-circuits with the `eval_disabled` refusal and this guard is not reached. Bridge-process mode (in development) will call the same guard before shipping the payload to the remote worker.
 
 - **Boot-time credential index.** `Woods::Console::CredentialIndex` walks `Rails.application.credentials.config` once at server boot, collects every string leaf with length ≥ 12, and substring-redacts those values from every MCP response. This catches credentials whose *shape* the scanner doesn't recognize but whose *exact contents* Rails already knows — Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook signing keys, custom OAuth client secrets. Hits are marked `[REDACTED:credential]` (distinct from the scanner's `[REDACTED]`) and counted under a `:credential_index` key so audit output shows which layer caught the leak.
 
@@ -743,15 +743,60 @@ The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus
 - For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
 - For everything else (`console_diagnose_model`, `console_eval`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
 
-### `console_eval` is permanently disabled in embedded mode
+### `console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)
 
-Calling `console_eval` through any embedded-executor transport (Options A–C) returns `error_type: "eval_disabled"` regardless of configuration. The refusal is hard-coded in `EmbeddedExecutor#refusal_for` and fires before dispatch reaches the Tier 4 handler, so `console_credential_defense_enabled` and `WOODS_CONSOLE_UNSAFE_EVAL` have no effect on this path in v0.1.
+`console_eval` is disabled by default and returns `error_type: "eval_disabled"` on every embedded-executor transport (Options A–C). Opting in is a deliberate, five-step configuration — the server fails closed on any missing step.
 
-Implications for operators and contributors:
+**The five controls (all mandatory; partial wiring is rejected at boot):**
 
-- **There is no v0.1 opt-in.** The `WOODS_CONSOLE_UNSAFE_EVAL` / `Rails.env.production?` language in the refusal message describes the *future* contract; the opt-in execution wiring is not implemented. Tracked in issue #87 and the `unsafe-eval-opt-in` backlog item.
-- **`Woods::Console::EvalGuard` is scaffold for bridge mode.** The class, its denylist, and its spec are intentionally retained as the pre-execution gate for Option D (bridge process) and for the future opt-in flag. Do not delete it; do not wire it into the embedded path without delivering the full opt-in contract (flag gate + production rejection + confirmation flow).
-- **Run arbitrary Ruby by switching to the bridge architecture** (Option D) once it ships, or by asking the human operator to paste the snippet into a local `rails console` — the error message the agent sees already instructs it to do so.
+| # | Control | Enforced by |
+|---|---|---|
+| 1 | Env / config flag dual-gate | `ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'` OR `config.console_unsafe_eval_enabled = true`. Explicit config wins over env in either direction. |
+| 2 | Production refusal | `Server.enforce_unsafe_eval_contract!` raises `Woods::ConfigurationError` when the flag is on and `Rails.env.production?` returns true. Non-negotiable. |
+| 3 | AST denylist | `Woods::Console::EvalGuard#check!` rejects credentials, reflection escapes, network, shell execution, and credential-file reads before any Ruby runs. |
+| 4 | Human-in-the-loop approval | `Woods::Console::Confirmation` — required collaborator. The server refuses to boot with the flag on unless one is supplied. |
+| 5 | JSONL audit log | `Woods::Console::AuditLogger` — required collaborator. Every outcome (guard-refused, denied, ok, error) writes one line with `CredentialScanner` redaction on the payload. |
+
+Every call runs inside a `SafeContext` transaction that rolls back at completion, and is wrapped in `Timeout.timeout(1..30s)`.
+
+#### Minimal opt-in example
+
+```ruby
+# config/initializers/woods_console.rb
+require 'woods/console/confirmation'
+
+# A real deployment should route this through an approval UI — the example
+# below deny-by-default so the gate never passes silently.
+slack_approval = Woods::Console::Confirmation.new(
+  mode: :callback,
+  callback: ->(req) { SlackApproval.request(req[:tool], req[:description]) }
+)
+
+Rails.application.config.middleware.use \
+  Woods::Console::RackMiddleware,
+  path: '/mcp/console',
+  embedded_read_tools: true,
+  unsafe_eval_confirmation: slack_approval,
+  unsafe_eval_audit_log_path: Rails.root.join('log/console_audit.jsonl').to_s
+```
+
+Set `WOODS_CONSOLE_UNSAFE_EVAL=true` in the runtime environment (never in a committed dotenv file). The boot banner on stderr confirms the flag is active.
+
+#### What each control catches
+
+| Threat | Caught by |
+|---|---|
+| `Rails.application.credentials.stripe.secret_key` | EvalGuard (`DENIED_CALL_CHAINS`) |
+| `ENV['AWS_SECRET_ACCESS_KEY']` | EvalGuard (`DENIED_CONSTANTS`) |
+| `File.read('config/master.key')` | EvalGuard (`CREDENTIAL_FILE_READERS`) |
+| `` `rm -rf /` `` / `%x{...}` / `system(...)` / `exec(...)` | EvalGuard (textual backtick check + `DENIED_REFLECTION`) |
+| `Thread.new { ... }` / `Fiber.new { ... }` | EvalGuard (threading escapes `SafeContext`) |
+| `Marshal.load(...)` / `YAML.unsafe_load(...)` | EvalGuard (deserialization) |
+| Writes to application data | `SafeContext` rollback (transaction always rolled back) |
+| Infinite loops / runaway compute | `Timeout.timeout` (1–30s clamp) |
+| Novel credential pattern that bypasses the guard | Operator responsibility — adjust EvalGuard denylist; the audit log records the attempt regardless. |
+
+Operator responsibilities not covered by the gem: routing the approval callback to a real human, rotating the audit log, and alerting on repeated guard refusals.
 
 ### Slow first request on HTTP/Rack middleware
 

@@ -168,17 +168,29 @@ module Woods
         #   {key_column:, value_column:, sensitive_keys: []}. See SafeContext for semantics.
         # @param connection [Object, nil] Database connection for adapter detection
         # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
+        # @param unsafe_eval_confirmation [Confirmation, nil] Approval callback for
+        #   `console_eval`. Required when the opt-in is on; the server refuses to
+        #   boot without it. Ignored when the opt-in is off.
+        # @param unsafe_eval_audit_log_path [String, Pathname, nil] JSONL audit log
+        #   path for `console_eval`. Required when the opt-in is on.
         # @return [MCP::Server] Configured server ready for transport
         def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists
                            redacted_key_values: [], connection: nil,
                            read_tools_enabled: false, model_tables: {},
-                           model_reflections: {})
+                           model_reflections: {},
+                           unsafe_eval_confirmation: nil,
+                           unsafe_eval_audit_log_path: nil)
           require_relative 'embedded_executor'
           enforce_unsafe_eval_contract!
 
           safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
           ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables,
                                        model_reflections: model_reflections)
+
+          eval_wiring = build_unsafe_eval_wiring(
+            confirmation: unsafe_eval_confirmation,
+            audit_log_path: unsafe_eval_audit_log_path
+          )
 
           # Wire the same TableGate into the executor so sql/query are blocked
           # PRE-execution against console_blocked_tables (previously TableGate
@@ -188,10 +200,69 @@ module Woods
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_context,
             connection: connection, read_tools_enabled: read_tools_enabled,
-            table_gate: table_gate
+            table_gate: table_gate,
+            eval_guard: eval_wiring[:eval_guard],
+            confirmation: eval_wiring[:confirmation],
+            audit_logger: eval_wiring[:audit_logger],
+            unsafe_eval_enabled: eval_wiring[:unsafe_eval_enabled]
           )
 
           build_server(executor, ctx)
+        end
+
+        # Resolve the three-collaborator eval wiring for the current config.
+        #
+        # When `unsafe_eval_enabled?` is false (default), returns nil for all
+        # three collaborators — the executor keeps its hard refusal and
+        # EvalGuard is never reached.
+        #
+        # When it's true, BOTH a {Confirmation} and an audit-log path MUST be
+        # provided (via kwargs or config); otherwise we raise so a
+        # misconfigured host fails at boot instead of silently running Ruby
+        # without approval or audit. See backlog B-053.
+        #
+        # @param confirmation [Confirmation, nil] Explicit kwarg wins over
+        #   `config.console_unsafe_eval_confirmation`.
+        # @param audit_log_path [String, Pathname, nil] Explicit kwarg wins
+        #   over `config.console_unsafe_eval_audit_log_path`.
+        # @return [Hash] { eval_guard:, confirmation:, audit_logger:, unsafe_eval_enabled: }
+        # @raise [Woods::ConfigurationError] when opt-in is on but either
+        #   collaborator is missing.
+        def build_unsafe_eval_wiring(confirmation:, audit_log_path:)
+          return empty_unsafe_eval_wiring unless unsafe_eval_enabled?
+
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          confirmation ||= config&.console_unsafe_eval_confirmation
+          audit_log_path ||= config&.console_unsafe_eval_audit_log_path
+          require_unsafe_eval_collaborators!(confirmation, audit_log_path)
+
+          {
+            eval_guard: EvalGuard.new,
+            confirmation: confirmation,
+            audit_logger: AuditLogger.new(path: audit_log_path.to_s),
+            unsafe_eval_enabled: true
+          }
+        end
+
+        def empty_unsafe_eval_wiring
+          { eval_guard: nil, confirmation: nil, audit_logger: nil, unsafe_eval_enabled: false }
+        end
+
+        def require_unsafe_eval_collaborators!(confirmation, audit_log_path)
+          if confirmation.nil?
+            raise Woods::ConfigurationError,
+                  'WOODS_CONSOLE_UNSAFE_EVAL is set but no Confirmation was provided. ' \
+                  'Pass `unsafe_eval_confirmation:` to Server.build_embedded / RackMiddleware ' \
+                  'or set `config.console_unsafe_eval_confirmation`. Fail-closed by design — ' \
+                  'see backlog B-053 / docs/CONSOLE_MCP_SETUP.md.'
+          end
+          return unless audit_log_path.nil? || audit_log_path.to_s.strip.empty?
+
+          raise Woods::ConfigurationError,
+                'WOODS_CONSOLE_UNSAFE_EVAL is set but no audit-log path was provided. ' \
+                'Pass `unsafe_eval_audit_log_path:` to Server.build_embedded / RackMiddleware ' \
+                'or set `config.console_unsafe_eval_audit_log_path`. Every console_eval run ' \
+                'must be audited.'
         end
 
         # Register all tool specs for a given tier on the server.
@@ -423,9 +494,10 @@ module Woods
 
             ================================================================================
              WOODS_CONSOLE_UNSAFE_EVAL IS SET
-             console_eval opt-in scaffolding is active. Execution is STILL NOT IMPLEMENTED
-             (backlog: unsafe-eval-opt-in). The flag will also refuse to boot in
-             Rails.env.production?. If you did not mean to set this, unset the env var.
+             console_eval is LIVE on this process. Every run goes through EvalGuard +
+             Confirmation + SafeContext rollback + a wall-clock timeout and is recorded
+             to the audit log. The flag refuses to boot in Rails.env.production?.
+             If you did not mean to set this, unset the env var.
             ================================================================================
           BANNER
         end

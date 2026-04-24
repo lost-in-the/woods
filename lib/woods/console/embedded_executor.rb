@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
+require 'timeout'
+
+require_relative 'audit_logger'
 require_relative 'bridge'
+require_relative 'confirmation'
+require_relative 'eval_guard'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'scope_predicate_parser'
@@ -35,6 +40,10 @@ module Woods
       MAX_SQL_LIMIT = 10_000
       MAX_QUERY_LIMIT = 10_000
 
+      MIN_EVAL_TIMEOUT = 1
+      MAX_EVAL_TIMEOUT = 30
+      DEFAULT_EVAL_TIMEOUT = 10
+
       # @param model_validator [ModelValidator] Validates model/column names
       # @param safe_context [SafeContext] Wraps execution in rolled-back transaction
       # @param connection [Object, nil] Database connection for adapter detection
@@ -45,13 +54,30 @@ module Woods
       #   configured as blocked. Callers should pass the live gate from
       #   {Server#build_response_context} so embedded mode matches the bridge's
       #   defense-in-depth posture.
-      def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false,
-                     table_gate: nil)
+      # @param eval_guard [#check!, nil] EvalGuard for the `console_eval` opt-in
+      #   path. Required when `unsafe_eval_enabled` is true; nil otherwise.
+      # @param confirmation [Confirmation, nil] Human-in-the-loop approval for
+      #   `console_eval`. Required when `unsafe_eval_enabled` is true; nil
+      #   otherwise.
+      # @param audit_logger [AuditLogger, nil] Logs every `console_eval` attempt
+      #   (refused, denied, or executed). Required when `unsafe_eval_enabled` is
+      #   true; nil otherwise.
+      # @param unsafe_eval_enabled [Boolean] When true, the executor wires the
+      #   five-control eval path (guard + confirmation + SafeContext + timeout +
+      #   audit). When false, `console_eval` returns the hard `eval_disabled`
+      #   refusal as before.
+      def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false, # rubocop:disable Metrics/ParameterLists
+                     table_gate: nil, eval_guard: nil, confirmation: nil, audit_logger: nil,
+                     unsafe_eval_enabled: false)
         @model_validator = model_validator
         @safe_context = safe_context
         @connection = connection
         @read_tools_enabled = read_tools_enabled
         @table_gate = table_gate
+        @eval_guard = eval_guard
+        @confirmation = confirmation
+        @audit_logger = audit_logger
+        @unsafe_eval_enabled = unsafe_eval_enabled
       end
 
       # Execute a tool request and return a response hash.
@@ -113,19 +139,17 @@ module Woods
       # Return a pre-dispatch refusal hash for tools the executor cannot or
       # will not run, else nil to let dispatch proceed.
       #
-      # `eval` is refused unconditionally here — the branch short-circuits
-      # before reaching the Tier 4 handler, so {Woods::Console::EvalGuard}
-      # is intentionally not consulted on this path. EvalGuard remains the
-      # intended pre-execution gate for bridge mode and for the planned
-      # `WOODS_CONSOLE_UNSAFE_EVAL` opt-in (issue #87 / `unsafe-eval-opt-in`
-      # backlog). Do not call EvalGuard from here without also delivering
-      # the opt-in wiring — a partial wire-up would silently imply eval
-      # is runnable when it still isn't.
+      # `eval` is refused unconditionally when the opt-in is off. When the
+      # opt-in is on, this returns nil and `handle_eval` runs the full
+      # five-control path (guard → confirmation → SafeContext → timeout →
+      # audit). See `Server.unsafe_eval_enabled?` for the flag semantics.
       #
       # @param tool [String] Tool name
       # @return [Hash, nil]
       def refusal_for(tool)
         if tool == 'eval'
+          return nil if @unsafe_eval_enabled
+
           { 'ok' => false, 'error' => eval_disabled_message, 'error_type' => 'eval_disabled' }
         elsif !(TIER1_TOOLS.include?(tool) || (@read_tools_enabled && EMBEDDED_READ_TOOLS.include?(tool)))
           { 'ok' => false, 'error' => unsupported_message(tool), 'error_type' => 'unsupported' }
@@ -151,33 +175,207 @@ module Woods
         end
       end
 
-      # Instructional error payload for console_eval. Execution is deliberately
-      # punted — the backlog item unsafe-eval-opt-in spells out the safety
-      # contract required before eval can ever run. Until then we return a
-      # structured refusal that:
-      #   1. names why eval is off (no safe execution path yet),
+      # Instructional error payload for console_eval when the opt-in is off.
+      # The default posture is still "refused" — the opt-in must be enabled
+      # explicitly (env var + fail-closed collaborators) before any Ruby runs.
+      # The message:
+      #   1. names why eval is off (default-off opt-in),
       #   2. points the agent at console_query / console_sql as the usual
       #      substitute (both already handle group_by/having/aggregates),
       #   3. tells the agent to surface its proposed Ruby snippet to the
-      #      human before any retry — never silently re-invoke.
-      #
-      # The operator line names the planned opt-in without implying it's
-      # live — setting any env var today has no effect. Tracked as backlog
-      # B-053 (issue #87).
+      #      human before any retry — never silently re-invoke,
+      #   4. tells operators exactly which flag + collaborators to wire to
+      #      turn it on.
       #
       # @return [String] Multi-line actionable message.
       def eval_disabled_message
         <<~MSG.strip
-          console_eval is disabled — embedded mode has no safe execution path yet.
+          console_eval is disabled — the unsafe-eval opt-in is off by default.
           Use console_query (model + select + joins/group_by/having/order) or console_sql
           for anything you were about to run. Both already support aggregates and scoping.
           If you believe eval is still necessary, SHOW your proposed Ruby snippet to the
           user first and let them run it manually — do not retry console_eval automatically.
-          Operators: eval execution is intentionally not wired in embedded mode — no env
-          var or config flag enables it today. The planned opt-in (tracked as backlog
-          B-053 / issue #87) will add WOODS_CONSOLE_UNSAFE_EVAL + EvalGuard + a
-          Rails.env.production? refusal; until that lands, setting the env var does nothing.
+          Operators: set WOODS_CONSOLE_UNSAFE_EVAL=true (or console_unsafe_eval_enabled = true)
+          AND wire console_unsafe_eval_confirmation + console_unsafe_eval_audit_log_path.
+          The server refuses to boot with the flag on in Rails.env.production?, and refuses
+          to boot with the flag on but any collaborator missing (fail-closed).
+          See docs/CONSOLE_MCP_SETUP.md "console_eval opt-in" for the full checklist.
         MSG
+      end
+
+      # Handle the `console_eval` request on the opt-in path.
+      #
+      # Runs the five-control contract in order:
+      #   1. EvalGuard.check! — parse-time AST denylist (credentials,
+      #      reflection escapes, network, file-IO for credentials, shell).
+      #   2. Confirmation.request_confirmation — human-in-the-loop approval.
+      #      Callback mode lets the host route through a real approval UI;
+      #      auto-deny is the fail-closed default when the host didn't wire one.
+      #   3. SafeContext.execute — runs the code inside a rolled-back
+      #      transaction so any writes are discarded.
+      #   4. Timeout.timeout — clamps wall-clock time to MIN..MAX seconds.
+      #   5. AuditLogger.log — records every outcome (refused/denied/ok/error)
+      #      with CredentialScanner redaction on params and result_summary.
+      #
+      # Every exit path writes exactly one audit entry. Refusals caused by
+      # missing collaborators ("eval_misconfigured") never reach here — the
+      # server refuses to boot in that state.
+      #
+      # @param params [Hash] Must contain 'code'; optional 'timeout'
+      # @return [Hash] { 'result' => <inspect of return value> }
+      # @raise [ValidationError] on guard refusal, confirmation denial, or
+      #   timeout. `send_request` turns these into { ok: false } responses.
+      def handle_eval(params)
+        code = params['code']
+        raise ValidationError, 'Missing required parameter: code' if code.nil? || code.to_s.strip.empty?
+
+        timeout = eval_timeout_from(params['timeout'])
+        audit_params = { code: code, timeout: timeout }
+
+        # guard_check! / confirm! each audit on refusal before re-raising,
+        # so we only need an execution-time rescue around the eval itself.
+        guard_check!(code, audit_params)
+        confirm!(code, audit_params)
+
+        execute_and_audit(code, timeout, audit_params)
+      end
+
+      def execute_and_audit(code, timeout, audit_params)
+        result = run_eval_with_timeout(code, timeout)
+        summary = audit_summary(result)
+        audit(params: audit_params, confirmed: true, result_summary: summary)
+        { 'result' => summary }
+      rescue StandardError => e
+        audit(params: audit_params, confirmed: true,
+              result_summary: "error:#{e.class}:#{truncate(e.message)}")
+        raise
+      end
+
+      # Validate + clamp the user-supplied timeout. Accepts a positive
+      # Integer (or nil → default). Everything else is rejected so a
+      # caller passing `timeout: 0` or `timeout: "forever"` hears about
+      # it instead of silently getting MIN_EVAL_TIMEOUT.
+      def eval_timeout_from(raw)
+        return DEFAULT_EVAL_TIMEOUT if raw.nil?
+
+        unless raw.is_a?(Integer) && raw.positive?
+          raise ValidationError,
+                "timeout must be a positive integer (#{MIN_EVAL_TIMEOUT}..#{MAX_EVAL_TIMEOUT})"
+        end
+
+        raw.clamp(MIN_EVAL_TIMEOUT, MAX_EVAL_TIMEOUT)
+      end
+
+      def guard_check!(code, audit_params)
+        @eval_guard.check!(code)
+      rescue ForbiddenExpressionError => e
+        audit(params: audit_params, confirmed: false,
+              result_summary: "guard-refused:#{truncate(e.message)}")
+        raise ValidationError, "console_eval refused by EvalGuard: #{e.message}"
+      end
+
+      # Route approval through the host-supplied {Confirmation}. Passes
+      # the FULL code (bounded at 1 KB) as the description so the
+      # approval UI renders what was actually proposed, not just the
+      # first line. `params:` carries the same full code so callbacks
+      # that want to show more can dig into it.
+      def confirm!(code, audit_params)
+        @confirmation.request_confirmation(
+          tool: 'console_eval',
+          description: truncate(code, 1024),
+          params: audit_params
+        )
+      rescue ConfirmationDeniedError => e
+        audit(params: audit_params, confirmed: false,
+              result_summary: "denied:#{truncate(e.message)}")
+        raise ValidationError, 'console_eval denied by confirmation callback'
+      end
+
+      # Wrap the eval in a wall-clock timeout.
+      #
+      # `Timeout.timeout` on MRI uses a watchdog thread that calls
+      # `Thread#raise` — a well-known footgun because the target thread can
+      # be interrupted mid-operation and leak resource state. We accept the
+      # risk here because the only resource held is the AR connection inside
+      # SafeContext's transaction, which rolls back on any exception; the
+      # connection is returned to the pool by the surrounding
+      # `pool.with_connection` block. There is no safer stdlib primitive
+      # for "bound arbitrary Ruby to N seconds wall-clock" on MRI today.
+      def run_eval_with_timeout(code, timeout)
+        Timeout.timeout(timeout) { eval_in_sandbox(code) }
+      end
+
+      # The literal `eval` call. Kept in its own method so the policy
+      # decision (we *do* run arbitrary Ruby on the opt-in path) is visible
+      # at one grep-able location. All five controls must have passed to
+      # reach this method — callers other than `handle_eval` must not
+      # invoke it.
+      #
+      # We eval via `Object.new.instance_eval` rather than `eval(code,
+      # binding)` so `self` is a throwaway receiver, not the executor.
+      # Without this isolation, a payload like `@audit_logger = nil; 1`
+      # would silence the audit log by writing to the executor's own
+      # instance variables (EvalGuard denies the reflection APIs but does
+      # not catch the syntactic `@ivar = value` form on its own — that's
+      # plugged separately in {EvalGuard#scan_assignment_nodes}).
+      # Top-level constants (User, Rails, ActiveRecord::Base, etc.) still
+      # resolve because constant lookup on `instance_eval(String)` uses
+      # the receiver's class hierarchy, and Object (the throwaway's class)
+      # holds every top-level constant.
+      #
+      # SyntaxError / ScriptError don't descend from StandardError, so
+      # they'd otherwise escape every rescue in `execute_and_audit` and
+      # `send_request` — crashing the MCP dispatch loop. EvalGuard's
+      # parser should reject unparseable payloads upstream, but Prism's
+      # parser and Ruby's parser don't always agree; we translate the
+      # script-level errors to ValidationError so the normal refusal
+      # path owns them.
+      def eval_in_sandbox(code)
+        Object.new.instance_eval(code, '(console_eval)', 1)
+      rescue ScriptError => e
+        raise ValidationError, "console_eval payload could not be parsed by Ruby: #{e.class}: #{e.message}"
+      end
+
+      def audit(params:, confirmed:, result_summary:)
+        return unless @audit_logger
+
+        @audit_logger.log(
+          tool: 'console_eval',
+          params: params,
+          confirmed: confirmed,
+          result_summary: result_summary
+        )
+      rescue StandardError
+        # Never let audit failures break the request path; a separate
+        # operator alert covers audit-log write failures.
+      end
+
+      # Build the audit-log `result_summary` without triggering side-effects.
+      #
+      # Naive `result.inspect` on an `ActiveRecord::Relation` materializes
+      # the query — a second SQL round-trip that happens *after* the
+      # `Timeout.timeout` clamp and that can be arbitrarily expensive. We
+      # stringify primitives (safe, informative) and reduce complex
+      # objects to their class name so the audit entry is useful without
+      # costing extra I/O.
+      PRIMITIVE_AUDIT_TYPES = [
+        String, Numeric, Symbol, TrueClass, FalseClass, NilClass
+      ].freeze
+      private_constant :PRIMITIVE_AUDIT_TYPES
+
+      def audit_summary(result)
+        if PRIMITIVE_AUDIT_TYPES.any? { |type| result.is_a?(type) }
+          truncate(result.inspect)
+        else
+          "#<#{result.class.name}>"
+        end
+      rescue StandardError => e
+        "inspect-failed:#{e.class}"
+      end
+
+      def truncate(str, limit = 512)
+        s = str.to_s
+        s.length > limit ? "#{s[0, limit]}…" : s
       end
 
       # Route a tool name to its handler.
@@ -191,6 +389,7 @@ module Woods
         when 'schema' then handle_schema(params)
         when 'sql'    then handle_sql(params)
         when 'query'  then handle_query(params)
+        when 'eval'   then handle_eval(params)
         else
           validate_model!(params)
           send(:"handle_#{tool}", params)
