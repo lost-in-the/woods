@@ -695,7 +695,13 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
-                               'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion.'
+                               'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
+                               'When the unfiltered top-K has no candidate of a requested type, the retriever ' \
+                               'falls back to rank-within-type so the response is never empty when the index ' \
+                               'contains units of that type. The response appends a "Type rank context" table ' \
+                               'with per-type: top_of_type_global_rank, global_k, total_of_type. Caller reads ' \
+                               'those integers to tell a strong match (rank close to 1) from a weak one ' \
+                               '(rank > global_k, shown as —).'
                 },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },

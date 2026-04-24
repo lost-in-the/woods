@@ -103,6 +103,16 @@ RSpec.describe Woods::Storage::VectorStore do
         expect(results).to be_empty
       end
 
+      it 'treats Array filter values as membership (#108)' do
+        results = store.search([1.0, 0.0, 0.0], filters: { type: %w[model service] })
+        expect(results.map(&:id)).to contain_exactly('model_user', 'model_order', 'service_auth')
+      end
+
+      it 'an empty Array filter matches nothing' do
+        results = store.search([1.0, 0.0, 0.0], filters: { type: [] })
+        expect(results).to be_empty
+      end
+
       it 'returns empty array for empty store' do
         empty_store = described_class.new
 

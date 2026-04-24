@@ -77,6 +77,10 @@ RSpec.describe Woods::Retriever do
 
     # build_structural_context calls metadata_store.count; default to 0 (nil result)
     allow(metadata_store).to receive(:count).and_return(0)
+    # build_type_rank_context calls find_by_type for each requested type.
+    # Empty Array is the right default — tests that care about the total_of_type
+    # value override per-example.
+    allow(metadata_store).to receive(:find_by_type).and_return([])
   end
 
   # ── #retrieve ──────────────────────────────────────────────────────
@@ -273,6 +277,117 @@ RSpec.describe Woods::Retriever do
       end
 
       retriever.retrieve('stripe webhook signature verification')
+    end
+  end
+
+  # ── #108 rank-within-type + type_rank_context ──────────────────
+
+  describe 'types: rank context (#108)' do
+    let(:ranked_candidates) do
+      [
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'AuthService', score: 0.92, source: :vector,
+          metadata: { type: 'service' }
+        ),
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'UsersController', score: 0.85, source: :vector,
+          metadata: { type: 'controller' }
+        ),
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'SessionsController', score: 0.74, source: :vector,
+          metadata: { type: 'controller' }
+        )
+      ]
+    end
+
+    before do
+      allow(ranker_double).to receive(:rank).and_return(ranked_candidates)
+      allow(metadata_store).to receive(:find_by_type).with('controller').and_return(Array.new(42))
+      allow(metadata_store).to receive(:find_by_type).with('service').and_return(Array.new(17))
+      allow(metadata_store).to receive(:find_by_type).with('mailer').and_return(Array.new(3))
+    end
+
+    it 'returns nil type_rank_context when types: is not set' do
+      result = retriever.retrieve('how does auth work?')
+      expect(result.type_rank_context).to be_nil
+    end
+
+    it 'populates top_of_type_global_rank from the unfiltered ranked list' do
+      result = retriever.retrieve('how does auth work?', types: %w[controller])
+      expect(result.type_rank_context['controller']).to eq(
+        top_of_type_global_rank: 2, # UsersController is rank 2
+        global_k: 3,
+        total_of_type: 42
+      )
+    end
+
+    it 'emits per-type entries for multi-type requests' do
+      result = retriever.retrieve('how does auth work?', types: %w[controller service])
+      expect(result.type_rank_context.keys).to contain_exactly('controller', 'service')
+      expect(result.type_rank_context['service'][:top_of_type_global_rank]).to eq(1)
+      expect(result.type_rank_context['controller'][:top_of_type_global_rank]).to eq(2)
+    end
+
+    it 'leaves top_of_type_global_rank nil when the type is absent from the global ranked list' do
+      result = retriever.retrieve('how does auth work?', types: %w[mailer])
+      expect(result.type_rank_context['mailer']).to eq(
+        top_of_type_global_rank: nil,
+        global_k: 3,
+        total_of_type: 3
+      )
+    end
+
+    it 'falls back to rank-within-type when the global top-K has no candidate of the requested type' do
+      # mailer has zero candidates in the global ranked list. The executor
+      # should be called a second time with type_filter so we return a
+      # mailer rather than empty.
+      mailer_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'UserMailer', score: 0.4, source: :vector,
+        metadata: { type: 'mailer' }
+      )
+      fallback_result = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [mailer_candidate], strategy: :vector, query: 'how does auth work?'
+      )
+      expect(executor_double).to receive(:execute)
+        .with(hash_including(type_filter: %w[mailer]))
+        .and_return(fallback_result)
+      allow(ranker_double).to receive(:rank).and_return(ranked_candidates, [mailer_candidate])
+
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        expect(kwargs[:candidates].map(&:identifier)).to eq(%w[UserMailer])
+        assembled_context
+      end
+
+      result = retriever.retrieve('how does auth work?', types: %w[mailer])
+      # type_rank_context reports nil top-of-type — this match wasn't in the
+      # original global top-K; fallback surfaced it.
+      expect(result.type_rank_context['mailer'][:top_of_type_global_rank]).to be_nil
+    end
+
+    it 'does not invoke the fallback query when the global top-K already has the type' do
+      expect(executor_double).not_to receive(:execute).with(hash_including(type_filter: anything))
+      retriever.retrieve('how does auth work?', types: %w[controller])
+    end
+
+    it 'appends a type rank context table to the context string when types: is set' do
+      result = retriever.retrieve('how does auth work?', types: %w[controller])
+      expect(result.context).to include('### Type rank context')
+      expect(result.context).to include('| controller | 2 | 3 | 42 |')
+    end
+
+    it 'records total_of_type: 0 when the index has no units of the requested type' do
+      allow(metadata_store).to receive(:find_by_type).with('policy').and_return([])
+      # with zero of that type in the index, fallback runs but returns nothing
+      empty_fallback = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [], strategy: :vector, query: 'how does auth work?'
+      )
+      allow(executor_double).to receive(:execute).and_return(empty_fallback)
+      allow(ranker_double).to receive(:rank).and_return(ranked_candidates, [])
+
+      result = retriever.retrieve('how does auth work?', types: %w[policy])
+      expect(result.type_rank_context['policy'][:total_of_type]).to eq(0)
     end
   end
 
