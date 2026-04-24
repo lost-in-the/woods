@@ -112,6 +112,15 @@ module Woods
       # Return a pre-dispatch refusal hash for tools the executor cannot or
       # will not run, else nil to let dispatch proceed.
       #
+      # `eval` is refused unconditionally here — the branch short-circuits
+      # before reaching the Tier 4 handler, so {Woods::Console::EvalGuard}
+      # is intentionally not consulted on this path. EvalGuard remains the
+      # intended pre-execution gate for bridge mode and for the planned
+      # `WOODS_CONSOLE_UNSAFE_EVAL` opt-in (issue #87 / `unsafe-eval-opt-in`
+      # backlog). Do not call EvalGuard from here without also delivering
+      # the opt-in wiring — a partial wire-up would silently imply eval
+      # is runnable when it still isn't.
+      #
       # @param tool [String] Tool name
       # @return [Hash, nil]
       def refusal_for(tool)

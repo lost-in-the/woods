@@ -527,5 +527,22 @@
     "description": "Three rake tasks: woods:retrieve[query] (CLI retrieval with HumanAdapter), woods:embed (full embedding pipeline), woods:embed_incremental (content_hash-based).",
     "status": "resolved",
     "depends_on": ["B-038"]
+  },
+  {
+    "id": "B-053",
+    "slug": "unsafe-eval-opt-in",
+    "title": "Wire console_eval behind WOODS_CONSOLE_UNSAFE_EVAL + EvalGuard (v0.2)",
+    "severity": "medium",
+    "category": "implementation",
+    "layer": "console-mcp",
+    "files": [
+      "lib/woods/console/embedded_executor.rb",
+      "lib/woods/console/eval_guard.rb",
+      "lib/woods/console/server.rb",
+      "docs/CONSOLE_MCP_SETUP.md"
+    ],
+    "description": "Embedded-mode console_eval is hard-refused at dispatch (EmbeddedExecutor#refusal_for), so EvalGuard is unreachable on the shipped path. The refusal message already advertises WOODS_CONSOLE_UNSAFE_EVAL + a Rails.env.production? rejection as the opt-in contract, but the execution wiring is not implemented. Deliver the full contract before running any Ruby: (1) gate on both config.console_unsafe_eval_enabled AND ENV['WOODS_CONSOLE_UNSAFE_EVAL']; (2) refuse unconditionally when Rails.env.production?; (3) run EvalGuard.check! before dispatch; (4) require Confirmation approval; (5) record the run in AuditLogger. Partial wiring is worse than the current refusal — ship all five or none. Tracked in issue #87 (option 2 deferral).",
+    "status": "open",
+    "depends_on": []
   }
 ]
