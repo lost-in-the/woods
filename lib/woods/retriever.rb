@@ -450,7 +450,7 @@ module Woods
       end
 
       "Codebase: #{total} searchable entries (#{type_counts.join(', ')}). " \
-        'Entries include per-chunk rows for chunked units; run `structure` for canonical unit counts.'
+        'Entries include per-chunk rows for chunked units; see `structure` for canonical unit counts.'
     rescue StandardError
       nil
     end
