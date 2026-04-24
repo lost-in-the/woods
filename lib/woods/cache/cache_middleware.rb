@@ -96,11 +96,17 @@ module Woods
 
       # Embed a single text, returning a cached vector when available.
       #
+      # Shares the per-text single-flight map with {#embed_batch}, so concurrent
+      # `embed("x")` / `embed_batch(["x", ...])` misses for the same text all
+      # attach to the same in-flight entry and produce exactly one provider call.
+      #
       # @param text [String] Text to embed
       # @return [Array<Float>] Embedding vector
       def embed(text)
-        key = embedding_key(text)
-        @cache_store.fetch(key, ttl: @ttl) { @provider.embed(text) }
+        cached = @cache_store.read(embedding_key(text))
+        return cached unless cached.nil?
+
+        with_single_flight(text) { @provider.embed(text) }
       end
 
       # Embed a batch of texts, using cached vectors for any previously seen texts.
@@ -154,6 +160,48 @@ module Woods
       end
 
       private
+
+      # Run a provider block for a single text under the shared single-flight map.
+      # The first thread to miss on `text` becomes the owner, runs the block, caches
+      # the result, and fulfills the entry. Concurrent callers for the same text
+      # wait on the same entry. Errors propagate to waiters via {InflightEntry#reject}.
+      #
+      # @param text [String]
+      # @yieldreturn [Array<Float>] the freshly computed embedding vector
+      # @return [Array<Float>]
+      def with_single_flight(text)
+        entry, owner = claim_single(text)
+        return entry.await unless owner
+
+        begin
+          vector = yield
+          write_cache(text, vector)
+          entry.fulfill(vector)
+          vector
+        rescue StandardError => e
+          entry.reject(e)
+          raise
+        ensure
+          entry.reject(OwnerAbortedError.new)
+          clear_inflight([text])
+        end
+      end
+
+      # Single-text counterpart of {#claim_inflight}. Returns the entry for `text`
+      # and a boolean indicating whether the current thread is the owner.
+      #
+      # @param text [String]
+      # @return [Array(InflightEntry, Boolean)]
+      def claim_single(text)
+        @inflight_mutex.synchronize do
+          existing = @inflight[text]
+          return [existing, false] if existing
+
+          entry = InflightEntry.new
+          @inflight[text] = entry
+          [entry, true]
+        end
+      end
 
       # Claim ownership of miss texts that no other thread is currently fetching.
       # Returns four arrays describing the split of `misses`:
@@ -210,6 +258,13 @@ module Woods
 
         begin
           fresh_vectors = @provider.embed_batch(to_fetch)
+          # Reject a malformed provider response up-front rather than silently
+          # fulfilling waiters with `nil` (or masking a missing tail vector by
+          # under-writing the cache).
+          if fresh_vectors.size != to_fetch.size
+            raise ArgumentError,
+                  "provider returned #{fresh_vectors.size} vectors for #{to_fetch.size} texts"
+          end
         rescue StandardError => e
           our_entries.each { |entry| entry.reject(e) }
           raise
