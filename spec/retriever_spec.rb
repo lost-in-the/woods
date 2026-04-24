@@ -599,6 +599,27 @@ RSpec.describe Woods::Retriever do
       expect(result).to include('2 jobs')
     end
 
+    it 'points at the structure tool as the canonical source for unit-level counts' do
+      # #105 — searchable_entries (retriever) and units_indexed (manifest)
+      # disagree because chunking duplicates long units. Without an
+      # explicit pointer, operators reading the retriever banner can't
+      # tell which number is authoritative for "did extraction capture
+      # everything?"; the cross-reference resolves that.
+      allow(metadata_store).to receive(:count).and_return(20)
+      allow(metadata_store).to receive(:find_by_type).with('model').and_return(Array.new(10))
+      allow(metadata_store).to receive(:find_by_type).with('controller').and_return(Array.new(5))
+      allow(metadata_store).to receive(:find_by_type).with('service').and_return([])
+      allow(metadata_store).to receive(:find_by_type).with('job').and_return([])
+      allow(metadata_store).to receive(:find_by_type).with('mailer').and_return([])
+      allow(metadata_store).to receive(:find_by_type).with('component').and_return([])
+      allow(metadata_store).to receive(:find_by_type).with('graphql').and_return([])
+
+      result = retriever.send(:build_structural_context)
+
+      expect(result).to match(/`?structure`?/)
+      expect(result).to include('unit')
+    end
+
     it 'omits types with zero count' do
       allow(metadata_store).to receive(:count).and_return(15)
       allow(metadata_store).to receive(:find_by_type).with('model').and_return(Array.new(10))
