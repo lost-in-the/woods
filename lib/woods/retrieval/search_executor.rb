@@ -61,9 +61,15 @@ module Woods
       #   filter — used by {Retriever#retrieve} to rank-within-type when
       #   the unfiltered global top-K had no candidate of the requested type.
       #   Overrides the classifier-derived +target_type+ in filter construction.
+      # @param strategy [Symbol, nil] Override the classifier-selected strategy.
+      #   {Retriever#within_type_fallback} passes +:vector+ here because the
+      #   vector path is the only one that honors +type_filter+; if the
+      #   classifier picked +:keyword+ / +:graph+ / +:direct+ the fallback
+      #   would otherwise silently re-run the same strategy, get filtered to
+      #   empty, and violate the "never empty when units exist" contract.
       # @return [ExecutionResult] Candidates with strategy metadata
-      def execute(query:, classification:, limit: 20, type_filter: nil)
-        strategy = select_strategy(classification)
+      def execute(query:, classification:, limit: 20, type_filter: nil, strategy: nil)
+        strategy ||= select_strategy(classification)
         candidates = run_strategy(
           strategy,
           query: query,

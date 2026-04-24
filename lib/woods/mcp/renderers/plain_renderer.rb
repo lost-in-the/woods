@@ -95,7 +95,7 @@ module Woods
           lines << "  units_indexed: #{manifest['total_units']}" if manifest['total_units']
           template_engines = fetch_key(data, :template_engines)
           if template_engines.is_a?(Array) && template_engines.any?
-            lines << "  template_engines: #{template_engines.join(', ')} (HAML/Slim/Stimulus/Turbo not extracted)"
+            lines << "  template_engines: #{template_engines.join(', ')}"
           end
 
           counts = manifest['counts']

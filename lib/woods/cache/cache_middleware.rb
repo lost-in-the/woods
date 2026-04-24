@@ -430,18 +430,7 @@ module Woods
       def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
         key = context_key(query, budget, types: types, exclude_types: exclude_types)
         cached = @cache_store.read(key)
-
-        if cached
-          return Retriever::RetrievalResult.new(
-            context: cached['context'],
-            sources: cached['sources'],
-            classification: nil,
-            strategy: cached['strategy']&.to_sym,
-            tokens_used: cached['tokens_used'],
-            budget: budget,
-            trace: nil
-          )
-        end
+        return rehydrate_cached(cached, budget) if cached
 
         result = @retriever.retrieve(query, budget: budget, types: types, exclude_types: exclude_types)
 
@@ -484,13 +473,55 @@ module Woods
       #
       # @param result [Retriever::RetrievalResult]
       # @return [Hash]
+      def rehydrate_cached(cached, budget)
+        Retriever::RetrievalResult.new(
+          context: cached['context'],
+          sources: cached['sources'],
+          classification: nil,
+          strategy: cached['strategy']&.to_sym,
+          tokens_used: cached['tokens_used'],
+          budget: budget,
+          trace: nil,
+          type_rank_context: rehydrate_type_rank_context(cached['type_rank_context'])
+        )
+      end
+
       def serialize_result(result)
         {
           'context' => result.context,
           'sources' => result.sources,
           'strategy' => result.strategy&.to_s,
-          'tokens_used' => result.tokens_used
+          'tokens_used' => result.tokens_used,
+          'type_rank_context' => serialize_type_rank_context(result.type_rank_context)
         }
+      end
+
+      # type_rank_context is a Hash<String => Hash<Symbol, ...>> with
+      # :source carrying a Symbol value. JSON-backed caches (Redis,
+      # SolidCache) collapse both to strings on the round-trip, so we
+      # serialize explicitly and re-symbolize both the inner keys and
+      # the :source value on rehydrate. The programmatic contract is
+      # "symbol keys, symbol :source value" regardless of cache hit
+      # vs miss.
+      def serialize_type_rank_context(ctx)
+        return nil if ctx.nil?
+
+        ctx.each_with_object({}) do |(type, info), out|
+          out[type] = info.each_with_object({}) do |(k, v), h|
+            h[k.to_s] = k == :source ? v.to_s : v
+          end
+        end
+      end
+
+      def rehydrate_type_rank_context(raw)
+        return nil if raw.nil?
+
+        raw.each_with_object({}) do |(type, info), out|
+          out[type] = info.each_with_object({}) do |(k, v), h|
+            sym_k = k.to_sym
+            h[sym_k] = sym_k == :source ? v.to_sym : v
+          end
+        end
       end
     end
   end

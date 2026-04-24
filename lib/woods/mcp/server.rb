@@ -697,11 +697,13 @@ module Woods
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
                                'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
                                'When the unfiltered top-K has no candidate of a requested type, the retriever ' \
-                               'falls back to rank-within-type so the response is never empty when the index ' \
-                               'contains units of that type. The response appends a "Type rank context" table ' \
-                               'with per-type: top_of_type_global_rank, global_k, total_of_type. Caller reads ' \
-                               'those integers to tell a strong match (rank close to 1) from a weak one ' \
-                               '(rank > global_k, shown as —).'
+                               'falls back to rank-within-type so the response is populated whenever units of ' \
+                               'the requested type exist in the index. The response appends a "Type rank ' \
+                               'context" table with per-type: source, rank in unfiltered top-K, global_k, ' \
+                               'total_of_type. Read source to tell the cases apart: in_top_k (strong match), ' \
+                               'within_type_fallback (weak match surfaced by the fallback), outside_top_k ' \
+                               '(index has this type but other requested types filled the result), absent ' \
+                               '(zero units of this type in the index).'
                 },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },

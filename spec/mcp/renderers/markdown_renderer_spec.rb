@@ -107,13 +107,12 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
       expect(out).to include('searchable_entries')
     end
 
-    it 'reports supported template engines and names what is out-of-scope (#86)' do
+    it 'reports supported template engines (#86)' do
       out = renderer.render(:structure, {
                               manifest: { 'total_units' => 10, 'counts' => {} },
                               template_engines: [:erb]
                             })
       expect(out).to include('**Supported template engines:** erb')
-      expect(out).to include('HAML, Slim, Stimulus, Turbo are not extracted')
     end
   end
 

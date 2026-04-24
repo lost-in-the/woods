@@ -583,6 +583,13 @@ RSpec.describe Woods::MCP::IndexReader do
         expect(results).to be_empty
       end
 
+      it 'returns empty when two of three tokens match but the third does not' do
+        # Both "ActiveRecord" and "Persistence" appear in ActiveRecord::Base;
+        # "nonexistent_marker" does not. The AND semantic must reject.
+        results = reader.framework_sources('ActiveRecord Persistence nonexistent_marker')
+        expect(results).to be_empty
+      end
+
       it 'returns empty for a whitespace-only keyword rather than raising' do
         expect(reader.framework_sources('   ')).to eq([])
       end

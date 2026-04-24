@@ -315,6 +315,7 @@ RSpec.describe Woods::Retriever do
     it 'populates top_of_type_global_rank from the unfiltered ranked list' do
       result = retriever.retrieve('how does auth work?', types: %w[controller])
       expect(result.type_rank_context['controller']).to eq(
+        source: :in_top_k,
         top_of_type_global_rank: 2, # UsersController is rank 2
         global_k: 3,
         total_of_type: 42
@@ -325,14 +326,43 @@ RSpec.describe Woods::Retriever do
       result = retriever.retrieve('how does auth work?', types: %w[controller service])
       expect(result.type_rank_context.keys).to contain_exactly('controller', 'service')
       expect(result.type_rank_context['service'][:top_of_type_global_rank]).to eq(1)
+      expect(result.type_rank_context['service'][:source]).to eq(:in_top_k)
       expect(result.type_rank_context['controller'][:top_of_type_global_rank]).to eq(2)
+      expect(result.type_rank_context['controller'][:source]).to eq(:in_top_k)
     end
 
-    it 'leaves top_of_type_global_rank nil when the type is absent from the global ranked list' do
+    it 'marks :source as :within_type_fallback when the type is missing from top-K but exists in the index' do
+      # mailer isn't in ranked_candidates; fallback runs with mailer
+      # candidate and the per-type :source reflects that path.
+      mailer_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'UserMailer', score: 0.4, source: :vector,
+        metadata: { type: 'mailer' }
+      )
+      fallback_result = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [mailer_candidate], strategy: :vector, query: 'how does auth work?'
+      )
+      allow(executor_double).to receive(:execute).and_return(fallback_result)
+      allow(ranker_double).to receive(:rank).and_return(ranked_candidates, [mailer_candidate])
+
       result = retriever.retrieve('how does auth work?', types: %w[mailer])
       expect(result.type_rank_context['mailer']).to eq(
+        source: :within_type_fallback,
         top_of_type_global_rank: nil,
         global_k: 3,
+        total_of_type: 3
+      )
+    end
+
+    it 'marks :source as :outside_top_k when the type exists in the index but fallback did not run' do
+      # Multi-type query where one type is in top-K (controller) and
+      # another isn't (mailer). filtered is non-empty from controllers,
+      # so fallback skips. mailer's :source is :outside_top_k.
+      result = retriever.retrieve('how does auth work?', types: %w[controller mailer])
+      expect(result.type_rank_context['controller'][:source]).to eq(:in_top_k)
+      expect(result.type_rank_context['mailer']).to include(
+        source: :outside_top_k,
+        top_of_type_global_rank: nil,
         total_of_type: 3
       )
     end
@@ -373,10 +403,61 @@ RSpec.describe Woods::Retriever do
     it 'appends a type rank context table to the context string when types: is set' do
       result = retriever.retrieve('how does auth work?', types: %w[controller])
       expect(result.context).to include('### Type rank context')
-      expect(result.context).to include('| controller | 2 | 3 | 42 |')
+      expect(result.context).to include('| controller | in_top_k | 2 | 3 | 42 |')
     end
 
-    it 'records total_of_type: 0 when the index has no units of the requested type' do
+    it 'forces strategy: :vector in the fallback so keyword/graph/direct classifications still surface results' do
+      # Simulate a query the classifier sends to :keyword strategy.
+      # Without a strategy override, the fallback would re-run :keyword
+      # (which ignores type_filter) and come back empty. With the
+      # override, :vector runs and returns a mailer.
+      keyword_classification = instance_double(
+        Woods::Retrieval::QueryClassifier::Classification,
+        intent: :locate, scope: :broad, target_type: nil, keywords: %w[mailer]
+      )
+      allow(classifier_double).to receive(:classify).and_return(keyword_classification)
+
+      mailer_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'UserMailer', score: 0.4, source: :vector,
+        metadata: { type: 'mailer' }
+      )
+      global_result = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [], strategy: :keyword, query: 'find mailer'
+      )
+      vector_fallback = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [mailer_candidate], strategy: :vector, query: 'find mailer'
+      )
+      allow(executor_double).to receive(:execute) do |**kwargs|
+        kwargs[:strategy] == :vector ? vector_fallback : global_result
+      end
+      allow(ranker_double).to receive(:rank).and_return([], [mailer_candidate])
+
+      retriever.retrieve('find mailer', types: %w[mailer])
+      expect(executor_double).to have_received(:execute).with(
+        hash_including(strategy: :vector, type_filter: %w[mailer])
+      )
+    end
+
+    it 'skips the fallback entirely when every requested type has 0 units in the index' do
+      allow(metadata_store).to receive(:find_by_type).with('nonexistent').and_return([])
+      empty_result = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [], strategy: :vector, query: 'x'
+      )
+      # Only the initial (non-fallback) execute call should fire — a
+      # second call would mean we wasted a vector search on a type we
+      # already know doesn't exist.
+      expect(executor_double).to receive(:execute).once.and_return(empty_result)
+      allow(ranker_double).to receive(:rank).and_return([])
+
+      result = retriever.retrieve('x', types: %w[nonexistent])
+      expect(result.type_rank_context['nonexistent'][:source]).to eq(:absent)
+      expect(result.type_rank_context['nonexistent'][:total_of_type]).to eq(0)
+    end
+
+    it 'records total_of_type: 0 and :source :absent when the index has no units of the requested type' do
       allow(metadata_store).to receive(:find_by_type).with('policy').and_return([])
       # with zero of that type in the index, fallback runs but returns nothing
       empty_fallback = instance_double(
