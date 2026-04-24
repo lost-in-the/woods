@@ -163,6 +163,19 @@ module Woods
         @parser = parser
       end
 
+      # Textual token for class-variable (`@@foo = …`) and global-variable
+      # (`$foo = …`) assignments. {Woods::Ast::Parser} doesn't normalize
+      # cvasgn / gvasgn to a dedicated node type, so we catch them at the
+      # source level the same way shell-execution literals are caught.
+      # Instance-variable writes (`@foo = …`) ARE normalized to `:ivasgn`
+      # and are refused via the AST walk — see {#scan_assignment_nodes}.
+      CLASS_OR_GLOBAL_VAR_ASSIGNMENT = /
+        (?:^|[^\w])         # not mid-identifier
+        (@@\w+|\$\w+)       # @@cvar or $gvar
+        \s*=(?!=)           # single `=`, not `==`
+      /x
+      private_constant :CLASS_OR_GLOBAL_VAR_ASSIGNMENT
+
       # @param code [String]
       # @raise [ForbiddenExpressionError]
       def check!(code)
@@ -177,9 +190,12 @@ module Woods
           raise ForbiddenExpressionError, 'payload contains a shell-execution literal (backtick or %x)'
         end
 
+        refuse_class_or_global_var_assignment!(code)
+
         tree = parse_or_refuse(code)
         scan_send_nodes(tree)
         scan_const_nodes(tree)
+        scan_assignment_nodes(tree)
       end
 
       private
@@ -207,6 +223,29 @@ module Woods
                   "payload references denied constant #{node.method_name}"
           end
         end
+      end
+
+      # Refuse `@ivar = …` writes. The embedded `console_eval` path runs
+      # inside a throwaway receiver, so a payload setting `@audit_logger
+      # = nil` would only affect the throwaway — but we deny the syntactic
+      # form anyway as defense-in-depth for any future caller that might
+      # hand EvalGuard a payload evaluated in a non-isolated binding.
+      def scan_assignment_nodes(tree)
+        node = tree.find_all(:ivasgn).first
+        return unless node
+
+        raise ForbiddenExpressionError,
+              "payload writes to instance variable #{node.method_name}"
+      end
+
+      # Textual refusal for `@@cvar = …` / `$gvar = …`. The parser
+      # normalization doesn't distinguish cvasgn / gvasgn today; the
+      # source-level scan is the same shape as the backtick check above.
+      def refuse_class_or_global_var_assignment!(code)
+        return unless (match = CLASS_OR_GLOBAL_VAR_ASSIGNMENT.match(code))
+
+        raise ForbiddenExpressionError,
+              "payload writes to #{match[1]} (class/global variable assignment)"
       end
 
       def refuse_reflection!(node)

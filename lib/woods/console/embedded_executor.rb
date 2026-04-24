@@ -251,8 +251,19 @@ module Woods
         raise
       end
 
+      # Validate + clamp the user-supplied timeout. Accepts a positive
+      # Integer (or nil → default). Everything else is rejected so a
+      # caller passing `timeout: 0` or `timeout: "forever"` hears about
+      # it instead of silently getting MIN_EVAL_TIMEOUT.
       def eval_timeout_from(raw)
-        (raw || DEFAULT_EVAL_TIMEOUT).to_i.clamp(MIN_EVAL_TIMEOUT, MAX_EVAL_TIMEOUT)
+        return DEFAULT_EVAL_TIMEOUT if raw.nil?
+
+        unless raw.is_a?(Integer) && raw.positive?
+          raise ValidationError,
+                "timeout must be a positive integer (#{MIN_EVAL_TIMEOUT}..#{MAX_EVAL_TIMEOUT})"
+        end
+
+        raw.clamp(MIN_EVAL_TIMEOUT, MAX_EVAL_TIMEOUT)
       end
 
       def guard_check!(code, audit_params)
@@ -263,10 +274,15 @@ module Woods
         raise ValidationError, "console_eval refused by EvalGuard: #{e.message}"
       end
 
+      # Route approval through the host-supplied {Confirmation}. Passes
+      # the FULL code (bounded at 1 KB) as the description so the
+      # approval UI renders what was actually proposed, not just the
+      # first line. `params:` carries the same full code so callbacks
+      # that want to show more can dig into it.
       def confirm!(code, audit_params)
         @confirmation.request_confirmation(
           tool: 'console_eval',
-          description: code.to_s.lines.first.to_s.strip,
+          description: truncate(code, 1024),
           params: audit_params
         )
       rescue ConfirmationDeniedError => e
@@ -275,6 +291,16 @@ module Woods
         raise ValidationError, 'console_eval denied by confirmation callback'
       end
 
+      # Wrap the eval in a wall-clock timeout.
+      #
+      # `Timeout.timeout` on MRI uses a watchdog thread that calls
+      # `Thread#raise` — a well-known footgun because the target thread can
+      # be interrupted mid-operation and leak resource state. We accept the
+      # risk here because the only resource held is the AR connection inside
+      # SafeContext's transaction, which rolls back on any exception; the
+      # connection is returned to the pool by the surrounding
+      # `pool.with_connection` block. There is no safer stdlib primitive
+      # for "bound arbitrary Ruby to N seconds wall-clock" on MRI today.
       def run_eval_with_timeout(code, timeout)
         Timeout.timeout(timeout) { eval_in_sandbox(code) }
       end
@@ -284,10 +310,19 @@ module Woods
       # at one grep-able location. All five controls must have passed to
       # reach this method — callers other than `handle_eval` must not
       # invoke it.
+      #
+      # We eval via `Object.new.instance_eval` rather than `eval(code,
+      # binding)` so `self` is a throwaway receiver, not the executor.
+      # Without this isolation, a payload like `@audit_logger = nil; 1`
+      # would silence the audit log by writing to the executor's own
+      # instance variables (EvalGuard denies the reflection APIs but does
+      # not catch the syntactic `@ivar = value` form on its own — that's
+      # plugged separately in {EvalGuard#refuse_variable_assignment!}).
+      # Top-level constants (User, Rails, ActiveRecord::Base, etc.) still
+      # resolve because constant lookup on `instance_eval(String)` uses
+      # the lexical scope of the caller, which reaches `::Object`.
       def eval_in_sandbox(code)
-        # rubocop:disable Security/Eval
-        eval(code, binding, '(console_eval)', 1)
-        # rubocop:enable Security/Eval
+        Object.new.instance_eval(code, '(console_eval)', 1)
       end
 
       def audit(params:, confirmed:, result_summary:)
@@ -304,8 +339,25 @@ module Woods
         # operator alert covers audit-log write failures.
       end
 
+      # Build the audit-log `result_summary` without triggering side-effects.
+      #
+      # Naive `result.inspect` on an `ActiveRecord::Relation` materializes
+      # the query — a second SQL round-trip that happens *after* the
+      # `Timeout.timeout` clamp and that can be arbitrarily expensive. We
+      # stringify primitives (safe, informative) and reduce complex
+      # objects to their class name so the audit entry is useful without
+      # costing extra I/O.
+      PRIMITIVE_AUDIT_TYPES = [
+        String, Numeric, Symbol, TrueClass, FalseClass, NilClass
+      ].freeze
+      private_constant :PRIMITIVE_AUDIT_TYPES
+
       def audit_summary(result)
-        truncate(result.inspect)
+        if PRIMITIVE_AUDIT_TYPES.any? { |type| result.is_a?(type) }
+          truncate(result.inspect)
+        else
+          "#<#{result.class.name}>"
+        end
       rescue StandardError => e
         "inspect-failed:#{e.class}"
       end

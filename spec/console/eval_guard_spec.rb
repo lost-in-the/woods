@@ -230,5 +230,35 @@ RSpec.describe Woods::Console::EvalGuard do
           .to raise_error(Woods::Console::ForbiddenExpressionError, /URI/)
       end
     end
+
+    # Regression: a payload like `@audit_logger = nil; 1` could previously
+    # silence the executor's audit log by writing to its instance variables.
+    # The embedded eval path now runs inside a throwaway receiver, but we
+    # also deny the syntactic forms as defense-in-depth.
+    context 'with variable-assignment bypass attempts' do
+      it 'rejects instance-variable assignment' do
+        expect { described_class.check!('@audit_logger = nil') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /instance variable @audit_logger/)
+      end
+
+      it 'rejects class-variable assignment' do
+        expect { described_class.check!('@@global_flag = true') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /@@global_flag/)
+      end
+
+      it 'rejects global-variable assignment' do
+        expect { described_class.check!('$foo = 1') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /\$foo/)
+      end
+
+      it 'rejects multi-statement payloads that hide the assignment' do
+        expect { described_class.check!('User.count; @audit_logger = nil') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /instance variable/)
+      end
+
+      it 'does not false-positive on equality comparisons' do
+        expect { described_class.check!('User.where("name == ?", x)') }.not_to raise_error
+      end
+    end
   end
 end
