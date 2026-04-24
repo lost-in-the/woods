@@ -39,6 +39,13 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(parsed['error']['message']).to match(/Origin not allowed/)
     end
 
+    it 'does not echo the rejected origin value in the response body' do
+      malicious = 'http://evil.example.com/<script>alert(1)</script>'
+      _status, _headers, body = call(middleware, origin: malicious)
+      expect(body.first).not_to include('evil.example.com')
+      expect(body.first).not_to include('<script>')
+    end
+
     it 'adds CORS headers to allowed responses' do
       _status, headers, = call(middleware, origin: 'http://localhost')
       expect(headers['access-control-allow-origin']).to eq('http://localhost')

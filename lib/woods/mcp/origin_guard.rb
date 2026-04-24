@@ -22,6 +22,8 @@ module Woods
       ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS'
       ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id'
 
+      FORBIDDEN_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' }, id: nil }.to_json.freeze
+
       def initialize(app, allowed_origins: nil)
         @app = app
         @allowed = Array(allowed_origins).compact.reject { |o| o.to_s.strip.empty? }.map { |o| normalize(o) }
@@ -32,7 +34,7 @@ module Woods
         origin = env['HTTP_ORIGIN']
         method = env['REQUEST_METHOD']
 
-        return forbidden(origin) if origin && !origin_allowed?(origin)
+        return forbidden if origin && !origin_allowed?(origin)
 
         return preflight(origin) if method == 'OPTIONS'
 
@@ -66,9 +68,8 @@ module Woods
         }
       end
 
-      def forbidden(origin)
-        body = { jsonrpc: '2.0', error: { code: -32_002, message: "Origin not allowed: #{origin}" }, id: nil }.to_json
-        [403, { 'content-type' => 'application/json' }, [body]]
+      def forbidden
+        [403, { 'content-type' => 'application/json' }, [FORBIDDEN_BODY]]
       end
     end
   end
