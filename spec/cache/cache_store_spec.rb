@@ -295,6 +295,167 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
     end
   end
 
+  # Regression — round-5 audit X-1 / issue #88. Without per-text single-flight,
+  # N threads missing on the same text all fan out to the provider, burning API
+  # quota and tripping rate limits. These specs stage a stampede deterministically
+  # with a Queue barrier and assert the provider is called exactly once per text.
+  describe '#embed_batch single-flight under concurrent misses' do
+    let(:provider) do
+      instance_double('EmbeddingProvider',
+                      dimensions: 768,
+                      model_name: 'test-model')
+    end
+
+    it 'deduplicates provider calls when N threads miss on the same texts' do
+      call_mutex = Mutex.new
+      call_count = 0
+      started = Queue.new
+      release = Queue.new
+
+      allow(provider).to receive(:embed_batch) do |texts|
+        call_mutex.synchronize { call_count += 1 }
+        started << :go
+        release.pop # hold the provider call open until released
+        texts.map { |t| [t.bytesize] }
+      end
+
+      thread_count = 5
+      threads = Array.new(thread_count) do
+        Thread.new { cached_provider.embed_batch(%w[shared-a shared-b]) }
+      end
+
+      started.pop      # wait for at least one provider call to begin
+      sleep 0.1        # give any stampeders time to also enter embed_batch
+      # Enough release tokens to unblock any path (broken or fixed). Excess tokens
+      # are harmless — the queue is drained when the spec ends.
+      thread_count.times { release << :go }
+
+      results = threads.map(&:value)
+
+      expect(call_count).to eq(1)
+      expect(results).to all(eq([[8], [8]])) # 'shared-a'.bytesize == 8
+    end
+
+    it 'parallelizes disjoint batches instead of serializing on a global lock' do
+      mutex = Mutex.new
+      in_flight = 0
+      max_in_flight = 0
+
+      allow(provider).to receive(:embed_batch) do |texts|
+        mutex.synchronize do
+          in_flight += 1
+          max_in_flight = [max_in_flight, in_flight].max
+        end
+        sleep 0.05
+        mutex.synchronize { in_flight -= 1 }
+        texts.map { |t| [t.bytesize] }
+      end
+
+      t1 = Thread.new { cached_provider.embed_batch(%w[alpha beta]) }
+      t2 = Thread.new { cached_provider.embed_batch(%w[gamma delta]) }
+      t1.value
+      t2.value
+
+      expect(max_in_flight).to eq(2)
+    end
+
+    it 'only fetches overlapping texts once across racing batches' do
+      call_log = Queue.new
+      release = Queue.new
+
+      allow(provider).to receive(:embed_batch) do |texts|
+        call_log << texts.dup
+        release.pop
+        texts.map { |t| [t.bytesize] }
+      end
+
+      # t1 enters first and claims 'one' + 'shared'.
+      t1 = Thread.new { cached_provider.embed_batch(%w[one shared]) }
+      first_call = call_log.pop
+      expect(first_call).to eq(%w[one shared]) # sanity
+
+      # t2 starts while t1 is still in the provider call. With single-flight,
+      # t2 should claim only 'two' and wait on t1's entry for 'shared'.
+      t2 = Thread.new { cached_provider.embed_batch(%w[shared two]) }
+      sleep 0.1 # let t2 register its claim / reach the provider
+
+      # Release any waiting provider calls (plenty of tokens).
+      3.times { release << :go }
+
+      r1 = t1.value
+      r2 = t2.value
+
+      remaining = []
+      remaining << call_log.pop until call_log.empty?
+
+      # Exactly one follow-on provider call, for the non-shared text only.
+      expect(remaining).to eq([['two']])
+      expect(r1).to eq([[3], [6]])              # 'one'=3, 'shared'=6
+      expect(r2).to eq([[6], [3]])              # 'shared' reused, 'two'=3
+    end
+
+    it 'propagates exceptions to waiting threads instead of blocking forever' do
+      call_mutex = Mutex.new
+      call_count = 0
+      started = Queue.new
+      release = Queue.new
+
+      allow(provider).to receive(:embed_batch) do |_texts|
+        call_mutex.synchronize { call_count += 1 }
+        started << :go
+        release.pop
+        raise 'provider down'
+      end
+
+      threads = Array.new(3) do
+        Thread.new do
+          cached_provider.embed_batch(%w[err-text])
+        rescue StandardError => e
+          e
+        end
+      end
+
+      started.pop
+      sleep 0.05
+      3.times { release << :go }
+
+      errors = threads.map(&:value)
+      expect(errors).to all(be_a(RuntimeError))
+      expect(errors.map(&:message)).to all(eq('provider down'))
+      expect(call_count).to eq(1) # single-flight: one call, not three
+    end
+
+    it 'cleans up the in-flight map after success so later batches re-enter cleanly' do
+      allow(provider).to receive(:embed_batch) do |texts|
+        texts.map { |t| [t.bytesize] }
+      end
+
+      cached_provider.embed_batch(%w[cleanup-1])
+      cached_provider.embed_batch(%w[cleanup-2])
+
+      inflight = cached_provider.instance_variable_get(:@inflight)
+      expect(inflight).to be_empty
+    end
+
+    it 'cleans up the in-flight map after exception so later batches are not stuck' do
+      call = 0
+      allow(provider).to receive(:embed_batch) do |texts|
+        call += 1
+        raise 'boom' if call == 1
+
+        texts.map { |t| [t.bytesize] }
+      end
+
+      expect { cached_provider.embed_batch(%w[retry-text]) }.to raise_error('boom')
+
+      inflight = cached_provider.instance_variable_get(:@inflight)
+      expect(inflight).to be_empty
+
+      # Second call must re-attempt (not silently block on a stale entry) and succeed.
+      expect(cached_provider.embed_batch(%w[retry-text])).to eq([[10]])
+    end
+  end
+
   describe '#dimensions' do
     it 'delegates to the underlying provider' do
       expect(cached_provider.dimensions).to eq(768)
