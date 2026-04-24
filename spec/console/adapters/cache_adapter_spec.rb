@@ -41,7 +41,9 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
 
     it 'returns :redis when the cache class name contains RedisCacheStore' do
       redis_stand_in = Class.new do
-        def self.name = 'ActiveSupport::Cache::RedisCacheStore'
+        def self.name
+          'ActiveSupport::Cache::RedisCacheStore'
+        end
       end
       with_rails_cache(redis_stand_in.new)
       expect(described_class.detect).to eq(:redis)
@@ -73,7 +75,9 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
 
     it 'returns :unknown for an unrecognised cache class even if SolidCache is absent' do
       custom_store = Class.new do
-        def self.name = 'MyApp::Cache::FancyStore'
+        def self.name
+          'MyApp::Cache::FancyStore'
+        end
       end
       with_rails_cache(custom_store.new)
       hide_const('SolidCache')
