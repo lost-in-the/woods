@@ -251,6 +251,29 @@ RSpec.describe Woods::Retriever do
 
       retriever.retrieve('orphan')
     end
+
+    it 'strips #chunk_N suffix before the metadata_store lookup' do
+      # Vector hits for chunked units arrive with identifiers like
+      # +spec/requests/stripe_webhooks_spec.rb#chunk_0+ but the metadata
+      # store keys them under the base identifier only. Without stripping,
+      # the fallback lookup misses, candidate_type falls through to '',
+      # and the default exclude_types filter lets test_mappings through.
+      chunked_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'spec/requests/stripe_webhooks_spec.rb#chunk_0',
+        score: 0.95, source: :vector, metadata: {}
+      )
+      allow(ranker_double).to receive(:rank).and_return([chunked_candidate])
+      allow(metadata_store).to receive(:find)
+        .with('spec/requests/stripe_webhooks_spec.rb')
+        .and_return('type' => 'test_mapping')
+
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        expect(kwargs[:candidates]).to be_empty
+        assembled_context
+      end
+
+      retriever.retrieve('stripe webhook signature verification')
+    end
   end
 
   # ── Pipeline integration ─────────────────────────────────────────

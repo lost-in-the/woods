@@ -337,6 +337,16 @@ module Woods
       end
       private_class_method :hydrated_graph_store
 
+      # Suffix the Indexer appends when a single unit is split into
+      # multiple embedding vectors — see
+      # {Embedding::Indexer#collect_embed_items}. Vector rows are keyed
+      # per-chunk (+Foo#chunk_0+) but metadata is keyed by the base
+      # identifier (+Foo+), so hydration strips the suffix before the
+      # lookup. Mirrors the pattern in {Retriever} and
+      # {Retrieval::ContextAssembler}.
+      CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
+      private_constant :CHUNK_SUFFIX_PATTERN
+
       # Back-fill the vector store's per-entry metadata hashes from the
       # metadata store. Only makes sense when both are in-memory — durable
       # backends return nil from the hydration helpers and never reach
@@ -351,7 +361,7 @@ module Woods
         # vector + metadata in place).
         entries = vector_store.each_entry.map { |id, vec, _meta| [id, vec] }
         entries.each do |id, vec|
-          meta = metadata_store.find(id)
+          meta = metadata_store.find(id.to_s.sub(CHUNK_SUFFIX_PATTERN, ''))
           next if meta.nil? || (meta.respond_to?(:empty?) && meta.empty?)
 
           vector_store.store(id, vec, meta)

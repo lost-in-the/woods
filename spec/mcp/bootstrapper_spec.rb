@@ -643,6 +643,41 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    it 'back-fills chunked vector entries from base-identifier metadata' do
+      # The Indexer keys per-chunk vector rows as +Foo#chunk_N+ but stores
+      # unit metadata under the base identifier +Foo+ only. Without
+      # stripping the chunk suffix, the hydration lookup misses and
+      # chunked entries never get their type/file_path/identifier metadata
+      # rebuilt — which then forces the retrieval path into its fallback
+      # and re-introduces the same key-mismatch bug at that layer.
+      Dir.mktmpdir do |dir|
+        write_artifact(
+          dir,
+          vector_entries: [
+            ['User#chunk_0', [1.0, 0.0, 0.0, 0.0], {}],
+            ['User#chunk_1', [0.0, 1.0, 0.0, 0.0], {}],
+            ['Post',         [0.0, 0.0, 1.0, 0.0], {}]
+          ],
+          metadata_entries: [
+            ['User', { 'type' => 'model', 'file_path' => 'app/models/user.rb' }],
+            ['Post', { 'type' => 'model', 'file_path' => 'app/models/post.rb' }]
+          ]
+        )
+
+        retriever, = described_class.build_retriever(index_dir: dir)
+        executor = retriever.instance_variable_get(:@executor)
+        vs = executor.instance_variable_get(:@vector_store)
+
+        metadata_by_id = vs.each_entry.to_h { |id, _, meta| [id, meta] }
+        expect(metadata_by_id['User#chunk_0']).to include('type' => 'model',
+                                                          'file_path' => 'app/models/user.rb')
+        expect(metadata_by_id['User#chunk_1']).to include('type' => 'model',
+                                                          'file_path' => 'app/models/user.rb')
+        expect(metadata_by_id['Post']).to include('type' => 'model',
+                                                  'file_path' => 'app/models/post.rb')
+      end
+    end
+
     it 'ids in vector store but absent from metadata store keep empty metadata hash (no raise)' do
       Dir.mktmpdir do |dir|
         write_artifact(

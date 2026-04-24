@@ -146,6 +146,16 @@ module Woods
     # override by passing +types:+ (include-only) or an explicit +exclude_types:+.
     DEFAULT_EXCLUDE_TYPES = %w[test_mapping].freeze
 
+    # Suffix the Indexer appends when a single unit is split into multiple
+    # embedding vectors — see {Embedding::Indexer#collect_embed_items}. The
+    # metadata store is keyed by the base identifier only, so the fallback
+    # lookup in +candidate_type+ strips this before probing. Mirrors the
+    # constant in {Retrieval::ContextAssembler}; kept as a local copy so the
+    # two consumers can evolve independently if the chunk format ever
+    # changes on one side of the pipeline.
+    CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
+    private_constant :CHUNK_SUFFIX_PATTERN
+
     # Execute the full retrieval pipeline for a natural language query.
     #
     # Pipeline: classify -> execute -> rank -> filter -> assemble -> format
@@ -216,8 +226,13 @@ module Woods
       return inline if inline
 
       # Fall back to the metadata store lookup so graph-expansion candidates
-      # (which come in with metadata: {}) still get type-filtered.
-      type_from_hash(@metadata_store.find(candidate.identifier)) || ''
+      # (which come in with metadata: {}) still get type-filtered. Strip the
+      # chunk suffix first: chunked vector hits arrive with +Foo#chunk_0+
+      # but the store is keyed by the base identifier +Foo+ only, and a
+      # missed lookup would let the candidate past the default-exclude
+      # (type resolves to '', which +excluded+ never contains).
+      lookup_id = candidate.identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
+      type_from_hash(@metadata_store.find(lookup_id)) || ''
     rescue StandardError
       ''
     end
