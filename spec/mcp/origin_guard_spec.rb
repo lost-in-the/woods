@@ -102,5 +102,25 @@ RSpec.describe Woods::MCP::OriginGuard do
     it 'treats the FQDN trailing-dot form of loopback as loopback' do
       expect(call(middleware, host: 'localhost.:3000').first).to eq(200)
     end
+
+    it 'rejects a hex-notation IPv4 Host (0x7f000001 = 127.0.0.1)' do
+      status, = call(middleware, host: '0x7f000001:3000')
+      expect(status).to eq(403)
+    end
+
+    it 'rejects a bare-integer IPv4 Host (2130706433 = 127.0.0.1)' do
+      status, = call(middleware, host: '2130706433:3000')
+      expect(status).to eq(403)
+    end
+
+    it 'rejects a leading-zero octal Host (0177.0.0.1 = 127.0.0.1)' do
+      status, = call(middleware, host: '0177.0.0.1:3000')
+      expect(status).to eq(403)
+    end
+
+    it 'rejects short-form IPv4 (127.1 = 127.0.0.1)' do
+      status, = call(middleware, host: '127.1:3000')
+      expect(status).to eq(403)
+    end
   end
 end

@@ -130,11 +130,23 @@ module Woods
         # Session tracer requires a configured session_store on Woods.configuration.
         # The tool reads the store inside its handler; skipping registration when
         # the store is absent keeps tools/list honest.
+        #
+        # Also validates that the store exposes the read-side methods the
+        # `session_trace` MCP tool calls (`read`, `sessions`). If the store
+        # only implements `:record` (as the middleware allows for
+        # backward-compatibility), we refuse to register the tool rather
+        # than letting it crash at first invocation — failing at wire-up
+        # keeps the error surface consistent with other collaborator-gated
+        # tools.
         def session_tracer_wired?
           config = Woods.configuration
           return false unless config
+          return false unless config.respond_to?(:session_store)
 
-          config.respond_to?(:session_store) && !config.session_store.nil?
+          store = config.session_store
+          return false if store.nil?
+
+          %i[read sessions].all? { |m| store.respond_to?(m) }
         end
 
         # Notion export needs both an API token and at least one database ID.

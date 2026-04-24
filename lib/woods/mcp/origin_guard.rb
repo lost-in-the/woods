@@ -67,15 +67,46 @@ module Woods
         host.empty? ? nil : host
       end
 
+      # Numeric host forms that resolve to loopback / private space via
+      # `getaddrinfo` but evade literal-string matches on `127.0.0.1` /
+      # `localhost`. We reject them outright rather than try to canonicalize
+      # every notation — the OS will still resolve them, but browsers and
+      # stdio clients never need them.
+      NUMERIC_HOST_BYPASS = Regexp.union(
+        /\A0x[0-9a-f]+\z/,           # hex: `0x7f000001`
+        /\A\d+\z/,                   # bare integer: `2130706433`
+        /\A0[0-7]+\z/,               # bare octal: `017700000001`
+        /\A\d+\.\d+\z/,              # short-form two-part: `127.1`
+        /\A\d+\.\d+\.\d+\z/          # short-form three-part: `127.0.1`
+      ).freeze
+      private_constant :NUMERIC_HOST_BYPASS
+
       def host_allowed?(host)
         # Strip port and trailing dot (FQDN form — `localhost.` is
         # equivalent to `localhost` in DNS but would slip a literal-list
         # check) before checking against loopback + allow-list.
         normalized = host.to_s.downcase.sub(/\.\z/, '')
         bare = normalized.sub(/:\d+\z/, '').sub(/\.\z/, '')
+
+        # Reject non-canonical numeric hosts. Net::HTTP / getaddrinfo
+        # would happily resolve `0x7f000001` or `2130706433` to 127.0.0.1,
+        # bypassing the loopback allow-list.
+        return false if suspicious_numeric_host?(bare)
+
         return true if LOOPBACK_HOSTS.include?(bare)
 
         @allowed_hosts.include?(normalized) || @allowed_hosts.include?(bare)
+      end
+
+      def suspicious_numeric_host?(bare)
+        return true if bare.match?(NUMERIC_HOST_BYPASS)
+
+        # Four-octet dotted-decimal is legitimate unless an octet carries
+        # a leading zero (octal interpretation in getaddrinfo).
+        four_octet = bare.match(/\A(\d+)\.(\d+)\.(\d+)\.(\d+)\z/)
+        return false unless four_octet
+
+        four_octet.captures.any? { |octet| octet.length > 1 && octet.start_with?('0') }
       end
 
       def origin_allowed?(origin)

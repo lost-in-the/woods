@@ -912,6 +912,27 @@ RSpec.describe Woods::MCP::Server do
       end
     end
 
+    context 'with a record-only store (missing read/sessions)' do
+      let(:record_only_store) do
+        Class.new do
+          def record(_session_id, _data); end
+          # no :read / :sessions
+        end.new
+      end
+
+      before do
+        Woods.configuration = Struct.new(:session_store).new(record_only_store)
+      end
+
+      after { Woods.configuration = nil }
+
+      it 'refuses to register session_trace when the store cannot answer reads' do
+        srv = described_class.build(index_dir: fixture_dir, response_format: :json)
+        tools = srv.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('session_trace')
+      end
+    end
+
     context 'with session store configured' do
       let(:mock_store) do
         instance_double('Woods::SessionTracer::FileStore').tap do |s|
@@ -923,6 +944,10 @@ RSpec.describe Woods::MCP::Server do
                                                                   'status' => 200, 'duration_ms' => 12
                                                                 }
                                                               ])
+          # session_tracer_wired? probes for :sessions before registering
+          # the tool — stub it so the wire-up check passes without having
+          # to assert on any particular return value.
+          allow(s).to receive(:sessions).and_return([])
         end
       end
 

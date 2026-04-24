@@ -382,5 +382,35 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         described_class.new(url: 'http://localhost.:6333', collection: 'x')
       end.to raise_error(ArgumentError, %r{private/loopback host})
     end
+
+    it 'rejects a hex-notation IPv4 host (0x7f000001 = 127.0.0.1)' do
+      expect do
+        described_class.new(url: 'http://0x7f000001:6333', collection: 'x')
+      end.to raise_error(ArgumentError, /non-standard numeric host/)
+    end
+
+    it 'rejects a bare-integer IPv4 host (2130706433 = 127.0.0.1)' do
+      expect do
+        described_class.new(url: 'http://2130706433:6333', collection: 'x')
+      end.to raise_error(ArgumentError, /non-standard numeric host/)
+    end
+
+    it 'rejects a leading-zero octal form (0177.0.0.1 = 127.0.0.1)' do
+      expect do
+        described_class.new(url: 'http://0177.0.0.1:6333', collection: 'x')
+      end.to raise_error(ArgumentError, /non-standard numeric host/)
+    end
+
+    it 'rejects short-form IPv4 (127.1 = 127.0.0.1)' do
+      expect do
+        described_class.new(url: 'http://127.1:6333', collection: 'x')
+      end.to raise_error(ArgumentError, /non-standard numeric host/)
+    end
+
+    it 'still accepts standard dotted-decimal IPv4' do
+      expect do
+        described_class.new(url: 'http://203.0.113.5:6333', collection: 'x')
+      end.not_to raise_error
+    end
   end
 end
