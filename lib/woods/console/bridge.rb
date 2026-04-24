@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require_relative 'bridge_protocol'
 require_relative 'model_validator'
 require_relative 'safe_context'
 
@@ -50,10 +51,14 @@ module Woods
     #   bridge.run
     #
     class StubBridge
-      SUPPORTED_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
-      # Alias used by EmbeddedExecutor to avoid duplicating the list.
-      TIER1_TOOLS = SUPPORTED_TOOLS
-      TOOL_HANDLERS = SUPPORTED_TOOLS.to_h { |t| [t, :"handle_#{t}"] }.freeze
+      # Protocol constants live on {BridgeProtocol} so the real executor
+      # (EmbeddedExecutor) and a future real bridge-process class can
+      # reference them without importing the scaffold. These top-level
+      # aliases keep `StubBridge::SUPPORTED_TOOLS` working for existing
+      # callers and specs.
+      SUPPORTED_TOOLS = BridgeProtocol::SUPPORTED_TOOLS
+      TIER1_TOOLS     = BridgeProtocol::TIER1_TOOLS
+      TOOL_HANDLERS   = BridgeProtocol::TOOL_HANDLERS
 
       # @param input [IO] Input stream (reads JSON-lines)
       # @param output [IO] Output stream (writes JSON-lines)
