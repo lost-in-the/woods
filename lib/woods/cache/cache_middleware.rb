@@ -5,6 +5,18 @@ require_relative 'cache_store'
 
 module Woods
   module Cache
+    # Raised by {InflightEntry#await} when the owning thread aborted before
+    # either fulfilling or rejecting the entry — for example on `Interrupt`,
+    # `Thread#kill`, or a non-StandardError exception that bypasses the explicit
+    # `rescue`. Waiters receive this instead of blocking forever.
+    #
+    # @api private
+    class OwnerAbortedError < StandardError
+      def initialize(msg = 'embedding fetch owner aborted before fulfill')
+        super
+      end
+    end
+
     # Per-text in-flight entry used for single-flight coordination in
     # {CachedEmbeddingProvider#embed_batch}. When thread A is already fetching an
     # embedding for text T, thread B's miss for T attaches to A's entry and waits
@@ -21,9 +33,13 @@ module Woods
         @error = nil
       end
 
-      # Publish the computed value and wake every waiter.
+      # Publish the computed value and wake every waiter. Idempotent — a second
+      # call (e.g. from an `ensure` that rejects unfulfilled entries) is a no-op
+      # so the hardening in {CachedEmbeddingProvider#fetch_and_fulfill} is safe.
       def fulfill(value)
         @mutex.synchronize do
+          return if @done
+
           @value = value
           @done = true
           @cond.broadcast
@@ -31,8 +47,11 @@ module Woods
       end
 
       # Publish an exception so waiters fail fast instead of blocking forever.
+      # Idempotent — see {#fulfill}.
       def reject(error)
         @mutex.synchronize do
+          return if @done
+
           @error = error
           @done = true
           @cond.broadcast
@@ -175,17 +194,16 @@ module Woods
         [to_fetch, to_fetch_positions, our_entries, awaiting]
       end
 
-      # Call the provider for texts owned by this thread, write each vector to
-      # the cache, fulfill the owned entries (waking any waiters), and remove
-      # them from the inflight map. On provider failure, rejects every owned
-      # entry so waiters fail fast instead of blocking, clears the inflight map,
-      # and re-raises.
+      # Call the provider for owned texts, write each vector to the cache, and
+      # fulfill the owned entries so waiters wake with the fresh vector.
       #
-      # @param to_fetch [Array<String>]
-      # @param to_fetch_positions [Array<Integer>]
-      # @param our_entries [Array<InflightEntry>]
-      # @param results [Array]
-      # @param miss_indices [Array<Integer>]
+      # The `ensure` block guarantees every owned entry reaches a terminal state
+      # and leaves the inflight map, even under paths the `rescue` misses —
+      # non-StandardError exceptions, `Thread#kill`, or a future refactor that
+      # introduces a raise into the fulfill loop. {InflightEntry#fulfill} /
+      # {InflightEntry#reject} are idempotent, so the fallback reject on
+      # already-fulfilled entries is a no-op.
+      #
       # @return [void]
       def fetch_and_fulfill(to_fetch, to_fetch_positions, our_entries, results, miss_indices)
         return if to_fetch.empty?
@@ -194,7 +212,6 @@ module Woods
           fresh_vectors = @provider.embed_batch(to_fetch)
         rescue StandardError => e
           our_entries.each { |entry| entry.reject(e) }
-          clear_inflight(to_fetch)
           raise
         end
 
@@ -204,6 +221,8 @@ module Woods
           write_cache(text, vector)
           our_entries[i].fulfill(vector)
         end
+      ensure
+        our_entries.each { |entry| entry.reject(OwnerAbortedError.new) }
         clear_inflight(to_fetch)
       end
 

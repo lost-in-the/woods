@@ -454,6 +454,31 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
       # Second call must re-attempt (not silently block on a stale entry) and succeed.
       expect(cached_provider.embed_batch(%w[retry-text])).to eq([[10]])
     end
+
+    # Hardening for the "owner aborted mid-fulfill" path flagged in review. A
+    # non-StandardError exception (Interrupt, NoMemoryError) raised between
+    # iterations of the fulfill loop would previously leak inflight entries and
+    # block waiters forever. The `ensure` wrap in fetch_and_fulfill rejects any
+    # entry not yet fulfilled with OwnerAbortedError.
+    it 'rejects unfulfilled entries when owner aborts with a non-StandardError' do
+      allow(provider).to receive(:embed_batch) do |texts|
+        texts.map { |t| [t.bytesize] }
+      end
+
+      # Monkey-stub the write_cache helper on this one instance to raise
+      # Interrupt on the second iteration — simulating a Ctrl-C between fulfills.
+      abort_after = 0
+      cached_provider.define_singleton_method(:write_cache) do |_text, _vector|
+        abort_after += 1
+        raise Interrupt if abort_after == 2
+      end
+
+      expect { cached_provider.embed_batch(%w[ok1 ok2 ok3]) }.to raise_error(Interrupt)
+
+      # Inflight map cleared, later batches re-enter cleanly.
+      expect(cached_provider.instance_variable_get(:@inflight)).to be_empty
+      expect(cached_provider.embed_batch(%w[ok3])).to eq([[3]])
+    end
   end
 
   describe '#dimensions' do
