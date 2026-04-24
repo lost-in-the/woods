@@ -10,6 +10,7 @@ require_relative '../index_artifact'
 require_relative '../builder'
 require_relative '../resolved_config'
 require_relative '../storage/snapshotter'
+require_relative '../storage/inapplicable_backend'
 
 module Woods
   module MCP
