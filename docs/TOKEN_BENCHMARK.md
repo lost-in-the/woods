@@ -1,14 +1,25 @@
 # Token Estimation Benchmark
 
-> **Heads-up:** production code uses `4.0` chars/token for the OpenAI
-> path (see `lib/woods/token_utils.rb` and `Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN`)
-> and `1.5` chars/token for the Ollama / WordPiece path (see
-> `Builder#chars_per_token_for` and `docs/EMBEDDING_MODELS.md`). The
-> `3.5` divisor below is a historical worst-case reference used during
-> the initial calibration pass — not the shipped default. The 4.0 floor
-> produces a conservative ~10.6 % overestimate against tiktoken
-> cl100k_base on Ruby source, which is what the gem relies on for chunk
-> budgeting.
+> **Heads-up:** the single source of truth for chars-per-token ratios is
+> `Woods::TokenUtils.chars_per_token_for(provider)` in
+> `lib/woods/token_utils.rb`. Production code uses **4.0 chars/token**
+> for the OpenAI path and **1.5 chars/token** for the Ollama / WordPiece
+> path. These are applied consistently across:
+>
+> - `lib/woods/retrieval/context_assembler.rb` (context truncation)
+> - `lib/woods/embedding/text_preparer.rb` (pre-embed sizing)
+> - `lib/woods/builder.rb#chars_per_token_for` (chunker budget)
+> - `lib/woods/cost_model/` (cost estimation)
+>
+> Retriever also wires the exact `Woods::Embedding::TokenCounter` into
+> `ContextAssembler` on the Ollama path, so budgets use BERT-WordPiece
+> counts rather than the `chars / N` heuristic when the optional
+> `tokenizers` gem is installed. The `3.5` divisor below is a historical
+> worst-case reference from the initial calibration pass — not the
+> shipped default. The 4.0 floor produces a conservative ~10.6 %
+> overestimate against tiktoken cl100k_base on Ruby source, which is
+> what the gem relies on for chunk budgeting when the exact counter is
+> unavailable.
 
 Benchmarking the heuristic `(string.length / 3.5).ceil` against tiktoken tokenizers used by OpenAI models.
 

@@ -22,6 +22,26 @@ module Woods
       class Qdrant # rubocop:disable Metrics/ClassLength
         include Interface
 
+        # URL schemes allowed for the Qdrant endpoint. `file://`, `gopher://`,
+        # and anything else would let a misconfigured or attacker-controlled
+        # config value turn the adapter into an SSRF vector against the host
+        # running extraction.
+        ALLOWED_SCHEMES = %w[http https].freeze
+
+        # Hostnames/IPs that always resolve to loopback or link-local services
+        # and should never be contacted as a vector store unless the operator
+        # explicitly opts in via `allow_private_hosts: true`. Guards the common
+        # cloud-metadata SSRF target (`169.254.169.254`) and RFC1918 ranges.
+        PRIVATE_HOST_REGEXES = [
+          /\A127(?:\.\d+){3}\z/,                     # 127.0.0.0/8 loopback
+          /\A10(?:\.\d+){3}\z/,                      # 10.0.0.0/8
+          /\A192\.168(?:\.\d+){2}\z/,                # 192.168.0.0/16
+          /\A172\.(?:1[6-9]|2[0-9]|3[0-1])(?:\.\d+){2}\z/, # 172.16.0.0/12
+          /\A169\.254(?:\.\d+){2}\z/,                # link-local (AWS IMDS)
+          /\A(?:0?::1|\[::1\])\z/i,                  # IPv6 loopback
+          /\Alocalhost\z/i
+        ].freeze
+
         # @param url [String] Qdrant server URL
         # @param collection [String] Collection name
         # @param api_key [String, nil] Optional API key for authentication
@@ -30,13 +50,54 @@ module Woods
         #   sending the HTTP request — Qdrant returns a 400 on mismatch, but
         #   detecting it client-side avoids wasted network round-trips and
         #   keeps error shape consistent with the pgvector adapter.
-        def initialize(url:, collection:, api_key: nil, dimensions: nil)
+        # @param allow_private_hosts [Boolean] Explicitly permit a URL whose
+        #   host resolves inside loopback, link-local, or RFC1918 space. Off
+        #   by default to block the common SSRF footgun. Set to true when the
+        #   operator intentionally runs Qdrant on `localhost:6333` or inside
+        #   a private network.
+        def initialize(url:, collection:, api_key: nil, dimensions: nil, allow_private_hosts: false)
+          @uri = self.class.validate_url!(url, allow_private_hosts: allow_private_hosts)
           @url = url
           @collection = collection
           @api_key = api_key
           @dimensions = dimensions
-          @uri = URI(url)
         end
+
+        # Validate a Qdrant endpoint URL — scheme in {ALLOWED_SCHEMES} and,
+        # unless opted out, host outside loopback / link-local / RFC1918.
+        # Public so callers can pre-check configuration before constructing.
+        def self.validate_url!(url, allow_private_hosts: false)
+          uri = URI(url)
+          validate_scheme!(uri)
+          validate_host_present!(uri, url)
+          validate_host_visibility!(uri.host.to_s, allow_private_hosts: allow_private_hosts)
+          uri
+        rescue URI::InvalidURIError => e
+          raise ArgumentError, "Qdrant URL is not a valid URI: #{e.message}"
+        end
+
+        def self.validate_scheme!(uri)
+          return if ALLOWED_SCHEMES.include?(uri.scheme)
+
+          raise ArgumentError,
+                "Qdrant URL scheme must be one of #{ALLOWED_SCHEMES.join(', ')}; got #{uri.scheme.inspect}"
+        end
+
+        def self.validate_host_present!(uri, url)
+          return unless uri.host.nil? || uri.host.empty?
+
+          raise ArgumentError, "Qdrant URL must include a host: #{url.inspect}"
+        end
+
+        def self.validate_host_visibility!(host, allow_private_hosts:)
+          return if allow_private_hosts
+          return unless PRIVATE_HOST_REGEXES.any? { |re| host.match?(re) }
+
+          raise ArgumentError,
+                "Qdrant URL targets a private/loopback host (#{host}); " \
+                'pass allow_private_hosts: true to permit.'
+        end
+        private_class_method :validate_scheme!, :validate_host_present!, :validate_host_visibility!
 
         # Create the collection if it doesn't exist.
         #

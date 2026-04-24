@@ -38,6 +38,12 @@ If `$ARGUMENTS` is empty, ask the user what to name the extractor.
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+# RouteHelperResolver wiring is a three-step commitment — if you uncomment
+# the require below you MUST also uncomment the include AND the
+# build_route_helper_map call in initialize AND call scan_navigation_dependencies
+# (and/or scan_form_dependencies) inside extract_dependencies. Any one of
+# the three missing turns the others into dead code. See
+# .claude/rules/extractors.md for the canonical navigation-edge pattern.
 # require_relative 'route_helper_resolver'  # uncomment if scanning nav/form helpers
 
 module Woods
@@ -51,13 +57,13 @@ module Woods
     class {Name}Extractor
       include SharedUtilityMethods
       include SharedDependencyScanner
-      # include RouteHelperResolver  # uncomment if scanning nav/form helpers
+      # include RouteHelperResolver  # uncomment if scanning nav/form helpers — REMEMBER build_route_helper_map + scan_navigation_dependencies
 
       APP_DIRECTORIES = %w[app].freeze
 
       def initialize
         @directories = APP_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
-        # build_route_helper_map  # uncomment if you included RouteHelperResolver
+        # build_route_helper_map  # REQUIRED if you included RouteHelperResolver — do not skip
       end
 
       # Extract all {type} units.

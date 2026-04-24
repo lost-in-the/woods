@@ -8,6 +8,8 @@ require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
 require_relative 'retrieval/context_assembler'
+require_relative 'embedding/token_counter'
+require_relative 'token_utils'
 
 module Woods
   # Retriever orchestrates the full retrieval pipeline: classify, execute,
@@ -83,7 +85,8 @@ module Woods
       chars_per_token = infer_chars_per_token(embedding_provider)
       @assembler = Retrieval::ContextAssembler.new(
         metadata_store: metadata_store,
-        chars_per_token: chars_per_token
+        chars_per_token: chars_per_token,
+        token_counter: infer_token_counter(embedding_provider)
       )
     end
 
@@ -100,9 +103,29 @@ module Woods
 
       model = provider.model_name.to_s
       ollama_patterns = /\A(nomic-embed|bge-|mxbai-embed|snowflake-arctic|all-minilm)/
-      model.match?(ollama_patterns) ? 1.5 : Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN
+      model.match?(ollama_patterns) ? TokenUtils.chars_per_token_for(:ollama) : Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN
     end
     private :infer_chars_per_token
+
+    # Build an exact TokenCounter for the Ollama path — where WordPiece
+    # ratios vary widely across Rails source, so an exact tokenizer is the
+    # only way to keep context-budget truncation honest. For OpenAI (and
+    # unknown providers) tiktoken's 4.0 ratio is stable enough that the
+    # heuristic fallback is fine; we skip the counter there so we don't
+    # pull in the optional `tokenizers` gem or warn about it at boot.
+    #
+    # @param provider [Object, nil]
+    # @return [Woods::Embedding::TokenCounter, nil]
+    def infer_token_counter(provider)
+      return nil unless provider.respond_to?(:model_name)
+
+      model = provider.model_name.to_s
+      ollama_patterns = /\A(nomic-embed|bge-|mxbai-embed|snowflake-arctic|all-minilm)/
+      return nil unless model.match?(ollama_patterns)
+
+      Embedding::TokenCounter.new
+    end
+    private :infer_token_counter
 
     # Unit types excluded from retrieval by default. +test_mapping+ units
     # make up ~33% of a typical index and lexically dominate semantic rank

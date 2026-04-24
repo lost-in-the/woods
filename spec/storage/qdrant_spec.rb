@@ -8,7 +8,7 @@ require 'woods/storage/vector_store'
 require 'woods/storage/qdrant'
 
 RSpec.describe Woods::Storage::VectorStore::Qdrant do
-  let(:store) { described_class.new(url: 'http://localhost:6333', collection: 'test_collection') }
+  let(:store) { described_class.new(url: 'http://localhost:6333', collection: 'test_collection', allow_private_hosts: true) }
   let(:http) { instance_double(Net::HTTP) }
 
   before do
@@ -27,7 +27,8 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     end
 
     it 'accepts an optional api_key' do
-      store_with_key = described_class.new(url: 'http://localhost:6333', collection: 'test', api_key: 'secret')
+      store_with_key = described_class.new(url: 'http://localhost:6333', collection: 'test',
+                                           api_key: 'secret', allow_private_hosts: true)
       expect(store_with_key).to be_a(described_class)
     end
   end
@@ -283,7 +284,8 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
   describe 'API key authentication' do
     it 'includes api-key header when api_key is provided' do
-      store_with_key = described_class.new(url: 'http://localhost:6333', collection: 'test', api_key: 'secret-key')
+      store_with_key = described_class.new(url: 'http://localhost:6333', collection: 'test',
+                                           api_key: 'secret-key', allow_private_hosts: true)
       response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":0}}')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       allow(http).to receive(:request).and_return(response)
@@ -293,6 +295,56 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(http).to have_received(:request) do |req|
         expect(req['api-key']).to eq('secret-key')
       end
+    end
+  end
+
+  describe 'URL validation (SSRF defense)' do
+    it 'rejects file:// schemes' do
+      expect do
+        described_class.new(url: 'file:///etc/passwd', collection: 'x')
+      end.to raise_error(ArgumentError, /scheme must be one of/)
+    end
+
+    it 'rejects gopher:// schemes' do
+      expect do
+        described_class.new(url: 'gopher://evil/', collection: 'x')
+      end.to raise_error(ArgumentError, /scheme must be one of/)
+    end
+
+    it 'rejects URLs with no host' do
+      expect do
+        described_class.new(url: 'http:///', collection: 'x')
+      end.to raise_error(ArgumentError, /must include a host/)
+    end
+
+    it 'rejects the AWS IMDS address by default' do
+      expect do
+        described_class.new(url: 'http://169.254.169.254/', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects RFC1918 hosts by default' do
+      expect do
+        described_class.new(url: 'http://10.0.0.5:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects localhost by default' do
+      expect do
+        described_class.new(url: 'http://localhost:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'permits loopback when allow_private_hosts: true is set explicitly' do
+      expect do
+        described_class.new(url: 'http://127.0.0.1:6333', collection: 'x', allow_private_hosts: true)
+      end.not_to raise_error
+    end
+
+    it 'permits an ordinary public hostname' do
+      expect do
+        described_class.new(url: 'https://qdrant.example.com:6333', collection: 'x')
+      end.not_to raise_error
     end
   end
 end

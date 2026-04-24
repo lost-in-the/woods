@@ -32,22 +32,48 @@ module Woods
         validate_schema! if validate_schema
       end
 
-      # Probe that `woods_snapshots` and `woods_snapshot_units` exist. If they
-      # don't, raise with guidance to run the missing migrations — without this,
-      # the first call to {#capture}/{#find} raises a generic adapter error
-      # that doesn't tell operators why.
+      REQUIRED_TABLES = %w[woods_snapshots woods_snapshot_units].freeze
+
+      # Probe that `woods_snapshots` and `woods_snapshot_units` exist. If
+      # they don't, raise with guidance to run migrations 004 + 005 —
+      # without this, the first call to {#capture}/{#find} raises a generic
+      # adapter error that doesn't tell operators why.
+      #
+      # When the connection responds to `#columns` (ActiveRecord-shaped) or
+      # `#table_exists?`, use that — these are hard to spoof from a test
+      # mock, so a partial mock can no longer silently pass. Falls back to
+      # the `SELECT 1 FROM t LIMIT 1` probe for minimal connections.
       #
       # @raise [Woods::Error]
       def validate_schema!
-        @db.execute('SELECT 1 FROM woods_snapshots LIMIT 1')
-        @db.execute('SELECT 1 FROM woods_snapshot_units LIMIT 1')
+        REQUIRED_TABLES.each { |t| probe_table!(t) }
+      rescue Woods::Error
+        raise
       rescue StandardError => e
-        raise Woods::Error,
-              'SnapshotStore requires the `woods_snapshots` and ' \
-              '`woods_snapshot_units` tables (migrations 004 + 005 under ' \
-              '`lib/woods/db/migrations/`). Run `rake woods:migrate` on the ' \
-              "metadata DB and retry. Underlying error: #{e.class}: #{e.message}"
+        raise Woods::Error, schema_error_message(e)
       end
+
+      private
+
+      def probe_table!(table)
+        if @db.respond_to?(:table_exists?)
+          raise Woods::Error, schema_error_message("table `#{table}` does not exist") unless @db.table_exists?(table)
+        elsif @db.respond_to?(:columns)
+          cols = @db.columns(table)
+          raise Woods::Error, schema_error_message("no columns for `#{table}`") if cols.nil? || cols.empty?
+        else
+          @db.execute("SELECT 1 FROM #{table} LIMIT 1")
+        end
+      end
+
+      def schema_error_message(detail)
+        'SnapshotStore requires the `woods_snapshots` and ' \
+          '`woods_snapshot_units` tables (migrations 004 + 005 under ' \
+          '`lib/woods/db/migrations/`). Run `rake woods:migrate` on the ' \
+          "metadata DB and retry. Underlying error: #{detail}"
+      end
+
+      public
 
       # Capture a snapshot after extraction completes.
       #

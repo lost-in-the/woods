@@ -1,6 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships 34 extractors — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **34 extractor classes** producing **39 distinct unit types** — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+
+> **Counts explained.** `lib/woods/extractors/` contains 40 files: 34 extractor classes (each ending in `_extractor.rb`) plus 6 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`). The 39 unit types comes from some extractors emitting multiple categories — e.g., `RailsSourceExtractor` produces `rails_source` and `gem_source`, `ConfigurationExtractor` produces multiple config-derived types. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing) but are not themselves extractors and do not appear in the unit type enumeration.
 
 ---
 
@@ -616,7 +618,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 | `source_code` | String | The full source code, potentially enriched: models have concerns inlined and schema prepended; controllers have a route context header prepended |
 | `metadata` | Hash | Type-specific structured data — associations, callbacks, actions, fields, etc. Keys and structure vary by extractor |
 | `dependencies` | Array\<Hash\> | Forward edges: `[{ type: :model, target: "User", via: "belongs_to" }, ...]` |
-| `dependents` | Array\<Hash\> | Reverse edges: populated in the second pass. `[{ type: :controller, identifier: "OrdersController" }, ...]` |
+| `dependents` | Array\<Hash\> | Reverse edges: **populated in Phase 2 (Resolve)**, not Phase 1 (Extract). After Phase 2 every field on a unit is effectively immutable. Shape: `[{ type: :controller, identifier: "OrdersController" }, ...]` |
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |
 | `estimated_tokens` | Integer | Approximate token count for `source_code + metadata.to_json` using 4.0 chars/token. Computed, not stored. |
 

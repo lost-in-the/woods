@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../token_utils'
+
 module Woods
   module Embedding
     # Prepares ExtractedUnit data for embedding by building context-prefixed text.
@@ -19,12 +21,11 @@ module Woods
     #   chunks = preparer.prepare_chunks(unit)
     class TextPreparer
       DEFAULT_MAX_TOKENS = 8192
-      # 4.0 matches tiktoken (cl100k_base) averages for Ruby source — see
-      # docs/TOKEN_BENCHMARK.md. It's the right ratio for OpenAI models.
-      # BERT/WordPiece tokenizers (nomic-embed-text, bge-*) run hotter on
-      # code, closer to 2.5 chars/token, so callers embedding with those
-      # models should override this to keep truncation honest.
-      DEFAULT_CHARS_PER_TOKEN = 4.0
+      # Aliased to the single source of truth in {Woods::TokenUtils} so the
+      # OpenAI 4.0 / Ollama 1.5 ratios stay consistent across TextPreparer,
+      # ContextAssembler, Builder, and cost_model/. See
+      # docs/TOKEN_BENCHMARK.md and lib/woods/token_utils.rb.
+      DEFAULT_CHARS_PER_TOKEN = TokenUtils::DEFAULT_CHARS_PER_TOKEN
 
       # @param max_tokens [Integer] maximum token budget for prepared text
       # @param chars_per_token [Float] tokenizer-calibrated char/token ratio

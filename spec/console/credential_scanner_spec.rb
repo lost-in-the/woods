@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'base64'
 require 'spec_helper'
 require 'woods/console/credential_scanner'
 
@@ -570,8 +571,93 @@ RSpec.describe Woods::Console::CredentialScanner do
         :shopify_access_token, :square_access_token, :paypal_access_token,
         :salesforce_access_token, :launchdarkly_sdk_key, :launchdarkly_mobile_key,
         :hubspot_private_app_token, :brevo_api_key, :brevo_smtp_key, :kit_api_key,
-        :twilio_account_sid, :twilio_api_key_sid, :twilio_verify_service_sid
+        :twilio_account_sid, :twilio_api_key_sid, :twilio_verify_service_sid,
+        :database_url_with_password
       )
+    end
+  end
+
+  describe 'database URLs with embedded credentials' do
+    it 'redacts a postgres URL' do
+      scanner = described_class.new
+      value, counts = scanner.scan('DATABASE_URL=postgres://app:s3cretpw@db.internal:5432/prod')
+      expect(value).to include('[REDACTED]')
+      expect(value).not_to include('s3cretpw')
+      expect(counts[:database_url_with_password]).to eq(1)
+    end
+
+    it 'redacts a mysql2 URL' do
+      scanner = described_class.new
+      value, counts = scanner.scan('mysql2://root:toor@localhost/app_production')
+      expect(value).to eq('[REDACTED]')
+      expect(counts[:database_url_with_password]).to eq(1)
+    end
+
+    it 'redacts a mongodb+srv URL with embedded password' do
+      scanner = described_class.new
+      value, = scanner.scan('mongodb+srv://user:complex_pw@cluster.mongodb.net/app')
+      expect(value).to include('[REDACTED]')
+      expect(value).not_to include('complex_pw')
+    end
+
+    it 'leaves a URL without embedded credentials untouched' do
+      scanner = described_class.new
+      value, counts = scanner.scan('postgres://db.internal:5432/prod')
+      expect(value).to eq('postgres://db.internal:5432/prod')
+      expect(counts[:database_url_with_password]).to be_nil
+    end
+  end
+
+  describe 'legacy Anthropic tokens (no api/admin infix)' do
+    it 'redacts a legacy-shape sk-ant- token' do
+      scanner = described_class.new
+      legacy = "sk-ant-#{'A' * 90}"
+      value, counts = scanner.scan("auth = #{legacy}")
+      expect(value).to eq('auth = [REDACTED]')
+      expect(counts[:anthropic_api_key]).to eq(1)
+    end
+
+    it 'still redacts the modern api03-prefixed shape' do
+      scanner = described_class.new
+      modern = "sk-ant-api03-#{'A' * 85}"
+      value, counts = scanner.scan(modern)
+      expect(value).to eq('[REDACTED]')
+      expect(counts[:anthropic_api_key]).to eq(1)
+    end
+  end
+
+  describe 'URL-encoded credentials' do
+    it 'redacts a URL-encoded stripe key' do
+      scanner = described_class.new
+      encoded = 'sk%5Flive%5F51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE'
+      value, counts = scanner.scan("token=#{encoded}")
+      expect(value).not_to include('sk%5Flive')
+      expect(counts[:stripe_secret_key]).to eq(1)
+    end
+
+    it 'leaves a non-credential percent-encoded value untouched' do
+      scanner = described_class.new
+      value, counts = scanner.scan('greeting=hello%20world')
+      expect(value).to eq('greeting=hello%20world')
+      expect(counts).to be_empty
+    end
+  end
+
+  describe 'base64-wrapped credentials' do
+    it 'redacts a base64-encoded stripe key' do
+      scanner = described_class.new
+      encoded = Base64.strict_encode64('sk_live_51Sx7cbE0QMvj9FH5xhCjCEIl6TDZXZRpfYE')
+      value, counts = scanner.scan(encoded)
+      expect(value).to eq('[REDACTED]')
+      expect(counts[:stripe_secret_key]).to eq(1)
+    end
+
+    it 'leaves random base64 without credentials untouched' do
+      scanner = described_class.new
+      harmless = Base64.strict_encode64('just some regular text, nothing secret in here at all')
+      value, counts = scanner.scan(harmless)
+      expect(value).to eq(harmless)
+      expect(counts).to be_empty
     end
   end
 end

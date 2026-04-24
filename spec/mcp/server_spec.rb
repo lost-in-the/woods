@@ -818,6 +818,8 @@ RSpec.describe Woods::MCP::Server do
       end
     end
 
+    before(:all) { require 'woods/flow_assembler' }
+
     before do
       allow(Woods::FlowAssembler).to receive(:new).and_return(mock_assembler)
     end
@@ -848,11 +850,46 @@ RSpec.describe Woods::MCP::Server do
       call_tool(server, 'trace_flow', entry_point: 'PostsController#create')
     end
 
-    it 'returns an error hash when assembly raises' do
+    it 'returns an MCP error response when assembly raises' do
       allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'unit not found')
       response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
-      data = parse_response(response)
-      expect(data['error']).to eq('unit not found')
+      expect(response.error?).to be(true)
+      expect(response_text(response)).to include('trace_flow failed')
+      expect(response_text(response)).to include('unit not found')
+    end
+  end
+
+  describe '.coerce_integer' do
+    it 'passes Integer through unchanged' do
+      expect(described_class.send(:coerce_integer, 7)).to eq(7)
+    end
+
+    it 'passes nil through unchanged' do
+      expect(described_class.send(:coerce_integer, nil)).to be_nil
+    end
+
+    it 'converts a numeric-shaped String to Integer' do
+      expect(described_class.send(:coerce_integer, '42')).to eq(42)
+      expect(described_class.send(:coerce_integer, '-5')).to eq(-5)
+      expect(described_class.send(:coerce_integer, '+12')).to eq(12)
+    end
+
+    it 'raises ArgumentError for junk strings instead of silently returning 0' do
+      expect { described_class.send(:coerce_integer, 'abc') }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, '1abc') }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, '') }
+        .to raise_error(ArgumentError, /expected integer/)
+    end
+
+    it 'raises ArgumentError for non-integer scalar types' do
+      expect { described_class.send(:coerce_integer, 3.14) }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, true) }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, []) }
+        .to raise_error(ArgumentError, /expected integer/)
     end
   end
 

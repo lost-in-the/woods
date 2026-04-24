@@ -258,9 +258,23 @@ module Woods
 
     # Normalize edge data from either old format (bare strings) or new format (hashes).
     #
-    # NOTE: Uses symbol keys (:target, :via) for in-memory Ruby objects.
-    # IndexReader.normalize_all_edges uses string keys for parsed JSON.
-    # The two normalizers are intentionally separate.
+    # ROUND-TRIP INVARIANT (do not break when refactoring):
+    #   DependencyGraph#to_h -> JSON.generate -> JSON.parse -> DependencyGraph.from_h
+    # must always yield the same in-memory shape. The two normalizers that
+    # sit at either end of this round trip are INTENTIONALLY SEPARATE — do
+    # not merge them:
+    #
+    # - This method ({.normalize_edges}) runs on Ruby objects. It produces
+    #   `{ target:, via: }` with SYMBOL keys because consumers
+    #   ({DependencyGraph#dependencies_of}, {GraphAnalyzer}) key on symbols.
+    # - {Woods::MCP::IndexReader.normalize_all_edges} runs on parsed JSON,
+    #   producing `{ 'target' => ..., 'via' => ... }` with STRING keys,
+    #   because the MCP tools serialize straight through to the client and
+    #   symbol keys would become `:target` on the wire.
+    #
+    # This method also accepts OLD-format bare-string edges so graphs
+    # serialized before the `{target, via}` migration still load without
+    # explicit data conversion.
     #
     # @param edges [Array] Edge entries — either strings or hashes
     # @return [Array<Hash>] Normalized edges with :target and :via keys

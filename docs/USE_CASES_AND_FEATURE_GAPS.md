@@ -330,7 +330,7 @@ Both component frameworks are extracted with slots, initialize params, sidecar t
 |----------|-----|--------|----------|--------|
 | 1 | HAML/Slim view templates | High | Extraction | Open |
 | 2 | Stimulus/Hotwire frontend | High | Extraction | Open |
-| 3 | Configuration semantic parsing | Medium | Extraction | Open |
+| 3 | Configuration semantic parsing | Medium | Extraction | **Partial** — `ConfigurationExtractor` scans `config/initializers/` and emits units; `BehavioralProfile` surfaces resolved `Rails.application.config` values at runtime. Heterogeneous initializer content (domain-specific DSLs) still requires extractor-specific parsers. |
 | 4 | Rake task extraction | Medium | Extraction | **Done** (Sprint 2) |
 | 5 | State machine extraction | Medium | Extraction | **Done** (Sprint 3) |
 | 6 | Webhook/event system extraction | Medium | Extraction | **Done** (Sprint 3) |

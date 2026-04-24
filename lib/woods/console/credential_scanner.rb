@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'base64'
+require 'cgi'
 require 'set'
 
 require_relative 'credential_index'
@@ -28,7 +30,7 @@ module Woods
     #   value  # => "token is [REDACTED]"
     #   counts # => { stripe_secret_key: 1 }
     #
-    class CredentialScanner
+    class CredentialScanner # rubocop:disable Metrics/ClassLength
       REDACTED = '[REDACTED]'
 
       # High-specificity credential patterns. Each is word-boundary anchored
@@ -60,7 +62,11 @@ module Woods
         slack_token: /\bxox[abpr]-[A-Za-z0-9-]{10,}\b/,
         sendgrid_api_key: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/,
         mailgun_api_key: /\bkey-[a-f0-9]{32}\b/,
-        anthropic_api_key: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}\b/,
+        # Matches both the current `sk-ant-api03-…` / `sk-ant-admin01-…` shape
+        # and the legacy `sk-ant-…` format that shipped without the
+        # `api|admin` infix. Length floor prevents matching on a bare `sk-ant-`
+        # prefix in logs or docs.
+        anthropic_api_key: /\bsk-ant-(?:(?:api|admin)\d{2}-)?[A-Za-z0-9_-]{80,}\b/,
         openai_api_key: %r{\bsk-(?:proj-)?[A-Za-z0-9/_-]{40,}\b},
         # `rt`/`ua` extend the existing alternation to cover refresh tokens
         # (`shprt_`) and user-access tokens (`shpua_`) — the prefix list
@@ -82,7 +88,16 @@ module Woods
         kit_api_key: /\bkit_[A-Za-z0-9]{20,}\b/,
         twilio_account_sid: /\bAC[0-9a-fA-F]{32}\b/,
         twilio_api_key_sid: /\bSK[0-9a-fA-F]{32}\b/,
-        twilio_verify_service_sid: /\bVA[0-9a-fA-F]{32}\b/
+        twilio_verify_service_sid: /\bVA[0-9a-fA-F]{32}\b/,
+        # Connection strings with embedded credentials: `postgres://user:pass@host/db`,
+        # `mysql2://user:pass@host/db`, `mongodb://…`, `amqp://…`, `redis://…`.
+        # Captures the entire URL — the password is part of it and redacting
+        # just the password field while leaving `user@host` visible is not
+        # worth the regex complexity when the host may itself be sensitive.
+        database_url_with_password: Regexp.new(
+          '\b(?:postgres|postgresql|mysql|mysql2|mongodb|mongodb\+srv|amqp|amqps|redis|rediss|' \
+          'clickhouse|cockroachdb|mariadb)://[^\s:@/]+:[^\s@/]+@\S+'
+        )
       }.freeze
 
       # @return [Array<Symbol>] every pattern name the scanner knows about.
@@ -175,12 +190,85 @@ module Woods
 
       def scan_string(str, counts)
         result = redact_indexed_secrets(str, counts)
+        result = scan_encoded_forms(result, counts)
         @active_patterns.inject(result) do |acc, (name, pattern)|
           acc.gsub(pattern) do
             counts[name] = (counts[name] || 0) + 1
             REDACTED
           end
         end
+      end
+
+      # Best-effort redaction of credentials that slip past the literal-pattern
+      # pass because they are URL-encoded (`sk%5Ftest%5F…`) or base64-wrapped
+      # (`c2tfdGVzdF8…`). For each candidate substring we try the decoded form
+      # against every active pattern; if any pattern matches, we redact the
+      # encoded substring in the original string. This is a defense-in-depth
+      # layer — the literal patterns remain the primary guarantee and the
+      # decoded scan runs only over substrings whose shape suggests encoding.
+      def scan_encoded_forms(str, counts)
+        str = scan_url_encoded(str, counts) if str.include?('%')
+        scan_base64(str, counts)
+      end
+
+      URL_ENCODED_CANDIDATE = %r{[A-Za-z0-9%_.~+/=-]{24,}}
+      # No trailing `\b` anchor — `\b` requires a word/non-word transition
+      # and fails at end-of-string after a `=` padding char. Use a negative
+      # look-ahead to stop at the next alphanumeric character instead.
+      BASE64_CANDIDATE = %r{\b[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/])}
+      private_constant :URL_ENCODED_CANDIDATE, :BASE64_CANDIDATE
+
+      def scan_url_encoded(str, counts)
+        str.gsub(URL_ENCODED_CANDIDATE) do |candidate|
+          next candidate unless candidate.include?('%')
+
+          decoded = safely_unescape(candidate)
+          credential_name = first_matching_pattern(decoded)
+          if credential_name
+            counts[credential_name] = (counts[credential_name] || 0) + 1
+            REDACTED
+          else
+            candidate
+          end
+        end
+      end
+
+      def scan_base64(str, counts)
+        str.gsub(BASE64_CANDIDATE) do |candidate|
+          decoded = safely_base64_decode(candidate)
+          next candidate unless decoded
+
+          credential_name = first_matching_pattern(decoded)
+          if credential_name
+            counts[credential_name] = (counts[credential_name] || 0) + 1
+            REDACTED
+          else
+            candidate
+          end
+        end
+      end
+
+      def first_matching_pattern(value)
+        @active_patterns.each do |name, pattern|
+          return name if pattern.match?(value)
+        end
+        nil
+      end
+
+      def safely_unescape(value)
+        CGI.unescape(value)
+      rescue ArgumentError
+        value
+      end
+
+      def safely_base64_decode(value)
+        decoded = Base64.strict_decode64(value)
+        decoded.force_encoding(Encoding::UTF_8)
+        return nil unless decoded.valid_encoding?
+
+        decoded
+      rescue ArgumentError
+        nil
       end
 
       def redact_indexed_secrets(str, counts)

@@ -17,18 +17,29 @@ module Woods
     #                               Woods::SessionTracer::Middleware
     #
     class Middleware
+      # The full Store interface every backend (FileStore, RedisStore,
+      # SolidCacheStore) implements. Surfacing misconfiguration at boot
+      # lets ops catch a half-implemented store before every request
+      # silently skips recording.
+      STORE_INTERFACE = %i[record read sessions clear clear_all].freeze
+
       # @param app [#call] The downstream Rack application
-      # @param store [Store] Session trace store backend (must respond to :record)
+      # @param store [Store] Session trace store backend implementing the
+      #   full {STORE_INTERFACE} (record, read, sessions, clear, clear_all)
       # @param session_id_proc [Proc, nil] Custom session ID extraction (receives env)
       # @param exclude_paths [Array<String>] Path prefixes to skip
-      # @raise [ArgumentError] if the store is nil or does not implement :record.
-      #   Surfacing misconfiguration at boot is preferable to the original
-      #   fire-and-forget rescue silently swallowing every request trace.
+      # @raise [ArgumentError] if the store is nil or missing any method
+      #   in {STORE_INTERFACE}. Boot-time validation is preferable to the
+      #   fire-and-forget rescue in {#call} silently swallowing every
+      #   request trace when half a store interface is implemented.
       def initialize(app, store:, session_id_proc: nil, exclude_paths: [])
         raise ArgumentError, 'session tracer middleware requires a store' if store.nil?
-        unless store.respond_to?(:record)
+
+        missing = STORE_INTERFACE.reject { |m| store.respond_to?(m) }
+        unless missing.empty?
           raise ArgumentError,
-                "session tracer store must respond to :record (got #{store.class})"
+                'session tracer store is missing required methods ' \
+                "#{missing.inspect} (got #{store.class}). Expected: #{STORE_INTERFACE.inspect}."
         end
 
         @app = app

@@ -56,16 +56,24 @@ end
 
 ## Core Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | Directory where extracted data is written |
-| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | List of enabled extractors (see [Extractors](#extractors) below) |
-| `pretty_json` | Boolean | `true` | Format extracted JSON with indentation |
-| `max_context_tokens` | Integer | `8000` | Maximum tokens for retrieval context windows |
-| `similarity_threshold` | Float | `0.7` | Minimum similarity score (0.0-1.0) for retrieval results |
-| `context_format` | Symbol | `:markdown` | Output format for retrieval: `:claude`, `:markdown`, `:plain`, `:json` |
-| `include_framework_sources` | Boolean | `true` | Extract Rails and gem source code |
-| `concurrent_extraction` | Boolean | `false` | Enable parallel extraction (experimental) |
+Columns:
+
+- **User-settable**: a direct `Woods.configure { |c| c.<option> = ... }` writes the value verbatim.
+- **Preset-derived**: set by `Builder.preset_config(:local | :postgresql | :production)` as a group. You can override any preset value afterwards in the `configure` block — later writes win.
+- **Computed**: derived from other options at read time (or at `build_*` time by `Woods::Builder`). Writing directly has no effect; change the inputs instead.
+
+| Option | Type | Default | Role | Description |
+|--------|------|---------|------|-------------|
+| `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
+| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | user-settable | List of enabled extractors (see [Extractors](#extractors) below) |
+| `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
+| `max_context_tokens` | Integer | `8000` | user-settable | Maximum tokens for retrieval context windows |
+| `similarity_threshold` | Float | `0.7` | user-settable | Minimum similarity score (0.0-1.0) for retrieval results |
+| `context_format` | Symbol | `:markdown` | user-settable | Output format for retrieval: `:claude`, `:markdown`, `:plain`, `:json` |
+| `include_framework_sources` | Boolean | `true` | user-settable | Extract Rails and gem source code |
+| `concurrent_extraction` | Boolean | `false` | user-settable | Enable parallel extraction (experimental) |
+| `vector_store` / `metadata_store` / `graph_store` / `embedding_provider` | Symbol | — | preset-derived | Adapter types. Set by presets; override individually to mix stacks. |
+| chars-per-token ratio (used by ContextAssembler, TextPreparer, Builder, cost_model) | Float | `4.0` (OpenAI) / `1.5` (Ollama) | computed | Derived from the active embedding provider via `Woods::TokenUtils.chars_per_token_for(...)`. Not directly user-settable; change `embedding_provider` to change the ratio. |
 
 ## Embedding Options
 

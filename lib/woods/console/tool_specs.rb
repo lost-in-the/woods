@@ -34,7 +34,19 @@ module Woods
       #     objects (validators, guards) are captured in the lambda's closure.
       ToolSpec = Struct.new(:name, :description, :properties, :required, :tier, :handler, keyword_init: true)
 
-      # All 29 console tool specifications, grouped by tier.
+      # All 31 console tool specifications, grouped by tier:
+      #   Tier 1 (read-only, 9 tools) — no guard required, bridge-level
+      #     table_gate already constrains reach.
+      #   Tier 2 (domain-aware, 9 tools) — no guard required, validators run
+      #     inside the app under SafeContext.
+      #   Tier 3 (analytics, 10 tools) — no guard required, adapters wrap
+      #     external services (Redis, job queues, cache).
+      #   Tier 4 (guarded, 3 tools) — `eval`, `sql`, `query`. Guards ARE
+      #     MANDATORY for these. The handler lambda for each Tier-4 tool
+      #     captures the relevant validator/guard closure; the Server's
+      #     {DispatchPipeline} and {EmbeddedExecutor} refuse to execute a
+      #     Tier-4 tool whose `guard` is missing or nil. Never call `eval`,
+      #     `sql`, or `query` without wiring EvalGuard / SqlValidator first.
       # Each spec is a ToolSpec; the handler lambda captures any objects that
       # must be built once at spec-definition time (validators, guards).
       TOOL_SPECS = [

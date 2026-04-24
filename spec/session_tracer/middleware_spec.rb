@@ -5,7 +5,15 @@ require 'woods/session_tracer/middleware'
 require 'woods/session_tracer/store'
 
 RSpec.describe Woods::SessionTracer::Middleware do
-  let(:store) { instance_double(Woods::SessionTracer::Store) }
+  let(:store) do
+    instance_double(Woods::SessionTracer::Store).tap do |s|
+      allow(s).to receive(:record)
+      allow(s).to receive(:read).and_return([])
+      allow(s).to receive(:sessions).and_return([])
+      allow(s).to receive(:clear)
+      allow(s).to receive(:clear_all)
+    end
+  end
   let(:inner_app) { ->(_env) { [200, { 'Content-Type' => 'text/html' }, ['OK']] } }
   let(:middleware) { described_class.new(inner_app, store: store, exclude_paths: ['/assets', '/health']) }
 
@@ -237,6 +245,42 @@ RSpec.describe Woods::SessionTracer::Middleware do
         anything,
         hash_including('format' => 'html')
       )
+    end
+  end
+
+  describe 'store interface validation (J-3)' do
+    it 'rejects a store missing :read' do
+      partial = Class.new do
+        def record(_session_id, _data); end
+        # no :read / :sessions / :clear / :clear_all
+      end.new
+
+      expect { described_class.new(inner_app, store: partial) }
+        .to raise_error(ArgumentError, /missing required methods.*:read/)
+    end
+
+    it 'rejects a store missing :clear_all' do
+      partial = Class.new do
+        def record(_session_id, _data); end
+        def read(_session_id) = []
+        def sessions = []
+        def clear(_session_id); end
+      end.new
+
+      expect { described_class.new(inner_app, store: partial) }
+        .to raise_error(ArgumentError, /:clear_all/)
+    end
+
+    it 'accepts a store that implements the full interface' do
+      full = Class.new do
+        def record(_session_id, _data); end
+        def read(_session_id) = []
+        def sessions = []
+        def clear(_session_id); end
+        def clear_all; end
+      end.new
+
+      expect { described_class.new(inner_app, store: full) }.not_to raise_error
     end
   end
 end

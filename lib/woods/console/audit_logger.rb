@@ -57,7 +57,7 @@ module Woods
         # malformed JSONL lines (integrity hit on audit review).
         File.open(@path, File::WRONLY | File::APPEND | File::CREAT, 0o644) do |f|
           f.flock(File::LOCK_EX)
-          f.puts(JSON.generate(entry))
+          f.puts(JSON.generate(sanitize_controls(entry)))
         end
       end
 
@@ -91,6 +91,26 @@ module Woods
         return value unless value.is_a?(String) && value.length > MAX_FIELD_CHARS
 
         "#{value[0, MAX_FIELD_CHARS]}… [truncated #{value.length - MAX_FIELD_CHARS} chars]"
+      end
+
+      # Defense-in-depth against log injection: strip ASCII control characters
+      # (NUL through US + DEL, except TAB) from every string in the entry
+      # before it reaches `JSON.generate`. `JSON.generate` already escapes
+      # these in string values, but (a) some downstream log readers parse
+      # JSONL by splitting on literal `\n` before JSON-parsing, and (b) a
+      # future consumer that decodes and reprints values (e.g. a terminal
+      # audit UI) would re-expose injection vectors.
+      CONTROL_CHARS = /[\x00-\x08\x0A-\x1F\x7F]/
+      private_constant :CONTROL_CHARS
+
+      def sanitize_controls(value)
+        case value
+        when String then value.gsub(CONTROL_CHARS, '')
+        when Hash   then value.transform_keys { |k| sanitize_controls(k) }
+                              .transform_values { |v| sanitize_controls(v) }
+        when Array  then value.map { |v| sanitize_controls(v) }
+        else value
+        end
       end
 
       public
