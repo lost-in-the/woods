@@ -11,23 +11,46 @@ require 'woods/extractors/view_template_extractor'
 RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   include_context 'extractor setup'
 
+  # Stub engine implementing the ViewEngines::Base contract. Reused by
+  # the supported_template_engines aggregation tests and the engine
+  # dispatch tests below.
+  let(:fake_engine_class) do
+    Class.new(Woods::Extractors::ViewEngines::Base) do
+      def name
+        :fake
+      end
+
+      def extensions
+        ['.fake']
+      end
+
+      def scan_partials(_source)
+        []
+      end
+
+      def scan_instance_variables(_source)
+        []
+      end
+
+      def scan_helpers(_source)
+        ['fake_helper']
+      end
+
+      def resolve_partial_identifier(partial_name, _current_identifier)
+        "_#{partial_name}.fake"
+      end
+    end
+  end
+
   describe '.supported_template_engines' do
     it 'returns the engine names currently wired into the orchestrator' do
       expect(described_class.supported_template_engines).to eq([:erb])
     end
 
     it 'is aggregated from ENGINES — adding an engine extends the list' do
-      fake = Class.new(Woods::Extractors::ViewEngines::Base) do
-        def name = :fake
-        def extensions = ['.fake']
-        def scan_partials(_) = []
-        def scan_instance_variables(_) = []
-        def scan_helpers(_) = []
-        def resolve_partial_identifier(n, _) = "_#{n}.fake"
-      end
       stub_const(
         "#{described_class}::ENGINES",
-        [Woods::Extractors::ViewEngines::Erb, fake].freeze
+        [Woods::Extractors::ViewEngines::Erb, fake_engine_class].freeze
       )
       expect(described_class.supported_template_engines).to eq(%i[erb fake])
     end
@@ -38,21 +61,6 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   end
 
   describe 'engine dispatch' do
-    let(:fake_engine_class) do
-      Class.new(Woods::Extractors::ViewEngines::Base) do
-        def name = :fake
-        def extensions = ['.fake']
-
-        def scan_partials(_) = []
-
-        def scan_instance_variables(_) = []
-
-        def scan_helpers(_) = ['fake_helper']
-
-        def resolve_partial_identifier(n, _) = "_#{n}.fake"
-      end
-    end
-
     before do
       stub_const(
         "#{described_class}::ENGINES",
@@ -67,10 +75,15 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(identifiers).to contain_exactly('home/index.html.erb', 'home/widget.fake')
     end
 
-    it 'routes each file to the matching engine (metadata reflects the match)' do
+    it 'routes each file to the matching engine based on extension' do
       create_file('app/views/home/widget.fake', 'fake source')
       units = described_class.new.extract_all
       expect(units.first.metadata[:template_engine]).to eq('fake')
+    end
+
+    it 'delegates scanning to the matched engine' do
+      create_file('app/views/home/widget.fake', 'fake source')
+      units = described_class.new.extract_all
       expect(units.first.metadata[:helpers_called]).to eq(['fake_helper'])
     end
 

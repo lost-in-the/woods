@@ -35,21 +35,31 @@ RSpec.describe Woods::Extractors::ViewEngines::Base do
 
     it 'names the concrete subclass in the error message' do
       subclass = Class.new(described_class)
-      stub_const('Fake::Haml', subclass)
-      expect { subclass.new.name }.to raise_error(NotImplementedError, /Fake::Haml/)
+      stub_const('FakeHamlEngine', subclass)
+      expect { subclass.new.name }.to raise_error(NotImplementedError, /FakeHamlEngine/)
     end
   end
 
   describe '#handles?' do
-    it 'returns true when any extension suffix-matches the path' do
-      impl = Class.new(described_class) { def extensions = %w[.html.haml .haml] }.new
-      expect(impl.handles?('app/views/users/index.html.haml')).to be true
-      expect(impl.handles?('mailer.haml')).to be true
+    let(:haml_like_class) do
+      Class.new(described_class) do
+        def extensions
+          %w[.html.haml .haml]
+        end
+      end
+    end
+    let(:haml_like_engine) { haml_like_class.new }
+
+    it 'returns true when a known extension suffix-matches the path' do
+      expect(haml_like_engine.handles?('app/views/users/index.html.haml')).to be true
+    end
+
+    it 'returns true for the shorter extension too' do
+      expect(haml_like_engine.handles?('mailer.haml')).to be true
     end
 
     it 'returns false when no extension matches' do
-      impl = Class.new(described_class) { def extensions = %w[.html.haml .haml] }.new
-      expect(impl.handles?('app/views/users/index.html.erb')).to be false
+      expect(haml_like_engine.handles?('app/views/users/index.html.erb')).to be false
     end
 
     it 'propagates NotImplementedError from #extensions when not overridden' do
