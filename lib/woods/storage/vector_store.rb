@@ -62,9 +62,15 @@ module Woods
 
         # Search for similar vectors using cosine similarity.
         #
+        # Filter values may be scalars (exact match) or Arrays (membership
+        # match — "value ∈ array"). Adapters implement the membership
+        # semantics natively: in-memory loops, pgvector IN (...), Qdrant
+        # `match: { any: [...] }`.
+        #
         # @param query_vector [Array<Float>] The query embedding vector
         # @param limit [Integer] Maximum number of results to return
-        # @param filters [Hash] Optional metadata filters to apply
+        # @param filters [Hash] Optional metadata filters — values may be
+        #   scalars or Arrays
         # @return [Array<SearchResult>] Results sorted by descending similarity
         # @raise [NotImplementedError] if not implemented by adapter
         def search(query_vector, limit: 10, filters: {})
@@ -225,6 +231,12 @@ module Woods
 
         private
 
+        # Match a filter value against a metadata value. Arrays are
+        # membership filters ("any of"); scalars are equality.
+        def filter_match?(filter_value, meta_value)
+          filter_value.is_a?(Array) ? filter_value.include?(meta_value) : filter_value == meta_value
+        end
+
         # Append a new entry to the flat buffer.
         def append(id, vector, metadata)
           idx = @ids.size
@@ -260,7 +272,7 @@ module Woods
               next
             end
             meta = @metadata[idx]
-            unless filters.empty? || filters.all? { |k, v| meta[k] == v }
+            unless filters.empty? || filters.all? { |k, v| filter_match?(v, meta[k]) }
               idx += 1
               next
             end

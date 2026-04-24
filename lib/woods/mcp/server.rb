@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'json'
 require 'logger'
 require 'mcp'
 require 'open3'
@@ -239,6 +240,30 @@ module Woods
           raise ArgumentError, "expected integer, got #{value.class}: #{value.inspect}"
         end
 
+        # Load a precomputed flow document written by FlowPrecomputer, when
+        # `config.precompute_flows` was enabled during extraction. Returns nil
+        # when the entry point is missing a method suffix, the JSON file isn't
+        # on disk, or the file can't be parsed — callers fall back to
+        # FlowAssembler.
+        #
+        # @param index_dir [String]
+        # @param entry_point [String] e.g., "PostsController#create"
+        # @return [Woods::FlowDocument, nil]
+        def load_precomputed_flow(index_dir, entry_point)
+          return nil unless entry_point.to_s.include?('#')
+
+          controller, action = entry_point.split('#', 2)
+          return nil if controller.empty? || action.empty?
+
+          filename = "#{controller.gsub('::', '__')}_#{action}.json"
+          path = File.join(index_dir, 'flows', filename)
+          return nil unless File.exist?(path)
+
+          Woods::FlowDocument.from_h(JSON.parse(File.read(path)))
+        rescue JSON::ParserError, Errno::ENOENT
+          nil
+        end
+
         # Apply offset+limit pagination to a single section key within a container hash.
         # Adds `_total`, `_truncated`, and `_offset` metadata keys when truncating.
         #
@@ -441,7 +466,7 @@ module Woods
               }
             }
           ) do |server_context:, detail: nil|
-            result = { manifest: reader.manifest }
+            result = { manifest: reader.manifest, template_engines: reader.template_engines }
             result[:summary] = reader.summary if (detail || 'summary') == 'full'
             respond.call(renderer.render(:structure, result))
           end
@@ -670,7 +695,15 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
-                               'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion.'
+                               'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
+                               'When the unfiltered top-K has no candidate of a requested type, the retriever ' \
+                               'falls back to rank-within-type so the response is populated whenever units of ' \
+                               'the requested type exist in the index. The response appends a "Type rank ' \
+                               'context" table with per-type: source, rank in unfiltered top-K, global_k, ' \
+                               'total_of_type. Read source to tell the cases apart: in_top_k (strong match), ' \
+                               'within_type_fallback (weak match surfaced by the fallback), outside_top_k ' \
+                               '(index has this type but other requested types filled the result), absent ' \
+                               '(zero units of this type in the index).'
                 },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },
@@ -727,8 +760,10 @@ module Woods
 
         def define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
           require_relative '../flow_assembler'
+          require_relative '../flow_document'
           require_relative '../dependency_graph'
           coerce_int = method(:coerce_integer)
+          load_precomputed = method(:load_precomputed_flow)
 
           server.define_tool(
             name: 'trace_flow',
@@ -748,13 +783,17 @@ module Woods
             }
           ) do |entry_point:, server_context:, depth: nil|
             max_depth = coerce_int.call(depth) || 3
-            graph = reader.dependency_graph
 
-            assembler = Woods::FlowAssembler.new(
-              graph: graph,
-              extracted_dir: index_dir
-            )
-            flow_doc = assembler.assemble(entry_point, max_depth: max_depth)
+            # Prefer the precomputed flow JSON written by FlowPrecomputer during
+            # extraction (gated on `config.precompute_flows`) — it avoids
+            # re-parsing source on every request. Fall back to query-time
+            # reassembly when no precomputed document exists.
+            flow_doc = load_precomputed.call(index_dir, entry_point)
+            flow_doc ||= begin
+              graph = reader.dependency_graph
+              assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: index_dir)
+              assembler.assemble(entry_point, max_depth: max_depth)
+            end
 
             respond.call(renderer.render(:trace_flow, flow_doc.to_h))
           rescue StandardError => e

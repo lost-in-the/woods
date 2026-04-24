@@ -726,6 +726,40 @@ RSpec.describe Woods::Cache::CachedRetriever do
       expect(retriever).to have_received(:retrieve).once
     end
 
+    it 'round-trips type_rank_context through the cache with symbol keys preserved (#108)' do
+      typed_result = Woods::Retriever::RetrievalResult.new(
+        context: '## Ctx', sources: [], classification: nil,
+        strategy: :vector, tokens_used: 10, budget: 8000, trace: nil,
+        type_rank_context: {
+          'controller' => {
+            source: :in_top_k,
+            top_of_type_global_rank: 2,
+            global_k: 20,
+            total_of_type: 183
+          },
+          'service' => {
+            source: :within_type_fallback,
+            top_of_type_global_rank: nil,
+            global_k: 20,
+            total_of_type: 17
+          }
+        }
+      )
+      allow(retriever).to receive(:retrieve)
+        .with('typed query', budget: 8000, types: %w[controller service], exclude_types: nil)
+        .and_return(typed_result)
+
+      # Miss → fills cache.
+      fresh = cached_retriever.retrieve('typed query', types: %w[controller service])
+      # Hit → rehydrates from JSON-normalized store.
+      hit = cached_retriever.retrieve('typed query', types: %w[controller service])
+
+      expect(hit.type_rank_context).to eq(fresh.type_rank_context)
+      expect(hit.type_rank_context['controller'][:source]).to eq(:in_top_k)
+      expect(hit.type_rank_context['service'][:source]).to eq(:within_type_fallback)
+      expect(retriever).to have_received(:retrieve).once
+    end
+
     it 'caches different queries independently' do
       result_a = Woods::Retriever::RetrievalResult.new(
         context: 'A', sources: [], classification: nil,

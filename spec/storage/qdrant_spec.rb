@@ -184,6 +184,18 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(body).not_to have_key('filter')
       end
     end
+
+    it 'translates an Array filter value into match.any membership (#108)' do
+      store.search([0.1, 0.2, 0.3], filters: { type: %w[model service] })
+
+      expect(http).to have_received(:request) do |req|
+        body = JSON.parse(req.body)
+        must_conditions = body['filter']['must']
+        expect(must_conditions).to include(
+          { 'key' => 'type', 'match' => { 'any' => %w[model service] } }
+        )
+      end
+    end
   end
 
   describe '#delete' do

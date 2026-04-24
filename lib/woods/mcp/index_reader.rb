@@ -102,6 +102,17 @@ module Woods
         @manifest ||= parse_json('manifest.json')
       end
 
+      # Template engines the extraction pipeline currently understands.
+      # Read from extractor class constants so the list stays honest as
+      # extractors come and go. Each constant must return an Array of
+      # Symbols. Surfaced by the MCP `structure` tool (#86).
+      #
+      # @return [Array<Symbol>]
+      def template_engines
+        require_relative '../extractors/view_template_extractor'
+        Woods::Extractors::ViewTemplateExtractor::SUPPORTED_TEMPLATE_ENGINES.dup
+      end
+
       # @return [String, nil] SUMMARY.md content, or nil if not present
       def summary
         @summary ||= begin
@@ -207,6 +218,14 @@ module Woods
                  TYPE_DIRS
                end
 
+        # Phase 2 candidates are collected per-dir and then scanned in
+        # round-robin across dirs. Exhausting the per-run scan cap linearly
+        # down TYPE_DIRS order would starve later types (`concerns` at pos
+        # 13, `test_mappings` at pos 31) on any codebase where the earlier
+        # dirs together exceed max_scan entries. Interleaving guarantees
+        # every type contributes to the scanned set.
+        phase2_queues = {}
+
         dirs.each do |dir|
           type_name = DIR_TO_TYPE[dir]
           entries = read_index(dir)
@@ -222,34 +241,54 @@ module Woods
           end
 
           entries.each do |entry|
-            break if results.size >= limit
-
             id = entry['identifier']
             next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
-            # Phase 1: identifier matching
+            # Phase 1: identifier matching (still in-order per dir)
             if fields.include?('identifier') && pattern.match?(id)
+              next if results.size >= limit
+
               results << { identifier: id, type: type_name, match_field: 'identifier' }
               next
             end
 
-            # Phase 2: metadata/source_code matching (requires loading full unit)
+            # Phase 2 is only reached when the caller opted into deeper fields.
             next unless fields.include?('metadata') || fields.include?('source_code')
 
-            if phase2_scanned >= max_scan
-              partial = true
-              next
-            end
+            (phase2_queues[dir] ||= []) << [type_name, id]
+          end
+        end
 
-            unit = find_unit(id)
-            next unless unit
+        if results.size < limit && phase2_queues.any?
+          queues = phase2_queues.values.map(&:dup)
+          catch(:phase2_done) do
+            loop do
+              progressed = false
+              queues.each do |queue|
+                next if queue.empty?
 
-            phase2_scanned += 1
+                throw :phase2_done if results.size >= limit
 
-            if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
-              results << { identifier: id, type: type_name, match_field: 'source_code' }
-            elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
-              results << { identifier: id, type: type_name, match_field: 'metadata' }
+                if phase2_scanned >= max_scan
+                  partial = true
+                  throw :phase2_done
+                end
+
+                type_name, id = queue.shift
+                progressed = true
+
+                unit = find_unit(id)
+                next unless unit
+
+                phase2_scanned += 1
+
+                if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
+                  results << { identifier: id, type: type_name, match_field: 'source_code' }
+                elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
+                  results << { identifier: id, type: type_name, match_field: 'metadata' }
+                end
+              end
+              break unless progressed
             end
           end
         end
@@ -291,7 +330,12 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
-        pattern = Regexp.new(Regexp.escape(keyword), Regexp::IGNORECASE)
+        # Multi-word keywords ("ActiveRecord callbacks") are split on
+        # whitespace and ANDed. Single-word queries behave as before.
+        tokens = keyword.to_s.strip.split(/\s+/)
+        return [] if tokens.empty?
+
+        patterns = tokens.map { |t| Regexp.new(Regexp.escape(t), Regexp::IGNORECASE) }
         results = []
 
         entries = read_index('rails_source')
@@ -302,9 +346,12 @@ module Woods
           unit = find_unit(id)
           next unless unit
 
-          matched = pattern.match?(id) ||
-                    (unit['source_code'] && pattern.match?(unit['source_code'])) ||
-                    (unit['metadata'] && pattern.match?(unit['metadata'].to_json))
+          metadata_json = unit['metadata']&.to_json
+          matched = patterns.all? do |pat|
+            pat.match?(id) ||
+              (unit['source_code'] && pat.match?(unit['source_code'])) ||
+              (metadata_json && pat.match?(metadata_json))
+          end
 
           next unless matched
 
@@ -350,7 +397,8 @@ module Woods
               identifier: id,
               type: DIR_TO_TYPE[dir],
               file_path: unit['file_path'],
-              last_modified: last_modified
+              last_modified: last_modified,
+              author: unit.dig('metadata', 'git', 'last_author')
             }
           end
         end
@@ -516,14 +564,18 @@ module Woods
                        neighbors
                      end
 
+          # At max depth, record the node with empty deps so the renderer
+          # doesn't emit an extra level of unexpanded neighbors. The parent
+          # node's deps list already shows this node as a child.
+          will_expand = current_depth < depth
           node_meta = nodes_data[current]
           result_nodes[current] = {
             type: node_meta&.dig('type'),
             depth: current_depth,
-            deps: filtered
+            deps: will_expand ? filtered : []
           }
 
-          next if current_depth >= depth
+          next unless will_expand
 
           filtered.each do |neighbor|
             unless visited.include?(neighbor)

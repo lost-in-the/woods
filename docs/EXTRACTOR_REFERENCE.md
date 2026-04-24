@@ -280,6 +280,8 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
 
+**Template engine coverage.** ERB only as a parsed template engine — HAML, Slim, and Turbo Streams are not parsed at all; an app using HAML or Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges — the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. When a `TemplateEngine` abstraction lands (tracked as a Turbo prerequisite, see issue #110), this extractor becomes the ERB implementation of that interface and HAML/Slim/Turbo become plug-in additions rather than fork points.
+
 ---
 
 ### DecoratorExtractor

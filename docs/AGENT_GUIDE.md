@@ -39,6 +39,8 @@ Key enrichments beyond source file content:
 
 **Navigation edges.** View templates scanning for `_path`/`_url` route helper calls produce `link_to` edges pointing to controllers. Controller `redirect_to` calls produce `redirect_to` edges. Form submissions produce `form_action` edges. Filter with the `via` parameter on `dependencies`/`dependents` to isolate UI navigation paths.
 
+**View-template coverage is ERB-only.** HAML, Slim, and Turbo Streams templates are not parsed at all — an app written in Slim will appear with zero view units even when views exist. Stimulus controller *references* are detected inside `PhlexExtractor` and `ViewComponentExtractor` via `data-controller` attribute scanning (dependency edges with `via: :html_attribute`, type `stimulus_controller`), but the Stimulus controller JS files themselves under `app/javascript/controllers/` are not extracted. Query the `structure` tool's `template_engines` field to confirm which engines the current index parses. A `TemplateEngine` interface for pluggable support is tracked as a Turbo prerequisite (issue #110).
+
 ---
 
 ## MCP Server Setup

@@ -205,7 +205,17 @@ module Woods
             # `@connection.quote` so the quoting story is uniform across the
             # key and value positions and a future regex-relaxation does not
             # silently unlock injection.
-            "metadata->>#{@connection.quote(key_s)} = #{@connection.quote(value.to_s)}"
+            if value.is_a?(Array)
+              # Membership filter. An empty Array would produce `IN ()`
+              # which is a syntax error; emit an always-false predicate
+              # so the query still parses and returns no rows.
+              next 'FALSE' if value.empty?
+
+              quoted = value.map { |v| @connection.quote(v.to_s) }.join(', ')
+              "metadata->>#{@connection.quote(key_s)} IN (#{quoted})"
+            else
+              "metadata->>#{@connection.quote(key_s)} = #{@connection.quote(value.to_s)}"
+            end
           end
           "WHERE #{conditions.join(' AND ')}"
         end

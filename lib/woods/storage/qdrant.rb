@@ -323,7 +323,11 @@ module Woods
         # @return [Hash] Qdrant-compatible filter with must conditions
         def build_filter(filters)
           conditions = filters.map do |key, value|
-            { key: key.to_s, match: { value: value } }
+            if value.is_a?(Array)
+              { key: key.to_s, match: { any: value } }
+            else
+              { key: key.to_s, match: { value: value } }
+            end
           end
           { must: conditions }
         end

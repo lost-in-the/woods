@@ -55,8 +55,35 @@ module Woods
                                 keyword_init: true)
 
     # The result of a retrieval operation.
+    #
+    # When the caller passed +types:+ to +#retrieve+, +type_rank_context+
+    # is a Hash keyed by requested type name with one entry per type:
+    #
+    #   {
+    #     "controller" => {
+    #       source: :in_top_k,            # see enum below
+    #       top_of_type_global_rank: 3,   # 1-based rank in unfiltered ranked, or nil
+    #       global_k: 20,                 # size of the unfiltered ranked list
+    #       total_of_type: 183            # total units of that type in the index
+    #     }
+    #   }
+    #
+    # +:source+ tells the caller which bucket the type landed in without
+    # forcing them to infer it from nil ranks:
+    #   :in_top_k              — type present in the unfiltered ranked list;
+    #                            strong match.
+    #   :within_type_fallback  — type NOT in the unfiltered ranked list, but
+    #                            the fallback vector search returned
+    #                            candidates of this type. Weak match.
+    #   :outside_top_k         — type NOT in the unfiltered ranked list, has
+    #                            units in the index, but the fallback did
+    #                            not run (other requested types filled the
+    #                            result). No results of this type.
+    #   :absent                — type has zero units in the index.
+    #
+    # Nil for unfiltered queries.
     RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace,
-                                 keyword_init: true)
+                                 :type_rank_context, keyword_init: true)
 
     # Unit types queried for the structural context overview.
     STRUCTURAL_TYPES = %w[model controller service job mailer component graphql].freeze
@@ -158,7 +185,12 @@ module Woods
 
     # Execute the full retrieval pipeline for a natural language query.
     #
-    # Pipeline: classify -> execute -> rank -> filter -> assemble -> format
+    # Pipeline: classify -> execute -> rank -> filter -> (fallback within-type
+    # when filter emptied everything) -> assemble -> format.
+    #
+    # When +types:+ is set, the response carries +type_rank_context+ —
+    # per-type rank metadata the caller uses to tell a strong match from
+    # a weak one without Woods imposing a score threshold.
     #
     # @param query [String] Natural language query
     # @param budget [Integer] Token budget for context assembly
@@ -169,25 +201,23 @@ module Woods
     # @return [RetrievalResult] Complete retrieval result
     def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
       classification = @classifier.classify(query)
       execution_result = @executor.execute(query: query, classification: classification)
       ranked = @ranker.rank(execution_result.candidates, classification: classification)
-      filtered = filter_by_type(ranked, types: types, exclude_types: exclude_types)
-      assembled = assemble_context(filtered, classification, budget)
 
-      elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
-
-      trace = RetrievalTrace.new(
-        classification: classification,
-        strategy: execution_result.strategy,
-        candidate_count: execution_result.candidates.size,
-        ranked_count: filtered.size,
-        tokens_used: assembled.tokens_used,
-        elapsed_ms: elapsed_ms
+      type_list = normalize_type_list(types)
+      filtered, fallback_ran = apply_type_filter(
+        ranked, query, classification, types: types, type_list: type_list, exclude_types: exclude_types
       )
+      type_rank_context = type_list ? build_type_rank_context(ranked, type_list, fallback_ran: fallback_ran) : nil
 
-      build_result(assembled, classification, execution_result.strategy, budget, trace)
+      assembled = assemble_context(filtered, classification, budget)
+      trace = build_trace(classification, execution_result, filtered, assembled, start_time)
+
+      build_result(
+        assembled: assembled, classification: classification, strategy: execution_result.strategy,
+        budget: budget, trace: trace, type_rank_context: type_rank_context
+      )
     end
 
     private
@@ -265,8 +295,9 @@ module Woods
     # @param strategy [Symbol] Search strategy used
     # @param budget [Integer] Token budget
     # @return [RetrievalResult]
-    def build_result(assembled, classification, strategy, budget, trace = nil)
+    def build_result(assembled:, classification:, strategy:, budget:, trace: nil, type_rank_context: nil)
       context = @formatter ? @formatter.call(assembled.context) : assembled.context
+      context = append_type_rank_context(context, type_rank_context) if type_rank_context
 
       RetrievalResult.new(
         context: context,
@@ -275,14 +306,134 @@ module Woods
         strategy: strategy,
         tokens_used: assembled.tokens_used,
         budget: budget,
-        trace: trace
+        trace: trace,
+        type_rank_context: type_rank_context
       )
+    end
+
+    # Post-rank reject, with rank-within-type fallback when the caller
+    # passed a type filter and the global top-K had no candidate of the
+    # requested type(s). Returns +[filtered, fallback_ran]+ — the second
+    # element drives the :source field on type_rank_context.
+    def apply_type_filter(ranked, query, classification, types:, type_list:, exclude_types:)
+      filtered = filter_by_type(ranked, types: types, exclude_types: exclude_types)
+      return [filtered, false] unless type_list && filtered.empty?
+
+      [within_type_fallback(query, classification, type_list, exclude_types), true]
+    end
+
+    # Rank-within-type fallback query. Pushes the explicit type filter
+    # into the executor so the vector store only scores candidates of
+    # that type. Used when the global top-K had none of the requested
+    # types but the index may still contain them.
+    #
+    # Forces +strategy: :vector+. Only the vector path honors
+    # +type_filter+ — on a keyword/graph/direct-classified query the
+    # default strategy would ignore the filter, return the same
+    # candidates, and silently leave +filtered+ empty. Vector search
+    # works for any classification because we always have the raw
+    # query text.
+    #
+    # Short-circuits to an empty Array when every requested type has
+    # zero units in the index — there is nothing for the fallback to
+    # find, so we skip the extra vector search.
+    def within_type_fallback(query, classification, type_list, exclude_types)
+      type_array = type_list.to_a
+      return [] if type_array.all? { |t| total_of_type(t).to_i.zero? }
+
+      fallback = @executor.execute(
+        query: query, classification: classification,
+        type_filter: type_array, strategy: :vector
+      )
+      ranked = @ranker.rank(fallback.candidates, classification: classification)
+      filter_by_type(ranked, types: type_array, exclude_types: exclude_types)
+    end
+
+    def build_trace(classification, execution_result, filtered, assembled, start_time)
+      elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
+      RetrievalTrace.new(
+        classification: classification,
+        strategy: execution_result.strategy,
+        candidate_count: execution_result.candidates.size,
+        ranked_count: filtered.size,
+        tokens_used: assembled.tokens_used,
+        elapsed_ms: elapsed_ms
+      )
+    end
+
+    # Build per-type rank metadata from the unfiltered global ranked list.
+    #
+    # +top_of_type_global_rank+ is the 1-based position of the first
+    # candidate of that type in the ranked list, or nil when no candidate
+    # of that type survived ranking. +total_of_type+ is the canonical
+    # count from the metadata store — answers "does this type exist in the
+    # index at all?" independent of query match. +source+ labels the bucket
+    # the type landed in so the caller doesn't infer it from a nil rank;
+    # see the RetrievalResult docstring for the four-value enum.
+    #
+    # @param ranked [Array<Candidate>]
+    # @param type_list [Set<String>]
+    # @param fallback_ran [Boolean] Whether rank-within-type fallback ran
+    # @return [Hash{String => Hash}]
+    def build_type_rank_context(ranked, type_list, fallback_ran:)
+      global_k = ranked.size
+      type_list.to_h do |type|
+        match_index = ranked.index { |c| candidate_type(c) == type }
+        top_rank = match_index ? match_index + 1 : nil
+        total = total_of_type(type)
+        [
+          type,
+          {
+            source: type_source(top_rank, total, fallback_ran: fallback_ran),
+            top_of_type_global_rank: top_rank,
+            global_k: global_k,
+            total_of_type: total
+          }
+        ]
+      end
+    end
+
+    # Pick the :source enum value for a single type based on where its
+    # candidate ended up. See RetrievalResult's docstring for the enum.
+    def type_source(top_rank, total, fallback_ran:)
+      return :in_top_k if top_rank
+      return :absent if total.to_i.zero?
+      return :within_type_fallback if fallback_ran
+
+      :outside_top_k
+    end
+
+    def total_of_type(type)
+      @metadata_store.find_by_type(type).size
+    rescue StandardError
+      nil
+    end
+
+    # Append a compact markdown summary of +type_rank_context+ to the
+    # assembled context string. Machine-readable enough for agents to
+    # parse without a structured response channel. :source is the first
+    # column so the common "strong match" case (in_top_k) is visible at
+    # a glance without needing to reason about rank vs global_k.
+    def append_type_rank_context(context, type_rank_context)
+      return context if type_rank_context.empty?
+
+      lines = ['', '### Type rank context', '',
+               '| Type | Source | Rank in unfiltered top-K | Global K | Total in index |',
+               '|------|--------|--------------------------|----------|----------------|']
+      type_rank_context.each do |type, info|
+        rank = info[:top_of_type_global_rank] || '—'
+        total = info[:total_of_type].nil? ? '?' : info[:total_of_type]
+        lines << "| #{type} | #{info[:source]} | #{rank} | #{info[:global_k]} | #{total} |"
+      end
+      "#{context}\n#{lines.join("\n")}\n"
     end
 
     # Build a structural context overview from the metadata store.
     #
-    # Queries the metadata store for total unit count and counts per type,
-    # producing a summary like "Codebase: 42 units (10 models, 5 controllers, ...)".
+    # Reports +searchable_entries+ (the retriever's native denominator:
+    # one row per vector, including per-chunk rows for long units) rather
+    # than +units_indexed+. The two differ because chunking duplicates
+    # units; see the `structure` tool's glossary for the full picture.
     #
     # @return [String, nil] Overview string, or nil if the store is empty or on error
     def build_structural_context
@@ -294,7 +445,7 @@ module Woods
         "#{count} #{type}s" if count.positive?
       end
 
-      "Codebase: #{total} units (#{type_counts.join(', ')})"
+      "Codebase: #{total} searchable entries (#{type_counts.join(', ')})"
     rescue StandardError
       nil
     end

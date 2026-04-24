@@ -69,6 +69,21 @@ RSpec.describe Woods::MCP::Renderers::ClaudeRenderer do
     end
   end
 
+  describe '#render_trace_flow' do
+    it 'wraps the full markdown flow document in <trace_flow entry_point="...">' do
+      flow = {
+        entry_point: 'PostsController#create',
+        steps: [
+          { unit: 'PostsController#create', operations: [{ type: 'call', target: 'Post', method: 'create!', line: 7 }] }
+        ]
+      }
+      out = renderer.render(:trace_flow, flow)
+      expect(out).to start_with('<trace_flow entry_point="PostsController#create">')
+      expect(out).to include('Post.create!')
+      expect(out).to end_with('</trace_flow>')
+    end
+  end
+
   describe 'empty array / nil data edge cases' do
     it 'renders empty dependency trees without crashing' do
       out = renderer.render(:dependencies, { 'root' => 'X', 'nodes' => {} })

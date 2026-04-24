@@ -24,6 +24,13 @@ module Woods
       include SharedDependencyScanner
       include RouteHelperResolver
 
+      # Template engines this extractor understands. Surfaced through
+      # the MCP `structure` tool so callers can see at a glance what's
+      # covered and what isn't. HAML, Slim, Stimulus, Turbo are
+      # intentionally absent; see docs/EXTRACTOR_REFERENCE.md for the
+      # current coverage boundary.
+      SUPPORTED_TEMPLATE_ENGINES = %i[erb].freeze
+
       # Directories to scan for view templates
       VIEW_DIRECTORIES = %w[
         app/views

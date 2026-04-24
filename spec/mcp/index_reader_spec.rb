@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
+require 'fileutils'
+require 'tmpdir'
 require 'woods/dependency_graph'
 require 'woods/mcp/index_reader'
 
@@ -455,6 +458,61 @@ RSpec.describe Woods::MCP::IndexReader do
       result = reader.traverse_dependencies('Comment', depth: 1)
       expect(result[:found]).to be true
     end
+
+    describe 'depth bounding (#109)' do
+      # Seed a 3-hop chain Order → Account → Currency → USD so the
+      # off-by-one is observable on real data. The fixture graph is
+      # too shallow to demonstrate the bug.
+      let(:tmp_dir) { Dir.mktmpdir('woods-traverse-depth') }
+      let(:reader) { described_class.new(tmp_dir) }
+
+      before do
+        File.write(File.join(tmp_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        File.write(
+          File.join(tmp_dir, 'dependency_graph.json'),
+          JSON.pretty_generate(
+            nodes: {
+              'Order' => { 'type' => 'model' },
+              'Account' => { 'type' => 'model' },
+              'Currency' => { 'type' => 'model' },
+              'USD' => { 'type' => 'model' }
+            },
+            edges: {
+              'Order' => [{ 'target' => 'Account', 'via' => 'belongs_to' }],
+              'Account' => [{ 'target' => 'Currency', 'via' => 'belongs_to' }],
+              'Currency' => [{ 'target' => 'USD', 'via' => 'belongs_to' }]
+            },
+            reverse: {
+              'Account' => ['Order'], 'Currency' => ['Account'], 'USD' => ['Currency']
+            }
+          )
+        )
+      end
+
+      after { FileUtils.remove_entry(tmp_dir) if File.directory?(tmp_dir) }
+
+      it 'at depth: 1 exposes only the root and its immediate children' do
+        result = reader.traverse_dependencies('Order', depth: 1)
+        expect(result[:nodes].keys).to contain_exactly('Order', 'Account')
+        # Account is at max depth, so its own entry has empty deps (its
+        # parent's deps list already shows it as a child).
+        expect(result[:nodes]['Account'][:deps]).to eq([])
+        expect(result[:nodes]['Order'][:deps]).to eq(['Account'])
+      end
+
+      it 'at depth: 2 expands one more level' do
+        result = reader.traverse_dependencies('Order', depth: 2)
+        expect(result[:nodes].keys).to contain_exactly('Order', 'Account', 'Currency')
+        expect(result[:nodes]['Currency'][:deps]).to eq([])
+        expect(result[:nodes]['Account'][:deps]).to eq(['Currency'])
+      end
+
+      it 'at depth: 0 returns only the root with empty deps' do
+        result = reader.traverse_dependencies('Order', depth: 0)
+        expect(result[:nodes].keys).to eq(['Order'])
+        expect(result[:nodes]['Order'][:deps]).to eq([])
+      end
+    end
   end
 
   describe '#traverse_dependents' do
@@ -510,6 +568,36 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(result[:file_path]).to include('activerecord')
       expect(result[:metadata]).to include('gem_name' => 'activerecord')
     end
+
+    describe 'multi-word keywords (#107)' do
+      it 'ANDs each whitespace-separated token' do
+        results = reader.framework_sources('ActiveRecord Persistence')
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('ActiveRecord::Base')
+      end
+
+      it 'returns empty when not all tokens match the same unit' do
+        # "Persistence" lives in ActiveRecord::Base source_code; "controller"
+        # only in ActionController::Base metadata — no unit has both.
+        results = reader.framework_sources('Persistence controller')
+        expect(results).to be_empty
+      end
+
+      it 'returns empty when two of three tokens match but the third does not' do
+        # Both "ActiveRecord" and "Persistence" appear in ActiveRecord::Base;
+        # "nonexistent_marker" does not. The AND semantic must reject.
+        results = reader.framework_sources('ActiveRecord Persistence nonexistent_marker')
+        expect(results).to be_empty
+      end
+
+      it 'returns empty for a whitespace-only keyword rather than raising' do
+        expect(reader.framework_sources('   ')).to eq([])
+      end
+
+      it 'returns empty for an empty keyword' do
+        expect(reader.framework_sources('')).to eq([])
+      end
+    end
   end
 
   describe '#recent_changes' do
@@ -547,6 +635,35 @@ RSpec.describe Woods::MCP::IndexReader do
       results = reader.recent_changes(limit: 1)
       result = results.first
       expect(result).to include(:identifier, :type, :file_path, :last_modified)
+    end
+
+    it 'populates :author from metadata.git.last_author (#106)' do
+      results = reader.recent_changes(limit: 1)
+      expect(results.first[:author]).to eq('dev@example.com')
+    end
+
+    it 'leaves :author nil when git metadata has no last_author entry' do
+      Dir.mktmpdir('woods-author-nil') do |tmp|
+        File.write(File.join(tmp, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        FileUtils.mkdir_p(File.join(tmp, 'models'))
+        File.write(
+          File.join(tmp, 'models', '_index.json'),
+          JSON.pretty_generate([{ 'identifier' => 'Anon' }])
+        )
+        digest = Digest::SHA256.hexdigest('Anon')[0, 8]
+        File.write(
+          File.join(tmp, 'models', "Anon_#{digest}.json"),
+          JSON.pretty_generate(
+            type: 'model', identifier: 'Anon',
+            metadata: { git: { last_modified: '2026-04-01T00:00:00Z' } }
+          )
+        )
+
+        reader = described_class.new(tmp)
+        results = reader.recent_changes(limit: 1)
+        expect(results.first[:identifier]).to eq('Anon')
+        expect(results.first[:author]).to be_nil
+      end
     end
   end
 
@@ -610,6 +727,87 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(results).to include(
         a_hash_including(identifier: 'External::Analytics', type: 'lib')
       )
+    end
+  end
+
+  describe 'Phase-2 scan budget distribution across type directories (#104)' do
+    # Phase 2 used to iterate TYPE_DIRS in order and increment a single
+    # global counter, so a codebase with more than max_scan units in the
+    # early dirs (models, controllers) would starve later dirs like
+    # concerns (pos 13) and test_mappings (pos 31). Interleaving ensures
+    # every populated dir gets a share of the scan budget.
+
+    let(:synthetic_dir) { Dir.mktmpdir('woods-search-budget') }
+    let(:synthetic_reader) { described_class.new(synthetic_dir) }
+
+    before do
+      # Satisfy IndexReader's manifest requirement.
+      File.write(
+        File.join(synthetic_dir, 'manifest.json'),
+        JSON.pretty_generate(total_units: 0, counts: {})
+      )
+
+      # 20 models — enough to exhaust any reasonable scan cap on its own.
+      FileUtils.mkdir_p(File.join(synthetic_dir, 'models'))
+      model_entries = 20.times.map do |i|
+        identifier = "Model#{i}"
+        write_unit(synthetic_dir, 'models', identifier, type: 'model', source: 'class body')
+        { 'identifier' => identifier }
+      end
+      File.write(File.join(synthetic_dir, 'models', '_index.json'), JSON.pretty_generate(model_entries))
+
+      # One concern whose source contains the target phrase. Positionally
+      # 13th in TYPE_DIRS — guaranteed to be starved by linear scan when
+      # max_scan is below ~20 models.
+      FileUtils.mkdir_p(File.join(synthetic_dir, 'concerns'))
+      write_unit(
+        synthetic_dir, 'concerns', 'ApiAuthentication',
+        type: 'concern',
+        source: "module ApiAuthentication\n  def requires_authentication\n    true\n  end\nend"
+      )
+      File.write(
+        File.join(synthetic_dir, 'concerns', '_index.json'),
+        JSON.pretty_generate([{ 'identifier' => 'ApiAuthentication' }])
+      )
+    end
+
+    after { FileUtils.remove_entry(synthetic_dir) if File.directory?(synthetic_dir) }
+
+    def write_unit(base, dir, identifier, type:, source:)
+      digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+      filename = "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}_#{digest}.json"
+      File.write(
+        File.join(base, dir, filename),
+        JSON.pretty_generate(
+          type: type, identifier: identifier, source_code: source,
+          metadata: {}, dependencies: [], dependents: []
+        )
+      )
+    end
+
+    it 'reaches the concerns dir even when models dir alone exceeds max_scan' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '5'
+      begin
+        result = synthetic_reader.search('requires_authentication', fields: %w[source_code])
+        identifiers = result[:results].map { |r| r[:identifier] }
+        expect(identifiers).to include('ApiAuthentication')
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
+    it 'still sets :partial when the scan cap actually runs out before all candidates load' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '3'
+      begin
+        result = synthetic_reader.search('class body', fields: %w[source_code])
+        expect(result[:partial]).to be true
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
     end
   end
 

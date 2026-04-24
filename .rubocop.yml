@@ -154,6 +154,7 @@ Metrics/ParameterLists:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
+    - 'lib/woods/retriever.rb'
     - 'lib/woods/unblocked/**/*'
 
 # MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars

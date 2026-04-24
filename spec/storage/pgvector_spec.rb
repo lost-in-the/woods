@@ -154,6 +154,18 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       expect(connection).to have_received(:execute).with(/metadata->>'type' = 'model'/)
     end
 
+    it 'translates an Array filter value into IN (...) membership (#108)' do
+      store.search([0.1, 0.2, 0.3], filters: { type: %w[model service] })
+
+      expect(connection).to have_received(:execute).with(/metadata->>'type' IN \('model', 'service'\)/)
+    end
+
+    it 'emits an always-false predicate for an empty Array filter' do
+      store.search([0.1, 0.2, 0.3], filters: { type: [] })
+
+      expect(connection).to have_received(:execute).with(/WHERE FALSE/)
+    end
+
     it 'returns empty array when no results' do
       allow(connection).to receive(:execute).and_return([])
 
