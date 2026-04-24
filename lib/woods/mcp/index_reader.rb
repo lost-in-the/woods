@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
 require 'digest'
 require 'json'
@@ -172,17 +173,25 @@ module Woods
       # hand-escaping regex anchors — metacharacters like +::+ are treated as
       # literal text.
       #
-      # @param query [String] Search pattern (case-insensitive regex)
+      # @param query [String, nil] Search pattern (case-insensitive regex). Optional when
+      #   +exact_prefix+ or +exact_suffix+ is provided; otherwise required.
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param fields [Array<String>] Fields to search: "identifier", "metadata", "source_code"
       # @param limit [Integer] Maximum results to return
       # @param exact_prefix [String, nil] Literal identifier prefix filter (case-insensitive)
       # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
-      def search(query, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
-        pattern = compile_search_pattern(query)
-        prefix = blank_string?(exact_prefix) ? nil : exact_prefix.downcase
-        suffix = blank_string?(exact_suffix) ? nil : exact_suffix.downcase
+      # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
+      def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
+        prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
+        suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
+        if query.blank? && !prefix && !suffix
+          raise ArgumentError, 'search requires a query or exact_prefix/exact_suffix filter'
+        end
+
+        # When only prefix/suffix are provided, the regex acts as a match-all
+        # wildcard so the existing phase-1/phase-2 pipeline still works.
+        pattern = compile_search_pattern(query.to_s.empty? ? '.*' : query)
         max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
         max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
         max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
@@ -391,10 +400,6 @@ module Woods
         return false unless identifier_passes_prefix_suffix?(identifier, prefix, suffix)
 
         pattern.match?(identifier)
-      end
-
-      def blank_string?(value)
-        value.nil? || (value.respond_to?(:empty?) && value.empty?)
       end
 
       # Memoized normalized edges — converts bare strings (old format) to hashes once.

@@ -378,6 +378,48 @@ RSpec.describe Woods::MCP::IndexReader do
         result = reader.search('.', exact_prefix: 'NoSuchPrefix')
         expect(result[:results]).to be_empty
       end
+
+      it 'accepts nil query when exact_prefix is provided' do
+        results = reader.search(nil, exact_prefix: 'Post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'accepts nil query when exact_suffix is provided' do
+        results = reader.search(nil, exact_suffix: 'Mailer')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['UserMailer'])
+      end
+
+      it 'raises ArgumentError when query and both filters are blank' do
+        expect { reader.search(nil) }.to raise_error(ArgumentError, /requires a query/)
+        expect { reader.search('') }.to raise_error(ArgumentError, /requires a query/)
+        expect { reader.search('', exact_prefix: '', exact_suffix: nil) }
+          .to raise_error(ArgumentError, /requires a query/)
+      end
+
+      it 'composes with the types filter' do
+        results = reader.search('.', exact_prefix: 'Post', types: ['controller'])[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'composes with metadata field matching' do
+        # "ApplicationController" appears in PostsController's parent_class metadata.
+        # exact_suffix restricts to identifiers ending in "Controller".
+        results = reader.search('ApplicationController', exact_suffix: 'Controller',
+                                                         fields: %w[metadata])[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('PostsController')
+      end
+
+      it 'reports broad-match counts based on the filtered candidate set' do
+        # ".*" would match all entries in a dir — without the filter it triggers
+        # the broad-pattern note. With exact_suffix: "Controller" only one entry
+        # in the controllers dir matches, so no broad-pattern warning should fire.
+        result = reader.search('.*', exact_suffix: 'Controller', types: ['model'])
+        expect(result[:note]).to be_nil
+      end
     end
   end
 

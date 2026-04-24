@@ -88,7 +88,7 @@ module Woods
           )
 
           define_lookup_tool(server, reader, respond, respond_err, renderer)
-          define_search_tool(server, reader, respond, renderer)
+          define_search_tool(server, reader, respond, respond_err, renderer)
           define_traversal_tool(server, reader, respond, renderer,
                                 name: 'dependencies',
                                 description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.',
@@ -287,7 +287,7 @@ module Woods
           end
         end
 
-        def define_search_tool(server, reader, respond, renderer)
+        def define_search_tool(server, reader, respond, respond_err, renderer)
           coerce = method(:coerce_array)
           coerce_int = method(:coerce_integer)
           server.define_tool(
@@ -323,10 +323,20 @@ module Woods
                   description: 'Literal (non-regex) case-insensitive identifier suffix filter. ' \
                                'Use for suffix matching like "Controller" without escaping regex metacharacters.'
                 }
-              },
-              required: ['query']
+              }
             }
-          ) do |query:, server_context:, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil|
+          ) do |server_context:, query: nil, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil|
+            if (query.nil? || query.empty?) &&
+               (exact_prefix.nil? || exact_prefix.empty?) &&
+               (exact_suffix.nil? || exact_suffix.empty?)
+              next respond_err.call(
+                'search requires `query` or at least one of `exact_prefix` / `exact_suffix`.',
+                code: :unsupported_argument,
+                tool: 'search',
+                argument: 'query',
+                hint: 'Pass query: "Worker|Job" for regex matching, or exact_prefix: "Next::Settings::" for literal prefix scoping.'
+              )
+            end
             types = coerce.call(types)
             fields = coerce.call(fields)
             limit = coerce_int.call(limit)
