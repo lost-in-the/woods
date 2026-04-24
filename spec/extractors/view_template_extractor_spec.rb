@@ -390,6 +390,20 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       nav_deps = deps.select { |d| d[:via] == :link_to }
       expect(nav_deps).to be_empty
     end
+
+    it 'deduplicates repeated candidates that resolve to the same (controller, via) pair' do
+      create_file('app/views/home/index.html.erb', <<~ERB)
+        <%= link_to "Posts A", posts_path %>
+        <%= link_to "Posts B", posts_path %>
+        <%= link_to "Posts C", posts_url %>
+      ERB
+
+      units = nav_extractor.extract_all
+      link_to_deps = units.first.dependencies.select { |d| d[:via] == :link_to }
+      # Three references all resolve to PostsController — orchestrator
+      # collapses them so we exercise the seen.include?(key) branch.
+      expect(link_to_deps.map { |d| d[:target] }).to eq(['PostsController'])
+    end
   end
 
   # ── Form dependencies ──────────────────────────────────────────────
