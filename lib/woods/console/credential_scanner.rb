@@ -265,10 +265,29 @@ module Woods
         decoded = Base64.strict_decode64(value)
         decoded.force_encoding(Encoding::UTF_8)
         return nil unless decoded.valid_encoding?
+        # CPU short-circuit: credential strings are printable ASCII. If
+        # the decoded bytes are mostly non-printable (likely a binary
+        # hash / random bytes / image), skip the pattern scan entirely —
+        # avoids running every `active_patterns` regex over gigabytes of
+        # hex dumps on every scan.
+        return nil unless mostly_printable?(decoded)
 
         decoded
       rescue ArgumentError
         nil
+      end
+
+      PRINTABLE_RATIO_THRESHOLD = 0.85
+      private_constant :PRINTABLE_RATIO_THRESHOLD
+
+      def mostly_printable?(str)
+        return false if str.empty?
+
+        # ASCII printable (0x20-0x7e) + tab/newline; the threshold matches
+        # base64 encodings of typical credential shapes (sk_live_..., AKIA...,
+        # ghp_..., etc.) which are 100% printable.
+        printable = str.each_char.count { |c| c.match?(/[\t\n\x20-\x7e]/) }
+        printable.to_f / str.length >= PRINTABLE_RATIO_THRESHOLD
       end
 
       def redact_indexed_secrets(str, counts)

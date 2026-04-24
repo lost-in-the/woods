@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'ipaddr'
 require 'net/http'
 require 'json'
 require 'uri'
@@ -28,19 +29,37 @@ module Woods
         # running extraction.
         ALLOWED_SCHEMES = %w[http https].freeze
 
-        # Hostnames/IPs that always resolve to loopback or link-local services
-        # and should never be contacted as a vector store unless the operator
-        # explicitly opts in via `allow_private_hosts: true`. Guards the common
-        # cloud-metadata SSRF target (`169.254.169.254`) and RFC1918 ranges.
-        PRIVATE_HOST_REGEXES = [
-          /\A127(?:\.\d+){3}\z/,                     # 127.0.0.0/8 loopback
-          /\A10(?:\.\d+){3}\z/,                      # 10.0.0.0/8
-          /\A192\.168(?:\.\d+){2}\z/,                # 192.168.0.0/16
-          /\A172\.(?:1[6-9]|2[0-9]|3[0-1])(?:\.\d+){2}\z/, # 172.16.0.0/12
-          /\A169\.254(?:\.\d+){2}\z/,                # link-local (AWS IMDS)
-          /\A(?:0?::1|\[::1\])\z/i,                  # IPv6 loopback
-          /\Alocalhost\z/i
-        ].freeze
+        # IP ranges that always resolve to loopback, link-local, private, or
+        # CGNAT space and should never be contacted as a vector store unless
+        # the operator explicitly opts in via `allow_private_hosts: true`.
+        #
+        # Covers:
+        # - IPv4 "this network" / wildcard (0.0.0.0/8)
+        # - IPv4 loopback, RFC1918 (10/8, 172.16/12, 192.168/16)
+        # - IPv4 link-local 169.254/16 (AWS / Azure / GCP IMDS)
+        # - IPv4 CGNAT 100.64/10 (common in managed clouds behind NAT)
+        # - IPv6 loopback (::1) and unspecified (::)
+        # - IPv6 ULA fc00::/7 (private IPv6 equivalent of RFC1918)
+        # - IPv6 link-local fe80::/10
+        # - IPv4-mapped IPv6 (::ffff:0:0/96) so `::ffff:169.254.169.254`
+        #   cannot bypass the IPv4 checks above
+        PRIVATE_IP_RANGES = [
+          '0.0.0.0/8',
+          '10.0.0.0/8',
+          '127.0.0.0/8',
+          '169.254.0.0/16',
+          '172.16.0.0/12',
+          '192.168.0.0/16',
+          '100.64.0.0/10',
+          '::/128',
+          '::1/128',
+          'fc00::/7',
+          'fe80::/10',
+          '::ffff:0:0/96'
+        ].map { |cidr| IPAddr.new(cidr) }.freeze
+
+        # Hostnames that always map to loopback regardless of DNS.
+        PRIVATE_HOSTNAMES = %w[localhost localhost. ip6-localhost ip6-loopback].freeze
 
         # @param url [String] Qdrant server URL
         # @param collection [String] Collection name
@@ -91,13 +110,32 @@ module Woods
 
         def self.validate_host_visibility!(host, allow_private_hosts:)
           return if allow_private_hosts
-          return unless PRIVATE_HOST_REGEXES.any? { |re| host.match?(re) }
+
+          # Strip trailing dot (FQDN form — `localhost.` is equivalent to
+          # `localhost` but would slip a literal-list check) and any IPv6
+          # brackets left in by URI before we parse as an IP.
+          canonical = host.to_s.downcase.sub(/\.\z/, '').delete('[]')
+
+          return unless private_host?(canonical)
 
           raise ArgumentError,
                 "Qdrant URL targets a private/loopback host (#{host}); " \
-                'pass allow_private_hosts: true to permit.'
+                'pass allow_private_hosts: true to permit. ' \
+                'Note: validation is at config time; DNS resolution happens ' \
+                'per request, so a public hostname that later resolves to a ' \
+                'private IP is NOT caught here — deploy Qdrant on a trusted network.'
         end
-        private_class_method :validate_scheme!, :validate_host_present!, :validate_host_visibility!
+
+        def self.private_host?(host)
+          return true if PRIVATE_HOSTNAMES.include?(host)
+
+          ip = IPAddr.new(host)
+          PRIVATE_IP_RANGES.any? { |range| range.include?(ip) }
+        rescue IPAddr::InvalidAddressError
+          false
+        end
+        private_class_method :validate_scheme!, :validate_host_present!,
+                             :validate_host_visibility!, :private_host?
 
         # Create the collection if it doesn't exist.
         #

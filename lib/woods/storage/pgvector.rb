@@ -155,12 +155,22 @@ module Woods
         end
 
         # Build the `[x,y,z]` pgvector literal from a validated numeric vector.
-        # Coerces each element to `Float` first — `Float#to_s` is guaranteed to
-        # produce only digits, `.`, `-`, and `e`, which closes the theoretical
-        # `Numeric`-subclass `#to_s` injection vector even though
-        # {#validate_vector!} already rejects non-Numeric inputs.
+        # Coerces each element through `Float()` first — `Float#to_s` is
+        # guaranteed to produce only digits, `.`, `-`, and `e`, which closes
+        # the theoretical `Numeric`-subclass `#to_s` injection vector even
+        # though {#validate_vector!} already rejects non-Numeric inputs.
+        # `Float()` raises `RangeError` on `Complex` values with an imaginary
+        # part — we surface that as an `ArgumentError` so callers see the
+        # same error shape as the other vector-validation paths instead of
+        # the raw coercion error.
         def build_vector_literal(vector)
-          "[#{vector.map { |element| Float(element).to_s }.join(',')}]"
+          coerced = vector.each_with_index.map do |element, i|
+            Float(element).to_s
+          rescue RangeError, TypeError, ArgumentError => e
+            raise ArgumentError,
+                  "Vector element at index #{i} cannot be coerced to Float: #{element.inspect} (#{e.class})"
+          end
+          "[#{coerced.join(',')}]"
         end
 
         # Convert a database row to a SearchResult.

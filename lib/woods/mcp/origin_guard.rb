@@ -68,8 +68,11 @@ module Woods
       end
 
       def host_allowed?(host)
-        normalized = host.to_s.downcase
-        bare = normalized.sub(/:\d+\z/, '')
+        # Strip port and trailing dot (FQDN form — `localhost.` is
+        # equivalent to `localhost` in DNS but would slip a literal-list
+        # check) before checking against loopback + allow-list.
+        normalized = host.to_s.downcase.sub(/\.\z/, '')
+        bare = normalized.sub(/:\d+\z/, '').sub(/\.\z/, '')
         return true if LOOPBACK_HOSTS.include?(bare)
 
         @allowed_hosts.include?(normalized) || @allowed_hosts.include?(bare)

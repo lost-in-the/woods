@@ -64,7 +64,12 @@ module Woods
                      token_counter: nil)
         @metadata_store = metadata_store
         @budget = budget
-        @chars_per_token = chars_per_token.to_f
+        # Guard against 0 / negative / NaN ratios — any of those would make
+        # `estimate_tokens` div-by-zero or return a negative budget, which
+        # would silently truncate every section to empty. Fall back to the
+        # default ratio rather than propagate the bogus input.
+        ratio = chars_per_token.to_f
+        @chars_per_token = ratio.positive? ? ratio : DEFAULT_CHARS_PER_TOKEN
         @token_counter = token_counter
       end
 
@@ -328,13 +333,15 @@ module Woods
 
       # Effective chars-per-token for chunk-size sizing. When an exact
       # counter is present, prefer its native ratio (e.g. 1.2 for
-      # nomic-embed-text) so truncation and estimation agree.
+      # nomic-embed-text) so truncation and estimation agree. Falls back
+      # to the configured ratio if the counter reports 0 or a non-positive
+      # value (which would make truncation target zero chars).
       def effective_chars_per_token
         if @token_counter.respond_to?(:chars_per_token) && @token_counter.chars_per_token
-          @token_counter.chars_per_token.to_f
-        else
-          @chars_per_token
+          ratio = @token_counter.chars_per_token.to_f
+          return ratio if ratio.positive?
         end
+        @chars_per_token
       end
 
       # Build the final AssembledContext result.

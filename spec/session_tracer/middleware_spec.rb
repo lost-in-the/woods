@@ -249,26 +249,22 @@ RSpec.describe Woods::SessionTracer::Middleware do
   end
 
   describe 'store interface validation (J-3)' do
-    it 'rejects a store missing :read' do
+    it 'rejects a store that does not implement :record' do
       partial = Class.new do
-        def record(_session_id, _data); end
-        # no :read / :sessions / :clear / :clear_all
+        # no :record at all
+        def other_method; end
       end.new
 
       expect { described_class.new(inner_app, store: partial) }
-        .to raise_error(ArgumentError, /missing required methods.*:read/)
+        .to raise_error(ArgumentError, /missing required methods.*:record/)
     end
 
-    it 'rejects a store missing :clear_all' do
-      partial = Class.new do
+    it 'accepts a minimal :record-only store (backward-compatible)' do
+      minimal = Class.new do
         def record(_session_id, _data); end
-        def read(_session_id) = []
-        def sessions = []
-        def clear(_session_id); end
       end.new
 
-      expect { described_class.new(inner_app, store: partial) }
-        .to raise_error(ArgumentError, /:clear_all/)
+      expect { described_class.new(inner_app, store: minimal) }.not_to raise_error
     end
 
     it 'accepts a store that implements the full interface' do
@@ -281,6 +277,11 @@ RSpec.describe Woods::SessionTracer::Middleware do
       end.new
 
       expect { described_class.new(inner_app, store: full) }.not_to raise_error
+    end
+
+    it 'exposes FULL_STORE_INTERFACE as a constant for consumer assertions' do
+      expect(described_class::FULL_STORE_INTERFACE)
+        .to contain_exactly(:record, :read, :sessions, :clear, :clear_all)
     end
   end
 end

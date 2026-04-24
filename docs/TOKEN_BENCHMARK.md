@@ -9,7 +9,11 @@
 > - `lib/woods/retrieval/context_assembler.rb` (context truncation)
 > - `lib/woods/embedding/text_preparer.rb` (pre-embed sizing)
 > - `lib/woods/builder.rb#chars_per_token_for` (chunker budget)
-> - `lib/woods/cost_model/` (cost estimation)
+>
+> The cost-model layer (`lib/woods/cost_model/`) uses its own
+> `TOKENS_PER_CHUNK` constant (450) as a pre-aggregated per-chunk
+> estimate and does NOT delegate to `TokenUtils` — the two layers
+> measure different things (per-string ratio vs. per-chunk average).
 >
 > Retriever also wires the exact `Woods::Embedding::TokenCounter` into
 > `ContextAssembler` on the Ollama path, so budgets use BERT-WordPiece

@@ -346,5 +346,41 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         described_class.new(url: 'https://qdrant.example.com:6333', collection: 'x')
       end.not_to raise_error
     end
+
+    it 'rejects the wildcard 0.0.0.0 address' do
+      expect do
+        described_class.new(url: 'http://0.0.0.0:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects CGNAT (100.64.0.0/10) addresses' do
+      expect do
+        described_class.new(url: 'http://100.64.5.1:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects IPv6 ULA fc00::/7 addresses' do
+      expect do
+        described_class.new(url: 'http://[fc00::1]:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects IPv6 link-local fe80::/10 addresses' do
+      expect do
+        described_class.new(url: 'http://[fe80::1]:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects IPv4-mapped IPv6 for the AWS IMDS' do
+      expect do
+        described_class.new(url: 'http://[::ffff:169.254.169.254]:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'rejects a trailing-dot "localhost." form' do
+      expect do
+        described_class.new(url: 'http://localhost.:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
   end
 end

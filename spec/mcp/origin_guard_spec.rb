@@ -98,5 +98,9 @@ RSpec.describe Woods::MCP::OriginGuard do
       status, = call(middleware, host: 'attacker.example.com', origin: nil)
       expect(status).to eq(403)
     end
+
+    it 'treats the FQDN trailing-dot form of loopback as loopback' do
+      expect(call(middleware, host: 'localhost.:3000').first).to eq(200)
+    end
   end
 end
