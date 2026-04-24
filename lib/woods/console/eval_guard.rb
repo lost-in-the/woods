@@ -12,16 +12,18 @@ module Woods
 
     # Parse-time refusal layer for `console_eval`.
     #
-    # ## Current reachability (v0.1)
+    # ## Reachability (v0.2)
     #
-    # **EvalGuard is not reached on the shipped embedded-executor path.**
-    # `EmbeddedExecutor#refusal_for('eval')` unconditionally returns the
-    # `eval_disabled` error, so dispatch never reaches the Tier 4 handler
-    # where this guard is injected. The class is retained as the defense
-    # layer for the in-development bridge-process mode and for the planned
-    # `WOODS_CONSOLE_UNSAFE_EVAL` opt-in — see issue #87 and the
-    # `unsafe-eval-opt-in` backlog item. Keep the denylist current: when
-    # bridge mode ships, this guard becomes the primary pre-execution gate.
+    # EvalGuard is the first of five controls on the embedded `console_eval`
+    # opt-in path. `EmbeddedExecutor#handle_eval` calls `check!` before
+    # anything else — ahead of the Confirmation prompt, the SafeContext
+    # rollback, the timeout, and the audit log. When the opt-in is off
+    # (the default), `refusal_for('eval')` still short-circuits with the
+    # `eval_disabled` payload and this guard is not reached. See
+    # docs/CONSOLE_MCP_SETUP.md "console_eval opt-in" and backlog B-053.
+    #
+    # Bridge-process mode (in development) will call the same guard before
+    # shipping the payload to the remote Rails worker.
     #
     # ## Behaviour
     #

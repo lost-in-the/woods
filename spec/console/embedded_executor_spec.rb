@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'json'
+require 'tmpdir'
 require 'woods/console/embedded_executor'
 
 RSpec.describe Woods::Console::EmbeddedExecutor do
@@ -78,6 +80,100 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
 
         expect(response['error']).to include('WOODS_CONSOLE_UNSAFE_EVAL')
+      end
+    end
+
+    # ── Opt-in path: five-control console_eval wiring ─────────────────────
+    #
+    # When unsafe_eval_enabled is true, console_eval runs the full
+    # guard → confirmation → SafeContext → timeout → audit contract.
+    # See backlog B-053 and docs/CONSOLE_MCP_SETUP.md.
+    context 'console_eval opt-in path' do
+      let(:audit_path) { File.join(Dir.mktmpdir, 'audit.jsonl') }
+      let(:audit_logger) { Woods::Console::AuditLogger.new(path: audit_path) }
+      let(:eval_guard) { Woods::Console::EvalGuard.new }
+      let(:confirmation) { Woods::Console::Confirmation.new(mode: :auto_approve) }
+
+      subject(:executor) do
+        described_class.new(
+          model_validator: validator, safe_context: safe_context,
+          connection: connection,
+          eval_guard: eval_guard, confirmation: confirmation,
+          audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+      end
+
+      def audit_entries
+        File.readlines(audit_path).map { |l| JSON.parse(l) }
+      rescue Errno::ENOENT
+        []
+      end
+
+      it 'executes a benign expression and records a confirmed audit entry' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
+
+        expect(response['ok']).to be true
+        expect(response['result']['result']).to eq('2')
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be true
+        expect(audit_entries.first['tool']).to eq('console_eval')
+      end
+
+      it 'refuses credential-reaching payloads via EvalGuard and audits the refusal' do
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => 'Rails.application.credentials.stripe' }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to match(/EvalGuard|denied call chain/i)
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be false
+        expect(audit_entries.first['result_summary']).to match(/guard-refused/)
+      end
+
+      it 'refuses when confirmation denies and records a denied audit entry' do
+        denied_exec = described_class.new(
+          model_validator: validator, safe_context: safe_context, connection: connection,
+          eval_guard: eval_guard,
+          confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
+          audit_logger: audit_logger, unsafe_eval_enabled: true
+        )
+
+        response = denied_exec.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/confirmation/i)
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be false
+        expect(audit_entries.first['result_summary']).to match(/denied/)
+      end
+
+      it 'times out long-running code and audits the execution error' do
+        # Use a stubbed Timeout.timeout to avoid a real sleep in the suite.
+        allow(Timeout).to receive(:timeout).and_raise(Timeout::Error, 'execution expired')
+
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => 'sleep 99', 'timeout' => 1 }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('execution')
+        expect(audit_entries.size).to eq(1)
+        expect(audit_entries.first['confirmed']).to be true
+        expect(audit_entries.first['result_summary']).to match(/error:Timeout::Error/)
+      end
+
+      it 'rejects an empty payload before reaching the guard' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '' } })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to match(/Missing required parameter: code/)
+        # No audit entry — nothing to record yet (we hadn't built audit_params).
+        expect(audit_entries).to be_empty
       end
     end
 

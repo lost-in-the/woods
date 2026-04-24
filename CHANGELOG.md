@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `console_eval` opt-in (backlog B-053, issue #87)
+
+- **Embedded `console_eval` is now opt-in and runs the full five-control contract.** Previously refused unconditionally at dispatch. Opting in requires `WOODS_CONSOLE_UNSAFE_EVAL=true` (or `config.console_unsafe_eval_enabled = true`) AND a `Woods::Console::Confirmation` collaborator AND a JSONL audit-log path. Any missing collaborator raises `Woods::ConfigurationError` at boot — fail-closed by design. The flag still refuses to boot in `Rails.env.production?`.
+- **Execution path: EvalGuard → Confirmation → SafeContext → Timeout → AuditLogger.** `EmbeddedExecutor#handle_eval` invokes each control in order. `EvalGuard.check!` refuses credential/reflection/shell/network payloads before parsing completes. `Confirmation#request_confirmation` delegates to the host-provided callback. The code runs inside the `SafeContext` rolled-back transaction and is wrapped in `Timeout.timeout(1..30s)`. Every outcome (guard-refused, denied, ok, error) writes exactly one audit entry with `CredentialScanner`-redacted params.
+- **New config attrs.** `Woods.configuration.console_unsafe_eval_confirmation` and `console_unsafe_eval_audit_log_path` — host-level defaults for the two required collaborators. Explicit kwargs on `Server.build_embedded` / `Woods::Console::RackMiddleware` take precedence.
+- **Updated operator banner.** The stderr banner now reads "console_eval is LIVE on this process" (previously said "scaffolding is active. Execution is STILL NOT IMPLEMENTED") — it reflects that execution is wired.
+
 ### Added — Persistence & Bootstrap arc (PRs #73–#79)
 
 - **Shape-2 (shared filesystem) support.** A new `:shared_filesystem` preset makes the "rake embed writes to `output_dir`, separate `woods-mcp` server reads from disk" shape a first-class deployment option. All stores in-memory at runtime; persistence is handled by the Snapshotter's atomic dumps. No `sqlite3` gem required — works on MySQL- and Postgres-only hosts. See `docs/CONFIGURATION_REFERENCE.md#deployment-shapes` and `docs/BACKEND_MATRIX.md#persistence-story`.

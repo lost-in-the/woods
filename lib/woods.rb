@@ -133,6 +133,7 @@ module Woods
                   :console_blocked_tables, :console_disabled_scanner_patterns,
                   :console_credential_defense_enabled,
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
+                  :console_unsafe_eval_confirmation, :console_unsafe_eval_audit_log_path,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
@@ -182,6 +183,11 @@ module Woods
       @console_credential_defense_enabled = true
       @console_credential_rotation_warning = true
       @console_unsafe_eval_enabled = nil # nil = fall back to env WOODS_CONSOLE_UNSAFE_EVAL
+      # Required collaborators when the opt-in is on. Both default to nil;
+      # the server refuses to boot with the opt-in set unless the host has
+      # wired them (fail-closed — see Server.build_embedded).
+      @console_unsafe_eval_confirmation = nil
+      @console_unsafe_eval_audit_log_path = nil
       @notion_api_token = nil
       @notion_database_ids = {}
       @unblocked_api_token = nil

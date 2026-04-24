@@ -90,17 +90,24 @@ RSpec.describe 'console_eval opt-in safety contract' do
     context 'when the flag is on in a non-production environment' do
       before { ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true' }
 
+      let(:wired_kwargs) do
+        {
+          unsafe_eval_confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
+          unsafe_eval_audit_log_path: '/tmp/audit.jsonl'
+        }
+      end
+
       it 'emits a loud warning banner to stderr' do
         expect do
           Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context
+            model_validator: validator, safe_context: safe_context, **wired_kwargs
           )
         end.to output(/WOODS_CONSOLE_UNSAFE_EVAL/).to_stderr
       end
 
-      it 'still builds the server (eval remains disabled, not enabled by the flag)' do
+      it 'builds the server when collaborators are wired' do
         server = Woods::Console::Server.build_embedded(
-          model_validator: validator, safe_context: safe_context
+          model_validator: validator, safe_context: safe_context, **wired_kwargs
         )
         expect(server).to be_a(MCP::Server)
       end
@@ -120,6 +127,55 @@ RSpec.describe 'console_eval opt-in safety contract' do
             model_validator: validator, safe_context: safe_context
           )
         end.to raise_error(Woods::ConfigurationError, /production/i)
+      end
+    end
+
+    context 'fail-closed: flag on but collaborators missing' do
+      before { ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true' }
+
+      it 'refuses to boot when no Confirmation is provided' do
+        expect do
+          Woods::Console::Server.build_embedded(
+            model_validator: validator, safe_context: safe_context,
+            unsafe_eval_audit_log_path: '/tmp/audit.jsonl'
+          )
+        end.to raise_error(Woods::ConfigurationError, /Confirmation/i)
+      end
+
+      it 'refuses to boot when no audit-log path is provided' do
+        expect do
+          Woods::Console::Server.build_embedded(
+            model_validator: validator, safe_context: safe_context,
+            unsafe_eval_confirmation: Woods::Console::Confirmation.new(mode: :auto_deny)
+          )
+        end.to raise_error(Woods::ConfigurationError, /audit-log/i)
+      end
+
+      it 'boots when both collaborators are provided' do
+        server = Woods::Console::Server.build_embedded(
+          model_validator: validator, safe_context: safe_context,
+          unsafe_eval_confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
+          unsafe_eval_audit_log_path: '/tmp/audit.jsonl'
+        )
+        expect(server).to be_a(MCP::Server)
+      end
+
+      it 'reads collaborators from Woods.configuration when kwargs are nil' do
+        Woods.configure do |c|
+          c.console_unsafe_eval_confirmation = Woods::Console::Confirmation.new(mode: :auto_deny)
+          c.console_unsafe_eval_audit_log_path = '/tmp/audit.jsonl'
+        end
+
+        expect do
+          Woods::Console::Server.build_embedded(
+            model_validator: validator, safe_context: safe_context
+          )
+        end.not_to raise_error
+      ensure
+        Woods.configure do |c|
+          c.console_unsafe_eval_confirmation = nil
+          c.console_unsafe_eval_audit_log_path = nil
+        end
       end
     end
   end
