@@ -103,14 +103,14 @@ module Woods
       end
 
       # Template engines the extraction pipeline currently understands.
-      # Read from extractor class constants so the list stays honest as
-      # extractors come and go. Each constant must return an Array of
-      # Symbols. Surfaced by the MCP `structure` tool (#86).
+      # Delegates to {ViewTemplateExtractor.supported_template_engines} so
+      # the list stays honest as engines are added or removed. Surfaced by
+      # the MCP `structure` tool (#86).
       #
       # @return [Array<Symbol>]
       def template_engines
         require_relative '../extractors/view_template_extractor'
-        Woods::Extractors::ViewTemplateExtractor::SUPPORTED_TEMPLATE_ENGINES.dup
+        Woods::Extractors::ViewTemplateExtractor.supported_template_engines.dup
       end
 
       # @return [String, nil] SUMMARY.md content, or nil if not present
