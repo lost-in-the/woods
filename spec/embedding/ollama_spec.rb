@@ -308,17 +308,14 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
       )
     end
 
-    it 'discards the original HTTP client before retrying' do
-      call_count = 0
-      allow(http_double).to receive(:request) do
-        call_count += 1
-        raise Errno::ECONNRESET
-      end
+    it 'discards the original HTTP client and issues the retry on the fresh one' do
+      allow(http_double).to receive(:request).and_raise(Errno::ECONNRESET)
       allow(retry_http).to receive(:request).and_return(success_response)
 
       provider.embed('hello')
 
-      expect(call_count).to eq(1)
+      expect(http_double).to have_received(:request).once
+      expect(retry_http).to have_received(:request).once
       expect(Net::HTTP).to have_received(:new).twice
     end
   end
