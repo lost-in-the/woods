@@ -513,6 +513,29 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(result[:file_path]).to include('activerecord')
       expect(result[:metadata]).to include('gem_name' => 'activerecord')
     end
+
+    describe 'multi-word keywords (#107)' do
+      it 'ANDs each whitespace-separated token' do
+        results = reader.framework_sources('ActiveRecord Persistence')
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('ActiveRecord::Base')
+      end
+
+      it 'returns empty when not all tokens match the same unit' do
+        # "Persistence" lives in ActiveRecord::Base source_code; "controller"
+        # only in ActionController::Base metadata — no unit has both.
+        results = reader.framework_sources('Persistence controller')
+        expect(results).to be_empty
+      end
+
+      it 'returns empty for a whitespace-only keyword rather than raising' do
+        expect(reader.framework_sources('   ')).to eq([])
+      end
+
+      it 'returns empty for an empty keyword' do
+        expect(reader.framework_sources('')).to eq([])
+      end
+    end
   end
 
   describe '#recent_changes' do

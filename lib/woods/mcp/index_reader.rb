@@ -319,7 +319,12 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
-        pattern = Regexp.new(Regexp.escape(keyword), Regexp::IGNORECASE)
+        # Multi-word keywords ("ActiveRecord callbacks") are split on
+        # whitespace and ANDed. Single-word queries behave as before.
+        tokens = keyword.to_s.strip.split(/\s+/)
+        return [] if tokens.empty?
+
+        patterns = tokens.map { |t| Regexp.new(Regexp.escape(t), Regexp::IGNORECASE) }
         results = []
 
         entries = read_index('rails_source')
@@ -330,9 +335,12 @@ module Woods
           unit = find_unit(id)
           next unless unit
 
-          matched = pattern.match?(id) ||
-                    (unit['source_code'] && pattern.match?(unit['source_code'])) ||
-                    (unit['metadata'] && pattern.match?(unit['metadata'].to_json))
+          metadata_json = unit['metadata']&.to_json
+          matched = patterns.all? do |pat|
+            pat.match?(id) ||
+              (unit['source_code'] && pat.match?(unit['source_code'])) ||
+              (metadata_json && pat.match?(metadata_json))
+          end
 
           next unless matched
 
