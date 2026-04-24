@@ -1,4 +1,6 @@
-# Woods Coverage Gap Analysis: Technical Review
+# Woods Coverage Gap Analysis: Retrospective
+
+> **Status (2026-04):** This document was the *original* gap-analysis from the gem's build phase. Every gap it ranks has since shipped (see below). Keep the content here as a retrospective — don't treat it as active scope. The live next-step tracker is `docs/backlog.json`; additional Rails-8-specific gaps (Stimulus, Solid Queue/Cache, Kamal, Propshaft, Action Mailbox) are tracked as backlog items, not in this file.
 
 We analyzed the 15 unextracted Rails concepts against the needs of three distinct practitioner roles to determine which gaps matter most and which are overrated. Woods currently covers **34 extractors** producing `ExtractedUnit` objects across models, controllers, jobs, mailers, GraphQL, components, services, policies, validators, serializers, managers, concerns, routes, middleware, I18n, Pundit policies, configurations, engines, view templates, migrations, ActionCable channels, scheduled jobs, rake tasks, state machines, events, decorators, database views, caching patterns, factories, test mappings, Phlex components, ViewComponents, and Rails source. Extraction also includes behavioral enrichment: callback side-effect analysis, a behavioral profile of resolved `Rails.application.config` values, and optional pre-computed request flow maps. This review identifies the 8-10 highest-value gaps, ordered by cross-role demand, unique value, and feasibility within the existing architecture.
 

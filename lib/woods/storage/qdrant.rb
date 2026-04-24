@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
+require 'ipaddr'
 require 'net/http'
 require 'json'
+require 'socket'
 require 'uri'
 require_relative 'vector_store'
+require_relative '../util/host_guard'
 
 module Woods
   module Storage
@@ -22,6 +25,48 @@ module Woods
       class Qdrant # rubocop:disable Metrics/ClassLength
         include Interface
 
+        # URL schemes allowed for the Qdrant endpoint. `file://`, `gopher://`,
+        # and anything else would let a misconfigured or attacker-controlled
+        # config value turn the adapter into an SSRF vector against the host
+        # running extraction.
+        ALLOWED_SCHEMES = %w[http https].freeze
+
+        # IP ranges that always resolve to loopback, link-local, private, or
+        # CGNAT space and should never be contacted as a vector store unless
+        # the operator explicitly opts in via `allow_private_hosts: true`.
+        #
+        # Covers:
+        # - IPv4 "this network" / wildcard (0.0.0.0/8)
+        # - IPv4 loopback, RFC1918 (10/8, 172.16/12, 192.168/16)
+        # - IPv4 link-local 169.254/16 (AWS / Azure / GCP IMDS)
+        # - IPv4 CGNAT 100.64/10 (common in managed clouds behind NAT)
+        # - IPv6 loopback (::1) and unspecified (::)
+        # - IPv6 ULA fc00::/7 (private IPv6 equivalent of RFC1918)
+        # - IPv6 link-local fe80::/10
+        #
+        # NOTE: IPv4-mapped IPv6 (`::ffff:169.254.169.254`) is handled
+        # separately in {.private_host?} by detecting the `::ffff:` prefix
+        # and extracting the embedded IPv4 portion before range comparison.
+        # A blanket `::ffff:0:0/96` range here would (on some Ruby versions,
+        # including 3.0) match every IPv4 address due to IPAddr's
+        # cross-family auto-mapping in `#include?`.
+        PRIVATE_IP_RANGES = [
+          '0.0.0.0/8',
+          '10.0.0.0/8',
+          '127.0.0.0/8',
+          '169.254.0.0/16',
+          '172.16.0.0/12',
+          '192.168.0.0/16',
+          '100.64.0.0/10',
+          '::/128',
+          '::1/128',
+          'fc00::/7',
+          'fe80::/10'
+        ].map { |cidr| IPAddr.new(cidr) }.freeze
+
+        # Hostnames that always map to loopback regardless of DNS.
+        PRIVATE_HOSTNAMES = %w[localhost localhost. ip6-localhost ip6-loopback].freeze
+
         # @param url [String] Qdrant server URL
         # @param collection [String] Collection name
         # @param api_key [String, nil] Optional API key for authentication
@@ -30,13 +75,111 @@ module Woods
         #   sending the HTTP request — Qdrant returns a 400 on mismatch, but
         #   detecting it client-side avoids wasted network round-trips and
         #   keeps error shape consistent with the pgvector adapter.
-        def initialize(url:, collection:, api_key: nil, dimensions: nil)
+        # @param allow_private_hosts [Boolean] Explicitly permit a URL whose
+        #   host resolves inside loopback, link-local, or RFC1918 space. Off
+        #   by default to block the common SSRF footgun. Set to true when the
+        #   operator intentionally runs Qdrant on `localhost:6333` or inside
+        #   a private network.
+        def initialize(url:, collection:, api_key: nil, dimensions: nil, allow_private_hosts: false)
+          @uri = self.class.validate_url!(url, allow_private_hosts: allow_private_hosts)
           @url = url
           @collection = collection
           @api_key = api_key
           @dimensions = dimensions
-          @uri = URI(url)
         end
+
+        # Validate a Qdrant endpoint URL — scheme in {ALLOWED_SCHEMES} and,
+        # unless opted out, host outside loopback / link-local / RFC1918.
+        # Public so callers can pre-check configuration before constructing.
+        def self.validate_url!(url, allow_private_hosts: false)
+          uri = URI(url)
+          validate_scheme!(uri)
+          validate_host_present!(uri, url)
+          validate_host_visibility!(uri.host.to_s, allow_private_hosts: allow_private_hosts)
+          uri
+        rescue URI::InvalidURIError => e
+          raise ArgumentError, "Qdrant URL is not a valid URI: #{e.message}"
+        end
+
+        def self.validate_scheme!(uri)
+          return if ALLOWED_SCHEMES.include?(uri.scheme)
+
+          raise ArgumentError,
+                "Qdrant URL scheme must be one of #{ALLOWED_SCHEMES.join(', ')}; got #{uri.scheme.inspect}"
+        end
+
+        def self.validate_host_present!(uri, url)
+          return unless uri.host.nil? || uri.host.empty?
+
+          raise ArgumentError, "Qdrant URL must include a host: #{url.inspect}"
+        end
+
+        def self.validate_host_visibility!(host, allow_private_hosts:)
+          return if allow_private_hosts
+
+          # Canonicalize (strip port, trailing dot, IPv6 brackets) via
+          # the shared helper so Qdrant and OriginGuard stay in sync.
+          canonical = Util::HostGuard.canonicalize(host)
+
+          # Non-canonical numeric hosts (hex `0x7f000001`, octal
+          # `0177.0.0.1`, bare integer `2130706433`, short-form `127.1`,
+          # mixed-radix `0x7f.0.0.1`) are accepted by URI and getaddrinfo
+          # but NOT by `IPAddr`, so the private-range check silently
+          # passed them through. Reject any host that looks numeric-but-
+          # not-standard instead of trying to canonicalize every form.
+          if Util::HostGuard.suspicious_numeric_host?(canonical)
+            raise ArgumentError,
+                  "Qdrant URL uses a non-standard numeric host (#{host}). " \
+                  'Hex/octal/integer/short-form IPs are rejected because they ' \
+                  'can disguise loopback or private addresses. Pass the ' \
+                  'dotted-decimal form explicitly.'
+          end
+
+          return unless private_host?(canonical)
+
+          raise ArgumentError,
+                "Qdrant URL targets a private/loopback host (#{host}); " \
+                'pass allow_private_hosts: true to permit. ' \
+                'Note: validation is at config time; DNS resolution happens ' \
+                'per request, so a public hostname that later resolves to a ' \
+                'private IP is NOT caught here — deploy Qdrant on a trusted network.'
+        end
+
+        def self.private_host?(host)
+          return true if PRIVATE_HOSTNAMES.include?(host)
+
+          ip = unmap_ipv4(IPAddr.new(host))
+
+          # Restrict range-check to the SAME address family so IPAddr's
+          # cross-family `include?` can't silently match all IPv4
+          # addresses into an IPv6 range (or vice versa) — a quirk
+          # observed on Ruby 3.0's IPAddr that trapped legitimate public
+          # IPv4 addresses as "IPv4-mapped private" when the range list
+          # contained `::ffff:0:0/96`.
+          PRIVATE_IP_RANGES.any? do |range|
+            range.family == ip.family && range.include?(ip)
+          end
+        rescue IPAddr::InvalidAddressError
+          false
+        end
+
+        # IPv4-mapped IPv6 (`::ffff:169.254.169.254`): extract the
+        # embedded IPv4 (low 32 bits) before range comparison so the AWS
+        # IMDS address is caught by 169.254/16 even when disguised as
+        # IPv4-mapped IPv6. Returns the input unchanged for every other
+        # address.
+        def self.unmap_ipv4(ip)
+          return ip unless ip.ipv6?
+          return ip unless ip.to_string.start_with?('0000:0000:0000:0000:0000:ffff:')
+
+          mapped_ipv4 = ip.to_i & 0xffff_ffff
+          return ip unless mapped_ipv4.positive?
+
+          IPAddr.new(mapped_ipv4, Socket::AF_INET)
+        end
+
+        private_class_method :validate_scheme!, :validate_host_present!,
+                             :validate_host_visibility!, :private_host?, :unmap_ipv4
 
         # Create the collection if it doesn't exist.
         #

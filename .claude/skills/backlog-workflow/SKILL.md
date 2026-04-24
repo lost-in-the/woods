@@ -93,3 +93,30 @@ the field order stable when updating existing entries.
   failures the change caused.
 - Don't delete a resolved item — keep it in the archive so reviewers
   can trace history.
+
+## Session-state template
+
+`CLAUDE.md` asks you to update `.claude/context/session-state.md` at
+the end of a session and read it at the start of the next. That file
+is gitignored (it's session-local, not shared). If the directory or
+file doesn't exist yet, bootstrap it with:
+
+```bash
+mkdir -p .claude/context
+cat > .claude/context/session-state.md <<'EOF'
+# Session State
+
+Local notes for the next Claude Code session. This file is gitignored.
+
+## Last session — <YYYY-MM-DD>
+
+- Backlog items touched (ids + status transitions):
+- Files modified:
+- Tests run and status:
+- Gotchas discovered:
+- Next suggested pick:
+EOF
+```
+
+Then update the five bullets at the end of each session. Keep it
+terse — it's a breadcrumb, not a journal.

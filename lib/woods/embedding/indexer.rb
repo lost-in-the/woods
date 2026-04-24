@@ -105,6 +105,11 @@ module Woods
       def process_batch(batch, checkpoint, stats, incremental:)
         to_embed = batch.each_with_object([]) do |unit_data, items|
           persist_unit_metadata(unit_data)
+          # Incremental skip uses `source_hash`, which the extractor derives
+          # from the unit's *source_code string only* (see ExtractedUnit#to_h
+          # and Extractor#dump_units). It is NOT a hash of the serialized
+          # unit_data JSON — so key ordering or whitespace in the _index.json
+          # does not invalidate checkpoints across Ruby-minor upgrades.
           if incremental && checkpoint[unit_data['identifier']] == unit_data['source_hash']
             stats[:skipped] += 1
             next

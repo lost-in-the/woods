@@ -107,7 +107,7 @@ module Woods
           define_recent_changes_tool(server, reader, respond, renderer)
           define_reload_tool(server, reader, respond, retriever_reloader)
           define_retrieve_tool(server, retriever, respond, respond_err)
-          define_trace_flow_tool(server, reader, index_dir, respond, renderer)
+          define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
           # Conditionally register collaborator-dependent tools. Historically
           # all 15 stubs were registered unconditionally and returned
           # isError: true when the wiring was missing — that added token
@@ -130,11 +130,24 @@ module Woods
         # Session tracer requires a configured session_store on Woods.configuration.
         # The tool reads the store inside its handler; skipping registration when
         # the store is absent keeps tools/list honest.
+        #
+        # The `session_trace` handler itself only calls `store.read`. We
+        # ALSO probe `:sessions` as a defense-in-depth cheap contract
+        # check — every shipped store (File/Redis/SolidCache) implements
+        # both, so if a misconfigured store lacks `:sessions` it is almost
+        # certainly missing `:read` too, and we'd rather fail at wire-up
+        # than at first invocation. A record-only store (permitted by the
+        # middleware for backward-compatibility) will correctly drop out
+        # of tools/list here.
         def session_tracer_wired?
           config = Woods.configuration
           return false unless config
+          return false unless config.respond_to?(:session_store)
 
-          config.respond_to?(:session_store) && !config.session_store.nil?
+          store = config.session_store
+          return false if store.nil?
+
+          %i[read sessions].all? { |m| store.respond_to?(m) }
         end
 
         # Notion export needs both an API token and at least one database ID.
@@ -199,14 +212,31 @@ module Woods
           value.is_a?(String) ? [value] : value
         end
 
-        # Coerce a value to an Integer. Converts String representations
-        # to Integer; leaves existing Integers and nil unchanged.
-        # MCP clients may send "2" (string) instead of 2 (integer).
+        # Coerce a value to an Integer.
         #
-        # @param value [String, Integer, nil] The input value
+        # - `nil` passes through unchanged.
+        # - `Integer` passes through unchanged.
+        # - `String` is accepted iff it represents a decimal integer with an
+        #   optional leading `+`/`-`. `"abc"` and `"1abc"` used to silently
+        #   coerce to `0` via `String#to_i`; that was a footgun for tools with
+        #   integer bounds (limit, offset, budget, timeout) — they'd receive
+        #   the wrong value without any feedback to the client. Now we raise
+        #   `ArgumentError` so the MCP dispatch layer can surface a proper
+        #   JSON-RPC error back to the caller.
+        # - Any other type raises `ArgumentError`.
+        #
+        # @param value [String, Integer, nil]
         # @return [Integer, nil]
+        # @raise [ArgumentError] if `value` is not nil, Integer, or an Integer-shaped String.
+        INTEGER_STRING = /\A[+-]?\d+\z/
+        private_constant :INTEGER_STRING
         def coerce_integer(value)
-          value.is_a?(String) ? value.to_i : value
+          return nil if value.nil?
+          return value if value.is_a?(Integer)
+
+          return Integer(value, 10) if value.is_a?(String) && value.match?(INTEGER_STRING)
+
+          raise ArgumentError, "expected integer, got #{value.class}: #{value.inspect}"
         end
 
         # Apply offset+limit pagination to a single section key within a container hash.
@@ -376,8 +406,11 @@ module Woods
                 },
                 via: {
                   type: 'array', items: { type: 'string' },
-                  description: 'Filter by relationship type (e.g. link_to, redirect_to, form_action, render, ' \
-                               'code_reference, belongs_to, has_many)'
+                  description: 'Filter by relationship type. Accepts either a single string ' \
+                               "(e.g. 'code_reference') or an array " \
+                               "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
+                               'Known values: link_to, redirect_to, form_action, render, code_reference, ' \
+                               'belongs_to, has_many, has_one, has_and_belongs_to_many.'
                 }
               },
               required: ['identifier']
@@ -692,7 +725,7 @@ module Woods
           end
         end
 
-        def define_trace_flow_tool(server, reader, index_dir, respond, renderer)
+        def define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
           require_relative '../flow_assembler'
           require_relative '../dependency_graph'
           coerce_int = method(:coerce_integer)
@@ -725,7 +758,15 @@ module Woods
 
             respond.call(renderer.render(:trace_flow, flow_doc.to_h))
           rescue StandardError => e
-            respond.call(JSON.pretty_generate({ error: e.message }))
+            # Emit an MCP error so clients can detect the failure and
+            # surface it, rather than wrapping the error payload in a
+            # successful response — consistent with session_trace and
+            # codebase_retrieve.
+            respond_err.call(
+              "trace_flow failed: #{e.message}",
+              code: :internal_error,
+              data: { entry_point: entry_point, exception: e.class.name }
+            )
           end
         end
 

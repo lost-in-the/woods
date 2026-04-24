@@ -8,6 +8,8 @@ require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
 require_relative 'retrieval/context_assembler'
+require_relative 'embedding/token_counter'
+require_relative 'token_utils'
 
 module Woods
   # Retriever orchestrates the full retrieval pipeline: classify, execute,
@@ -35,6 +37,18 @@ module Woods
   #   result.tokens_used    # => 4200
   #
   class Retriever # rubocop:disable Metrics/ClassLength
+    # BERT / WordPiece-family embedders Ollama commonly serves. Matched
+    # against `provider.model_name` to decide whether to use the 1.5
+    # chars/token ratio and wire in an exact {Woods::Embedding::TokenCounter}.
+    # Extend this list when new WordPiece-family models become popular —
+    # the tiktoken 4.0 default remains the safe fallback for unknowns.
+    OLLAMA_EMBEDDING_MODELS = Regexp.union(
+      /\Anomic-embed/, /\Abge-/, /\Amxbai-embed/,
+      /\Asnowflake-arctic/, /\Aall-minilm/, /\Aparaphrase-/,
+      /\Ae5-/, /\Agte-/, /\Astella/,
+      /\Agranite-embedding/, /\Ajina-embeddings/
+    ).freeze
+
     # Diagnostic trace for retrieval quality analysis.
     RetrievalTrace = Struct.new(:classification, :strategy, :candidate_count,
                                 :ranked_count, :tokens_used, :elapsed_ms,
@@ -83,7 +97,8 @@ module Woods
       chars_per_token = infer_chars_per_token(embedding_provider)
       @assembler = Retrieval::ContextAssembler.new(
         metadata_store: metadata_store,
-        chars_per_token: chars_per_token
+        chars_per_token: chars_per_token,
+        token_counter: infer_token_counter(embedding_provider)
       )
     end
 
@@ -99,10 +114,30 @@ module Woods
       return Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN unless provider.respond_to?(:model_name)
 
       model = provider.model_name.to_s
-      ollama_patterns = /\A(nomic-embed|bge-|mxbai-embed|snowflake-arctic|all-minilm)/
-      model.match?(ollama_patterns) ? 1.5 : Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN
+      ollama_patterns = OLLAMA_EMBEDDING_MODELS
+      model.match?(ollama_patterns) ? TokenUtils.chars_per_token_for(:ollama) : Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN
     end
     private :infer_chars_per_token
+
+    # Build an exact TokenCounter for the Ollama path — where WordPiece
+    # ratios vary widely across Rails source, so an exact tokenizer is the
+    # only way to keep context-budget truncation honest. For OpenAI (and
+    # unknown providers) tiktoken's 4.0 ratio is stable enough that the
+    # heuristic fallback is fine; we skip the counter there so we don't
+    # pull in the optional `tokenizers` gem or warn about it at boot.
+    #
+    # @param provider [Object, nil]
+    # @return [Woods::Embedding::TokenCounter, nil]
+    def infer_token_counter(provider)
+      return nil unless provider.respond_to?(:model_name)
+
+      model = provider.model_name.to_s
+      ollama_patterns = OLLAMA_EMBEDDING_MODELS
+      return nil unless model.match?(ollama_patterns)
+
+      Embedding::TokenCounter.new
+    end
+    private :infer_token_counter
 
     # Unit types excluded from retrieval by default. +test_mapping+ units
     # make up ~33% of a typical index and lexically dominate semantic rank

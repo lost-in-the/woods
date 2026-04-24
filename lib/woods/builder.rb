@@ -10,6 +10,7 @@ require_relative 'embedding/provider'
 require_relative 'embedding/openai'
 require_relative 'embedding/text_preparer'
 require_relative 'embedding/token_counter'
+require_relative 'token_utils'
 require_relative 'chunking/semantic_chunker'
 
 module Woods
@@ -261,14 +262,17 @@ module Woods
     end
 
     # Tokenizer-calibrated chars/token ratio for the given provider.
+    # Delegates to {Woods::TokenUtils.chars_per_token_for} — the single
+    # source of truth — after reducing the provider instance to a symbol.
     #
     # @param provider [Embedding::Provider::Interface]
     # @return [Float]
     def chars_per_token_for(provider)
-      case provider
-      when Embedding::Provider::Ollama then 1.5
-      else Embedding::TextPreparer::DEFAULT_CHARS_PER_TOKEN
-      end
+      symbol = case provider
+               when Embedding::Provider::Ollama then :ollama
+               else :openai
+               end
+      TokenUtils.chars_per_token_for(symbol)
     end
 
     # Diagnostic for the build_chunker budget guard.

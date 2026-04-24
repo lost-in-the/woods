@@ -83,7 +83,7 @@ module Woods
       filename = "#{controller_id.gsub('::', '__')}_#{action}.json"
       flow_path = File.join(@flows_dir, filename)
 
-      File.write(flow_path, JSON.pretty_generate(flow.to_h))
+      File.write(flow_path, canonical_json(flow.to_h))
 
       flow_path
     rescue StandardError => e
@@ -96,7 +96,26 @@ module Woods
     # @param flow_map [Hash{String => String}]
     def write_flow_index(flow_map)
       index_path = File.join(@flows_dir, 'flow_index.json')
-      File.write(index_path, JSON.pretty_generate(flow_map))
+      File.write(index_path, canonical_json(flow_map))
+    end
+
+    # Emit deterministic pretty JSON — keys recursively sorted so two runs
+    # over identical input produce byte-identical output. Without this,
+    # diff-based tooling (snapshot review, flow-change detection) flags
+    # spurious churn from incidental key-order differences in `flow.to_h`.
+    #
+    # @param value [Hash, Array, Object]
+    # @return [String]
+    def canonical_json(value)
+      JSON.pretty_generate(sort_keys_deep(value))
+    end
+
+    def sort_keys_deep(value)
+      case value
+      when Hash  then value.keys.sort_by(&:to_s).to_h { |k| [k, sort_keys_deep(value[k])] }
+      when Array then value.map { |v| sort_keys_deep(v) }
+      else value
+      end
     end
   end
 end

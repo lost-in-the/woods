@@ -106,7 +106,7 @@ module Woods
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {})
           validate_vector!(query_vector)
-          vector_literal = "[#{query_vector.join(',')}]"
+          vector_literal = build_vector_literal(query_vector)
           where_clause = build_where(filters)
 
           sql = <<~SQL
@@ -150,8 +150,27 @@ module Woods
         def format_entry(id, vector, metadata)
           quoted_id = @connection.quote(id)
           quoted_metadata = @connection.quote(JSON.generate(metadata))
-          vector_literal = "[#{vector.join(',')}]"
+          vector_literal = build_vector_literal(vector)
           "(#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)"
+        end
+
+        # Build the `[x,y,z]` pgvector literal from a validated numeric vector.
+        # Coerces each element through `Float()` first — `Float#to_s` is
+        # guaranteed to produce only digits, `.`, `-`, and `e`, which closes
+        # the theoretical `Numeric`-subclass `#to_s` injection vector even
+        # though {#validate_vector!} already rejects non-Numeric inputs.
+        # `Float()` raises `RangeError` on `Complex` values with an imaginary
+        # part — we surface that as an `ArgumentError` so callers see the
+        # same error shape as the other vector-validation paths instead of
+        # the raw coercion error.
+        def build_vector_literal(vector)
+          coerced = vector.each_with_index.map do |element, i|
+            Float(element).to_s
+          rescue RangeError, TypeError, ArgumentError => e
+            raise ArgumentError,
+                  "Vector element at index #{i} cannot be coerced to Float: #{element.inspect} (#{e.class})"
+          end
+          "[#{coerced.join(',')}]"
         end
 
         # Convert a database row to a SearchResult.
@@ -181,7 +200,12 @@ module Woods
               raise ArgumentError, "Invalid filter key: #{key_s.inspect}"
             end
 
-            "metadata->>'#{key_s}' = #{@connection.quote(value.to_s)}"
+            # Belt-and-suspenders: regex above already rejects any value that
+            # could alter the SQL shape, but we still pass the key through
+            # `@connection.quote` so the quoting story is uniform across the
+            # key and value positions and a future regex-relaxation does not
+            # silently unlock injection.
+            "metadata->>#{@connection.quote(key_s)} = #{@connection.quote(value.to_s)}"
           end
           "WHERE #{conditions.join(' AND ')}"
         end

@@ -25,7 +25,8 @@ module Woods
     # Console MCP Server — queries live Rails application state.
     #
     # Communicates with a bridge process running inside the Rails environment
-    # via JSON-lines over stdio. Exposes Tier 1-4 tools (read-only, domain, analytics, guarded) through MCP.
+    # via JSON-lines over stdio. Exposes 31 tools across 4 tiers
+    # (9 read-only / 9 domain-aware / 10 analytics / 3 guarded) through MCP.
     #
     # @example
     #   server = Woods::Console::Server.build(config: config)

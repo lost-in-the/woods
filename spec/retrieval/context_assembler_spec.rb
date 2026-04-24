@@ -485,4 +485,48 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       expect(result.sources.first[:identifier]).to eq('User')
     end
   end
+
+  describe 'error paths (D-3)' do
+    it 'returns an empty-ish result when candidates is empty' do
+      result = assembler.assemble(candidates: [], classification: classification)
+      expect(result.sources).to eq([])
+    end
+
+    it 'treats a metadata miss as a skip, not a crash' do
+      allow(metadata_store).to receive(:find).and_return(nil)
+      allow(metadata_store).to receive(:find_batch) do |ids|
+        ids.to_h { |id| [id, nil] }
+      end
+
+      expect do
+        assembler.assemble(
+          candidates: [candidate(identifier: 'NonexistentThing', score: 0.9)],
+          classification: classification
+        )
+      end.not_to raise_error
+    end
+
+    it 'estimates tokens as 0 for nil and empty strings' do
+      expect(assembler.send(:estimate_tokens, nil)).to eq(0)
+      expect(assembler.send(:estimate_tokens, '')).to eq(0)
+    end
+
+    it 'uses the injected TokenCounter when present (exact counts)' do
+      counter = instance_double('Woods::Embedding::TokenCounter', count: 17, chars_per_token: 1.2)
+      tc_assembler = described_class.new(metadata_store: metadata_store, token_counter: counter)
+      expect(tc_assembler.send(:estimate_tokens, 'some text')).to eq(17)
+    end
+
+    it 'falls back to chars/token heuristic when no TokenCounter is injected' do
+      # 40 chars / 4.0 (default) = 10
+      expect(assembler.send(:estimate_tokens, 'x' * 40)).to eq(10)
+    end
+
+    it 'truncates oversized text to roughly the byte budget' do
+      text = 'z' * 10_000
+      truncated = assembler.send(:truncate_to_budget, text, 100)
+      expect(truncated.length).to be < text.length
+      expect(truncated).to end_with('[truncated]')
+    end
+  end
 end

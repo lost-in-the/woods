@@ -855,6 +855,8 @@ RSpec.describe Woods::MCP::Server do
       end
     end
 
+    before(:all) { require 'woods/flow_assembler' }
+
     before do
       allow(Woods::FlowAssembler).to receive(:new).and_return(mock_assembler)
     end
@@ -885,11 +887,46 @@ RSpec.describe Woods::MCP::Server do
       call_tool(server, 'trace_flow', entry_point: 'PostsController#create')
     end
 
-    it 'returns an error hash when assembly raises' do
+    it 'returns an MCP error response when assembly raises' do
       allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'unit not found')
       response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
-      data = parse_response(response)
-      expect(data['error']).to eq('unit not found')
+      expect(response.error?).to be(true)
+      expect(response_text(response)).to include('trace_flow failed')
+      expect(response_text(response)).to include('unit not found')
+    end
+  end
+
+  describe '.coerce_integer' do
+    it 'passes Integer through unchanged' do
+      expect(described_class.send(:coerce_integer, 7)).to eq(7)
+    end
+
+    it 'passes nil through unchanged' do
+      expect(described_class.send(:coerce_integer, nil)).to be_nil
+    end
+
+    it 'converts a numeric-shaped String to Integer' do
+      expect(described_class.send(:coerce_integer, '42')).to eq(42)
+      expect(described_class.send(:coerce_integer, '-5')).to eq(-5)
+      expect(described_class.send(:coerce_integer, '+12')).to eq(12)
+    end
+
+    it 'raises ArgumentError for junk strings instead of silently returning 0' do
+      expect { described_class.send(:coerce_integer, 'abc') }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, '1abc') }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, '') }
+        .to raise_error(ArgumentError, /expected integer/)
+    end
+
+    it 'raises ArgumentError for non-integer scalar types' do
+      expect { described_class.send(:coerce_integer, 3.14) }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, true) }
+        .to raise_error(ArgumentError, /expected integer/)
+      expect { described_class.send(:coerce_integer, []) }
+        .to raise_error(ArgumentError, /expected integer/)
     end
   end
 
@@ -912,6 +949,27 @@ RSpec.describe Woods::MCP::Server do
       end
     end
 
+    context 'with a record-only store (missing read/sessions)' do
+      let(:record_only_store) do
+        Class.new do
+          def record(_session_id, _data); end
+          # no :read / :sessions
+        end.new
+      end
+
+      before do
+        Woods.configuration = Struct.new(:session_store).new(record_only_store)
+      end
+
+      after { Woods.configuration = nil }
+
+      it 'refuses to register session_trace when the store cannot answer reads' do
+        srv = described_class.build(index_dir: fixture_dir, response_format: :json)
+        tools = srv.instance_variable_get(:@tools)
+        expect(tools.keys).not_to include('session_trace')
+      end
+    end
+
     context 'with session store configured' do
       let(:mock_store) do
         instance_double('Woods::SessionTracer::FileStore').tap do |s|
@@ -923,6 +981,10 @@ RSpec.describe Woods::MCP::Server do
                                                                   'status' => 200, 'duration_ms' => 12
                                                                 }
                                                               ])
+          # session_tracer_wired? probes for :sessions before registering
+          # the tool — stub it so the wire-up check passes without having
+          # to assert on any particular return value.
+          allow(s).to receive(:sessions).and_return([])
         end
       end
 

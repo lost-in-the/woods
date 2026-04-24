@@ -1,0 +1,62 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'woods/mcp/tool_response_renderer'
+require 'woods/mcp/renderers/markdown_renderer'
+
+RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
+  subject(:renderer) { described_class.new }
+
+  describe '#render_lookup' do
+    it 'renders a markdown heading and file path' do
+      out = renderer.render(:lookup, {
+                              'identifier' => 'User',
+                              'type' => 'model',
+                              'file_path' => 'app/models/user.rb'
+                            })
+      expect(out).to include('## User (model)')
+      expect(out).to include('**File:** `app/models/user.rb`')
+    end
+
+    it 'wraps source_code in a fenced code block' do
+      out = renderer.render(:lookup, {
+                              'identifier' => 'X',
+                              'type' => 'service',
+                              'source_code' => "class X\n  def call; end\nend"
+                            })
+      expect(out).to include('```ruby')
+      expect(out).to include('class X')
+      expect(out).to include('```')
+    end
+
+    it 'returns "Unit not found" for non-hash input' do
+      expect(renderer.render(:lookup, nil)).to eq('Unit not found')
+      expect(renderer.render(:lookup, {})).to eq('Unit not found')
+    end
+
+    it 'lists dependencies and dependents' do
+      out = renderer.render(:lookup, {
+                              'identifier' => 'User',
+                              'type' => 'model',
+                              'dependencies' => %w[Post Comment],
+                              'dependents' => %w[UserController]
+                            })
+      expect(out).to include('### Dependencies')
+      expect(out).to include('- Post')
+      expect(out).to include('- Comment')
+      expect(out).to include('### Dependents')
+      expect(out).to include('- UserController')
+    end
+  end
+
+  describe '#render_default' do
+    it 'renders a hash as markdown-style bold keys' do
+      out = renderer.render(:totally_unknown, { a: 1, b: 2 })
+      expect(out).to include('**a:**').and include('**b:**')
+    end
+
+    it 'handles strings without crashing' do
+      expect(renderer.render(:totally_unknown, 'hello')).to include('hello')
+    end
+  end
+end

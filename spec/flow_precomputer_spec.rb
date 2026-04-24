@@ -346,4 +346,47 @@ RSpec.describe Woods::FlowPrecomputer do
       precomputer.precompute
     end
   end
+
+  # ── Deterministic output ───────────────────────────────────────────
+
+  describe 'deterministic JSON output (J-1)' do
+    it 'produces byte-identical JSON across runs with identical input' do
+      controller = make_unit(
+        type: :controller,
+        identifier: 'StableController',
+        file_path: 'app/controllers/stable_controller.rb',
+        metadata: { actions: %w[index] },
+        source_code: "class StableController < ApplicationController\n  def index; end\nend"
+      )
+      write_unit_json(controller)
+      graph.register(controller)
+
+      flow = Woods::FlowDocument.new(
+        entry_point: 'StableController#index',
+        route: { verb: 'GET', path: '/stable' },
+        max_depth: 3,
+        steps: [
+          { unit: 'StableController', type: 'controller', operations: [] },
+          { unit: 'StableService',    type: 'service',    operations: [] }
+        ]
+      )
+      assembler = instance_double(Woods::FlowAssembler)
+      allow(assembler).to receive(:assemble).and_return(flow)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
+
+      first_out = Dir.mktmpdir('flow_a')
+      second_out = Dir.mktmpdir('flow_b')
+      begin
+        described_class.new(units: [controller], graph: graph, output_dir: first_out).precompute
+        described_class.new(units: [controller], graph: graph, output_dir: second_out).precompute
+
+        first_path = File.join(first_out, 'flows', 'StableController_index.json')
+        second_path = File.join(second_out, 'flows', 'StableController_index.json')
+        expect(File.read(first_path)).to eq(File.read(second_path))
+      ensure
+        FileUtils.rm_rf(first_out)
+        FileUtils.rm_rf(second_out)
+      end
+    end
+  end
 end

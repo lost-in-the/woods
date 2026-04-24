@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'search_executor'
+require_relative '../token_utils'
 
 module Woods
   module Retrieval
@@ -36,12 +37,14 @@ module Woods
       # Minimum token count for a section to be worth including.
       MIN_USEFUL_TOKENS = 200
 
-      # Default chars-per-token ratio. Matches the OpenAI / tiktoken
-      # cl100k_base average for Ruby source (see docs/TOKEN_BENCHMARK.md).
+      # Default chars-per-token ratio. Delegates to {Woods::TokenUtils} —
+      # the single source of truth — which uses 4.0 (OpenAI / tiktoken
+      # cl100k_base average for Ruby source; see docs/TOKEN_BENCHMARK.md).
       # Callers embedding with BERT/WordPiece tokenizers (nomic-embed-text,
       # bge-*) should pass the tighter ratio from their TextPreparer
-      # (~1.5–2.5) so truncation stays honest for that provider.
-      DEFAULT_CHARS_PER_TOKEN = 4.0
+      # (~1.5–2.5) so truncation stays honest for that provider — or use
+      # {TokenUtils.chars_per_token_for(:ollama)} for the shipped default.
+      DEFAULT_CHARS_PER_TOKEN = TokenUtils::DEFAULT_CHARS_PER_TOKEN
 
       # @param metadata_store [#find] Store that resolves identifiers to unit data
       # @param budget [Integer] Total token budget
@@ -49,15 +52,32 @@ module Woods
       #   for truncation sizing. Match this to the embedding provider in use —
       #   {Woods::Embedding::TextPreparer#chars_per_token} exposes the live
       #   value from the indexing-time preparer.
+      # @param token_counter [#count, nil] Optional exact tokenizer (typically
+      #   {Woods::Embedding::TokenCounter}). When provided, token estimation
+      #   uses the model's real WordPiece/BPE output instead of the
+      #   `chars / chars_per_token` heuristic, which matters most for the
+      #   Ollama path (ratios vary widely across Rails source, 1.5–2.5).
+      #   The heuristic remains the fallback when the counter is nil or the
+      #   tokenizer gem isn't installed.
       def initialize(metadata_store:, budget: DEFAULT_BUDGET,
-                     chars_per_token: DEFAULT_CHARS_PER_TOKEN)
+                     chars_per_token: DEFAULT_CHARS_PER_TOKEN,
+                     token_counter: nil)
         @metadata_store = metadata_store
         @budget = budget
-        @chars_per_token = chars_per_token.to_f
+        # Guard against 0 / negative / NaN ratios — any of those would make
+        # `estimate_tokens` div-by-zero or return a negative budget, which
+        # would silently truncate every section to empty. Fall back to the
+        # default ratio rather than propagate the bogus input.
+        ratio = chars_per_token.to_f
+        @chars_per_token = ratio.positive? ? ratio : DEFAULT_CHARS_PER_TOKEN
+        @token_counter = token_counter
       end
 
       # @return [Float] the configured chars-per-token ratio
       attr_reader :chars_per_token
+
+      # @return [#count, nil] the exact tokenizer, if one was injected
+      attr_reader :token_counter
 
       # Assemble context from ranked candidates within token budget.
       #
@@ -289,19 +309,39 @@ module Woods
       def truncate_to_budget(text, token_budget)
         return text if estimate_tokens(text) <= token_budget
 
-        # Estimate target character count with 10% safety margin. Sizing
-        # uses @chars_per_token so Ollama-indexed corpora (ratio ~1.5) are
-        # not over-truncated by an OpenAI-sized assumption (ratio 4.0).
-        target_chars = (token_budget * @chars_per_token * 0.9).to_i
+        # Target-char sizing uses the effective ratio: the provider's live
+        # ratio when we have an exact counter, otherwise @chars_per_token.
+        # 10 % safety margin keeps us below the budget after the imprecise
+        # tokenizer runs again on the truncated output.
+        target_chars = (token_budget * effective_chars_per_token * 0.9).to_i
         "#{text[0...target_chars]}\n... [truncated]"
       end
 
-      # Estimate token count using the configured chars-per-token ratio.
+      # Estimate token count. Prefers the injected {TokenCounter} — which
+      # loads the provider's real tokenizer and returns exact counts — and
+      # falls back to the configured chars-per-token ratio when no counter
+      # is wired.
       #
       # @param text [String]
       # @return [Integer]
       def estimate_tokens(text)
+        return 0 if text.nil? || text.empty?
+        return @token_counter.count(text) if @token_counter
+
         (text.length / @chars_per_token).ceil
+      end
+
+      # Effective chars-per-token for chunk-size sizing. When an exact
+      # counter is present, prefer its native ratio (e.g. 1.2 for
+      # nomic-embed-text) so truncation and estimation agree. Falls back
+      # to the configured ratio if the counter reports 0 or a non-positive
+      # value (which would make truncation target zero chars).
+      def effective_chars_per_token
+        if @token_counter.respond_to?(:chars_per_token) && @token_counter.chars_per_token
+          ratio = @token_counter.chars_per_token.to_f
+          return ratio if ratio.positive?
+        end
+        @chars_per_token
       end
 
       # Build the final AssembledContext result.
