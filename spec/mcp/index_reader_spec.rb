@@ -551,6 +551,35 @@ RSpec.describe Woods::MCP::IndexReader do
       result = results.first
       expect(result).to include(:identifier, :type, :file_path, :last_modified)
     end
+
+    it 'populates :author from metadata.git.last_author (#106)' do
+      results = reader.recent_changes(limit: 1)
+      expect(results.first[:author]).to eq('dev@example.com')
+    end
+
+    it 'leaves :author nil when git metadata has no last_author entry' do
+      Dir.mktmpdir('woods-author-nil') do |tmp|
+        File.write(File.join(tmp, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        FileUtils.mkdir_p(File.join(tmp, 'models'))
+        File.write(
+          File.join(tmp, 'models', '_index.json'),
+          JSON.pretty_generate([{ 'identifier' => 'Anon' }])
+        )
+        digest = Digest::SHA256.hexdigest('Anon')[0, 8]
+        File.write(
+          File.join(tmp, 'models', "Anon_#{digest}.json"),
+          JSON.pretty_generate(
+            type: 'model', identifier: 'Anon',
+            metadata: { git: { last_modified: '2026-04-01T00:00:00Z' } }
+          )
+        )
+
+        reader = described_class.new(tmp)
+        results = reader.recent_changes(limit: 1)
+        expect(results.first[:identifier]).to eq('Anon')
+        expect(results.first[:author]).to be_nil
+      end
+    end
   end
 
   describe 'previously invisible types' do

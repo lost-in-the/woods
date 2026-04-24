@@ -378,7 +378,8 @@ module Woods
               identifier: id,
               type: DIR_TO_TYPE[dir],
               file_path: unit['file_path'],
-              last_modified: last_modified
+              last_modified: last_modified,
+              author: unit.dig('metadata', 'git', 'last_author')
             }
           end
         end
