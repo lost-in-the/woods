@@ -10,28 +10,20 @@ module Woods
       # implementations) subclass Base and override the abstract methods.
       # The orchestrator consults the engine collection via
       # {ViewTemplateExtractor::ENGINES}, finds the first engine whose
-      # {#handles?} returns true for a file, and delegates parsing,
-      # scanning, and partial-identifier resolution to that engine.
+      # {#handles?} returns true for a file, and delegates scanning and
+      # partial-identifier resolution to that engine.
       #
-      # Base intentionally does NOT prescribe an engine-neutral AST — the
-      # original #110 design sketched a `parse(source) -> ast` step, but
-      # HAML/Slim compile to engine-specific intermediate representations
-      # (Temple expressions, indented line trees) that resist a shared
-      # shape. Instead each `scan_*` method accepts raw source and the
-      # engine is free to parse it however it likes before returning the
-      # flat result type the orchestrator needs.
+      # {#parse} is an optional per-engine memoization seam: engines whose
+      # parse step is expensive (e.g. HAML / Slim compiling through
+      # Temple) can override it to return an internal IR and call it once
+      # before the three scan operations. ERB and Turbo Streams, whose
+      # scanners regex raw source, leave the identity default in place.
+      # The orchestrator does not invoke {#parse} — engines opt in
+      # internally when it pays off.
       #
-      # @abstract Subclass and override all abstract methods.
-      #
-      # @example Minimal engine
-      #   class Haml < Woods::Extractors::ViewEngines::Base
-      #     def name = :haml
-      #     def extensions = %w[.html.haml .haml].freeze
-      #     def scan_partials(source); ...; end
-      #     def scan_instance_variables(source); ...; end
-      #     def scan_helpers(source); ...; end
-      #     def resolve_partial_identifier(partial_name, current_identifier); ...; end
-      #   end
+      # @abstract Subclass and override the abstract methods ({#name},
+      #   {#extensions}, {#scan_partials}, {#scan_instance_variables},
+      #   {#scan_helpers}, {#resolve_partial_identifier}).
       class Base
         # Stable engine identifier surfaced through
         # {ViewTemplateExtractor.supported_template_engines} and the MCP
@@ -59,6 +51,23 @@ module Woods
         # @return [Boolean]
         def handles?(file_path)
           extensions.any? { |ext| file_path.end_with?(ext) }
+        end
+
+        # Optional memoization hook for engines whose parse step is
+        # expensive. Default is identity — returns the source string
+        # unchanged — so engines that scan raw source (ERB, Turbo
+        # Streams) pay no overhead. HAML/Slim implementations can
+        # override to compile once and cache an internal IR, then call
+        # {#parse} inside their own {#scan_partials} /
+        # {#scan_instance_variables} / {#scan_helpers}.
+        #
+        # The orchestrator does not invoke this method; it is a
+        # convention for engine-internal reuse.
+        #
+        # @param source [String] Template source code
+        # @return [Object] An engine-private IR, or the source itself
+        def parse(source)
+          source
         end
 
         # Partial names referenced by render calls in the given source.

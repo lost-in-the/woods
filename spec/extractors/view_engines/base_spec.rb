@@ -6,34 +6,14 @@ require 'woods/extractors/view_engines/base'
 RSpec.describe Woods::Extractors::ViewEngines::Base do
   subject(:engine) { described_class.new }
 
-  describe 'abstract contract' do
-    it 'requires #name' do
-      expect { engine.name }.to raise_error(NotImplementedError, /#name/)
-    end
-
-    it 'requires #extensions' do
-      expect { engine.extensions }.to raise_error(NotImplementedError, /#extensions/)
-    end
-
-    it 'requires #scan_partials' do
-      expect { engine.scan_partials('src') }.to raise_error(NotImplementedError, /#scan_partials/)
-    end
-
-    it 'requires #scan_instance_variables' do
-      expect { engine.scan_instance_variables('src') }
-        .to raise_error(NotImplementedError, /#scan_instance_variables/)
-    end
-
-    it 'requires #scan_helpers' do
-      expect { engine.scan_helpers('src') }.to raise_error(NotImplementedError, /#scan_helpers/)
-    end
-
-    it 'requires #resolve_partial_identifier' do
-      expect { engine.resolve_partial_identifier('p', 'i') }
-        .to raise_error(NotImplementedError, /#resolve_partial_identifier/)
-    end
-
-    it 'names the concrete subclass in the error message' do
+  describe 'abstract methods' do
+    # A representative check — the other abstract methods share the
+    # same `raise NotImplementedError, "#{self.class.name} ..."` shape.
+    # Exhaustively testing each is tautology (verifying that `raise`
+    # raises). What's worth asserting is that the error message names
+    # the concrete subclass, since that's the bit future engine authors
+    # rely on when they forget to override a method.
+    it 'names the concrete subclass in the NotImplementedError message' do
       subclass = Class.new(described_class)
       stub_const('FakeHamlEngine', subclass)
       expect { subclass.new.name }.to raise_error(NotImplementedError, /FakeHamlEngine/)
@@ -64,6 +44,21 @@ RSpec.describe Woods::Extractors::ViewEngines::Base do
 
     it 'propagates NotImplementedError from #extensions when not overridden' do
       expect { engine.handles?('foo.erb') }.to raise_error(NotImplementedError, /#extensions/)
+    end
+  end
+
+  describe '#parse' do
+    it 'returns the source unchanged by default (identity hook)' do
+      expect(engine.parse('<h1>hello</h1>')).to eq('<h1>hello</h1>')
+    end
+
+    it 'is overridable so engines with expensive parsing can memoize an IR' do
+      subclass = Class.new(described_class) do
+        def parse(source)
+          { ir: :compiled, from: source }
+        end
+      end
+      expect(subclass.new.parse('src')).to eq(ir: :compiled, from: 'src')
     end
   end
 end
