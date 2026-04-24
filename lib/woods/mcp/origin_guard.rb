@@ -12,6 +12,11 @@ module Woods
     # :allowed_origins. Requests without an Origin header (curl, server-to-server,
     # MCP stdio clients) are allowed through — bearer auth still gates them.
     #
+    # Port-matching: an allow-list entry WITHOUT a port (`http://localhost`)
+    # matches that host on any port. An entry WITH a port (`http://localhost:3000`)
+    # requires an exact port match. Specify explicit ports when port isolation
+    # matters.
+    #
     # Also answers CORS preflight (OPTIONS) with the matching allow-list.
     class OriginGuard
       DEFAULT_ALLOWED = %w[
