@@ -131,14 +131,13 @@ module Woods
 
         # @see Base#scan_navigation_candidates
         def scan_navigation_candidates(source)
-          candidates = []
-          source.scan(ROUTE_HELPER_PATTERN).each do |route_name, suffix|
-            candidates << { helper: "#{route_name}_#{suffix}", via: :link_to }
+          link_to_candidates = source.scan(ROUTE_HELPER_PATTERN).map do |route_name, suffix|
+            { helper: "#{route_name}_#{suffix}", via: :link_to }
           end
-          source.scan(FORM_ACTION_HELPER).each do |_form_kind, route_name, suffix|
-            candidates << { helper: "#{route_name}_#{suffix}", via: :form_action }
+          form_candidates = source.scan(FORM_ACTION_HELPER).map do |_form_kind, route_name, suffix|
+            { helper: "#{route_name}_#{suffix}", via: :form_action }
           end
-          candidates
+          link_to_candidates + form_candidates
         end
       end
     end
