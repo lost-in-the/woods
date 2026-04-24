@@ -11,6 +11,12 @@ require 'woods/extractors/view_template_extractor'
 RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   include_context 'extractor setup'
 
+  describe '.supported_template_engines' do
+    it 'returns the engine names currently wired into the orchestrator' do
+      expect(described_class.supported_template_engines).to eq([:erb])
+    end
+  end
+
   describe '#extract_all' do
     context 'when app/views/ does not exist' do
       it 'returns an empty array' do
