@@ -41,7 +41,7 @@ module Woods
       #
       # @return [Array<Symbol>]
       def self.supported_template_engines
-        [ViewEngines::Erb::ENGINE_NAME]
+        @supported_template_engines ||= [ViewEngines::Erb.new.name].freeze
       end
 
       def initialize
@@ -56,7 +56,7 @@ module Woods
       # @return [Array<ExtractedUnit>] List of view template units
       def extract_all
         @directories.flat_map do |dir|
-          files = ViewEngines::Erb::EXTENSIONS.flat_map do |ext|
+          files = @engine.extensions.flat_map do |ext|
             Dir[dir.join("**/*#{ext}")]
           end
           files.uniq.filter_map { |file| extract_view_template_file(file) }
@@ -122,7 +122,7 @@ module Woods
       # @return [Hash]
       def build_metadata(source, file_path, partials)
         {
-          template_engine: @engine.class::ENGINE_NAME.to_s,
+          template_engine: @engine.name.to_s,
           is_partial: partial?(file_path),
           partials_rendered: partials,
           instance_variables: @engine.scan_instance_variables(source),

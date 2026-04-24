@@ -6,19 +6,15 @@ require 'woods/extractors/view_engines/erb'
 RSpec.describe Woods::Extractors::ViewEngines::Erb do
   subject(:engine) { described_class.new }
 
-  describe '::EXTENSIONS' do
-    it 'lists both .html.erb and .erb' do
-      expect(described_class::EXTENSIONS).to eq(%w[.html.erb .erb])
-    end
-
-    it 'orders longer suffix first so dispatch can match greedily' do
-      expect(described_class::EXTENSIONS.first).to eq('.html.erb')
+  describe '#extensions' do
+    it 'returns both .html.erb and .erb' do
+      expect(engine.extensions).to contain_exactly('.html.erb', '.erb')
     end
   end
 
-  describe '::ENGINE_NAME' do
+  describe '#name' do
     it 'is :erb' do
-      expect(described_class::ENGINE_NAME).to eq(:erb)
+      expect(engine.name).to eq(:erb)
     end
   end
 
@@ -71,6 +67,10 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
     it 'returns an empty array for source with no render calls' do
       expect(engine.scan_partials('<h1>No renders</h1>')).to eq([])
     end
+
+    it 'returns an empty array for empty source' do
+      expect(engine.scan_partials('')).to eq([])
+    end
   end
 
   describe '#scan_instance_variables' do
@@ -86,6 +86,10 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
 
     it 'returns an empty array when no ivars are present' do
       expect(engine.scan_instance_variables('<h1>static</h1>')).to eq([])
+    end
+
+    it 'returns an empty array for empty source' do
+      expect(engine.scan_instance_variables('')).to eq([])
     end
   end
 
@@ -105,10 +109,13 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
       expect(engine.scan_helpers(source)).not_to include('link_to')
     end
 
-    it 'returns results sorted' do
+    it 'returns results sorted alphabetically' do
       source = '<%= link_to %> <%= image_tag %> <%= button_to %>'
-      result = engine.scan_helpers(source)
-      expect(result).to eq(result.sort)
+      expect(engine.scan_helpers(source)).to eq(%w[button_to image_tag link_to])
+    end
+
+    it 'returns an empty array for empty source' do
+      expect(engine.scan_helpers('')).to eq([])
     end
   end
 

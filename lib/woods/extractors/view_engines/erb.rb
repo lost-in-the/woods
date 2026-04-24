@@ -14,13 +14,24 @@ module Woods
       # HAML / Slim / Turbo implementations will land as sibling classes in
       # this namespace (see issue #110 for the non-goals).
       class Erb
-        # File extensions this engine handles. Checked longest-first so
-        # `.html.erb` wins before the bare `.erb` fallback.
+        # File extensions this engine handles.
         EXTENSIONS = %w[.html.erb .erb].freeze
 
         # Symbol surfaced by {ViewTemplateExtractor.supported_template_engines}
         # and the MCP `structure` tool.
         ENGINE_NAME = :erb
+
+        # @return [Symbol] Engine identifier — stable contract for the
+        #   orchestrator so it never reads {ENGINE_NAME} through
+        #   {Class#const_get}-style reach-through.
+        def name
+          ENGINE_NAME
+        end
+
+        # @return [Array<String>] Extensions this engine handles.
+        def extensions
+          EXTENSIONS
+        end
 
         # Common Rails view helper methods to detect in template source.
         COMMON_HELPERS = %w[
