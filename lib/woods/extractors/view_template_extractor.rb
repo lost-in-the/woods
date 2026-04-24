@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'shared_dependency_scanner'
+require 'set'
 require_relative 'route_helper_resolver'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
@@ -27,7 +27,6 @@ module Woods
     #   index = units.find { |u| u.identifier == "users/index.html.erb" }
     #
     class ViewTemplateExtractor
-      include SharedDependencyScanner
       include RouteHelperResolver
 
       # Directories to scan for view templates.
@@ -174,10 +173,33 @@ module Woods
         controller = infer_controller(file_path)
         deps << { type: :controller, target: controller, via: :view_render } if controller
 
-        deps.concat(scan_navigation_dependencies(source, via_type: :link_to))
-        deps.concat(scan_form_dependencies(source))
+        deps.concat(resolve_navigation_candidates(engine, source))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
+      end
+
+      # Ask the engine for route-helper candidates and resolve each to a
+      # controller target via {RouteHelperResolver}. Gated by
+      # +Woods.configuration.extract_navigation_edges+ so the config
+      # toggle still applies.
+      #
+      # @param engine [ViewEngines::Base]
+      # @param source [String]
+      # @return [Array<Hash>]
+      def resolve_navigation_candidates(engine, source)
+        return [] unless Woods.configuration&.extract_navigation_edges
+
+        seen = Set.new
+        engine.scan_navigation_candidates(source).filter_map do |cand|
+          resolved = resolve_route_helper(cand[:helper])
+          next unless resolved
+
+          key = [resolved[:controller], cand[:via]]
+          next if seen.include?(key)
+
+          seen.add(key)
+          { type: :controller, target: resolved[:controller], via: cand[:via] }
+        end
       end
 
       # Infer the controller class from the template's directory path.

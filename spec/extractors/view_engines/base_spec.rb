@@ -18,7 +18,8 @@ RSpec.describe Woods::Extractors::ViewEngines::Base do
       scan_partials: ['src'],
       scan_instance_variables: ['src'],
       scan_helpers: ['src'],
-      resolve_partial_identifier: %w[p i]
+      resolve_partial_identifier: %w[p i],
+      scan_navigation_candidates: ['src']
     }.each do |method, args|
       it "##{method} raises NotImplementedError identifying the missing method" do
         expect { engine.public_send(method, *args) }

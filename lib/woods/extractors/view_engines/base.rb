@@ -115,6 +115,26 @@ module Woods
           raise NotImplementedError,
                 "#{self.class.name} must implement #resolve_partial_identifier"
         end
+
+        # Route-helper references found in the template source. Each
+        # candidate is a hash shaped `{ helper: 'posts_path', via: Symbol }`
+        # where `via` is typically `:link_to` or `:form_action`. The
+        # orchestrator resolves each candidate's `helper` to a controller
+        # target via {RouteHelperResolver} — engines do NOT need to know
+        # about Rails route state, they only surface raw helper calls
+        # from the source in whatever way their syntax requires.
+        #
+        # Engines matter here because form-call syntax differs across
+        # engines (e.g. ERB's `<%= form_with ... %>` vs. HAML's
+        # `= form_with ...`); returning candidates rather than resolved
+        # edges keeps Rails-coupled logic off the engine.
+        #
+        # @param source [String] Template source code
+        # @return [Array<Hash>]
+        def scan_navigation_candidates(_source)
+          raise NotImplementedError,
+                "#{self.class.name} must implement #scan_navigation_candidates"
+        end
       end
     end
   end

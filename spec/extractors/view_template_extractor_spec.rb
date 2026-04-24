@@ -39,6 +39,10 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       def resolve_partial_identifier(partial_name, _current_identifier)
         "_#{partial_name}.fake"
       end
+
+      def scan_navigation_candidates(_source)
+        []
+      end
     end
   end
 

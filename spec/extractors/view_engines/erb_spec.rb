@@ -139,4 +139,24 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
       expect(result).to eq('_sidebar.html.erb')
     end
   end
+
+  describe '#scan_navigation_candidates' do
+    it 'emits link_to candidates from every _path/_url helper in source' do
+      source = '<%= link_to "Posts", posts_path %><%= button_to users_url %>'
+      candidates = engine.scan_navigation_candidates(source)
+      helpers = candidates.select { |c| c[:via] == :link_to }.map { |c| c[:helper] }
+      expect(helpers).to include('posts_path', 'users_url')
+    end
+
+    it 'emits form_action candidates from form_with/form_for calls' do
+      source = '<%= form_with url: posts_path do |f| %><% end %>'
+      candidates = engine.scan_navigation_candidates(source)
+      form = candidates.find { |c| c[:via] == :form_action }
+      expect(form).to eq(helper: 'posts_path', via: :form_action)
+    end
+
+    it 'returns an empty array for source with no route helpers' do
+      expect(engine.scan_navigation_candidates('<h1>static</h1>')).to eq([])
+    end
+  end
 end

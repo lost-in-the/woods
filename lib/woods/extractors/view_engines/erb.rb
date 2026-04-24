@@ -15,8 +15,19 @@ module Woods
         # File extensions this engine handles.
         EXTENSIONS = %w[.html.erb .erb].freeze
 
-        # @see Base#name
+        # Stable engine identifier — see Base#name.
         ENGINE_NAME = :erb
+
+        # Matches named route helpers (e.g. `posts_path`, `user_url`) in
+        # template source. Identical shape across ERB / plain Ruby, so
+        # shared with {SharedDependencyScanner}.
+        ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
+
+        # Matches form_with / form_for calls whose action is a named
+        # route helper. ERB-flavored (`[^%]*?` stops at the next `%`
+        # which appears at ERB tag terminators and HAML tag starts) —
+        # when HAML/Slim land they will define their own form pattern.
+        FORM_ACTION_HELPER = /form_(with|for)\b[^%]*?(\w+)_(path|url)/
 
         # Common Rails view helper methods to detect in template source.
         COMMON_HELPERS = %w[
@@ -116,6 +127,18 @@ module Woods
               "#{dir}/_#{partial_name}.html.erb"
             end
           end
+        end
+
+        # @see Base#scan_navigation_candidates
+        def scan_navigation_candidates(source)
+          candidates = []
+          source.scan(ROUTE_HELPER_PATTERN).each do |route_name, suffix|
+            candidates << { helper: "#{route_name}_#{suffix}", via: :link_to }
+          end
+          source.scan(FORM_ACTION_HELPER).each do |_form_kind, route_name, suffix|
+            candidates << { helper: "#{route_name}_#{suffix}", via: :form_action }
+          end
+          candidates
         end
       end
     end
