@@ -12,6 +12,19 @@ module Woods
 
     # Parse-time refusal layer for `console_eval`.
     #
+    # ## Current reachability (v0.1)
+    #
+    # **EvalGuard is not reached on the shipped embedded-executor path.**
+    # `EmbeddedExecutor#refusal_for('eval')` unconditionally returns the
+    # `eval_disabled` error, so dispatch never reaches the Tier 4 handler
+    # where this guard is injected. The class is retained as the defense
+    # layer for the in-development bridge-process mode and for the planned
+    # `WOODS_CONSOLE_UNSAFE_EVAL` opt-in — see issue #87 and the
+    # `unsafe-eval-opt-in` backlog item. Keep the denylist current: when
+    # bridge mode ships, this guard becomes the primary pre-execution gate.
+    #
+    # ## Behaviour
+    #
     # Walks the normalized {Woods::Ast::Parser} tree of the proposed Ruby
     # snippet and refuses any expression that reaches a known credential or
     # reflection escape — so an LLM-generated `Rails.application.credentials
