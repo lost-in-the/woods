@@ -7,12 +7,25 @@ RSpec.describe Woods::Extractors::ViewEngines::Base do
   subject(:engine) { described_class.new }
 
   describe 'abstract methods' do
-    # A representative check — the other abstract methods share the
-    # same `raise NotImplementedError, "#{self.class.name} ..."` shape.
-    # Exhaustively testing each is tautology (verifying that `raise`
-    # raises). What's worth asserting is that the error message names
-    # the concrete subclass, since that's the bit future engine authors
-    # rely on when they forget to override a method.
+    # Data-driven to exercise every NotImplementedError path (required
+    # for coverage) while keeping the assertion Woods-specific: each
+    # error names the method it came from, so future engine authors who
+    # forget to override get a pointed message rather than a generic
+    # NoMethodError from deep inside the orchestrator.
+    {
+      name: [],
+      extensions: [],
+      scan_partials: ['src'],
+      scan_instance_variables: ['src'],
+      scan_helpers: ['src'],
+      resolve_partial_identifier: %w[p i]
+    }.each do |method, args|
+      it "##{method} raises NotImplementedError identifying the missing method" do
+        expect { engine.public_send(method, *args) }
+          .to raise_error(NotImplementedError, /##{method}/)
+      end
+    end
+
     it 'names the concrete subclass in the NotImplementedError message' do
       subclass = Class.new(described_class)
       stub_const('FakeHamlEngine', subclass)
