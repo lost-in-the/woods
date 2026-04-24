@@ -3,6 +3,7 @@
 require 'ipaddr'
 require 'net/http'
 require 'json'
+require 'socket'
 require 'uri'
 require_relative 'vector_store'
 require_relative '../util/host_guard'
@@ -42,8 +43,13 @@ module Woods
         # - IPv6 loopback (::1) and unspecified (::)
         # - IPv6 ULA fc00::/7 (private IPv6 equivalent of RFC1918)
         # - IPv6 link-local fe80::/10
-        # - IPv4-mapped IPv6 (::ffff:0:0/96) so `::ffff:169.254.169.254`
-        #   cannot bypass the IPv4 checks above
+        #
+        # NOTE: IPv4-mapped IPv6 (`::ffff:169.254.169.254`) is handled
+        # separately in {.private_host?} by detecting the `::ffff:` prefix
+        # and extracting the embedded IPv4 portion before range comparison.
+        # A blanket `::ffff:0:0/96` range here would (on some Ruby versions,
+        # including 3.0) match every IPv4 address due to IPAddr's
+        # cross-family auto-mapping in `#include?`.
         PRIVATE_IP_RANGES = [
           '0.0.0.0/8',
           '10.0.0.0/8',
@@ -55,8 +61,7 @@ module Woods
           '::/128',
           '::1/128',
           'fc00::/7',
-          'fe80::/10',
-          '::ffff:0:0/96'
+          'fe80::/10'
         ].map { |cidr| IPAddr.new(cidr) }.freeze
 
         # Hostnames that always map to loopback regardless of DNS.
@@ -143,14 +148,38 @@ module Woods
         def self.private_host?(host)
           return true if PRIVATE_HOSTNAMES.include?(host)
 
-          ip = IPAddr.new(host)
-          PRIVATE_IP_RANGES.any? { |range| range.include?(ip) }
+          ip = unmap_ipv4(IPAddr.new(host))
+
+          # Restrict range-check to the SAME address family so IPAddr's
+          # cross-family `include?` can't silently match all IPv4
+          # addresses into an IPv6 range (or vice versa) — a quirk
+          # observed on Ruby 3.0's IPAddr that trapped legitimate public
+          # IPv4 addresses as "IPv4-mapped private" when the range list
+          # contained `::ffff:0:0/96`.
+          PRIVATE_IP_RANGES.any? do |range|
+            range.family == ip.family && range.include?(ip)
+          end
         rescue IPAddr::InvalidAddressError
           false
         end
 
+        # IPv4-mapped IPv6 (`::ffff:169.254.169.254`): extract the
+        # embedded IPv4 (low 32 bits) before range comparison so the AWS
+        # IMDS address is caught by 169.254/16 even when disguised as
+        # IPv4-mapped IPv6. Returns the input unchanged for every other
+        # address.
+        def self.unmap_ipv4(ip)
+          return ip unless ip.ipv6?
+          return ip unless ip.to_string.start_with?('0000:0000:0000:0000:0000:ffff:')
+
+          mapped_ipv4 = ip.to_i & 0xffff_ffff
+          return ip unless mapped_ipv4.positive?
+
+          IPAddr.new(mapped_ipv4, Socket::AF_INET)
+        end
+
         private_class_method :validate_scheme!, :validate_host_present!,
-                             :validate_host_visibility!, :private_host?
+                             :validate_host_visibility!, :private_host?, :unmap_ipv4
 
         # Create the collection if it doesn't exist.
         #
