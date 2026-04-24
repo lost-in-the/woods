@@ -39,13 +39,18 @@ RSpec.describe Woods::Console::BridgeProtocol do
   end
 
   describe 'sharing across executors' do
-    it 'is the source that StubBridge surfaces as SUPPORTED_TOOLS' do
+    # `equal?` asserts object identity, not value equality. It's load-
+    # bearing here: if a future refactor does
+    # `SUPPORTED_TOOLS = BridgeProtocol::SUPPORTED_TOOLS.dup.freeze` the
+    # executors silently fork into separate frozen copies, defeating the
+    # single-source-of-truth that B-054 extracted the module to establish.
+    it 'binds StubBridge::SUPPORTED_TOOLS to the same frozen Array (not a copy)' do
       require 'woods/console/bridge'
       expect(Woods::Console::StubBridge::SUPPORTED_TOOLS)
         .to equal(described_class::SUPPORTED_TOOLS)
     end
 
-    it 'is the source that EmbeddedExecutor surfaces as TIER1_TOOLS' do
+    it 'binds EmbeddedExecutor::TIER1_TOOLS to the same frozen Array (not a copy)' do
       require 'woods/console/embedded_executor'
       expect(Woods::Console::EmbeddedExecutor::TIER1_TOOLS)
         .to equal(described_class::TIER1_TOOLS)
