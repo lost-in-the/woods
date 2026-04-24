@@ -210,6 +210,40 @@ end
 
 # ── CachedEmbeddingProvider ────────────────────────────────────────────
 
+# Thread-safe fake used by the concurrent specs for {CachedEmbeddingProvider}.
+# rspec-mocks' proxy.rb `message_received` mutates internal state without
+# synchronization and drops calls when invoked from multiple threads under MRI's
+# 3.1/3.2 scheduler — which CI exposed via flaky failures on those two Ruby
+# versions (#94). This plain object routes every call to its constructor block
+# deterministically, so the concurrency assertions are meaningful.
+#
+# Lives at the top level so rubocop's Lint/ConstantDefinitionInBlock is happy
+# (constants defined inside an `RSpec.describe` block would warn).
+#
+# @api private
+class FakeEmbeddingProvider
+  attr_reader :dimensions, :model_name
+
+  def initialize(embed: nil, embed_batch: nil, dimensions: 768, model_name: 'test-model')
+    @embed_block = embed
+    @embed_batch_block = embed_batch
+    @dimensions = dimensions
+    @model_name = model_name
+  end
+
+  def embed(text)
+    raise NoMethodError, 'embed not stubbed' unless @embed_block
+
+    @embed_block.call(text)
+  end
+
+  def embed_batch(texts)
+    raise NoMethodError, 'embed_batch not stubbed' unless @embed_batch_block
+
+    @embed_batch_block.call(texts)
+  end
+end
+
 RSpec.describe Woods::Cache::CachedEmbeddingProvider do
   let(:cache_store) { Woods::Cache::InMemory.new }
   let(:provider) do
@@ -297,24 +331,20 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
 
   # Regression — round-5 audit X-1 / issue #88. Without per-text single-flight,
   # N threads missing on the same text all fan out to the provider, burning API
-  # quota and tripping rate limits. These specs stage a stampede with deterministic
-  # Thread#status-based barriers (no sleep) and assert the provider is called
-  # exactly once per text.
+  # quota and tripping rate limits. Each spec drives a stampede with deterministic
+  # queue + waiter_count synchronization (NOT Thread#status polling — which briefly
+  # reports `sleep` during routine mutex contention inside cache_store.read and
+  # caused CI flakes on MRI 3.1/3.2, see #94).
   describe '#embed_batch single-flight under concurrent misses' do
-    let(:provider) do
-      instance_double('EmbeddingProvider',
-                      dimensions: 768,
-                      model_name: 'test-model')
-    end
-
-    # Block until every thread is parked on a mutex/condvar/IO (`status == 'sleep'`)
-    # or has finished. Used as a deterministic "all stampeders have reached their
-    # blocking point" barrier — replaces the earlier `sleep 0.1` wiggle-room and
-    # removes a whole class of CI flakes.
-    def wait_until_all_sleeping(threads, timeout: 2.0)
+    # Poll the CachedEmbeddingProvider's inflight map for an entry on `text` with
+    # exactly `expected` waiters blocked in {InflightEntry#await}. This is the
+    # authoritative "N threads have actually attached as waiters" barrier.
+    def wait_for_waiters(cached, text, expected, timeout: 2.0)
       deadline = Time.now + timeout
-      until threads.all? { |t| %w[sleep].include?(t.status) || t.status == false || t.status.nil? }
-        raise 'timeout waiting for threads to block' if Time.now > deadline
+      loop do
+        entry = cached.instance_variable_get(:@inflight)[text]
+        break if entry && entry.waiter_count >= expected
+        raise "timeout waiting for #{expected} waiters on #{text.inspect}" if Time.now > deadline
 
         Thread.pass
       end
@@ -323,27 +353,31 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
     it 'deduplicates provider calls when N threads miss on the same texts' do
       call_mutex = Mutex.new
       call_count = 0
+      entered = Queue.new
       release = Queue.new
 
-      allow(provider).to receive(:embed_batch) do |texts|
+      provider = FakeEmbeddingProvider.new(embed_batch: lambda do |texts|
         call_mutex.synchronize { call_count += 1 }
-        release.pop # hold the provider call open until released
+        entered << :go
+        release.pop
         texts.map { |t| [t.bytesize] }
-      end
+      end)
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
       thread_count = 5
       threads = Array.new(thread_count) do
-        Thread.new { cached_provider.embed_batch(%w[shared-a shared-b]) }
+        Thread.new { cached.embed_batch(%w[shared-a shared-b]) }
       end
 
-      # Every stampeder is now either in the provider call (owner) or awaiting
-      # on the inflight entry (waiters). Under the broken code all N would be
-      # in the provider call; under single-flight only the owner is.
-      wait_until_all_sleeping(threads)
+      entered.pop # one thread is now in the provider call as owner
+      # Non-owner threads enter `await_others` which blocks serially on each
+      # entry in `awaiting`. They all park on the FIRST shared key first, so
+      # waiting for N-1 waiters on 'shared-a' is sufficient to know every
+      # non-owner thread has attached. ('shared-b' gets its waiters only after
+      # 'shared-a' fulfills, which happens after `release << :go`.)
+      wait_for_waiters(cached, 'shared-a', thread_count - 1)
 
-      # Excess tokens are harmless — unused ones go with the queue when the spec ends.
-      thread_count.times { release << :go }
-
+      release << :go
       results = threads.map(&:value)
 
       expect(call_count).to eq(1)
@@ -351,27 +385,27 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
     end
 
     it 'parallelizes disjoint batches instead of serializing on a global lock' do
-      mutex = Mutex.new
-      in_flight = 0
-      max_in_flight = 0
+      entered = Queue.new
       release = Queue.new
+      call_count = 0
+      call_mutex = Mutex.new
 
-      allow(provider).to receive(:embed_batch) do |texts|
-        mutex.synchronize do
-          in_flight += 1
-          max_in_flight = [max_in_flight, in_flight].max
-        end
+      provider = FakeEmbeddingProvider.new(embed_batch: lambda do |texts|
+        call_mutex.synchronize { call_count += 1 }
+        entered << :go
         release.pop
-        mutex.synchronize { in_flight -= 1 }
         texts.map { |t| [t.bytesize] }
-      end
+      end)
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
-      t1 = Thread.new { cached_provider.embed_batch(%w[alpha beta]) }
-      t2 = Thread.new { cached_provider.embed_batch(%w[gamma delta]) }
-      wait_until_all_sleeping([t1, t2])
+      t1 = Thread.new { cached.embed_batch(%w[alpha beta]) }
+      t2 = Thread.new { cached.embed_batch(%w[gamma delta]) }
 
-      # Both provider calls reached their blocking `release.pop` → ran concurrently.
-      expect(max_in_flight).to eq(2)
+      # Both provider calls must be in flight simultaneously. Popping twice from
+      # `entered` blocks until BOTH threads reached the provider block — proving
+      # the fix didn't accidentally introduce a global lock that serializes them.
+      2.times { entered.pop }
+      expect(call_count).to eq(2)
 
       2.times { release << :go }
       t1.value
@@ -382,59 +416,62 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
       call_log = Queue.new
       release = Queue.new
 
-      allow(provider).to receive(:embed_batch) do |texts|
+      provider = FakeEmbeddingProvider.new(embed_batch: lambda do |texts|
         call_log << texts.dup
         release.pop
         texts.map { |t| [t.bytesize] }
-      end
+      end)
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
-      # t1 enters first and claims 'one' + 'shared'.
-      t1 = Thread.new { cached_provider.embed_batch(%w[one shared]) }
-      first_call = call_log.pop
-      expect(first_call).to eq(%w[one shared]) # sanity
+      t1 = Thread.new { cached.embed_batch(%w[one shared]) }
+      first_call = call_log.pop # t1 is now in provider holding 'one'+'shared'
+      expect(first_call).to eq(%w[one shared])
 
-      # t2 starts while t1 is still in the provider call. With single-flight,
-      # t2 claims only 'two' (awaiting t1 for 'shared') and issues a second
-      # provider call for `['two']` alone.
-      t2 = Thread.new { cached_provider.embed_batch(%w[shared two]) }
-      wait_until_all_sleeping([t1, t2]) # both parked: t1 in release.pop, t2 either in its own release.pop or in await
+      # With t1 holding 'shared', t2's 'shared' miss goes into `awaiting`; 'two'
+      # is disjoint, so t2 becomes the owner of a second provider call for `['two']`
+      # alone. `call_log.pop` unblocks only when t2 actually enters the provider —
+      # so it's both the synchronization barrier AND the assertion.
+      t2 = Thread.new { cached.embed_batch(%w[shared two]) }
+      second_call = call_log.pop                 # t2 entered the provider for 'two'
+      expect(second_call).to eq(['two'])
 
       2.times { release << :go }
-
       r1 = t1.value
       r2 = t2.value
 
-      remaining = []
-      remaining << call_log.pop until call_log.empty?
-
-      expect(remaining).to eq([['two']])
-      expect(r1).to eq([[3], [6]]) # 'one'=3, 'shared'=6
-      expect(r2).to eq([[6], [3]]) # 'shared' reused, 'two'=3
+      expect(call_log).to be_empty
+      expect(r1).to eq([[3], [6]])               # 'one'=3, 'shared'=6
+      expect(r2).to eq([[6], [3]])               # 'shared' reused, 'two'=3
     end
 
     it 'propagates exceptions to waiting threads instead of blocking forever' do
       call_mutex = Mutex.new
       call_count = 0
+      entered = Queue.new
       release = Queue.new
 
-      allow(provider).to receive(:embed_batch) do |_texts|
+      provider = FakeEmbeddingProvider.new(embed_batch: lambda do |_texts|
         call_mutex.synchronize { call_count += 1 }
+        entered << :go
         release.pop
         raise 'provider down'
-      end
+      end)
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
       threads = Array.new(3) do
         Thread.new do
-          cached_provider.embed_batch(%w[err-text])
+          cached.embed_batch(%w[err-text])
         rescue StandardError => e
           e
         end
       end
 
-      wait_until_all_sleeping(threads)
-      3.times { release << :go }
+      entered.pop                                # owner is in the provider
+      wait_for_waiters(cached, 'err-text', threads.size - 1)
 
+      release << :go
       errors = threads.map(&:value)
+
       expect(errors).to all(be_a(RuntimeError))
       expect(errors.map(&:message)).to all(eq('provider down'))
       expect(call_count).to eq(1) # single-flight: one call, not three
@@ -523,16 +560,12 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
   # for the same text produce exactly one provider call regardless of which
   # method they use.
   describe '#embed single-flight' do
-    let(:provider) do
-      instance_double('EmbeddingProvider',
-                      dimensions: 768,
-                      model_name: 'test-model')
-    end
-
-    def wait_until_all_sleeping(threads, timeout: 2.0)
+    def wait_for_waiters(cached, text, expected, timeout: 2.0)
       deadline = Time.now + timeout
-      until threads.all? { |t| %w[sleep].include?(t.status) || t.status == false || t.status.nil? }
-        raise 'timeout waiting for threads to block' if Time.now > deadline
+      loop do
+        entry = cached.instance_variable_get(:@inflight)[text]
+        break if entry && entry.waiter_count >= expected
+        raise "timeout waiting for #{expected} waiters on #{text.inspect}" if Time.now > deadline
 
         Thread.pass
       end
@@ -541,19 +574,26 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
     it 'deduplicates concurrent #embed calls for the same text' do
       call_count = 0
       call_mutex = Mutex.new
+      entered = Queue.new
       release = Queue.new
 
-      allow(provider).to receive(:embed) do |text|
+      provider = FakeEmbeddingProvider.new(embed: lambda do |text|
         call_mutex.synchronize { call_count += 1 }
+        entered << :go
         release.pop
         [text.bytesize]
-      end
+      end)
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
-      threads = Array.new(4) { Thread.new { cached_provider.embed('shared') } }
-      wait_until_all_sleeping(threads)
-      4.times { release << :go }
+      thread_count = 4
+      threads = Array.new(thread_count) { Thread.new { cached.embed('shared') } }
 
+      entered.pop
+      wait_for_waiters(cached, 'shared', thread_count - 1)
+
+      release << :go
       results = threads.map(&:value)
+
       expect(results).to all(eq([6]))
       expect(call_count).to eq(1)
     end
@@ -561,51 +601,67 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
     it 'shares the inflight map with #embed_batch for the same text' do
       # An in-flight #embed call claims the text; a concurrent #embed_batch for
       # the same text must attach to that entry rather than making a second call.
+      entered = Queue.new
       release = Queue.new
-      embed_call_count = 0
-      batch_call_count = 0
+      embed_calls = 0
+      batch_calls = 0
 
-      allow(provider).to receive(:embed) do |text|
-        embed_call_count += 1
-        release.pop
-        [text.bytesize + 100]
-      end
-      allow(provider).to receive(:embed_batch) do |texts|
-        batch_call_count += 1
-        texts.map { |t| [t.bytesize] }
-      end
+      provider = FakeEmbeddingProvider.new(
+        embed: lambda do |text|
+          embed_calls += 1
+          entered << :go
+          release.pop
+          [text.bytesize + 100]
+        end,
+        embed_batch: lambda do |texts|
+          batch_calls += 1
+          texts.map { |t| [t.bytesize] }
+        end
+      )
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
-      embed_thread = Thread.new { cached_provider.embed('x') }
-      batch_thread = Thread.new { cached_provider.embed_batch(%w[x]) }
-      wait_until_all_sleeping([embed_thread, batch_thread])
+      # Force ordering: embed first becomes the owner for 'x', then embed_batch
+      # attaches as a waiter (verified via waiter_count).
+      embed_thread = Thread.new { cached.embed('x') }
+      entered.pop                                 # embed is now in the provider
+
+      batch_thread = Thread.new { cached.embed_batch(%w[x]) }
+      wait_for_waiters(cached, 'x', 1)            # batch_thread has attached
 
       release << :go
 
       expect(embed_thread.value).to eq([101])
-      expect(batch_thread.value).to eq([[101]])    # shared the owner's vector
-      expect(embed_call_count).to eq(1)
-      expect(batch_call_count).to eq(0)            # attached to owner, no second call
+      expect(batch_thread.value).to eq([[101]])   # shared the owner's vector
+      expect(embed_calls).to eq(1)
+      expect(batch_calls).to eq(0)                # attached to owner, no second call
     end
 
     it 'propagates provider exception to concurrent waiters' do
+      entered = Queue.new
       release = Queue.new
 
-      allow(provider).to receive(:embed) do |_text|
+      provider = FakeEmbeddingProvider.new(embed: lambda do |_text|
+        entered << :go
         release.pop
         raise 'embed failed'
-      end
+      end)
+      cached = described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
 
-      threads = Array.new(3) do
+      thread_count = 3
+      threads = Array.new(thread_count) do
         Thread.new do
-          cached_provider.embed('err')
+          cached.embed('err')
         rescue StandardError => e
           e
         end
       end
-      wait_until_all_sleeping(threads)
-      3.times { release << :go }
 
+      entered.pop
+      wait_for_waiters(cached, 'err', thread_count - 1)
+
+      release << :go
       errors = threads.map(&:value)
+
       expect(errors).to all(be_a(RuntimeError))
       expect(errors.map(&:message)).to all(eq('embed failed'))
     end

@@ -31,6 +31,7 @@ module Woods
         @done = false
         @value = nil
         @error = nil
+        @waiter_count = 0
       end
 
       # Publish the computed value and wake every waiter. Idempotent — a second
@@ -59,12 +60,31 @@ module Woods
       end
 
       # Block until {#fulfill} or {#reject} is called, then return the value
-      # (or re-raise the error) to the waiting thread.
+      # (or re-raise the error) to the waiting thread. `@waiter_count` is bumped
+      # under the mutex so tests can deterministically wait for "N threads have
+      # attached to this entry" instead of polling coarse Thread#status values.
       def await
-        @mutex.synchronize { @cond.wait(@mutex) until @done }
+        @mutex.synchronize do
+          @waiter_count += 1
+          begin
+            @cond.wait(@mutex) until @done
+          ensure
+            @waiter_count -= 1
+          end
+        end
         raise @error if @error
 
         @value
+      end
+
+      # Number of threads currently blocked in {#await}. Thread-safe observation
+      # used primarily by concurrent specs to synchronize without relying on
+      # `Thread#status` (which can transiently report 'sleep' on unrelated
+      # mutex contention — see issue #94 CI flake on MRI 3.1/3.2).
+      #
+      # @return [Integer]
+      def waiter_count
+        @mutex.synchronize { @waiter_count }
       end
     end
 
