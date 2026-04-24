@@ -207,6 +207,14 @@ module Woods
                  TYPE_DIRS
                end
 
+        # Phase 2 candidates are collected per-dir and then scanned in
+        # round-robin across dirs. Exhausting the per-run scan cap linearly
+        # down TYPE_DIRS order would starve later types (`concerns` at pos
+        # 13, `test_mappings` at pos 31) on any codebase where the earlier
+        # dirs together exceed max_scan entries. Interleaving guarantees
+        # every type contributes to the scanned set.
+        phase2_queues = {}
+
         dirs.each do |dir|
           type_name = DIR_TO_TYPE[dir]
           entries = read_index(dir)
@@ -222,34 +230,54 @@ module Woods
           end
 
           entries.each do |entry|
-            break if results.size >= limit
-
             id = entry['identifier']
             next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
-            # Phase 1: identifier matching
+            # Phase 1: identifier matching (still in-order per dir)
             if fields.include?('identifier') && pattern.match?(id)
+              next if results.size >= limit
+
               results << { identifier: id, type: type_name, match_field: 'identifier' }
               next
             end
 
-            # Phase 2: metadata/source_code matching (requires loading full unit)
+            # Phase 2 is only reached when the caller opted into deeper fields.
             next unless fields.include?('metadata') || fields.include?('source_code')
 
-            if phase2_scanned >= max_scan
-              partial = true
-              next
-            end
+            (phase2_queues[dir] ||= []) << [type_name, id]
+          end
+        end
 
-            unit = find_unit(id)
-            next unless unit
+        if results.size < limit && phase2_queues.any?
+          queues = phase2_queues.values.map(&:dup)
+          catch(:phase2_done) do
+            loop do
+              progressed = false
+              queues.each do |queue|
+                next if queue.empty?
 
-            phase2_scanned += 1
+                throw :phase2_done if results.size >= limit
 
-            if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
-              results << { identifier: id, type: type_name, match_field: 'source_code' }
-            elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
-              results << { identifier: id, type: type_name, match_field: 'metadata' }
+                if phase2_scanned >= max_scan
+                  partial = true
+                  throw :phase2_done
+                end
+
+                type_name, id = queue.shift
+                progressed = true
+
+                unit = find_unit(id)
+                next unless unit
+
+                phase2_scanned += 1
+
+                if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
+                  results << { identifier: id, type: type_name, match_field: 'source_code' }
+                elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
+                  results << { identifier: id, type: type_name, match_field: 'metadata' }
+                end
+              end
+              break unless progressed
             end
           end
         end

@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
+require 'fileutils'
+require 'tmpdir'
 require 'woods/dependency_graph'
 require 'woods/mcp/index_reader'
 
@@ -610,6 +613,87 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(results).to include(
         a_hash_including(identifier: 'External::Analytics', type: 'lib')
       )
+    end
+  end
+
+  describe 'Phase-2 scan budget distribution across type directories (#104)' do
+    # Phase 2 used to iterate TYPE_DIRS in order and increment a single
+    # global counter, so a codebase with more than max_scan units in the
+    # early dirs (models, controllers) would starve later dirs like
+    # concerns (pos 13) and test_mappings (pos 31). Interleaving ensures
+    # every populated dir gets a share of the scan budget.
+
+    let(:synthetic_dir) { Dir.mktmpdir('woods-search-budget') }
+    let(:synthetic_reader) { described_class.new(synthetic_dir) }
+
+    before do
+      # Satisfy IndexReader's manifest requirement.
+      File.write(
+        File.join(synthetic_dir, 'manifest.json'),
+        JSON.pretty_generate(total_units: 0, counts: {})
+      )
+
+      # 20 models — enough to exhaust any reasonable scan cap on its own.
+      FileUtils.mkdir_p(File.join(synthetic_dir, 'models'))
+      model_entries = 20.times.map do |i|
+        identifier = "Model#{i}"
+        write_unit(synthetic_dir, 'models', identifier, type: 'model', source: 'class body')
+        { 'identifier' => identifier }
+      end
+      File.write(File.join(synthetic_dir, 'models', '_index.json'), JSON.pretty_generate(model_entries))
+
+      # One concern whose source contains the target phrase. Positionally
+      # 13th in TYPE_DIRS — guaranteed to be starved by linear scan when
+      # max_scan is below ~20 models.
+      FileUtils.mkdir_p(File.join(synthetic_dir, 'concerns'))
+      write_unit(
+        synthetic_dir, 'concerns', 'ApiAuthentication',
+        type: 'concern',
+        source: "module ApiAuthentication\n  def requires_authentication\n    true\n  end\nend"
+      )
+      File.write(
+        File.join(synthetic_dir, 'concerns', '_index.json'),
+        JSON.pretty_generate([{ 'identifier' => 'ApiAuthentication' }])
+      )
+    end
+
+    after { FileUtils.remove_entry(synthetic_dir) if File.directory?(synthetic_dir) }
+
+    def write_unit(base, dir, identifier, type:, source:)
+      digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+      filename = "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}_#{digest}.json"
+      File.write(
+        File.join(base, dir, filename),
+        JSON.pretty_generate(
+          type: type, identifier: identifier, source_code: source,
+          metadata: {}, dependencies: [], dependents: []
+        )
+      )
+    end
+
+    it 'reaches the concerns dir even when models dir alone exceeds max_scan' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '5'
+      begin
+        result = synthetic_reader.search('requires_authentication', fields: %w[source_code])
+        identifiers = result[:results].map { |r| r[:identifier] }
+        expect(identifiers).to include('ApiAuthentication')
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
+    it 'still sets :partial when the scan cap actually runs out before all candidates load' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '3'
+      begin
+        result = synthetic_reader.search('class body', fields: %w[source_code])
+        expect(result[:partial]).to be true
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
     end
   end
 
