@@ -15,6 +15,69 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     it 'returns the engine names currently wired into the orchestrator' do
       expect(described_class.supported_template_engines).to eq([:erb])
     end
+
+    it 'is aggregated from ENGINES — adding an engine extends the list' do
+      fake = Class.new(Woods::Extractors::ViewEngines::Base) do
+        def name = :fake
+        def extensions = ['.fake']
+        def scan_partials(_) = []
+        def scan_instance_variables(_) = []
+        def scan_helpers(_) = []
+        def resolve_partial_identifier(n, _) = "_#{n}.fake"
+      end
+      stub_const(
+        "#{described_class}::ENGINES",
+        [Woods::Extractors::ViewEngines::Erb, fake].freeze
+      )
+      expect(described_class.supported_template_engines).to eq(%i[erb fake])
+    end
+
+    it 'returns a frozen array' do
+      expect(described_class.supported_template_engines).to be_frozen
+    end
+  end
+
+  describe 'engine dispatch' do
+    let(:fake_engine_class) do
+      Class.new(Woods::Extractors::ViewEngines::Base) do
+        def name = :fake
+        def extensions = ['.fake']
+
+        def scan_partials(_) = []
+
+        def scan_instance_variables(_) = []
+
+        def scan_helpers(_) = ['fake_helper']
+
+        def resolve_partial_identifier(n, _) = "_#{n}.fake"
+      end
+    end
+
+    before do
+      stub_const(
+        "#{described_class}::ENGINES",
+        [Woods::Extractors::ViewEngines::Erb, fake_engine_class].freeze
+      )
+    end
+
+    it 'globs files for every registered engine' do
+      create_file('app/views/home/index.html.erb', '<h1>Home</h1>')
+      create_file('app/views/home/widget.fake', 'fake source')
+      identifiers = described_class.new.extract_all.map(&:identifier)
+      expect(identifiers).to contain_exactly('home/index.html.erb', 'home/widget.fake')
+    end
+
+    it 'routes each file to the matching engine (metadata reflects the match)' do
+      create_file('app/views/home/widget.fake', 'fake source')
+      units = described_class.new.extract_all
+      expect(units.first.metadata[:template_engine]).to eq('fake')
+      expect(units.first.metadata[:helpers_called]).to eq(['fake_helper'])
+    end
+
+    it 'returns nil from #extract_view_template_file for unregistered extensions' do
+      unit = described_class.new.extract_view_template_file('/path/to/thing.unknown')
+      expect(unit).to be_nil
+    end
   end
 
   describe '#extract_all' do
@@ -397,7 +460,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(unit.identifier).to eq('users/edit.html.erb')
     end
 
-    it 'returns nil for non-ERB files' do
+    it 'returns nil for files no registered engine handles' do
       unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.haml')
       expect(unit).to be_nil
     end

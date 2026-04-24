@@ -1,37 +1,22 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'base'
 
 module Woods
   module Extractors
     module ViewEngines
-      # ERB template engine — owns the ERB-specific parsing surface that
-      # {ViewTemplateExtractor} delegates to. Extension list, partial
-      # filename convention, and the three scan operations (partials,
-      # instance variables, helper calls) all live here so the orchestrator
-      # stays engine-agnostic above the seam.
-      #
-      # HAML / Slim / Turbo implementations will land as sibling classes in
-      # this namespace (see issue #110 for the non-goals).
-      class Erb
+      # ERB implementation of the {Base} template-engine contract. Owns
+      # the ERB-specific parsing surface that {ViewTemplateExtractor}
+      # delegates to — extension list, partial filename convention, and
+      # the three scan operations (partials, instance variables, helper
+      # calls).
+      class Erb < Base
         # File extensions this engine handles.
         EXTENSIONS = %w[.html.erb .erb].freeze
 
-        # Symbol surfaced by {ViewTemplateExtractor.supported_template_engines}
-        # and the MCP `structure` tool.
+        # @see Base#name
         ENGINE_NAME = :erb
-
-        # @return [Symbol] Engine identifier — stable contract for the
-        #   orchestrator so it never reads {ENGINE_NAME} through
-        #   {Class#const_get}-style reach-through.
-        def name
-          ENGINE_NAME
-        end
-
-        # @return [Array<String>] Extensions this engine handles.
-        def extensions
-          EXTENSIONS
-        end
 
         # Common Rails view helper methods to detect in template source.
         COMMON_HELPERS = %w[
@@ -66,23 +51,22 @@ module Woods
           asset_url
         ].freeze
 
-        # Whether this engine handles the given file path.
-        #
-        # @param file_path [String]
-        # @return [Boolean]
-        def handles?(file_path)
-          EXTENSIONS.any? { |ext| file_path.end_with?(ext) }
+        # @see Base#name
+        def name
+          ENGINE_NAME
         end
 
-        # Extract partial names from render calls.
-        #
+        # @see Base#extensions
+        def extensions
+          EXTENSIONS
+        end
+
         # Matches:
         # - `render partial: 'foo/bar'`
         # - `render 'foo/bar'`
         # - `render :foo`
         #
-        # @param source [String] Template source code
-        # @return [Array<String>] Partial names
+        # @see Base#scan_partials
         def scan_partials(source)
           partials = Set.new
 
@@ -101,18 +85,12 @@ module Woods
           partials.to_a
         end
 
-        # Extract instance variables used in the template.
-        #
-        # @param source [String] Template source code
-        # @return [Array<String>] Instance variable names, sorted
+        # @see Base#scan_instance_variables
         def scan_instance_variables(source)
           source.scan(/@[a-zA-Z_]\w*/).uniq.sort
         end
 
-        # Extract common Rails helper calls from the template.
-        #
-        # @param source [String] Template source code
-        # @return [Array<String>] Helper method names, sorted
+        # @see Base#scan_helpers
         def scan_helpers(source)
           found = Set.new
           COMMON_HELPERS.each do |helper|
@@ -121,14 +99,10 @@ module Woods
           found.to_a.sort
         end
 
-        # Resolve a partial name to its file identifier.
+        # Given `render 'comments/comment'` from a template at
+        # `posts/show.html.erb`, resolves to `comments/_comment.html.erb`.
         #
-        # Given a render call like `render 'comments/comment'`, resolves to
-        # `comments/_comment.html.erb`.
-        #
-        # @param partial_name [String] The partial name from the render call
-        # @param current_identifier [String] The current template's identifier
-        # @return [String] Resolved partial identifier
+        # @see Base#resolve_partial_identifier
         def resolve_partial_identifier(partial_name, current_identifier)
           if partial_name.include?('/')
             dir = File.dirname(partial_name)

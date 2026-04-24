@@ -6,6 +6,10 @@ require 'woods/extractors/view_engines/erb'
 RSpec.describe Woods::Extractors::ViewEngines::Erb do
   subject(:engine) { described_class.new }
 
+  it 'is a ViewEngines::Base subclass so it satisfies the template-engine contract' do
+    expect(described_class.ancestors).to include(Woods::Extractors::ViewEngines::Base)
+  end
+
   describe '#extensions' do
     it 'returns both .html.erb and .erb' do
       expect(engine.extensions).to contain_exactly('.html.erb', '.erb')
