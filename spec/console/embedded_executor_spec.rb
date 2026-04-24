@@ -293,6 +293,40 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
           expect(response['ok']).to be true
         end
 
+        # Defense-in-depth — block comments and dollar-quoted strings
+        # don't actually let an attacker smuggle a SELECT past a real DB
+        # parser (SQL standard treats `/**/` as whitespace, so `SE/**/LECT`
+        # is two identifiers, not `SELECT` — verified against SQLite),
+        # but the validator still strips them before the keyword scan so
+        # callers get an honest "forbidden SQL keywords" error rather than
+        # a confusing adapter-level syntax failure.
+        it 'rejects forbidden keywords hidden behind block comments' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id IN (/* hidden */ SELECT password FROM users)']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+          expect(response['error']).to match(/forbidden SQL keywords/i)
+        end
+
+        it 'rejects keywords hidden in PostgreSQL dollar-quoted strings' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id = $$1$$ OR EXISTS (SELECT 1 FROM users)']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+        end
+
         it 'does NOT reject a forbidden keyword that appears only inside a string literal bind' do
           # The template must be scanned with literals stripped — otherwise
           # legitimate searches like name = "SELECT ..." would false-reject.

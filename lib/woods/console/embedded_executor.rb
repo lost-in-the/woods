@@ -4,6 +4,7 @@ require_relative 'bridge'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'scope_predicate_parser'
+require_relative 'sql_noise_stripper'
 require_relative 'table_gate'
 
 module Woods
@@ -678,7 +679,18 @@ module Woods
 
         raise ValidationError, 'scope template must not contain `;` (statement chaining)' if template.include?(';')
 
-        if SCOPE_TEMPLATE_FORBIDDEN.match?(strip_string_literals(template))
+        # Strip SQL comments + string literals BEFORE the keyword scan.
+        # Defense-in-depth: a payload like `id IN (/* x */ SELECT password
+        # FROM users)` would actually be rejected by the database parser
+        # too (SQL treats block comments as whitespace, so the SELECT is
+        # tokenised correctly there) — but stripping comments first lets
+        # the validator give a clear "forbidden SQL keywords" error
+        # instead of a confusing adapter-level syntax failure. It also
+        # neutralises `--` line comments and PostgreSQL dollar-quoted
+        # strings that could carry forbidden keywords past a naive scan.
+        # `SqlNoiseStripper` is the same module SqlValidator uses.
+        stripped = SqlNoiseStripper.strip_literals(SqlNoiseStripper.strip_comments(template))
+        if SCOPE_TEMPLATE_FORBIDDEN.match?(stripped)
           raise ValidationError,
                 'scope template contains forbidden SQL keywords ' \
                 '(subqueries, UNION, time-based functions, DML/DDL are not allowed). ' \
@@ -691,13 +703,6 @@ module Woods
 
         raise ValidationError,
               "scope template expects #{placeholder_count} bind(s), got #{bind_count}"
-      end
-
-      # Strip single- and double-quoted string literals before scanning
-      # for forbidden keywords, so `["name = ?", "SELECT"]` (legitimate
-      # bind value) doesn't false-reject — only the template is scanned.
-      def strip_string_literals(template)
-        template.gsub(/'(?:[^']|'')*'/, "''").gsub(/"(?:[^"]|"")*"/, '""')
       end
 
       # Returns true if any key in the hash has a recognised predicate suffix.
