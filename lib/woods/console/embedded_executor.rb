@@ -9,8 +9,9 @@ require_relative 'table_gate'
 
 module Woods
   module Console
-    # Drop-in replacement for ConnectionManager + Bridge that executes
-    # queries directly via ActiveRecord instead of a separate bridge process.
+    # Drop-in replacement for ConnectionManager + the bridge process that
+    # executes queries directly via ActiveRecord instead of going over the
+    # JSON-lines protocol (see {StubBridge} for the protocol scaffold).
     #
     # Implements the same `send_request(Hash) -> Hash` interface as
     # ConnectionManager, so all existing tool definitions in Server work
@@ -24,7 +25,7 @@ module Woods
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
       AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
 
-      TIER1_TOOLS = Bridge::TIER1_TOOLS
+      TIER1_TOOLS = StubBridge::TIER1_TOOLS
 
       # Tools gated behind the read_tools_enabled flag.
       # sql/query have existing safety gates (SqlValidator, SafeContext rollback)
