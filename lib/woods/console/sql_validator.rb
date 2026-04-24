@@ -68,10 +68,14 @@ module Woods
       #
       # `EXPLAIN ANALYZE` actually executes the planned query on PostgreSQL
       # (and the MySQL 8.0+ `EXPLAIN ANALYZE` does the same) — explicitly
-      # reject the `ANALYZE` variant so SafeContext doesn't silently trust
+      # reject the `ANALYZE` variant. PostgreSQL also accepts an option-list
+      # form `EXPLAIN (ANALYZE, FORMAT JSON) SELECT …` where `ANALYZE` follows
+      # `(` rather than whitespace; the `(?!\s*\(?\s*ANALYZE)` lookahead
+      # rejects both spellings so SafeContext doesn't silently trust
       # "we're just planning, not running" for what is a side-effectful
-      # execution.
-      ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN(?!\s+ANALYZE))\b/i
+      # execution. `EXPLAIN (…)` without `ANALYZE` is still permitted
+      # (e.g. `EXPLAIN (FORMAT JSON) SELECT 1`).
+      ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN(?!\s+ANALYZE)(?!\s*\([^)]*\bANALYZE\b))\b/i
 
       # Frozen map of forbidden keyword => regex matching the keyword at statement start.
       # Used by {#check_forbidden_keywords!} and {#check_forbidden_keywords_in_body!}.

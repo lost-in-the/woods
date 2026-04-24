@@ -103,6 +103,7 @@ module Woods
       #   {Kernel.fork, Thread.new} pair can't slip past.
       DENIED_REFLECTION = %w[
         eval instance_eval class_eval module_eval binding
+        instance_exec class_exec module_exec
         send public_send __send__ method public_method
         const_get const_set remove_const define_method define_singleton_method
         alias_method undef_method remove_method method_defined? singleton_method

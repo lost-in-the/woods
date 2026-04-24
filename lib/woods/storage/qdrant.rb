@@ -147,6 +147,19 @@ module Woods
 
         private
 
+        # Cap interpolated response bodies so misconfigured Qdrant responses
+        # (e.g. proxied HTML error pages) don't unbounded-leak into logs or
+        # re-raised error messages.
+        #
+        # @param body [String, nil]
+        # @return [String]
+        def truncate_response_body(body)
+          return '' if body.nil?
+
+          s = body.to_s
+          s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
+        end
+
         # Ensure the provided vector matches the store's configured dimension.
         #
         # @param vector [Array<Numeric>]
@@ -184,7 +197,7 @@ module Woods
           response = http_client.request(req)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Qdrant API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Qdrant API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
@@ -193,7 +206,7 @@ module Woods
           @http_client = nil
           response = http_client.request(req)
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Qdrant API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Qdrant API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)

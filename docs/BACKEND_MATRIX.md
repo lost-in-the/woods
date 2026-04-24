@@ -159,6 +159,11 @@ volumes:
 
 ### Pinecone
 
+> **Status: planned, not yet implemented.** There is no `lib/woods/storage/pinecone.rb`
+> adapter in the shipped gem. The section below documents the design target.
+> Track progress in #83 or open a new issue if you need this sooner. Current
+> shipped vector stores: `:pgvector`, `:qdrant`, `:sqlite` (in-memory).
+
 **What it is:** Fully managed cloud vector database.
 
 **Best for:** Teams that prefer managed services and don't want to operate vector infrastructure.
@@ -226,6 +231,9 @@ config.vector_store = :sqlite_faiss
 
 ### Chroma
 
+> **Status: planned, not yet implemented.** No `lib/woods/storage/chroma.rb`
+> adapter in the shipped gem. The section below documents the design target.
+
 **What it is:** Open-source embedding database with a focus on developer experience.
 
 **Best for:** Prototyping, Python-heavy teams (Ruby client exists but is third-party).
@@ -249,6 +257,9 @@ config.vector_store = :sqlite_faiss
 ---
 
 ### Milvus
+
+> **Status: planned, not yet implemented.** No `lib/woods/storage/milvus.rb`
+> adapter in the shipped gem. The section below documents the design target.
 
 **What it is:** Open-source vector database designed for massive scale.
 
@@ -351,6 +362,15 @@ config.vector_store = :sqlite_faiss
 ---
 
 ## Metadata Stores
+
+> **Status note.** The shipped gem implements two metadata adapters:
+> `:sqlite` (file-based SQLite) and `:in_memory`. The PostgreSQL and MySQL
+> sections below document the design targets — they describe the schema
+> shape a future adapter would use. For MySQL- or PostgreSQL-backed
+> deployments today, pair `:sqlite` metadata with your preferred vector
+> store (`:pgvector` or `:qdrant`). See
+> [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for the
+> implemented symbols.
 
 ### PostgreSQL
 

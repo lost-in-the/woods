@@ -98,12 +98,25 @@ module Woods
 
         private
 
+        # Cap interpolated response bodies so misconfigured API errors
+        # (which occasionally echo request metadata, including headers) don't
+        # unbounded-leak into logs or re-raised messages.
+        #
+        # @param body [String, nil]
+        # @return [String]
+        def truncate_response_body(body)
+          return '' if body.nil?
+
+          s = body.to_s
+          s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
+        end
+
         # Send a POST request to the OpenAI embeddings API.
         #
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body)
+        def post_request(body) # rubocop:disable Metrics/AbcSize
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'
           request['Authorization'] = "Bearer #{@api_key}"
@@ -112,7 +125,7 @@ module Woods
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
@@ -121,7 +134,7 @@ module Woods
           @http_client = nil
           response = http_client.request(request)
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)

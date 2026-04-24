@@ -520,7 +520,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Embed     │───>│ Vector Store│    │  MCP Index Server    │  │
-│  │  OpenAI /  │    │ pgvector /  │    │  27 tools            │  │
+│  │  OpenAI /  │    │ pgvector /  │    │  29 tools            │  │
 │  │  Ollama    │    │ Qdrant      │    │  No Rails required   │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 │                                                                  │

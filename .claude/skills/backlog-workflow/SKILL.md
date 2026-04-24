@@ -74,13 +74,16 @@ Backlog entries follow the shape already in `docs/backlog.json`:
   "layer": "extraction | retrieval | storage | mcp | console | ...",
   "files": ["lib/woods/..."],
   "description": "One-paragraph rationale + acceptance criteria.",
-  "status": "ready | in-progress | resolved | needs-triage"
+  "status": "ready | in-progress | resolved | needs-triage",
+  "depends_on": ["B-NNN"]
 }
 ```
 
 Required fields: `id`, `title`, `severity`, `category`, `layer`,
-`files`, `description`, `status`. Optional fields the repo already
-uses sparingly (keep them when present): nothing beyond the above.
+`files`, `description`, `status`. Optional fields used in
+`docs/backlog.json`: `depends_on` (array of other backlog ids —
+include when this item can't start until another resolves). Keep
+the field order stable when updating existing entries.
 
 ## Anti-patterns
 

@@ -600,13 +600,18 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     end
 
     context 'error handling' do
-      it 'wraps StandardError as execution errors' do
+      it 'wraps StandardError as execution errors with a sanitized message' do
+        # Sanitization: adapter errors can embed column/table names or SQL
+        # fragments (schema disclosure). The executor returns a generic
+        # "execution failed" message with just the error class for routing
+        # and logs the full detail server-side. Audit F-7.
         allow(connection).to receive(:transaction).and_raise(StandardError, 'DB gone')
 
         response = executor.send_request({ 'tool' => 'status', 'params' => {} })
 
         expect(response['ok']).to be false
-        expect(response['error']).to eq('DB gone')
+        expect(response['error']).to include('StandardError')
+        expect(response['error']).not_to include('DB gone')
         expect(response['error_type']).to eq('execution')
       end
     end

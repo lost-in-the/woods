@@ -186,6 +186,19 @@ module Woods
 
         private
 
+        # Cap interpolated response bodies so misconfigured Ollama responses
+        # (e.g. proxied HTML error pages) don't unbounded-leak into logs or
+        # re-raised error messages.
+        #
+        # @param body [String, nil]
+        # @return [String]
+        def truncate_response_body(body)
+          return '' if body.nil?
+
+          s = body.to_s
+          s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
+        end
+
         # Build the JSON body for an `/api/embed` call. Adds `options.num_ctx`
         # when configured — without it, Ollama silently truncates to 2048
         # tokens and returns 400 when the input exceeds that default.
@@ -200,13 +213,13 @@ module Woods
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body)
+        def post_request(body) # rubocop:disable Metrics/AbcSize
           request = Net::HTTP::Post.new(@uri.path, 'Content-Type' => 'application/json')
           request.body = body.to_json
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Ollama API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Ollama API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
@@ -219,7 +232,7 @@ module Woods
             raise Woods::Error, "Ollama API error (retry failed): #{retry_error.message}"
           end
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Ollama API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Ollama API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)

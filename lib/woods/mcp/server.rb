@@ -11,8 +11,11 @@ require_relative 'tool_response_renderer'
 
 module Woods
   module MCP
-    # Builds an MCP::Server with 27 tools, 2 resources, and 2 resource templates for querying
-    # Woods extraction output, managing pipelines, and collecting feedback.
+    # Builds an MCP::Server with up to 29 tools, 2 resources, and 2 resource templates
+    # for querying Woods extraction output, managing pipelines, and collecting feedback.
+    # 14 tools are always registered; 15 more register conditionally based on wiring:
+    # 5 operator tools, 4 feedback tools, 4 snapshot tools, 1 session_trace tool,
+    # 1 Notion sync tool.
     #
     # All tools are defined inline via closures over an IndexReader instance.
     # No Rails required at runtime — reads JSON files from disk.

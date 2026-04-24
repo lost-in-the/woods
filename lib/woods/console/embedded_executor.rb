@@ -75,12 +75,38 @@ module Woods
 
         { 'ok' => true, 'result' => result, 'timing_ms' => elapsed }
       rescue ValidationError => e
+        # Validation messages are author-controlled — safe to return as-is so
+        # callers can correct their request.
         { 'ok' => false, 'error' => e.message, 'error_type' => 'validation' }
       rescue StandardError => e
-        { 'ok' => false, 'error' => e.message, 'error_type' => 'execution' }
+        # Execution errors come from adapters and can embed fragments of the
+        # rejected SQL, schema names, column names, or partial table contents
+        # (`PG::UndefinedColumn`, `Mysql2::Error`, etc.). Return a generic
+        # reason to the client; log the full detail via Rails.logger when
+        # available so operators can still debug.
+        log_execution_error(e)
+        { 'ok' => false, 'error' => sanitize_execution_error(e), 'error_type' => 'execution' }
       end
 
       private
+
+      def sanitize_execution_error(error)
+        klass = error.class.name
+        # Well-known AR wrappers that contain the adapter error as their cause —
+        # still surface the class name so logs can route, but don't echo the
+        # message.
+        "#{klass}: execution failed (details logged server-side)"
+      end
+
+      def log_execution_error(error)
+        return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+
+        Rails.logger.warn(
+          "[Woods::Console] execution error: #{error.class}: #{error.message}"
+        )
+      rescue StandardError
+        # Never let logging break the request path.
+      end
 
       # Return a pre-dispatch refusal hash for tools the executor cannot or
       # will not run, else nil to let dispatch proceed.
