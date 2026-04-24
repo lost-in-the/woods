@@ -10,6 +10,7 @@ require_relative '../index_artifact'
 require_relative '../builder'
 require_relative '../resolved_config'
 require_relative '../storage/snapshotter'
+require_relative '../storage/inapplicable_backend'
 
 module Woods
   module MCP
@@ -289,25 +290,47 @@ module Woods
       # strategy from a silent no-op (empty graph → no graph expansion) into
       # a working graph-expansion source.
       #
-      # Durable backends other than +:in_memory+ aren't supported here (the
-      # gem only ships +GraphStore::Memory+). Returns nil when the dependency
-      # graph file is absent or unreadable so Builder falls back to a fresh
-      # empty store — the pre-fix behaviour.
+      # Contract: this path assumes an ephemeral store. A durable backend
+      # (adapter reports +durable? => true+) owns its own persistence and
+      # must be populated via the extraction/embed write path — rebuilding
+      # it from +dependency_graph.json+ on every boot would stomp state the
+      # durable store is supposed to preserve. When a future adapter declares
+      # itself durable, this method raises {Woods::Storage::InapplicableBackend}
+      # so the contributor adding the adapter sees the contract violation at
+      # boot rather than shipping a store that silently disagrees with
+      # +dependency_graph.json+. Mirrors the pattern +Snapshotter::Vector.dump+
+      # uses for pgvector / Qdrant.
+      #
+      # Returns nil when the artifact or dependency graph file is absent so
+      # Builder falls back to a fresh empty store — the pre-fix behaviour for
+      # hosts that haven't run an extraction yet.
       #
       # @param config [Woods::Configuration]
       # @param artifact [Woods::IndexArtifact, nil]
       # @return [Woods::Storage::GraphStore::Memory, nil]
+      # @raise [Woods::Storage::InapplicableBackend] if the configured
+      #   graph_store reports +durable? => true+
       def self.hydrated_graph_store(config, artifact)
         return nil unless artifact
-        return nil unless config.graph_store == :in_memory
 
         graph_json = artifact.output_dir.join('dependency_graph.json')
         return nil unless graph_json.exist?
 
         require_relative '../dependency_graph'
         require_relative '../storage/graph_store'
+
+        probe = Woods::Builder.new(config).build_graph_store
+        if probe.durable?
+          raise Woods::Storage::InapplicableBackend,
+                "graph_store=#{config.graph_store.inspect} reports durable? => true; " \
+                'boot rehydration from dependency_graph.json is only valid for ephemeral ' \
+                'stores. Populate the durable backend via the extraction write path instead.'
+        end
+
         graph = Woods::DependencyGraph.from_h(JSON.parse(graph_json.read))
         Woods::Storage::GraphStore::Memory.new(graph)
+      rescue Woods::Storage::InapplicableBackend
+        raise
       rescue StandardError => e
         warn "[woods-mcp] graph hydration failed (#{e.class}: #{e.message}); starting with empty store"
         nil

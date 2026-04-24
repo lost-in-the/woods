@@ -63,6 +63,22 @@ module Woods
         def pagerank(damping: 0.85, iterations: 20)
           raise NotImplementedError
         end
+
+        # Returns true iff this store is the authoritative write target for
+        # graph edges and survives process restart.
+        #
+        # Adapter authors must override this — the default raises so a
+        # write-through cache or a partially-persistent adapter can't be
+        # misclassified as ephemeral by omission. Boot-time rehydration
+        # from +dependency_graph.json+ is only valid when this returns
+        # +false+; durable backends own their own persistence and must be
+        # populated by the extraction/embed write path.
+        #
+        # @return [Boolean]
+        # @raise [NotImplementedError] if the adapter doesn't declare its durability
+        def durable?
+          raise NotImplementedError
+        end
       end
 
       # In-memory graph store wrapping the existing DependencyGraph.
@@ -129,6 +145,13 @@ module Woods
         # @see Interface#pagerank
         def pagerank(damping: 0.85, iterations: 20)
           @graph.pagerank(damping: damping, iterations: iterations)
+        end
+
+        # @see Interface#durable?
+        # @return [Boolean] always +false+ — the in-memory adapter is rebuilt
+        #   on every process boot and owns none of its state across restarts.
+        def durable?
+          false
         end
       end
     end

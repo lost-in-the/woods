@@ -879,16 +879,35 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
-    it 'returns nil when graph_store is not :in_memory (durable backends are not hydrated)' do
-      require 'woods/index_artifact'
+    it 'raises InapplicableBackend when the configured graph_store reports durable? => true' do
+      # Build a real interface-conforming stand-in for a durable adapter.
+      # Testing against a plain symbol / instance_double would let a future
+      # MySQL-backed graph adapter slip past the guard with a mis-shaped
+      # interface — this asserts the guard fires on the real capability check.
+      durable_adapter_class = Class.new do
+        include Woods::Storage::GraphStore::Interface
 
-      Woods.configuration.graph_store = :pgvector
+        def durable? = true
+        def dependencies_of(_identifier) = []
+        def dependents_of(_identifier) = []
+        def affected_by(_changed_files, max_depth: nil) = [] # rubocop:disable Lint/UnusedMethodArgument
+        def by_type(_type) = []
+        def pagerank(damping: 0.85, iterations: 20) = {} # rubocop:disable Lint/UnusedMethodArgument
+      end
+      durable_store = durable_adapter_class.new
+
+      builder_double = instance_double(Woods::Builder, build_graph_store: durable_store)
+      allow(Woods::Builder).to receive(:new).and_return(builder_double)
+
+      require 'woods/index_artifact'
 
       Dir.mktmpdir do |dir|
         artifact = Woods::IndexArtifact.new(dir)
         File.write(File.join(dir, 'dependency_graph.json'), JSON.generate('nodes' => {}, 'edges' => {}))
-        store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
-        expect(store).to be_nil
+
+        expect do
+          described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
+        end.to raise_error(Woods::Storage::InapplicableBackend, /durable/)
       end
     end
 

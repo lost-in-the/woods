@@ -559,5 +559,21 @@
     "description": "Issue #82 renamed Woods::Console::Bridge to StubBridge so the scaffold status is obvious. The downstream smell — flagged by both reviewers — is that the canonical protocol contract (SUPPORTED_TOOLS, TIER1_TOOLS, TOOL_HANDLERS) still lives on the stub class. EmbeddedExecutor::TIER1_TOOLS = StubBridge::TIER1_TOOLS reads as 'the real executor borrows constants from the stub', which is backwards. Extract a Woods::Console::BridgeProtocol module owning the three constants; have StubBridge include or reference it; update EmbeddedExecutor to read from BridgeProtocol directly. When the real bridge-process implementation lands it can claim the Bridge class name without the protocol contract migrating with it. Pre-existing doc-rot in docs/design/CONSOLE_SERVER.md (sections 107/118/130 still describe rails runner lib/woods/console/bridge.rb as if it works) is in scope for the same PR.",
     "status": "open",
     "depends_on": []
+  },
+  {
+    "id": "B-055",
+    "slug": "durable-graph-store-extraction-writes",
+    "title": "Wire extraction-side writes when the first durable GraphStore adapter lands",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "storage",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/storage/graph_store.rb",
+      "lib/woods/mcp/bootstrapper.rb"
+    ],
+    "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md §3.5. Do NOT design a speculative write API before the concrete adapter exists — bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
+    "status": "open",
+    "depends_on": []
   }
 ]

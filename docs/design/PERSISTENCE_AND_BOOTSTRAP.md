@@ -159,6 +159,8 @@ Bootstrapper.build_retriever(config, artifact:)
 
 `build_retriever` does not mutate `Woods.configuration`. `rescue StandardError` is gone. `ConfigResolver` raises typed errors; `ProviderProbe.reachable!` raises typed errors; `Snapshotter.load_or_empty` returns nil only at the boundary (no dump yet) and the empty-store is the interior's single source of truth.
 
+The graph store is rebuilt from `dependency_graph.json` on boot because extraction owns the write path — embed never touches graph edges. This only works when the graph store is ephemeral. If a backend reports `durable? => true`, the hydration path raises `InapplicableBackend` at boot: rebuilding a durable store from the extraction artifact would stomp state it's supposed to preserve, and the contributor adding that adapter is the one who needs to wire an extraction-time write path (mirroring what `Snapshotter::Vector.dump` already enforces for pgvector / Qdrant).
+
 ### 3.6 Exception hierarchy
 
 ```

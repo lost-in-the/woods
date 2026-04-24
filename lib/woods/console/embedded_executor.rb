@@ -161,6 +161,10 @@ module Woods
       #   3. tells the agent to surface its proposed Ruby snippet to the
       #      human before any retry — never silently re-invoke.
       #
+      # The operator line names the planned opt-in without implying it's
+      # live — setting any env var today has no effect. Tracked as backlog
+      # B-053 (issue #87).
+      #
       # @return [String] Multi-line actionable message.
       def eval_disabled_message
         <<~MSG.strip
@@ -169,8 +173,10 @@ module Woods
           for anything you were about to run. Both already support aggregates and scoping.
           If you believe eval is still necessary, SHOW your proposed Ruby snippet to the
           user first and let them run it manually — do not retry console_eval automatically.
-          Operators: opting in requires WOODS_CONSOLE_UNSAFE_EVAL=true, is rejected in
-          Rails.env.production?, and the execution wiring for that flag is not implemented.
+          Operators: eval execution is intentionally not wired in embedded mode — no env
+          var or config flag enables it today. The planned opt-in (tracked as backlog
+          B-053 / issue #87) will add WOODS_CONSOLE_UNSAFE_EVAL + EvalGuard + a
+          Rails.env.production? refusal; until that lands, setting the env var does nothing.
         MSG
       end
 
