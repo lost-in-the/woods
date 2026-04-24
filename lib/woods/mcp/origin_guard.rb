@@ -50,6 +50,8 @@ module Woods
       end
 
       def origin_allowed?(origin)
+        return false if origin.match?(/[[:cntrl:]]/)
+
         @allowed.include?(normalize(origin)) || @allowed.include?(normalize(origin).sub(/:\d+\z/, ''))
       end
 

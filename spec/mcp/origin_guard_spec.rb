@@ -46,6 +46,23 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(body.first).not_to include('<script>')
     end
 
+    it 'returns a spec-compliant JSON-RPC error envelope on rejection' do
+      _status, headers, body = call(middleware, origin: 'http://evil.example.com')
+      expect(headers['content-type']).to eq('application/json')
+      parsed = JSON.parse(body.first)
+      expect(parsed).to include('jsonrpc' => '2.0', 'id' => nil)
+      expect(parsed['error']).to include('code' => -32_002, 'message' => 'Origin not allowed')
+    end
+
+    it 'rejects origins with CRLF / control characters without reflecting them' do
+      malicious = "http://localhost\r\nX-Injected: yes"
+      status, headers, body = call(middleware, origin: malicious)
+      expect(status).to eq(403)
+      expect(headers).not_to have_key('X-Injected')
+      expect(body.first).not_to include("\r\n")
+      expect(body.first).not_to include('X-Injected')
+    end
+
     it 'adds CORS headers to allowed responses' do
       _status, headers, = call(middleware, origin: 'http://localhost')
       expect(headers['access-control-allow-origin']).to eq('http://localhost')
