@@ -1,25 +1,19 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'tmpdir'
-require 'active_support/cache'
-require 'active_support/cache/memory_store'
-require 'active_support/cache/file_store'
 require 'woods/console/adapters/cache_adapter'
 
 RSpec.describe Woods::Console::Adapters::CacheAdapter do
   describe '.detect' do
-    # Use real ActiveSupport cache stores where possible so the detection
-    # logic exercises actual Ruby class-name resolution rather than a double
-    # that returns a preset string. RedisCacheStore is autoloaded lazily and
-    # raises without the redis gem installed, so that one still uses a
-    # name-returning stand-in — the detection contract is a substring match
-    # on the class name, which we preserve.
+    # Detection reads `Rails.cache.class.name` and does a substring match
+    # against STORE_PATTERNS. To avoid relying on ActiveSupport::Cache
+    # internals (which vary across activesupport / Ruby versions), we use
+    # stand-in classes that expose a real `#name` method — this still
+    # exercises the genuine Ruby name-resolution path, not a pre-mocked
+    # double that returns a string the test itself injected.
     #
     # `Rails.cache` is a class (module) method, so we mock the Rails module
     # itself via a plain double and swap it in with `stub_const`.
-    # `instance_double('Rails')` would eventually verify against Rails-the-
-    # class and fail once Rails loads earlier in a random-order run.
     let(:rails_double) { double('Rails') }
 
     def with_rails_cache(cache)
@@ -27,25 +21,24 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
       stub_const('Rails', rails_double)
     end
 
-    it 'returns :memory for a real ActiveSupport::Cache::MemoryStore' do
-      with_rails_cache(ActiveSupport::Cache::MemoryStore.new)
+    def stand_in_cache(class_name)
+      Class.new do
+        define_singleton_method(:name) { class_name }
+      end.new
+    end
+
+    it 'returns :memory when the cache class name contains MemoryStore' do
+      with_rails_cache(stand_in_cache('ActiveSupport::Cache::MemoryStore'))
       expect(described_class.detect).to eq(:memory)
     end
 
-    it 'returns :file for a real ActiveSupport::Cache::FileStore' do
-      Dir.mktmpdir do |dir|
-        with_rails_cache(ActiveSupport::Cache::FileStore.new(dir))
-        expect(described_class.detect).to eq(:file)
-      end
+    it 'returns :file when the cache class name contains FileStore' do
+      with_rails_cache(stand_in_cache('ActiveSupport::Cache::FileStore'))
+      expect(described_class.detect).to eq(:file)
     end
 
     it 'returns :redis when the cache class name contains RedisCacheStore' do
-      redis_stand_in = Class.new do
-        def self.name
-          'ActiveSupport::Cache::RedisCacheStore'
-        end
-      end
-      with_rails_cache(redis_stand_in.new)
+      with_rails_cache(stand_in_cache('ActiveSupport::Cache::RedisCacheStore'))
       expect(described_class.detect).to eq(:redis)
     end
 
@@ -74,12 +67,7 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
     end
 
     it 'returns :unknown for an unrecognised cache class even if SolidCache is absent' do
-      custom_store = Class.new do
-        def self.name
-          'MyApp::Cache::FancyStore'
-        end
-      end
-      with_rails_cache(custom_store.new)
+      with_rails_cache(stand_in_cache('MyApp::Cache::FancyStore'))
       hide_const('SolidCache')
       expect(described_class.detect).to eq(:unknown)
     end
@@ -92,7 +80,7 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
     end
 
     it 'prefers Rails.cache class detection over the SolidCache fallback' do
-      with_rails_cache(ActiveSupport::Cache::MemoryStore.new)
+      with_rails_cache(stand_in_cache('ActiveSupport::Cache::MemoryStore'))
       stub_const('SolidCache', Module.new)
       expect(described_class.detect).to eq(:memory)
     end
