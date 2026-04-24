@@ -93,6 +93,28 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
     end
   end
 
+  describe '#render_structure (#105)' do
+    it 'labels the total-units line as "Total units indexed" (units_indexed denominator)' do
+      out = renderer.render(:structure, { manifest: { 'total_units' => 6335, 'counts' => {} } })
+      expect(out).to include('**Total units indexed:** 6335')
+    end
+
+    it 'appends the denominators glossary explaining why counts differ across tools' do
+      out = renderer.render(:structure, { manifest: { 'total_units' => 100, 'counts' => { 'model' => 5 } } })
+      expect(out).to include('### Denominators')
+      expect(out).to include('units_indexed')
+      expect(out).to include('graph_nodes')
+      expect(out).to include('searchable_entries')
+    end
+  end
+
+  describe '#render_pagerank (#105)' do
+    it 'labels the graph denominator explicitly' do
+      out = renderer.render(:pagerank, { total_nodes: 6333, results: [] })
+      expect(out).to include('Ranking 6333 nodes in the dependency graph.')
+    end
+  end
+
   describe '#render_default' do
     it 'renders a hash as markdown-style bold keys' do
       out = renderer.render(:totally_unknown, { a: 1, b: 2 })

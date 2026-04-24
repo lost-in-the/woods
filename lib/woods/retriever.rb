@@ -383,8 +383,10 @@ module Woods
 
     # Build a structural context overview from the metadata store.
     #
-    # Queries the metadata store for total unit count and counts per type,
-    # producing a summary like "Codebase: 42 units (10 models, 5 controllers, ...)".
+    # Reports +searchable_entries+ (the retriever's native denominator:
+    # one row per vector, including per-chunk rows for long units) rather
+    # than +units_indexed+. The two differ because chunking duplicates
+    # units; see the `structure` tool's glossary for the full picture.
     #
     # @return [String, nil] Overview string, or nil if the store is empty or on error
     def build_structural_context
@@ -396,7 +398,7 @@ module Woods
         "#{count} #{type}s" if count.positive?
       end
 
-      "Codebase: #{total} units (#{type_counts.join(', ')})"
+      "Codebase: #{total} searchable entries (#{type_counts.join(', ')})"
     rescue StandardError
       nil
     end

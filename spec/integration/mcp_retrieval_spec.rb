@@ -127,8 +127,9 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
       response = call_tool(server, 'codebase_retrieve', query: 'How does the User model work?')
       text = response_text(response)
 
-      # Structural context is "Codebase: N units (X models, ...)"
+      # Structural context is "Codebase: N searchable entries (X models, ...)"
       expect(text).to include('Codebase:')
+      expect(text).to include('searchable entries')
     end
 
     it 'respects a custom budget parameter' do

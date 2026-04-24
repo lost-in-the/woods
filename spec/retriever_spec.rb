@@ -497,7 +497,7 @@ RSpec.describe Woods::Retriever do
 
       result = retriever.send(:build_structural_context)
 
-      expect(result).to include('Codebase: 42 units')
+      expect(result).to include('Codebase: 42 searchable entries')
     end
 
     it 'includes type counts in overview' do

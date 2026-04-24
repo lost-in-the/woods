@@ -89,9 +89,10 @@ module Woods
           lines << 'Codebase Structure'
           lines << DIVIDER
 
-          %w[rails_version ruby_version git_branch git_sha extracted_at total_units].each do |key|
+          %w[rails_version ruby_version git_branch git_sha extracted_at].each do |key|
             lines << "  #{key}: #{manifest[key]}" if manifest[key]
           end
+          lines << "  units_indexed: #{manifest['total_units']}" if manifest['total_units']
 
           counts = manifest['counts']
           if counts.is_a?(Hash) && counts.any?
@@ -106,6 +107,15 @@ module Woods
             lines << DIVIDER
             lines << summary
           end
+
+          lines << ''
+          lines << DIVIDER
+          lines << 'Denominators:'
+          lines << '  units_indexed     (manifest, structure): total ExtractedUnits written.'
+          lines << '  graph_nodes       (pagerank, dependencies, dependents): units in the graph'
+          lines << '                    (excludes orphans with no incoming/outgoing edges).'
+          lines << '  searchable_entries (codebase_retrieve): retriever-store entries including'
+          lines << '                    per-chunk rows. Always >= units_indexed.'
 
           lines.join("\n").rstrip
         end
@@ -144,7 +154,7 @@ module Woods
 
         def render_pagerank(data, **)
           lines = []
-          lines << "PageRank Scores (#{fetch_key(data, :total_nodes)} nodes)"
+          lines << "PageRank Scores (ranking #{fetch_key(data, :total_nodes)} graph nodes)"
           lines << DIVIDER
 
           results = fetch_key(data, :results, [])
