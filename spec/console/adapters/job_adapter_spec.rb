@@ -48,6 +48,17 @@ RSpec.describe Woods::Console::Adapters::JobAdapter do
     it 'accepts limit exactly equal to the cap' do
       expect(adapter.recent_failures(limit: 100)[:params][:limit]).to eq(100)
     end
+
+    # These pin current behaviour: the cap is one-sided (`[limit, 100].min`)
+    # and does not clamp at the low end. If that changes to clamp at >= 1,
+    # update these expectations.
+    it 'forwards limit: 0 without clamping' do
+      expect(adapter.recent_failures(limit: 0)[:params][:limit]).to eq(0)
+    end
+
+    it 'forwards negative limits without clamping' do
+      expect(adapter.recent_failures(limit: -5)[:params][:limit]).to eq(-5)
+    end
   end
 
   describe '#scheduled_jobs' do
@@ -78,6 +89,13 @@ RSpec.describe Woods::Console::Adapters::JobAdapter do
     it 'accepts integer ids' do
       expect(adapter.find_job(id: 42)[:params][:id]).to eq(42)
     end
+
+    it 'compacts a nil id out of params' do
+      expect(adapter.find_job(id: nil)).to eq(
+        tool: 'test_queue_find_job',
+        params: {}
+      )
+    end
   end
 
   describe '#retry_job' do
@@ -87,22 +105,32 @@ RSpec.describe Woods::Console::Adapters::JobAdapter do
         params: { id: 'abc-123' }
       )
     end
+
+    it 'compacts a nil id out of params' do
+      expect(adapter.retry_job(id: nil)).to eq(
+        tool: 'test_queue_retry_job',
+        params: {}
+      )
+    end
   end
 
   describe 'request envelope shape' do
     it 'every builder returns { tool: String, params: Hash }' do
-      requests = [
-        adapter.queue_stats,
-        adapter.recent_failures,
-        adapter.scheduled_jobs,
-        adapter.find_job(id: 1),
-        adapter.retry_job(id: 1)
-      ]
+      builders = {
+        queue_stats: -> { adapter.queue_stats },
+        recent_failures: -> { adapter.recent_failures },
+        scheduled_jobs: -> { adapter.scheduled_jobs },
+        find_job: -> { adapter.find_job(id: 1) },
+        retry_job: -> { adapter.retry_job(id: 1) }
+      }
 
-      requests.each do |request|
-        expect(request).to be_a(Hash)
-        expect(request[:tool]).to be_a(String)
-        expect(request[:params]).to be_a(Hash)
+      aggregate_failures do
+        builders.each do |name, call|
+          request = call.call
+          expect(request).to be_a(Hash), "#{name} returned #{request.class}"
+          expect(request[:tool]).to be_a(String), "#{name} :tool was #{request[:tool].inspect}"
+          expect(request[:params]).to be_a(Hash), "#{name} :params was #{request[:params].inspect}"
+        end
       end
     end
   end

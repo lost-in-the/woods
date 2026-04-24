@@ -15,7 +15,12 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
     # raises without the redis gem installed, so that one still uses a
     # name-returning stand-in — the detection contract is a substring match
     # on the class name, which we preserve.
-    let(:rails_double) { instance_double('Rails') }
+    #
+    # `Rails.cache` is a class (module) method, so we mock the Rails module
+    # itself via a plain double and swap it in with `stub_const`.
+    # `instance_double('Rails')` would eventually verify against Rails-the-
+    # class and fail once Rails loads earlier in a random-order run.
+    let(:rails_double) { double('Rails') }
 
     def with_rails_cache(cache)
       allow(rails_double).to receive(:cache).and_return(cache)
@@ -43,7 +48,7 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
     end
 
     it 'returns :solid_cache when SolidCache is defined and Rails is absent' do
-      hide_const('Rails') if defined?(Rails)
+      hide_const('Rails')
       stub_const('SolidCache', Module.new)
       expect(described_class.detect).to eq(:solid_cache)
     end
@@ -56,13 +61,13 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
 
     it 'returns :unknown when Rails.cache is nil and SolidCache is not defined' do
       with_rails_cache(nil)
-      hide_const('SolidCache') if defined?(SolidCache)
+      hide_const('SolidCache')
       expect(described_class.detect).to eq(:unknown)
     end
 
     it 'returns :unknown when Rails is not defined and SolidCache is not defined' do
-      hide_const('Rails') if defined?(Rails)
-      hide_const('SolidCache') if defined?(SolidCache)
+      hide_const('Rails')
+      hide_const('SolidCache')
       expect(described_class.detect).to eq(:unknown)
     end
 
@@ -71,7 +76,14 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
         def self.name = 'MyApp::Cache::FancyStore'
       end
       with_rails_cache(custom_store.new)
-      hide_const('SolidCache') if defined?(SolidCache)
+      hide_const('SolidCache')
+      expect(described_class.detect).to eq(:unknown)
+    end
+
+    it 'returns :unknown for an anonymous cache class (nil .name)' do
+      anonymous_store = Class.new # .name is nil
+      with_rails_cache(anonymous_store.new)
+      hide_const('SolidCache')
       expect(described_class.detect).to eq(:unknown)
     end
 
@@ -93,6 +105,13 @@ RSpec.describe Woods::Console::Adapters::CacheAdapter do
 
     it 'includes the namespace when provided' do
       expect(described_class.stats(namespace: 'views')[:params]).to eq(namespace: 'views')
+    end
+
+    # Pins current behaviour: Hash#compact drops nil, not empty strings. An
+    # empty-string namespace is forwarded verbatim. If the contract changes
+    # to treat '' as "no namespace", swap this to `.to eq({})`.
+    it 'forwards an empty-string namespace verbatim' do
+      expect(described_class.stats(namespace: '')[:params]).to eq(namespace: '')
     end
   end
 
