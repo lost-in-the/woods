@@ -553,14 +553,18 @@ module Woods
                        neighbors
                      end
 
+          # At max depth, record the node with empty deps so the renderer
+          # doesn't emit an extra level of unexpanded neighbors. The parent
+          # node's deps list already shows this node as a child.
+          will_expand = current_depth < depth
           node_meta = nodes_data[current]
           result_nodes[current] = {
             type: node_meta&.dig('type'),
             depth: current_depth,
-            deps: filtered
+            deps: will_expand ? filtered : []
           }
 
-          next if current_depth >= depth
+          next unless will_expand
 
           filtered.each do |neighbor|
             unless visited.include?(neighbor)

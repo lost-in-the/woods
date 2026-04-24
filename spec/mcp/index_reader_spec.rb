@@ -458,6 +458,61 @@ RSpec.describe Woods::MCP::IndexReader do
       result = reader.traverse_dependencies('Comment', depth: 1)
       expect(result[:found]).to be true
     end
+
+    describe 'depth bounding (#109)' do
+      # Seed a 3-hop chain Order → Account → Currency → USD so the
+      # off-by-one is observable on real data. The fixture graph is
+      # too shallow to demonstrate the bug.
+      let(:tmp_dir) { Dir.mktmpdir('woods-traverse-depth') }
+      let(:reader) { described_class.new(tmp_dir) }
+
+      before do
+        File.write(File.join(tmp_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        File.write(
+          File.join(tmp_dir, 'dependency_graph.json'),
+          JSON.pretty_generate(
+            nodes: {
+              'Order' => { 'type' => 'model' },
+              'Account' => { 'type' => 'model' },
+              'Currency' => { 'type' => 'model' },
+              'USD' => { 'type' => 'model' }
+            },
+            edges: {
+              'Order' => [{ 'target' => 'Account', 'via' => 'belongs_to' }],
+              'Account' => [{ 'target' => 'Currency', 'via' => 'belongs_to' }],
+              'Currency' => [{ 'target' => 'USD', 'via' => 'belongs_to' }]
+            },
+            reverse: {
+              'Account' => ['Order'], 'Currency' => ['Account'], 'USD' => ['Currency']
+            }
+          )
+        )
+      end
+
+      after { FileUtils.remove_entry(tmp_dir) if File.directory?(tmp_dir) }
+
+      it 'at depth: 1 exposes only the root and its immediate children' do
+        result = reader.traverse_dependencies('Order', depth: 1)
+        expect(result[:nodes].keys).to contain_exactly('Order', 'Account')
+        # Account is at max depth, so its own entry has empty deps (its
+        # parent's deps list already shows it as a child).
+        expect(result[:nodes]['Account'][:deps]).to eq([])
+        expect(result[:nodes]['Order'][:deps]).to eq(['Account'])
+      end
+
+      it 'at depth: 2 expands one more level' do
+        result = reader.traverse_dependencies('Order', depth: 2)
+        expect(result[:nodes].keys).to contain_exactly('Order', 'Account', 'Currency')
+        expect(result[:nodes]['Currency'][:deps]).to eq([])
+        expect(result[:nodes]['Account'][:deps]).to eq(['Currency'])
+      end
+
+      it 'at depth: 0 returns only the root with empty deps' do
+        result = reader.traverse_dependencies('Order', depth: 0)
+        expect(result[:nodes].keys).to eq(['Order'])
+        expect(result[:nodes]['Order'][:deps]).to eq([])
+      end
+    end
   end
 
   describe '#traverse_dependents' do
