@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'fileutils'
+require 'tmpdir'
 require 'woods'
 require 'woods/dependency_graph'
+require 'woods/flow_document'
 require 'woods/mcp/server'
 
 RSpec.describe Woods::MCP::Server do
@@ -893,6 +896,98 @@ RSpec.describe Woods::MCP::Server do
       expect(response.error?).to be(true)
       expect(response_text(response)).to include('trace_flow failed')
       expect(response_text(response)).to include('unit not found')
+    end
+
+    context 'with a precomputed flow JSON on disk' do
+      let(:tmp_index_dir) { Dir.mktmpdir('woods-flows') }
+      let(:precomputed_server) do
+        described_class.build(index_dir: tmp_index_dir, response_format: :json, warmup: false)
+      end
+      let(:precomputed_payload) do
+        {
+          entry_point: 'PostsController#create',
+          route: { verb: 'POST', path: '/posts' },
+          max_depth: 3,
+          generated_at: '2026-04-24T00:00:00Z',
+          steps: [
+            {
+              unit: 'PostsController#create',
+              type: 'controller',
+              file_path: 'app/controllers/posts_controller.rb',
+              operations: [
+                { type: 'call', target: 'Post', method: 'create!', line: 7 },
+                { type: 'response', status_code: 201, render_method: 'render', line: 9 }
+              ]
+            }
+          ]
+        }
+      end
+
+      before do
+        FileUtils.mkdir_p(File.join(tmp_index_dir, 'flows'))
+        File.write(
+          File.join(tmp_index_dir, 'manifest.json'),
+          JSON.pretty_generate(total_units: 0, counts: {})
+        )
+        File.write(
+          File.join(tmp_index_dir, 'dependency_graph.json'),
+          JSON.pretty_generate(nodes: {}, edges: {}, reverse: {})
+        )
+        File.write(
+          File.join(tmp_index_dir, 'flows', 'PostsController_create.json'),
+          JSON.pretty_generate(precomputed_payload)
+        )
+      end
+
+      after { FileUtils.remove_entry(tmp_index_dir) if File.directory?(tmp_index_dir) }
+
+      it 'serves the precomputed JSON and bypasses FlowAssembler' do
+        expect(Woods::FlowAssembler).not_to receive(:new)
+
+        response = call_tool(precomputed_server, 'trace_flow', entry_point: 'PostsController#create')
+        data = parse_response(response)
+
+        expect(data['entry_point']).to eq('PostsController#create')
+        expect(data['steps']).not_to be_empty
+        expect(data['steps'].first['operations'].size).to eq(2)
+      end
+
+      it 'falls back to FlowAssembler when no precomputed JSON exists for the entry point' do
+        response = call_tool(precomputed_server, 'trace_flow', entry_point: 'PostsController#destroy')
+        expect(mock_assembler).to have_received(:assemble).with('PostsController#destroy', max_depth: 3)
+        expect(parse_response(response)['entry_point']).to eq('PostsController#create')
+      end
+    end
+
+    describe '.load_precomputed_flow' do
+      let(:tmp_dir) { Dir.mktmpdir('woods-flows-helper') }
+
+      after { FileUtils.remove_entry(tmp_dir) if File.directory?(tmp_dir) }
+
+      it 'returns nil when the entry point has no method suffix' do
+        expect(described_class.send(:load_precomputed_flow, tmp_dir, 'PostsController')).to be_nil
+      end
+
+      it 'returns nil when the file is absent' do
+        expect(described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')).to be_nil
+      end
+
+      it 'translates namespaced controllers via :: → __' do
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.write(
+          File.join(tmp_dir, 'flows', 'Admin__PostsController_create.json'),
+          JSON.pretty_generate(entry_point: 'Admin::PostsController#create', steps: [])
+        )
+        doc = described_class.send(:load_precomputed_flow, tmp_dir, 'Admin::PostsController#create')
+        expect(doc).to be_a(Woods::FlowDocument)
+        expect(doc.entry_point).to eq('Admin::PostsController#create')
+      end
+
+      it 'returns nil when the JSON file is corrupt' do
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.write(File.join(tmp_dir, 'flows', 'X_y.json'), 'not json')
+        expect(described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')).to be_nil
+      end
     end
   end
 

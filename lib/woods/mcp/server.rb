@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'json'
 require 'logger'
 require 'mcp'
 require 'open3'
@@ -237,6 +238,30 @@ module Woods
           return Integer(value, 10) if value.is_a?(String) && value.match?(INTEGER_STRING)
 
           raise ArgumentError, "expected integer, got #{value.class}: #{value.inspect}"
+        end
+
+        # Load a precomputed flow document written by FlowPrecomputer, when
+        # `config.precompute_flows` was enabled during extraction. Returns nil
+        # when the entry point is missing a method suffix, the JSON file isn't
+        # on disk, or the file can't be parsed — callers fall back to
+        # FlowAssembler.
+        #
+        # @param index_dir [String]
+        # @param entry_point [String] e.g., "PostsController#create"
+        # @return [Woods::FlowDocument, nil]
+        def load_precomputed_flow(index_dir, entry_point)
+          return nil unless entry_point.to_s.include?('#')
+
+          controller, action = entry_point.split('#', 2)
+          return nil if controller.empty? || action.empty?
+
+          filename = "#{controller.gsub('::', '__')}_#{action}.json"
+          path = File.join(index_dir, 'flows', filename)
+          return nil unless File.exist?(path)
+
+          Woods::FlowDocument.from_h(JSON.parse(File.read(path)))
+        rescue JSON::ParserError, Errno::ENOENT
+          nil
         end
 
         # Apply offset+limit pagination to a single section key within a container hash.
@@ -727,8 +752,10 @@ module Woods
 
         def define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
           require_relative '../flow_assembler'
+          require_relative '../flow_document'
           require_relative '../dependency_graph'
           coerce_int = method(:coerce_integer)
+          load_precomputed = method(:load_precomputed_flow)
 
           server.define_tool(
             name: 'trace_flow',
@@ -748,13 +775,17 @@ module Woods
             }
           ) do |entry_point:, server_context:, depth: nil|
             max_depth = coerce_int.call(depth) || 3
-            graph = reader.dependency_graph
 
-            assembler = Woods::FlowAssembler.new(
-              graph: graph,
-              extracted_dir: index_dir
-            )
-            flow_doc = assembler.assemble(entry_point, max_depth: max_depth)
+            # Prefer the precomputed flow JSON written by FlowPrecomputer during
+            # extraction (gated on `config.precompute_flows`). Query-time
+            # reassembly via FlowAssembler has known gaps against real host-app
+            # metadata — see issue #103 for the follow-up.
+            flow_doc = load_precomputed.call(index_dir, entry_point)
+            flow_doc ||= begin
+              graph = reader.dependency_graph
+              assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: index_dir)
+              assembler.assemble(entry_point, max_depth: max_depth)
+            end
 
             respond.call(renderer.render(:trace_flow, flow_doc.to_h))
           rescue StandardError => e

@@ -303,6 +303,15 @@ module Woods
           lines.join("\n").rstrip
         end
 
+        # ── trace_flow ──────────────────────────────────────────────
+
+        # @param data [Hash] Serialized FlowDocument
+        # @return [String] Markdown flow document with a step-by-step operations table
+        def render_trace_flow(data, **)
+          require_relative '../../flow_document'
+          Woods::FlowDocument.from_h(data).to_markdown
+        end
+
         # ── Default fallback ────────────────────────────────────────
 
         # @param data [Object] Any data
