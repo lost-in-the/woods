@@ -777,9 +777,9 @@ module Woods
             max_depth = coerce_int.call(depth) || 3
 
             # Prefer the precomputed flow JSON written by FlowPrecomputer during
-            # extraction (gated on `config.precompute_flows`). Query-time
-            # reassembly via FlowAssembler has known gaps against real host-app
-            # metadata — see issue #103 for the follow-up.
+            # extraction (gated on `config.precompute_flows`) — it avoids
+            # re-parsing source on every request. Fall back to query-time
+            # reassembly when no precomputed document exists.
             flow_doc = load_precomputed.call(index_dir, entry_point)
             flow_doc ||= begin
               graph = reader.dependency_graph
