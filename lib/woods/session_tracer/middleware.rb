@@ -18,10 +18,19 @@ module Woods
     #
     class Middleware
       # @param app [#call] The downstream Rack application
-      # @param store [Store] Session trace store backend
+      # @param store [Store] Session trace store backend (must respond to :record)
       # @param session_id_proc [Proc, nil] Custom session ID extraction (receives env)
       # @param exclude_paths [Array<String>] Path prefixes to skip
+      # @raise [ArgumentError] if the store is nil or does not implement :record.
+      #   Surfacing misconfiguration at boot is preferable to the original
+      #   fire-and-forget rescue silently swallowing every request trace.
       def initialize(app, store:, session_id_proc: nil, exclude_paths: [])
+        raise ArgumentError, 'session tracer middleware requires a store' if store.nil?
+        unless store.respond_to?(:record)
+          raise ArgumentError,
+                "session tracer store must respond to :record (got #{store.class})"
+        end
+
         @app = app
         @store = store
         @session_id_proc = session_id_proc

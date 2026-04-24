@@ -456,4 +456,76 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result).to all(satisfy { |d| d[:via] == :form_action })
     end
   end
+
+  # ── Graph resolution: constantize + short names (fills a graph gap where
+  #    bare short-name / string-literal refs produced zero dependents) ──
+
+  describe 'constantize / short-name resolution' do
+    it 'resolves .constantize string-literal arguments to model targets' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User Library::Book])
+
+      source = '"Library::Book".constantize.new'
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Library::Book')
+    end
+
+    it 'resolves const_get(...) string-literal arguments to model targets' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User Library::Book])
+
+      source = 'klass = Object.const_get("Library::Book")'
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Library::Book')
+    end
+
+    it 'ignores .constantize on unknown string literals' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User])
+
+      source = '"NotAModel".constantize'
+      result = scanner.scan_model_dependencies(source)
+      expect(result).to be_empty
+    end
+
+    it 'resolves bare short names to fully-qualified owners when unambiguous' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[Library::Book])
+      allow(Woods::ModelNameCache).to receive(:short_names_regex)
+        .and_return(/(?<![:.\w])Book\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/)
+      allow(Woods::ModelNameCache).to receive(:resolve_short_name)
+        .with('Book').and_return('Library::Book')
+
+      source = 'Book.new(isbn: "x")'
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Library::Book')
+    end
+
+    it 'preserves Ruby string interpolation (#{...}) when stripping comments' do
+      # Regression: an earlier iteration used `gsub(/#[^\n]*/, '')` which
+      # also consumed every `#{interpolation}`, wiping short-name refs
+      # inside ERB/Phlex/string templates like `"Book: #{Book.name}"`.
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[Library::Book])
+      allow(Woods::ModelNameCache).to receive(:short_names_regex)
+        .and_return(/(?<![:.\w])Book\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/)
+      allow(Woods::ModelNameCache).to receive(:resolve_short_name)
+        .with('Book').and_return('Library::Book')
+
+      # The source string deliberately contains the literal characters
+      # `#{Book.name}` so the scanner sees what an ERB/Phlex template
+      # would emit at runtime — we are NOT evaluating the interpolation
+      # here.
+      source = "<%= \"Current: \#{Book.name}\" %>"
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to include('Library::Book')
+    end
+
+    it 'strips `#` line comments before short-name scanning (no ghost edges)' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[Library::Book])
+      allow(Woods::ModelNameCache).to receive(:short_names_regex)
+        .and_return(/(?<![:.\w])Book\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/)
+      # Scanner must NOT ask the cache to resolve a name pulled out of
+      # a comment — if it does, the test fails loudly.
+      expect(Woods::ModelNameCache).not_to receive(:resolve_short_name)
+
+      source = "# TODO: rewrite Book.new later\nUser.find(1)\n"
+      scanner.scan_model_dependencies(source)
+    end
+  end
 end

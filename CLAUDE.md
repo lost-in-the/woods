@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness.
 
 ## Commands
 
@@ -99,8 +99,13 @@ lib/
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
+│   ├── flow_assembler.rb               # Per-query runtime flow aggregation
+│   ├── flow_document.rb                # Serialization envelope for flow output
 │   ├── filename_utils.rb               # Safe filename generation
-│   ├── extractors/                      # 34 extractors + callback_analyzer + behavioral_profile + route_helper_resolver
+│   ├── index_artifact.rb               # Dump promotion + safe path handling
+│   ├── resolved_config.rb              # Frozen configuration snapshot
+│   ├── token_utils.rb                  # Token count estimation helpers
+│   ├── extractors/                      # 34 extractors + 6 helpers (shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -110,8 +115,8 @@ lib/
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
-│   ├── mcp/                             # MCP Index Server (27 tools, 2 resources, 2 templates)
-│   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
+│   ├── mcp/                             # MCP Index Server (29 tools — 14 always-on + 15 wiring-conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion; 2 resources, 2 templates)
+│   ├── console/                         # Console MCP Server (31 tools across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
 │   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
@@ -122,7 +127,8 @@ lib/
 │   ├── session_tracer/                  # Session tracing middleware + flow assembly (FileStore, RedisStore, SolidCacheStore)
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
-│   └── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
+│   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
+│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
 │   └── woods.rake                       # Rake task definitions
@@ -208,6 +214,14 @@ At the end of a session, update `.claude/context/session-state.md` with breadcru
 
 At the start of a session, read `.claude/context/session-state.md` for context from the previous session.
 
+> **Local-only files.** `.claude/context/session-state.md` and
+> `.claude/rules/integration-testing.md` are intentionally gitignored
+> (see `.gitignore`) — they're session-local and host-local notes, not
+> shared conventions. If either file is missing in a fresh clone, create
+> it (templates live in `.claude/skills/backlog-workflow/SKILL.md`'s
+> references and this section). `.claude/skills/backlog-workflow/SKILL.md`
+> is tracked — the workflow itself is shared.
+
 ## Gotchas
 
 - Extraction **must** run inside a Rails app — the gem has no standalone extraction mode. All extractors assume `Rails`, `ActiveRecord::Base`, etc. are defined.
@@ -215,13 +229,13 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - Service discovery scans `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`. If a host app uses a non-standard directory, it won't be found without configuration.
 - The dependency graph can have cycles (A depends on B depends on A). Graph traversal must handle this — see `DependencyGraph#visited` tracking.
 - MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax. Any database-touching code must handle both. Never write PostgreSQL-only SQL and assume it works.
-- `eager_load!` is called once in the orchestrator (`Extractor`), not in individual extractors. Don't add `Rails.application.eager_load!` calls to extractors.
+- `eager_load!` is called once per extraction mode in the orchestrator (`Extractor#extract_all` and `Extractor#extract_changed`), not in individual extractors. Don't add `Rails.application.eager_load!` calls to extractors.
 - Git commands use `Open3.capture2` (not backticks) to prevent shell injection. Never use backtick-style command execution for external processes.
 - `callback.options` doesn't exist on modern Rails (removed in 4.2) — use `@if`/`@unless` ivars + ActionFilter duck-typing (check for `@actions` ivar as a `Set`) to extract `:only`/`:except` action lists from callbacks.
 - `eager_load!` aborts completely on a single `NameError` (e.g., `app/graphql/` referencing an uninstalled gem). Zeitwerk processes dirs alphabetically, so a failure in `graphql/` prevents `models/` from loading. The gem falls back to per-directory loading via `EXTRACTION_DIRECTORIES` when this happens.
 - `CallbackChain#size` does not exist on any Rails version (7.0–8.1) — `CallbackChain` includes `Enumerable` but never defines `#size`. Use `#count` instead.
 - `git_available?` is memoized — won't detect git becoming available mid-extraction (acceptable tradeoff).
-- Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit.
+- Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit. Three passes resolve references: (1) fully-qualified names via the whole-word regex; (2) string literals passed to `.constantize` / `const_get(...)` when the literal matches a known model; (3) bare short names (e.g., `Book` inside `module Library` for a `Library::Book` model) via `ModelNameCache.resolve_short_name` when unambiguous. Ambiguous short names (same inner class across multiple namespaces) are skipped to avoid false positives.
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.

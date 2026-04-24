@@ -5,9 +5,16 @@ on:
     tags:
       - 'v*'
 
+# Top-level least-privilege default. The `publish` job overrides this with
+# `contents: write` + `id-token: write` for the gem push + GitHub release.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
       - name: Set up Ruby

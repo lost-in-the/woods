@@ -172,6 +172,179 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error_type']).to eq('validation')
       end
 
+      # ── Scope SQL-injection regression tests ──────────────────────
+      #
+      # Prior to round-5 the array-form scope was splatted directly into
+      # AR's `where(*scope)`, which is the `where(raw_sql_string)` arity
+      # — turning every Tier-1 scope-accepting tool (count, pluck,
+      # aggregate, sample, find, recent) into a boolean exfiltration
+      # oracle. These specs lock in the rejection of the known bypass
+      # patterns. See `EmbeddedExecutor#validate_scope_array!`.
+      describe 'scope array-form SQL injection (R5-F1)' do
+        it 'rejects a scope template that contains a SELECT subquery' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id IN (SELECT password_digest FROM users)']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+          expect(response['error']).to match(/forbidden SQL keywords/i)
+        end
+
+        it 'rejects a scope template that uses UNION' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['1=1 UNION SELECT 1']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+        end
+
+        it 'rejects a scope template containing `;` (statement chaining)' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id = 1; DROP TABLE users']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+          expect(response['error']).to match(/`;`/)
+        end
+
+        it 'rejects a scope template containing pg_sleep or BENCHMARK (timing oracles)' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['pg_sleep(5)']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+        end
+
+        it 'rejects a scope template with mismatched bind count' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['name = ?'] # zero binds, one placeholder
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+          expect(response['error']).to match(/expects 1 bind/)
+        end
+
+        it 'rejects a scope where[0] is not a String' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => [{ name: 'x' }]
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+        end
+
+        it 'allows a parameterised scope template with matching binds' do
+          allow(user_model).to receive(:where).with('name = ?', 'Alice').and_return(relation)
+          allow(relation).to receive(:count).and_return(2)
+
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['name = ?', 'Alice']
+                                             }
+                                           })
+
+          expect(response['ok']).to be true
+          expect(response['result']['count']).to eq(2)
+        end
+
+        it 'allows a no-bind scope template with no forbidden keywords' do
+          allow(user_model).to receive(:where).with('id IS NULL').and_return(relation)
+          allow(relation).to receive(:count).and_return(0)
+
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id IS NULL']
+                                             }
+                                           })
+
+          expect(response['ok']).to be true
+        end
+
+        # Defense-in-depth — block comments and dollar-quoted strings
+        # don't actually let an attacker smuggle a SELECT past a real DB
+        # parser (SQL standard treats `/**/` as whitespace, so `SE/**/LECT`
+        # is two identifiers, not `SELECT` — verified against SQLite),
+        # but the validator still strips them before the keyword scan so
+        # callers get an honest "forbidden SQL keywords" error rather than
+        # a confusing adapter-level syntax failure.
+        it 'rejects forbidden keywords hidden behind block comments' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id IN (/* hidden */ SELECT password FROM users)']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+          expect(response['error']).to match(/forbidden SQL keywords/i)
+        end
+
+        it 'rejects keywords hidden in PostgreSQL dollar-quoted strings' do
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ['id = $$1$$ OR EXISTS (SELECT 1 FROM users)']
+                                             }
+                                           })
+
+          expect(response['ok']).to be false
+          expect(response['error_type']).to eq('validation')
+        end
+
+        it 'does NOT reject a forbidden keyword that appears only inside a string literal bind' do
+          # The template must be scanned with literals stripped — otherwise
+          # legitimate searches like name = "SELECT ..." would false-reject.
+          allow(user_model).to receive(:where).with("name = 'SELECT'").and_return(relation)
+          allow(relation).to receive(:count).and_return(0)
+
+          response = executor.send_request({
+                                             'tool' => 'count',
+                                             'params' => {
+                                               'model' => 'User',
+                                               'scope' => ["name = 'SELECT'"]
+                                             }
+                                           })
+
+          expect(response['ok']).to be true
+        end
+      end
+
       it 'returns validation error for missing model param' do
         response = executor.send_request({ 'tool' => 'count', 'params' => {} })
 
@@ -600,13 +773,18 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     end
 
     context 'error handling' do
-      it 'wraps StandardError as execution errors' do
+      it 'wraps StandardError as execution errors with a sanitized message' do
+        # Sanitization: adapter errors can embed column/table names or SQL
+        # fragments (schema disclosure). The executor returns a generic
+        # "execution failed" message with just the error class for routing
+        # and logs the full detail server-side. Audit F-7.
         allow(connection).to receive(:transaction).and_raise(StandardError, 'DB gone')
 
         response = executor.send_request({ 'tool' => 'status', 'params' => {} })
 
         expect(response['ok']).to be false
-        expect(response['error']).to eq('DB gone')
+        expect(response['error']).to include('StandardError')
+        expect(response['error']).not_to include('DB gone')
         expect(response['error_type']).to eq('execution')
       end
     end

@@ -36,15 +36,43 @@ module Woods
 
     initializer 'woods.console_mcp' do |app|
       config = Woods.configuration
-      if config.console_mcp_enabled
-        require 'woods/console/rack_middleware'
+      next unless config.console_mcp_enabled
 
-        app.middleware.use(
-          Woods::Console::RackMiddleware,
-          path: config.console_mcp_path,
-          embedded_read_tools: config.console_embedded_read_tools
-        )
+      require 'woods/console/rack_middleware'
+      require 'woods/mcp/bearer_auth'
+      require 'woods/mcp/origin_guard'
+
+      token = config.console_mcp_token
+      production = defined?(Rails) && Rails.env.production?
+      token_missing = token.nil? || token.to_s.empty?
+
+      if token_missing
+        msg = '[Woods Console] console_mcp_token is not set — Console MCP is a high-privilege ' \
+              'endpoint that runs SQL and model introspection against the live database. ' \
+              'Set Woods.configuration.console_mcp_token (or WOODS_CONSOLE_MCP_TOKEN env var) ' \
+              'to a 32+ character random string.'
+        raise Woods::ConfigurationError, msg if production
+
+        # Non-prod without a token: refuse to wire the middleware at all.
+        # Earlier iterations fell through and installed the RackMiddleware
+        # with ZERO auth/origin guard in front of it — a binding on 0.0.0.0
+        # (common in devcontainers/docker-compose) would expose an
+        # unauthenticated SQL-bearing endpoint to every local process.
+        # Fail-closed: warn and skip.
+        warn "#{msg} Refusing to mount the Console MCP middleware until a token is configured."
+        next
       end
+
+      # Origin guard first — rejects cross-origin POSTs before any auth cost.
+      # BearerAuth next — requires `Authorization: Bearer <token>` on every request.
+      app.middleware.use(Woods::MCP::OriginGuard, allowed_origins: Array(config.console_mcp_allowed_origins))
+      app.middleware.use(Woods::MCP::BearerAuth, token: token)
+
+      app.middleware.use(
+        Woods::Console::RackMiddleware,
+        path: config.console_mcp_path,
+        embedded_read_tools: config.console_embedded_read_tools
+      )
     end
   end
 end

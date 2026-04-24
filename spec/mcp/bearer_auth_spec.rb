@@ -5,7 +5,10 @@ require 'woods/mcp/bearer_auth'
 
 RSpec.describe Woods::MCP::BearerAuth do
   let(:inner_app) { ->(_env) { [200, { 'content-type' => 'text/plain' }, ['ok']] } }
-  let(:token) { 'sekret-token-abc123' }
+  # 64 hex chars — satisfies the 32-char minimum. Using a literal so
+  # failures are reproducible across runs; real deployments should
+  # generate tokens via SecureRandom.hex(32).
+  let(:token) { '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }
   let(:middleware) { described_class.new(inner_app, token: token) }
 
   def call(auth_header)
@@ -32,7 +35,7 @@ RSpec.describe Woods::MCP::BearerAuth do
   end
 
   it 'returns 401 when the token is wrong' do
-    status, = call('Bearer wrong-token-abc123')
+    status, = call("Bearer #{'w' * token.length}")
     expect(status).to eq(401)
   end
 
@@ -54,5 +57,10 @@ RSpec.describe Woods::MCP::BearerAuth do
 
   it 'raises when constructed with empty token' do
     expect { described_class.new(inner_app, token: '') }.to raise_error(ArgumentError)
+  end
+
+  it 'raises when constructed with a token shorter than the minimum length' do
+    expect { described_class.new(inner_app, token: 'too-short') }
+      .to raise_error(ArgumentError, /at least 32 characters/)
   end
 end

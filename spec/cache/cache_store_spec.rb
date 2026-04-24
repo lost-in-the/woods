@@ -94,7 +94,7 @@ RSpec.describe Woods::Cache::InMemory do
     it 'returns nil for expired entries' do
       store.write('key:ttl', 'ephemeral', ttl: 0)
       # TTL of 0 means expires immediately — sleep a tiny amount for Time.now to advance
-      sleep 0.01
+      sleep 0.05
       expect(store.read('key:ttl')).to be_nil
     end
 
@@ -105,7 +105,7 @@ RSpec.describe Woods::Cache::InMemory do
 
     it 'reports expired entries as not existing' do
       store.write('key:ttl3', 'temp', ttl: 0)
-      sleep 0.01
+      sleep 0.05
       expect(store.exist?('key:ttl3')).to be false
     end
   end

@@ -17,6 +17,34 @@ module Woods
     #   pool consumer
     # - Column redaction replaces sensitive values with "[REDACTED]"
     #
+    # == What SafeContext does NOT cover
+    #
+    # The rolled-back transaction is a strong guardrail but not absolute.
+    # Known escape paths — callers of {#execute} should assume anything
+    # below is effectively live:
+    # - `ActiveJob` / `ActionMailer` async deliveries. Earlier versions
+    #   tried to swap the global queue_adapter/delivery_method to `:test`
+    #   for the block's duration, but those settings are process-wide
+    #   class state: in a Puma worker serving both the host app and the
+    #   Console MCP, a concurrent host request would briefly see the
+    #   test adapter and silently drop real jobs / mail. We now leave
+    #   them alone — treat callback-triggered enqueues / deliveries as
+    #   live.
+    # - `after_rollback` callbacks (fire on rollback, can still enqueue
+    #   jobs or call external services).
+    # - `Thread.new` / `Fiber.new` inside the block — they lease a fresh
+    #   connection outside the transaction.
+    # - Direct HTTP egress (Net::HTTP, Faraday, HTTP gem, ...).
+    # - File I/O / shell-outs initiated from within AR callbacks.
+    # - Writes through a different pool or shard than the one this
+    #   SafeContext was built with.
+    # - `raw_connection.execute` on some adapters when the adapter's
+    #   transaction bookkeeping is out-of-band.
+    #
+    # Treat SafeContext as "rolls back the database", not "prevents every
+    # side effect" — operators must still apply the upstream defenses
+    # (TableGate, SqlValidator, EvalGuard, BearerAuth).
+    #
     # Two construction modes are supported:
     #
     # - `connection:` — wraps the supplied connection in a single-use pool
@@ -124,6 +152,15 @@ module Woods
       def execute(&block)
         raise ArgumentError, 'SafeContext#execute requires connection: or pool: at construction time' unless @pool
 
+        # NOTE: on async side effects: earlier iterations of SafeContext
+        # tried to swap `ActiveJob::Base.queue_adapter` / `ActionMailer::Base
+        # .delivery_method` to `:test` for the duration of this block.
+        # That's unsafe — those settings are process-wide class state, so
+        # any concurrent request served by the SAME Puma worker (the host
+        # app running alongside the Console MCP) would race and briefly
+        # see the test adapter, silently dropping real jobs and mail.
+        # The gap is documented in the class docstring instead; operators
+        # must treat callback-triggered enqueues / deliveries as live.
         @pool.with_connection { |conn| run_with_timeout(conn, &block) }
       end
 
@@ -213,9 +250,29 @@ module Woods
         else
           connection.execute("SET LOCAL statement_timeout = '#{timeout_ms.to_i}ms'")
         end
-      rescue StandardError
-        # Unsupported adapter — timeout enforcement is best-effort
+      rescue StandardError => e
+        # Unsupported adapter (SQLite, Trilogy on unsupported version, Oracle) —
+        # timeout enforcement is best-effort, but operators need to know their
+        # rollback fence is narrower than advertised. Log once per adapter via
+        # Rails.logger when available; otherwise swallow as before.
+        warn_timeout_unsupported(adapter, e)
         nil
+      end
+
+      def warn_timeout_unsupported(adapter, error)
+        return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+
+        @warned_adapters ||= {}
+        return if @warned_adapters[adapter]
+
+        @warned_adapters[adapter] = true
+        Rails.logger.warn(
+          '[Woods::Console::SafeContext] statement timeout not supported on ' \
+          "adapter #{adapter.inspect}: #{error.class}: #{error.message}. " \
+          'Queries will run without a per-statement time limit.'
+        )
+      rescue StandardError
+        # Last-resort swallow — never let telemetry failure break execution.
       end
     end
   end

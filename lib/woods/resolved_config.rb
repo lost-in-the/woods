@@ -117,8 +117,8 @@ module Woods
       @schema_version = schema_version
       @gem_version = gem_version.to_s.freeze
       @created_at = created_at
-      @embedding_provider = embedding_provider.transform_values { |val| val.is_a?(String) ? val.freeze : val }.freeze
-      @stores = stores.freeze
+      @embedding_provider = deep_freeze(embedding_provider)
+      @stores = deep_freeze(stores)
       freeze
     end
 
@@ -185,6 +185,29 @@ module Woods
     end
 
     private
+
+    # Recursively freeze a Hash and every Hash/Array/String it transitively
+    # holds. The previous shallow `.freeze` left nested Hash values mutable
+    # — a caller reaching `config.embedding_provider[:options][:foo] = …`
+    # could mutate the supposedly-immutable snapshot. Public ResolvedConfig
+    # is documented as a frozen Whole Value; this enforces it.
+    def deep_freeze(obj) # rubocop:disable Metrics/CyclomaticComplexity
+      case obj
+      when Hash
+        obj.each_pair do |k, v|
+          deep_freeze(k)
+          deep_freeze(v)
+        end
+        obj.frozen? ? obj : obj.freeze
+      when Array
+        obj.each { |v| deep_freeze(v) }
+        obj.frozen? ? obj : obj.freeze
+      when String
+        obj.frozen? ? obj : obj.dup.freeze
+      else
+        obj
+      end
+    end
 
     def assert_dimensions_match!(stored_config)
       return if dimension == stored_config.dimension

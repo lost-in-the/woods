@@ -140,14 +140,29 @@ module Woods
         end
       end
 
-      def prepare_texts(unit_data)
+      def prepare_texts(unit_data) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         unit = build_unit(unit_data)
         apply_chunking(unit) if @chunker && unit.chunks.empty? && needs_chunking?(unit)
         # Extraction may have emitted chunks larger than the provider's
         # budget (rails_source in particular). Enforce the ceiling on
         # whatever chunks we have before handing off to the provider.
         @chunker&.enforce_chunk_limits!(unit) if unit.chunks.any?
-        unit.chunks.any? ? @text_preparer.prepare_chunks(unit) : [@text_preparer.prepare(unit)]
+        texts = unit.chunks.any? ? @text_preparer.prepare_chunks(unit) : [@text_preparer.prepare(unit)]
+        # Drop empty/whitespace-only texts — embedding providers reject
+        # them with 400 and retrying never succeeds. Unit is effectively
+        # skipped when every text is empty (zero-source unit).
+        texts.reject { |t| t.nil? || t.strip.empty? || content_portion_empty?(t, unit) }
+      end
+
+      # True when a prepared text is just the metadata prefix with no
+      # underlying source content (empty source_code + empty chunks).
+      # Avoids embedding prefix-only stubs that have no semantic value
+      # and would poison the vector space with identical headers.
+      def content_portion_empty?(text, unit)
+        return false unless unit.chunks.empty?
+        return false unless unit.source_code.nil? || unit.source_code.strip.empty?
+
+        !text.nil?
       end
 
       # Does this unit exceed the embedding provider's single-input

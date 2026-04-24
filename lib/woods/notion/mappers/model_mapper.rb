@@ -15,7 +15,7 @@ module Woods
       #   properties = mapper.map(unit_data)
       #   client.create_page(database_id: db_id, properties: properties)
       #
-      class ModelMapper
+      class ModelMapper # rubocop:disable Metrics/ClassLength
         include Shared
 
         # Map a model unit to Notion Data Models page properties.
@@ -66,6 +66,16 @@ module Woods
           metadata['column_count'] || (metadata['columns'] || []).size
         end
 
+        # Extract the leading comment block from a model file, redacting
+        # any credential-shaped content before shipping it to Notion.
+        #
+        # Model header comments occasionally contain sample API keys,
+        # integration URLs with embedded passwords, or TODO references to
+        # internal secrets. Without redaction those land verbatim in a
+        # third-party SaaS database. This uses the same {CredentialScanner}
+        # that protects the Console MCP so Notion export inherits the same
+        # defenses.
+        #
         # @return [String]
         def extract_description(source_code)
           return '' unless source_code
@@ -80,7 +90,31 @@ module Woods
             end
           end
 
-          comment_lines.any? ? comment_lines.join(' ').strip : ''
+          return '' if comment_lines.empty?
+
+          raw = comment_lines.join(' ').strip
+          redact_credentials(raw)
+        end
+
+        def redact_credentials(text)
+          return text if text.empty?
+
+          # CredentialScanner#scan returns `[redacted_value, match_counts]`.
+          # Unpack the tuple — returning the whole Array would serialize to
+          # Notion as a stringified `["text...", {}]` blob.
+          redacted, _counts = scanner.scan(text)
+          redacted
+        rescue StandardError
+          # Scanner construction or scan failure — fail closed: return an
+          # empty description rather than risk leaking anything.
+          ''
+        end
+
+        def scanner
+          @scanner ||= begin
+            require 'woods/console/credential_scanner'
+            Woods::Console::CredentialScanner.new
+          end
         end
 
         # @return [String]

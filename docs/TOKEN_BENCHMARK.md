@@ -1,5 +1,15 @@
 # Token Estimation Benchmark
 
+> **Heads-up:** production code uses `4.0` chars/token for the OpenAI
+> path (see `lib/woods/token_utils.rb` and `Retrieval::ContextAssembler::DEFAULT_CHARS_PER_TOKEN`)
+> and `1.5` chars/token for the Ollama / WordPiece path (see
+> `Builder#chars_per_token_for` and `docs/EMBEDDING_MODELS.md`). The
+> `3.5` divisor below is a historical worst-case reference used during
+> the initial calibration pass — not the shipped default. The 4.0 floor
+> produces a conservative ~10.6 % overestimate against tiktoken
+> cl100k_base on Ruby source, which is what the gem relies on for chunk
+> budgeting.
+
 Benchmarking the heuristic `(string.length / 3.5).ceil` against tiktoken tokenizers used by OpenAI models.
 
 ## Methodology

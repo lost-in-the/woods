@@ -23,9 +23,11 @@ module Woods
       include AstSourceExtraction
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include RouteHelperResolver
 
       def initialize
         @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
+        build_route_helper_map
       end
 
       # Extract all mailers in the application
@@ -223,8 +225,19 @@ module Woods
         deps = []
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
+        # Navigation edges — resolve `_path`/`_url` helpers to real
+        # controllers via RouteHelperResolver (wired through the include +
+        # build_route_helper_map call in #initialize). This adds resolved
+        # {type: :controller, via: :link_to} edges on top of the raw
+        # helper scan below.
+        deps.concat(scan_navigation_dependencies(source))
+        deps.concat(scan_form_dependencies(source))
 
-        # URL helpers (indicates what resources emails link to)
+        # Raw-helper fallback — emits {type: :route, target: 'confirmation'}
+        # for every `_path`/`_url` helper referenced, regardless of whether
+        # RouteHelperResolver could resolve it. Kept so mailers that link to
+        # engine-mounted routes (not in the main routes table) still produce
+        # a dependency edge.
         source.scan(/(\w+)_(?:url|path)/).flatten.uniq.each do |route|
           deps << { type: :route, target: route, via: :url_helper }
         end

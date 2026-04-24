@@ -104,7 +104,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
 
   describe 'CircuitBreaker' do
     let(:breaker) do
-      Woods::Resilience::CircuitBreaker.new(threshold: 3, reset_timeout: 1)
+      Woods::Resilience::CircuitBreaker.new(threshold: 3, reset_timeout: 0.1)
     end
 
     it 'starts in closed state' do
@@ -147,7 +147,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
       end
 
       expect(breaker.state).to eq(:open)
-      allow(Time).to receive(:now).and_return(Time.now + 1.1)
+      sleep 0.4 # large margin past reset_timeout 0.1 so CI jitter can't flake
 
       # Next call should transition to half_open and execute
       result = breaker.call { 'recovered' }
@@ -162,7 +162,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
         nil
       end
 
-      allow(Time).to receive(:now).and_return(Time.now + 1.1)
+      sleep 0.4 # large margin past reset_timeout 0.1 so CI jitter can't flake
 
       result = breaker.call { 'ok' }
       expect(result).to eq('ok')
@@ -176,7 +176,7 @@ RSpec.describe 'Coordination + Resilience Integration', :integration do
         nil
       end
 
-      allow(Time).to receive(:now).and_return(Time.now + 1.1)
+      sleep 0.4 # large margin past reset_timeout 0.1 so CI jitter can't flake
 
       begin
         breaker.call { raise 'still failing' }

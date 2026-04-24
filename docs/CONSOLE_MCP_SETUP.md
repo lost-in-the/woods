@@ -557,6 +557,37 @@ A pattern is skipped silently when its `key_column` or `value_column` is absent 
 
 `console_redacted_columns` and `console_redacted_key_values` run in a single pass — configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
 
+### Bridge mode vs embedded: `console_sql` / `console_query` posture
+
+**Embedded mode** (Options A–C) lets you gate the Tier 4 read tools via
+`console_embedded_read_tools`. When that flag is `false` (the default),
+`console_sql` and `console_query` return `"unsupported_in_embedded"`
+without ever touching ActiveRecord.
+
+**Bridge mode** (Option D) does **not** respect `console_embedded_read_tools`.
+Those tools are part of the bridge's standard surface as soon as the
+bridge process boots. Your only guards in bridge mode are the ones that
+always run:
+
+1. `SqlValidator` rejects DML/DDL and most administrative keywords
+   (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`,
+   `PREPARE`, transaction control, and `EXPLAIN ANALYZE`) at the string
+   level.
+2. `TableGate` refuses any SQL, model, or join that touches a
+   `console_blocked_tables` entry.
+3. `SafeContext` wraps every request in a rolled-back transaction with
+   a short statement timeout. **It does NOT cover async side effects** —
+   ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP
+   egress, `Thread.new`-spawned work, `after_rollback` callbacks, and
+   writes through a different shard all execute as live. Treat the
+   Console MCP as an admin-trust boundary, not a sandbox.
+4. `CredentialScanner` + column/EAV redaction scrub results.
+
+If your threat model needs embedded-mode read-tool gating, deploy via
+Options A–C and leave `console_embedded_read_tools = false`. Bridge mode
+is appropriate when the host runs in a trusted admin context and you
+need the full 31-tool surface.
+
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
 By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:

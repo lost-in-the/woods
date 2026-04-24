@@ -8,7 +8,7 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
 | **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 26 | 31 |
+| **Tools** | 29 (14 always-on + 15 conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion) | 31 (across 4 tiers: 9/9/10/3) |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
@@ -96,7 +96,9 @@ Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
-### Tools (26)
+### Tools (29 — 14 always-on + 15 conditional)
+
+Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`, `snapshot.*`, and `notion.*` register conditionally (on session-tracer wiring, operator host presence, feedback store config, snapshot store enabled, Notion credentials), so `tools/list` reflects the *current* wiring rather than the total theoretical surface. The unconditional core is 14 tools — the breakdown below includes every tool the index server can register.
 
 #### Core Query (6)
 

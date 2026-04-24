@@ -183,5 +183,52 @@ RSpec.describe Woods::Console::EvalGuard do
           .to raise_error(Woods::Console::ForbiddenExpressionError, /empty/)
       end
     end
+
+    context 'with shell-exec + escape vectors' do
+      it 'rejects backtick literals (`cmd`)' do
+        expect { described_class.check!('`ls /tmp`') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /shell-execution/)
+      end
+
+      it 'rejects %x{cmd} literals' do
+        expect { described_class.check!('%x{ls /tmp}') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /shell-execution/)
+      end
+
+      it 'rejects Kernel system/exec/spawn methods' do
+        expect { described_class.check!('system("ls")') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /system/)
+        expect { described_class.check!('exec("ls")') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /exec/)
+        expect { described_class.check!('spawn("ls")') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /spawn/)
+      end
+
+      it 'rejects Marshal/YAML unsafe deserialization' do
+        expect { described_class.check!('Marshal.load(payload)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /Marshal/)
+        expect { described_class.check!('YAML.unsafe_load(payload)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /(YAML|unsafe_load)/)
+      end
+
+      it 'rejects Thread.new (would escape SafeContext rollback)' do
+        expect { described_class.check!('Thread.new { User.delete_all }') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /Thread/)
+      end
+
+      it 'rejects __send__ (classic send-blocklist bypass)' do
+        expect { described_class.check!('obj.__send__(:destroy)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /__send__/)
+      end
+
+      it 'rejects network egress constants (Net, URI, Socket)' do
+        # `Net::HTTP.get(u)` — both `Net` and `HTTP` are on the denylist;
+        # whichever is scanned first triggers refusal.
+        expect { described_class.check!('Net::HTTP.get(u)') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /(Net|HTTP)/)
+        expect { described_class.check!('URI.open("http://x")') }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /URI/)
+      end
+    end
   end
 end

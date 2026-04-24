@@ -379,4 +379,53 @@ RSpec.describe Woods::Console::SafeContext do
       expect(ctx.redacted_key_values.size).to eq(1)
     end
   end
+
+  describe 'does NOT touch ActiveJob / ActionMailer class state (F-7 boundary)' do
+    it 'leaves ActiveJob.queue_adapter alone during #execute' do
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      fake_aj = Class.new do
+        class << self
+          attr_accessor :queue_adapter
+        end
+      end
+      fake_aj.queue_adapter = :sidekiq
+      stub_const('ActiveJob::Base', fake_aj)
+
+      ctx = described_class.new(connection: connection)
+      observed = nil
+      ctx.execute { |_c| observed = fake_aj.queue_adapter }
+
+      # Earlier iteration swapped to :test mid-block; that raced with
+      # concurrent host-app requests in the same Puma worker. We now
+      # leave it alone — callers must treat callback-triggered enqueues
+      # as live. (Docs: lib/woods/console/safe_context.rb class comment.)
+      expect(observed).to eq(:sidekiq)
+      expect(fake_aj.queue_adapter).to eq(:sidekiq)
+    end
+
+    it 'leaves ActionMailer delivery_method alone during #execute' do
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      fake_am = Class.new do
+        class << self
+          attr_accessor :delivery_method, :perform_deliveries
+        end
+      end
+      fake_am.delivery_method = :smtp
+      fake_am.perform_deliveries = true
+      stub_const('ActionMailer::Base', fake_am)
+
+      ctx = described_class.new(connection: connection)
+      observed_method = nil
+      observed_perform = nil
+      ctx.execute do |_c|
+        observed_method = fake_am.delivery_method
+        observed_perform = fake_am.perform_deliveries
+      end
+
+      expect(observed_method).to eq(:smtp)
+      expect(observed_perform).to be true
+      expect(fake_am.delivery_method).to eq(:smtp)
+      expect(fake_am.perform_deliveries).to be true
+    end
+  end
 end

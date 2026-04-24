@@ -56,6 +56,7 @@ module Woods
         # @see Interface#store
         def store(id, vector, metadata = {})
           validate_vector!(vector)
+          validate_dimensions!(vector) if @dimensions
           entry = format_entry(id, vector, metadata)
 
           @connection.execute(<<~SQL)
@@ -71,13 +72,20 @@ module Woods
         # Store multiple vectors in a single multi-row INSERT.
         #
         # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
+        # @raise [ArgumentError] if any entry has a non-numeric or wrong-dimension vector.
+        #   Validation runs BEFORE any INSERT so partial-batch writes can't occur.
         def store_batch(entries)
           return if entries.empty?
 
-          values = entries.map do |entry|
-            validate_vector!(entry[:vector])
-            format_entry(entry[:id], entry[:vector], entry[:metadata] || {})
+          # Pre-validate every vector before any SQL — prevents partial-batch
+          # state when a later entry's dimension doesn't match.
+          entries.each_with_index do |entry, idx|
+            vector = entry[:vector]
+            validate_vector!(vector)
+            validate_dimensions!(vector, index: idx) if @dimensions
           end
+
+          values = entries.map { |entry| format_entry(entry[:id], entry[:vector], entry[:metadata] || {}) }
 
           @connection.execute(<<~SQL)
             INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
@@ -178,16 +186,36 @@ module Woods
           "WHERE #{conditions.join(' AND ')}"
         end
 
-        # Validate that all vector elements are numeric.
+        # Validate that all vector elements are numeric and finite.
+        # Rejecting NaN / Infinity also closes a defense-in-depth gap
+        # around the vector-literal SQL construction — `Float::NAN.to_s`
+        # yields `"NaN"` which pgvector rejects, but other float-like
+        # sentinels can leak through string construction unexpectedly.
         #
         # @param vector [Array] The vector to validate
-        # @raise [ArgumentError] if any element is not numeric
+        # @raise [ArgumentError] if any element is not numeric or is non-finite
         def validate_vector!(vector)
           vector.each_with_index do |element, i|
             unless element.is_a?(Numeric)
               raise ArgumentError, "Vector element at index #{i} is not numeric: #{element.inspect}"
             end
+            if element.is_a?(Float) && !element.finite?
+              raise ArgumentError, "Vector element at index #{i} is not finite: #{element.inspect}"
+            end
           end
+        end
+
+        # Assert the provided vector matches the store's configured dimension.
+        #
+        # @param vector [Array<Numeric>]
+        # @param index [Integer, nil] position in the batch, used in the error message
+        # @raise [Woods::Error] on dimension mismatch
+        def validate_dimensions!(vector, index: nil)
+          return if vector.length == @dimensions
+
+          where = index ? " (entry #{index})" : ''
+          raise Woods::Error,
+                "Vector dimension mismatch#{where}: got #{vector.length}, expected #{@dimensions}"
         end
       end
     end

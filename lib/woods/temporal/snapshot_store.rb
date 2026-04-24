@@ -23,8 +23,30 @@ module Woods
     #
     class SnapshotStore # rubocop:disable Metrics/ClassLength
       # @param connection [Object] Database connection supporting #execute and #get_first_row
-      def initialize(connection:)
+      # @param validate_schema [Boolean] If true (default), probe both required
+      #   tables at construction time and raise a descriptive error pointing at
+      #   migrations 004+005 when they are missing. Set false in tests that
+      #   construct the store with a bare mock.
+      def initialize(connection:, validate_schema: true)
         @db = connection
+        validate_schema! if validate_schema
+      end
+
+      # Probe that `woods_snapshots` and `woods_snapshot_units` exist. If they
+      # don't, raise with guidance to run the missing migrations — without this,
+      # the first call to {#capture}/{#find} raises a generic adapter error
+      # that doesn't tell operators why.
+      #
+      # @raise [Woods::Error]
+      def validate_schema!
+        @db.execute('SELECT 1 FROM woods_snapshots LIMIT 1')
+        @db.execute('SELECT 1 FROM woods_snapshot_units LIMIT 1')
+      rescue StandardError => e
+        raise Woods::Error,
+              'SnapshotStore requires the `woods_snapshots` and ' \
+              '`woods_snapshot_units` tables (migrations 004 + 005 under ' \
+              '`lib/woods/db/migrations/`). Run `rake woods:migrate` on the ' \
+              "metadata DB and retry. Underlying error: #{e.class}: #{e.message}"
       end
 
       # Capture a snapshot after extraction completes.

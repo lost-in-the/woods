@@ -22,7 +22,10 @@ module Woods
         top_k = retrieved.first(cutoff)
         relevant_set = relevant.to_set
         hits = top_k.count { |id| relevant_set.include?(id) }
-        hits.to_f / cutoff
+        # Divide by actual slice size, not the cutoff — when fewer than
+        # `cutoff` items are retrieved, dividing by `cutoff` understates
+        # precision (returns 0.2 for 1-of-1 at cutoff=5 instead of 1.0).
+        hits.to_f / top_k.size
       end
 
       # Fraction of relevant items that were retrieved.

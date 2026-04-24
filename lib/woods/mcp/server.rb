@@ -11,8 +11,11 @@ require_relative 'tool_response_renderer'
 
 module Woods
   module MCP
-    # Builds an MCP::Server with 27 tools, 2 resources, and 2 resource templates for querying
-    # Woods extraction output, managing pipelines, and collecting feedback.
+    # Builds an MCP::Server with up to 29 tools, 2 resources, and 2 resource templates
+    # for querying Woods extraction output, managing pipelines, and collecting feedback.
+    # 14 tools are always registered; 15 more register conditionally based on wiring:
+    # 5 operator tools, 4 feedback tools, 4 snapshot tools, 1 session_trace tool,
+    # 1 Notion sync tool.
     #
     # All tools are defined inline via closures over an IndexReader instance.
     # No Rails required at runtime — reads JSON files from disk.
@@ -784,6 +787,19 @@ module Woods
               )
             end
 
+            # Acquire the in-process lock BEFORE recording to the guard.
+            # Otherwise a refused "already running" request still resets
+            # the cooldown clock and blocks the next legitimate attempt
+            # for the full 5-minute window once the current run finishes.
+            unless Woods::MCP::Server.send(:pipeline_start, :extraction)
+              next respond_err.call(
+                'Extraction pipeline is already running. Wait for it to complete.',
+                code: :already_running,
+                tool: 'pipeline_extract'
+              )
+            end
+
+            # Lock acquired — now it's safe to record the run.
             guard&.record!(:extraction)
 
             Thread.new do
@@ -794,6 +810,8 @@ module Woods
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline extract failed: #{e.message}")
+            ensure
+              Woods::MCP::Server.send(:pipeline_finish, :extraction)
             end
 
             respond.call(JSON.pretty_generate({
@@ -825,6 +843,16 @@ module Woods
               )
             end
 
+            # Acquire the in-process lock first so a refused "already
+            # running" request doesn't burn the cooldown clock.
+            unless Woods::MCP::Server.send(:pipeline_start, :embedding)
+              next respond_err.call(
+                'Embedding pipeline is already running. Wait for it to complete.',
+                code: :already_running,
+                tool: 'pipeline_embed'
+              )
+            end
+
             guard&.record!(:embedding)
 
             Thread.new do
@@ -838,6 +866,8 @@ module Woods
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline embed failed: #{e.message}")
+            ensure
+              Woods::MCP::Server.send(:pipeline_finish, :embedding)
             end
 
             respond.call(JSON.pretty_generate({
@@ -845,6 +875,26 @@ module Woods
                                                 message: 'Embedding pipeline started in background thread'
                                               }))
           end
+        end
+
+        # Acquire a pipeline-kind lock atomically. Returns false when
+        # another thread is already running that kind of pipeline (so the
+        # caller can refuse the new request instead of racing the running
+        # pipeline). Module-level state — a single MCP server process
+        # serializes its own pipelines.
+        def pipeline_start(kind)
+          @pipeline_mutex ||= Mutex.new
+          @pipeline_in_flight ||= {}
+          @pipeline_mutex.synchronize do
+            return false if @pipeline_in_flight[kind]
+
+            @pipeline_in_flight[kind] = true
+            true
+          end
+        end
+
+        def pipeline_finish(kind)
+          @pipeline_mutex&.synchronize { @pipeline_in_flight&.delete(kind) }
         end
 
         def define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)

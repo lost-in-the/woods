@@ -36,12 +36,28 @@ module Woods
       # Minimum token count for a section to be worth including.
       MIN_USEFUL_TOKENS = 200
 
+      # Default chars-per-token ratio. Matches the OpenAI / tiktoken
+      # cl100k_base average for Ruby source (see docs/TOKEN_BENCHMARK.md).
+      # Callers embedding with BERT/WordPiece tokenizers (nomic-embed-text,
+      # bge-*) should pass the tighter ratio from their TextPreparer
+      # (~1.5–2.5) so truncation stays honest for that provider.
+      DEFAULT_CHARS_PER_TOKEN = 4.0
+
       # @param metadata_store [#find] Store that resolves identifiers to unit data
       # @param budget [Integer] Total token budget
-      def initialize(metadata_store:, budget: DEFAULT_BUDGET)
+      # @param chars_per_token [Float] Tokenizer-calibrated char/token ratio used
+      #   for truncation sizing. Match this to the embedding provider in use —
+      #   {Woods::Embedding::TextPreparer#chars_per_token} exposes the live
+      #   value from the indexing-time preparer.
+      def initialize(metadata_store:, budget: DEFAULT_BUDGET,
+                     chars_per_token: DEFAULT_CHARS_PER_TOKEN)
         @metadata_store = metadata_store
         @budget = budget
+        @chars_per_token = chars_per_token.to_f
       end
+
+      # @return [Float] the configured chars-per-token ratio
+      attr_reader :chars_per_token
 
       # Assemble context from ranked candidates within token budget.
       #
@@ -273,17 +289,19 @@ module Woods
       def truncate_to_budget(text, token_budget)
         return text if estimate_tokens(text) <= token_budget
 
-        # Estimate target character count with 10% safety margin
-        target_chars = (token_budget * 4.0 * 0.9).to_i
+        # Estimate target character count with 10% safety margin. Sizing
+        # uses @chars_per_token so Ollama-indexed corpora (ratio ~1.5) are
+        # not over-truncated by an OpenAI-sized assumption (ratio 4.0).
+        target_chars = (token_budget * @chars_per_token * 0.9).to_i
         "#{text[0...target_chars]}\n... [truncated]"
       end
 
-      # Estimate token count using the project convention.
+      # Estimate token count using the configured chars-per-token ratio.
       #
       # @param text [String]
       # @return [Integer]
       def estimate_tokens(text)
-        (text.length / 4.0).ceil
+        (text.length / @chars_per_token).ceil
       end
 
       # Build the final AssembledContext result.

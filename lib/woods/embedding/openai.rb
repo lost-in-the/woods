@@ -43,7 +43,10 @@ module Woods
         # @param text [String] the text to embed
         # @return [Array<Float>] the embedding vector
         # @raise [Woods::Error] if the API returns an error
+        # @raise [ArgumentError] if the text is nil or empty (OpenAI rejects these with 400)
         def embed(text)
+          raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
+
           response = post_request({ model: @model, input: text })
           response['data'].first['embedding']
         end
@@ -55,7 +58,13 @@ module Woods
         # @param texts [Array<String>] the texts to embed
         # @return [Array<Array<Float>>] array of embedding vectors
         # @raise [Woods::Error] if the API returns an error
-        def embed_batch(texts)
+        # @raise [ArgumentError] if the array is empty or any element is nil/empty
+        def embed_batch(texts) # rubocop:disable Metrics/CyclomaticComplexity
+          raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
+          if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
+            raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
+          end
+
           response = post_request({ model: @model, input: texts })
           response['data']
             .sort_by { |item| item['index'] }
@@ -89,12 +98,25 @@ module Woods
 
         private
 
+        # Cap interpolated response bodies so misconfigured API errors
+        # (which occasionally echo request metadata, including headers) don't
+        # unbounded-leak into logs or re-raised messages.
+        #
+        # @param body [String, nil]
+        # @return [String]
+        def truncate_response_body(body)
+          return '' if body.nil?
+
+          s = body.to_s
+          s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
+        end
+
         # Send a POST request to the OpenAI embeddings API.
         #
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body)
+        def post_request(body) # rubocop:disable Metrics/AbcSize
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'
           request['Authorization'] = "Bearer #{@api_key}"
@@ -103,7 +125,7 @@ module Woods
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
@@ -112,7 +134,7 @@ module Woods
           @http_client = nil
           response = http_client.request(request)
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
