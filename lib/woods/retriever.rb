@@ -446,7 +446,7 @@ module Woods
 
       type_counts = STRUCTURAL_TYPES.filter_map do |type|
         count = @metadata_store.find_by_type(type).size
-        "#{count} #{type}s" if count.positive?
+        "#{count} #{type} entries" if count.positive?
       end
 
       "Codebase: #{total} searchable entries (#{type_counts.join(', ')}). " \

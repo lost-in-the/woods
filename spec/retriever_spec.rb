@@ -593,10 +593,10 @@ RSpec.describe Woods::Retriever do
 
       result = retriever.send(:build_structural_context)
 
-      expect(result).to include('10 models')
-      expect(result).to include('5 controllers')
-      expect(result).to include('3 services')
-      expect(result).to include('2 jobs')
+      expect(result).to include('10 model entries')
+      expect(result).to include('5 controller entries')
+      expect(result).to include('3 service entries')
+      expect(result).to include('2 job entries')
     end
 
     it 'points at the structure tool as the canonical source for unit-level counts' do
@@ -616,8 +616,8 @@ RSpec.describe Woods::Retriever do
 
       result = retriever.send(:build_structural_context)
 
-      expect(result).to match(/`?structure`?/)
-      expect(result).to include('unit')
+      expect(result).to include('structure')
+      expect(result).to match(/unit\s+counts?/i)
     end
 
     it 'omits types with zero count' do
