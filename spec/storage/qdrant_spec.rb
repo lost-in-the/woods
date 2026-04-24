@@ -407,6 +407,12 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       end.to raise_error(ArgumentError, /non-standard numeric host/)
     end
 
+    it 'rejects mixed-radix IPv4 (0x7f.0.0.1 = 127.0.0.1)' do
+      expect do
+        described_class.new(url: 'http://0x7f.0.0.1:6333', collection: 'x')
+      end.to raise_error(ArgumentError, /non-standard numeric host/)
+    end
+
     it 'still accepts standard dotted-decimal IPv4' do
       expect do
         described_class.new(url: 'http://203.0.113.5:6333', collection: 'x')

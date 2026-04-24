@@ -131,13 +131,14 @@ module Woods
         # The tool reads the store inside its handler; skipping registration when
         # the store is absent keeps tools/list honest.
         #
-        # Also validates that the store exposes the read-side methods the
-        # `session_trace` MCP tool calls (`read`, `sessions`). If the store
-        # only implements `:record` (as the middleware allows for
-        # backward-compatibility), we refuse to register the tool rather
-        # than letting it crash at first invocation — failing at wire-up
-        # keeps the error surface consistent with other collaborator-gated
-        # tools.
+        # The `session_trace` handler itself only calls `store.read`. We
+        # ALSO probe `:sessions` as a defense-in-depth cheap contract
+        # check — every shipped store (File/Redis/SolidCache) implements
+        # both, so if a misconfigured store lacks `:sessions` it is almost
+        # certainly missing `:read` too, and we'd rather fail at wire-up
+        # than at first invocation. A record-only store (permitted by the
+        # middleware for backward-compatibility) will correctly drop out
+        # of tools/list here.
         def session_tracer_wired?
           config = Woods.configuration
           return false unless config

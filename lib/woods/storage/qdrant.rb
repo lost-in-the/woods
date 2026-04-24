@@ -5,6 +5,7 @@ require 'net/http'
 require 'json'
 require 'uri'
 require_relative 'vector_store'
+require_relative '../util/host_guard'
 
 module Woods
   module Storage
@@ -111,19 +112,17 @@ module Woods
         def self.validate_host_visibility!(host, allow_private_hosts:)
           return if allow_private_hosts
 
-          # Strip trailing dot (FQDN form — `localhost.` is equivalent to
-          # `localhost` but would slip a literal-list check) and any IPv6
-          # brackets left in by URI before we parse as an IP.
-          canonical = host.to_s.downcase.sub(/\.\z/, '').delete('[]')
+          # Canonicalize (strip port, trailing dot, IPv6 brackets) via
+          # the shared helper so Qdrant and OriginGuard stay in sync.
+          canonical = Util::HostGuard.canonicalize(host)
 
           # Non-canonical numeric hosts (hex `0x7f000001`, octal
-          # `0177.0.0.1`, bare integer `2130706433`, short-form `127.1`)
-          # are accepted by URI and by getaddrinfo but are NOT parsed by
-          # `IPAddr`, so the private-range check silently passed them
-          # through. Reject any host that looks numeric-but-not-standard
-          # instead of trying to canonicalize every form — we can't safely
-          # intuit the intended IPv4 from every notation.
-          if suspicious_numeric_host?(canonical)
+          # `0177.0.0.1`, bare integer `2130706433`, short-form `127.1`,
+          # mixed-radix `0x7f.0.0.1`) are accepted by URI and getaddrinfo
+          # but NOT by `IPAddr`, so the private-range check silently
+          # passed them through. Reject any host that looks numeric-but-
+          # not-standard instead of trying to canonicalize every form.
+          if Util::HostGuard.suspicious_numeric_host?(canonical)
             raise ArgumentError,
                   "Qdrant URL uses a non-standard numeric host (#{host}). " \
                   'Hex/octal/integer/short-form IPs are rejected because they ' \
@@ -150,34 +149,8 @@ module Woods
           false
         end
 
-        # Detect numeric host forms that bypass `IPAddr` parsing but are
-        # accepted by `getaddrinfo` and resolve to real IPs. These don't
-        # appear in legitimate Qdrant URLs, so blanket-reject them.
-        NUMERIC_HOST_BYPASS = Regexp.union(
-          /\A0x[0-9a-f]+\z/,           # hex: `0x7f000001`
-          /\A\d+\z/,                   # bare integer: `2130706433`
-          /\A0[0-7]+\z/,               # bare octal: `017700000001`
-          /\A0\d[0-9.]*\z/,            # leading-zero dotted: `0177.0.0.1`
-          /\A\d+\.\d+\z/,              # short-form two-part: `127.1`
-          /\A\d+\.\d+\.\d+\z/          # short-form three-part: `127.0.1`
-        ).freeze
-
-        def self.suspicious_numeric_host?(canonical)
-          return true if canonical.match?(NUMERIC_HOST_BYPASS)
-
-          # Dotted-decimal four-octet form is legitimate ONLY when no
-          # octet has a leading zero. `0177.0.0.1` parses (via
-          # getaddrinfo) as octal 127.0.0.1; require every octet to be
-          # either "0" or to start with a non-zero digit.
-          four_octet = canonical.match(/\A(\d+)\.(\d+)\.(\d+)\.(\d+)\z/)
-          return false unless four_octet
-
-          four_octet.captures.any? { |octet| octet.length > 1 && octet.start_with?('0') }
-        end
-
         private_class_method :validate_scheme!, :validate_host_present!,
-                             :validate_host_visibility!, :private_host?,
-                             :suspicious_numeric_host?
+                             :validate_host_visibility!, :private_host?
 
         # Create the collection if it doesn't exist.
         #

@@ -122,5 +122,10 @@ RSpec.describe Woods::MCP::OriginGuard do
       status, = call(middleware, host: '127.1:3000')
       expect(status).to eq(403)
     end
+
+    it 'rejects mixed-radix IPv4 (0x7f.0.0.1 = 127.0.0.1)' do
+      status, = call(middleware, host: '0x7f.0.0.1:3000')
+      expect(status).to eq(403)
+    end
   end
 end
