@@ -466,7 +466,7 @@ module Woods
               }
             }
           ) do |server_context:, detail: nil|
-            result = { manifest: reader.manifest }
+            result = { manifest: reader.manifest, template_engines: reader.template_engines }
             result[:summary] = reader.summary if (detail || 'summary') == 'full'
             respond.call(renderer.render(:structure, result))
           end

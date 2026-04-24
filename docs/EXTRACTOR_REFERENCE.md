@@ -280,6 +280,8 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
 
+**Template engine coverage.** ERB only. HAML, Slim, Stimulus, and Turbo are *not* extracted. An app using HAML or Slim as its primary view engine gets zero view-layer coverage from this extractor. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field so callers can detect the coverage gap without reading source. When a `TemplateEngine` abstraction lands (tracked as a Turbo prerequisite), this extractor becomes the ERB implementation of that interface and HAML/Slim/Turbo become plug-in additions rather than fork points.
+
 ---
 
 ### DecoratorExtractor

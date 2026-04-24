@@ -103,6 +103,11 @@ module Woods
             lines << "- **#{key.tr('_', ' ').capitalize}:** #{manifest[key]}" if manifest[key]
           end
           lines << "- **Total units indexed:** #{manifest['total_units']}" if manifest['total_units']
+          template_engines = fetch_key(data, :template_engines)
+          if template_engines.is_a?(Array) && template_engines.any?
+            lines << "- **Supported template engines:** #{template_engines.join(', ')} " \
+                     '(HAML, Slim, Stimulus, Turbo are not extracted)'
+          end
           lines << ''
 
           counts = manifest['counts']

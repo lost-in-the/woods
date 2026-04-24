@@ -39,6 +39,8 @@ Key enrichments beyond source file content:
 
 **Navigation edges.** View templates scanning for `_path`/`_url` route helper calls produce `link_to` edges pointing to controllers. Controller `redirect_to` calls produce `redirect_to` edges. Form submissions produce `form_action` edges. Filter with the `via` parameter on `dependencies`/`dependents` to isolate UI navigation paths.
 
+**View-template coverage is ERB-only.** HAML, Slim, Stimulus, and Turbo are not extracted. Query the `structure` tool's `template_engines` field if you need to confirm which engines the current index covers — an app written in Slim will appear with zero view units even when views exist. This is a known coverage gap and a `TemplateEngine` interface for pluggable support is tracked as a Turbo prerequisite.
+
 ---
 
 ## MCP Server Setup
