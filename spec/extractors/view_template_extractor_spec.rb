@@ -11,9 +11,89 @@ require 'woods/extractors/view_template_extractor'
 RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   include_context 'extractor setup'
 
+  # Stub engine implementing the ViewEngines::Base contract. Reused by
+  # the supported_template_engines aggregation tests and the engine
+  # dispatch tests below.
+  let(:fake_engine_class) do
+    Class.new(Woods::Extractors::ViewEngines::Base) do
+      def name
+        :fake
+      end
+
+      def extensions
+        ['.fake']
+      end
+
+      def scan_partials(_source)
+        []
+      end
+
+      def scan_instance_variables(_source)
+        []
+      end
+
+      def scan_helpers(_source)
+        ['fake_helper']
+      end
+
+      def resolve_partial_identifier(partial_name, _current_identifier)
+        "_#{partial_name}.fake"
+      end
+
+      def scan_navigation_candidates(_source)
+        []
+      end
+    end
+  end
+
   describe '.supported_template_engines' do
     it 'returns the engine names currently wired into the orchestrator' do
       expect(described_class.supported_template_engines).to eq([:erb])
+    end
+
+    it 'is aggregated from ENGINES — adding an engine extends the list' do
+      stub_const(
+        "#{described_class}::ENGINES",
+        [Woods::Extractors::ViewEngines::Erb, fake_engine_class].freeze
+      )
+      expect(described_class.supported_template_engines).to eq(%i[erb fake])
+    end
+
+    it 'returns a frozen array' do
+      expect(described_class.supported_template_engines).to be_frozen
+    end
+  end
+
+  describe 'engine dispatch' do
+    before do
+      stub_const(
+        "#{described_class}::ENGINES",
+        [Woods::Extractors::ViewEngines::Erb, fake_engine_class].freeze
+      )
+    end
+
+    it 'globs files for every registered engine' do
+      create_file('app/views/home/index.html.erb', '<h1>Home</h1>')
+      create_file('app/views/home/widget.fake', 'fake source')
+      identifiers = described_class.new.extract_all.map(&:identifier)
+      expect(identifiers).to contain_exactly('home/index.html.erb', 'home/widget.fake')
+    end
+
+    it 'routes each file to the matching engine based on extension' do
+      create_file('app/views/home/widget.fake', 'fake source')
+      units = described_class.new.extract_all
+      expect(units.first.metadata[:template_engine]).to eq('fake')
+    end
+
+    it 'delegates scanning to the matched engine' do
+      create_file('app/views/home/widget.fake', 'fake source')
+      units = described_class.new.extract_all
+      expect(units.first.metadata[:helpers_called]).to eq(['fake_helper'])
+    end
+
+    it 'returns nil from #extract_view_template_file for unregistered extensions' do
+      unit = described_class.new.extract_view_template_file('/path/to/thing.unknown')
+      expect(unit).to be_nil
     end
   end
 
@@ -310,6 +390,20 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       nav_deps = deps.select { |d| d[:via] == :link_to }
       expect(nav_deps).to be_empty
     end
+
+    it 'deduplicates repeated candidates that resolve to the same (controller, via) pair' do
+      create_file('app/views/home/index.html.erb', <<~ERB)
+        <%= link_to "Posts A", posts_path %>
+        <%= link_to "Posts B", posts_path %>
+        <%= link_to "Posts C", posts_url %>
+      ERB
+
+      units = nav_extractor.extract_all
+      link_to_deps = units.first.dependencies.select { |d| d[:via] == :link_to }
+      # Three references all resolve to PostsController — orchestrator
+      # collapses them so we exercise the seen.include?(key) branch.
+      expect(link_to_deps.map { |d| d[:target] }).to eq(['PostsController'])
+    end
   end
 
   # ── Form dependencies ──────────────────────────────────────────────
@@ -397,7 +491,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(unit.identifier).to eq('users/edit.html.erb')
     end
 
-    it 'returns nil for non-ERB files' do
+    it 'returns nil for files no registered engine handles' do
       unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.haml')
       expect(unit).to be_nil
     end
