@@ -626,10 +626,78 @@ module Woods
             relation.where(scope)
           end
         when Array
-          scope.any? ? relation.where(*scope) : relation
+          return relation unless scope.any?
+
+          # Array form is `[template, *binds]`. The previous implementation
+          # splatted directly into `where(*scope)`, which is the
+          # `where(raw_sql_string)` arity — unbounded SQL injection. A
+          # caller could pass `["EXISTS (SELECT 1 FROM users WHERE
+          # password_digest LIKE 'a%')"]` and turn `console_count` /
+          # `console_pluck` into a boolean exfiltration oracle against
+          # any table the DB user can read (TableGate doesn't fire on
+          # the rendered Tier-1 SQL). Validate the template now.
+          validate_scope_array!(scope)
+          relation.where(*scope)
         else
           relation
         end
+      end
+
+      # Forbidden SQL keywords inside a scope template — same set as
+      # SqlValidator's body check, sized to the WHERE-fragment context
+      # (no DML/DDL keywords because AR will syntax-fail on them anyway,
+      # but a SELECT subquery is the live exfiltration vector).
+      SCOPE_TEMPLATE_FORBIDDEN = /
+        \b(?:
+          SELECT | INSERT | UPDATE | DELETE | MERGE | UPSERT |
+          UNION | INTERSECT | EXCEPT | INTO |
+          DROP | ALTER | TRUNCATE | CREATE | RENAME |
+          EXEC | EXECUTE | CALL | DO | COPY |
+          GRANT | REVOKE | SET | RESET | LISTEN | NOTIFY |
+          PG_SLEEP | PG_TERMINATE_BACKEND | PG_CANCEL_BACKEND |
+          LOAD_FILE | INTO\s+OUTFILE | INTO\s+DUMPFILE |
+          BENCHMARK | SLEEP
+        )\b
+      /ix
+      private_constant :SCOPE_TEMPLATE_FORBIDDEN
+
+      # Validate an `[template, *binds]` scope array. Rejects when:
+      # - The first element isn't a String (Arel.sql / raw nodes are
+      #   indistinguishable from raw SQL once they reach AR).
+      # - The template contains any forbidden keyword (subquery
+      #   exfiltration, multi-statement, time-based oracles).
+      # - The template contains a semicolon (statement chaining).
+      # - The number of `?` placeholders doesn't match the number of
+      #   binds — AR would error anyway, but failing fast surfaces the
+      #   mismatch as a validation error rather than an execution one.
+      def validate_scope_array!(scope)
+        template = scope.first
+        unless template.is_a?(String)
+          raise ValidationError, "scope[0] must be a String template (got #{template.class})"
+        end
+
+        raise ValidationError, 'scope template must not contain `;` (statement chaining)' if template.include?(';')
+
+        if SCOPE_TEMPLATE_FORBIDDEN.match?(strip_string_literals(template))
+          raise ValidationError,
+                'scope template contains forbidden SQL keywords ' \
+                '(subqueries, UNION, time-based functions, DML/DDL are not allowed). ' \
+                'Use a parameterised comparison like `["col = ?", value]`.'
+        end
+
+        placeholder_count = template.scan('?').size
+        bind_count = scope.length - 1
+        return if placeholder_count == bind_count
+
+        raise ValidationError,
+              "scope template expects #{placeholder_count} bind(s), got #{bind_count}"
+      end
+
+      # Strip single- and double-quoted string literals before scanning
+      # for forbidden keywords, so `["name = ?", "SELECT"]` (legitimate
+      # bind value) doesn't false-reject — only the template is scanned.
+      def strip_string_literals(template)
+        template.gsub(/'(?:[^']|'')*'/, "''").gsub(/"(?:[^"]|"")*"/, '""')
       end
 
       # Returns true if any key in the hash has a recognised predicate suffix.
