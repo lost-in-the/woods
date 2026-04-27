@@ -3,7 +3,7 @@
 require 'timeout'
 
 require_relative 'audit_logger'
-require_relative 'bridge'
+require_relative 'bridge_protocol'
 require_relative 'confirmation'
 require_relative 'eval_guard'
 require_relative 'model_validator'
@@ -30,7 +30,7 @@ module Woods
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
       AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
 
-      TIER1_TOOLS = StubBridge::TIER1_TOOLS
+      TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS
 
       # Tools gated behind the read_tools_enabled flag.
       # sql/query have existing safety gates (SqlValidator, SafeContext rollback)
