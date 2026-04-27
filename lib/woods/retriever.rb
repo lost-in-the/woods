@@ -435,6 +435,10 @@ module Woods
     # than +units_indexed+. The two differ because chunking duplicates
     # units; see the `structure` tool's glossary for the full picture.
     #
+    # The banner ends with a pointer to `structure` so operators who
+    # spot the searchable-entries vs unit-count discrepancy know which
+    # tool carries the canonical unit totals (issue #105).
+    #
     # @return [String, nil] Overview string, or nil if the store is empty or on error
     def build_structural_context
       total = @metadata_store.count
@@ -442,10 +446,11 @@ module Woods
 
       type_counts = STRUCTURAL_TYPES.filter_map do |type|
         count = @metadata_store.find_by_type(type).size
-        "#{count} #{type}s" if count.positive?
+        "#{count} #{type} entries" if count.positive?
       end
 
-      "Codebase: #{total} searchable entries (#{type_counts.join(', ')})"
+      "Codebase: #{total} searchable entries (#{type_counts.join(', ')}). " \
+        'Entries include per-chunk rows for chunked units; see `structure` for canonical unit counts.'
     rescue StandardError
       nil
     end
