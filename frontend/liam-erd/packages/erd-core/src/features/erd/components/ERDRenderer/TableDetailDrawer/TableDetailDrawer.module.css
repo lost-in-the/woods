@@ -1,0 +1,11 @@
+.content {
+  top: var(--default-header-height);
+  right: 0;
+  bottom: 0;
+}
+
+.content[data-vaul-drawer] {
+  transition-duration: 165ms;
+  animation-duration: 165ms;
+  user-select: auto;
+}

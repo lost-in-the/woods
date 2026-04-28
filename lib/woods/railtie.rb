@@ -74,5 +74,18 @@ module Woods
         embedded_read_tools: config.console_embedded_read_tools
       )
     end
+
+    initializer 'woods.erd', after: :load_config_initializers do |app|
+      config = Woods.configuration
+      if config.erd_enabled
+        require 'woods/erd/rack_middleware'
+
+        app.middleware.use(
+          Woods::Erd::RackMiddleware,
+          path: config.erd_path,
+          output_dir: config.output_dir
+        )
+      end
+    end
   end
 end

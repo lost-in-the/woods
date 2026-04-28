@@ -1,0 +1,72 @@
+.banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-3);
+  border-radius: var(--border-radius-md, 6px);
+  background: var(--primary-accent, #6366f1);
+  border: 1px solid color-mix(in srgb, var(--primary-accent, #6366f1) 80%, white);
+  font-size: var(--font-size-2);
+  color: #ffffff;
+}
+
+.label {
+  white-space: nowrap;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 1px var(--spacing-2);
+  border-radius: var(--border-radius-sm, 4px);
+  background: rgba(255, 255, 255, 0.2);
+  font-weight: 500;
+  font-size: var(--font-size-2);
+}
+
+.chipRemove {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.chipRemove:hover {
+  color: #ffffff;
+}
+
+.exitButton {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--border-radius-sm, 4px);
+  color: #ffffff;
+  padding: 2px var(--spacing-2);
+  cursor: pointer;
+  font-size: var(--font-size-1);
+  white-space: nowrap;
+  transition: background 300ms var(--default-timing-function);
+}
+
+.exitButton:hover {
+  background: rgba(255, 255, 255, 0.25);
+}

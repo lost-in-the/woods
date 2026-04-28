@@ -1,0 +1,40 @@
+{
+  "extends": "//",
+  "root": false,
+  "files": {
+    "includes": ["**", "!**/src/parser/schemarb/parser.js"]
+  },
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noNodejsModules": "error",
+        "useImportExtensions": {
+          "level": "error",
+          "fix": "safe",
+          "options": {
+            "forceJsExtensions": true
+          }
+        }
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "options": {
+            "maxAllowedComplexity": 20
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["*.config.ts", "*.config.js"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off"
+          }
+        }
+      }
+    }
+  ]
+}
