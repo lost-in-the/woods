@@ -2,7 +2,6 @@
 
 require 'digest'
 require 'json'
-require 'time' # Time#iso8601
 
 module Woods
   # ExtractedUnit represents a single meaningful unit of code from the codebase.

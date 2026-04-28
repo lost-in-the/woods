@@ -12,11 +12,6 @@
 # The rake task captures stdout before Rails boots and passes the fd via
 # $woods_protocol_out. When run via rails runner, this script
 # captures stdout itself to keep MCP protocol clean.
-#
-# Disabled by default. Set Woods.configuration.console_mcp_enabled = true
-# in the host application's Woods initializer to enable. Layer 1 blocked
-# tables, Layer 2 credential scanning, and Layer 3 column/EAV redaction are
-# all configured through Woods::Configuration — see docs/CONSOLE_MCP_SETUP.md.
 
 # Check if the rake task already captured stdout for us.
 protocol_out = $woods_protocol_out # rubocop:disable Style/GlobalVars
@@ -28,13 +23,6 @@ unless protocol_out
 end
 
 require 'woods/console/server'
-
-unless Woods.configuration.console_mcp_enabled
-  warn 'Woods Console MCP is disabled. Set ' \
-       'Woods.configuration.console_mcp_enabled = true to enable. ' \
-       'See docs/CONSOLE_MCP_SETUP.md for the full security posture.'
-  exit 1
-end
 
 # Ensure all application models are loaded for the registry.
 Rails.application.eager_load!
@@ -48,52 +36,19 @@ rescue StandardError
   next
 end
 
-model_tables = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
-  next if model.abstract_class?
-  next unless model.table_exists?
-
-  hash[model.name] = model.table_name
-rescue StandardError
-  next
-end
-
-# Association-name → target-table map so TableGate can resolve `joins:` and
-# `association:` arguments before the executor loads data. Polymorphic
-# associations and anything that raises during reflection are skipped.
-model_reflections = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
-  next if model.abstract_class?
-  next unless model.table_exists?
-
-  assoc_map = {}
-  model.reflect_on_all_associations.each do |reflection|
-    next if reflection.polymorphic?
-
-    klass = reflection.klass
-    assoc_map[reflection.name.to_s] = klass.table_name if klass.respond_to?(:table_name)
-  rescue StandardError
-    next
-  end
-  hash[model.name] = assoc_map
-rescue StandardError
-  next
-end
-
 validator = Woods::Console::ModelValidator.new(registry: registry)
 safe_context = Woods::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
 
-config = Woods.configuration
-redacted_columns = Array(config.console_redacted_columns)
-redacted_key_values = Array(config.console_redacted_key_values)
-read_tools_enabled = config.console_embedded_read_tools
+redacted_columns = if Woods.respond_to?(:configuration) && Woods.configuration
+                     Array(Woods.configuration.console_redacted_columns)
+                   else
+                     []
+                   end
 
 server = Woods::Console::Server.build_embedded(
   model_validator: validator,
   safe_context: safe_context,
-  redacted_columns: redacted_columns,
-  redacted_key_values: redacted_key_values,
-  read_tools_enabled: read_tools_enabled,
-  model_tables: model_tables,
-  model_reflections: model_reflections
+  redacted_columns: redacted_columns
 )
 
 # Restore the protocol output for MCP transport.

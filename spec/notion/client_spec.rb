@@ -283,47 +283,4 @@ RSpec.describe Woods::Notion::Client do
       end.to raise_error(Woods::Error, /429/)
     end
   end
-
-  describe 'bearer-token redaction in errors' do
-    it 'redacts the api_token from a reflected error message body' do
-      reflected_response = instance_double(
-        Net::HTTPResponse,
-        code: '400',
-        body: JSON.generate({ 'message' => "Bad token: Bearer #{api_token}" })
-      )
-      allow(reflected_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
-
-      http = instance_double(Net::HTTP)
-      allow(Net::HTTP).to receive(:new).and_return(http)
-      allow(http).to receive(:use_ssl=)
-      allow(http).to receive(:open_timeout=)
-      allow(http).to receive(:read_timeout=)
-      allow(http).to receive(:request).and_return(reflected_response)
-
-      expect do
-        client.create_page(database_id: 'db', properties: {})
-      end.to raise_error(Woods::Error) { |err|
-        expect(err.message).not_to include(api_token)
-        expect(err.message).to include('[REDACTED]')
-      }
-    end
-
-    it 'redacts the api_token from a network error message after retry exhaustion' do
-      http = instance_double(Net::HTTP)
-      allow(Net::HTTP).to receive(:new).and_return(http)
-      allow(http).to receive(:use_ssl=)
-      allow(http).to receive(:open_timeout=)
-      allow(http).to receive(:read_timeout=)
-      leaky_error = Net::OpenTimeout.new("request failed with Bearer #{api_token}")
-      allow(http).to receive(:request).and_raise(leaky_error)
-      allow(client).to receive(:sleep)
-
-      expect do
-        client.create_page(database_id: 'db', properties: {})
-      end.to raise_error(Woods::Error) { |err|
-        expect(err.message).not_to include(api_token)
-        expect(err.message).to include('[REDACTED]')
-      }
-    end
-  end
 end

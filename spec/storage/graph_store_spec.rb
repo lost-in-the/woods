@@ -32,13 +32,6 @@ RSpec.describe Woods::Storage::GraphStore do
     it 'raises NotImplementedError for #pagerank' do
       expect { dummy.pagerank }.to raise_error(NotImplementedError)
     end
-
-    it 'raises NotImplementedError for #durable? — adapter authors must declare intent' do
-      # The default deliberately raises rather than returning false so a
-      # write-through cache or partially-persistent adapter can't be
-      # misclassified as ephemeral by omission.
-      expect { dummy.durable? }.to raise_error(NotImplementedError)
-    end
   end
 
   describe Woods::Storage::GraphStore::Memory do
@@ -180,12 +173,6 @@ RSpec.describe Woods::Storage::GraphStore do
         store = described_class.new(graph)
 
         expect(store.by_type(:model)).to include('User')
-      end
-    end
-
-    describe '#durable?' do
-      it 'returns false — the in-memory adapter is rebuilt per process' do
-        expect(store.durable?).to be(false)
       end
     end
   end

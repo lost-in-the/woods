@@ -1,0 +1,95 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "lineWidth": 80,
+    "includes": ["**", "!**/package.json","!**/eslint-suppressions.json"] // some rules conflict with syncpack
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "nursery": {
+        // TODO: Re-enable useUniqueElementIds after fixing hardcoded IDs across codebase
+        "useUniqueElementIds": "off"
+      },
+      "correctness": {
+        "noUndeclaredDependencies": "error",
+        "noUndeclaredVariables": "error",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "off",
+        "useExhaustiveDependencies": "off",
+        "useImportExtensions": "off"
+      },
+      "performance": {
+        // TODO: Re-enable noImgElement after replacing img with Next.js Image
+        "noImgElement": "off"
+      },
+      "suspicious": {
+        "noConsole": { "level": "error", "options": { "allow": ["warn", "error", "info", "debug"] } },
+        "noDuplicateProperties": "error",
+        "noDocumentCookie": "error"
+      },
+      "a11y": {
+        // TODO: Re-enable useAriaPropsSupportedByRole after fixing accessibility issues
+        "useAriaPropsSupportedByRole": "off",
+        // TODO: Re-enable noStaticElementInteractions after adding proper roles
+        "noStaticElementInteractions": "off"
+      },
+      "complexity": {
+        "useLiteralKeys": "off",
+        // FIXME: Change to "error" once all cognitive complexity issues are resolved
+        "noExcessiveCognitiveComplexity": "warn",
+        // TODO: Re-enable noUselessEscapeInRegex after fixing regex escape issues
+        "noUselessEscapeInRegex": "off",
+        // TODO: Re-enable noUselessUndefinedInitialization after fixing undefined initialization issues
+        "noUselessUndefinedInitialization": "off",
+        "useDateNow": "error",
+        "noUselessFragments": "error"
+      },
+      "style": {
+        "noParameterAssign": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error",
+        "useEnumInitializers": "error",
+        "useSelfClosingElements": "error",
+        "useSingleVarDeclarator": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useNumberNamespace": "error",
+        "noInferrableTypes": "error",
+        "noUselessElse": "error",
+        "noCommonJs": "error",
+        // TODO: Re-enable noDescendingSpecificity after fixing CSS specificity issues
+        "noDescendingSpecificity": "off"
+      }
+    },
+    "includes": ["**"]
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded"
+    }
+  },
+  "css": {
+    "parser": {
+      "cssModules": true
+    },
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  }
+}

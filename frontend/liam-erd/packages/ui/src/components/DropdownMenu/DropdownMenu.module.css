@@ -1,0 +1,90 @@
+.content {
+  /*
+    Needed to set the z-index on the parent element div[data-radix-popper-content-wrapper].
+    @see: https://github.com/radix-ui/primitives/issues/1839#issuecomment-1708479747
+  */
+  z-index: var(--z-index-dropdown-menu);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-half);
+  padding: var(--spacing-1);
+  background-color: var(--global-background);
+  border: 1px solid var(--dropdown-border);
+  border-radius: var(--border-radius-base);
+  box-shadow: 0 4px 20px 0 rgb(0 0 0 / 40%);
+}
+
+.item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--spacing-2);
+  place-content: center;
+  align-items: center;
+  padding: var(--spacing-2);
+  font-size: var(--font-size-2);
+  cursor: default;
+  background: var(--global-background);
+  border-radius: var(--border-radius-base);
+  transition: background-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.radioItem {
+  grid-template-columns: 1fr auto;
+}
+
+.md {
+  height: 32px;
+}
+
+.sm {
+  height: 29px;
+}
+
+.default {
+  color: var(--global-foreground);
+}
+
+.danger {
+  color: var(--danger-default);
+}
+
+.item[data-state='checked'] {
+  background-color: var(--dropdown-background-active);
+}
+
+.item[data-state='checked'] span[data-state='checked'] {
+  color: var(--primary-accent);
+}
+
+.item:hover,
+.item:focus {
+  background-color: var(--dropdown-background-hover);
+}
+
+.item:focus-visible {
+  outline: none;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--overlay-70);
+}
+
+.md .leftIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.sm .leftIcon {
+  width: 12px;
+  height: 12px;
+}
+
+.separator {
+  height: 1px;
+  margin: var(--spacing-half) 0;
+  background-color: var(--dropdown-border);
+}

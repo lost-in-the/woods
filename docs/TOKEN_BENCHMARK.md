@@ -1,30 +1,5 @@
 # Token Estimation Benchmark
 
-> **Heads-up:** the single source of truth for chars-per-token ratios is
-> `Woods::TokenUtils.chars_per_token_for(provider)` in
-> `lib/woods/token_utils.rb`. Production code uses **4.0 chars/token**
-> for the OpenAI path and **1.5 chars/token** for the Ollama / WordPiece
-> path. These are applied consistently across:
->
-> - `lib/woods/retrieval/context_assembler.rb` (context truncation)
-> - `lib/woods/embedding/text_preparer.rb` (pre-embed sizing)
-> - `lib/woods/builder.rb#chars_per_token_for` (chunker budget)
->
-> The cost-model layer (`lib/woods/cost_model/`) uses its own
-> `TOKENS_PER_CHUNK` constant (450) as a pre-aggregated per-chunk
-> estimate and does NOT delegate to `TokenUtils` — the two layers
-> measure different things (per-string ratio vs. per-chunk average).
->
-> Retriever also wires the exact `Woods::Embedding::TokenCounter` into
-> `ContextAssembler` on the Ollama path, so budgets use BERT-WordPiece
-> counts rather than the `chars / N` heuristic when the optional
-> `tokenizers` gem is installed. The `3.5` divisor below is a historical
-> worst-case reference from the initial calibration pass — not the
-> shipped default. The 4.0 floor produces a conservative ~10.6 %
-> overestimate against tiktoken cl100k_base on Ruby source, which is
-> what the gem relies on for chunk budgeting when the exact counter is
-> unavailable.
-
 Benchmarking the heuristic `(string.length / 3.5).ceil` against tiktoken tokenizers used by OpenAI models.
 
 ## Methodology

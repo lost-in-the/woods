@@ -46,40 +46,15 @@ module Woods
 
       def build_body(unit_data)
         type = unit_data['type']
-        body = case type
-               when 'model' then build_model_body(unit_data)
-               when 'controller' then build_controller_body(unit_data)
-               when 'service', 'job', 'mailer', 'manager', 'decorator', 'concern'
-                 build_generic_body(unit_data)
-               when 'graphql', 'graphql_type', 'graphql_mutation', 'graphql_resolver', 'graphql_query'
-                 build_graphql_body(unit_data)
-               else build_generic_body(unit_data)
-               end
-        # Defensive credential scrub — current builders only emit structured
-        # metadata, but if a future formatter adds source_code or comments
-        # (mirroring Notion's `ModelMapper#extract_description`) the scrub
-        # keeps credential material from reaching Unblocked.
-        redact_credentials(body)
-      end
-
-      # Run the assembled body through CredentialScanner. Fails closed (empty
-      # body) if the scanner raises, so a shipping failure never leaks
-      # unredacted content.
-      #
-      # @param body [String]
-      # @return [String]
-      def redact_credentials(body)
-        return body if body.nil? || body.empty?
-
-        require 'woods/console/credential_scanner'
-        redacted, _counts = credential_scanner.scan(body)
-        redacted
-      rescue StandardError
-        ''
-      end
-
-      def credential_scanner
-        @credential_scanner ||= Woods::Console::CredentialScanner.new
+        case type
+        when 'model' then build_model_body(unit_data)
+        when 'controller' then build_controller_body(unit_data)
+        when 'service', 'job', 'mailer', 'manager', 'decorator', 'concern'
+          build_generic_body(unit_data)
+        when 'graphql', 'graphql_type', 'graphql_mutation', 'graphql_resolver', 'graphql_query'
+          build_graphql_body(unit_data)
+        else build_generic_body(unit_data)
+        end
       end
 
       # ── Model formatting ─────────────────────────────────────────────

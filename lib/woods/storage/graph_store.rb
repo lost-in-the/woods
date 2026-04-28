@@ -63,22 +63,6 @@ module Woods
         def pagerank(damping: 0.85, iterations: 20)
           raise NotImplementedError
         end
-
-        # Returns true iff this store is the authoritative write target for
-        # graph edges and survives process restart.
-        #
-        # Adapter authors must override this — the default raises so a
-        # write-through cache or a partially-persistent adapter can't be
-        # misclassified as ephemeral by omission. Boot-time rehydration
-        # from +dependency_graph.json+ is only valid when this returns
-        # +false+; durable backends own their own persistence and must be
-        # populated by the extraction/embed write path.
-        #
-        # @return [Boolean]
-        # @raise [NotImplementedError] if the adapter doesn't declare its durability
-        def durable?
-          raise NotImplementedError
-        end
       end
 
       # In-memory graph store wrapping the existing DependencyGraph.
@@ -94,11 +78,6 @@ module Woods
       class Memory
         include Interface
 
-        # The wrapped graph. Exposed so reload paths can peel the raw
-        # graph out of a freshly-hydrated wrapper and {#replace_graph}
-        # it into the live one.
-        attr_reader :graph
-
         # @param graph [DependencyGraph, nil] Existing graph to wrap, or nil to create a new one
         def initialize(graph = nil)
           @graph = graph || DependencyGraph.new
@@ -109,17 +88,6 @@ module Woods
         # @param unit [ExtractedUnit] The unit to register
         def register(unit)
           @graph.register(unit)
-        end
-
-        # Replace the wrapped graph in place. Used by the MCP +reload+ tool
-        # so tool closures that captured this wrapper see a fresh graph
-        # without needing to re-instantiate the wrapper (and break the
-        # closure references).
-        #
-        # @param graph [DependencyGraph]
-        # @return [void]
-        def replace_graph(graph)
-          @graph = graph
         end
 
         # @see Interface#dependencies_of
@@ -145,13 +113,6 @@ module Woods
         # @see Interface#pagerank
         def pagerank(damping: 0.85, iterations: 20)
           @graph.pagerank(damping: damping, iterations: iterations)
-        end
-
-        # @see Interface#durable?
-        # @return [Boolean] always +false+ — the in-memory adapter is rebuilt
-        #   on every process boot and owns none of its state across restarts.
-        def durable?
-          false
         end
       end
     end

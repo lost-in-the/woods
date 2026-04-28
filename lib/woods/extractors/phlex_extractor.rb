@@ -2,7 +2,6 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
-require_relative 'route_helper_resolver'
 
 module Woods
   module Extractors
@@ -24,7 +23,6 @@ module Woods
     class PhlexExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
-      include RouteHelperResolver
 
       # Common Phlex base classes to look for
       PHLEX_BASES = %w[
@@ -35,10 +33,6 @@ module Woods
 
       def initialize
         @component_base = find_component_base
-        # Precompute the _path/_url → controller#action map once per
-        # extraction run so navigation edges resolve to real targets
-        # instead of the unresolved helper literal.
-        build_route_helper_map
       end
 
       # Extract all Phlex/ViewComponent components
@@ -246,13 +240,10 @@ module Woods
           deps << { type: :stimulus_controller, target: controller, via: :html_attribute }
         end
 
-        # Navigation edges — resolve _path / _url helpers to real controllers
-        # via RouteHelperResolver (wired through the include + build_route_helper_map
-        # call in #initialize). Replaces an earlier manual regex that emitted
-        # unresolved {type: :route, target: 'users'} edges; the graph now
-        # gets {type: :controller, target: 'UsersController', via: :link_to}.
-        deps.concat(scan_navigation_dependencies(source))
-        deps.concat(scan_form_dependencies(source))
+        # URL helpers
+        source.scan(/(\w+)_(?:path|url)/).flatten.uniq.each do |route|
+          deps << { type: :route, target: route, via: :url_helper }
+        end
 
         deps.uniq { |d| [d[:type], d[:target]] }
       end

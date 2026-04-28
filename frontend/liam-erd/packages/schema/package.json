@@ -1,0 +1,29 @@
+{
+  "name": "@liam-hq/schema",
+  "license": "Apache-2.0",
+  "version": "0.5.2",
+  "type": "module",
+  "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@liam-hq/neverthrow": "workspace:*",
+    "fast-json-patch": "3.1.1",
+    "neverthrow": "8.2.0",
+    "valibot": "1.1.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@liam-hq/configs": "workspace:*",
+    "@pgsql/types": "15.1.1",
+    "@types/node": "22.17.1",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  },
+  "scripts": {
+    "build": "echo 'schema: source-only in woods fork (consumed by Vite directly)'",
+    "test": "vitest --watch=false"
+  }
+}

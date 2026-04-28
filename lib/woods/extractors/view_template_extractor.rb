@@ -1,25 +1,19 @@
 # frozen_string_literal: true
 
-require 'set'
+require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
-require_relative 'view_engines/base'
-require_relative 'view_engines/erb'
 
 module Woods
   module Extractors
-    # ViewTemplateExtractor orchestrates view-template extraction across
-    # per-engine implementations under {ViewEngines}.
+    # ViewTemplateExtractor handles ERB view template extraction.
     #
-    # For each configured view directory the orchestrator walks every
-    # extension any registered engine handles, finds the first engine
-    # whose {ViewEngines::Base#handles?} returns true for a given file,
-    # and delegates parsing, scanning, and partial-identifier resolution
-    # to that engine. The orchestrator itself owns filesystem walking,
-    # identifier construction, controller inference, route-helper edge
-    # resolution, and dependency assembly.
+    # Scans `app/views/` for `.html.erb` and `.erb` files and produces
+    # one ExtractedUnit per template. Extracts render calls (partials),
+    # instance variables, and helper method usage. Links partials via
+    # dependencies and infers the owning controller from directory structure.
     #
-    # Engines are registered via {ENGINES}. Add a new engine by creating
-    # a {ViewEngines::Base} subclass and appending it to that list.
+    # This is an ERB-only MVP — HAML, Slim, and layout inheritance
+    # are not yet supported.
     #
     # @example
     #   extractor = ViewTemplateExtractor.new
@@ -27,55 +21,71 @@ module Woods
     #   index = units.find { |u| u.identifier == "users/index.html.erb" }
     #
     class ViewTemplateExtractor
+      include SharedDependencyScanner
       include RouteHelperResolver
 
-      # Directories to scan for view templates.
+      # Directories to scan for view templates
       VIEW_DIRECTORIES = %w[
         app/views
       ].freeze
 
-      # Registered view-template engines, in precedence order. The first
-      # engine whose {ViewEngines::Base#handles?} returns true for a file
-      # wins — place more specific engines before more general ones if
-      # overlap is ever introduced.
-      ENGINES = [ViewEngines::Erb].freeze
-
-      # Template engine names the extraction pipeline currently
-      # understands — aggregated from {ENGINES} so the list stays honest
-      # as engines are added or removed. Surfaced through the MCP
-      # `structure` tool.
-      #
-      # @return [Array<Symbol>]
-      def self.supported_template_engines
-        ENGINES.map { |klass| klass.new.name }.uniq.freeze
-      end
+      # Common Rails view helper methods to detect
+      COMMON_HELPERS = %w[
+        link_to
+        button_to
+        form_for
+        form_with
+        form_tag
+        image_tag
+        stylesheet_link_tag
+        javascript_include_tag
+        content_for
+        yield
+        render
+        redirect_to
+        truncate
+        pluralize
+        number_to_currency
+        number_to_percentage
+        number_with_delimiter
+        time_ago_in_words
+        distance_of_time_in_words
+        simple_format
+        sanitize
+        raw
+        safe_join
+        content_tag
+        tag
+        mail_to
+        url_for
+        asset_path
+        asset_url
+      ].freeze
 
       def initialize
         @directories = VIEW_DIRECTORIES.map { |d| Rails.root.join(d) }
                                        .select(&:directory?)
-        @engines = self.class::ENGINES.map(&:new)
         build_route_helper_map
       end
 
-      # Extract all view templates across the registered engines.
+      # Extract all ERB view templates
       #
       # @return [Array<ExtractedUnit>] List of view template units
       def extract_all
-        extensions = @engines.flat_map(&:extensions).uniq
         @directories.flat_map do |dir|
-          files = extensions.flat_map { |ext| Dir[dir.join("**/*#{ext}")] }
-          files.uniq.filter_map { |file| extract_view_template_file(file) }
+          erb_files = Dir[dir.join('**/*.html.erb')] + Dir[dir.join('**/*.erb')]
+          erb_files.uniq.filter_map do |file|
+            extract_view_template_file(file)
+          end
         end
       end
 
-      # Extract a single view template file.
+      # Extract a single view template file
       #
-      # @param file_path [String] Path to the template file
-      # @return [ExtractedUnit, nil] The extracted unit, or nil if no
-      #   registered engine handles the file
+      # @param file_path [String] Path to the ERB template file
+      # @return [ExtractedUnit, nil] The extracted unit or nil if not ERB
       def extract_view_template_file(file_path)
-        engine = engine_for(file_path)
-        return nil unless engine
+        return nil unless file_path.end_with?('.erb')
 
         source = File.read(file_path)
         identifier = build_identifier(file_path)
@@ -89,9 +99,9 @@ module Woods
 
         unit.namespace = namespace
         unit.source_code = source
-        partials = engine.scan_partials(source)
-        unit.metadata = build_metadata(engine, source, file_path, partials)
-        unit.dependencies = build_dependencies(engine, source, file_path, identifier, partials)
+        partials = extract_rendered_partials(source)
+        unit.metadata = build_metadata(source, file_path, partials)
+        unit.dependencies = build_dependencies(source, file_path, identifier, partials)
 
         unit
       rescue StandardError => e
@@ -100,14 +110,6 @@ module Woods
       end
 
       private
-
-      # Find the registered engine that handles the given file, if any.
-      #
-      # @param file_path [String]
-      # @return [ViewEngines::Base, nil]
-      def engine_for(file_path)
-        @engines.find { |e| e.handles?(file_path) }
-      end
 
       # Build a readable identifier from the file path.
       #
@@ -130,18 +132,17 @@ module Woods
 
       # Build metadata hash for the template.
       #
-      # @param engine [ViewEngines::Base] Engine that matched this file
       # @param source [String] Template source code
       # @param file_path [String] Path to the template
       # @param partials [Array<String>] Pre-extracted partial names
       # @return [Hash]
-      def build_metadata(engine, source, file_path, partials)
+      def build_metadata(source, file_path, partials)
         {
-          template_engine: engine.name.to_s,
+          template_engine: 'erb',
           is_partial: partial?(file_path),
           partials_rendered: partials,
-          instance_variables: engine.scan_instance_variables(source),
-          helpers_called: engine.scan_helpers(source),
+          instance_variables: extract_instance_variables(source),
+          helpers_called: extract_helpers(source),
           loc: source.lines.count { |l| l.strip.length.positive? }
         }
       end
@@ -154,51 +155,105 @@ module Woods
         File.basename(file_path).start_with?('_')
       end
 
+      # Extract partial names from render calls.
+      #
+      # Matches:
+      # - render partial: 'foo/bar'
+      # - render 'foo/bar'
+      # - render :foo
+      #
+      # @param source [String] Template source code
+      # @return [Array<String>] Partial names
+      def extract_rendered_partials(source)
+        partials = Set.new
+
+        # render partial: 'path/to/partial'
+        source.scan(/render\s+partial:\s*['"]([^'"]+)['"]/).each do |match|
+          partials << match[0]
+        end
+
+        # render 'path/to/partial' (string without keyword)
+        source.scan(/render\s+['"]([^'"]+)['"]/).each do |match|
+          partials << match[0]
+        end
+
+        # render :symbol
+        source.scan(/render\s+:(\w+)/).each do |match|
+          partials << match[0]
+        end
+
+        partials.to_a
+      end
+
+      # Extract instance variables used in the template.
+      #
+      # @param source [String] Template source code
+      # @return [Array<String>] Instance variable names
+      def extract_instance_variables(source)
+        source.scan(/@[a-zA-Z_]\w*/).uniq.sort
+      end
+
+      # Extract common Rails helper calls from the template.
+      #
+      # @param source [String] Template source code
+      # @return [Array<String>] Helper method names
+      def extract_helpers(source)
+        found = Set.new
+        COMMON_HELPERS.each do |helper|
+          found << helper if source.match?(/\b#{Regexp.escape(helper)}\b/)
+        end
+        found.to_a.sort
+      end
+
       # Build dependencies for the template.
       #
-      # @param engine [ViewEngines::Base] Engine that matched this file
       # @param source [String] Template source code
       # @param file_path [String] Path to the template
       # @param identifier [String] Template identifier
       # @param partials [Array<String>] Pre-extracted partial names
       # @return [Array<Hash>]
-      def build_dependencies(engine, source, file_path, identifier, partials)
+      def build_dependencies(source, file_path, identifier, partials)
         deps = []
 
+        # Rendered partials
         partials.each do |partial_name|
-          partial_identifier = engine.resolve_partial_identifier(partial_name, identifier)
+          partial_identifier = resolve_partial_identifier(partial_name, identifier)
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
 
+        # Inferred controller
         controller = infer_controller(file_path)
         deps << { type: :controller, target: controller, via: :view_render } if controller
 
-        deps.concat(resolve_navigation_candidates(engine, source))
+        # Navigation edges (link_to, button_to via _path/_url helpers)
+        deps.concat(scan_navigation_dependencies(source, via_type: :link_to))
+
+        # Form destinations (form_with/form_for submitting to a route)
+        deps.concat(scan_form_dependencies(source))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
       end
 
-      # Ask the engine for route-helper candidates and resolve each to a
-      # controller target via {RouteHelperResolver}. Gated by
-      # +Woods.configuration.extract_navigation_edges+ so the config
-      # toggle still applies.
+      # Resolve a partial name to its file identifier.
       #
-      # @param engine [ViewEngines::Base]
-      # @param source [String]
-      # @return [Array<Hash>]
-      def resolve_navigation_candidates(engine, source)
-        return [] unless Woods.configuration&.extract_navigation_edges
-
-        seen = Set.new
-        engine.scan_navigation_candidates(source).filter_map do |cand|
-          resolved = resolve_route_helper(cand[:helper])
-          next unless resolved
-
-          key = [resolved[:controller], cand[:via]]
-          next if seen.include?(key)
-
-          seen.add(key)
-          { type: :controller, target: resolved[:controller], via: cand[:via] }
+      # Given a render call like `render 'comments/comment'`, resolves to
+      # `comments/_comment.html.erb`.
+      #
+      # @param partial_name [String] The partial name from the render call
+      # @param current_identifier [String] The current template's identifier
+      # @return [String] Resolved partial identifier
+      def resolve_partial_identifier(partial_name, current_identifier)
+        if partial_name.include?('/')
+          dir = File.dirname(partial_name)
+          base = File.basename(partial_name)
+          "#{dir}/_#{base}.html.erb"
+        else
+          dir = File.dirname(current_identifier)
+          if dir == '.'
+            "_#{partial_name}.html.erb"
+          else
+            "#{dir}/_#{partial_name}.html.erb"
+          end
         end
       end
 
@@ -209,6 +264,8 @@ module Woods
       def infer_controller(file_path)
         namespace = extract_view_namespace(file_path)
         return nil unless namespace
+
+        # Skip layout-only directories
         return nil if namespace == 'layouts'
 
         parts = namespace.split('/')

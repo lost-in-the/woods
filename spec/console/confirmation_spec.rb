@@ -8,14 +8,13 @@ RSpec.describe Woods::Console::Confirmation do
     context 'when auto-approved' do
       subject(:confirmation) { described_class.new(mode: :auto_approve) }
 
-      it 'does not raise' do
-        expect do
-          confirmation.request_confirmation(
-            tool: 'console_eval',
-            description: 'Execute: 1 + 1',
-            params: { code: '1 + 1' }
-          )
-        end.not_to raise_error
+      it 'returns true without blocking' do
+        result = confirmation.request_confirmation(
+          tool: 'console_eval',
+          description: 'Execute: 1 + 1',
+          params: { code: '1 + 1' }
+        )
+        expect(result).to be true
       end
     end
 

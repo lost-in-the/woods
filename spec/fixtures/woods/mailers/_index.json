@@ -1,9 +1,1 @@
-[
-  {
-    "identifier": "UserMailer",
-    "file_path": "app/mailers/user_mailer.rb",
-    "namespace": null,
-    "estimated_tokens": 80,
-    "chunk_count": 1
-  }
-]
+[]

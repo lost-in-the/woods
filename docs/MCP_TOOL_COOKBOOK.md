@@ -2,21 +2,6 @@
 
 Scenario-based examples showing which tool to use, what parameters to pass, and what you'll get back. Each section answers a natural question you might ask while working in a Rails codebase.
 
-## Conditional Tools & Wiring
-
-The Index Server ships with **29 tools** — **14 are always registered** and **15 are conditionally registered** depending on whether their collaborator is wired into `Woods.configuration`. If you call a conditionally-wired tool that isn't registered, the MCP server will simply not advertise it in `tools/list` — clients see it as "tool not found," not as a runtime failure.
-
-| Tool group | Count | Wiring condition |
-|------------|-------|------------------|
-| Always-on | 14 | Always registered — `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `retrieve` (a.k.a. `codebase_retrieve`), `trace_flow`, `woods_status` |
-| `session_trace` | 1 | `Woods.configuration.session_store` set and session tracer enabled |
-| Operator (5) | 5 | Operator wired — `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
-| Feedback (4) | 4 | `Woods.configuration.feedback_store` wired — `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
-| Snapshot (4) | 4 | `Woods.configuration.snapshot_store` wired (requires migrations 004 + 005) — `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
-| `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
-
-If your agent reports a tool is "missing," check Woods configuration first; the tool is gated by presence of the matching collaborator. Console Server tools (31 total across 4 tiers) are all unconditionally registered.
-
 ---
 
 ## Understanding Your Codebase
@@ -400,7 +385,7 @@ Because Woods runs inside a booted Rails process, it captures every method Rails
 }
 ```
 
-Woods captures the `enums`, `scopes`, and `associations` metadata directly from ActiveRecord reflection — the method names below are inferred per standard Rails conventions, not listed explicitly in the `_index.json`. From this metadata, you can infer every runtime-generated method:
+From this metadata, you can infer every runtime-generated method:
 
 | Source | Generated Methods |
 |--------|------------------|
@@ -616,34 +601,6 @@ Start with performance metrics from the Console Server, then trace the code path
 
 ## Data Exploration (Console Server)
 
-### Scope predicates
-
-Tools that accept a `scope` parameter (`console_count`, `console_sample`, `console_pluck`, `console_aggregate`, `console_association_count`, `console_recent`) support Ransack-style predicate suffixes on hash keys. Plain keys are treated as equality, suffixed keys build safe Arel predicates. Column names are validated against the model's schema — SQL injection via column names is not possible.
-
-| Suffix | SQL equivalent | Example |
-|--------|----------------|---------|
-| `_eq` | `col = value` | `{ "status_eq": "paid" }` |
-| `_not_eq` | `col != value` | `{ "status_not_eq": "cancelled" }` |
-| `_gt` | `col > value` | `{ "total_cents_gt": 1000 }` |
-| `_gteq` | `col >= value` | `{ "created_at_gteq": "2026-01-01" }` |
-| `_lt` | `col < value` | `{ "total_cents_lt": 5000 }` |
-| `_lteq` | `col <= value` | `{ "created_at_lteq": "2026-12-31" }` |
-| `_in` | `col IN (…)` | `{ "status_in": ["paid", "refunded"] }` |
-| `_not_in` | `col NOT IN (…)` | `{ "status_not_in": ["cancelled"] }` |
-| `_null` | `col IS NULL` (value: `true`) / `IS NOT NULL` (value: `false`) | `{ "deleted_at_null": true }` |
-| `_not_null` | `col IS NOT NULL` (value: `true`) / `IS NULL` (value: `false`) | `{ "email_not_null": true }` |
-| `_present` | `col IS NOT NULL AND col != ''` (value: `true`) | `{ "name_present": true }` |
-| `_blank` | `col IS NULL OR col = ''` (value: `true`) | `{ "notes_blank": true }` |
-| `_matches` | `col LIKE value` | `{ "email_matches": "%@example.com" }` |
-
-Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equality. You can mix both in a single scope:
-
-```json
-{ "status": "paid", "total_cents_gt": 1000, "created_at_gteq": "2026-01-01" }
-```
-
----
-
 ### "How many active users do we have?"
 
 **Tool:** `console_count` (Console Server)
@@ -711,7 +668,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 }
 ```
 
-**What you'll get:** A single aggregate value. Functions: `sum`, `avg`, `minimum`, `maximum`, `count`. The `column` parameter is required for every function except `count`, where it may be omitted to count all matching rows.
+**What you'll get:** A single aggregate value. Functions: `sum`, `avg`, `minimum`, `maximum`.
 
 ---
 

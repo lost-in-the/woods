@@ -52,8 +52,8 @@ RSpec.describe Woods::Console::ModelValidator do
   end
 
   describe '#validate_columns!' do
-    it 'passes when all columns are valid' do
-      expect { validator.validate_columns!('User', %w[email name]) }.not_to raise_error
+    it 'returns true when all columns are valid' do
+      expect(validator.validate_columns!('User', %w[email name])).to be true
     end
 
     it 'raises on the first invalid column' do

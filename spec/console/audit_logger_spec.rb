@@ -77,43 +77,4 @@ RSpec.describe Woods::Console::AuditLogger do
       expect(logger.size).to eq(1)
     end
   end
-
-  describe 'control-character sanitization' do
-    it 'strips embedded newlines from a hostile result_summary' do
-      logger.log(
-        tool: 'console_eval',
-        params: {},
-        confirmed: true,
-        result_summary: "ok\nINJECTED:{\"tool\":\"fake\",\"confirmed\":true}"
-      )
-
-      lines = File.readlines(log_path)
-      expect(lines.size).to eq(1)
-      entry = JSON.parse(lines.first)
-      expect(entry['result_summary']).not_to include("\n")
-      expect(entry['result_summary']).to eq('okINJECTED:{"tool":"fake","confirmed":true}')
-    end
-
-    it 'strips NUL and control bytes from params keys' do
-      logger.log(
-        tool: 'console_sql',
-        params: { "a\x00b" => "v\x01w" },
-        confirmed: true,
-        result_summary: 'ok'
-      )
-      entry = JSON.parse(File.readlines(log_path).first)
-      expect(entry['params']).to eq({ 'ab' => 'vw' })
-    end
-
-    it 'preserves horizontal tab (legitimate whitespace)' do
-      logger.log(
-        tool: 'console_eval',
-        params: { code: "a\tb" },
-        confirmed: true,
-        result_summary: 'ok'
-      )
-      entry = JSON.parse(File.readlines(log_path).first)
-      expect(entry['params']['code']).to eq("a\tb")
-    end
-  end
 end

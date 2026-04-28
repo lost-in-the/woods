@@ -56,7 +56,7 @@ module Woods
         @mutex.synchronize do
           case @state
           when :open
-            unless monotonic_now - @last_failure_time >= @reset_timeout
+            unless Time.now - @last_failure_time >= @reset_timeout
               raise CircuitOpenError, "Circuit breaker is open (#{@failure_count} failures)"
             end
 
@@ -81,17 +81,10 @@ module Woods
 
       private
 
-      # Monotonic clock reading — immune to NTP slews and DST adjustments.
-      #
-      # @return [Float] seconds from an unspecified epoch.
-      def monotonic_now
-        Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      end
-
       # Record a failure and potentially open the circuit.
       def record_failure
         @failure_count += 1
-        @last_failure_time = monotonic_now
+        @last_failure_time = Time.now
         @state = :open if @failure_count >= @threshold
       end
 

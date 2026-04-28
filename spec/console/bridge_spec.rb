@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'woods/console/bridge'
 
-RSpec.describe Woods::Console::StubBridge do
+RSpec.describe Woods::Console::Bridge do
   let(:registry) do
     {
       'User' => %w[id email name created_at],

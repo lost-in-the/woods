@@ -179,36 +179,4 @@ RSpec.describe Woods::Retrieval::QueryClassifier do
       expect(result2.keywords).not_to include('the', 'is', 'where')
     end
   end
-
-  describe 'error / edge-case inputs (D-8)' do
-    it 'does not crash on an empty string' do
-      result = classifier.classify('')
-      expect(result.intent).to be_a(Symbol)
-      expect(result.scope).to be_a(Symbol)
-      expect(result.keywords).to eq([])
-    end
-
-    it 'does not crash on a whitespace-only string' do
-      expect { classifier.classify("   \t\n ") }.not_to raise_error
-    end
-
-    it 'handles a very long query without error' do
-      expect { classifier.classify('x ' * 5_000) }.not_to raise_error
-    end
-
-    it 'handles unicode characters' do
-      result = classifier.classify('Comment est-ce que le système fonctionne? 日本語も')
-      expect(result).to be_a(Woods::Retrieval::QueryClassifier::Classification)
-    end
-
-    it 'treats nil as an error (classifier expects a String)' do
-      expect { classifier.classify(nil) }.to raise_error(NoMethodError)
-    end
-
-    it 'classifies queries with no keywords after stop-word filtering' do
-      result = classifier.classify('the a an is')
-      expect(result.keywords).to eq([])
-      expect(result.intent).to be_a(Symbol)
-    end
-  end
 end

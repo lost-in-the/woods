@@ -35,11 +35,8 @@ module Woods
       RRF_K = 60
 
       # @param metadata_store [#find] Store that resolves identifiers to unit metadata
-      # @param graph_store [#pagerank, nil] Optional graph store exposing PageRank scores.
-      #   When present, PageRank rank-percentile replaces the bucketed importance signal.
-      def initialize(metadata_store:, graph_store: nil)
+      def initialize(metadata_store:)
         @metadata_store = metadata_store
-        @graph_store = graph_store
       end
 
       # Rank candidates by weighted signal scoring with diversity adjustment.
@@ -92,9 +89,8 @@ module Woods
 
         candidates.group_by(&:source).each_value do |source_candidates|
           ranked = source_candidates.sort_by { |c| -c.score }
-          ranked.each_with_index do |candidate, idx|
-            # RRF is 1-based (Cormack et al., 2009): top-ranked doc uses rank 1, not 0.
-            rrf_scores[candidate.identifier] += 1.0 / (RRF_K + idx + 1)
+          ranked.each_with_index do |candidate, rank|
+            rrf_scores[candidate.identifier] += 1.0 / (RRF_K + rank)
             metadata_map[candidate.identifier] ||= candidate.metadata
           end
         end
@@ -106,14 +102,7 @@ module Woods
       #
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map)
-        # Plain-Ruby `index_by` substitute — the ActiveSupport version
-        # isn't loaded when the gem runs outside a Rails boot. Preserve
-        # last-wins semantics to match ActiveSupport's `Enumerable#index_by`
-        # so the merged candidate's `source` continues to reflect the
-        # final source a given identifier appeared in (relevant when
-        # observability/debug tools read `.source` on an RRF result).
-        original_by_id = {}
-        candidates.each { |c| original_by_id[c.identifier] = c }
+        original_by_id = candidates.index_by(&:identifier)
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(
@@ -144,7 +133,7 @@ module Woods
               semantic: candidate.score.to_f,
               keyword: keyword_score(candidate),
               recency: recency_score(unit),
-              importance: importance_score(unit, candidate.identifier),
+              importance: importance_score(unit),
               type_match: type_match_score(unit, classification),
               diversity: 1.0 # Adjusted after initial sort
             }
@@ -195,18 +184,9 @@ module Woods
 
       # Importance score based on PageRank / structural importance.
       #
-      # Prefers live PageRank from the graph store (rank-percentile 0.0–1.0) when
-      # available. Falls back to bucketed importance metadata (`:high`/`:medium`/`:low`)
-      # when there is no graph store, the PageRank map is empty, or the identifier
-      # is not yet indexed (e.g., a new unit since the last extraction).
-      #
       # @param unit [Hash, nil] Unit metadata from store
-      # @param identifier [String] Candidate identifier (matched against PageRank keys)
       # @return [Float] 0.0 to 1.0
-      def importance_score(unit, identifier)
-        pagerank = pagerank_importance_map[identifier]
-        return pagerank if pagerank
-
+      def importance_score(unit)
         return 0.5 unless unit
 
         importance = dig_metadata(unit, :importance)
@@ -216,35 +196,6 @@ module Woods
         when 'low' then 0.3
         else 0.5
         end
-      end
-
-      # Lazily-computed rank-percentile map derived from the graph store's PageRank.
-      #
-      # Top-ranked identifier gets 1.0, bottom-ranked gets 1/n. Identifiers absent
-      # from PageRank (new units, ephemeral candidates) return nil and fall back
-      # to the bucketed importance signal.
-      #
-      # @return [Hash{String => Float}]
-      def pagerank_importance_map
-        @pagerank_importance_map ||= compute_pagerank_importance_map
-      end
-
-      # Compute rank-percentile scores from the graph store's PageRank hash.
-      #
-      # @return [Hash{String => Float}] Empty hash when no graph store or no scores.
-      def compute_pagerank_importance_map
-        return {} unless @graph_store.respond_to?(:pagerank)
-
-        scores = @graph_store.pagerank
-        return {} if scores.nil? || scores.empty?
-
-        ranked = scores.sort_by { |_id, score| -score }
-        total = ranked.size.to_f
-        ranked.each_with_index.to_h do |(identifier, _score), rank|
-          [identifier, 1.0 - (rank / total)]
-        end
-      rescue StandardError
-        {}
       end
 
       # Type match score — bonus when result type matches query target_type.

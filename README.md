@@ -251,7 +251,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 ### Index Server — Reads Pre-Extracted Data (No Rails Required)
 
-29 tools for code lookup, dependency traversal, semantic search, graph analysis, and more (14 always-on + 15 that register based on wiring: 5 operator / 4 feedback / 4 snapshot / 1 session-trace / 1 Notion). Reads static JSON from disk — fast, no Rails boot needed.
+27 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. Reads static JSON from disk — fast, no Rails boot needed.
 
 **Claude Code** — add to `.mcp.json` in your project root:
 
@@ -400,7 +400,7 @@ Woods.configure do |config|
     config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
   else
     config.embedding_provider = :ollama
-    config.embedding_options = { model: 'nomic-embed-text', host: 'http://localhost:11434' }
+    config.embedding_options = { base_url: 'http://localhost:11434' }
   end
 end
 ```
@@ -520,7 +520,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Embed     │───>│ Vector Store│    │  MCP Index Server    │  │
-│  │  OpenAI /  │    │ pgvector /  │    │  29 tools            │  │
+│  │  OpenAI /  │    │ pgvector /  │    │  27 tools            │  │
 │  │  Ollama    │    │ Qdrant      │    │  No Rails required   │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 │                                                                  │

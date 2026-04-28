@@ -358,6 +358,28 @@ module Woods
                    else
                      []
                    end,
+          indexes: if model.table_exists?
+                     ActiveRecord::Base.connection.indexes(model.table_name).map do |idx|
+                       { 'name' => idx.name, 'unique' => idx.unique, 'columns' => idx.columns }
+                     end
+                   else
+                     []
+                   end,
+          foreign_keys: if model.table_exists?
+                          ActiveRecord::Base.connection.foreign_keys(model.table_name).map do |fk|
+                            {
+                              'from_table' => fk.from_table,
+                              'to_table' => fk.to_table,
+                              'column' => fk.column,
+                              'primary_key' => fk.primary_key,
+                              'name' => fk.name,
+                              'on_delete' => fk.on_delete,
+                              'on_update' => fk.on_update
+                            }
+                          end
+                        else
+                          []
+                        end,
 
           # ActiveStorage / ActionText
           active_storage_attachments: extract_active_storage_attachments(source),
@@ -530,12 +552,7 @@ module Woods
               conditions: format_callback_conditions(cb)
             }
           end
-        rescue StandardError
-          # Widen beyond NoMethodError per CLAUDE.md — callback-chain
-          # introspection can raise a variety of errors across Rails
-          # versions (NameError, TypeError, LoadError for missing
-          # concerns), and silently swallowing only NoMethodError left
-          # the rest to crash extraction.
+        rescue NoMethodError
           []
         end.compact
       end

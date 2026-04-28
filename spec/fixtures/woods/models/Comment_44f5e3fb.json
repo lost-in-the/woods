@@ -18,7 +18,7 @@
     "parent_class": "ApplicationRecord",
     "git": {
       "last_modified": "2026-01-14T16:00:00Z",
-      "last_author": "dev@example.com"
+      "author": "dev@example.com"
     }
   },
   "dependencies": [

@@ -5,15 +5,7 @@ require 'woods/session_tracer/middleware'
 require 'woods/session_tracer/store'
 
 RSpec.describe Woods::SessionTracer::Middleware do
-  let(:store) do
-    instance_double(Woods::SessionTracer::Store).tap do |s|
-      allow(s).to receive(:record)
-      allow(s).to receive(:read).and_return([])
-      allow(s).to receive(:sessions).and_return([])
-      allow(s).to receive(:clear)
-      allow(s).to receive(:clear_all)
-    end
-  end
+  let(:store) { instance_double(Woods::SessionTracer::Store) }
   let(:inner_app) { ->(_env) { [200, { 'Content-Type' => 'text/html' }, ['OK']] } }
   let(:middleware) { described_class.new(inner_app, store: store, exclude_paths: ['/assets', '/health']) }
 
@@ -245,43 +237,6 @@ RSpec.describe Woods::SessionTracer::Middleware do
         anything,
         hash_including('format' => 'html')
       )
-    end
-  end
-
-  describe 'store interface validation (J-3)' do
-    it 'rejects a store that does not implement :record' do
-      partial = Class.new do
-        # no :record at all
-        def other_method; end
-      end.new
-
-      expect { described_class.new(inner_app, store: partial) }
-        .to raise_error(ArgumentError, /missing required methods.*:record/)
-    end
-
-    it 'accepts a minimal :record-only store (backward-compatible)' do
-      minimal = Class.new do
-        def record(_session_id, _data); end
-      end.new
-
-      expect { described_class.new(inner_app, store: minimal) }.not_to raise_error
-    end
-
-    it 'accepts a store that implements the full interface' do
-      full = Class.new do
-        def record(_session_id, _data); end
-        def read(_session_id) = []
-        def sessions = []
-        def clear(_session_id); end
-        def clear_all; end
-      end.new
-
-      expect { described_class.new(inner_app, store: full) }.not_to raise_error
-    end
-
-    it 'exposes FULL_STORE_INTERFACE as a constant for consumer assertions' do
-      expect(described_class::FULL_STORE_INTERFACE)
-        .to contain_exactly(:record, :read, :sessions, :clear, :clear_all)
     end
   end
 end

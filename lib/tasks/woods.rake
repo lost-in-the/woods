@@ -354,11 +354,33 @@ namespace :woods do
   desc 'Embed all extracted units'
   task embed: :environment do
     require 'woods'
-    require 'woods/tasks'
+    require 'woods/embedding/indexer'
+    require 'woods/embedding/text_preparer'
+    require 'woods/embedding/provider'
+    require 'woods/storage/vector_store'
 
-    indexer = Woods::Tasks.build_embed_indexer
+    config = Woods.configuration
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+
+    provider = Woods::Embedding::Provider::Ollama.new
+    text_preparer = Woods::Embedding::TextPreparer.new
+    vector_store = Woods::Storage::VectorStore::InMemory.new
+
+    indexer = Woods::Embedding::Indexer.new(
+      provider: provider,
+      text_preparer: text_preparer,
+      vector_store: vector_store,
+      output_dir: output_dir
+    )
+
     puts 'Embedding all extracted units...'
-    Woods::Tasks.print_embed_stats(indexer.index_all, mode: :full)
+    stats = indexer.index_all
+
+    puts
+    puts 'Embedding complete!'
+    puts "  Processed: #{stats[:processed]}"
+    puts "  Skipped:   #{stats[:skipped]}"
+    puts "  Errors:    #{stats[:errors]}"
   end
 
   desc 'Nest the data — embed all units (alias for embed)'
@@ -367,11 +389,33 @@ namespace :woods do
   desc 'Embed changed units only (incremental)'
   task embed_incremental: :environment do
     require 'woods'
-    require 'woods/tasks'
+    require 'woods/embedding/indexer'
+    require 'woods/embedding/text_preparer'
+    require 'woods/embedding/provider'
+    require 'woods/storage/vector_store'
 
-    indexer = Woods::Tasks.build_embed_indexer
+    config = Woods.configuration
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+
+    provider = Woods::Embedding::Provider::Ollama.new
+    text_preparer = Woods::Embedding::TextPreparer.new
+    vector_store = Woods::Storage::VectorStore::InMemory.new
+
+    indexer = Woods::Embedding::Indexer.new(
+      provider: provider,
+      text_preparer: text_preparer,
+      vector_store: vector_store,
+      output_dir: output_dir
+    )
+
     puts 'Embedding changed units (incremental)...'
-    Woods::Tasks.print_embed_stats(indexer.index_incremental, mode: :incremental)
+    stats = indexer.index_incremental
+
+    puts
+    puts 'Incremental embedding complete!'
+    puts "  Processed: #{stats[:processed]}"
+    puts "  Skipped:   #{stats[:skipped]}"
+    puts "  Errors:    #{stats[:errors]}"
   end
 
   desc 'Hone the blade — incremental embedding (alias for embed_incremental)'
@@ -628,13 +672,4 @@ namespace :woods do
 
   desc 'Relay findings to Unblocked (alias for unblocked_sync)'
   task relay: :unblocked_sync
-
-  desc 'Generate a random bearer token for woods-mcp-http (WOODS_MCP_HTTP_TOKEN)'
-  task :generate_token do
-    require 'securerandom'
-    token = SecureRandom.hex(32)
-    puts token
-    warn 'Set WOODS_MCP_HTTP_TOKEN to this value in the environment where woods-mcp-http runs,'
-    warn 'and send it as `Authorization: Bearer <token>` from clients.'
-  end
 end

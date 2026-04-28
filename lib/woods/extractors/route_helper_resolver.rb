@@ -52,20 +52,11 @@ module Woods
 
       # Build the route helper lookup map from Rails named routes.
       # Call this once in your extractor's initialize method.
-      #
-      # Resilient to partial test doubles: any exception raised while
-      # traversing Rails routes (unstubbed `application` on a double,
-      # missing `named_routes`, etc.) is swallowed and leaves the map
-      # empty — extractors fall back to returning the helper name
-      # literal as the dependency target.
       def build_route_helper_map
         @route_helper_map = {}
-        return unless defined?(Rails)
+        return unless defined?(Rails) && Rails.application&.routes
 
-        routes = safe_rails_application_routes
-        return unless routes
-
-        routes.named_routes.each do |name, route|
+        Rails.application.routes.named_routes.each do |name, route|
           controller = route.defaults[:controller]
           action = route.defaults[:action]
           next unless controller && action
@@ -77,26 +68,6 @@ module Woods
             verb: extract_route_verb(route)
           }
         end
-      rescue StandardError
-        # Leave @route_helper_map empty — navigation-edge extractors will
-        # fall back to the helper-name literal.
-        @route_helper_map = {}
-      end
-
-      # True when Rails.application.routes is reachable. Probing via
-      # `respond_to?` first so partial RSpec doubles that haven't
-      # stubbed `.application` don't raise MockExpectationError (which
-      # descends from Exception, not StandardError — `rescue StandardError`
-      # would not catch it).
-      def safe_rails_application_routes
-        return nil unless Rails.respond_to?(:application)
-
-        app = Rails.application
-        return nil unless app.respond_to?(:routes)
-
-        app.routes
-      rescue StandardError
-        nil
       end
 
       # Resolve a _path/_url helper to its controller#action target.

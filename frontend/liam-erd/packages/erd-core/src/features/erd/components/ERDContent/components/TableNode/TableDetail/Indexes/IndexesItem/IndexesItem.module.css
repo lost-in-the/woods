@@ -1,0 +1,5 @@
+.wrapper {
+  display: grid;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+}

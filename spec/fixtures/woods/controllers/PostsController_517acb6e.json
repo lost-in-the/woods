@@ -10,7 +10,7 @@
     "parent_class": "ApplicationController",
     "git": {
       "last_modified": "2026-01-12T10:00:00Z",
-      "last_author": "dev@example.com"
+      "author": "dev@example.com"
     }
   },
   "dependencies": [

@@ -31,113 +31,20 @@ module Woods
 
   CONFIG_MUTEX = Mutex.new
 
-  # Console MCP secure defaults — Layer 3 column-name redaction.
-  #
-  # Columns named here are replaced with `[REDACTED]` in every MCP tool
-  # response. This list targets credential columns that appear with the
-  # same names across Devise, Doorkeeper, Rodauth, has_secure_password,
-  # devise-two-factor, OAuth integrations, and hand-rolled auth code.
-  #
-  # Intentionally omitted because they cause over-redaction in apps that
-  # use them for non-secret purposes:
-  #   - `key` — ActiveStorage blob keys, EAV key columns, translation keys
-  #   - `name` — universal non-secret identifier
-  #   - PII columns (`ssn`, `tax_id`, `dob`) — org-specific compliance concern
-  #
-  # Host apps extend this by reassigning `console_redacted_columns` to
-  # `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[extra_column]`, or
-  # override entirely to remove a default.
-  DEFAULT_CONSOLE_REDACTED_COLUMNS = %w[
-    password
-    password_digest
-    password_salt
-    encrypted_password
-    crypted_password
-    salt
-    otp_secret
-    encrypted_otp_secret
-    two_factor_secret
-    backup_codes
-    consumed_timestep
-    reset_password_token
-    confirmation_token
-    unlock_token
-    remember_token
-    invitation_token
-    access_token
-    refresh_token
-    auth_token
-    api_token
-    api_key
-    bearer_token
-    client_secret
-    webhook_secret
-    signing_secret
-    session_secret
-    private_key
-    encrypted_private_key
-    key_hash
-    token
-    secret
-  ].freeze
-
-  # Console MCP secure defaults — Layer 1 table-level blocking.
-  #
-  # Tables named here are rejected outright before any SQL reaches the
-  # database. This list targets authentication and credential storage
-  # tables that carry secrets or session state across all major auth
-  # stacks (Devise, Doorkeeper, Rodauth, has_secure_password, Sorcery,
-  # OmniAuth, and hand-rolled token systems).
-  #
-  # Intentionally omitted to avoid over-blocking benign apps:
-  #   - `users` / `accounts` — many apps expose safe columns from these
-  #     tables and operators should decide explicitly.
-  #   - PII-heavy but auth-unrelated tables (`payments`, `addresses`) —
-  #     org-specific compliance concern, not a universal default.
-  #
-  # To keep the defaults and add more tables:
-  #   Woods.configure { |c| c.console_blocked_tables =
-  #     Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[extra_table] }
-  #
-  # To replace the defaults entirely (including removing entries):
-  #   Woods.configure { |c| c.console_blocked_tables = %w[only_this] }
-  #
-  # To disable Layer 1 (gate becomes inactive; other layers still apply):
-  #   Woods.configure { |c| c.console_blocked_tables = [] }
-  DEFAULT_CONSOLE_BLOCKED_TABLES = %w[
-    sessions
-    api_keys
-    credentials
-    oauth_applications
-    oauth_access_tokens
-    oauth_refresh_tokens
-    identities
-    active_storage_blobs
-  ].freeze
-
   # ════════════════════════════════════════════════════════════════════════
   # Configuration
   # ════════════════════════════════════════════════════════════════════════
 
-  class Configuration # rubocop:disable Metrics/ClassLength
+  class Configuration
     attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
-                  :session_tracer_enabled, :session_tracer_allow_production,
-                  :session_store, :session_id_proc, :session_exclude_paths,
-                  :console_mcp_enabled, :console_mcp_path, :console_mcp_token,
-                  :console_mcp_allowed_origins,
-                  :console_redacted_columns,
-                  :console_redacted_key_values, :console_embedded_read_tools,
-                  :console_blocked_tables, :console_disabled_scanner_patterns,
-                  :console_credential_defense_enabled,
-                  :console_credential_rotation_warning, :console_unsafe_eval_enabled,
-                  :console_unsafe_eval_confirmation, :console_unsafe_eval_audit_log_path,
+                  :session_tracer_enabled, :session_store, :session_id_proc, :session_exclude_paths,
+                  :console_mcp_enabled, :console_mcp_path, :console_redacted_columns,
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
-                  :cache_store, :cache_options,
-                  :dump_retention_count
+                  :cache_store, :cache_options, :erd_enabled, :erd_path, :erd_layers
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
                 :cache_enabled
 
@@ -157,37 +64,12 @@ module Woods
       @enable_snapshots = false
       @context_format = :markdown
       @session_tracer_enabled = false
-      @session_tracer_allow_production = false
       @session_store = nil
       @session_id_proc = nil
       @session_exclude_paths = []
       @console_mcp_enabled = false
       @console_mcp_path = '/mcp/console'
-      # Accept token from config or env var. Nil by default — the railtie
-      # refuses to wire the middleware in production without a real token
-      # and only warns loudly in non-prod when unset.
-      @console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN', nil)
-      # Origins allowed to reach the embedded console MCP. Loopback only
-      # by default; override in host initializers for tunneled or internal
-      # dashboard access.
-      @console_mcp_allowed_origins = %w[
-        http://localhost
-        http://127.0.0.1
-        http://[::1]
-      ]
-      @console_redacted_columns = DEFAULT_CONSOLE_REDACTED_COLUMNS.dup
-      @console_redacted_key_values = []
-      @console_embedded_read_tools = false
-      @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
-      @console_disabled_scanner_patterns = []
-      @console_credential_defense_enabled = true
-      @console_credential_rotation_warning = true
-      @console_unsafe_eval_enabled = nil # nil = fall back to env WOODS_CONSOLE_UNSAFE_EVAL
-      # Required collaborators when the opt-in is on. Both default to nil;
-      # the server refuses to boot with the opt-in set unless the host has
-      # wired them (fail-closed — see Server.build_embedded).
-      @console_unsafe_eval_confirmation = nil
-      @console_unsafe_eval_audit_log_path = nil
+      @console_redacted_columns = []
       @notion_api_token = nil
       @notion_database_ids = {}
       @unblocked_api_token = nil
@@ -196,7 +78,9 @@ module Woods
       @cache_enabled = false
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
-      @dump_retention_count = 3
+      @erd_enabled = false
+      @erd_path = '/woods/erd'
+      @erd_layers = %i[models controllers jobs services mailers]
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods

@@ -39,8 +39,6 @@ Key enrichments beyond source file content:
 
 **Navigation edges.** View templates scanning for `_path`/`_url` route helper calls produce `link_to` edges pointing to controllers. Controller `redirect_to` calls produce `redirect_to` edges. Form submissions produce `form_action` edges. Filter with the `via` parameter on `dependencies`/`dependents` to isolate UI navigation paths.
 
-**View-template coverage is ERB-only.** HAML, Slim, and Turbo Streams templates are not parsed at all — an app written in Slim will appear with zero view units even when views exist. Stimulus controller *references* are detected inside `PhlexExtractor` and `ViewComponentExtractor` via `data-controller` attribute scanning (dependency edges with `via: :html_attribute`, type `stimulus_controller`), but the Stimulus controller JS files themselves under `app/javascript/controllers/` are not extracted. Query the `structure` tool's `template_engines` field to confirm which engines the current index parses. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and `ViewTemplateExtractor::ENGINES` registry landed with issue #110 — HAML / Slim / Turbo implementations slot in by subclassing `Base` and appending to `ENGINES`.
-
 ---
 
 ## MCP Server Setup
@@ -72,7 +70,7 @@ The Index Server reads from `tmp/woods/` and does not require Rails.
 }
 ```
 
-> Use `woods-mcp-start` on Claude Code for automatic restart after crashes. Use `woods-mcp` on Cursor, Windsurf, or other MCP clients.
+`woods-mcp-start` is a self-healing wrapper that validates `manifest.json` before starting and auto-restarts on failure. Use it for Claude Code.
 
 **Cursor** — add to `.cursor/mcp.json`:
 
@@ -237,9 +235,8 @@ Use `framework` to search the Rails/gem source installed in the app — not docu
 
 | Tool | Key Parameters | Description |
 |------|---------------|-------------|
-| `woods_status` | _(none)_ | Diagnose whether the server is ready. Returns extraction metadata (last run, unit counts, git SHA, staleness seconds), retriever/embedding configuration, and feature flags. **Call first on cold connect.** |
 | `lookup` | `identifier`, `include_source`, `sections` | Full unit by exact identifier. `sections` filters which fields to return. |
-| `search` | `query`, `types`, `fields`, `limit` | Regex search across identifiers, source, or metadata. Returns `{ results: [...], note?, partial? }` — `note` flags broad patterns (>50% of a directory matched), `partial` means the phase-2 scan cap (`WOODS_SEARCH_MAX_SCAN`, default 500) was hit. Invalid regex falls back to literal match. Follow up with `lookup`. |
+| `search` | `query`, `types`, `fields`, `limit` | Regex search across identifiers, source, or metadata. Returns identifiers — follow up with `lookup`. |
 | `dependencies` | `identifier`, `depth`, `types`, `via` | Forward dependency tree (BFS). What a unit depends on. |
 | `dependents` | `identifier`, `depth`, `types`, `via` | Reverse dependency tree (BFS). What depends on a unit. |
 | `structure` | `detail` | Manifest summary or full unit breakdown by type. |
@@ -300,19 +297,6 @@ Use `framework` to search the Rails/gem source installed in the app — not docu
 |------|---------------|-------------|
 | `reload` | — | Reload extraction data from disk without restarting the server. |
 | `notion_sync` | — | Sync models and columns to Notion. Requires `notion_api_token` and `notion_database_ids`. |
-
-### Structured Errors
-
-Tool failures return `isError: true` with machine-readable `_meta.error_code` so agents can branch without parsing prose. Common codes:
-
-| `error_code` | Meaning | Fix |
-|--------------|---------|-----|
-| `:not_configured` | A required config value is missing | Read `_meta.config_key` and `_meta.doc_link` |
-| `:not_found` | Unit, snapshot, or other entity doesn't exist | Check `_meta.identifier` / `_meta.git_sha`; use `search` or `list_snapshots` |
-| `:rate_limited` | PipelineGuard cooldown in effect | Wait `_meta.retry_after_seconds` and retry |
-| `:unsupported_argument` | Enum value not allowed | See `_meta.allowed` for valid values |
-| `:internal_error` | Assembly or rendering raised an exception | Inspect the text message |
-| `:api_error` | External API (e.g. Notion) failed | Inspect the text message |
 
 ### Console Server (selected tools)
 
@@ -428,7 +412,6 @@ Set these in `config/initializers/woods.rb` (created by `rails generate woods:in
 | `extract_navigation_edges` | `true` | Navigation edges (`link_to`, `redirect_to`, `form_action`) included in extraction |
 | `session_tracer_enabled` | `false` | Required for `session_trace` tool |
 | `console_redacted_columns` | `[]` | Columns hidden from Console Server results |
-| `console_embedded_read_tools` | `false` | Unlocks `console_sql` / `console_query` in embedded transports |
 
 Storage presets set vector store, metadata store, and embedding together:
 

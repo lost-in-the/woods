@@ -225,62 +225,6 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
         expect(c.metadata[:type] || c.metadata['type']).to eq('model')
       end
     end
-
-    describe 'explicit type_filter: (#108)' do
-      it 'pushes type_filter down into vector store filters' do
-        classification = classifier.classify('how does auth work?')
-        # type_filter restricts vector search to controllers; returns only
-        # UsersController from the four seeded units.
-        result = executor.execute(
-          query: 'how does auth work?',
-          classification: classification,
-          type_filter: ['controller']
-        )
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
-        expect(types).to all(eq('controller'))
-        expect(result.candidates.map(&:identifier)).to eq(%w[UsersController])
-      end
-
-      it 'accepts multiple types as an Array' do
-        classification = classifier.classify('how does auth work?')
-        result = executor.execute(
-          query: 'how does auth work?',
-          classification: classification,
-          type_filter: %w[service controller]
-        )
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
-        expect(types).to all(satisfy { |t| %w[service controller].include?(t) })
-        expect(result.candidates.map(&:identifier)).to contain_exactly('UserService', 'UsersController')
-      end
-
-      it 'overrides classifier-derived target_type when both are present' do
-        # "how does User model work" sets classification.target_type = :model,
-        # but an explicit type_filter: [service] must win.
-        classification = classifier.classify('how does the User model work?')
-        expect(classification.target_type).to eq(:model)
-
-        result = executor.execute(
-          query: 'how does the User model work?',
-          classification: classification,
-          type_filter: ['service']
-        )
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
-        expect(types).to all(eq('service'))
-      end
-
-      it 'ignores an empty type_filter: falls through to classifier-derived filters' do
-        classification = classifier.classify('how does the User model work?')
-        result = executor.execute(
-          query: 'how does the User model work?',
-          classification: classification,
-          type_filter: []
-        )
-        # With type_filter: [], the classifier's target_type :model still
-        # applies — only model-type candidates come through.
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
-        expect(types).to all(eq('model'))
-      end
-    end
   end
 
   describe 'keyword strategy execution' do

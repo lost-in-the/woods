@@ -154,18 +154,6 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       expect(connection).to have_received(:execute).with(/metadata->>'type' = 'model'/)
     end
 
-    it 'translates an Array filter value into IN (...) membership (#108)' do
-      store.search([0.1, 0.2, 0.3], filters: { type: %w[model service] })
-
-      expect(connection).to have_received(:execute).with(/metadata->>'type' IN \('model', 'service'\)/)
-    end
-
-    it 'emits an always-false predicate for an empty Array filter' do
-      store.search([0.1, 0.2, 0.3], filters: { type: [] })
-
-      expect(connection).to have_received(:execute).with(/WHERE FALSE/)
-    end
-
     it 'returns empty array when no results' do
       allow(connection).to receive(:execute).and_return([])
 
@@ -258,58 +246,6 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
     it 'rejects non-numeric vector elements on search' do
       expect { store.search([0.1, nil, 0.3]) }
         .to raise_error(ArgumentError, /not numeric/)
-    end
-
-    it 'rejects NaN and Infinity on store' do
-      allow(connection).to receive(:execute)
-      allow(connection).to receive(:quote) { |v| "'#{v}'" }
-
-      expect { store.store('doc1', [0.1, Float::NAN, 0.3]) }
-        .to raise_error(ArgumentError, /not finite/)
-      expect { store.store('doc1', [0.1, Float::INFINITY, 0.3]) }
-        .to raise_error(ArgumentError, /not finite/)
-    end
-
-    it 'coerces vector elements to Float when building the literal so a Numeric subclass cannot smuggle SQL' do
-      sneaky = Class.new(Numeric) do
-        def to_s
-          "', INJECTED, '"
-        end
-
-        def to_f
-          0.5
-        end
-
-        def finite?
-          true
-        end
-      end.new
-
-      captured = nil
-      allow(connection).to receive(:execute) do |sql|
-        captured = sql
-        []
-      end
-      allow(connection).to receive(:quote) { |v| "'#{v}'" }
-
-      store.search([0.1, sneaky, 0.3])
-      expect(captured).not_to include('INJECTED')
-      expect(captured).to match(/\[0\.1,0\.5,0\.3\]/)
-    end
-  end
-
-  describe '#build_where SQL construction (G-3)' do
-    it 'passes the metadata key through connection.quote so future regex changes cannot reopen injection' do
-      quoted_calls = []
-      allow(connection).to receive(:execute).and_return([])
-      allow(connection).to receive(:quote) do |v|
-        quoted_calls << v
-        "'#{v}'"
-      end
-
-      store.search([0.1, 0.2, 0.3], filters: { unit_type: 'model' })
-      expect(quoted_calls).to include('unit_type')
-      expect(quoted_calls).to include('model')
     end
   end
 end

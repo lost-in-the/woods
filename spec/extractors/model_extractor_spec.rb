@@ -743,4 +743,98 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(extractor.warnings.first).to include('BrokenModel')
     end
   end
+
+  # ── extract_metadata indexes and foreign_keys ─────────────────────
+
+  describe '#extract_metadata indexes and foreign_keys' do
+    let(:model) do
+      model = double('Model')
+      allow(model).to receive_messages(
+        table_name: 'posts',
+        primary_key: 'id',
+        table_exists?: true,
+        reflect_on_all_associations: [],
+        inheritance_column: 'type',
+        superclass: double(name: 'ApplicationRecord'),
+        methods: [],
+        instance_methods: [],
+        column_names: %w[id title],
+        columns: [
+          double(name: 'id', sql_type: 'bigint', null: false, default: nil),
+          double(name: 'title', sql_type: 'varchar(255)', null: true, default: nil)
+        ],
+        abstract_class?: false,
+        name: 'Post'
+      )
+      allow(model).to receive(:_validators).and_return({})
+      model
+    end
+
+    let(:connection) { double('Connection') }
+    let(:active_record_base) { double('ActiveRecord::Base') }
+
+    before do
+      stub_const('ActiveRecord::Base', active_record_base)
+      allow(active_record_base).to receive(:connection).and_return(connection)
+
+      # Stub private helper methods so tests focus on indexes/foreign_keys
+      allow(extractor).to receive(:extract_associations).and_return([])
+      allow(extractor).to receive(:extract_validations).and_return([])
+      allow(extractor).to receive(:extract_callbacks).and_return([])
+      allow(extractor).to receive(:extract_scopes).and_return([])
+      allow(extractor).to receive(:extract_enums).and_return({})
+      allow(extractor).to receive(:extract_included_modules).and_return([])
+      allow(extractor).to receive(:filter_instance_methods).and_return([])
+      allow(extractor).to receive(:sti_base?).and_return(false)
+      allow(extractor).to receive(:sti_child?).and_return(false)
+      allow(extractor).to receive(:count_loc).and_return(0)
+      allow(extractor).to receive(:callback_count).and_return(0)
+      allow(extractor).to receive(:extract_active_storage_attachments).and_return([])
+      allow(extractor).to receive(:extract_action_text_fields).and_return([])
+      allow(extractor).to receive(:extract_variant_definitions).and_return([])
+      allow(extractor).to receive(:extract_database_roles).and_return([])
+      allow(extractor).to receive(:extract_shard_config).and_return(nil)
+    end
+
+    it 'extracts structured index metadata' do
+      index = double(name: 'index_posts_on_title', unique: false, columns: ['title'])
+      allow(connection).to receive(:indexes).with('posts').and_return([index])
+      allow(connection).to receive(:foreign_keys).with('posts').and_return([])
+
+      metadata = extractor.send(:extract_metadata, model)
+
+      expect(metadata[:indexes]).to eq([
+                                         { 'name' => 'index_posts_on_title', 'unique' => false, 'columns' => ['title'] }
+                                       ])
+    end
+
+    it 'extracts structured foreign_key metadata' do
+      fk = double(
+        from_table: 'posts', to_table: 'users', column: 'user_id',
+        primary_key: 'id', name: 'fk_posts_user_id',
+        on_delete: :cascade, on_update: nil
+      )
+      allow(connection).to receive(:indexes).with('posts').and_return([])
+      allow(connection).to receive(:foreign_keys).with('posts').and_return([fk])
+
+      metadata = extractor.send(:extract_metadata, model)
+
+      expect(metadata[:foreign_keys]).to eq([
+                                              {
+                                                'from_table' => 'posts', 'to_table' => 'users', 'column' => 'user_id',
+                                                'primary_key' => 'id', 'name' => 'fk_posts_user_id',
+                                                'on_delete' => :cascade, 'on_update' => nil
+                                              }
+                                            ])
+    end
+
+    it 'returns empty arrays when table does not exist' do
+      allow(model).to receive(:table_exists?).and_return(false)
+
+      metadata = extractor.send(:extract_metadata, model)
+
+      expect(metadata[:indexes]).to eq([])
+      expect(metadata[:foreign_keys]).to eq([])
+    end
+  end
 end

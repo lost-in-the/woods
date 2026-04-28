@@ -35,7 +35,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "config",
-    "files": ["lib/woods.rb"],
+    "files": ["lib/codebase_index.rb"],
     "description": "Default extractors config only lists :models, :controllers, :services, :components. Missing: :jobs, :mailers, :graphql, :rails_source.",
     "status": "resolved"
   },
@@ -527,53 +527,5 @@
     "description": "Three rake tasks: woods:retrieve[query] (CLI retrieval with HumanAdapter), woods:embed (full embedding pipeline), woods:embed_incremental (content_hash-based).",
     "status": "resolved",
     "depends_on": ["B-038"]
-  },
-  {
-    "id": "B-053",
-    "slug": "unsafe-eval-opt-in",
-    "title": "Wire console_eval behind WOODS_CONSOLE_UNSAFE_EVAL + EvalGuard (v0.2)",
-    "severity": "medium",
-    "category": "implementation",
-    "layer": "console-mcp",
-    "files": [
-      "lib/woods/console/embedded_executor.rb",
-      "lib/woods/console/eval_guard.rb",
-      "lib/woods/console/server.rb",
-      "docs/CONSOLE_MCP_SETUP.md"
-    ],
-    "description": "Embedded-mode console_eval is hard-refused at dispatch (EmbeddedExecutor#refusal_for), so EvalGuard is unreachable on the shipped path. The refusal message already advertises WOODS_CONSOLE_UNSAFE_EVAL + a Rails.env.production? rejection as the opt-in contract, but the execution wiring is not implemented. Deliver the full contract before running any Ruby: (1) gate on both config.console_unsafe_eval_enabled AND ENV['WOODS_CONSOLE_UNSAFE_EVAL']; (2) refuse unconditionally when Rails.env.production?; (3) run EvalGuard.check! before dispatch; (4) require Confirmation approval; (5) record the run in AuditLogger. Partial wiring is worse than the current refusal — ship all five or none. Tracked in issue #87 (option 2 deferral). RESOLVED: EmbeddedExecutor#handle_eval now runs all five controls (guard → confirmation → SafeContext → Timeout → audit). Server.build_embedded fails closed at boot when the flag is on but a Confirmation or audit-log path is missing.",
-    "status": "resolved",
-    "depends_on": []
-  },
-  {
-    "id": "B-054",
-    "slug": "extract-bridge-protocol",
-    "title": "Extract BridgeProtocol constants module from StubBridge",
-    "severity": "low",
-    "category": "refactor",
-    "layer": "console-mcp",
-    "files": [
-      "lib/woods/console/bridge.rb",
-      "lib/woods/console/embedded_executor.rb"
-    ],
-    "description": "Issue #82 renamed Woods::Console::Bridge to StubBridge so the scaffold status is obvious. The downstream smell — flagged by both reviewers — is that the canonical protocol contract (SUPPORTED_TOOLS, TIER1_TOOLS, TOOL_HANDLERS) still lives on the stub class. EmbeddedExecutor::TIER1_TOOLS = StubBridge::TIER1_TOOLS reads as 'the real executor borrows constants from the stub', which is backwards. Extract a Woods::Console::BridgeProtocol module owning the three constants; have StubBridge include or reference it; update EmbeddedExecutor to read from BridgeProtocol directly. When the real bridge-process implementation lands it can claim the Bridge class name without the protocol contract migrating with it. Pre-existing doc-rot in docs/design/CONSOLE_SERVER.md (sections 107/118/130 still describe rails runner lib/woods/console/bridge.rb as if it works) is in scope for the same PR. RESOLVED: new lib/woods/console/bridge_protocol.rb owns SUPPORTED_TOOLS / TIER1_TOOLS / TOOL_HANDLERS. StubBridge references BridgeProtocol (top-level aliases keep StubBridge::SUPPORTED_TOOLS working for existing callers). EmbeddedExecutor reads TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS and no longer imports bridge.rb. CONSOLE_SERVER.md Connection Modes section carries a callout that the three rails-runner configs describe the target bridge-process architecture, not the shipping state.",
-    "status": "resolved",
-    "depends_on": []
-  },
-  {
-    "id": "B-055",
-    "slug": "durable-graph-store-extraction-writes",
-    "title": "Wire extraction-side writes when the first durable GraphStore adapter lands",
-    "severity": "low",
-    "category": "implementation",
-    "layer": "storage",
-    "files": [
-      "lib/woods/extractor.rb",
-      "lib/woods/storage/graph_store.rb",
-      "lib/woods/mcp/bootstrapper.rb"
-    ],
-    "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md §3.5. Do NOT design a speculative write API before the concrete adapter exists — bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
-    "status": "open",
-    "depends_on": []
   }
 ]

@@ -50,77 +50,10 @@ RSpec.describe Woods::Console::ConsoleResponseRenderer do
       expect(result).to include('  - other: x')
     end
 
-    it 'renders Hash with a scalar Array value as a bullet list' do
-      data = { 'items' => %w[one two three] }
+    it 'renders Hash with Array values as item count' do
+      data = { 'items' => [1, 2, 3] }
       result = renderer.render_default(data)
-      expect(result).to include('**items:**')
-      expect(result).to include('- one')
-      expect(result).to include('- two')
-      expect(result).to include('- three')
-    end
-
-    it 'renders Hash with an Array<Hash> value as a Markdown table' do
-      data = { 'records' => [{ 'id' => 1, 'name' => 'Alice' }, { 'id' => 2, 'name' => 'Bob' }] }
-      result = renderer.render_default(data)
-      expect(result).to include('**records:**')
-      expect(result).to include('| id | name |')
-      expect(result).to include('| --- | --- |')
-      expect(result).to include('| 1 | Alice |')
-      expect(result).to include('| 2 | Bob |')
-    end
-
-    it 'renders positional rows as a table using sibling `columns` as headers (sql / query)' do
-      data = {
-        'columns' => %w[id subdomain crypted_password],
-        'rows' => [[1, 'test', '[REDACTED]'], [2, 'other', '[REDACTED]']],
-        'count' => 2
-      }
-      result = renderer.render_default(data)
-      expect(result).to include('**rows:**')
-      expect(result).to include('| id | subdomain | crypted_password |')
-      expect(result).to include('| 1 | test | [REDACTED] |')
-      expect(result).to include('| 2 | other | [REDACTED] |')
-      expect(result).to include('**count:** 2')
-    end
-
-    it 'renders positional multi-column values as a table (pluck multi-column)' do
-      data = {
-        'columns' => %w[id subdomain],
-        'values' => [[1, 'test'], [2, 'other']]
-      }
-      result = renderer.render_default(data)
-      expect(result).to include('| id | subdomain |')
-      expect(result).to include('| 1 | test |')
-      expect(result).to include('| 2 | other |')
-    end
-
-    it 'renders a flat scalar values array against a single-column header (pluck single-column)' do
-      data = {
-        'columns' => %w[subdomain],
-        'values' => %w[alpha beta gamma]
-      }
-      result = renderer.render_default(data)
-      expect(result).to include('| subdomain |')
-      expect(result).to include('| alpha |')
-      expect(result).to include('| beta |')
-      expect(result).to include('| gamma |')
-    end
-
-    it 'renders an empty `rows` array as _(empty)_ with the columns key still labeled' do
-      data = { 'columns' => %w[id], 'rows' => [], 'count' => 0 }
-      result = renderer.render_default(data)
-      expect(result).to include('**rows:**')
-      expect(result).to include('_(empty)_')
-      expect(result).to include('**count:** 0')
-    end
-
-    it 'falls back to bullet-list rendering when `values` has no sibling columns' do
-      data = { 'values' => [1, 2, 3] }
-      result = renderer.render_default(data)
-      expect(result).to include('**values:**')
-      expect(result).to include('- 1')
-      expect(result).to include('- 2')
-      expect(result).to include('- 3')
+      expect(result).to include('**items:** 3 items')
     end
   end
 

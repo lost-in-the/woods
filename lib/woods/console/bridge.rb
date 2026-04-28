@@ -1,64 +1,31 @@
 # frozen_string_literal: true
 
 require 'json'
-require_relative 'bridge_protocol'
 require_relative 'model_validator'
 require_relative 'safe_context'
 
 module Woods
   module Console
-    # **PROTOCOL SCAFFOLD — does not execute real queries.** Every handler
-    # below returns static empty data (`{ 'count' => 0 }`, `{ 'records' =>
-    # [] }`, etc.). Real in-process execution lives in
-    # {Woods::Console::EmbeddedExecutor}; the eventual real bridge process
-    # for Option D will replace this scaffold with a class that performs
-    # actual ActiveRecord queries.
-    #
-    # The scaffold pins the JSON-lines wire protocol — request envelope,
-    # response envelope, supported-tools list, error shape — so other
-    # components (EmbeddedExecutor, ConnectionManager, Server) can be
-    # built and tested against a stable contract before the real
-    # bridge-process implementation lands. Treat this class the way you'd
-    # treat a Sinatra fake of a third-party API in tests: it satisfies
-    # the protocol, nothing more.
-    #
-    # ## Why the name carries "Stub"
-    #
-    # Round-1 audit Track H-4 flagged this class as a "critical SafeContext
-    # bypass" because `handle_request` doesn't wrap calls in `SafeContext`.
-    # That finding wasn't exploitable — no live code path executes through
-    # this class in the shipped gem — but the bare name `Bridge` made the
-    # scaffold status invisible to auditors. The `Stub` prefix removes the
-    # ambiguity. When the real bridge-process implementation is delivered,
-    # it should claim the `Bridge` name; this class will either be deleted
-    # (if the protocol is fully owned by the real bridge) or renamed to
-    # `BridgeProtocol` and reduced to a constants module.
-    #
-    # ## Protocol
+    # JSON-lines protocol bridge between MCP server and Rails environment.
     #
     # Reads JSON-lines requests from an input IO, validates model/column names,
-    # dispatches to (stub) tool handlers, and writes JSON-lines responses to
-    # an output IO.
+    # dispatches to tool handlers, and writes JSON-lines responses to an output IO.
     #
     # Protocol:
     #   Request:  {"id":"req_1","tool":"count","params":{"model":"Order","scope":{"status":"pending"}}}
     #   Response: {"id":"req_1","ok":true,"result":{"count":1847},"timing_ms":12.3}
     #   Error:    {"id":"req_1","ok":false,"error":"Model not found","error_type":"validation"}
     #
-    # @example Wiring against a fake input/output (testing only — handlers return empty data)
-    #   bridge = StubBridge.new(input: $stdin, output: $stdout,
-    #                           model_validator: validator, safe_context: ctx)
+    # @example
+    #   bridge = Bridge.new(input: $stdin, output: $stdout,
+    #                       model_validator: validator, safe_context: ctx)
     #   bridge.run
     #
-    class StubBridge
-      # Protocol constants live on {BridgeProtocol} so the real executor
-      # (EmbeddedExecutor) and a future real bridge-process class can
-      # reference them without importing the scaffold. These top-level
-      # aliases keep `StubBridge::SUPPORTED_TOOLS` working for existing
-      # callers and specs.
-      SUPPORTED_TOOLS = BridgeProtocol::SUPPORTED_TOOLS
-      TIER1_TOOLS     = BridgeProtocol::TIER1_TOOLS
-      TOOL_HANDLERS   = BridgeProtocol::TOOL_HANDLERS
+    class Bridge
+      SUPPORTED_TOOLS = %w[count sample find pluck aggregate association_count schema recent status].freeze
+      # Alias used by EmbeddedExecutor to avoid duplicating the list.
+      TIER1_TOOLS = SUPPORTED_TOOLS
+      TOOL_HANDLERS = SUPPORTED_TOOLS.to_h { |t| [t, :"handle_#{t}"] }.freeze
 
       # @param input [IO] Input stream (reads JSON-lines)
       # @param output [IO] Output stream (writes JSON-lines)
@@ -148,10 +115,10 @@ module Woods
         @model_validator.validate_model!(model)
       end
 
-      # Stub handlers below return empty/zero data by design — see the
-      # class-level docstring. Real in-process execution happens in
-      # EmbeddedExecutor; the eventual Option-D bridge process will replace
-      # this class entirely.
+      # Stub handlers below return empty/zero data by design.
+      # This Bridge class is a protocol scaffold — real execution happens
+      # in EmbeddedExecutor (in-process) or a live Rails bridge process.
+      # The stubs satisfy the protocol contract for testing and offline use.
 
       def handle_count(_params)
         { 'count' => 0 }
@@ -167,7 +134,7 @@ module Woods
 
       def handle_pluck(params)
         @model_validator.validate_columns!(params['model'], params['columns']) if params['columns']
-        { 'columns' => Array(params['columns']), 'values' => [] }
+        { 'values' => [] }
       end
 
       def handle_aggregate(params)

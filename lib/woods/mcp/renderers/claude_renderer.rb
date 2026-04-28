@@ -59,12 +59,6 @@ module Woods
           wrap_xml('recent_changes', super)
         end
 
-        def render_trace_flow(data, **)
-          content = super
-          entry_point = data[:entry_point] || data['entry_point']
-          wrap_xml('trace_flow', content, entry_point: entry_point)
-        end
-
         def render_default(data)
           wrap_xml('result', super)
         end

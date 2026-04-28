@@ -1,0 +1,6 @@
+.comment {
+  color: var(--color-white-alpha-70);
+  font-size: var(--font-size-2);
+  font-style: normal;
+  line-height: 150%;
+}

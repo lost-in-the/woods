@@ -1,0 +1,87 @@
+.dialogOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  background-color: var(--modal-overlay);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  isolation: isolate;
+  animation: overlayShow 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dialogContent {
+  font-family: var(--main-font);
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1002;
+  width: 400px;
+  padding: var(--spacing-5);
+  color: var(--global-foreground);
+  background-color: var(--global-background);
+  border: solid 1px var(--pane-border);
+  border-radius: var(--border-radius-lg);
+  box-shadow: 0 4px 20px 0 rgb(0 0 0 / 100%);
+  transform: translate(-50%, -50%);
+  animation: contentShow 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dialogContent:focus {
+  outline: none;
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: var(--font-size-7);
+  font-weight: 500;
+  color: var(--global-foreground);
+}
+
+.dialogDescription {
+  margin: var(--spacing-5) 0;
+  font-size: var(--font-size-4);
+  line-height: 1.6;
+  color: var(--global-foreground);
+}
+
+.dialogActions {
+  display: flex;
+  gap: var(--spacing-2);
+  justify-content: flex-end;
+  margin-top: var(--spacing-5);
+}
+
+.dialogButton,
+.confirmButton {
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--font-size-4);
+  border: 1px solid var(--button-border);
+  border-radius: var(--border-radius-md);
+}
+
+.confirmButton {
+  background-color: var(--button-danger);
+  border: 1px solid var(--button-danger);
+}
+
+@keyframes overlayShow {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes contentShow {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}

@@ -79,7 +79,7 @@ RSpec.describe Woods::SessionTracer::FileStore do
   describe '#sessions' do
     it 'lists sessions sorted by most recent first' do
       store.record('older', request_data.merge('timestamp' => '2026-02-13T09:00:00Z'))
-      sleep 0.05 # Ensure different mtime — some filesystems have coarse mtime granularity under load
+      sleep 0.01 # Ensure different mtime
       store.record('newer', request_data.merge('timestamp' => '2026-02-13T10:00:00Z'))
 
       summaries = store.sessions(limit: 10)

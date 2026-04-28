@@ -87,9 +87,9 @@ RSpec.describe Woods::Resilience::CircuitBreaker do
       end
 
       it 'transitions to half_open after the reset timeout elapses' do
-        sleep 0.4 # reset_timeout is 0.1 — large margin so CI jitter can't flake
+        allow(Time).to receive(:now).and_return(Time.now + 0.2)
 
-        # The next call attempt will transition to half_open then close on success
+        # The next call attempt will transition to half_open
         breaker.call { 'recovered' }
         expect(breaker.state).to eq(:closed)
       end
@@ -102,7 +102,7 @@ RSpec.describe Woods::Resilience::CircuitBreaker do
         rescue StandardError
           nil
         end
-        sleep 0.4 # reset_timeout is 0.1 — large margin so CI jitter can't flake
+        allow(Time).to receive(:now).and_return(Time.now + 0.2)
       end
 
       it 'closes on successful call' do

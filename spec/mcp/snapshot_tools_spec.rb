@@ -30,24 +30,24 @@ RSpec.describe 'Snapshot MCP tools' do
   describe 'without snapshot store configured' do
     let(:server) { Woods::MCP::Server.build(index_dir: fixture_dir) }
 
-    it 'list_snapshots is not registered' do
-      tools = server.instance_variable_get(:@tools)
-      expect(tools.keys).not_to include('list_snapshots')
+    it 'list_snapshots returns not configured message' do
+      response = call_tool(server, 'list_snapshots')
+      expect(response_text(response)).to include('not configured')
     end
 
-    it 'snapshot_diff is not registered' do
-      tools = server.instance_variable_get(:@tools)
-      expect(tools.keys).not_to include('snapshot_diff')
+    it 'snapshot_diff returns not configured message' do
+      response = call_tool(server, 'snapshot_diff', sha_a: 'abc', sha_b: 'def')
+      expect(response_text(response)).to include('not configured')
     end
 
-    it 'unit_history is not registered' do
-      tools = server.instance_variable_get(:@tools)
-      expect(tools.keys).not_to include('unit_history')
+    it 'unit_history returns not configured message' do
+      response = call_tool(server, 'unit_history', identifier: 'User')
+      expect(response_text(response)).to include('not configured')
     end
 
-    it 'snapshot_detail is not registered' do
-      tools = server.instance_variable_get(:@tools)
-      expect(tools.keys).not_to include('snapshot_detail')
+    it 'snapshot_detail returns not configured message' do
+      response = call_tool(server, 'snapshot_detail', git_sha: 'abc')
+      expect(response_text(response)).to include('not configured')
     end
   end
 

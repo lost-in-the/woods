@@ -3,7 +3,6 @@
 require 'spec_helper'
 require 'woods/console/tools/tier4'
 require 'woods/console/sql_validator'
-require 'woods/console/eval_guard'
 require 'woods/console/audit_logger'
 require 'woods/console/confirmation'
 
@@ -29,30 +28,6 @@ RSpec.describe Woods::Console::Tools::Tier4 do
     it 'enforces minimum timeout of 1 second' do
       result = described_class.console_eval(code: '1+1', timeout: 0)
       expect(result[:params][:timeout]).to eq(1)
-    end
-
-    context 'with an EvalGuard' do
-      let(:guard) { Woods::Console::EvalGuard.new }
-
-      it 'allows safe payloads through' do
-        result = described_class.console_eval(code: 'User.count', guard: guard)
-        expect(result[:tool]).to eq('eval')
-      end
-
-      it 'refuses credential payloads before building the bridge request' do
-        expect do
-          described_class.console_eval(
-            code: 'Rails.application.credentials.stripe.secret_key', guard: guard
-          )
-        end.to raise_error(Woods::Console::ForbiddenExpressionError)
-      end
-
-      it 'no-ops when guard is nil (legacy callers)' do
-        result = described_class.console_eval(
-          code: 'Rails.application.credentials.foo', guard: nil
-        )
-        expect(result[:tool]).to eq('eval')
-      end
     end
   end
 

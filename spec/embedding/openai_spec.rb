@@ -121,12 +121,6 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
     end
   end
 
-  describe '#max_input_tokens' do
-    it 'returns the OpenAI embedding model budget (8191 — the actual API cap)' do
-      expect(provider.max_input_tokens).to eq(8191)
-    end
-  end
-
   describe 'HTTP timeout configuration' do
     before { allow(http_double).to receive(:request).and_return(success_response) }
 

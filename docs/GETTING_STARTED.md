@@ -31,11 +31,7 @@ Then run the install generator:
 bundle exec rails generate woods:install
 ```
 
-This creates `config/initializers/woods.rb` with annotated default configuration, and a migration for Woods tables (`woods_units`, `woods_edges`, `woods_embeddings`). Run migrations after the generator:
-
-```bash
-bundle exec rails db:migrate
-```
+This creates `config/initializers/woods.rb` with default configuration.
 
 > **Important:** Woods requires a booted Rails environment for extraction. It uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) to produce accurate output. It cannot extract from source files alone.
 
@@ -158,8 +154,6 @@ Configure in your AI tool's MCP settings:
 }
 ```
 
-> Use `woods-mcp-start` on Claude Code for automatic restart after crashes. Use `woods-mcp` on Cursor, Windsurf, or other MCP clients.
-
 ### Console Server (live Rails queries)
 
 ```bash
@@ -281,10 +275,7 @@ Woods.configure do |config|
     config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
   else
     config.embedding_provider = :ollama
-    config.embedding_options = {
-      model: 'nomic-embed-text',
-      host: ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
-    }
+    config.embedding_options = { base_url: ENV.fetch('OLLAMA_URL', 'http://localhost:11434') }
   end
 end
 ```

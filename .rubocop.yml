@@ -4,7 +4,6 @@ AllCops:
   Exclude:
     - 'vendor/**/*'
     - 'tmp/**/*'
-    - 'bench/**/*'
 
 # ── Metrics exclusions ──
 # AST visitors, extractors, MCP registries, flow analysis, and core
@@ -49,13 +48,13 @@ Metrics/ModuleLength:
 Metrics/ClassLength:
   Exclude:
     - 'lib/woods/ast/**/*'
+    - 'lib/woods/erd/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'
     - 'lib/woods/retrieval/**/*'
     - 'lib/woods/flow_*.rb'
     - 'lib/woods/flow_analysis/**/*'
     - 'lib/woods/ruby_analyzer/**/*'
-    - 'lib/woods/cache/cache_middleware.rb'
     - 'lib/woods/extractor.rb'
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
@@ -99,6 +98,7 @@ Metrics/CyclomaticComplexity:
   Exclude:
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
+    - 'lib/woods/erd/**/*'
     - 'lib/woods/mcp/**/*'
     - 'lib/woods/retrieval/**/*'
     - 'lib/woods/flow_*.rb'
@@ -114,6 +114,7 @@ Metrics/PerceivedComplexity:
   Exclude:
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
+    - 'lib/woods/erd/**/*'
     - 'lib/woods/mcp/**/*'
     - 'lib/woods/retrieval/**/*'
     - 'lib/woods/flow_*.rb'
@@ -154,7 +155,6 @@ Metrics/ParameterLists:
     - 'lib/woods/extracted_unit.rb'
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
-    - 'lib/woods/retriever.rb'
     - 'lib/woods/unblocked/**/*'
 
 # MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars

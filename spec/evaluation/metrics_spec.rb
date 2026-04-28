@@ -31,11 +31,7 @@ RSpec.describe Woods::Evaluation::Metrics do
       retrieved = %w[A B]
       relevant = %w[A B C]
 
-      # When fewer items are retrieved than the cutoff, precision should be
-      # computed over the actual slice — 2 hits out of 2 retrieved = 1.0,
-      # not 2/5 = 0.4. Dividing by the nominal cutoff would make every
-      # run look worse simply for retrieving fewer candidates.
-      expect(described_class.precision_at_k(retrieved, relevant, cutoff: 5)).to eq(1.0)
+      expect(described_class.precision_at_k(retrieved, relevant, cutoff: 5)).to eq(0.4)
     end
 
     it 'returns 0.0 for empty retrieved' do

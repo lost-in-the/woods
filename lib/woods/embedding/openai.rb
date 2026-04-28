@@ -24,12 +24,6 @@ module Woods
           'text-embedding-3-small' => 1536,
           'text-embedding-3-large' => 3072
         }.freeze
-        # OpenAI embedding models share an 8191-token input cap across
-        # text-embedding-3-small / -3-large / ada-002. The chunker uses
-        # this as a hard ceiling — the actual chunk size lands well
-        # below it once chars-per-token estimation and the prefix
-        # allowance are factored in (see Builder#build_chunker).
-        MAX_INPUT_TOKENS = 8191
 
         # @param api_key [String] OpenAI API key
         # @param model [String] OpenAI embedding model name (default: text-embedding-3-small)
@@ -43,10 +37,7 @@ module Woods
         # @param text [String] the text to embed
         # @return [Array<Float>] the embedding vector
         # @raise [Woods::Error] if the API returns an error
-        # @raise [ArgumentError] if the text is nil or empty (OpenAI rejects these with 400)
         def embed(text)
-          raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
-
           response = post_request({ model: @model, input: text })
           response['data'].first['embedding']
         end
@@ -58,13 +49,7 @@ module Woods
         # @param texts [Array<String>] the texts to embed
         # @return [Array<Array<Float>>] array of embedding vectors
         # @raise [Woods::Error] if the API returns an error
-        # @raise [ArgumentError] if the array is empty or any element is nil/empty
-        def embed_batch(texts) # rubocop:disable Metrics/CyclomaticComplexity
-          raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
-          if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
-            raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
-          end
-
+        def embed_batch(texts)
           response = post_request({ model: @model, input: texts })
           response['data']
             .sort_by { |item| item['index'] }
@@ -88,35 +73,14 @@ module Woods
           @model
         end
 
-        # Maximum input length OpenAI will accept for a single embedding
-        # text. All current text-embedding-* models cap at ~8k tokens.
-        #
-        # @return [Integer]
-        def max_input_tokens
-          MAX_INPUT_TOKENS
-        end
-
         private
-
-        # Cap interpolated response bodies so misconfigured API errors
-        # (which occasionally echo request metadata, including headers) don't
-        # unbounded-leak into logs or re-raised messages.
-        #
-        # @param body [String, nil]
-        # @return [String]
-        def truncate_response_body(body)
-          return '' if body.nil?
-
-          s = body.to_s
-          s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
-        end
 
         # Send a POST request to the OpenAI embeddings API.
         #
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body) # rubocop:disable Metrics/AbcSize
+        def post_request(body)
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'
           request['Authorization'] = "Bearer #{@api_key}"
@@ -125,7 +89,7 @@ module Woods
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)
@@ -134,7 +98,7 @@ module Woods
           @http_client = nil
           response = http_client.request(request)
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
+            raise Woods::Error, "OpenAI API error: #{response.code} #{response.body}"
           end
 
           JSON.parse(response.body)

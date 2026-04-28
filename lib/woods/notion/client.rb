@@ -146,11 +146,6 @@ module Woods
 
       # Execute HTTP with rate limiting and network error retry.
       #
-      # Any message from an underlying network error is run through
-      # {#redact_token} before being re-raised — a malformed reflected
-      # URL or request dump from the stdlib must not leak the bearer
-      # token into logs or backtraces.
-      #
       # @return [Net::HTTPResponse]
       # @raise [Woods::Error] on persistent network failures
       def execute_with_retry(method, path, body)
@@ -159,10 +154,7 @@ module Woods
           @rate_limiter.throttle { execute_http(method, path, body) }
         rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
           attempts += 1
-          if attempts >= MAX_RETRIES
-            raise Woods::Error,
-                  "Network error after #{attempts} retries: #{redact_token(e.message)}"
-          end
+          raise Woods::Error, "Network error after #{attempts} retries: #{e.message}" if attempts >= MAX_RETRIES
 
           sleep(2**attempts)
           retry
@@ -170,9 +162,6 @@ module Woods
       end
 
       # Raise a descriptive error from a non-success Notion response.
-      # The response body is scrubbed before being formatted into the
-      # exception — if the Notion API ever echoes back a header (or a
-      # proxy does), the bearer token must not surface here.
       #
       # @raise [Woods::Error]
       def raise_api_error(response)
@@ -182,19 +171,7 @@ module Woods
           { 'message' => "Unparseable response body: #{response.body&.slice(0, 200)}" }
         end
         message = parsed['message'] || 'Unknown error'
-        raise Woods::Error,
-              "Notion API error #{response.code}: #{redact_token(message)}"
-      end
-
-      # Replace every occurrence of the bearer token with `[REDACTED]`.
-      # Defense in depth — no exception message emitted by this client
-      # should carry the secret even if a future code path embeds the
-      # request headers verbatim.
-      def redact_token(message)
-        return message if message.nil? || message.empty?
-        return message if @api_token.nil? || @api_token.empty?
-
-        message.to_s.gsub(@api_token, '[REDACTED]')
+        raise Woods::Error, "Notion API error #{response.code}: #{message}"
       end
 
       # Perform the raw HTTP request.

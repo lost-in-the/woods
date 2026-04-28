@@ -4,7 +4,6 @@ require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
-require_relative 'route_helper_resolver'
 
 module Woods
   module Extractors

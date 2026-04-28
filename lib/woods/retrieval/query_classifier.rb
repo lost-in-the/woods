@@ -31,7 +31,7 @@ module Woods
         implement: /\b(implement|add|create|build|write|make|generate)\b/i,
         compare: /\b(compare|difference|vs|versus|between|contrast)\b/i,
         # rubocop:disable Layout/LineLength
-        framework: /\b(how does rails|what does rails|rails .+ work|work.+\brails\b|in rails\b|activerecord|actioncontroller|activejob|actionmailer|actioncable|actiontext|activestorage|solid_queue|solid_cache|solid_cable|kamal|propshaft|importmap|hotwire|turbo|stimulus|zeitwerk)\b/i,
+        framework: /\b(how does rails|what does rails|rails .+ work|work.+\brails\b|in rails\b|activerecord|actioncontroller|activejob)\b/i,
         # rubocop:enable Layout/LineLength
         reference: /\b(show me|what is|what are|list|options for|api|interface|signature)\b/i,
         understand: /\b(how|why|explain|understand|what happens|describe|overview)\b/i

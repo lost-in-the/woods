@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require 'json'
-require 'tmpdir'
 require 'woods/console/embedded_executor'
 
 RSpec.describe Woods::Console::EmbeddedExecutor do
@@ -41,290 +39,19 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
   describe '#send_request' do
     context 'unsupported tools' do
-      it 'points Tier 2+ tools at the bridge architecture' do
+      it 'returns unsupported error for Tier 2+ tools' do
         response = executor.send_request({ 'tool' => 'diagnose_model', 'params' => { 'model' => 'User' } })
 
         expect(response['ok']).to be false
+        expect(response['error']).to match(/Not yet implemented in embedded mode/)
         expect(response['error_type']).to eq('unsupported')
-        expect(response['error']).to include('diagnose_model')
-        expect(response['error']).to include('bridge architecture')
-        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'returns an instructional eval_disabled payload instead of a bare unsupported error' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
+      it 'returns unsupported error for eval tool' do
+        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'puts 1' } })
 
         expect(response['ok']).to be false
-        expect(response['error_type']).to eq('eval_disabled')
-      end
-
-      it 'eval error explains why eval is disabled and names the query alternatives' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
-
-        error = response['error']
-        expect(error).to include('console_eval')
-        expect(error).to include('disabled')
-        expect(error).to include('console_query')
-        expect(error).to include('console_sql')
-      end
-
-      it 'eval error instructs the agent to surface its proposed snippet to the user before retrying' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
-
-        error = response['error']
-        expect(error).to match(/surface|present|show/i)
-        expect(error).to match(/first|manual/i)
-      end
-
-      it 'eval error points operators at the WOODS_CONSOLE_UNSAFE_EVAL opt-in flag' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
-
-        expect(response['error']).to include('WOODS_CONSOLE_UNSAFE_EVAL')
-      end
-    end
-
-    # ── Opt-in path: five-control console_eval wiring ─────────────────────
-    #
-    # When unsafe_eval_enabled is true, console_eval runs the full
-    # guard → confirmation → SafeContext → timeout → audit contract.
-    # See backlog B-053 and docs/CONSOLE_MCP_SETUP.md.
-    context 'console_eval opt-in path' do
-      let(:audit_path) { File.join(Dir.mktmpdir, 'audit.jsonl') }
-      let(:audit_logger) { Woods::Console::AuditLogger.new(path: audit_path) }
-      let(:eval_guard) { Woods::Console::EvalGuard.new }
-      let(:confirmation) { Woods::Console::Confirmation.new(mode: :auto_approve) }
-
-      subject(:executor) do
-        described_class.new(
-          model_validator: validator, safe_context: safe_context,
-          connection: connection,
-          eval_guard: eval_guard, confirmation: confirmation,
-          audit_logger: audit_logger, unsafe_eval_enabled: true
-        )
-      end
-
-      def audit_entries
-        File.readlines(audit_path).map { |l| JSON.parse(l) }
-      rescue Errno::ENOENT
-        []
-      end
-
-      it 'executes a benign expression and records a confirmed audit entry' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
-
-        expect(response['ok']).to be true
-        expect(response['result']['result']).to eq('2')
-        expect(audit_entries.size).to eq(1)
-        expect(audit_entries.first['confirmed']).to be true
-        expect(audit_entries.first['tool']).to eq('console_eval')
-      end
-
-      it 'refuses credential-reaching payloads via EvalGuard and audits the refusal' do
-        response = executor.send_request({
-                                           'tool' => 'eval',
-                                           'params' => { 'code' => 'Rails.application.credentials.stripe' }
-                                         })
-
-        expect(response['ok']).to be false
-        expect(response['error_type']).to eq('validation')
-        expect(response['error']).to match(/EvalGuard|denied call chain/i)
-        expect(audit_entries.size).to eq(1)
-        expect(audit_entries.first['confirmed']).to be false
-        expect(audit_entries.first['result_summary']).to match(/guard-refused/)
-      end
-
-      it 'refuses when confirmation denies and records a denied audit entry' do
-        denied_exec = described_class.new(
-          model_validator: validator, safe_context: safe_context, connection: connection,
-          eval_guard: eval_guard,
-          confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
-          audit_logger: audit_logger, unsafe_eval_enabled: true
-        )
-
-        response = denied_exec.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
-
-        expect(response['ok']).to be false
-        expect(response['error']).to match(/confirmation/i)
-        expect(audit_entries.size).to eq(1)
-        expect(audit_entries.first['confirmed']).to be false
-        expect(audit_entries.first['result_summary']).to match(/denied/)
-      end
-
-      it 'times out long-running code and audits the execution error' do
-        # Use a stubbed Timeout.timeout to avoid a real sleep in the suite.
-        allow(Timeout).to receive(:timeout).and_raise(Timeout::Error, 'execution expired')
-
-        response = executor.send_request({
-                                           'tool' => 'eval',
-                                           'params' => { 'code' => 'sleep 99', 'timeout' => 1 }
-                                         })
-
-        expect(response['ok']).to be false
-        expect(response['error_type']).to eq('execution')
-        expect(audit_entries.size).to eq(1)
-        expect(audit_entries.first['confirmed']).to be true
-        expect(audit_entries.first['result_summary']).to match(/error:Timeout::Error/)
-      end
-
-      it 'rejects an empty payload before reaching the guard' do
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '' } })
-
-        expect(response['ok']).to be false
-        expect(response['error_type']).to eq('validation')
-        expect(response['error']).to match(/Missing required parameter: code/)
-        # No audit entry — nothing to record yet (we hadn't built audit_params).
-        expect(audit_entries).to be_empty
-      end
-
-      # Review finding: a payload assigning to executor ivars used to be
-      # able to silence the audit log for this run and every subsequent
-      # run on the same executor. EvalGuard now refuses the syntactic
-      # assignment, and eval_in_sandbox runs in a throwaway receiver so
-      # even if the guard is bypassed, the write lands on the throwaway.
-      it 'refuses @audit_logger = nil bypass payload at the guard' do
-        response = executor.send_request({
-                                           'tool' => 'eval',
-                                           'params' => { 'code' => '@audit_logger = nil; 1' }
-                                         })
-
-        expect(response['ok']).to be false
-        expect(response['error']).to match(/instance variable/)
-        # Audit still writes the refusal — silencing failed.
-        expect(audit_entries.size).to eq(1)
-        expect(audit_entries.first['confirmed']).to be false
-
-        # And the executor's own @audit_logger is unchanged.
-        expect(executor.instance_variable_get(:@audit_logger)).to eq(audit_logger)
-      end
-
-      it 'isolates eval from executor instance variables even if the guard missed something' do
-        # Bypass EvalGuard's ivar check by constructing the executor
-        # without a guard — the sandbox isolation is what we're
-        # asserting here, not the guard.
-        ungated = described_class.new(
-          model_validator: validator, safe_context: safe_context, connection: connection,
-          eval_guard: instance_double(Woods::Console::EvalGuard, check!: nil),
-          confirmation: confirmation, audit_logger: audit_logger, unsafe_eval_enabled: true
-        )
-
-        response = ungated.send_request({
-                                          'tool' => 'eval',
-                                          'params' => { 'code' => '@audit_logger = nil; 42' }
-                                        })
-
-        expect(response['ok']).to be true
-        # Audit entry still written — @audit_logger on the throwaway, not the executor.
-        expect(audit_entries.size).to eq(1)
-        expect(audit_entries.first['confirmed']).to be true
-        expect(ungated.instance_variable_get(:@audit_logger)).to eq(audit_logger)
-      end
-
-      it 'rejects non-integer timeout values instead of silently clamping to 1' do
-        response = executor.send_request({
-                                           'tool' => 'eval',
-                                           'params' => { 'code' => '1 + 1', 'timeout' => 'forever' }
-                                         })
-
-        expect(response['ok']).to be false
-        expect(response['error']).to match(/timeout must be a positive integer/)
-      end
-
-      it 'rejects timeout: 0 instead of silently clamping to 1' do
-        response = executor.send_request({
-                                           'tool' => 'eval',
-                                           'params' => { 'code' => '1 + 1', 'timeout' => 0 }
-                                         })
-
-        expect(response['ok']).to be false
-        expect(response['error']).to match(/timeout must be a positive integer/)
-      end
-
-      it 'reduces a complex return value to its class name in the audit summary' do
-        # Something that looks like an AR relation — we don't actually
-        # need ActiveRecord here, just an object whose #inspect would
-        # normally trigger I/O. A class that raises on #inspect proves
-        # we never call it.
-        fake_relation_class = Class.new do
-          def inspect
-            raise 'inspect should not be called'
-          end
-
-          def self.name
-            'FakeRelation'
-          end
-        end
-        complex = fake_relation_class.new
-
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => '1 + 1' } })
-
-        # Control: a primitive keeps its inspect form.
-        expect(response['result']['result']).to eq('2')
-
-        # Reduction path: the complex object goes through #<ClassName>
-        # without calling inspect.
-        summary = executor.send(:audit_summary, complex)
-        expect(summary).to eq('#<FakeRelation>')
-      end
-
-      it 'resolves top-level model constants from within the throwaway sandbox' do
-        user_model = class_double('User', count: 42)
-        stub_const('User', user_model)
-
-        response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
-
-        expect(response['ok']).to be true
-        expect(response['result']['result']).to eq('42')
-      end
-
-      # SyntaxError is a ScriptError, not a StandardError — it would
-      # otherwise skip every rescue in execute_and_audit / send_request
-      # and crash the MCP dispatch loop. eval_in_sandbox translates it
-      # to ValidationError.
-      it 'turns a Ruby SyntaxError into a validation refusal instead of crashing' do
-        # Bypass EvalGuard (whose Prism parser would otherwise catch it)
-        # by handing in a guard that no-ops — we're asserting the
-        # executor-level defense here.
-        noguard = described_class.new(
-          model_validator: validator, safe_context: safe_context, connection: connection,
-          eval_guard: instance_double(Woods::Console::EvalGuard, check!: nil),
-          confirmation: confirmation, audit_logger: audit_logger, unsafe_eval_enabled: true
-        )
-
-        # Unclosed string literal — Ruby's parser rejects this even though
-        # Prism might handle it differently across versions.
-        response = noguard.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'x = "unclosed' } })
-
-        expect(response['ok']).to be false
-        expect(response['error_type']).to eq('validation')
-        expect(response['error']).to match(/could not be parsed by Ruby/)
-      end
-
-      it 'confirms with the full (bounded) code, not just the first line' do
-        captured = nil
-        callback_conf = Woods::Console::Confirmation.new(
-          mode: :callback,
-          callback: lambda { |req|
-            captured = req
-            true
-          }
-        )
-        exec = described_class.new(
-          model_validator: validator, safe_context: safe_context, connection: connection,
-          eval_guard: eval_guard, confirmation: callback_conf,
-          audit_logger: audit_logger, unsafe_eval_enabled: true
-        )
-
-        multi_line = <<~RUBY.strip
-          x = 1
-          y = 2
-          x + y
-        RUBY
-
-        exec.send_request({ 'tool' => 'eval', 'params' => { 'code' => multi_line } })
-
-        expect(captured[:description]).to include('x = 1')
-        expect(captured[:description]).to include('y = 2')
-        expect(captured[:description]).to include('x + y')
+        expect(response['error_type']).to eq('unsupported')
       end
     end
 
@@ -337,47 +64,6 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['result']['models']).to eq(%w[Post User])
         expect(response['result']['adapter']).to eq('PostgreSQL')
         expect(response['timing_ms']).to be_a(Numeric)
-      end
-    end
-
-    # Regression: ActiveRecord::Base.connection is deprecated in Rails 7.2 and
-    # removed in 8.0. Under RackMiddleware, SafeContext leases a fresh
-    # connection per request and publishes it via Thread.current — handlers
-    # must pick that up rather than re-leasing or calling the deprecated
-    # method.
-    context 'connection resolution (no injected connection)' do
-      let(:pool) { instance_double('ActiveRecord::ConnectionPool') }
-      let(:leased_conn) { instance_double('LeasedConnection') }
-      let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
-      let(:safe_context) { Woods::Console::SafeContext.new(pool: pool) }
-
-      subject(:executor) do
-        described_class.new(model_validator: validator, safe_context: safe_context)
-      end
-
-      before do
-        allow(ar_base).to receive(:connection_pool).and_return(pool)
-        allow(pool).to receive(:with_connection).and_yield(leased_conn)
-        allow(leased_conn).to receive(:adapter_name).and_return('PostgreSQL')
-        allow(leased_conn).to receive(:execute) # SET LOCAL statement_timeout
-        allow(leased_conn).to receive(:transaction) do |&block|
-          block.call
-        rescue ActiveRecord::Rollback
-          nil
-        end
-      end
-
-      it 'reuses the connection leased by SafeContext for the request' do
-        response = executor.send_request({ 'tool' => 'status', 'params' => {} })
-
-        expect(response['ok']).to be true
-        expect(response['result']['adapter']).to eq('PostgreSQL')
-        expect(pool).to have_received(:with_connection).once
-      end
-
-      it 'never invokes the deprecated ActiveRecord::Base.connection' do
-        expect(ar_base).not_to receive(:connection)
-        executor.send_request({ 'tool' => 'status', 'params' => {} })
       end
     end
 
@@ -417,179 +103,6 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['ok']).to be false
         expect(response['error']).to match(/Unknown model: Hacker/)
         expect(response['error_type']).to eq('validation')
-      end
-
-      # ── Scope SQL-injection regression tests ──────────────────────
-      #
-      # Prior to round-5 the array-form scope was splatted directly into
-      # AR's `where(*scope)`, which is the `where(raw_sql_string)` arity
-      # — turning every Tier-1 scope-accepting tool (count, pluck,
-      # aggregate, sample, find, recent) into a boolean exfiltration
-      # oracle. These specs lock in the rejection of the known bypass
-      # patterns. See `EmbeddedExecutor#validate_scope_array!`.
-      describe 'scope array-form SQL injection (R5-F1)' do
-        it 'rejects a scope template that contains a SELECT subquery' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id IN (SELECT password_digest FROM users)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/forbidden SQL keywords/i)
-        end
-
-        it 'rejects a scope template that uses UNION' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['1=1 UNION SELECT 1']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'rejects a scope template containing `;` (statement chaining)' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id = 1; DROP TABLE users']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/`;`/)
-        end
-
-        it 'rejects a scope template containing pg_sleep or BENCHMARK (timing oracles)' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['pg_sleep(5)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'rejects a scope template with mismatched bind count' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['name = ?'] # zero binds, one placeholder
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/expects 1 bind/)
-        end
-
-        it 'rejects a scope where[0] is not a String' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => [{ name: 'x' }]
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'allows a parameterised scope template with matching binds' do
-          allow(user_model).to receive(:where).with('name = ?', 'Alice').and_return(relation)
-          allow(relation).to receive(:count).and_return(2)
-
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['name = ?', 'Alice']
-                                             }
-                                           })
-
-          expect(response['ok']).to be true
-          expect(response['result']['count']).to eq(2)
-        end
-
-        it 'allows a no-bind scope template with no forbidden keywords' do
-          allow(user_model).to receive(:where).with('id IS NULL').and_return(relation)
-          allow(relation).to receive(:count).and_return(0)
-
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id IS NULL']
-                                             }
-                                           })
-
-          expect(response['ok']).to be true
-        end
-
-        # Defense-in-depth — block comments and dollar-quoted strings
-        # don't actually let an attacker smuggle a SELECT past a real DB
-        # parser (SQL standard treats `/**/` as whitespace, so `SE/**/LECT`
-        # is two identifiers, not `SELECT` — verified against SQLite),
-        # but the validator still strips them before the keyword scan so
-        # callers get an honest "forbidden SQL keywords" error rather than
-        # a confusing adapter-level syntax failure.
-        it 'rejects forbidden keywords hidden behind block comments' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id IN (/* hidden */ SELECT password FROM users)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/forbidden SQL keywords/i)
-        end
-
-        it 'rejects keywords hidden in PostgreSQL dollar-quoted strings' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id = $$1$$ OR EXISTS (SELECT 1 FROM users)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'does NOT reject a forbidden keyword that appears only inside a string literal bind' do
-          # The template must be scanned with literals stripped — otherwise
-          # legitimate searches like name = "SELECT ..." would false-reject.
-          allow(user_model).to receive(:where).with("name = 'SELECT'").and_return(relation)
-          allow(relation).to receive(:count).and_return(0)
-
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ["name = 'SELECT'"]
-                                             }
-                                           })
-
-          expect(response['ok']).to be true
-        end
       end
 
       it 'returns validation error for missing model param' do
@@ -753,31 +266,6 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['result']['value']).to eq(5.5)
       end
 
-      it 'runs count aggregate without column' do
-        allow(user_model).to receive(:count).with(no_args).and_return(99)
-
-        response = executor.send_request({
-                                           'tool' => 'aggregate',
-                                           'params' => { 'model' => 'User', 'function' => 'count' }
-                                         })
-
-        expect(response['ok']).to be true
-        expect(response['result']['value']).to eq(99)
-      end
-
-      it 'runs count aggregate with column' do
-        allow(user_model).to receive(:count).with(:email).and_return(40)
-
-        response = executor.send_request({
-                                           'tool' => 'aggregate',
-                                           'params' => { 'model' => 'User', 'function' => 'count',
-                                                         'column' => 'email' }
-                                         })
-
-        expect(response['ok']).to be true
-        expect(response['result']['value']).to eq(40)
-      end
-
       it 'rejects invalid aggregate function' do
         response = executor.send_request({
                                            'tool' => 'aggregate',
@@ -931,45 +419,6 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
     end
 
-    context 'predicate-suffix scope' do
-      let(:user_model) { class_double('User') }
-      let(:arel_table) { instance_double('Arel::Table') }
-      let(:arel_col)   { instance_double('Arel::Attributes::Attribute') }
-      let(:arel_node)  { instance_double('Arel::Nodes::GreaterThan') }
-      let(:scoped)     { instance_double('ActiveRecord::Relation') }
-
-      before do
-        stub_const('User', user_model)
-        allow(user_model).to receive(:arel_table).and_return(arel_table)
-        allow(arel_table).to receive(:[]).with('id').and_return(arel_col)
-        allow(arel_col).to receive(:gt).with(10).and_return(arel_node)
-        allow(user_model).to receive(:where).with(arel_node).and_return(scoped)
-        allow(scoped).to receive(:count).and_return(5)
-      end
-
-      it 'routes predicate-suffix keys through ScopePredicateParser' do
-        response = executor.send_request({
-                                           'tool' => 'count',
-                                           'params' => { 'model' => 'User', 'scope' => { 'id_gt' => 10 } }
-                                         })
-
-        expect(response['ok']).to be true
-        expect(response['result']['count']).to eq(5)
-        expect(arel_col).to have_received(:gt).with(10)
-      end
-
-      it 'rejects unknown column in predicate suffix' do
-        response = executor.send_request({
-                                           'tool' => 'count',
-                                           'params' => { 'model' => 'User', 'scope' => { 'evil_col_gt' => 0 } }
-                                         })
-
-        expect(response['ok']).to be false
-        expect(response['error']).to match(/Unknown column 'evil_col'/)
-        expect(response['error_type']).to eq('validation')
-      end
-    end
-
     context 'array-form scope' do
       let(:user_model) { class_double('User') }
       let(:scoped) { instance_double('ActiveRecord::Relation') }
@@ -1020,18 +469,13 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     end
 
     context 'error handling' do
-      it 'wraps StandardError as execution errors with a sanitized message' do
-        # Sanitization: adapter errors can embed column/table names or SQL
-        # fragments (schema disclosure). The executor returns a generic
-        # "execution failed" message with just the error class for routing
-        # and logs the full detail server-side. Audit F-7.
+      it 'wraps StandardError as execution errors' do
         allow(connection).to receive(:transaction).and_raise(StandardError, 'DB gone')
 
         response = executor.send_request({ 'tool' => 'status', 'params' => {} })
 
         expect(response['ok']).to be false
-        expect(response['error']).to include('StandardError')
-        expect(response['error']).not_to include('DB gone')
+        expect(response['error']).to eq('DB gone')
         expect(response['error_type']).to eq('execution')
       end
     end
@@ -1039,17 +483,14 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     # ── Read tools (sql/query) gated by read_tools_enabled ──────────
 
     context 'read tools disabled (default)' do
-      it 'points sql at embedded_read_tools and the docs' do
+      it 'returns unsupported error for sql tool' do
         response = executor.send_request({ 'tool' => 'sql', 'params' => { 'sql' => 'SELECT 1' } })
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
-        expect(response['error']).to include("'sql'")
-        expect(response['error']).to include('embedded_read_tools: true')
-        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
-      it 'points query at embedded_read_tools and the docs' do
+      it 'returns unsupported error for query tool' do
         response = executor.send_request({
                                            'tool' => 'query',
                                            'params' => { 'model' => 'User', 'select' => ['id'] }
@@ -1057,8 +498,6 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
-        expect(response['error']).to include("'query'")
-        expect(response['error']).to include('embedded_read_tools: true')
       end
     end
 

@@ -253,11 +253,7 @@ module Woods
 
       filenames.each do |filename|
         Dir[File.join(@extracted_dir, '*', filename)].each do |path|
-          # Force UTF-8: the extractor writes the routes-comment header in
-          # source_code using Unicode box-drawing characters; reading under
-          # the platform default (US-ASCII on some CIs) raises
-          # InvalidByteSequenceError before JSON parsing.
-          return JSON.parse(File.read(path, encoding: 'UTF-8'), symbolize_names: true)
+          return JSON.parse(File.read(path), symbolize_names: true)
         rescue JSON::ParserError
           next
         end
@@ -267,32 +263,28 @@ module Woods
     end
 
     # Extract route information from controller metadata.
-    #
-    # Handles two on-disk shapes:
-    # - Hash keyed by action (what ControllerExtractor writes):
-    #     { "create" => [{ verb:, path:, ... }, ...] }
-    # - Array of route hashes (older / test fixture shape):
-    #     [{ action:, verb:, path: }, ...]
     def extract_route(entry_point)
       unit_id, method_name = parse_identifier(entry_point)
       unit_data = load_unit(unit_id)
       return nil unless unit_data
 
       metadata = unit_data[:metadata] || {}
-      route = resolve_route_entry(metadata[:routes], method_name)
+      routes = metadata[:routes]
+      return nil unless routes.is_a?(Array)
+
+      # Find route matching the method name
+      route = if method_name
+                routes.find { |r| r[:action]&.to_s == method_name }
+              else
+                routes.first
+              end
+
       return nil unless route
 
-      { verb: route[:verb], path: route[:path] }
-    end
-
-    def resolve_route_entry(routes, method_name)
-      case routes
-      when Hash
-        action_routes = method_name ? routes[method_name.to_s] || routes[method_name.to_sym] : routes.values.first
-        Array(action_routes).first
-      when Array
-        method_name ? routes.find { |r| r[:action]&.to_s == method_name } : routes.first
-      end
+      {
+        verb: route[:verb],
+        path: route[:path]
+      }
     end
   end
 end

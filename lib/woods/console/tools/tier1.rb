@@ -60,11 +60,11 @@ module Woods
         # Run aggregate function on a column.
         #
         # @param model [String] Model name
-        # @param function [String] One of: sum, average, minimum, maximum, count
-        # @param column [String, nil] Column to aggregate (optional for count)
+        # @param function [String] One of: sum, avg, minimum, maximum
+        # @param column [String] Column to aggregate
         # @param scope [Hash, nil] Filter conditions
         # @return [Hash] Bridge request
-        def console_aggregate(model:, function:, column: nil, scope: nil)
+        def console_aggregate(model:, function:, column:, scope: nil)
           { tool: 'aggregate', params: { model: model, function: function, column: column, scope: scope }.compact }
         end
 

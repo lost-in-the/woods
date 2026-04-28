@@ -43,9 +43,8 @@ RSpec.describe Woods::Console::SqlValidator do
         expect { validator.validate!('EXPLAIN SELECT * FROM users') }.not_to raise_error
       end
 
-      it 'rejects EXPLAIN ANALYZE (actually executes the plan on PG/MySQL 8)' do
-        expect { validator.validate!('EXPLAIN ANALYZE SELECT * FROM users') }
-          .to raise_error(Woods::Console::SqlValidationError)
+      it 'accepts EXPLAIN ANALYZE SELECT' do
+        expect { validator.validate!('EXPLAIN ANALYZE SELECT * FROM users') }.not_to raise_error
       end
     end
 
@@ -139,18 +138,6 @@ RSpec.describe Woods::Console::SqlValidator do
       end
     end
 
-    context 'with other set operators' do
-      it 'rejects SELECT with INTERSECT' do
-        expect { validator.validate!('SELECT id FROM users INTERSECT SELECT id FROM admins') }
-          .to raise_error(Woods::Console::SqlValidationError, /INTERSECT/i)
-      end
-
-      it 'rejects SELECT with EXCEPT' do
-        expect { validator.validate!('SELECT id FROM users EXCEPT SELECT id FROM admins') }
-          .to raise_error(Woods::Console::SqlValidationError, /EXCEPT/i)
-      end
-    end
-
     context 'with writable CTEs' do
       it 'rejects WITH...DELETE' do
         expect { validator.validate!('WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d') }
@@ -241,28 +228,6 @@ RSpec.describe Woods::Console::SqlValidator do
 
     it 'returns false for INSERT' do
       expect(validator.valid?('INSERT INTO x VALUES (1)')).to be false
-    end
-  end
-
-  describe 'expanded forbidden prefixes (release-prep hardening)' do
-    %w[
-      DO CALL SET RESET LISTEN NOTIFY VACUUM ANALYZE CLUSTER REINDEX
-      REFRESH LOCK PREPARE EXECUTE DEALLOCATE BEGIN COMMIT ROLLBACK
-      SAVEPOINT RELEASE START LOAD HANDLER
-    ].each do |keyword|
-      it "rejects #{keyword} statements" do
-        expect { validator.validate!("#{keyword} something") }
-          .to raise_error(Woods::Console::SqlValidationError)
-      end
-    end
-
-    it 'rejects EXPLAIN ANALYZE SELECT (actually executes on PG)' do
-      expect { validator.validate!('EXPLAIN ANALYZE SELECT 1') }
-        .to raise_error(Woods::Console::SqlValidationError)
-    end
-
-    it 'still accepts plain EXPLAIN SELECT' do
-      expect { validator.validate!('EXPLAIN SELECT 1') }.not_to raise_error
     end
   end
 end

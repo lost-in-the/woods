@@ -25,14 +25,8 @@ module Woods
         #
         # @param code [String] Ruby code to execute
         # @param timeout [Integer] Execution timeout in seconds (default 10, max 30)
-        # @param guard [#check!, nil] Optional EvalGuard instance. When present,
-        #   the payload is parsed and refused before the bridge request is
-        #   built — surfacing credential/reflection escapes as a clean MCP
-        #   error instead of relying on the bridge's own enforcement.
         # @return [Hash] Bridge request
-        # @raise [Woods::Console::ForbiddenExpressionError] if guard rejects
-        def console_eval(code:, timeout: DEFAULT_EVAL_TIMEOUT, guard: nil)
-          guard&.check!(code)
+        def console_eval(code:, timeout: DEFAULT_EVAL_TIMEOUT)
           timeout = timeout.clamp(MIN_EVAL_TIMEOUT, MAX_EVAL_TIMEOUT)
           { tool: 'eval', params: { code: code, timeout: timeout } }
         end

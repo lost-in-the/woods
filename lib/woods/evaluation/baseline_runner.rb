@@ -19,19 +19,8 @@ module Woods
       VALID_STRATEGIES = %i[grep random file_level].freeze
 
       # @param metadata_store [Object] Store that responds to #all_identifiers and #find_by_type
-      # @param seed [Integer, nil] Optional RNG seed for the `:random`
-      #   baseline. Seeding makes evaluation runs reproducible — essential
-      #   for comparing the real retriever against the baseline on the same
-      #   query set across two invocations. `nil` (default) keeps the
-      #   historical behavior of drawing from system entropy.
-      def initialize(metadata_store:, seed: nil)
+      def initialize(metadata_store:)
         @metadata_store = metadata_store
-        @random = seed.nil? ? Random.new : Random.new(seed)
-        # Ruby's `Random` instance isn't documented thread-safe; multiple
-        # evaluator threads sharing one runner would otherwise interleave
-        # `sample` calls and drift from the seeded sequence. A plain Mutex
-        # around the read path is enough — `sample` is the only caller.
-        @random_mutex = Mutex.new
       end
 
       # Run a baseline strategy for a query.
@@ -75,18 +64,11 @@ module Woods
 
       # Random strategy: random selection from all available units.
       #
-      # Uses the instance's injected {Random} generator so results are
-      # reproducible when {#initialize} was called with a seed. Guarded by
-      # a mutex so concurrent evaluator threads don't interleave calls on
-      # the shared `Random` and drift from the seeded sequence.
-      #
       # @param _query [String] Query string (unused)
       # @param limit [Integer] Max results
       # @return [Array<String>]
       def run_random(_query, limit)
-        @random_mutex.synchronize do
-          @metadata_store.all_identifiers.sample(limit, random: @random)
-        end
+        @metadata_store.all_identifiers.sample(limit)
       end
 
       # File-level strategy: matches identifiers that look like file paths
