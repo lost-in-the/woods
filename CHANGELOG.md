@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-13
+
+### Upgrade Notes
+
+Two behavior changes are worth pre-reading before you bump:
+
+- **The MCP Index Server (`woods-mcp`, `woods-mcp-http`) no longer silently degrades to pattern-only search when it can't find a real index.** Hosts that ran 1.2.0 without writing `woods.json` got an empty-store retriever that quietly served degraded results. After this release, the bootstrapper raises `Woods::MCP::MissingArtifact` at boot unless one of these is true: (a) you've run `rake woods:embed` against this checkout (writes `woods.json` + dumps under `output_dir`), or (b) you explicitly opt into the legacy env-var auto-detect path with `WOODS_ALLOW_AUTODETECT=1`. The Shape-2 ("shared filesystem") preset documented under `docs/CONFIGURATION_REFERENCE.md#deployment-shapes` is the supported way to ship pre-built indices alongside a separate MCP process.
+- **Console MCP is opt-in.** The Index Server is unaffected. Hosts that mounted `Woods::Console::RackMiddleware` in 1.2.0 already saw it short-circuit at the entry points (Console MCP was disabled in 1.2.0 after an audit). To re-enable it under the new five-layer defense stack, set `config.console_mcp_enabled = true` in your Woods initializer and review the threat-model walkthrough in `docs/CONSOLE_MCP_SETUP.md`. No host automatically re-enables Console MCP on upgrade.
+
+The `mcp` runtime gem is now pinned to `>= 0.9.2` (was `~> 0.6`) — see the `### Security` block below.
+
 ### Added — `console_eval` opt-in (backlog B-053, issue #87)
 
 - **Embedded `console_eval` is now opt-in and runs the full five-control contract.** Previously refused unconditionally at dispatch. Opting in requires `WOODS_CONSOLE_UNSAFE_EVAL=true` (or `config.console_unsafe_eval_enabled = true`) AND a `Woods::Console::Confirmation` collaborator AND a JSONL audit-log path. Any missing collaborator raises `Woods::ConfigurationError` at boot — fail-closed by design. The flag still refuses to boot in `Rails.env.production?`.
@@ -72,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`mcp` gem bumped from `~> 0.6` to `>= 0.9.2, < 1.0` to close [CVE-2026-33946](https://github.com/anthropics/mcp/security/advisories) (HIGH).** The vulnerability is in the upstream `mcp` gem's STDIO transport, not in Woods' use of it, but every Woods install transitively depended on the affected versions. Hosts running `bundle update woods` will pick up the fixed `mcp` release automatically; Gemfile.lock pins on older `mcp` versions need to be regenerated. No API change required in host code.
 - **Console MCP re-enabled behind a five-layer defense-in-depth stack.** The feature was previously disabled at its entry points after an audit flagged a Stripe Connect credential leak via the `authorizations` EAV table. It now ships gated on a new `console_mcp_enabled` config flag (default `false`) and runs through five independent safety layers, so a single misconfigured layer cannot leak secrets:
   - **Layer 0 — feature gate.** `exe/woods-console-mcp`, `exe/woods-console`, and `Woods::Console::RackMiddleware` all short-circuit with a helpful "disabled" notice (stderr + exit 1 for stdio, `410 Gone` with JSON body for HTTP) when `Woods.configuration.console_mcp_enabled` is false. Hosts that have mounted the middleware see no change in behavior until they opt in.
   - **Layer 1 — blocked tables (`console_blocked_tables`).** Rejects a tool call at dispatch time — before the executor is invoked — when any `:model`, `:table`, or `:sql` argument resolves to a configured blocked table. Built on `Woods::Console::TableGate`. Embedded transports now pass a `model_tables` registry so model-scoped tools (`console_find`, `console_sample`, etc.) can resolve model names to their tables without a database round-trip.
@@ -145,6 +157,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scope tool descriptions** updated to reference the supported predicate suffixes, so agents discover the richer filtering surface without reading the cookbook.
 - **Tool descriptions for `console_sql` and `console_query`** rewritten in Figma-MCP-style (purpose → safety → requirement → alternatives) so agents understand when to reach for each and how to enable them.
 - **Docs:** `docs/CONSOLE_MCP_SETUP.md` now covers `embedded_read_tools: true` as an alternative to switching to the bridge architecture, and the Troubleshooting entry for Tier 2–4 tools distinguishes the two read tools from everything else.
+
+### Documentation
+
+- **MySQL vector-pairing constraint surfaced where readers actually hit it** (#83 docs subset, PR #122). `docs/BACKEND_MATRIX.md` gains a "Database compatibility" subsection at the top of `## Vector Stores` with a MySQL-first table mapping primary database → supported vector stores, and a one-paragraph explanation of why MySQL stacks must pair with Qdrant / Pinecone / FAISS. `docs/TROUBLESHOOTING.md` gains "Configuring vector search on MySQL" under Embedding Problems, showing the MySQL + Qdrant initializer first and the Postgres + pgvector equivalent below for contrast. The `:mysql_qdrant` preset and dedicated integration spec from #83 remain open as post-1.3.0 follow-ups.
+
+### Dependencies
+
+- **Runtime gems added.**
+  - `msgpack` (`>= 1.5`) — required for the `WMD1` streaming metadata snapshot format introduced by the Persistence & Bootstrap arc. Only loaded on the Snapshotter's metadata path; pgvector / Qdrant users don't pay the load cost.
+  - `prism` (`~> 1.4`) — backs `Woods::Console::EvalGuard`'s AST inspection. Ships in stdlib on Ruby 3.3+; the gem dependency guarantees the Prism path on 3.0–3.2 so the guard's behavior stays consistent across the support matrix.
+- **Runtime gem version constraint tightened.**
+  - `mcp`: `~> 0.6` → `>= 0.9.2, < 1.0` (CVE-2026-33946 HIGH; see `### Security` above).
+- **GitHub Actions bumps.**
+  - `ruby/setup-ruby` 1.295.0 → 1.307.0 (PRs #91 + #121).
+  - `softprops/action-gh-release` 2.2.2 → 3.0.0 (PR #21 — Node 24 runtime; GitHub-hosted runners support this today).
+  - `rubygems/configure-rubygems-credentials` 1.0.0 → 2.0.0 (PR #120 — internal-only changes, no `with:` keys affected).
 
 ## [1.2.0] - 2026-03-27
 
