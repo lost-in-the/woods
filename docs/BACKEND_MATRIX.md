@@ -33,6 +33,17 @@ The shape determines the capability matrix:
 
 ## Vector Stores
 
+### Database compatibility
+
+The vector store you can use depends on the primary database your Rails app uses. MySQL stacks **must** pair with an external vector backend; PostgreSQL stacks have the option of running pgvector inside the same database.
+
+| Primary database | Supported vector stores | Required? |
+|---|---|---|
+| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant`, `:pinecone` (external), `:sqlite` (local dev only) | Yes — MySQL has no native vector extension |
+| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`, `:pinecone`, `:sqlite` (local dev only) | No — `:pgvector` runs inside the same database |
+
+**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of the InnoDB / MyISAM storage engines and cannot be added via plugin. Woods does not emulate vector search in MySQL — the gem only ships adapters that delegate to a real vector engine. The recommended pairing is `:mysql` (metadata + graph) + `:qdrant` (vectors); the [MySQL section below](#mysql) covers this stack end to end.
+
 ### pgvector (PostgreSQL Extension)
 
 **What it is:** PostgreSQL extension that adds vector similarity search directly to Postgres.
