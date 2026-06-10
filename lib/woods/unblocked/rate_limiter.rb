@@ -1,7 +1,15 @@
 # frozen_string_literal: true
 
+require 'woods'
+
 module Woods
   module Unblocked
+    # Raised when the daily API call budget is exhausted. Subclasses
+    # Woods::Error so existing +rescue Woods::Error+ sites keep working;
+    # callers that need to branch on exhaustion rescue this class instead of
+    # matching the message string.
+    class BudgetExhaustedError < Woods::Error; end
+
     # Daily budget-based rate limiter for the Unblocked API (1000 calls/day).
     #
     # Unlike Notion's per-second throttling, Unblocked limits by daily call count.
@@ -35,13 +43,13 @@ module Woods
       #
       # @yield The API call to execute
       # @return [Object] The block's return value
-      # @raise [Woods::Error] if daily budget is exhausted
+      # @raise [BudgetExhaustedError] if daily budget is exhausted
       def track
         raise ArgumentError, 'block required' unless block_given?
 
         @mutex.synchronize do
           if @calls_today >= @daily_budget
-            raise Woods::Error,
+            raise BudgetExhaustedError,
                   "Unblocked API daily budget exhausted (#{@daily_budget} calls). " \
                   'Budget resets at midnight PST. Use UNBLOCKED_DAILY_BUDGET to adjust.'
           end

@@ -397,6 +397,156 @@ RSpec.describe Woods::Unblocked::Exporter do
       end
     end
 
+    context 'two consecutive runs with a real manifest (end-to-end)' do
+      it 'pushes everything on run 1, then skips everything and deletes nothing on run 2' do
+        stub_single_user
+
+        first = exporter.sync_all
+        expect(first[:synced]).to eq(1)
+        expect(client).to have_received(:put_document).once
+
+        second_exporter = described_class.new(
+          index_dir: @index_dir, config: stub_config, client: client,
+          reader: reader, output: StringIO.new
+        )
+        second = second_exporter.sync_all
+
+        expect(second[:synced]).to eq(0)
+        expect(second[:skipped]).to be >= 1
+        expect(second[:deleted]).to eq(0)
+        expect(client).to have_received(:put_document).once # still only run 1's push
+        expect(client).not_to have_received(:delete_document)
+      end
+    end
+
+    context 'partial-sync URI tracking (top-N fallout protection)' do
+      it 'reports every existing partial unit to stale_uris, not just the top-N' do
+        stub_const('Woods::Unblocked::Exporter::FULL_SYNC_TYPES', [])
+        stub_const('Woods::Unblocked::Exporter::PARTIAL_SYNC_TYPES', [['poro', 2]])
+
+        units = (1..3).map { |i| { 'identifier' => "Poro#{i}", 'type' => 'poro' } }
+        allow(reader).to receive(:list_units).with(type: 'poro').and_return(units)
+        (1..3).each do |i|
+          allow(reader).to receive(:find_unit).with("Poro#{i}").and_return(
+            { 'type' => 'poro', 'identifier' => "Poro#{i}",
+              'file_path' => "lib/poro#{i}.rb", 'metadata' => {},
+              'dependents' => Array.new(4 - i) { { 'type' => 'model', 'identifier' => 'X' } } }
+          )
+        end
+
+        captured = nil
+        local_manifest = manifest_double do |m|
+          allow(m).to receive(:stale_uris) { |uris|
+            captured = uris.to_a
+            []
+          }
+        end
+        described_class.new(
+          index_dir: @index_dir, config: stub_config, client: client,
+          reader: reader, manifest: local_manifest, output: StringIO.new
+        ).sync_all
+
+        # Poro3 (rank 3, beyond max_count 2) still exists — it must be in the
+        # current set handed to stale_uris or it would be purged remotely.
+        expect(captured).to include(uri_for('lib/poro1.rb'), uri_for('lib/poro2.rb'), uri_for('lib/poro3.rb'))
+        expect(client).to have_received(:put_document).twice # only top 2 pushed
+      end
+    end
+
+    context 'mass-deletion guard boundaries' do
+      def guarded_stats(manifest_size, stale_count)
+        stale = (1..stale_count).map { |i| uri_for("app/models/m#{i}.rb") }
+        local_manifest = manifest_double do |m|
+          allow(m).to receive(:size).and_return(manifest_size)
+          allow(m).to receive(:stale_uris).and_return(stale)
+          allow(m).to receive(:document_id_for).and_return('doc-x')
+        end
+        described_class.new(
+          index_dir: @index_dir, config: stub_config, client: client,
+          reader: reader, manifest: local_manifest, output: StringIO.new
+        ).sync_all
+      end
+
+      it 'blocks at size 10 with 40% stale (guard active at the floor)' do
+        expect(guarded_stats(10, 4)[:deleted]).to eq(0)
+      end
+
+      it 'allows exactly 30% (threshold is strict greater-than)' do
+        expect(guarded_stats(10, 3)[:deleted]).to eq(3)
+      end
+
+      it 'allows 100% stale below the 10-doc floor (small collections stay deletable)' do
+        expect(guarded_stats(9, 9)[:deleted]).to eq(9)
+      end
+    end
+
+    context 'when a sync type raises mid-run' do
+      let(:manifest) { manifest_double }
+
+      it 'still saves the manifest from the ensure block' do
+        allow(reader).to receive(:list_units).and_raise(RuntimeError, 'index unreadable')
+        expect { exporter.sync_all }.to raise_error(RuntimeError, /index unreadable/)
+        expect(manifest).to have_received(:save)
+      end
+    end
+
+    context 'when put_document returns no id' do
+      let(:manifest) do
+        manifest_double { |m| allow(m).to receive(:document_id_for).and_return('previously-known-id') }
+      end
+
+      it 'falls back to the previously recorded document_id' do
+        stub_single_user
+        allow(client).to receive(:put_document).and_return({})
+        exporter.sync_all
+        expect(manifest).to have_received(:record)
+          .with(hash_including(document_id: 'previously-known-id'))
+      end
+    end
+
+    context 'when a stale delete fails with a non-404 error' do
+      let(:manifest) do
+        manifest_double do |m|
+          allow(m).to receive(:size).and_return(20)
+          allow(m).to receive(:stale_uris).and_return([uri_for('app/models/gone.rb')])
+          allow(m).to receive(:document_id_for).and_return('doc-x')
+        end
+      end
+
+      it 'surfaces the failure in stats[:errors] instead of swallowing it' do
+        stub_single_user
+        allow(client).to receive(:delete_document)
+          .and_raise(Woods::Unblocked::ApiError.new('Unblocked API error 500: oops', status: 500))
+
+        stats = exporter.sync_all
+        expect(stats[:errors]).to include(a_string_matching(/delete.*gone\.rb.*500/))
+        expect(stats[:deleted]).to eq(0)
+      end
+    end
+
+    context 'when reconcile hits an auth failure' do
+      let(:manifest) { manifest_double { |m| allow(m).to receive(:empty?).and_return(true) } }
+
+      it 'aborts loudly instead of proceeding into doomed API calls' do
+        allow(client).to receive(:all_documents)
+          .and_raise(Woods::Unblocked::ApiError.new('Unblocked API error 401: bad token', status: 401))
+        expect { exporter.sync_all }.to raise_error(Woods::Unblocked::ApiError, /401/)
+      end
+    end
+
+    context 'when the credential scrub fails closed (empty body)' do
+      let(:manifest) { manifest_double }
+
+      it 'records an error and does not overwrite the remote doc with an empty body' do
+        stub_single_user
+        allow(Woods::Console::CredentialScanner).to receive(:new).and_raise(StandardError, 'scanner broken')
+
+        stats = exporter.sync_all
+        expect(client).not_to have_received(:put_document)
+        expect(stats[:errors]).to include(a_string_matching(/User.*empty/i))
+      end
+    end
+
     context 'when the manifest is empty (cache miss)' do
       it 'reconciles document ids from the remote and purges orphans' do
         # No current units; remote has one orphan in our collection.

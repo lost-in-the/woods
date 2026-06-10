@@ -115,6 +115,12 @@ RSpec.describe Woods::Unblocked::Client do
       }
     end
 
+    it 'requires a status when constructing ApiError' do
+      # Status is the type's whole reason to exist — a nil status would
+      # silently fall through every `e.status == 404` branch.
+      expect { Woods::Unblocked::ApiError.new('boom') }.to raise_error(ArgumentError)
+    end
+
     it 'raises a descriptive error on 401' do
       err = instance_double(Net::HTTPResponse, code: '401', body: JSON.generate({ 'message' => 'bad token' }))
       allow(err).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)

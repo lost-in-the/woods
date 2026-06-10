@@ -126,5 +126,34 @@ RSpec.describe Woods::Unblocked::SyncManifest do
       File.write(path, 'not valid json {{{')
       expect(manifest).to be_empty
     end
+
+    it 'warns to stderr so the resulting full re-push is explainable' do
+      File.write(path, 'not valid json {{{')
+      expect { described_class.new(path: path, collection_id: collection_id) }
+        .to output(/unparseable/i).to_stderr
+    end
+  end
+
+  describe 'version guard' do
+    it 'discards a manifest written by a future schema version' do
+      File.write(path, JSON.generate(
+                         'version' => described_class::VERSION + 1,
+                         'collection_id' => collection_id,
+                         'documents' => { 'uri-a' => { 'hash' => 'h', 'document_id' => 'd' } }
+                       ))
+      expect(manifest).to be_empty
+    end
+  end
+
+  describe 'collection mismatch warning' do
+    it 'warns to stderr when discarding a foreign-collection manifest' do
+      described_class.new(path: path, collection_id: 'OLD').tap do |old|
+        old.record(uri: 'u', hash: 'h', document_id: 'd')
+        old.save
+      end
+
+      expect { described_class.new(path: path, collection_id: 'NEW') }
+        .to output(/collection/i).to_stderr
+    end
   end
 end

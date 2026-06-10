@@ -633,6 +633,17 @@ namespace :woods do
       puts "  Errors:             #{stats[:errors].size}"
       stats[:errors].first(5).each { |e| puts "    - #{e}" }
       puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+
+      # Fail the task so CI notices — a printed-but-green run is invisible in
+      # post-merge pipelines (a dead token would otherwise stay green forever).
+      # Exception: budget exhaustion *with* partial progress is the expected
+      # cold-start shape; it converges on the next run.
+      budget_only = stats[:errors].all? { |e| e.include?('daily budget exhausted') }
+      unless budget_only && stats[:synced].positive?
+        puts
+        puts 'Sync completed with errors — failing so CI surfaces it.'
+        exit 1
+      end
     end
   end
 

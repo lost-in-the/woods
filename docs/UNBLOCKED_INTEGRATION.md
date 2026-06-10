@@ -21,14 +21,8 @@ citation links in Unblocked answers.
 
 ### 1. Create an Unblocked Collection
 
-In the [Unblocked web app](https://getunblocked.com):
-
-1. Go to **Settings** → **Data Sources** → **Add Data Sources**
-2. Scroll to the documentation section and select **Create a Custom Source**
-3. Name it (e.g., "Codebase Architecture") and save
-4. Copy the collection ID from the URL or API
-
-Or via the API:
+Collections for custom sources are created **via the API** (the web app does
+not currently offer a creation path for them):
 
 ```bash
 curl -X POST https://getunblocked.com/api/v1/collections \
@@ -162,41 +156,62 @@ otherwise every deploy starts from scratch and re-pushes everything.
 
 ### GitHub Actions
 
+`actions/cache` entries are **immutable** — an exact-key hit skips the post-job
+save, which would freeze the manifest at its first-run state forever. Use a
+unique key plus `restore-keys` so every run saves a fresh manifest and the next
+run restores the most recent one:
+
 ```yaml
-- uses: actions/cache@v4
-  with:
-    path: tmp/woods/unblocked_sync_manifest.json
-    key: unblocked-sync-${{ env.UNBLOCKED_COLLECTION_ID }}
-- run: bin/rails woods:extract
-- run: bin/rails woods:unblocked_sync
-  env:
-    UNBLOCKED_API_TOKEN: "ubk_..."
-    UNBLOCKED_COLLECTION_ID: "..."
-    UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
+env:
+  UNBLOCKED_COLLECTION_ID: "..."
+
+steps:
+  - uses: actions/cache@v4
+    with:
+      path: tmp/woods/unblocked_sync_manifest.json
+      key: unblocked-sync-${{ env.UNBLOCKED_COLLECTION_ID }}-${{ github.run_id }}
+      restore-keys: |
+        unblocked-sync-${{ env.UNBLOCKED_COLLECTION_ID }}-
+  - run: bin/rails woods:extract
+  - run: bin/rails woods:unblocked_sync
+    env:
+      UNBLOCKED_API_TOKEN: "ubk_..."
+      UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
 ```
 
 ### Buildkite
 
-Buildkite has no native cache primitive — use the S3-backed
-[cache plugin](https://github.com/buildkite-plugins/cache-buildkite-plugin) or
-the artifact API. The manifest lands in `<output_dir>` (default `tmp/woods/`),
-so a pipeline that already declares `artifact_paths: tmp/woods/**/*` **uploads it
-for free** — you only need to add the *restore* (download) side before the sync
-step.
+Buildkite has no native cache primitive. Note that plain
+`buildkite-agent artifact download` is **scoped to the current build** — it
+cannot restore a previous build's manifest on its own. Use the S3-backed
+[cache plugin](https://github.com/buildkite-plugins/cache-buildkite-plugin)
+(simplest), or resolve the last successful build's ID via the REST API and pass
+`--build`:
 
 ```yaml
 - label: ":trees: Woods → Unblocked"
+  plugins:
+    - cache#v1.7.0:
+        manifest: Gemfile.lock          # any stable file; key below does the work
+        path: tmp/woods/unblocked_sync_manifest.json
+        restore: pipeline
+        save: pipeline
   command:
-    - buildkite-agent artifact download "tmp/woods/unblocked_sync_manifest.json" . || true
     - bin/rails woods:extract
     - bin/rails woods:unblocked_sync
-  artifact_paths: "tmp/woods/**/*"
   branches: main
   env:
     UNBLOCKED_API_TOKEN: "ubk_..."
     UNBLOCKED_COLLECTION_ID: "..."
     UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
 ```
+
+If you prefer the artifact API, the restore step must target a previous build
+explicitly, e.g.
+`buildkite-agent artifact download --build "$(previous_passed_build_id)" "tmp/woods/unblocked_sync_manifest.json" .`
+where `previous_passed_build_id` queries the REST API for the last passed build
+on the pipeline. Declaring `artifact_paths: tmp/woods/**/*` still uploads the
+fresh manifest for free at the end of each run.
 
 > **Concurrency:** two syncs racing (e.g. per-deploy CI on quick successive
 > merges) can interleave manifest writes and put/delete calls. Gating this is
@@ -216,7 +231,7 @@ document id of everything last pushed. On each run the exporter:
 Documents are upserted by URI, so the sync is always safe to re-run. If the
 manifest is missing (first run, or a CI cache miss) the exporter reconciles
 document ids from the remote collection and falls back to a full re-push,
-rebuilding the manifest — correct, just more API calls that one run. In steady
+rebuilding the manifest — correct, just more API calls than one run. In steady
 state an unchanged codebase costs ~0 calls.
 
 Pair with `woods:incremental` to re-extract only changed files; the sync then
@@ -228,7 +243,7 @@ pushes only the documents whose content actually changed.
   check (still uses the manifest for deletes). Use after a `DocumentBuilder`
   format change, which alters every body.
 - `UNBLOCKED_FORCE_PURGE=1` — bypass the mass-deletion guard. The guard refuses
-  to delete more than 30% of a collection of ≥10 documents in one run, which
+  to delete more than 30% of a manifest tracking ≥10 documents in one run, which
   protects against running the sync against a **partial index** (e.g.
   `woods:incremental` output in a fresh directory), where the current unit set
   is a small subset and an unguarded purge would wipe the collection.

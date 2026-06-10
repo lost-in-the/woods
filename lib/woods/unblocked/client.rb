@@ -3,6 +3,7 @@
 require 'json'
 require 'net/http'
 require 'uri'
+require 'woods'
 require_relative 'rate_limiter'
 
 module Woods
@@ -12,14 +13,15 @@ module Woods
     # matching message strings. Subclasses Woods::Error, so existing
     # +rescue Woods::Error+ sites keep working unchanged.
     class ApiError < Woods::Error
-      # @return [Integer, nil] HTTP status code of the failed response
+      # @return [Integer] HTTP status code of the failed response
       attr_reader :status
 
       # @param message [String] Error message
-      # @param status [Integer, nil] HTTP status code
-      def initialize(message, status: nil)
+      # @param status [Integer] HTTP status code — required, because callers
+      #   branch on it (a nil status would silently miss every status check)
+      def initialize(message, status:)
         super(message)
-        @status = status
+        @status = Integer(status)
       end
     end
 

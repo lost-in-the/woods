@@ -115,7 +115,7 @@ module Woods
           errors.concat(result[:errors])
         end
 
-        deleted = @budget_exhausted ? 0 : purge_stale
+        deleted = @budget_exhausted ? 0 : purge_stale(errors)
         { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
       ensure
         save_manifest
@@ -155,7 +155,9 @@ module Woods
         units_with_data.each { |u| track_uri(u[:data]) }
 
         top_units = units_with_data.sort_by { |u| -u[:dep_count] }.first(max_count)
-        skipped_count = [units.size - max_count, 0].max
+        # Count against what was actually synced — units.size includes entries
+        # whose unit data was missing (dropped by the filter_map above).
+        skipped_count = units.size - top_units.size
 
         log "  #{type}: #{top_units.size}/#{units.size} units (top by dependents)"
 
@@ -188,7 +190,9 @@ module Woods
           errors << "#{entry['identifier']}: #{e.message}"
           break if note_budget_exhaustion(e)
         rescue StandardError => e
-          errors << "#{entry['identifier']}: #{e.message}"
+          # Include the class — "undefined method for nil" without it is
+          # unactionable in CI logs.
+          errors << "#{entry['identifier']}: #{e.class}: #{e.message}"
         end
 
         { synced: synced, skipped: skipped, errors: errors }
@@ -210,7 +214,9 @@ module Woods
           errors << "#{entry['identifier']}: #{e.message}"
           break if note_budget_exhaustion(e)
         rescue StandardError => e
-          errors << "#{entry['identifier']}: #{e.message}"
+          # Include the class — "undefined method for nil" without it is
+          # unactionable in CI logs.
+          errors << "#{entry['identifier']}: #{e.class}: #{e.message}"
         end
 
         { synced: synced, skipped: skipped, errors: errors }
@@ -222,6 +228,13 @@ module Woods
       # @return [Symbol] :synced or :skipped
       def push_document(unit_data)
         doc = @builder.build(unit_data)
+        # An empty body means the credential scrub failed closed (the builders
+        # always emit at least a header). Upserting it would overwrite a good
+        # remote document with nothing — error out and leave the remote as-is.
+        if doc[:body].nil? || doc[:body].empty?
+          raise Woods::ExtractionError, 'document body empty (credential scrub failure?) — push skipped'
+        end
+
         hash = fingerprint(doc)
         return :skipped if !@force_full && @manifest.unchanged?(doc[:uri], hash)
 
@@ -236,10 +249,13 @@ module Woods
         :synced
       end
 
-      # Delete remote documents whose source unit no longer exists.
+      # Delete remote documents whose source unit no longer exists. Failures
+      # are appended to +errors+ — a delete that fails silently every run is
+      # how a collection rots while "deleted: 0" looks normal.
       #
+      # @param errors [Array<String>] sink for delete failures
       # @return [Integer] number of documents deleted
-      def purge_stale
+      def purge_stale(errors)
         stale = @manifest.stale_uris(@current_uris)
         return 0 if stale.empty?
         return 0 if guard_blocks_purge?(stale)
@@ -255,13 +271,21 @@ module Woods
           @manifest.forget(uri)
           deleted += 1
         rescue ApiError => e
-          # 404 means the document is already gone remotely — goal state
-          # reached, so drop the entry rather than retrying every run.
-          @manifest.forget(uri) if e.status == 404
+          if e.status == 404
+            # Already gone remotely — goal state reached, drop the entry
+            # rather than retrying every run.
+            @manifest.forget(uri)
+          else
+            errors << "delete #{uri}: #{e.message}"
+          end
         rescue Woods::Error => e
           break if note_budget_exhaustion(e)
-        rescue StandardError
-          # Leave the entry in the manifest; a later run will retry the delete.
+
+          errors << "delete #{uri}: #{e.message}"
+        rescue StandardError => e
+          # Entry stays in the manifest so a later run retries the delete —
+          # but surface the failure so systematic breakage is visible.
+          errors << "delete #{uri}: #{e.class}: #{e.message}"
         end
         deleted
       end
@@ -306,6 +330,10 @@ module Woods
       # state (first run / CI cache miss). The list endpoint returns no body,
       # so hashes are nil (everything re-pushes), but recovering document_ids
       # lets this run still purge orphaned documents.
+      #
+      # Auth failures re-raise: a 401/403 here dooms every subsequent call,
+      # and "proceeding with full sync" would burn the whole daily budget on
+      # guaranteed failures.
       def reconcile_from_remote
         @client.all_documents(collection_id: @collection_id).each do |doc|
           uri = doc['uri']
@@ -313,6 +341,10 @@ module Woods
 
           @manifest.record(uri: uri, hash: nil, document_id: doc['id'])
         end
+      rescue ApiError => e
+        raise if [401, 403].include?(e.status)
+
+        log "  reconcile skipped (#{e.message}) — proceeding with full sync"
       rescue StandardError => e
         log "  reconcile skipped (#{e.message}) — proceeding with full sync"
       end
@@ -326,9 +358,11 @@ module Woods
       end
 
       # Records whether an error was a budget-exhaustion stop. Returns true when
-      # it was, so callers can break out of their loop.
+      # it was, so callers can break out of their loop. Class check first; the
+      # message match remains as a fallback for injected clients that raise
+      # plain Woods::Error.
       def note_budget_exhaustion(error)
-        return false unless error.message.include?('daily budget exhausted')
+        return false unless error.is_a?(BudgetExhaustedError) || error.message.include?('daily budget exhausted')
 
         @budget_exhausted = true
       end
@@ -345,7 +379,7 @@ module Woods
       def save_manifest
         @manifest.save
       rescue StandardError => e
-        log "  WARNING: sync manifest not persisted (#{e.message}) — next run will re-check all documents"
+        log "  WARNING: sync manifest not persisted (#{e.message}) — next run will re-push all documents"
       end
 
       def build_manifest(index_dir)

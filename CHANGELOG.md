@@ -18,15 +18,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~800–1200 per run). Persist the manifest across CI runs via your provider's cache —
   see `docs/UNBLOCKED_INTEGRATION.md`.
 - **Deletion safety.** Orphan purging is skipped when the daily API budget exhausts
-  mid-run, and a mass-deletion guard refuses to delete more than 30% of a ≥10-document
-  collection in one run (`UNBLOCKED_FORCE_PURGE=1` overrides) — protection against
+  mid-run, and a mass-deletion guard refuses to delete more than 30% of a ≥10-entry
+  manifest in one run (`UNBLOCKED_FORCE_PURGE=1` overrides) — protection against
   syncing a partial index. `UNBLOCKED_FORCE_FULL_SYNC=1` re-pushes everything (use
   after a document-format change). Both flags parse `1`/`true`/`yes` (case-insensitive).
 - **`Client#list_documents` / `#all_documents`** — paginated document listing with
   client-side collection filtering, used to reconcile remote document ids when the
-  manifest is missing.
-- **`Woods::Unblocked::ApiError`** (subclass of `Woods::Error`) now carries the HTTP
-  `status` of failed API calls; a 404 on delete is treated as already-gone.
+  manifest is missing. Cursors are URL-encoded and a page without a cursor id stops
+  pagination rather than looping against the rate budget.
+- **`Woods::Unblocked::ApiError`** (subclass of `Woods::Error`) carries the required
+  HTTP `status` of failed API calls; a 404 on delete is treated as already-gone.
+  **`Woods::Unblocked::BudgetExhaustedError`** (also a `Woods::Error` subclass) is
+  raised by the rate limiter, so budget detection no longer depends on message text.
+- **CI-visible failures.** `woods:unblocked_sync` exits non-zero when the sync
+  recorded errors (delete failures are now surfaced in the error list too). The one
+  tolerated shape is budget exhaustion with partial progress — the expected
+  cold-start outcome, which converges on the next run. Reconcile aborts loudly on
+  auth failures (401/403) instead of burning the budget on doomed calls.
 - **Deterministic document bodies.** `DocumentBuilder` sorts every rendered collection
   (associations, dependents, routes, enums, scopes, concerns, callbacks) so an
   unchanged unit always produces byte-identical output — the precondition for
@@ -43,8 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response.
 - API error messages now surface RFC7807 `title`/`detail` fields (previously
   "Unknown error").
-- Pagination cursors are URL-encoded, and a malformed page can no longer cause an
-  infinite refetch loop against the rate budget.
+- `require 'woods/unblocked/client'` works standalone (previously needed `woods`
+  loaded first).
 
 ### Build
 

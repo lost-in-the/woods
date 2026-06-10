@@ -18,7 +18,7 @@ agent-facing operational map.
 | `document_builder.rb` | Unit JSON → `{title:, body:, uri:}` Markdown. **Every rendered collection is sorted** — body bytes must be a function of content, not input order, because the exporter hashes them. Credential-scrubs bodies (fails closed to empty string). |
 | `exporter.rb` | Orchestrates the sync. Skip-if-unchanged via manifest hash, reconcile-on-empty-manifest, orphan purge with safety guards. |
 | `sync_manifest.rb` | JSON at `<output_dir>/unblocked_sync_manifest.json`: `uri → {hash, document_id}`. Atomic save; discards itself on collection-id mismatch or corrupt file (degrades to full re-push). |
-| `rate_limiter.rb` | 1000-calls/day budget (override: `UNBLOCKED_DAILY_BUDGET`). Raises `Woods::Error` containing `daily budget exhausted`. |
+| `rate_limiter.rb` | 1000-calls/day budget (override: `UNBLOCKED_DAILY_BUDGET`). Raises `BudgetExhaustedError < Woods::Error` when spent. |
 
 ## Setup (one-time per host app)
 
@@ -55,11 +55,14 @@ agent-facing operational map.
 
 ## Escape hatches (truthy: `1`/`true`/`yes`, case-insensitive)
 
-- `UNBLOCKED_FORCE_FULL_SYNC` — re-push everything. Needed after ANY
-  `DocumentBuilder` format change (every body hash shifts anyway — but this
-  makes intent explicit) and after changing `unblocked_repo_url` (URIs change,
-  which otherwise creates remote duplicates until purge catches them).
-- `UNBLOCKED_FORCE_PURGE` — bypass the mass-deletion guard.
+- `UNBLOCKED_FORCE_FULL_SYNC` — re-push everything, ignoring the unchanged
+  check. Use after a `DocumentBuilder` format change to make intent explicit
+  (every body hash shifts anyway, so the effect is the same either way).
+- `UNBLOCKED_FORCE_PURGE` — bypass the mass-deletion guard. **This is the flag
+  a `unblocked_repo_url` change needs:** every URI changes, so everything
+  re-pushes on its own (all URIs are new to the manifest), but the old-URI
+  documents become 100% of the stale set — which trips the >30% guard — and
+  they persist as remote duplicates until a run with FORCE_PURGE deletes them.
 
 ## Symptom → cause
 
@@ -79,8 +82,9 @@ agent-facing operational map.
 - **Determinism is a hard invariant:** any new `DocumentBuilder` output must be
   byte-identical across runs for unchanged input — extend the order-independence
   spec in `spec/unblocked/document_builder_spec.rb` when adding sections.
-- Error classes: raise/rescue `ApiError` (has `status`) for HTTP failures;
-  budget exhaustion is detected via `note_budget_exhaustion` (single chokepoint).
+- Error classes: raise/rescue `ApiError` (required `status`) for HTTP failures;
+  `BudgetExhaustedError` for budget stops — detected in `note_budget_exhaustion`
+  (single chokepoint; class check with a message-text fallback).
 - **Live smoke** (writes to the real org, self-cleaning): create temp collection
   → put → `all_documents` → delete doc → delete collection. Needs the
   Team token. Pattern: `script` it against `Client` directly; never log the token.

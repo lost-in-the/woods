@@ -103,19 +103,31 @@ module Woods
       private
 
       # Load the persisted documents, discarding data from a different
-      # collection or an unparseable file.
+      # collection, a different schema version, or an unparseable file.
+      # Every discard warns to stderr — the consequence (a full re-push) is
+      # expensive enough that operators need to know why it happened.
       #
       # @return [Hash{String=>Hash}] uri => { 'hash' =>, 'document_id' => }
       def load
         return {} unless File.exist?(@path)
 
         parsed = JSON.parse(File.read(@path))
-        return {} unless parsed.is_a?(Hash)
-        return {} unless parsed['collection_id'] == @collection_id
+        return discard('not a JSON object') unless parsed.is_a?(Hash)
+        return discard("schema version #{parsed['version'].inspect}, expected #{VERSION}") unless
+          parsed['version'] == VERSION
+        return discard("written for collection #{parsed['collection_id'].inspect}, expected #{@collection_id}") unless
+          parsed['collection_id'] == @collection_id
 
         documents = parsed['documents']
         documents.is_a?(Hash) ? documents : {}
       rescue JSON::ParserError
+        discard('unparseable JSON')
+      end
+
+      # @param reason [String] Why the persisted manifest is unusable
+      # @return [Hash] empty documents hash (degrades to a full re-push)
+      def discard(reason)
+        warn "WARNING: discarding sync manifest at #{@path} (#{reason}) — next sync re-pushes all documents"
         {}
       end
     end
