@@ -1,10 +1,18 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
 require 'woods'
 require 'woods/unblocked/exporter'
 
 RSpec.describe Woods::Unblocked::Exporter do
+  around do |example|
+    Dir.mktmpdir do |dir|
+      @index_dir = dir
+      example.run
+    end
+  end
+
   let(:stub_config) do
     instance_double(
       'Woods::Configuration',
@@ -23,17 +31,48 @@ RSpec.describe Woods::Unblocked::Exporter do
   let(:client) do
     instance_double(Woods::Unblocked::Client).tap do |c|
       allow(c).to receive(:put_document).and_return('id' => 'doc-1')
+      allow(c).to receive(:all_documents).and_return([])
+      allow(c).to receive(:delete_document).and_return({})
     end
   end
 
+  # nil → the exporter builds a real SyncManifest under @index_dir.
+  # Override with a double in focused tests for precise skip/delete control.
+  let(:manifest) { nil }
+  let(:force_full) { false }
+  let(:force_purge) { false }
+
   subject(:exporter) do
     described_class.new(
-      index_dir: '/tmp/woods',
+      index_dir: @index_dir,
       config: stub_config,
       client: client,
       reader: reader,
+      manifest: manifest,
+      force_full: force_full,
+      force_purge: force_purge,
       output: StringIO.new
     )
+  end
+
+  # The blob URI the builder produces for a unit at the given path.
+  def uri_for(path)
+    "https://github.com/org/repo/blob/main/#{path}"
+  end
+
+  # A manifest double with sensible no-op defaults; pass a block to override.
+  def manifest_double # rubocop:disable Metrics/AbcSize
+    instance_double(Woods::Unblocked::SyncManifest).tap do |m|
+      allow(m).to receive(:empty?).and_return(false)
+      allow(m).to receive(:unchanged?).and_return(false)
+      allow(m).to receive(:record)
+      allow(m).to receive(:document_id_for).and_return(nil)
+      allow(m).to receive(:stale_uris).and_return([])
+      allow(m).to receive(:forget)
+      allow(m).to receive(:size).and_return(0)
+      allow(m).to receive(:save)
+      yield m if block_given?
+    end
   end
 
   describe '#initialize' do
@@ -144,6 +183,134 @@ RSpec.describe Woods::Unblocked::Exporter do
 
       stats = exporter.sync_all
       expect(stats[:errors].size).to be <= Woods::Unblocked::Exporter::MAX_ERRORS + 1
+    end
+  end
+
+  describe 'incremental sync' do
+    # One model unit named User, present this run.
+    def stub_single_user
+      allow(reader).to receive(:list_units).and_return([])
+      allow(reader).to receive(:list_units).with(type: 'model')
+                                           .and_return([{ 'identifier' => 'User', 'type' => 'model' }])
+      allow(reader).to receive(:find_unit).with('User')
+                                          .and_return({ 'type' => 'model', 'identifier' => 'User',
+                                                        'file_path' => 'app/models/user.rb', 'metadata' => {} })
+    end
+
+    context 'when a unit is unchanged' do
+      let(:manifest) { manifest_double { |m| allow(m).to receive(:unchanged?).and_return(true) } }
+
+      it 'skips it without calling put_document' do
+        stub_single_user
+        stats = exporter.sync_all
+        expect(client).not_to have_received(:put_document)
+        expect(stats[:skipped]).to be >= 1
+      end
+    end
+
+    context 'when a unit changed' do
+      let(:manifest) { manifest_double { |m| allow(m).to receive(:unchanged?).and_return(false) } }
+
+      it 'pushes it and records the new hash + document_id' do
+        stub_single_user
+        exporter.sync_all
+        expect(client).to have_received(:put_document).once
+        expect(manifest).to have_received(:record)
+          .with(uri: uri_for('app/models/user.rb'), hash: kind_of(String), document_id: 'doc-1')
+      end
+    end
+
+    context 'when force_full is set' do
+      let(:force_full) { true }
+      let(:manifest) { manifest_double { |m| allow(m).to receive(:unchanged?).and_return(true) } }
+
+      it 'pushes even unchanged units' do
+        stub_single_user
+        exporter.sync_all
+        expect(client).to have_received(:put_document).once
+      end
+    end
+
+    context 'when a recorded unit no longer exists' do
+      let(:manifest) do
+        manifest_double do |m|
+          allow(m).to receive(:size).and_return(20)
+          allow(m).to receive(:stale_uris).and_return([uri_for('app/models/gone.rb')])
+          allow(m).to receive(:document_id_for).with(uri_for('app/models/gone.rb')).and_return('doc-gone')
+        end
+      end
+
+      it 'deletes the orphaned remote document and forgets it' do
+        stub_single_user
+        stats = exporter.sync_all
+        expect(client).to have_received(:delete_document).with(document_id: 'doc-gone')
+        expect(manifest).to have_received(:forget).with(uri_for('app/models/gone.rb'))
+        expect(stats[:deleted]).to eq(1)
+      end
+    end
+
+    context 'mass-deletion guard' do
+      # 8 of 10 recorded docs would be purged (80% > 30%) — a partial index.
+      let(:stale) { (1..8).map { |i| uri_for("app/models/m#{i}.rb") } }
+      let(:manifest) do
+        manifest_double do |m|
+          allow(m).to receive(:size).and_return(10)
+          allow(m).to receive(:stale_uris).and_return(stale)
+          allow(m).to receive(:document_id_for).and_return('some-doc')
+        end
+      end
+
+      it 'refuses to purge above the threshold without force_purge' do
+        stub_single_user
+        stats = exporter.sync_all
+        expect(client).not_to have_received(:delete_document)
+        expect(stats[:deleted]).to eq(0)
+      end
+
+      context 'with force_purge' do
+        let(:force_purge) { true }
+
+        it 'purges anyway' do
+          stub_single_user
+          stats = exporter.sync_all
+          expect(client).to have_received(:delete_document).exactly(8).times
+          expect(stats[:deleted]).to eq(8)
+        end
+      end
+    end
+
+    context 'when budget is exhausted mid-run' do
+      let(:manifest) do
+        manifest_double do |m|
+          allow(m).to receive(:size).and_return(20)
+          allow(m).to receive(:stale_uris).and_return([uri_for('app/models/gone.rb')])
+          allow(m).to receive(:document_id_for).and_return('doc-gone')
+        end
+      end
+
+      it 'does not purge (current set is incomplete)' do
+        stub_single_user
+        allow(client).to receive(:put_document).and_raise(Woods::Error, 'daily budget exhausted')
+        stats = exporter.sync_all
+        expect(client).not_to have_received(:delete_document)
+        expect(stats[:deleted]).to eq(0)
+      end
+    end
+
+    context 'when the manifest is empty (cache miss)' do
+      it 'reconciles document ids from the remote and purges orphans' do
+        # No current units; remote has one orphan in our collection.
+        allow(reader).to receive(:list_units).and_return([])
+        allow(client).to receive(:all_documents).with(collection_id: 'col-1').and_return(
+          [{ 'id' => 'remote-1', 'uri' => uri_for('app/models/orphan.rb'), 'collectionId' => 'col-1' }]
+        )
+
+        stats = exporter.sync_all
+
+        expect(client).to have_received(:all_documents).with(collection_id: 'col-1')
+        expect(client).to have_received(:delete_document).with(document_id: 'remote-1')
+        expect(stats[:deleted]).to eq(1)
+      end
     end
   end
 end

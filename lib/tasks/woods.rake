@@ -604,20 +604,28 @@ namespace :woods do
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+    force_full = ENV.fetch('UNBLOCKED_FORCE_FULL_SYNC', nil)
+    force_purge = ENV.fetch('UNBLOCKED_FORCE_PURGE', nil)
 
     puts 'Syncing extraction data to Unblocked...'
     puts "  Output dir:     #{output_dir}"
     puts "  Collection:     #{config.unblocked_collection_id}"
     puts "  Repo URL:       #{config.unblocked_repo_url}"
+    puts '  Mode:           full re-sync (UNBLOCKED_FORCE_FULL_SYNC set)' if force_full
     puts
 
-    exporter = Woods::Unblocked::Exporter.new(index_dir: output_dir)
+    exporter = Woods::Unblocked::Exporter.new(
+      index_dir: output_dir,
+      force_full: !force_full.nil?,
+      force_purge: !force_purge.nil?
+    )
     stats = exporter.sync_all
 
     puts
     puts 'Sync complete!'
     puts "  Documents synced:   #{stats[:synced]}"
     puts "  Documents skipped:  #{stats[:skipped]}"
+    puts "  Documents deleted:  #{stats[:deleted]}"
 
     if stats[:errors].any?
       puts "  Errors:             #{stats[:errors].size}"

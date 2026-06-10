@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
+require 'set'
+require 'digest'
 require 'woods'
 require_relative 'client'
 require_relative 'rate_limiter'
 require_relative 'document_builder'
+require_relative 'sync_manifest'
 
 module Woods
   module Unblocked
@@ -11,15 +14,26 @@ module Woods
     #
     # Reads extraction output from disk via IndexReader, converts units to
     # condensed Markdown documents, and pushes via the Unblocked Documents API.
-    # All syncs are idempotent — documents are upserted by URI.
+    # Syncs are incremental: a {SyncManifest} records the content hash and
+    # remote document_id of everything last pushed, so each run only PUTs
+    # new/changed documents, skips unchanged ones, and deletes documents whose
+    # source unit has disappeared. Documents are upserted by URI, so a missing
+    # manifest (first run / CI cache miss) degrades to a correct full sync.
     #
     # @example
     #   exporter = Exporter.new(index_dir: "tmp/woods")
     #   stats = exporter.sync_all
-    #   # => { synced: 940, skipped: 5060, errors: [] }
+    #   # => { synced: 12, skipped: 928, deleted: 1, errors: [] }
     #
     class Exporter
       MAX_ERRORS = 100
+
+      # Mass-deletion guard: refuse to purge when more than this fraction of a
+      # manifest of at least PURGE_GUARD_MIN_DOCS entries would be deleted —
+      # the signature of a sync run against a partial index. Override with
+      # force_purge.
+      PURGE_GUARD_FRACTION = 0.30
+      PURGE_GUARD_MIN_DOCS = 10
 
       # Unit types to sync, in priority order.
       # All units are synced for these types.
@@ -39,9 +53,13 @@ module Woods
       # @param config [Configuration] Woods configuration (default: global config)
       # @param client [Client, nil] Unblocked API client (auto-created from config if nil)
       # @param reader [Object, nil] IndexReader instance (auto-created if nil)
+      # @param manifest [SyncManifest, nil] Sync manifest (auto-created under index_dir if nil)
+      # @param force_full [Boolean] Re-push every unit, ignoring the unchanged check
+      # @param force_purge [Boolean] Bypass the mass-deletion guard
       # @param output [IO] Progress output stream (default: $stdout)
       # @raise [ConfigurationError] if required config is missing
-      def initialize(index_dir:, config: Woods.configuration, client: nil, reader: nil, output: $stdout)
+      def initialize(index_dir:, config: Woods.configuration, client: nil, reader: nil,
+                     manifest: nil, force_full: false, force_purge: false, output: $stdout)
         @collection_id = config.unblocked_collection_id
         raise ConfigurationError, 'unblocked_collection_id is required' unless @collection_id
 
@@ -57,18 +75,27 @@ module Woods
         @client = client || Client.new(api_token: api_token, rate_limiter: limiter)
         @reader = reader || build_reader(index_dir)
         @builder = DocumentBuilder.new(repo_url: repo_url)
+        @manifest = manifest || build_manifest(index_dir)
+        @force_full = force_full
+        @force_purge = force_purge
         @output = output
       end
 
       # Sync all configured unit types to the Unblocked collection.
       #
-      # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
+      # @return [Hash] { synced:, skipped:, deleted:, errors: }
       def sync_all
+        @current_uris = Set.new
+        @budget_exhausted = false
+        reconcile_from_remote if @manifest.empty?
+
         synced = 0
         skipped = 0
         errors = []
 
         FULL_SYNC_TYPES.each do |type|
+          break if @budget_exhausted
+
           result = sync_type(type)
           synced += result[:synced]
           skipped += result[:skipped]
@@ -76,19 +103,24 @@ module Woods
         end
 
         PARTIAL_SYNC_TYPES.each do |type, max_count|
+          break if @budget_exhausted
+
           result = sync_type_partial(type, max_count)
           synced += result[:synced]
           skipped += result[:skipped]
           errors.concat(result[:errors])
         end
 
-        { synced: synced, skipped: skipped, errors: cap_errors(errors) }
+        deleted = @budget_exhausted ? 0 : purge_stale
+        { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
+      ensure
+        @manifest.save
       end
 
       # Sync all units of a given type.
       #
       # @param type [String] Unit type (e.g. "model", "controller")
-      # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
+      # @return [Hash] { synced:, skipped:, errors: }
       def sync_type(type)
         units = @reader.list_units(type: type)
         log "  #{type}: #{units.size} units"
@@ -100,7 +132,7 @@ module Woods
       #
       # @param type [String] Unit type
       # @param max_count [Integer] Maximum units to sync
-      # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
+      # @return [Hash] { synced:, skipped:, errors: }
       def sync_type_partial(type, max_count)
         units = @reader.list_units(type: type)
         return empty_stats if units.empty?
@@ -113,6 +145,10 @@ module Woods
           dep_count = (data['dependents'] || []).size
           { entry: entry, data: data, dep_count: dep_count }
         end
+
+        # Every unit of this type still exists — track its URI so partial units
+        # that fall *out* of the top-N are never mistaken for deletions.
+        units_with_data.each { |u| track_uri(u[:data]) }
 
         top_units = units_with_data.sort_by { |u| -u[:dep_count] }.first(max_count)
         skipped_count = [units.size - max_count, 0].max
@@ -138,11 +174,15 @@ module Woods
             next
           end
 
-          push_document(unit_data)
-          synced += 1
+          track_uri(unit_data)
+          if push_document(unit_data) == :skipped
+            skipped += 1
+          else
+            synced += 1
+          end
         rescue Woods::Error => e
           errors << "#{entry['identifier']}: #{e.message}"
-          break if e.message.include?('daily budget exhausted')
+          break if note_budget_exhaustion(e)
         rescue StandardError => e
           errors << "#{entry['identifier']}: #{e.message}"
         end
@@ -156,11 +196,15 @@ module Woods
         errors = []
 
         entries_with_data.each do |entry, unit_data|
-          push_document(unit_data)
-          synced += 1
+          track_uri(unit_data)
+          if push_document(unit_data) == :skipped
+            skipped += 1
+          else
+            synced += 1
+          end
         rescue Woods::Error => e
           errors << "#{entry['identifier']}: #{e.message}"
-          break if e.message.include?('daily budget exhausted')
+          break if note_budget_exhaustion(e)
         rescue StandardError => e
           errors << "#{entry['identifier']}: #{e.message}"
         end
@@ -168,19 +212,109 @@ module Woods
         { synced: synced, skipped: skipped, errors: errors }
       end
 
+      # Build the document, skip it if the manifest says it is unchanged,
+      # otherwise upsert it and record the new hash + remote document_id.
+      #
+      # @return [Symbol] :synced or :skipped
       def push_document(unit_data)
         doc = @builder.build(unit_data)
-        @client.put_document(
+        hash = fingerprint(doc)
+        return :skipped if !@force_full && @manifest.unchanged?(doc[:uri], hash)
+
+        response = @client.put_document(
           collection_id: @collection_id,
           title: doc[:title],
           body: doc[:body],
           uri: doc[:uri]
         )
+        document_id = (response['id'] if response.is_a?(Hash)) || @manifest.document_id_for(doc[:uri])
+        @manifest.record(uri: doc[:uri], hash: hash, document_id: document_id)
+        :synced
+      end
+
+      # Delete remote documents whose source unit no longer exists.
+      #
+      # @return [Integer] number of documents deleted
+      def purge_stale
+        stale = @manifest.stale_uris(@current_uris)
+        return 0 if stale.empty?
+        return 0 if guard_blocks_purge?(stale)
+
+        deleted = 0
+        stale.each do |uri|
+          document_id = @manifest.document_id_for(uri)
+          next unless document_id
+
+          @client.delete_document(document_id: document_id)
+          @manifest.forget(uri)
+          deleted += 1
+        rescue Woods::Error => e
+          break if note_budget_exhaustion(e)
+        rescue StandardError
+          # Leave the entry in the manifest; a later run will retry the delete.
+        end
+        deleted
+      end
+
+      # True when purging +stale+ would delete too large a fraction of the
+      # manifest — the signature of running against a partial index. The floor
+      # (PURGE_GUARD_MIN_DOCS) keeps small collections deletable.
+      def guard_blocks_purge?(stale)
+        return false if @force_purge
+
+        size = @manifest.size
+        return false if size < PURGE_GUARD_MIN_DOCS
+
+        fraction = stale.size.to_f / size
+        return false unless fraction > PURGE_GUARD_FRACTION
+
+        log "  WARNING: refusing to delete #{stale.size} of #{size} documents " \
+            "(#{(fraction * 100).round}% > #{(PURGE_GUARD_FRACTION * 100).to_i}% — likely a partial index). " \
+            'Set UNBLOCKED_FORCE_PURGE=1 to override.'
+        true
+      end
+
+      # Seed the manifest from the remote collection when we have no local
+      # state (first run / CI cache miss). The list endpoint returns no body,
+      # so hashes are nil (everything re-pushes), but recovering document_ids
+      # lets this run still purge orphaned documents.
+      def reconcile_from_remote
+        @client.all_documents(collection_id: @collection_id).each do |doc|
+          uri = doc['uri']
+          next unless uri
+
+          @manifest.record(uri: uri, hash: nil, document_id: doc['id'])
+        end
+      rescue StandardError => e
+        log "  reconcile skipped (#{e.message}) — proceeding with full sync"
+      end
+
+      def track_uri(unit_data)
+        @current_uris << @builder.uri_for(unit_data)
+      end
+
+      def fingerprint(doc)
+        Digest::SHA256.hexdigest("#{doc[:title]}\n#{doc[:body]}")
+      end
+
+      # Records whether an error was a budget-exhaustion stop. Returns true when
+      # it was, so callers can break out of their loop.
+      def note_budget_exhaustion(error)
+        return false unless error.message.include?('daily budget exhausted')
+
+        @budget_exhausted = true
       end
 
       def build_reader(index_dir)
         require_relative '../mcp/index_reader'
         Woods::MCP::IndexReader.new(index_dir)
+      end
+
+      def build_manifest(index_dir)
+        SyncManifest.new(
+          path: File.join(index_dir, 'unblocked_sync_manifest.json'),
+          collection_id: @collection_id
+        )
       end
 
       def empty_stats

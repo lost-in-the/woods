@@ -133,14 +133,41 @@ sync uses ~800-1200 calls for the initial build. If your app exceeds 1,000 units
 
 ## CI Integration
 
-Add a post-merge Buildkite (or GitHub Actions) step:
+Add a post-merge step. The sync is incremental (see below), so the one thing CI
+must do beyond running the task is **persist the sync manifest between runs** —
+otherwise every deploy starts from scratch and re-pushes everything.
+
+### GitHub Actions
 
 ```yaml
-# Buildkite example
+- uses: actions/cache@v4
+  with:
+    path: tmp/woods/unblocked_sync_manifest.json
+    key: unblocked-sync-${{ env.UNBLOCKED_COLLECTION_ID }}
+- run: bin/rails woods:extract
+- run: bin/rails woods:unblocked_sync
+  env:
+    UNBLOCKED_API_TOKEN: "ubk_..."
+    UNBLOCKED_COLLECTION_ID: "..."
+    UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
+```
+
+### Buildkite
+
+Buildkite has no native cache primitive — use the S3-backed
+[cache plugin](https://github.com/buildkite-plugins/cache-buildkite-plugin) or
+the artifact API. The manifest lands in `<output_dir>` (default `tmp/woods/`),
+so a pipeline that already declares `artifact_paths: tmp/woods/**/*` **uploads it
+for free** — you only need to add the *restore* (download) side before the sync
+step.
+
+```yaml
 - label: ":trees: Woods → Unblocked"
   command:
+    - buildkite-agent artifact download "tmp/woods/unblocked_sync_manifest.json" . || true
     - bin/rails woods:extract
     - bin/rails woods:unblocked_sync
+  artifact_paths: "tmp/woods/**/*"
   branches: main
   env:
     UNBLOCKED_API_TOKEN: "ubk_..."
@@ -148,16 +175,40 @@ Add a post-merge Buildkite (or GitHub Actions) step:
     UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
 ```
 
-This keeps the Unblocked collection in sync with main after every merge.
+> **Concurrency:** two syncs racing (e.g. per-deploy CI on quick successive
+> merges) can interleave manifest writes and put/delete calls. Gating this is
+> the host pipeline's responsibility — set a Buildkite `concurrency_group` (or
+> the GitHub Actions `concurrency:` key) on the sync step.
 
 ## Incremental Updates
 
-The current implementation pushes all qualifying units on each sync (upsert
-ensures idempotency). For large codebases, you can combine with
-`woods:incremental` to only re-extract changed files, though the sync itself
-still pushes all documents.
+The sync is incremental. A **sync manifest**
+(`<output_dir>/unblocked_sync_manifest.json`) records the content hash and remote
+document id of everything last pushed. On each run the exporter:
 
-Future versions may support diff-based sync that only pushes changed documents.
+- **skips** documents whose built body hash is unchanged,
+- **pushes** only new or changed documents,
+- **deletes** documents whose source unit has disappeared.
+
+Documents are upserted by URI, so the sync is always safe to re-run. If the
+manifest is missing (first run, or a CI cache miss) the exporter reconciles
+document ids from the remote collection and falls back to a full re-push,
+rebuilding the manifest — correct, just more API calls that one run. In steady
+state an unchanged codebase costs ~0 calls.
+
+Pair with `woods:incremental` to re-extract only changed files; the sync then
+pushes only the documents whose content actually changed.
+
+### Escape hatches
+
+- `UNBLOCKED_FORCE_FULL_SYNC=1` — re-push every document, ignoring the unchanged
+  check (still uses the manifest for deletes). Use after a `DocumentBuilder`
+  format change, which alters every body.
+- `UNBLOCKED_FORCE_PURGE=1` — bypass the mass-deletion guard. The guard refuses
+  to delete more than 30% of a collection of ≥10 documents in one run, which
+  protects against running the sync against a **partial index** (e.g.
+  `woods:incremental` output in a fresh directory), where the current unit set
+  is a small subset and an unguarded purge would wipe the collection.
 
 ## Troubleshooting
 

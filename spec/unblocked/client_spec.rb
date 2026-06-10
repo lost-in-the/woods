@@ -113,6 +113,24 @@ RSpec.describe Woods::Unblocked::Client do
         .to raise_error(Woods::Error, /401/)
     end
 
+    it 'surfaces title/detail from RFC7807-style error bodies' do
+      # The live Unblocked API returns { status, title, detail } — not message/error.
+      err = instance_double(Net::HTTPResponse, code: '400',
+                                               body: JSON.generate({ 'status' => 400, 'title' => 'Bad Request',
+                                                                     'detail' => 'Invalid request body' }))
+      allow(err).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:request).and_return(err)
+
+      expect { client.list_collections }
+        .to raise_error(Woods::Error, /Invalid request body/)
+    end
+
     it 'handles a malformed JSON response body without crashing' do
       err = instance_double(Net::HTTPResponse, code: '500', body: 'internal error html')
       allow(err).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
@@ -148,6 +166,73 @@ RSpec.describe Woods::Unblocked::Client do
       client.create_collection(name: 'Woods', description: 'an index')
       body = JSON.parse(captured.body)
       expect(body).not_to have_key('iconUrl')
+    end
+  end
+
+  # Helper: stub Net::HTTP so successive requests return the given response bodies
+  # (as JSON), capturing each request path. Mirrors the per-example stubbing the
+  # other specs use, factored out for the paginated list cases.
+  def stub_http_sequence(*bodies) # rubocop:disable Metrics/AbcSize
+    responses = bodies.map do |body|
+      resp = instance_double(Net::HTTPSuccess, code: '200', body: JSON.generate(body))
+      allow(resp).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      resp
+    end
+    http = instance_double(Net::HTTP)
+    allow(Net::HTTP).to receive(:new).and_return(http)
+    allow(http).to receive(:use_ssl=)
+    allow(http).to receive(:open_timeout=)
+    allow(http).to receive(:read_timeout=)
+    paths = []
+    allow(http).to receive(:request) do |req|
+      paths << req.path
+      responses.shift
+    end
+    paths
+  end
+
+  describe '#list_documents' do
+    it 'sends a GET to /documents with the limit and returns the array' do
+      paths = stub_http_sequence([{ 'id' => 'd1', 'uri' => 'u1' }])
+
+      result = client.list_documents(limit: 50)
+
+      expect(result).to eq([{ 'id' => 'd1', 'uri' => 'u1' }])
+      expect(paths.first).to include('documents')
+      expect(paths.first).to include('limit=50')
+    end
+
+    it 'passes the after cursor when given' do
+      paths = stub_http_sequence([])
+      client.list_documents(after: 'cursor-abc')
+      expect(paths.first).to include('after=cursor-abc')
+    end
+  end
+
+  describe '#all_documents' do
+    it 'pages via the after cursor until a short page and filters by collection' do
+      page1 = (1..200).map { |i| { 'id' => "d#{i}", 'uri' => "u#{i}", 'collectionId' => 'col-1' } }
+      page2 = [
+        { 'id' => 'd201', 'uri' => 'u201', 'collectionId' => 'col-1' },
+        { 'id' => 'd202', 'uri' => 'u202', 'collectionId' => 'other' }
+      ]
+      paths = stub_http_sequence(page1, page2)
+
+      result = client.all_documents(collection_id: 'col-1')
+
+      # 200 from page1 + 1 matching from page2; the 'other' collection is filtered out
+      expect(result.size).to eq(201)
+      expect(result.map { |d| d['collectionId'] }.uniq).to eq(['col-1'])
+      # second request carried the last id of page1 as the cursor
+      expect(paths.size).to eq(2)
+      expect(paths.last).to include('after=d200')
+    end
+
+    it 'stops after a single short page' do
+      paths = stub_http_sequence([{ 'id' => 'd1', 'uri' => 'u1', 'collectionId' => 'col-1' }])
+      result = client.all_documents(collection_id: 'col-1')
+      expect(result.size).to eq(1)
+      expect(paths.size).to eq(1)
     end
   end
 

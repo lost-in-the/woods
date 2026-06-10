@@ -25,6 +25,8 @@ module Woods
       BASE_URL = 'https://getunblocked.com/api/v1'
       MAX_RETRIES = 3
       DEFAULT_TIMEOUT = 30
+      # Max page size the list endpoint accepts (per API docs).
+      PAGE_SIZE = 200
 
       # @param api_token [String] Unblocked API token (Personal or Team)
       # @param rate_limiter [RateLimiter] Rate limiter instance
@@ -82,6 +84,49 @@ module Woods
       # @return [Hash] API response
       def delete_document(document_id:)
         request(:delete, "documents/#{document_id}")
+      end
+
+      # List a single page of documents.
+      #
+      # The endpoint returns a bare JSON array of document metadata (no body):
+      # `id, collectionId, title, uri, createdAt, updatedAt`. Pagination is
+      # cursor-based via `after`/`before` (opaque cursors); there is no
+      # server-side collection filter.
+      #
+      # @param limit [Integer] Page size (1-200)
+      # @param after [String, nil] Opaque forward cursor (typically the last id)
+      # @return [Array<Hash>] One page of document metadata
+      def list_documents(limit: PAGE_SIZE, after: nil)
+        query = "limit=#{limit}"
+        query += "&after=#{after}" if after
+        result = request(:get, "documents?#{query}")
+        return result if result.is_a?(Array)
+
+        result['items'] || result['data'] || []
+      end
+
+      # List every document in a collection, paging until exhausted.
+      #
+      # Filters client-side on `collectionId` since the API has no collection
+      # filter. ~5 calls for ~1000 documents; each goes through the rate limiter.
+      #
+      # @param collection_id [String] Collection UUID to filter to
+      # @return [Array<Hash>] All matching document metadata
+      def all_documents(collection_id:)
+        docs = []
+        after = nil
+
+        loop do
+          page = list_documents(limit: PAGE_SIZE, after: after)
+          break if page.empty?
+
+          docs.concat(page)
+          break if page.size < PAGE_SIZE
+
+          after = page.last['id']
+        end
+
+        docs.select { |doc| doc['collectionId'] == collection_id }
       end
 
       private
@@ -155,7 +200,9 @@ module Woods
         rescue JSON::ParserError, TypeError
           { 'message' => response.body&.slice(0, 200) || 'Unknown error' }
         end
-        message = parsed['message'] || parsed['error'] || 'Unknown error'
+        # The Unblocked API returns RFC7807-style bodies ({ status, title, detail });
+        # older/other paths use message/error. Check all so failures stay legible.
+        message = parsed['message'] || parsed['error'] || parsed['detail'] || parsed['title'] || 'Unknown error'
         raise Woods::Error, "Unblocked API error #{response.code}: #{message}"
       end
     end
