@@ -70,7 +70,7 @@ agent-facing operational map.
 |---------|--------------|
 | Everything re-pushes every run | Manifest not persisted between CI runs (cache restore missing), OR a `DocumentBuilder` change altered all bodies, OR nondeterministic body output (unsorted collection — check any new `build_*` method) |
 | `0 synced, N skipped`, but docs stale in Unblocked | Hash matched stale manifest from another checkout — delete the manifest to force reconcile |
-| `WARNING: refusing to delete X of Y documents` | Partial index — sync against full extraction output, or `UNBLOCKED_FORCE_PURGE=1` if the deletions are intended |
+| `WARNING: refusing to delete X of Y documents` | Partial index — sync against full extraction output. Or an *intentional* large removal (type dropped from FULL_SYNC_TYPES, `unblocked_repo_url` change, big deletion): re-run once with `UNBLOCKED_FORCE_PURGE=1` |
 | `daily budget exhausted` | >1000 calls today. Cold start needs ~1005 for ~1000 docs; converges next run. Raise `UNBLOCKED_DAILY_BUDGET` only if the plan allows |
 | Bare `400 Bad Request` on create_collection | Missing `iconUrl` (live-API quirk) |
 | `TypeError` parsing list responses | Live API returns bare JSON arrays, not `{items:}` envelopes — guard with `is_a?(Array)` first |

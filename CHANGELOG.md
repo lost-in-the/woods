@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Unknown error").
 - `require 'woods/unblocked/client'` works standalone (previously needed `woods`
   loaded first).
+- Units without a `file_path` are skipped instead of synced. Previously every
+  such unit fell back to the bare repo URL as its document URI — and since URIs
+  are the upsert key, they silently overwrote each other in the collection
+  (and would have ping-ponged the new manifest hash every run).
 
 ### Build
 

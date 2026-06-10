@@ -227,6 +227,11 @@ module Woods
       #
       # @return [Symbol] :synced or :skipped
       def push_document(unit_data)
+        # No file_path → the URI falls back to the bare repo URL, which every
+        # such unit would share: they'd overwrite each other remotely and
+        # ping-pong the manifest hash forever. Skip them.
+        return :skipped unless unit_data['file_path']
+
         doc = @builder.build(unit_data)
         # An empty body means the credential scrub failed closed (the builders
         # always emit at least a header). Upserting it would overwrite a good
@@ -350,6 +355,11 @@ module Woods
       end
 
       def track_uri(unit_data)
+        # Units without a file_path are never pushed (see push_document), so
+        # their fallback repo-root URI must not be marked current either — a
+        # stale repo-root document from before this guard should purge.
+        return unless unit_data['file_path']
+
         @current_uris << @builder.uri_for(unit_data)
       end
 

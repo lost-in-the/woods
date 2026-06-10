@@ -248,6 +248,12 @@ pushes only the documents whose content actually changed.
   `woods:incremental` output in a fresh directory), where the current unit set
   is a small subset and an unguarded purge would wipe the collection.
 
+  The guard also fires on *intentional* large removals: dropping a unit type
+  from the sync set, changing `unblocked_repo_url` (every URI changes), or a
+  big codebase deletion can all legitimately exceed 30%. The refusal warning
+  names the counts — if the deletions are expected, re-run once with
+  `UNBLOCKED_FORCE_PURGE=1`.
+
 ## Troubleshooting
 
 **"daily budget exhausted"** — You've hit the 1,000 call/day limit. Wait until

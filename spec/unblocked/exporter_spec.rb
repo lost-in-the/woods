@@ -534,6 +534,46 @@ RSpec.describe Woods::Unblocked::Exporter do
       end
     end
 
+    context 'when a unit has no file_path' do
+      let(:manifest) { manifest_double }
+
+      it 'skips it instead of pushing to the shared repo-root URI' do
+        # Without a file_path the URI falls back to the bare repo URL. Two such
+        # units would share one URI — overwriting each other remotely and
+        # ping-ponging the manifest hash every run. Skip them entirely.
+        allow(reader).to receive(:list_units).and_return([])
+        allow(reader).to receive(:list_units).with(type: 'model')
+                                             .and_return([{ 'identifier' => 'Ghost', 'type' => 'model' }])
+        allow(reader).to receive(:find_unit).with('Ghost')
+                                            .and_return({ 'type' => 'model', 'identifier' => 'Ghost',
+                                                          'file_path' => nil, 'metadata' => {} })
+
+        stats = exporter.sync_all
+        expect(client).not_to have_received(:put_document)
+        expect(stats[:skipped]).to be >= 1
+        expect(stats[:errors]).to eq([])
+      end
+
+      it 'does not protect a previously-pushed repo-root doc from the purge' do
+        # The stale repo-root document (from before this guard) should become
+        # purgeable — its URI must not be tracked as current.
+        allow(reader).to receive(:list_units).and_return([])
+        allow(reader).to receive(:list_units).with(type: 'model')
+                                             .and_return([{ 'identifier' => 'Ghost', 'type' => 'model' }])
+        allow(reader).to receive(:find_unit).with('Ghost')
+                                            .and_return({ 'type' => 'model', 'identifier' => 'Ghost',
+                                                          'file_path' => nil, 'metadata' => {} })
+        captured = nil
+        allow(manifest).to receive(:stale_uris) { |uris|
+          captured = uris.to_a
+          []
+        }
+
+        exporter.sync_all
+        expect(captured).not_to include('https://github.com/org/repo')
+      end
+    end
+
     context 'when the credential scrub fails closed (empty body)' do
       let(:manifest) { manifest_double }
 
