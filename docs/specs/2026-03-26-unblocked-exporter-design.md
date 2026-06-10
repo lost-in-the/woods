@@ -107,7 +107,7 @@ Follows `notion_sync` pattern: env var override, validation, progress output, er
 
 ## Unit Types Synced
 
-| Type | Count (admin) | Strategy |
+| Type | Count (reference app) | Strategy |
 |------|--------------|----------|
 | Models | 212 | All |
 | Controllers | 334 | All |
@@ -129,7 +129,7 @@ Follows `notion_sync` pattern: env var override, validation, progress output, er
 - **Diff-based incremental sync** — upsert is idempotent; optimization comes later
   *(shipped 2026-06 in PR #128 — `SyncManifest` content-hash manifest; see
   `docs/UNBLOCKED_INTEGRATION.md` for the as-built behavior)*
-- **Buildkite pipeline config** — that's consumer-side (bc-agents), not gem code
+- **Buildkite pipeline config** — that's consumer-side (the host app's pipeline), not gem code
 
 ## Testing Strategy
 

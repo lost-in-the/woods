@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Woods configuration
-# Full reference: https://github.com/bigcartel/woods/blob/main/docs/CONFIGURATION_REFERENCE.md
+# Full reference: https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md
 #
 # Quick-start presets (uncomment one instead of the full block below):
 #   Woods.configure_with_preset(:local)       # in-memory + Ollama, no external services
