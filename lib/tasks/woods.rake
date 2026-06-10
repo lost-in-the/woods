@@ -604,8 +604,10 @@ namespace :woods do
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-    force_full = ENV.fetch('UNBLOCKED_FORCE_FULL_SYNC', nil)
-    force_purge = ENV.fetch('UNBLOCKED_FORCE_PURGE', nil)
+    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
+    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
+    force_full = env_flag.call('UNBLOCKED_FORCE_FULL_SYNC')
+    force_purge = env_flag.call('UNBLOCKED_FORCE_PURGE')
 
     puts 'Syncing extraction data to Unblocked...'
     puts "  Output dir:     #{output_dir}"
@@ -616,8 +618,8 @@ namespace :woods do
 
     exporter = Woods::Unblocked::Exporter.new(
       index_dir: output_dir,
-      force_full: !force_full.nil?,
-      force_purge: !force_purge.nil?
+      force_full: force_full,
+      force_purge: force_purge
     )
     stats = exporter.sync_all
 

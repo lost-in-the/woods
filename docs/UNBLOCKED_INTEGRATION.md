@@ -34,8 +34,13 @@ Or via the API:
 curl -X POST https://getunblocked.com/api/v1/collections \
   -H "Authorization: Bearer $UNBLOCKED_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Codebase Architecture", "description": "Structural metadata from Woods extraction — models, controllers, services, dependencies, and blast radius analysis."}'
+  -d '{"name": "Codebase Architecture", "description": "Structural metadata from Woods extraction — models, controllers, services, dependencies, and blast radius analysis.", "iconUrl": "https://raw.githubusercontent.com/lost-in-the/woods/main/assets/woods-mark-black.svg"}'
 ```
+
+> **Known API quirk:** the live API rejects collection creation with a bare
+> `400 Bad Request` unless `iconUrl` is included, even though the API docs mark
+> it optional. Always pass an `iconUrl` — the Woods mark above is a stable,
+> repo-hosted square SVG you can use directly.
 
 ### 2. Create an API Token
 

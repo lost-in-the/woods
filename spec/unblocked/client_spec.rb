@@ -98,6 +98,23 @@ RSpec.describe Woods::Unblocked::Client do
   end
 
   describe 'error responses' do
+    it 'raises ApiError carrying the HTTP status (and remains a Woods::Error)' do
+      err = instance_double(Net::HTTPResponse, code: '404', body: JSON.generate({ 'title' => 'Not Found' }))
+      allow(err).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:request).and_return(err)
+
+      expect { client.delete_document(document_id: 'gone') }.to raise_error(Woods::Unblocked::ApiError) { |e|
+        expect(e.status).to eq(404)
+        expect(e).to be_a(Woods::Error)
+      }
+    end
+
     it 'raises a descriptive error on 401' do
       err = instance_double(Net::HTTPResponse, code: '401', body: JSON.generate({ 'message' => 'bad token' }))
       allow(err).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
@@ -144,6 +161,15 @@ RSpec.describe Woods::Unblocked::Client do
 
       expect { client.list_collections }
         .to raise_error(Woods::Error, /500/)
+    end
+  end
+
+  describe '#list_collections' do
+    it 'returns a bare-array response as-is (live API shape)' do
+      paths = stub_http_sequence([{ 'id' => 'c1', 'name' => 'Woods' }])
+      result = client.list_collections
+      expect(result).to eq([{ 'id' => 'c1', 'name' => 'Woods' }])
+      expect(paths.first).to include('collections')
     end
   end
 
@@ -207,6 +233,13 @@ RSpec.describe Woods::Unblocked::Client do
       client.list_documents(after: 'cursor-abc')
       expect(paths.first).to include('after=cursor-abc')
     end
+
+    it 'URL-encodes the after cursor' do
+      paths = stub_http_sequence([])
+      client.list_documents(after: 'cur+sor&x=1')
+      expect(paths.first).to include("after=#{URI.encode_www_form_component('cur+sor&x=1')}")
+      expect(paths.first).not_to include('after=cur+sor&x=1')
+    end
   end
 
   describe '#all_documents' do
@@ -232,6 +265,15 @@ RSpec.describe Woods::Unblocked::Client do
       paths = stub_http_sequence([{ 'id' => 'd1', 'uri' => 'u1', 'collectionId' => 'col-1' }])
       result = client.all_documents(collection_id: 'col-1')
       expect(result.size).to eq(1)
+      expect(paths.size).to eq(1)
+    end
+
+    it 'stops rather than looping when a full page has no cursor id' do
+      # A full page whose last item lacks 'id' would otherwise refetch page 1 forever.
+      page = (1..200).map { |i| { 'uri' => "u#{i}", 'collectionId' => 'col-1' } }
+      paths = stub_http_sequence(page, page)
+      result = client.all_documents(collection_id: 'col-1')
+      expect(result.size).to eq(200)
       expect(paths.size).to eq(1)
     end
   end

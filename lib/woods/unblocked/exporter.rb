@@ -79,6 +79,10 @@ module Woods
         @force_full = force_full
         @force_purge = force_purge
         @output = output
+        # Initialized here as well as in sync_all so the public sync_type /
+        # sync_type_partial methods work standalone (track_uri needs them).
+        @current_uris = Set.new
+        @budget_exhausted = false
       end
 
       # Sync all configured unit types to the Unblocked collection.
@@ -114,7 +118,7 @@ module Woods
         deleted = @budget_exhausted ? 0 : purge_stale
         { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
       ensure
-        @manifest.save
+        save_manifest
       end
 
       # Sync all units of a given type.
@@ -240,6 +244,8 @@ module Woods
         return 0 if stale.empty?
         return 0 if guard_blocks_purge?(stale)
 
+        resolve_missing_document_ids(stale)
+
         deleted = 0
         stale.each do |uri|
           document_id = @manifest.document_id_for(uri)
@@ -248,12 +254,34 @@ module Woods
           @client.delete_document(document_id: document_id)
           @manifest.forget(uri)
           deleted += 1
+        rescue ApiError => e
+          # 404 means the document is already gone remotely — goal state
+          # reached, so drop the entry rather than retrying every run.
+          @manifest.forget(uri) if e.status == 404
         rescue Woods::Error => e
           break if note_budget_exhaustion(e)
         rescue StandardError
           # Leave the entry in the manifest; a later run will retry the delete.
         end
         deleted
+      end
+
+      # A manifest entry can carry a nil document_id (e.g. the PUT response
+      # body was empty). Those entries would be permanently undeletable, so
+      # before purging, make one bounded all_documents sweep to resolve ids.
+      # Best-effort: unresolved entries are simply skipped by the purge loop.
+      def resolve_missing_document_ids(stale)
+        missing = stale.select { |uri| @manifest.document_id_for(uri).nil? }
+        return if missing.empty?
+
+        ids_by_uri = @client.all_documents(collection_id: @collection_id)
+                            .to_h { |doc| [doc['uri'], doc['id']] }
+        missing.each do |uri|
+          id = ids_by_uri[uri]
+          @manifest.record(uri: uri, hash: nil, document_id: id) if id
+        end
+      rescue StandardError => e
+        log "  id resolution skipped (#{e.message})"
       end
 
       # True when purging +stale+ would delete too large a fraction of the
@@ -308,6 +336,16 @@ module Woods
       def build_reader(index_dir)
         require_relative '../mcp/index_reader'
         Woods::MCP::IndexReader.new(index_dir)
+      end
+
+      # Persist the manifest, downgrading failures to a warning: losing the
+      # manifest only costs a full re-check next run, which must not turn an
+      # otherwise-successful sync into a crash (this runs from an ensure, where
+      # a raise would also mask any in-flight exception).
+      def save_manifest
+        @manifest.save
+      rescue StandardError => e
+        log "  WARNING: sync manifest not persisted (#{e.message}) — next run will re-check all documents"
       end
 
       def build_manifest(index_dir)

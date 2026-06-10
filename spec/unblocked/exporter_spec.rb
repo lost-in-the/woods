@@ -297,6 +297,106 @@ RSpec.describe Woods::Unblocked::Exporter do
       end
     end
 
+    context 'when public sync methods are called without sync_all' do
+      it 'sync_type works standalone (regression: nil @current_uris crash)' do
+        allow(reader).to receive(:list_units).with(type: 'model')
+                                             .and_return([{ 'identifier' => 'User', 'type' => 'model' }])
+        allow(reader).to receive(:find_unit).with('User')
+                                            .and_return({ 'type' => 'model', 'identifier' => 'User',
+                                                          'file_path' => 'app/models/user.rb', 'metadata' => {} })
+
+        stats = exporter.sync_type('model')
+        # The nil-@current_uris crash is swallowed by the per-unit rescue and
+        # surfaces as a sync error — so assert success, not just no-raise.
+        expect(stats[:errors]).to eq([])
+        expect(stats[:synced]).to eq(1)
+      end
+
+      it 'sync_type_partial works standalone' do
+        allow(reader).to receive(:list_units).with(type: 'poro')
+                                             .and_return([{ 'identifier' => 'Util', 'type' => 'poro' }])
+        allow(reader).to receive(:find_unit).with('Util')
+                                            .and_return({ 'type' => 'poro', 'identifier' => 'Util',
+                                                          'file_path' => 'lib/util.rb', 'metadata' => {} })
+
+        stats = exporter.sync_type_partial('poro', 10)
+        expect(stats[:errors]).to eq([])
+        expect(stats[:synced]).to eq(1)
+      end
+    end
+
+    context 'when persisting the manifest fails' do
+      let(:manifest) { manifest_double { |m| allow(m).to receive(:save).and_raise(Errno::EACCES, 'ro mount') } }
+
+      it 'still returns stats instead of raising from the ensure block' do
+        stub_single_user
+        stats = nil
+        expect { stats = exporter.sync_all }.not_to raise_error
+        expect(stats[:synced]).to eq(1)
+      end
+    end
+
+    context 'when a stale delete returns 404 (already gone remotely)' do
+      let(:gone_uri) { uri_for('app/models/gone.rb') }
+      let(:manifest) do
+        manifest_double do |m|
+          allow(m).to receive(:size).and_return(20)
+          allow(m).to receive(:stale_uris).and_return([gone_uri, uri_for('app/models/also_gone.rb')])
+          allow(m).to receive(:document_id_for).and_return('doc-x')
+        end
+      end
+
+      it 'forgets the entry and continues purging the rest' do
+        stub_single_user
+        call = 0
+        allow(client).to receive(:delete_document) do
+          call += 1
+          raise Woods::Unblocked::ApiError.new('Unblocked API error 404: Not Found', status: 404) if call == 1
+
+          {}
+        end
+
+        stats = exporter.sync_all
+        expect(manifest).to have_received(:forget).twice # 404 entry + successful delete
+        expect(stats[:deleted]).to eq(1)                 # only the real delete counts
+      end
+
+      it 'keeps the entry on a non-404 ApiError so a later run retries' do
+        stub_single_user
+        allow(client).to receive(:delete_document)
+          .and_raise(Woods::Unblocked::ApiError.new('Unblocked API error 500: oops', status: 500))
+
+        exporter.sync_all
+        expect(manifest).not_to have_received(:forget)
+      end
+    end
+
+    context 'when a stale entry has no document_id' do
+      let(:gone_uri) { uri_for('app/models/gone.rb') }
+      let(:manifest) do
+        manifest_double do |m|
+          allow(m).to receive(:size).and_return(20)
+          allow(m).to receive(:stale_uris).and_return([gone_uri])
+          # nil until the reconcile records the resolved id
+          ids = { gone_uri => nil }
+          allow(m).to receive(:document_id_for) { |uri| ids[uri] }
+          allow(m).to receive(:record) { |uri:, document_id:, **| ids[uri] = document_id }
+        end
+      end
+
+      it 'resolves the id via one all_documents call, then deletes' do
+        stub_single_user
+        allow(client).to receive(:all_documents).with(collection_id: 'col-1').and_return(
+          [{ 'id' => 'resolved-1', 'uri' => gone_uri, 'collectionId' => 'col-1' }]
+        )
+
+        stats = exporter.sync_all
+        expect(client).to have_received(:all_documents).once
+        expect(client).to have_received(:delete_document).with(document_id: 'resolved-1')
+        expect(stats[:deleted]).to eq(1)
+      end
+    end
+
     context 'when the manifest is empty (cache miss)' do
       it 'reconciles document ids from the remote and purges orphans' do
         # No current units; remote has one orphan in our collection.

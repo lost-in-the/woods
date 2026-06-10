@@ -7,6 +7,22 @@ require_relative 'rate_limiter'
 
 module Woods
   module Unblocked
+    # API error carrying the HTTP status code, so callers can branch on
+    # status (e.g. treat a 404 on delete as "already gone") instead of
+    # matching message strings. Subclasses Woods::Error, so existing
+    # +rescue Woods::Error+ sites keep working unchanged.
+    class ApiError < Woods::Error
+      # @return [Integer, nil] HTTP status code of the failed response
+      attr_reader :status
+
+      # @param message [String] Error message
+      # @param status [Integer, nil] HTTP status code
+      def initialize(message, status: nil)
+        super(message)
+        @status = status
+      end
+    end
+
     # REST client for the Unblocked API v1.
     #
     # Handles document and collection CRUD with rate limiting, retries,
@@ -62,7 +78,9 @@ module Woods
       #
       # @param name [String] Collection name (1-32 chars)
       # @param description [String] Collection description (1-4096 chars)
-      # @param icon_url [String, nil] Optional icon URL
+      # @param icon_url [String, nil] Icon URL. Nominally optional, but the
+      #   live API rejects creation with a bare 400 when omitted — always pass
+      #   one (see docs/UNBLOCKED_INTEGRATION.md for a stable Woods icon URL).
       # @return [Hash] { "id" => "collection-uuid", "name" => "...", ... }
       def create_collection(name:, description:, icon_url: nil)
         body = { name: name, description: description }
@@ -75,6 +93,10 @@ module Woods
       # @return [Array<Hash>] Collection objects
       def list_collections
         result = request(:get, 'collections')
+        # The live API returns a bare JSON array; the envelope fallbacks are
+        # defensive (calling ['items'] on an Array raises TypeError).
+        return result if result.is_a?(Array)
+
         result['items'] || result['data'] || [result].flatten.compact
       end
 
@@ -98,7 +120,7 @@ module Woods
       # @return [Array<Hash>] One page of document metadata
       def list_documents(limit: PAGE_SIZE, after: nil)
         query = "limit=#{limit}"
-        query += "&after=#{after}" if after
+        query += "&after=#{URI.encode_www_form_component(after)}" if after
         result = request(:get, "documents?#{query}")
         return result if result.is_a?(Array)
 
@@ -124,6 +146,9 @@ module Woods
           break if page.size < PAGE_SIZE
 
           after = page.last['id']
+          # A full page with no cursor id would refetch page 1 forever —
+          # stop with what we have rather than loop against the budget.
+          break if after.nil?
         end
 
         docs.select { |doc| doc['collectionId'] == collection_id }
@@ -203,7 +228,7 @@ module Woods
         # The Unblocked API returns RFC7807-style bodies ({ status, title, detail });
         # older/other paths use message/error. Check all so failures stay legible.
         message = parsed['message'] || parsed['error'] || parsed['detail'] || parsed['title'] || 'Unknown error'
-        raise Woods::Error, "Unblocked API error #{response.code}: #{message}"
+        raise ApiError.new("Unblocked API error #{response.code}: #{message}", status: response.code.to_i)
       end
     end
   end
