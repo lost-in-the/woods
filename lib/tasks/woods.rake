@@ -604,25 +604,46 @@ namespace :woods do
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
+    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
+    force_full = env_flag.call('UNBLOCKED_FORCE_FULL_SYNC')
+    force_purge = env_flag.call('UNBLOCKED_FORCE_PURGE')
 
     puts 'Syncing extraction data to Unblocked...'
     puts "  Output dir:     #{output_dir}"
     puts "  Collection:     #{config.unblocked_collection_id}"
     puts "  Repo URL:       #{config.unblocked_repo_url}"
+    puts '  Mode:           full re-sync (UNBLOCKED_FORCE_FULL_SYNC set)' if force_full
     puts
 
-    exporter = Woods::Unblocked::Exporter.new(index_dir: output_dir)
+    exporter = Woods::Unblocked::Exporter.new(
+      index_dir: output_dir,
+      force_full: force_full,
+      force_purge: force_purge
+    )
     stats = exporter.sync_all
 
     puts
     puts 'Sync complete!'
     puts "  Documents synced:   #{stats[:synced]}"
     puts "  Documents skipped:  #{stats[:skipped]}"
+    puts "  Documents deleted:  #{stats[:deleted]}"
 
     if stats[:errors].any?
       puts "  Errors:             #{stats[:errors].size}"
       stats[:errors].first(5).each { |e| puts "    - #{e}" }
       puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+
+      # Fail the task so CI notices — a printed-but-green run is invisible in
+      # post-merge pipelines (a dead token would otherwise stay green forever).
+      # Exception: budget exhaustion *with* partial progress is the expected
+      # cold-start shape; it converges on the next run.
+      budget_only = stats[:errors].all? { |e| e.include?('daily budget exhausted') }
+      unless budget_only && stats[:synced].positive?
+        puts
+        puts 'Sync completed with errors — failing so CI surfaces it.'
+        exit 1
+      end
     end
   end
 

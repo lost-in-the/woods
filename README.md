@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/woods-wordmark-white-with-bg.png" width="400" alt="woods">
+</p>
+
 # Woods
 
 **Your AI coding assistant is guessing about your Rails app. Woods gives it the real answers.**

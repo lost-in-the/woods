@@ -77,14 +77,14 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - **`woods-testbed` `rails-8.0`** — default. Day-to-day Rails 8 validation. Fast, small, self-contained.
 - **`woods-testbed` `rails-7.2`** — when a change could plausibly behave differently on Rails 7 (Zeitwerk load paths, callback-chain internals, `eager_load!` error paths).
 - **`~/work/test_app`** (local-only host) — when a change needs a committed integration spec, or maps cleanly to `spec/integration/` fixtures. No Docker, runs on Rails 8.1.
-- **`~/work/compose-dev/admin`** (local-only host) — only when a problem demands a production-shaped MySQL codebase: namespace collisions, large callback chains, non-standard service directories, many-model PageRank behaviour.
+- **A production-shaped MySQL host app** (local-only, see `.claude/rules/integration-testing.md`) — only when a problem demands a large real codebase: namespace collisions, large callback chains, non-standard service directories, many-model PageRank behaviour.
 
 **Gotchas:**
 - `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
 - Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`). Nuke the matching volume if a lockfile change triggers an install loop.
 - If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container.
 
-See `.claude/rules/integration-testing.md` for the full host-app reference (includes `test_app` and `compose-dev/admin`).
+See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
 
 ## Architecture
 
@@ -128,7 +128,7 @@ lib/
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
-│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter)
+│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
 │   └── woods.rake                       # Rake task definitions

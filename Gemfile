@@ -7,6 +7,9 @@ gemspec
 
 group :development, :test do
   gem 'benchmark-ips', '~> 2.0'
+  # `benchmark` left Ruby's default gems in 4.0; the performance specs (and
+  # benchmark-ips) `require 'benchmark'`, so declare it explicitly.
+  gem 'benchmark'
   gem 'bundler', '>= 2.0'
   gem 'bundler-audit', '~> 0.9'
   gem 'debug', '>= 1.0.0'
@@ -40,5 +43,15 @@ group :development, :test do
   # Ruby 3.0 we have to skip the declaration entirely or lock fails before
   # install runs. Pinned to 0.5.x — tokenizers 0.6 requires Ruby 3.2+,
   # which would break our 3.1 CI matrix row.
-  gem 'tokenizers', '~> 0.5.0' if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
+  #
+  # `install_if` gate: tokenizers 0.5.x links rb-sys 0.9.111, whose native
+  # build cannot compile against the Ruby 4.0 ABI. Keep it in the lock for the
+  # 3.1–3.x rows but skip *installing* it on Ruby >= 4.0 — exact token counting
+  # is opt-in (Ollama path only) and TokenCounter falls back to a chars/token
+  # ratio when the gem is absent, so the suite runs fine without it.
+  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
+    install_if -> { Gem::Version.new(RUBY_VERSION) < Gem::Version.new('4.0') } do
+      gem 'tokenizers', '~> 0.5.0'
+    end
+  end
 end

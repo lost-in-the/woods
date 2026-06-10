@@ -25,6 +25,19 @@ jobs:
           bundler-cache: true
       - name: Run tests
         run: bundle exec rake spec
+
+  # Lint once, in its own job — style is Ruby-version-independent, and running
+  # it inside every matrix row turned one offense into four red checks with
+  # the real cause buried after the test output.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@6aaa311d81eba98ae12eaffbcb63296ace0efcde # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
       - name: Run linter
         run: bundle exec rubocop
 

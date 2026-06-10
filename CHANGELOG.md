@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Incremental Unblocked sync (PR #128)
+
+- **`woods:unblocked_sync` is now incremental.** A new `Woods::Unblocked::SyncManifest`
+  (JSON at `<output_dir>/unblocked_sync_manifest.json`) records the content hash and
+  remote document id of everything last pushed. Each run skips unchanged documents,
+  pushes only new/changed ones, and deletes documents whose source unit disappeared.
+  A missing manifest (first run / CI cache miss) degrades to a correct full re-push
+  that rebuilds it; steady state on an unchanged codebase costs ~0 API calls (was
+  ~800–1200 per run). Persist the manifest across CI runs via your provider's cache —
+  see `docs/UNBLOCKED_INTEGRATION.md`.
+- **Deletion safety.** Orphan purging is skipped when the daily API budget exhausts
+  mid-run, and a mass-deletion guard refuses to delete more than 30% of a ≥10-entry
+  manifest in one run (`UNBLOCKED_FORCE_PURGE=1` overrides) — protection against
+  syncing a partial index. `UNBLOCKED_FORCE_FULL_SYNC=1` re-pushes everything (use
+  after a document-format change). Both flags parse `1`/`true`/`yes` (case-insensitive).
+- **`Client#list_documents` / `#all_documents`** — paginated document listing with
+  client-side collection filtering, used to reconcile remote document ids when the
+  manifest is missing. Cursors are URL-encoded and a page without a cursor id stops
+  pagination rather than looping against the rate budget.
+- **`Woods::Unblocked::ApiError`** (subclass of `Woods::Error`) carries the required
+  HTTP `status` of failed API calls; a 404 on delete is treated as already-gone.
+  **`Woods::Unblocked::BudgetExhaustedError`** (also a `Woods::Error` subclass) is
+  raised by the rate limiter, so budget detection no longer depends on message text.
+- **CI-visible failures.** `woods:unblocked_sync` exits non-zero when the sync
+  recorded errors (delete failures are now surfaced in the error list too). The one
+  tolerated shape is budget exhaustion with partial progress — the expected
+  cold-start outcome, which converges on the next run. Reconcile aborts loudly on
+  auth failures (401/403) instead of burning the budget on doomed calls.
+- **Deterministic document bodies.** `DocumentBuilder` sorts every rendered collection
+  (associations, dependents, routes, enums, scopes, concerns, callbacks) so an
+  unchanged unit always produces byte-identical output — the precondition for
+  hash-based change detection.
+- **`Client#create_collection` defaults `iconUrl`** to the repo-hosted Woods mark.
+  The live API rejects collection creation without an `iconUrl` despite the API docs
+  marking it optional (documented quirk).
+- **Branding.** Tree Rings logo set under `assets/` (marks, wordmark lockups, PNG
+  exports); README wordmark.
+
+### Fixed
+
+- `Client#list_collections` no longer raises `TypeError` on the live API's bare-array
+  response.
+- API error messages now surface RFC7807 `title`/`detail` fields (previously
+  "Unknown error").
+- `require 'woods/unblocked/client'` works standalone (previously needed `woods`
+  loaded first).
+- Units without a `file_path` are skipped instead of synced. Previously every
+  such unit fell back to the bare repo URL as its document URI — and since URIs
+  are the upsert key, they silently overwrote each other in the collection
+  (and would have ping-ponged the new manifest hash every run).
+
+### Build
+
+- The suite now installs and runs on Ruby 4.0: the optional `tokenizers` gem (whose
+  native extension cannot build against the Ruby 4.0 ABI) is gated behind
+  `install_if (Ruby < 4.0)`, and `benchmark` (no longer a default gem in 4.0) is
+  declared explicitly. Lockfile unchanged.
+
 ## [1.3.0] - 2026-05-13
 
 ### Upgrade Notes
