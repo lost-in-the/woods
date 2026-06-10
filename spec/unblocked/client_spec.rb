@@ -174,7 +174,7 @@ RSpec.describe Woods::Unblocked::Client do
   end
 
   describe '#create_collection' do
-    it 'omits icon_url when nil' do
+    it 'defaults iconUrl to the Woods mark (live API rejects creation without one)' do
       success = instance_double(Net::HTTPSuccess, code: '200', body: JSON.generate({ 'id' => 'c' }))
       allow(success).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
 
@@ -191,7 +191,28 @@ RSpec.describe Woods::Unblocked::Client do
 
       client.create_collection(name: 'Woods', description: 'an index')
       body = JSON.parse(captured.body)
-      expect(body).not_to have_key('iconUrl')
+      expect(body['iconUrl']).to eq(Woods::Unblocked::Client::DEFAULT_ICON_URL)
+    end
+
+    it 'uses the provided icon_url over the default' do
+      success = instance_double(Net::HTTPSuccess, code: '200', body: JSON.generate({ 'id' => 'c' }))
+      allow(success).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      captured = nil
+      allow(http).to receive(:request) do |req|
+        captured = req
+        success
+      end
+
+      client.create_collection(name: 'Woods', description: 'an index',
+                               icon_url: 'https://example.com/custom.svg')
+      body = JSON.parse(captured.body)
+      expect(body['iconUrl']).to eq('https://example.com/custom.svg')
     end
   end
 

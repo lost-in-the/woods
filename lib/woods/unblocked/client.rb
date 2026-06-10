@@ -43,6 +43,10 @@ module Woods
       DEFAULT_TIMEOUT = 30
       # Max page size the list endpoint accepts (per API docs).
       PAGE_SIZE = 200
+      # Repo-hosted Woods mark, used as the collection icon when none is given.
+      # The live API rejects collection creation without an iconUrl (despite
+      # the API docs marking it optional), so a working default matters.
+      DEFAULT_ICON_URL = 'https://raw.githubusercontent.com/lost-in-the/woods/main/assets/woods-mark-black.svg'
 
       # @param api_token [String] Unblocked API token (Personal or Team)
       # @param rate_limiter [RateLimiter] Rate limiter instance
@@ -78,14 +82,17 @@ module Woods
       #
       # @param name [String] Collection name (1-32 chars)
       # @param description [String] Collection description (1-4096 chars)
-      # @param icon_url [String, nil] Icon URL. Nominally optional, but the
-      #   live API rejects creation with a bare 400 when omitted — always pass
-      #   one (see docs/UNBLOCKED_INTEGRATION.md for a stable Woods icon URL).
+      # @param icon_url [String, nil] Icon URL. The live API rejects creation
+      #   with a bare 400 when omitted (despite the API docs marking it
+      #   optional), so nil falls back to DEFAULT_ICON_URL — the repo-hosted
+      #   Woods mark.
       # @return [Hash] { "id" => "collection-uuid", "name" => "...", ... }
       def create_collection(name:, description:, icon_url: nil)
-        body = { name: name, description: description }
-        body[:iconUrl] = icon_url if icon_url
-        request(:post, 'collections', body)
+        request(:post, 'collections', {
+                  name: name,
+                  description: description,
+                  iconUrl: icon_url || DEFAULT_ICON_URL
+                })
       end
 
       # List all collections.

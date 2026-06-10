@@ -42,6 +42,24 @@ curl -X POST https://getunblocked.com/api/v1/collections \
 > it optional. Always pass an `iconUrl` — the Woods mark above is a stable,
 > repo-hosted square SVG you can use directly.
 
+Creating the collection from Ruby is simpler — `Client#create_collection`
+defaults `iconUrl` to the Woods mark (`Client::DEFAULT_ICON_URL`), so the quirk
+can't bite:
+
+```ruby
+require 'woods/unblocked/client'
+
+client = Woods::Unblocked::Client.new(api_token: ENV['UNBLOCKED_API_TOKEN'])
+collection = client.create_collection(
+  name: 'Codebase Architecture',
+  description: 'Structural metadata from Woods extraction — models, ' \
+               'controllers, services, dependencies, and blast radius analysis.'
+)
+collection['id'] # => use as UNBLOCKED_COLLECTION_ID
+```
+
+Pass `icon_url:` to use your own icon instead of the default.
+
 ### 2. Create an API Token
 
 In the Unblocked web app: **Settings** → **API Tokens** → **Create Token**.
