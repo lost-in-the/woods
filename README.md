@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/woods-wordmark-white.svg">
+    <img src="assets/woods-wordmark-black.svg" width="300" alt="woods">
+  </picture>
+</p>
+
 # Woods
 
 **Your AI coding assistant is guessing about your Rails app. Woods gives it the real answers.**

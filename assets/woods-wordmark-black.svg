@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120" fill="none">
+  <title>woods — wordmark lockup (Tree Rings + Fira Mono)</title>
+  <g stroke="#15140F" stroke-width="3.4" fill="none">
+    <circle cx="62" cy="58" r="49"></circle>
+    <circle cx="59" cy="61" r="38"></circle>
+    <circle cx="63" cy="57" r="27"></circle>
+    <circle cx="60" cy="60" r="16"></circle>
+  </g>
+  <circle cx="61" cy="59" r="4.4" fill="#15140F"></circle>
+  <path d="M61 59 L18 34" stroke="#15140F" stroke-width="2.4" stroke-linecap="round"></path>
+  <text x="147" y="59" fill="#15140F" font-family="Fira Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" font-size="84" letter-spacing="0.005em" dominant-baseline="central">woods</text>
+</svg>
