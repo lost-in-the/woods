@@ -226,10 +226,10 @@ module Woods
 
           # Parent chain for understanding inherited behavior
           ancestors: controller.ancestors
-                     .take_while { |a| a != ActionController::Base && a != ActionController::API }
-                     .grep(Class)
-                     .map(&:name)
-                     .compact,
+                               .take_while { |a| a != ActionController::Base && a != ActionController::API }
+                               .grep(Class)
+                               .map(&:name)
+                               .compact,
 
           # Concerns included
           included_concerns: extract_included_concerns(controller),
