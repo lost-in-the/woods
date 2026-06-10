@@ -128,7 +128,7 @@ lib/
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
-│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter)
+│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
 │   └── woods.rake                       # Rake task definitions

@@ -127,6 +127,8 @@ Follows `notion_sync` pattern: env var override, validation, progress output, er
 
 - **Domain cluster documents** — tracked as a separate issue
 - **Diff-based incremental sync** — upsert is idempotent; optimization comes later
+  *(shipped 2026-06 in PR #128 — `SyncManifest` content-hash manifest; see
+  `docs/UNBLOCKED_INTEGRATION.md` for the as-built behavior)*
 - **Buildkite pipeline config** — that's consumer-side (bc-agents), not gem code
 
 ## Testing Strategy
