@@ -574,6 +574,80 @@ RSpec.describe Woods::Unblocked::Exporter do
       end
     end
 
+    context 'when multiple units share one file_path (URI collision)' do
+      # Two model units defined in one file — e.g. an outer class and a nested
+      # one. Both resolve to the same blob URI; without disambiguation they
+      # overwrite each other remotely (only the last survives) and ping-pong
+      # the manifest hash every run.
+      let(:shared_path) { 'app/models/order.rb' }
+      let(:base_uri) { uri_for(shared_path) }
+
+      def stub_colliding_pair # rubocop:disable Metrics/AbcSize
+        entries = [
+          { 'identifier' => 'Order', 'type' => 'model', 'file_path' => shared_path },
+          { 'identifier' => 'Order::Line', 'type' => 'model', 'file_path' => shared_path }
+        ]
+        allow(reader).to receive(:list_units).and_return([])
+        allow(reader).to receive(:list_units).with(type: 'model').and_return(entries)
+        allow(reader).to receive(:find_unit).with('Order').and_return(
+          { 'type' => 'model', 'identifier' => 'Order', 'file_path' => shared_path, 'metadata' => {} }
+        )
+        allow(reader).to receive(:find_unit).with('Order::Line').and_return(
+          { 'type' => 'model', 'identifier' => 'Order::Line', 'file_path' => shared_path, 'metadata' => {} }
+        )
+      end
+
+      it 'pushes each unit under a distinct URI (lexically-first identifier keeps the bare path)' do
+        stub_colliding_pair
+        uris = []
+        allow(client).to receive(:put_document) { |args|
+          uris << args[:uri]
+          { 'id' => 'd' }
+        }
+
+        stats = exporter.sync_all
+
+        expect(stats[:synced]).to eq(2)
+        expect(uris).to contain_exactly(
+          base_uri,
+          "#{base_uri}?unit=Order%3A%3ALine"
+        )
+      end
+
+      it 'skips both on a warm second run instead of re-pushing forever' do
+        stub_colliding_pair
+        exporter.sync_all # cold: 2 pushes
+
+        warm = described_class.new(
+          index_dir: @index_dir, config: stub_config, client: client,
+          reader: reader, output: StringIO.new
+        )
+        stats = warm.sync_all
+
+        expect(stats[:synced]).to eq(0)
+        expect(stats[:skipped]).to be >= 2
+        expect(client).to have_received(:put_document).twice # still only the cold run's 2
+      end
+
+      it 'leaves a solo unit on the bare URI (no needless suffix churn)' do
+        allow(reader).to receive(:list_units).and_return([])
+        allow(reader).to receive(:list_units).with(type: 'model')
+                                             .and_return([{ 'identifier' => 'Solo', 'type' => 'model',
+                                                            'file_path' => 'app/models/solo.rb' }])
+        allow(reader).to receive(:find_unit).with('Solo').and_return(
+          { 'type' => 'model', 'identifier' => 'Solo', 'file_path' => 'app/models/solo.rb', 'metadata' => {} }
+        )
+        pushed = nil
+        allow(client).to receive(:put_document) { |args|
+          pushed = args[:uri]
+          { 'id' => 'd' }
+        }
+
+        exporter.sync_all
+        expect(pushed).to eq(uri_for('app/models/solo.rb'))
+      end
+    end
+
     context 'when the credential scrub fails closed (empty body)' do
       let(:manifest) { manifest_double }
 

@@ -70,6 +70,8 @@ agent-facing operational map.
 |---------|--------------|
 | Everything re-pushes every run | Manifest not persisted between CI runs (cache restore missing), OR a `DocumentBuilder` change altered all bodies, OR nondeterministic body output (unsorted collection — check any new `build_*` method) |
 | `0 synced, N skipped`, but docs stale in Unblocked | Hash matched stale manifest from another checkout — delete the manifest to force reconcile |
+| A few units re-push every warm run; manifest entry count < synced | Multiple units share one `file_path` (nested/namespaced classes, several classes per `.rb`). `build_uri_index` disambiguates them (`?unit=` suffix on all but the lexically-first identifier) — if it regresses, those units collide on one URI again |
+| A unit's document is missing from the collection (only one of N co-located classes present) | Same file-sharing collision overwriting on a shared URI — `build_uri_index` is the fix |
 | `WARNING: refusing to delete X of Y documents` | Partial index — sync against full extraction output. Or an *intentional* large removal (type dropped from FULL_SYNC_TYPES, `unblocked_repo_url` change, big deletion): re-run once with `UNBLOCKED_FORCE_PURGE=1` |
 | `daily budget exhausted` | >1000 calls today. Cold start needs ~1005 for ~1000 docs; converges next run. Raise `UNBLOCKED_DAILY_BUDGET` only if the plan allows |
 | Bare `400 Bad Request` on create_collection | Missing `iconUrl` (live-API quirk) |
