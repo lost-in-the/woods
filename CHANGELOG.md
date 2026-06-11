@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-06-10
+
 ### Fixed
 
 - **Unblocked sync: multiple units sharing one file no longer collide on a single
