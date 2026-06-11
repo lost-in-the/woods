@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unblocked sync: multiple units sharing one file no longer collide on a single
+  URI** (#130). A document's URI derives from `file_path`, so a file defining
+  several extracted units (nested/namespaced classes, STI subclasses, multiple
+  classes in one `.rb`) mapped every unit to the same URI — the remote document
+  was overwritten per unit (only the last survived) and, under the content-hash
+  manifest, those units re-pushed on every run. The exporter now detects files
+  shared by more than one synced unit and disambiguates: the lexically-first
+  identifier keeps the bare blob URL, siblings get a `?unit=<identifier>` suffix.
+  Solo files (the overwhelming majority) are untouched. Sibling of the
+  no-`file_path` guard shipped in 1.4.0.
+
 ## [1.4.0] - 2026-06-10
 
 ### Added — Incremental Unblocked sync (PR #128)

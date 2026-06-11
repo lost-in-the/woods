@@ -2,6 +2,7 @@
 
 require 'set'
 require 'digest'
+require 'uri'
 require 'woods'
 require_relative 'client'
 require_relative 'rate_limiter'
@@ -83,6 +84,9 @@ module Woods
         # sync_type_partial methods work standalone (track_uri needs them).
         @current_uris = Set.new
         @budget_exhausted = false
+        # base URI => identifier that keeps the bare URI (only populated for
+        # URIs shared by >1 unit). Rebuilt per sync_all run.
+        @uri_primary = {}
       end
 
       # Sync all configured unit types to the Unblocked collection.
@@ -91,6 +95,7 @@ module Woods
       def sync_all
         @current_uris = Set.new
         @budget_exhausted = false
+        build_uri_index
         reconcile_from_remote if @manifest.empty?
 
         synced = 0
@@ -232,6 +237,11 @@ module Woods
         # ping-pong the manifest hash forever. Skip them.
         return :skipped unless unit_data['file_path']
 
+        # When several units share one file they share one base URI; only one
+        # keeps it, the rest get a `?unit=` suffix so each is a distinct remote
+        # document (and a distinct manifest key).
+        uri = effective_uri(unit_data)
+
         doc = @builder.build(unit_data)
         # An empty body means the credential scrub failed closed (the builders
         # always emit at least a header). Upserting it would overwrite a good
@@ -241,16 +251,16 @@ module Woods
         end
 
         hash = fingerprint(doc)
-        return :skipped if !@force_full && @manifest.unchanged?(doc[:uri], hash)
+        return :skipped if !@force_full && @manifest.unchanged?(uri, hash)
 
         response = @client.put_document(
           collection_id: @collection_id,
           title: doc[:title],
           body: doc[:body],
-          uri: doc[:uri]
+          uri: uri
         )
-        document_id = (response['id'] if response.is_a?(Hash)) || @manifest.document_id_for(doc[:uri])
-        @manifest.record(uri: doc[:uri], hash: hash, document_id: document_id)
+        document_id = (response['id'] if response.is_a?(Hash)) || @manifest.document_id_for(uri)
+        @manifest.record(uri: uri, hash: hash, document_id: document_id)
         :synced
       end
 
@@ -360,7 +370,47 @@ module Woods
         # stale repo-root document from before this guard should purge.
         return unless unit_data['file_path']
 
-        @current_uris << @builder.uri_for(unit_data)
+        # Must match the URI push_document actually uses, or a colliding unit's
+        # disambiguated document would look stale and be purged.
+        @current_uris << effective_uri(unit_data)
+      end
+
+      # The URI a unit's document is stored under. Normally the file's blob URL;
+      # when several units share that file, all but the lexically-first
+      # identifier get a `?unit=` suffix so each keeps a distinct document
+      # rather than overwriting the others (see #build_uri_index).
+      def effective_uri(unit_data)
+        base = @builder.uri_for(unit_data)
+        primary = @uri_primary[base]
+        return base if primary.nil? || primary == unit_data['identifier']
+
+        "#{base}?unit=#{URI.encode_www_form_component(unit_data['identifier'])}"
+      end
+
+      # One cheap pass over the type indexes (entries already carry file_path,
+      # and read_index is cached) to find files that define more than one synced
+      # unit. For each such base URI, the lexically-smallest identifier — the
+      # outer/top-level class — keeps the bare URI; siblings are suffixed. Solo
+      # files (the overwhelming majority) are absent from the map and unchanged,
+      # so this introduces no churn for them.
+      def build_uri_index
+        groups = Hash.new { |h, k| h[k] = [] }
+        synced_types.each do |type|
+          @reader.list_units(type: type).each do |entry|
+            next unless entry['file_path']
+
+            groups[@builder.uri_for(entry)] << entry['identifier']
+          end
+        end
+
+        @uri_primary = groups.each_with_object({}) do |(uri, identifiers), primary|
+          unique = identifiers.uniq
+          primary[uri] = unique.min if unique.size > 1
+        end
+      end
+
+      def synced_types
+        FULL_SYNC_TYPES + PARTIAL_SYNC_TYPES.map(&:first)
       end
 
       def fingerprint(doc)
