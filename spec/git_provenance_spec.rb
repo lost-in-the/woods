@@ -93,6 +93,19 @@ RSpec.describe Woods::GitProvenance do
   end
 
   describe '#branch / #sha when the checkout is not a git working tree' do
+    # Pin git's repo discovery to a nonexistent GIT_DIR so `git -C <tmpdir>
+    # rev-parse` can't walk UP into a parent checkout (e.g. when TMPDIR nests
+    # inside a repo) and resolve a real ref — these cases must deterministically
+    # exercise the no-.git fallback. git_working_tree? (a File.exist? check) and
+    # the GIT_BRANCH/GIT_SHA lookup (the injected env: hash) are unaffected.
+    around do |example|
+      original = ENV.fetch('GIT_DIR', nil)
+      ENV['GIT_DIR'] = File.join(Dir.tmpdir, 'woods_no_such_gitdir')
+      example.run
+    ensure
+      ENV['GIT_DIR'] = original
+    end
+
     # No .git at the root at all (a source tarball, or a Docker `COPY` that
     # excludes .git) with the git binary present: the GIT_BRANCH/GIT_SHA build
     # args are the only provenance signal, so they ARE honored. This must not be
