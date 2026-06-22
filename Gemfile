@@ -25,7 +25,14 @@ group :development, :test do
   # sqlite3 2.0+ requires RubyGems >= 3.3.22, which Ruby 3.0.7 doesn't ship
   # (it's stuck on 3.2.33). Pin to the 1.x line on 3.0 so the matrix row
   # can still resolve; everywhere else we get the latest.
-  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
+  #
+  # WOODS_SQLITE3_REQ override: Rails < 7.1 pins `sqlite3 ~> 1.4` in its adapter
+  # at load time, so the old-Rails appraisal gemfiles set this to '~> 1.4' to
+  # hold the 1.x line. The unit suite and newer Rails take the latest.
+  sqlite3_req = ENV.fetch('WOODS_SQLITE3_REQ', nil)
+  if sqlite3_req && !sqlite3_req.empty?
+    gem 'sqlite3', sqlite3_req
+  elsif Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
     gem 'sqlite3', '>= 1.4'
   else
     gem 'sqlite3', '>= 1.4', '< 2.0'
