@@ -169,6 +169,23 @@ If this fails, your Docker volume mount is not configured correctly. See [DOCKER
 
 ---
 
+### Index Server exits with `MissingArtifact`
+
+**Symptom:** `woods-mcp` exits 2 with `MissingArtifact: No woods.json found ...`.
+
+**Cause:** Strict mode is enabled (`WOODS_REQUIRE_INDEX=1`) but no embedding index has been written. By default the server boots without `woods.json` — it serves pattern/regex/structural tools and skips semantic search. You only see this error when you've explicitly opted into fail-closed behavior.
+
+**Fix:** Either generate the index so semantic search is available:
+
+```bash
+bundle exec rake woods:extract
+bundle exec rake woods:embed          # writes woods.json + vector dumps
+```
+
+…or unset `WOODS_REQUIRE_INDEX` to boot in pattern-only mode. (The older `WOODS_ALLOW_AUTODETECT=1` flag is no longer needed — auto-detect is the default.)
+
+---
+
 ### No tools appear in the MCP client
 
 **Symptom:** The MCP client connects but shows no tools, or the server exits immediately.

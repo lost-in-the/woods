@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Index Server now boots in pattern-only mode by default when no embedding
+  index is present** (#138). Since 1.3.0, `woods-mcp` raised `MissingArtifact` at
+  boot unless `woods.json` existed or `WOODS_ALLOW_AUTODETECT=1` was set — which
+  surprised the most common setup: `rake woods:extract` with no embedding
+  provider, where pattern/regex/structural search works perfectly. The server now
+  auto-detects by default: it serves all always-on tools (`lookup`, `search`,
+  `dependencies`, `structure`, `graph_analysis`, `pagerank`, …) with no env var,
+  and `codebase_retrieve` (semantic search) activates automatically once an
+  embedding provider is configured. Set `WOODS_REQUIRE_INDEX=1` to restore
+  fail-closed behavior (raise `MissingArtifact` when `woods.json` is absent).
+  `WOODS_ALLOW_AUTODETECT` is retained as a no-op for backward compatibility.
+
 ## [1.4.1] - 2026-06-10
 
 ### Fixed

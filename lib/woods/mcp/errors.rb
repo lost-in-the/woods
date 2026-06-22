@@ -72,9 +72,11 @@ module Woods
     #   )
     class UnsupportedArtifact < BootstrapError; end
 
-    # Raised when +woods.json+ is absent from +output_dir+ and the env flag
-    # +WOODS_ALLOW_AUTODETECT+ is not set. Hosts that have never run an embed
-    # see a clear failure message rather than silent degradation.
+    # Raised when +woods.json+ is absent from +output_dir+ and the operator has
+    # opted into strict mode with +WOODS_REQUIRE_INDEX=1+. By default an absent
+    # artifact is *not* an error — the server boots in pattern/structural-only
+    # mode (see {ConfigResolver.resolve_without_artifact}). Strict mode exists
+    # for deployments that want to fail closed when an index is missing.
     #
     # @example
     #   raise Woods::MCP::MissingArtifact.new(

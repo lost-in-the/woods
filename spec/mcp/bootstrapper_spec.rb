@@ -185,40 +185,58 @@ RSpec.describe Woods::MCP::Bootstrapper do
 
   describe '.build_retriever' do
     # The decomposed build_retriever returns [retriever, BootstrapState].
-    # It refuses to silently auto-detect anymore — no woods.json + no
-    # explicit opt-in raises MissingArtifact. Callers rescue the typed
-    # error at the top level (see exe/woods-mcp).
+    # Extract-only hosts (no woods.json + no provider) boot in pattern/
+    # structural mode by default — auto-detect runs and returns a nil
+    # retriever when no credentials are present (#138). Strict deployments
+    # set WOODS_REQUIRE_INDEX=1 to fail closed with MissingArtifact, which
+    # callers rescue at the top level (see exe/woods-mcp).
     around do |example|
       original = Woods.configuration
       Woods.configuration = Woods::Configuration.new
       ENV.delete('WOODS_ALLOW_AUTODETECT')
+      ENV.delete('WOODS_REQUIRE_INDEX')
       example.run
     ensure
       Woods.configuration = original
     end
 
-    context 'when no woods.json exists and autodetect is not opted in' do
-      it 'raises Woods::MCP::MissingArtifact with an actionable message' do
+    context 'when no woods.json exists and no provider is configured (extract-only)' do
+      it 'boots in pattern-only mode with a nil retriever instead of raising (#138)' do
+        ENV.delete('OPENAI_API_KEY')
+        # Stub the Ollama reachability check — the machine running the
+        # spec might have Ollama listening on localhost, which would
+        # otherwise cause autodetect to wire a provider and defeat the test.
+        allow(described_class).to receive(:ollama_reachable?).and_return(false)
+
         Dir.mktmpdir do |dir|
-          expect { described_class.build_retriever(index_dir: dir) }
-            .to raise_error(Woods::MCP::MissingArtifact, /WOODS_ALLOW_AUTODETECT/)
+          retriever, state = described_class.build_retriever(index_dir: dir)
+          expect(retriever).to be_nil
+          expect(state).to be_a(Woods::MCP::BootstrapState)
         end
       end
     end
 
-    context 'when no woods.json exists and WOODS_ALLOW_AUTODETECT=1 is set' do
-      it 'falls through to env-var auto-detect (deprecated path)' do
-        ENV['WOODS_ALLOW_AUTODETECT'] = '1'
-        ENV.delete('OPENAI_API_KEY')
-        # Stub the Ollama reachability check — the machine running the
-        # spec might have Ollama listening on localhost, which would
-        # otherwise cause autodetect to succeed and defeat the test.
+    context 'when no woods.json exists and WOODS_REQUIRE_INDEX=1 is set (strict)' do
+      it 'raises Woods::MCP::MissingArtifact with an actionable message' do
+        ENV['WOODS_REQUIRE_INDEX'] = '1'
         allow(described_class).to receive(:ollama_reachable?).and_return(false)
 
         Dir.mktmpdir do |dir|
-          # No credentials, no Ollama — auto-detect finds nothing and
-          # returns a nil retriever instead of raising. The caller
-          # diagnoses via BootstrapState.
+          expect { described_class.build_retriever(index_dir: dir) }
+            .to raise_error(Woods::MCP::MissingArtifact, /WOODS_REQUIRE_INDEX/)
+        end
+      ensure
+        ENV.delete('WOODS_REQUIRE_INDEX')
+      end
+    end
+
+    context 'when no woods.json exists and legacy WOODS_ALLOW_AUTODETECT=1 is set' do
+      it 'still boots via auto-detect (back-compat no-op)' do
+        ENV['WOODS_ALLOW_AUTODETECT'] = '1'
+        ENV.delete('OPENAI_API_KEY')
+        allow(described_class).to receive(:ollama_reachable?).and_return(false)
+
+        Dir.mktmpdir do |dir|
           retriever, state = described_class.build_retriever(index_dir: dir)
           expect(retriever).to be_nil
           expect(state).to be_a(Woods::MCP::BootstrapState)

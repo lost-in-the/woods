@@ -103,8 +103,8 @@ module Woods
       #   When nil, uses Woods.configuration.output_dir.
       # @return [Array(Woods::Retriever, Woods::MCP::BootstrapState)]
       # @raise [Woods::MCP::BootstrapError] on config-invalid (missing
-      #   credentials, dimension mismatch, unsupported artifact, missing
-      #   artifact with autodetect off).
+      #   credentials, dimension mismatch, unsupported artifact, or a missing
+      #   artifact under WOODS_REQUIRE_INDEX=1).
       def self.build_retriever(index_dir: nil)
         state = BootstrapState.new
         state.mark(:hydrating)

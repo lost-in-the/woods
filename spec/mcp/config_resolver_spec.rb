@@ -245,21 +245,36 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
     end
 
-    context 'no woods.json, no host provider, WOODS_ALLOW_AUTODETECT unset' do
-      it 'raises Woods::MCP::MissingArtifact' do
+    context 'no woods.json, no host provider, no credentials (extract-only default)' do
+      it 'returns [config, :autodetect] in pattern-only mode instead of raising (#138)' do
         Dir.mktmpdir do |dir|
           artifact = Woods::IndexArtifact.new(dir)
-          expect { described_class.resolve(blank_config, artifact: artifact, env: {}) }
-            .to raise_error(Woods::MCP::MissingArtifact, /WOODS_ALLOW_AUTODETECT/)
+          config, source = described_class.resolve(blank_config,
+                                                   artifact: artifact,
+                                                   env: {},
+                                                   ollama_probe: -> { false })
+          expect(config.embedding_provider).to be_nil
+          expect(source).to eq(:autodetect)
         end
       end
     end
 
-    context 'no woods.json, no host provider, WOODS_ALLOW_AUTODETECT=1, OPENAI_API_KEY set' do
-      it 'returns [config, :autodetect] with embedding_provider :openai' do
+    context 'no woods.json, no host provider, WOODS_REQUIRE_INDEX=1 (strict opt-in)' do
+      it 'raises Woods::MCP::MissingArtifact naming the strict flag' do
         Dir.mktmpdir do |dir|
           artifact = Woods::IndexArtifact.new(dir)
-          env = { 'WOODS_ALLOW_AUTODETECT' => '1', 'OPENAI_API_KEY' => 'sk-test' }
+          env = { 'WOODS_REQUIRE_INDEX' => '1' }
+          expect { described_class.resolve(blank_config, artifact: artifact, env: env, ollama_probe: -> { false }) }
+            .to raise_error(Woods::MCP::MissingArtifact, /WOODS_REQUIRE_INDEX/)
+        end
+      end
+    end
+
+    context 'no woods.json, no host provider, OPENAI_API_KEY set' do
+      it 'auto-detects :openai by default (no opt-in flag required)' do
+        Dir.mktmpdir do |dir|
+          artifact = Woods::IndexArtifact.new(dir)
+          env = { 'OPENAI_API_KEY' => 'sk-test' }
           config, source = described_class.resolve(blank_config, artifact: artifact, env: env)
           expect(config.embedding_provider).to eq(:openai)
           expect(source).to eq(:autodetect)
@@ -267,8 +282,23 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
     end
 
-    context 'no woods.json, no host provider, WOODS_ALLOW_AUTODETECT=1, no credentials' do
-      it 'returns [config, :autodetect] with nil embedding_provider when Ollama probe returns false' do
+    context 'no woods.json, no host provider, Ollama reachable' do
+      it 'auto-detects :ollama by default (no opt-in flag required)' do
+        Dir.mktmpdir do |dir|
+          artifact = Woods::IndexArtifact.new(dir)
+          env = { 'OLLAMA_BASE_URL' => 'http://127.0.0.1:11434' }
+          config, source = described_class.resolve(blank_config,
+                                                   artifact: artifact,
+                                                   env: env,
+                                                   ollama_probe: -> { true })
+          expect(config.embedding_provider).to eq(:ollama)
+          expect(source).to eq(:autodetect)
+        end
+      end
+    end
+
+    context 'legacy WOODS_ALLOW_AUTODETECT=1 (back-compat no-op)' do
+      it 'still auto-detects without error' do
         Dir.mktmpdir do |dir|
           artifact = Woods::IndexArtifact.new(dir)
           env = { 'WOODS_ALLOW_AUTODETECT' => '1' }
@@ -280,25 +310,20 @@ RSpec.describe Woods::MCP::ConfigResolver do
           expect(source).to eq(:autodetect)
         end
       end
-
-      it 'returns [config, :autodetect] with :ollama when Ollama probe returns true' do
-        Dir.mktmpdir do |dir|
-          artifact = Woods::IndexArtifact.new(dir)
-          env = { 'WOODS_ALLOW_AUTODETECT' => '1', 'OLLAMA_BASE_URL' => 'http://127.0.0.1:11434' }
-          config, source = described_class.resolve(blank_config,
-                                                   artifact: artifact,
-                                                   env: env,
-                                                   ollama_probe: -> { true })
-          expect(config.embedding_provider).to eq(:ollama)
-          expect(source).to eq(:autodetect)
-        end
-      end
     end
 
     context 'nil artifact (no output_dir configured)' do
-      it 'raises Woods::MCP::MissingArtifact when host has no provider' do
-        expect { described_class.resolve(blank_config, artifact: nil, env: {}) }
-          .to raise_error(Woods::MCP::MissingArtifact)
+      it 'boots in pattern-only mode by default when host has no provider' do
+        config, source = described_class.resolve(blank_config, artifact: nil, env: {}, ollama_probe: -> { false })
+        expect(config.embedding_provider).to be_nil
+        expect(source).to eq(:autodetect)
+      end
+
+      it 'raises Woods::MCP::MissingArtifact under WOODS_REQUIRE_INDEX=1' do
+        expect do
+          described_class.resolve(blank_config, artifact: nil, env: { 'WOODS_REQUIRE_INDEX' => '1' },
+                                                ollama_probe: -> { false })
+        end.to raise_error(Woods::MCP::MissingArtifact)
       end
 
       it 'returns [config, :host_config] when host has a provider' do

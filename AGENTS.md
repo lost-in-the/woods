@@ -53,7 +53,7 @@ Woods is a Ruby gem that extracts structured data from Rails applications via ru
 }
 ```
 
-Run `bundle exec rake woods:extract` (or `docker compose exec app bundle exec rake woods:extract`) before starting the Index Server.
+Run `bundle exec rake woods:extract` (or `docker compose exec app bundle exec rake woods:extract`) before starting the Index Server. Extraction alone is enough: the Index Server boots in pattern/structural mode and serves every always-on tool with no extra configuration. Semantic search (`codebase_retrieve`) is optional — it activates once an embedding provider is configured and `rake woods:embed` has run. (Set `WOODS_REQUIRE_INDEX=1` if you want the server to refuse to boot without an embedding index.)
 
 ## Quick Reference: Common Tools
 
