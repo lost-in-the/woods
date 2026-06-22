@@ -12,7 +12,7 @@ No — Woods requires a booted Rails environment for extraction. It uses runtime
 
 ### What Rails versions does Woods support?
 
-Woods supports Rails 6.1 and newer, with Ruby 3.0 or newer. It is tested against Rails 7.x and 8.x. Rails 6.0 and earlier are not supported because the gem relies on Zeitwerk autoloading and several reflection APIs introduced in 6.1.
+Woods supports **Rails 6.0 and newer**, on **Ruby 3.0 through 4.0**. CI runs an end-to-end extraction against Rails 6.0, 6.1, 7.0, 7.1, 7.2, and 8.0 (see the version matrix in [CONTRIBUTING.md](../CONTRIBUTING.md)). The gem declares `railties >= 6.0`; the only 6.1-introduced APIs it touches (`connection_db_config`, `has_many_inversing`) are `respond_to?`-guarded and degrade cleanly on 6.0.
 
 ---
 

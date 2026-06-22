@@ -90,19 +90,31 @@ RSpec.describe Woods::GitProvenance do
         expect(provenance.sha).to eq('unknown')
       end
     end
+  end
 
-    it 'parses the gitdir: pointer to read the branch when the linked HEAD is reachable' do
+  describe '#branch / #sha when the checkout is not a git working tree' do
+    # No .git at the root at all (a source tarball, or a Docker `COPY` that
+    # excludes .git) with the git binary present: the GIT_BRANCH/GIT_SHA build
+    # args are the only provenance signal, so they ARE honored. This must not be
+    # conflated with the unresolvable-worktree case (#137), where a .git IS
+    # present and a possibly-stale env value must be suppressed.
+    it 'honours GIT_BRANCH/GIT_SHA build args when git is installed but there is no .git' do
       Dir.mktmpdir do |dir|
-        # A reachable, hand-built worktree git dir whose HEAD names a branch,
-        # even though it is not registered with a real repo (rev-parse fails).
-        gitdir = File.join(dir, 'real_git', 'worktrees', 'wt')
-        FileUtils.mkdir_p(gitdir)
-        File.write(File.join(gitdir, 'HEAD'), "ref: refs/heads/recovered-branch\n")
-        File.write(File.join(dir, '.git'), "gitdir: #{gitdir}\n")
+        # Real git binary on PATH; dir has no .git (git rev-parse will fail).
+        env = { 'GIT_BRANCH' => 'release-1.2', 'GIT_SHA' => 'cafebabecafe' }
+        provenance = described_class.new(root: dir, env: env)
 
-        provenance = described_class.new(root: dir, env: { 'GIT_BRANCH' => 'stale' })
+        expect(provenance.branch).to eq('release-1.2')
+        expect(provenance.sha).to eq('cafebabecafe')
+      end
+    end
 
-        expect(provenance.branch).to eq('recovered-branch')
+    it 'emits "unknown" when there is no .git and no env vars' do
+      Dir.mktmpdir do |dir|
+        provenance = described_class.new(root: dir, env: {})
+
+        expect(provenance.branch).to eq('unknown')
+        expect(provenance.sha).to eq('unknown')
       end
     end
   end

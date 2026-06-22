@@ -144,7 +144,7 @@ bundle exec rake woods:extract
 
 **Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory — often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg). See [#137].
 
-**Fix:** Make the worktree's git directory reachable from the extraction environment — for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If git is genuinely unavailable in the environment, set `GIT_BRANCH` / `GIT_SHA` to the correct values explicitly — Woods uses these only when no git binary is present.
+**Fix:** Make the worktree's git directory reachable from the extraction environment — for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly — Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
 
 ---
 

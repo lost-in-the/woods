@@ -33,8 +33,12 @@ jobs:
 
   # Booted-app extraction across the supported Rails versions (#135/#136). Each
   # row boots the spec/dummy Rails app in-process against a pinned Rails and runs
-  # a real end-to-end extraction (spec/integration/booted_extraction_spec.rb),
-  # gating the version-sensitive introspection path that the unit suite can't.
+  # a real end-to-end extraction (spec/integration/booted_extraction_spec.rb) —
+  # the version-sensitive introspection gate the unit suite (which stubs Rails)
+  # can't provide. The unit suite runs in the `test` job on the base Gemfile; it
+  # is deliberately NOT re-run per Rails version — it stubs Rails, so it would add
+  # bundle-difference noise without real version coverage, and the booted spec
+  # can't share a process with it (hence the :booted_app tag + the solo run here).
   # Pairs are explicit to exclude invalid Ruby x Rails combinations (e.g. Rails
   # 6.0 only on Ruby 3.0; Rails 7.2 needs >= 3.1; Rails 8.0 needs >= 3.2).
   rails-matrix:

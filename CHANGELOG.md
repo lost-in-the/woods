@@ -46,10 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrichment failed silently and the branch/SHA fell back to a baked
   `GIT_BRANCH`/`GIT_SHA` build arg, reporting an unrelated branch. A new
   `Woods::GitProvenance` resolves provenance with worktree-aware plumbing
-  (`git -C <root> rev-parse`, plus reading the linked `HEAD`), and emits
-  `"unknown"` when nothing resolves rather than a misleading value. `GIT_BRANCH`/
-  `GIT_SHA` env vars now apply only when the `git` binary is entirely absent.
-  Temporal snapshots skip an `"unknown"` SHA so it can't key or collide a snapshot.
+  (`git -C <root> rev-parse`), and emits `"unknown"` when a `.git` is present but
+  the ref can't be resolved (the worktree case) rather than a misleading value.
+  The `GIT_BRANCH`/`GIT_SHA` env vars are honored only when there is **no** `.git`
+  at the root at all (a non-repo checkout — e.g. a Docker `COPY` that excludes
+  `.git` — with build args supplying the SHA) or git is unavailable. Temporal
+  snapshots skip an `"unknown"` SHA so it can't key or collide a snapshot.
 
 ## [1.4.1] - 2026-06-10
 

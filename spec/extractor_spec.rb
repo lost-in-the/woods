@@ -206,8 +206,12 @@ RSpec.describe Woods::Extractor do
   describe '#write_manifest' do
     # json_serialize reads Woods.configuration.pretty_json; ensure a config
     # exists regardless of suite ordering (another spec may have left it nil).
+    # Requiring active_support's time ext defines Time.current so the stub below
+    # is valid under verify_partial_doubles even when this file runs standalone
+    # (`rake spec SPEC=...`), regardless of which other spec loaded it first.
     before do
       require 'woods'
+      require 'active_support/core_ext/time'
       @original_config = Woods.configuration
       Woods.configuration = Woods::Configuration.new
     end
@@ -218,6 +222,9 @@ RSpec.describe Woods::Extractor do
 
     it 'delegates branch/sha to a Rails.root-rooted GitProvenance (#137)' do
       allow(Rails).to receive(:version).and_return('7.1.0')
+      # Stub Time.current (now defined by the require above) so the real one —
+      # which needs ActiveSupport::IsolatedExecutionState / a loaded Time.zone —
+      # is never invoked.
       allow(Time).to receive(:current).and_return(Time.now)
       output_dir = File.join(tmpdir, 'output')
       FileUtils.mkdir_p(output_dir)

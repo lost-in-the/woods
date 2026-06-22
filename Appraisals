@@ -2,8 +2,8 @@
 
 # Rails version matrix for CI. The gem declares `railties >= 6.0`; these
 # appraisals exercise the supported Rails releases against the booted-app
-# extraction path (spec/integration/booted_extraction_spec.rb) and the unit
-# suite.
+# extraction path (spec/integration/booted_extraction_spec.rb). The unit suite
+# stubs Rails and runs once on the base Gemfile (the `test` job), not per row.
 #
 # Regenerate the gemfiles after editing this file:
 #   bundle exec appraisal generate

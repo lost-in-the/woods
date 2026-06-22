@@ -66,13 +66,20 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     @output_dir = Dir.mktmpdir('woods_booted')
     require 'woods'
     require 'woods/extractor'
+    @original_woods_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.concurrent_extraction = false
 
     Woods::Extractor.new(output_dir: @output_dir).extract_all
   end
 
+  # Restore the global state this file mutates so it can't corrupt other specs.
+  # (CI runs this file solo via WOODS_RUN_BOOTED_APP, but the isolation is
+  # enforced here rather than assumed. The booted Rails.application singleton
+  # can't be torn down, but the config and DB connection are restored.)
   after(:all) do
+    Woods.configuration = @original_woods_config if defined?(@original_woods_config)
+    ActiveRecord::Base.remove_connection if defined?(ActiveRecord::Base)
     FileUtils.rm_rf(@output_dir) if @output_dir
     FileUtils.rm_rf(@db_dir) if @db_dir
     ENV.delete('WOODS_DUMMY_DB')

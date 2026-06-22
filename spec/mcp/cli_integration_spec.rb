@@ -83,6 +83,38 @@ RSpec.describe 'MCP CLI integration' do
       expect(stderr_output).not_to match(/from .+\.rb:\d+:in/) # backtrace frame
     end
 
+    # #138: extract-only host (manifest.json present, no woods.json, no provider)
+    # must boot into pattern/structural mode by default — NOT fail-fast with
+    # MissingArtifact — and with no WOODS_REQUIRE_INDEX / WOODS_ALLOW_AUTODETECT
+    # set. We confirm the process is still alive after boot (it entered the stdio
+    # transport) rather than having exited 2.
+    it 'boots in pattern-only mode for an extract-only dir with no woods.json' do
+      Dir.mktmpdir do |dir|
+        FileUtils.touch(File.join(dir, 'manifest.json'))
+        env = {
+          'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
+          'WOODS_REQUIRE_INDEX' => nil,
+          'WOODS_ALLOW_AUTODETECT' => nil,
+          'OPENAI_API_KEY' => nil,
+          # Dead port so autodetect can't wire a real Ollama provider.
+          'OLLAMA_BASE_URL' => 'http://127.0.0.1:19999'
+        }
+        stdin, stdout, stderr, wait_thr = Open3.popen3(env, 'bundle', 'exec', 'ruby', ruby_bin, dir)
+        sleep 2
+        # Still alive == booted into the server (did not exit 2 on MissingArtifact).
+        booted = wait_thr.alive?
+        Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
+        wait_thr.join(5)
+        err = stderr.read
+        stdin.close
+        stdout.close
+        stderr.close
+
+        expect(booted).to be(true)
+        expect(err).not_to include('MissingArtifact')
+      end
+    end
+
     it 'exits non-zero when pointed at a missing index directory' do
       env = { 'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile') }
       _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, '/no/such/path')

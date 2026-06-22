@@ -51,10 +51,20 @@ All new features need tests. Bug fixes should include a regression test.
 
 ### Rails version matrix
 
-The gem supports `railties >= 6.0`. CI runs the unit suite across Ruby 3.0–4.0
-and a booted-app extraction test (`spec/integration/booted_extraction_spec.rb`,
-against `spec/dummy`) across Rails 6.0–8.0 using per-version gemfiles under
-`gemfiles/`. The Rails pins live in `Appraisals`; the gemfiles are hand-maintained
+The gem supports `railties >= 6.0`. Coverage is split across two CI jobs:
+
+- The base unit `test` job runs `rake spec` across **Ruby 3.0–4.0** on the
+  default (newest) Rails. The unit specs stub Rails, so they run once on the base
+  Gemfile rather than per Rails version.
+- The `rails-matrix` job runs the **booted-app extraction test**
+  (`spec/integration/booted_extraction_spec.rb` against `spec/dummy`) under each
+  supported Rails — 6.0, 6.1, 7.0, 7.1, 7.2, 8.0 — using per-version gemfiles
+  under `gemfiles/`. This is the version-sensitive gate: it boots a real Rails
+  app in-process and runs an extraction. (The booted spec is tagged `:booted_app`
+  and excluded from the default `rake spec`; `WOODS_RUN_BOOTED_APP=1` opts it in,
+  and it must run in its own process — it can't share one with the unit suite.)
+
+The Rails pins live in `Appraisals`; the gemfiles are hand-maintained
 (`eval_gemfile`-ing the base `Gemfile` and pinning Rails) because Appraisal can't
 generate from the conditional base Gemfile. To run a single Rails row locally:
 
@@ -64,10 +74,13 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
   bundle exec rspec spec/integration/booted_extraction_spec.rb
 ```
 
-The booted-app spec is tagged `:booted_app` and excluded from the default
-`rake spec` run (it needs full Rails, which the base Gemfile doesn't bundle).
-When adding a Rails line, add it to both `Appraisals` and `gemfiles/`, and add a
+When adding a Rails line: add it to both `Appraisals` and `gemfiles/`, and add a
 valid Ruby×Rails pair to the `rails-matrix` job in `.github/workflows/ci.yml`.
+**For a row below Rails 7.1**, the gemfile must set `ENV['WOODS_SQLITE3_REQ'] =
+'~> 1.4'` *before* `eval_gemfile` (those Rails versions pin `sqlite3 ~> 1.4` in
+their adapter at load time) and pin `concurrent-ruby '< 1.3.5'` (1.3.5 dropped
+the implicit `require "logger"` those releases rely on under Ruby 3.x) — copy an
+existing `gemfiles/rails_6.0.gemfile` as the template.
 
 ## Code Style
 
