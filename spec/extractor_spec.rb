@@ -204,6 +204,18 @@ RSpec.describe Woods::Extractor do
   # ── write_manifest — git provenance ─────────────────────────────────
 
   describe '#write_manifest' do
+    # json_serialize reads Woods.configuration.pretty_json; ensure a config
+    # exists regardless of suite ordering (another spec may have left it nil).
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
     it 'delegates branch/sha to a Rails.root-rooted GitProvenance (#137)' do
       allow(Rails).to receive(:version).and_return('7.1.0')
       allow(Time).to receive(:current).and_return(Time.now)
