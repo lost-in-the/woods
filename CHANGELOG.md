@@ -21,6 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fail-closed behavior (raise `MissingArtifact` when `woods.json` is absent).
   `WOODS_ALLOW_AUTODETECT` is retained as a no-op for backward compatibility.
 
+### Fixed
+
+- **`manifest.json` no longer reports a stale `git_branch`/`git_sha` in a git
+  worktree** (#137). In a linked worktree, `.git` is a file pointing at the real
+  git directory (often an absolute host path). When that directory couldn't be
+  resolved — e.g. inside a container where the host path isn't mounted — git
+  enrichment failed silently and the branch/SHA fell back to a baked
+  `GIT_BRANCH`/`GIT_SHA` build arg, reporting an unrelated branch. A new
+  `Woods::GitProvenance` resolves provenance with worktree-aware plumbing
+  (`git -C <root> rev-parse`, plus reading the linked `HEAD`), and emits
+  `"unknown"` when nothing resolves rather than a misleading value. `GIT_BRANCH`/
+  `GIT_SHA` env vars now apply only when the `git` binary is entirely absent.
+  Temporal snapshots skip an `"unknown"` SHA so it can't key or collide a snapshot.
+
 ## [1.4.1] - 2026-06-10
 
 ### Fixed

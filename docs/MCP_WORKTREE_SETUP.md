@@ -91,6 +91,14 @@ cat .mcp.json
 
 If the file exists and contains the woods entries, Claude Code will use it. If the file is missing, check parent directories up to your home directory for any `.mcp.json` that would be discovered.
 
+## Extraction Provenance in Worktrees (`git_branch` / `git_sha`)
+
+`manifest.json` records the `git_branch` and `git_sha` the extraction ran against. In a linked worktree, `.git` is a **file** containing a `gitdir:` pointer to the real git directory — frequently an absolute host path — rather than a `.git` directory.
+
+Woods resolves provenance with worktree-aware git plumbing (`git -C <root> rev-parse`, plus reading the linked `HEAD`), so an ordinary worktree reports the correct branch and SHA. When the pointed-to git directory **cannot be resolved** — most commonly a worktree extracted inside a container where the host path isn't mounted — Woods records `git_branch: "unknown"` / `git_sha: "unknown"` rather than a stale, misleading value (it no longer silently falls back to a baked `GIT_BRANCH`/`GIT_SHA` build arg).
+
+To get correct provenance from a containerized worktree, mount the directory the `gitdir:` pointer references (the parent repository's `.git`) into the container so git can resolve it. Temporal snapshots skip an `"unknown"` SHA, so misleading provenance never keys a snapshot.
+
 ## Troubleshooting
 
 **"Unknown tool" or "no MCP server named woods"**

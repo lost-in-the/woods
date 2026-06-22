@@ -1,0 +1,136 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'tmpdir'
+require 'open3'
+require 'fileutils'
+require 'woods/git_provenance'
+
+RSpec.describe Woods::GitProvenance do
+  # Initialize a real git repo with one commit and a deterministic branch.
+  def init_repo(dir, branch: 'main')
+    run(dir, 'git', 'init', '--quiet', '--initial-branch', branch)
+    run(dir, 'git', 'config', 'user.email', 'test@example.com')
+    run(dir, 'git', 'config', 'user.name', 'Test')
+    File.write(File.join(dir, 'README.md'), "hello\n")
+    run(dir, 'git', 'add', '.')
+    run(dir, 'git', 'commit', '--quiet', '-m', 'initial')
+  end
+
+  def run(dir, *args)
+    out, status = Open3.capture2e(*args, chdir: dir)
+    raise "command failed: #{args.join(' ')}\n#{out}" unless status.success?
+
+    out.strip
+  end
+
+  describe '#branch / #sha in a normal checkout' do
+    it 'resolves the real branch and commit SHA' do
+      Dir.mktmpdir do |dir|
+        init_repo(dir, branch: 'main')
+        expected_sha = run(dir, 'git', 'rev-parse', 'HEAD')
+
+        provenance = described_class.new(root: dir, env: {})
+
+        expect(provenance.branch).to eq('main')
+        expect(provenance.sha).to eq(expected_sha)
+        expect(provenance.to_h).to eq(git_branch: 'main', git_sha: expected_sha)
+      end
+    end
+
+    it 'resolves independently of the process working directory' do
+      Dir.mktmpdir do |dir|
+        init_repo(dir, branch: 'feature-x')
+        expected_sha = run(dir, 'git', 'rev-parse', 'HEAD')
+
+        # Process cwd is the gem root, not `dir` — `-C <root>` must still work.
+        provenance = described_class.new(root: dir, env: {})
+
+        expect(provenance.branch).to eq('feature-x')
+        expect(provenance.sha).to eq(expected_sha)
+      end
+    end
+  end
+
+  describe '#branch / #sha in a linked worktree (.git is a file)' do
+    it 'resolves the worktree branch/sha when the git dir is reachable' do
+      Dir.mktmpdir do |parent|
+        main = File.join(parent, 'main')
+        FileUtils.mkdir_p(main)
+        init_repo(main, branch: 'main')
+
+        worktree = File.join(parent, 'wt')
+        run(main, 'git', 'worktree', 'add', '--quiet', '-b', 'wt-branch', worktree)
+
+        # Sanity: the worktree's .git is a FILE, not a directory.
+        expect(File).to be_file(File.join(worktree, '.git'))
+
+        expected_sha = run(worktree, 'git', 'rev-parse', 'HEAD')
+        provenance = described_class.new(root: worktree, env: {})
+
+        expect(provenance.branch).to eq('wt-branch')
+        expect(provenance.sha).to eq(expected_sha)
+      end
+    end
+  end
+
+  describe '#branch / #sha when the worktree git dir is unreachable (#137)' do
+    it 'emits "unknown" instead of a stale GIT_BRANCH/GIT_SHA env value' do
+      Dir.mktmpdir do |dir|
+        # Simulate a worktree whose real git dir is not mounted: .git is a file
+        # pointing at a path that does not exist in this filesystem.
+        File.write(File.join(dir, '.git'), "gitdir: /nonexistent/host/path/.git/worktrees/wt\n")
+
+        stale_env = { 'GIT_BRANCH' => 'baked-stale-branch', 'GIT_SHA' => 'deadbeefstale' }
+        provenance = described_class.new(root: dir, env: stale_env)
+
+        # git is installed (CI/dev) but cannot resolve the ref → "unknown",
+        # NOT the misleading baked build-arg.
+        expect(provenance.branch).to eq('unknown')
+        expect(provenance.sha).to eq('unknown')
+      end
+    end
+
+    it 'parses the gitdir: pointer to read the branch when the linked HEAD is reachable' do
+      Dir.mktmpdir do |dir|
+        # A reachable, hand-built worktree git dir whose HEAD names a branch,
+        # even though it is not registered with a real repo (rev-parse fails).
+        gitdir = File.join(dir, 'real_git', 'worktrees', 'wt')
+        FileUtils.mkdir_p(gitdir)
+        File.write(File.join(gitdir, 'HEAD'), "ref: refs/heads/recovered-branch\n")
+        File.write(File.join(dir, '.git'), "gitdir: #{gitdir}\n")
+
+        provenance = described_class.new(root: dir, env: { 'GIT_BRANCH' => 'stale' })
+
+        expect(provenance.branch).to eq('recovered-branch')
+      end
+    end
+  end
+
+  describe '#branch / #sha when git is unavailable' do
+    before do
+      # Force both rev-parse and the binary probe to fail, simulating an
+      # environment with no usable git.
+      allow(Open3).to receive(:capture2).and_raise(Errno::ENOENT)
+    end
+
+    it 'honours GIT_BRANCH/GIT_SHA env vars as the documented no-git fallback' do
+      Dir.mktmpdir do |dir|
+        env = { 'GIT_BRANCH' => 'ci-branch', 'GIT_SHA' => 'abc123' }
+        provenance = described_class.new(root: dir, env: env)
+
+        expect(provenance.branch).to eq('ci-branch')
+        expect(provenance.sha).to eq('abc123')
+      end
+    end
+
+    it 'emits "unknown" when no env vars are set' do
+      Dir.mktmpdir do |dir|
+        provenance = described_class.new(root: dir, env: {})
+
+        expect(provenance.branch).to eq('unknown')
+        expect(provenance.sha).to eq('unknown')
+      end
+    end
+  end
+end
