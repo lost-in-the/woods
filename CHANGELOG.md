@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rails 6.0 support: the `railties` floor is lowered from `>= 6.1` to `>= 6.0`**
+  (#135). Woods runs cleanly on the Rails 6.0 series — extraction and index-MCP
+  serving need no 6.1-only API. The only 6.1-introduced calls touched
+  (`connection_db_config`, `has_many_inversing`) are `respond_to?`-guarded and
+  degrade on 6.0; a regression spec locks that in.
+- **CI now runs a Rails version matrix plus a booted-app extraction test** (#136).
+  `Appraisals` + `gemfiles/rails_*.gemfile` exercise Rails 6.0, 6.1, 7.0, 7.1,
+  7.2, and 8.0; the matrix excludes invalid Ruby×Rails pairs (e.g. Rails 6.0 only
+  on Ruby 3.0) and adds a **Ruby 4.0** lane. A new booted-app test
+  (`spec/integration/booted_extraction_spec.rb`, against the minimal `spec/dummy`
+  app) boots Rails in-process and runs a real end-to-end extraction, asserting a
+  non-zero unit count and the expected models/associations — gating the
+  version-sensitive introspection path the unit suite (which stubs Rails) can't.
+
 ### Changed
 
 - **The Index Server now boots in pattern-only mode by default when no embedding

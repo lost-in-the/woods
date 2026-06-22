@@ -1,0 +1,50 @@
+# frozen_string_literal: true
+
+# Rails version matrix for CI. The gem declares `railties >= 6.0`; these
+# appraisals exercise the supported Rails releases against the booted-app
+# extraction path (spec/integration/booted_extraction_spec.rb) and the unit
+# suite.
+#
+# Regenerate the gemfiles after editing this file:
+#   bundle exec appraisal generate
+#
+# Install and run a single row:
+#   BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle install
+#   BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rake spec
+#
+# Notes:
+# - `sqlite3` is intentionally NOT re-declared here. The base Gemfile pins
+#   `sqlite3 >= 1.4`; Rails' own transitive constraint (`~> 1.4` on 6.0–7.0)
+#   narrows it to the 1.x line on old Rails and the latest 2.x on 7.1+.
+# - Rails < 7.1 boots against `concurrent-ruby < 1.3.5`: 1.3.5 dropped the
+#   implicit `require "logger"` that those releases rely on, so they raise a
+#   NameError on `Logger` under Ruby 3.x without the pin.
+# - Invalid Ruby x Rails pairs (e.g. Rails 6.0 on Ruby 3.2+) are excluded in
+#   the CI matrix, not here — Appraisals is Ruby-version-agnostic.
+
+appraise 'rails-6.0' do
+  gem 'rails', '~> 6.0.0'
+  gem 'concurrent-ruby', '< 1.3.5'
+end
+
+appraise 'rails-6.1' do
+  gem 'rails', '~> 6.1.0'
+  gem 'concurrent-ruby', '< 1.3.5'
+end
+
+appraise 'rails-7.0' do
+  gem 'rails', '~> 7.0.0'
+  gem 'concurrent-ruby', '< 1.3.5'
+end
+
+appraise 'rails-7.1' do
+  gem 'rails', '~> 7.1.0'
+end
+
+appraise 'rails-7.2' do
+  gem 'rails', '~> 7.2.0'
+end
+
+appraise 'rails-8.0' do
+  gem 'rails', '~> 8.0.0'
+end

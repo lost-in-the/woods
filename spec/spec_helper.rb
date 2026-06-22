@@ -37,6 +37,13 @@ RSpec.configure do |config|
   # against a predictable box.
   config.filter_run_excluding(perf: true) unless ENV['WOODS_RUN_PERF_SPECS']
 
+  # Booted-app specs (spec/integration/booted_extraction_spec.rb) boot a real
+  # Rails app in-process and require full Rails (activerecord + actionpack),
+  # which the default unit Gemfile doesn't bundle. Excluded from the default
+  # suite; the CI Rails-version matrix opts in via WOODS_RUN_BOOTED_APP using
+  # the per-version gemfiles under gemfiles/.
+  config.filter_run_excluding(booted_app: true) unless ENV['WOODS_RUN_BOOTED_APP']
+
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
   end

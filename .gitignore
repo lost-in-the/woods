@@ -39,3 +39,6 @@ bin/context7
 .grove/state.json.bak
 .grove/.envrc
 .claude/worktrees/
+
+# Appraisal per-version lockfiles (resolved fresh in CI)
+gemfiles/*.gemfile.lock

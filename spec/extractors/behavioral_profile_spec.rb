@@ -125,6 +125,38 @@ RSpec.describe Woods::Extractors::BehavioralProfile do
         expect(unit.metadata[:database]).to eq({})
       end
     end
+
+    # Rails 6.0 floor (#135): connection_db_config (6.1) and has_many_inversing
+    # (6.1) don't exist. The respond_to? guards must degrade cleanly — no
+    # adapter, no has_many_inversing, and no error — while still reading the
+    # pre-6.1 active_record config values.
+    context 'on Rails 6.0 (no connection_db_config / no has_many_inversing)' do
+      let(:ar_base) { double('ARBase') }
+
+      before do
+        stub_const('ActiveRecord::Base', ar_base)
+        allow(ar_base).to receive(:respond_to?).with(:connection_db_config).and_return(false)
+        allow(rails_config).to receive(:respond_to?).with(:active_record).and_return(true)
+        ar_config = double('ARConfig')
+        allow(rails_config).to receive(:active_record).and_return(ar_config)
+        allow(ar_config).to receive(:respond_to?).with(:schema_format).and_return(true)
+        allow(ar_config).to receive(:schema_format).and_return(:ruby)
+        allow(ar_config).to receive(:respond_to?).with(:belongs_to_required_by_default).and_return(true)
+        allow(ar_config).to receive(:belongs_to_required_by_default).and_return(true)
+        allow(ar_config).to receive(:respond_to?).with(:has_many_inversing).and_return(false)
+      end
+
+      it 'degrades without error and omits the 6.1-only keys' do
+        unit = described_class.new.extract
+        db = unit.metadata[:database]
+
+        expect(db).not_to have_key(:adapter)
+        expect(db).not_to have_key(:has_many_inversing)
+        # Pre-6.1 values still resolve.
+        expect(db[:schema_format]).to eq(:ruby)
+        expect(db[:belongs_to_required_by_default]).to eq(true)
+      end
+    end
   end
 
   # ── Frameworks section ───────────────────────────────────────────────

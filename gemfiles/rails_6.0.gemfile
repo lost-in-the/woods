@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+# Hand-maintained Rails-version gemfile (appraisal can't generate from the
+# conditional base Gemfile). Inherits the base Gemfile's dev/test gems via
+# eval_gemfile and pins Rails. Keep the Rails pins in sync with ../Appraisals.
+
+source 'https://rubygems.org'
+
+eval_gemfile File.expand_path('../Gemfile', __dir__)
+
+gem 'rails', '~> 6.0.0'
+# Rails < 7.1 relies on concurrent-ruby's implicit `require "logger"`, which
+# 1.3.5 removed; pin below it so the app boots on Ruby 3.x.
+gem 'concurrent-ruby', '< 1.3.5'

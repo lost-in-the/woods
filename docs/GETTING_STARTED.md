@@ -4,9 +4,27 @@ This guide walks you through installing Woods, running your first extraction, an
 
 ## Prerequisites
 
-- Ruby >= 3.0
-- A Rails application (6.1+)
+- Ruby >= 3.0 (through Ruby 4.0)
+- A Rails application (6.0+)
 - Bundler
+
+### Supported versions
+
+Woods declares `railties >= 6.0` and is exercised in CI across the Rails and Ruby
+versions below (the booted-app extraction test runs against each Rails row):
+
+| Rails | Tested Ruby |
+|---|---|
+| 6.0 | 3.0 |
+| 6.1 | 3.0 |
+| 7.0 | 3.1 |
+| 7.1 | 3.2 |
+| 7.2 | 3.3 |
+| 8.0 | 3.3, 4.0 |
+
+Newer Ruby/Rails point releases within these lines are expected to work; the
+matrix pins one representative Ruby per Rails line and excludes invalid pairings
+(e.g. Rails 6.0 does not run on Ruby 3.2+, Rails 8.0 requires Ruby >= 3.2).
 
 ## 1. Install the Gem
 

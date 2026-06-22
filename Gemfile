@@ -6,6 +6,7 @@ source 'https://rubygems.org'
 gemspec
 
 group :development, :test do
+  gem 'appraisal', '~> 2.5'
   gem 'benchmark-ips', '~> 2.0'
   # `benchmark` left Ruby's default gems in 4.0; the performance specs (and
   # benchmark-ips) `require 'benchmark'`, so declare it explicitly.

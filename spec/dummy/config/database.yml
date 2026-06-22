@@ -1,0 +1,19 @@
+# Minimal sqlite config for the booted-app extraction test. The database path
+# is supplied by the spec via WOODS_DUMMY_DB (a tmp file) so the same DB is
+# shared across connections; falls back to in-memory.
+default: &default
+  adapter: sqlite3
+  pool: 5
+  timeout: 5000
+
+development:
+  <<: *default
+  database: <%= ENV.fetch("WOODS_DUMMY_DB", ":memory:") %>
+
+test:
+  <<: *default
+  database: <%= ENV.fetch("WOODS_DUMMY_DB", ":memory:") %>
+
+production:
+  <<: *default
+  database: <%= ENV.fetch("WOODS_DUMMY_DB", ":memory:") %>
