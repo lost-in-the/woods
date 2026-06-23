@@ -51,5 +51,9 @@ Gem::Specification.new do |spec|
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower
   # Ruby range so the guard's behavior stays consistent across the support matrix.
   spec.add_dependency 'prism', '~> 1.4'
-  spec.add_dependency 'railties', '>= 6.1'
+  # Floor is Rails 6.0: Woods runs cleanly on the 6.0 series (extraction + index
+  # MCP serving). The only 6.1-introduced APIs touched (connection_db_config,
+  # has_many_inversing) are respond_to?-guarded and degrade on 6.0. The Rails
+  # version matrix in CI gates this floor. See #135 / #136.
+  spec.add_dependency 'railties', '>= 6.0'
 end

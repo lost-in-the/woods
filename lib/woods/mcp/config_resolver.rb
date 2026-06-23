@@ -23,9 +23,12 @@ module Woods
     #    compatible via {ResolvedConfig#assert_compatible!}.
     # 2. +woods.json+ snapshot alone (MCP server running without a host initializer).
     #    The stored config is used to populate +config+ in place.
-    # 3. Environment-variable auto-detect (deprecated, opt-in via
-    #    +WOODS_ALLOW_AUTODETECT=1+). Mutates +config+ to set provider and stores.
-    # 4. If none of the above applies, raises {MissingArtifact}.
+    # 3. Environment-variable auto-detect (the default when +woods.json+ is
+    #    absent and no host provider is set). Wires semantic search if
+    #    +OPENAI_API_KEY+ or a reachable Ollama is found; otherwise leaves the
+    #    provider nil so the server boots in pattern/structural-only mode.
+    # 4. +WOODS_REQUIRE_INDEX=1+ overrides (3) to fail closed, raising
+    #    {MissingArtifact} when +woods.json+ is absent.
     #
     # @example Typical Bootstrapper usage
     #   config, source = ConfigResolver.resolve(Woods.configuration, artifact: artifact)
@@ -43,10 +46,11 @@ module Woods
       # When +woods.json+ is absent and the host already has a provider
       # configured, the host config is trusted and used as-is.
       #
-      # When +woods.json+ is absent and the host has no provider configured:
-      # - If +WOODS_ALLOW_AUTODETECT+ is +1+, falls through to env-var
-      #   auto-detect (deprecated, emits a structured warning).
-      # - Otherwise raises {MissingArtifact}.
+      # When +woods.json+ is absent and the host has no provider configured,
+      # auto-detect runs by default: pattern/structural tools always work, and
+      # semantic search wires up only if +OPENAI_API_KEY+ or a reachable Ollama
+      # is found. Set +WOODS_REQUIRE_INDEX=1+ to fail closed and raise
+      # {MissingArtifact} instead.
       #
       # @param config [Woods::Configuration] the live host configuration object.
       #   May be mutated in the auto-detect path.
@@ -61,7 +65,7 @@ module Woods
       #   where +source+ is one of +:snapshot+, +:host_config+, +:autodetect+,
       #   or +:none+. The config is the same object passed in, possibly mutated.
       # @raise [Woods::MCP::MissingArtifact] when +woods.json+ is absent, the
-      #   host has no provider configured, and +WOODS_ALLOW_AUTODETECT+ is unset.
+      #   host has no provider configured, and +WOODS_REQUIRE_INDEX=1+ is set.
       # @raise [Woods::MCP::UnsupportedArtifact] when +woods.json+ has an
       #   unsupported +schema_version+.
       # @raise [Woods::MCP::DimensionMismatch] when stored and live provider
@@ -201,36 +205,53 @@ module Woods
 
       # Handle the no-artifact, no-host-provider case.
       #
-      # Raises {MissingArtifact} unless +WOODS_ALLOW_AUTODETECT=1+ opts in to
-      # the deprecated env-var auto-detect path.
+      # Extract-only hosts — those that ran +woods:extract+ but never
+      # +woods:embed+ and configured no embedding provider — boot in
+      # pattern/structural mode by default. The env-var auto-detect path runs,
+      # wiring semantic search only if +OPENAI_API_KEY+ or a reachable Ollama
+      # instance is found. With neither, +config+ comes back with a nil provider
+      # and {Bootstrapper.build_retriever} returns a nil retriever, leaving the
+      # always-on pattern/regex/structural tools fully functional.
+      #
+      # Set +WOODS_REQUIRE_INDEX=1+ to fail closed instead: demand a real
+      # +woods.json+ and raise {MissingArtifact} when it is absent.
+      # +WOODS_ALLOW_AUTODETECT+ is retained for backward compatibility but no
+      # longer changes behaviour — auto-detect is now the default.
       #
       # @param config [Woods::Configuration]
       # @param artifact [Woods::IndexArtifact, nil]
       # @param env [Hash]
       # @param ollama_probe [#call, nil]
-      # @return [Woods::Configuration]
-      # @raise [Woods::MCP::MissingArtifact]
+      # @return [Array(Woods::Configuration, Symbol)]
+      # @raise [Woods::MCP::MissingArtifact] only when +WOODS_REQUIRE_INDEX=1+.
       def self.resolve_without_artifact(config, artifact:, env:, ollama_probe:)
-        if env['WOODS_ALLOW_AUTODETECT'] != '1'
+        if env['WOODS_REQUIRE_INDEX'] == '1'
           raise MissingArtifact.new(
-            'No woods.json found and WOODS_ALLOW_AUTODETECT is unset. ' \
-            'Run `bundle exec rake woods:extract` in your host app, or set ' \
-            'WOODS_ALLOW_AUTODETECT=1 to probe env vars (deprecated).',
+            'No woods.json found and WOODS_REQUIRE_INDEX=1 demands a real index. ' \
+            'Run `bundle exec rake woods:extract` (then `woods:embed` for semantic ' \
+            'search) in your host app, or unset WOODS_REQUIRE_INDEX to boot in ' \
+            'pattern-only mode.',
             details: { output_dir: artifact&.output_dir&.to_s }
           )
         end
 
-        warn '[woods-mcp] deprecated_autodetect: falling back to env-var auto-detect (no woods.json found)'
-        [autodetect_from_env(config, env: env, ollama_probe: ollama_probe), :autodetect]
+        resolved = autodetect_from_env(config, env: env, ollama_probe: ollama_probe)
+        unless resolved.embedding_provider
+          warn '[woods-mcp] no woods.json and no embedding provider — serving ' \
+               'pattern/structural tools only. Run `rake woods:embed`, or set ' \
+               'OPENAI_API_KEY / run Ollama, to enable semantic search.'
+        end
+        [resolved, :autodetect]
       end
       private_class_method :resolve_without_artifact
 
       # Probe environment variables for provider credentials and configure
       # +config+ accordingly.
       #
-      # Only reachable when +WOODS_ALLOW_AUTODETECT=1+ and no +woods.json+
-      # is present. Mutates +config+ to set provider and stores when a
-      # credential or reachable Ollama instance is found.
+      # Reached by default when no +woods.json+ is present and the host
+      # configured no provider (unless +WOODS_REQUIRE_INDEX=1+). Mutates
+      # +config+ to set provider and stores when a credential or reachable
+      # Ollama instance is found; leaves the provider nil otherwise.
       #
       # @param config [Woods::Configuration]
       # @param env [Hash]

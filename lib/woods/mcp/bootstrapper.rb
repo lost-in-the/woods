@@ -84,9 +84,10 @@ module Woods
       #
       # Flow:
       #   1. Wrap output_dir in an IndexArtifact (owns path semantics).
-      #   2. If woods.json is present, resolve config from it; otherwise
-      #      either raise MissingArtifact or, if WOODS_ALLOW_AUTODETECT=1,
-      #      fall back to env-var auto-detect (deprecated path).
+      #   2. If woods.json is present, resolve config from it; otherwise fall
+      #      back to env-var auto-detect by default (pattern/structural mode when
+      #      nothing is found). Set WOODS_REQUIRE_INDEX=1 to fail closed instead
+      #      (raise MissingArtifact). See #138.
       #   3. Build provider + stores from config (no mutation of
       #      Woods.configuration — the host's initializer stays intact).
       #   4. Hydrate in-memory stores from dumps (stubs in PR 2; real in PR 3).
@@ -103,8 +104,8 @@ module Woods
       #   When nil, uses Woods.configuration.output_dir.
       # @return [Array(Woods::Retriever, Woods::MCP::BootstrapState)]
       # @raise [Woods::MCP::BootstrapError] on config-invalid (missing
-      #   credentials, dimension mismatch, unsupported artifact, missing
-      #   artifact with autodetect off).
+      #   credentials, dimension mismatch, unsupported artifact, or a missing
+      #   artifact under WOODS_REQUIRE_INDEX=1).
       def self.build_retriever(index_dir: nil)
         state = BootstrapState.new
         state.mark(:hydrating)

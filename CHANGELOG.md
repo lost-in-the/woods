@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rails 6.0 support: the `railties` floor is lowered from `>= 6.1` to `>= 6.0`**
+  (#135). Woods runs cleanly on the Rails 6.0 series — extraction and index-MCP
+  serving need no 6.1-only API. The only 6.1-introduced calls touched
+  (`connection_db_config`, `has_many_inversing`) are `respond_to?`-guarded and
+  degrade on 6.0; a regression spec locks that in.
+- **CI now runs a Rails version matrix plus a booted-app extraction test** (#136).
+  `Appraisals` + `gemfiles/rails_*.gemfile` exercise Rails 6.0, 6.1, 7.0, 7.1,
+  7.2, and 8.0; the matrix excludes invalid Ruby×Rails pairs (e.g. Rails 6.0 only
+  on Ruby 3.0) and adds a **Ruby 4.0** lane. A new booted-app test
+  (`spec/integration/booted_extraction_spec.rb`, against the minimal `spec/dummy`
+  app) boots Rails in-process and runs a real end-to-end extraction, asserting a
+  non-zero unit count and the expected models/associations — gating the
+  version-sensitive introspection path the unit suite (which stubs Rails) can't.
+
+### Changed
+
+- **The Index Server now boots in pattern-only mode by default when no embedding
+  index is present** (#138). Since 1.3.0, `woods-mcp` raised `MissingArtifact` at
+  boot unless `woods.json` existed or `WOODS_ALLOW_AUTODETECT=1` was set — which
+  surprised the most common setup: `rake woods:extract` with no embedding
+  provider, where pattern/regex/structural search works perfectly. The server now
+  auto-detects by default: it serves all always-on tools (`lookup`, `search`,
+  `dependencies`, `structure`, `graph_analysis`, `pagerank`, …) with no env var,
+  and `codebase_retrieve` (semantic search) activates automatically once an
+  embedding provider is configured. Set `WOODS_REQUIRE_INDEX=1` to restore
+  fail-closed behavior (raise `MissingArtifact` when `woods.json` is absent).
+  `WOODS_ALLOW_AUTODETECT` is retained as a no-op for backward compatibility.
+
+### Fixed
+
+- **`manifest.json` no longer reports a stale `git_branch`/`git_sha` in a git
+  worktree** (#137). In a linked worktree, `.git` is a file pointing at the real
+  git directory (often an absolute host path). When that directory couldn't be
+  resolved — e.g. inside a container where the host path isn't mounted — git
+  enrichment failed silently and the branch/SHA fell back to a baked
+  `GIT_BRANCH`/`GIT_SHA` build arg, reporting an unrelated branch. A new
+  `Woods::GitProvenance` resolves provenance with worktree-aware plumbing
+  (`git -C <root> rev-parse`), and emits `"unknown"` when a `.git` is present but
+  the ref can't be resolved (the worktree case) rather than a misleading value.
+  The `GIT_BRANCH`/`GIT_SHA` env vars are honored only when there is **no** `.git`
+  at the root at all (a non-repo checkout — e.g. a Docker `COPY` that excludes
+  `.git` — with build args supplying the SHA) or git is unavailable. Temporal
+  snapshots skip an `"unknown"` SHA so it can't key or collide a snapshot.
+
 ## [1.4.1] - 2026-06-10
 
 ### Fixed

@@ -268,7 +268,7 @@ If any gate fails, the corresponding phase is re-opened. **Measurement 2026-04-2
 - New `lib/woods/mcp/bootstrap_state.rb` — value object.
 - `lib/woods/mcp/bootstrapper.rb` — rewritten `build_retriever(config, artifact: IndexArtifact.new(config.output_dir))`. No mutation of `Woods.configuration`. No bare `rescue StandardError`. Four-line narrative body.
 - `exe/woods-mcp` top-level gains one `rescue Woods::MCP::BootstrapError => e` that prints class + message + remediation hint and exits nonzero.
-- **Auto-detect fallback is opt-in, not default.** A warning is not a contract — silent degradation is what we're eliminating. When `woods.json` is absent, `Bootstrapper` raises `Woods::MCP::MissingArtifact` unless `WOODS_ALLOW_AUTODETECT=1` is set. If the env flag is set, the existing env-var auto-detect path runs with a `deprecated_autodetect` structured warning. Hosts that never ran an embed see a clear failure; hosts that want the old behavior opt in explicitly.
+- **Auto-detect fallback was originally opt-in (revised — see below).** The original Phase-2 decision raised `Woods::MCP::MissingArtifact` whenever `woods.json` was absent unless `WOODS_ALLOW_AUTODETECT=1` was set, on the principle that silent degradation is worse than a loud failure. In practice the most common deployment runs `woods:extract` only — no embedding provider — and pattern/regex/structural search works perfectly without `woods.json`. Forcing those hosts to thread an env var to boot was friction, not safety. **As of #138 the default is flipped:** when `woods.json` is absent *and* no embedding provider is configured, the server boots in pattern/structural-only mode via the auto-detect path (semantic search wires up only if `OPENAI_API_KEY` or a reachable Ollama is found). Deployments that genuinely require an index set `WOODS_REQUIRE_INDEX=1` to restore the fail-closed behavior (raises `MissingArtifact`). `WOODS_ALLOW_AUTODETECT` is retained as a no-op for backward compatibility.
 - **No user-visible behavior change for existing deployments** until Phase 3 (Snapshotters are no-ops here).
 
 **Specs:**
@@ -379,7 +379,7 @@ Woods::Error                                 # existing
     Woods::MCP::ConfigMismatch               # stored config contradicts host config
     Woods::MCP::DimensionMismatch            # provider dim ≠ stored vectors dim
     Woods::MCP::UnsupportedArtifact          # artifact schema_version newer than gem, or corrupted
-    Woods::MCP::MissingArtifact              # no woods.json and WOODS_ALLOW_AUTODETECT unset
+    Woods::MCP::MissingArtifact              # no woods.json, raised only under WOODS_REQUIRE_INDEX=1 (#138)
   Woods::MCP::ProviderUnreachable            # recoverable sibling; caught internally for degraded start
 ```
 

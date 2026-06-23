@@ -85,7 +85,10 @@ module Woods
       # @return [Hash] Snapshot record with diff stats
       def capture(manifest, unit_hashes)
         git_sha = mget(manifest, 'git_sha')
-        return nil unless git_sha
+        # Snapshots are keyed by commit SHA — skip a missing or non-SHA value
+        # (e.g. the "unknown" provenance sentinel, #137) so it can't key or
+        # collide a snapshot row. Mirrors JsonSnapshotStore's path validation.
+        return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
         previous = find_latest
         upsert_snapshot(manifest, git_sha, unit_hashes.size)
