@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-23
+
 ### Added
 
 - **Rails 6.0 support: the `railties` floor is lowered from `>= 6.1` to `>= 6.0`**
