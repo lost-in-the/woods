@@ -29,7 +29,10 @@ module Woods
 
       def capture(manifest, unit_hashes)
         git_sha = mget(manifest, 'git_sha')
-        return nil unless git_sha
+        # Snapshots are keyed by commit SHA — skip a missing or non-SHA value
+        # (e.g. the "unknown" provenance sentinel, #137) rather than letting it
+        # reach snapshot_path, which raises ArgumentError on a non-hex SHA.
+        return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
         previous = find_latest
         snapshot = build_snapshot(manifest, git_sha, unit_hashes)

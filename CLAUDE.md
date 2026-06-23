@@ -35,6 +35,7 @@ Extraction, the Console MCP server, and the ERD middleware all require a booted 
 |---|---|---|---|
 | `apps/rails-8.0` | 8.0.x | 3010 | `woods-testbed-rails-8.0` |
 | `apps/rails-7.2` | ~> 7.2.0 | 3011 | `woods-testbed-rails-7.2` |
+| `apps/rails-6.0` | ~> 6.0.0 | 3012 | `woods-testbed-rails-6.0` |
 
 **Typical setup** (sibling-repo layout — the testbed's compose file defaults to `../woods` for the gem mount):
 
@@ -76,12 +77,13 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 **When to use each host:**
 - **`woods-testbed` `rails-8.0`** — default. Day-to-day Rails 8 validation. Fast, small, self-contained.
 - **`woods-testbed` `rails-7.2`** — when a change could plausibly behave differently on Rails 7 (Zeitwerk load paths, callback-chain internals, `eager_load!` error paths).
+- **`woods-testbed` `rails-6.0`** — the supported floor (`railties >= 6.0`, #135). Use when a change touches 6.0/6.1-era APIs (e.g. `connection_db_config`, `has_many_inversing` guards) or to validate the lowest end of the matrix. Boots on Ruby 3.0.
 - **`~/work/test_app`** (local-only host) — when a change needs a committed integration spec, or maps cleanly to `spec/integration/` fixtures. No Docker, runs on Rails 8.1.
 - **A production-shaped MySQL host app** (local-only, see `.claude/rules/integration-testing.md`) — only when a problem demands a large real codebase: namespace collisions, large callback chains, non-standard service directories, many-model PageRank behaviour.
 
 **Gotchas:**
 - `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
-- Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`). Nuke the matching volume if a lockfile change triggers an install loop.
+- Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
 - If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container.
 
 See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
@@ -166,6 +168,7 @@ exe/
 **Two test suites** — the gem has unit specs with mocks, and a separate Rails app has integration specs that run real extractions.
 
 - **Gem unit specs** (`spec/`): RSpec with `rubocop-rspec` enforcement. Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
+- **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained — Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`.
 - **Integration specs** (in a separate Rails app): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Set up a host Rails app per the Getting Started guide, then run `bundle exec rspec spec/integration/`.
 - Every extractor needs tests for: happy path extraction, edge cases (empty files, namespaced classes, STI), concern inlining, dependency detection
 - Test `ExtractedUnit#to_h` serialization round-trips
@@ -235,9 +238,11 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `eager_load!` aborts completely on a single `NameError` (e.g., `app/graphql/` referencing an uninstalled gem). Zeitwerk processes dirs alphabetically, so a failure in `graphql/` prevents `models/` from loading. The gem falls back to per-directory loading via `EXTRACTION_DIRECTORIES` when this happens.
 - `CallbackChain#size` does not exist on any Rails version (7.0–8.1) — `CallbackChain` includes `Enumerable` but never defines `#size`. Use `#count` instead.
 - `git_available?` is memoized — won't detect git becoming available mid-extraction (acceptable tradeoff).
+- Manifest `git_branch`/`git_sha` come from `Woods::GitProvenance` (`lib/woods/git_provenance.rb`), not `run_git` directly — it's worktree-aware (`.git` can be a *file* with a `gitdir:` pointer) and runs `git -C <root>` so it's cwd-independent. When a `.git` is present but git can't resolve the ref (e.g. an unmounted worktree git dir in a container) it returns `"unknown"` rather than a stale `GIT_BRANCH`/`GIT_SHA` env value; the env vars are honored only when there's **no** `.git` at the root (a non-repo checkout — `GitProvenance#git_working_tree?`) or git is unavailable. `capture_snapshot` treats `"unknown"` as no-sha (#137). The per-file `batch_git_data`/`run_git` enrichment path is separate and still cwd-based.
 - Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit. Three passes resolve references: (1) fully-qualified names via the whole-word regex; (2) string literals passed to `.constantize` / `const_get(...)` when the literal matches a known model; (3) bare short names (e.g., `Book` inside `module Library` for a `Library::Book` model) via `ModelNameCache.resolve_short_name` when unambiguous. Ambiguous short names (same inner class across multiple namespaces) are skipped to avoid false positives.
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
+- The Index Server (`woods-mcp`) boots in **pattern-only mode by default** when no `woods.json` is present and no embedding provider is configured (#138) — extract-only hosts get every always-on tool with no env var. `codebase_retrieve` (semantic search) activates only when a provider is configured. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot (raises `MissingArtifact`); `WOODS_ALLOW_AUTODETECT` is now a back-compat no-op. The strict-vs-default decision lives in `ConfigResolver.resolve_without_artifact`.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
 - Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
 - `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."

@@ -51,6 +51,10 @@ woods-mcp-start /path/to/rails-app/tmp/woods
 woods-mcp-http /path/to/rails-app/tmp/woods
 ```
 
+**Extract-only works out of the box.** If you've run `rake woods:extract` but not `rake woods:embed` (no embedding provider configured), the server still boots and serves all pattern/regex/structural tools — `lookup`, `search`, `dependencies`, `structure`, `graph_analysis`, `pagerank`, and the rest. Only `codebase_retrieve` (semantic search) needs embeddings, and it activates automatically once a provider is configured and `woods:embed` has run. No environment variable is required.
+
+To fail closed instead — refuse to boot unless a real index (`woods.json`) is present — set `WOODS_REQUIRE_INDEX=1`. (The legacy `WOODS_ALLOW_AUTODETECT` flag is now a no-op; auto-detect is the default.)
+
 ### Claude Code Configuration
 
 ```json

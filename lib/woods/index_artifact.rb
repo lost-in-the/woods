@@ -57,9 +57,9 @@ module Woods
     # Returns true when the artifact has never been populated — +woods.json+
     # is absent AND the +dumps/latest+ pointer does not exist.
     #
-    # Once either file is present the artifact is considered non-fresh; the
-    # Bootstrapper uses this to decide whether to raise {Woods::MCP::MissingArtifact}
-    # or proceed with loading.
+    # Once either file is present the artifact is considered non-fresh and the
+    # Bootstrapper loads from it. A fresh artifact boots in pattern-only mode by
+    # default, raising {Woods::MCP::MissingArtifact} only under WOODS_REQUIRE_INDEX=1.
     #
     # @return [Boolean]
     def fresh?

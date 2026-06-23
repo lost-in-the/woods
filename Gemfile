@@ -5,7 +5,21 @@ source 'https://rubygems.org'
 # Specify your gem's dependencies in woods.gemspec
 gemspec
 
+# sqlite3 2.0+ requires RubyGems >= 3.3.22, which Ruby 3.0.7 doesn't ship (it's
+# stuck on 3.2.33) — pin to the 1.x line there. WOODS_SQLITE3_REQ lets the
+# old-Rails appraisal gemfiles hold sqlite3 to '~> 1.4' (Rails < 7.1 pins that in
+# its adapter at load time); the unit suite and newer Rails take the latest.
+sqlite3_requirement =
+  if (req = ENV.fetch('WOODS_SQLITE3_REQ', nil)) && !req.empty?
+    [req]
+  elsif Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
+    ['>= 1.4']
+  else
+    ['>= 1.4', '< 2.0']
+  end
+
 group :development, :test do
+  gem 'appraisal', '~> 2.5'
   gem 'benchmark-ips', '~> 2.0'
   # `benchmark` left Ruby's default gems in 4.0; the performance specs (and
   # benchmark-ips) `require 'benchmark'`, so declare it explicitly.
@@ -21,14 +35,7 @@ group :development, :test do
   gem 'rubocop-rails', '~> 2.19'
   gem 'rubocop-rspec', '~> 3.9'
   gem 'simplecov', '~> 0.22', require: false
-  # sqlite3 2.0+ requires RubyGems >= 3.3.22, which Ruby 3.0.7 doesn't ship
-  # (it's stuck on 3.2.33). Pin to the 1.x line on 3.0 so the matrix row
-  # can still resolve; everywhere else we get the latest.
-  if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
-    gem 'sqlite3', '>= 1.4'
-  else
-    gem 'sqlite3', '>= 1.4', '< 2.0'
-  end
+  gem 'sqlite3', *sqlite3_requirement
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'

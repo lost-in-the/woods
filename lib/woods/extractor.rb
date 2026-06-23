@@ -10,6 +10,7 @@ require 'set'
 require_relative 'filename_utils'
 require_relative 'extracted_unit'
 require_relative 'dependency_graph'
+require_relative 'git_provenance'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
 require_relative 'extractors/phlex_extractor'
@@ -745,6 +746,12 @@ module Woods
     end
 
     def write_manifest
+      # Worktree-aware git provenance. In a linked worktree +.git+ is a file
+      # pointing at the real git dir; when that dir is unreachable (e.g. an
+      # unmounted host path inside a container) this resolves to "unknown"
+      # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
+      provenance = GitProvenance.new(root: Rails.root).to_h
+
       manifest = {
         extracted_at: Time.current.iso8601,
         rails_version: Rails.version,
@@ -757,10 +764,9 @@ module Woods
         total_units: @results.values.sum(&:size),
         total_chunks: @results.sum { |_, units| units.sum { |u| u.chunks.size } },
 
-        # Git info — fall back to env vars for Docker/worktree environments
-        # where the git repo may not be directly accessible
-        git_sha: run_git('rev-parse', 'HEAD').presence || ENV['GIT_SHA'].presence,
-        git_branch: run_git('rev-parse', '--abbrev-ref', 'HEAD').presence || ENV['GIT_BRANCH'].presence,
+        # Git provenance (branch/sha), or "unknown" when unresolvable
+        git_sha: provenance[:git_sha],
+        git_branch: provenance[:git_branch],
 
         # For change detection
         gemfile_lock_sha: gemfile_lock_sha,
@@ -787,7 +793,10 @@ module Woods
       return unless manifest_path.exist?
 
       manifest = JSON.parse(File.read(manifest_path))
-      return unless manifest['git_sha']
+      # Snapshots are keyed on the commit SHA — an unresolvable provenance
+      # ("unknown", see GitProvenance/#137) must not key or collide a snapshot.
+      git_sha = manifest['git_sha']
+      return if git_sha.nil? || git_sha == Woods::GitProvenance::UNKNOWN
 
       store = build_snapshot_store
       return unless store

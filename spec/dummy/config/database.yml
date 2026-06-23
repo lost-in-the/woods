@@ -1,0 +1,24 @@
+# Minimal sqlite config for the booted-app extraction test. The database path
+# is supplied by the spec via WOODS_DUMMY_DB (a tmp file) so the same DB is
+# shared across connections; falls back to in-memory.
+#
+# Deliberately flat — no YAML anchors/aliases. Rails < 7.0 loads database.yml
+# without `aliases: true`, which Psych 4+ rejects (Psych::AliasesNotEnabled),
+# so a `<<: *default` merge breaks the Rails 6.0/6.1 booted lanes.
+development:
+  adapter: sqlite3
+  pool: 5
+  timeout: 5000
+  database: <%= ENV.fetch("WOODS_DUMMY_DB", ":memory:") %>
+
+test:
+  adapter: sqlite3
+  pool: 5
+  timeout: 5000
+  database: <%= ENV.fetch("WOODS_DUMMY_DB", ":memory:") %>
+
+production:
+  adapter: sqlite3
+  pool: 5
+  timeout: 5000
+  database: <%= ENV.fetch("WOODS_DUMMY_DB", ":memory:") %>

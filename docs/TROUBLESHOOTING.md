@@ -138,6 +138,16 @@ bundle exec rake woods:extract
 
 ---
 
+### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
+
+**Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct — only the provenance metadata is off.
+
+**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory — often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg). See [#137].
+
+**Fix:** Make the worktree's git directory reachable from the extraction environment — for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly — Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
+
+---
+
 ## MCP Server Problems
 
 ### "No manifest.json" error when starting the Index Server
@@ -166,6 +176,23 @@ ls ./tmp/woods/manifest.json
 ```
 
 If this fails, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
+
+---
+
+### Index Server exits with `MissingArtifact`
+
+**Symptom:** `woods-mcp` exits 2 with `MissingArtifact: No woods.json found ...`.
+
+**Cause:** Strict mode is enabled (`WOODS_REQUIRE_INDEX=1`) but no embedding index has been written. By default the server boots without `woods.json` — it serves pattern/regex/structural tools and skips semantic search. You only see this error when you've explicitly opted into fail-closed behavior.
+
+**Fix:** Either generate the index so semantic search is available:
+
+```bash
+bundle exec rake woods:extract
+bundle exec rake woods:embed          # writes woods.json + vector dumps
+```
+
+…or unset `WOODS_REQUIRE_INDEX` to boot in pattern-only mode. (The older `WOODS_ALLOW_AUTODETECT=1` flag is no longer needed — auto-detect is the default.)
 
 ---
 
