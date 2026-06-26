@@ -575,5 +575,42 @@
     "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md §3.5. Do NOT design a speculative write API before the concrete adapter exists — bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
     "status": "open",
     "depends_on": []
+  },
+  {
+    "id": "B-056",
+    "slug": "obsidian-vault-exporter",
+    "title": "Obsidian vault exporter (human graph-view + agent sidecar)",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "formatting",
+    "files": [
+      "lib/woods/atomic_file.rb",
+      "lib/woods/obsidian/vault_exporter.rb",
+      "lib/woods/obsidian/note_builder.rb",
+      "lib/woods/obsidian/name_mapper.rb",
+      "lib/woods/obsidian/vault_assets.rb",
+      "lib/woods/obsidian/errors.rb",
+      "lib/tasks/woods.rake",
+      "docs/OBSIDIAN_INTEGRATION.md"
+    ],
+    "description": "Export extraction artifacts to a self-contained Obsidian vault (folder of interlinked Markdown notes) so a human can explore the app in Obsidian's graph view + Bases, and an agent can load the whole topology from a _woods/ sidecar in one read. One note per unit; wikilinks encode dependencies; flat YAML frontmatter (nested props are unsupported by Obsidian Properties, so structured edges live in the sidecar + body). Reads the flat extraction output via IndexReader using raw_graph_data (string keys, persisted pagerank); all edges derive from a single in-memory edge_map (graph edges/reverse), per-unit JSON used only for note bodies. Bare-identifier keys throughout (the graph already merges cross-type id collisions upstream). Four passes: link map -> notes -> sidecar/MOC/.obsidian-config/Units.base -> guarded stale-sweep. Sweep and .obsidian writes are both gated behind a .woods-vault ownership sentinel + a 30% purge guard mirroring Unblocked. Zero new Configuration accessors (vault_path/include_source/include_framework/force_purge are constructor kwargs, exposed via WOODS_OBSIDIAN_* env in the rake task). include_framework covers rails_source only (gem_source is unreachable via IndexReader::TYPE_DIRS). Unit specs only, no booted app. Grounded in Steph Ango / kepano vault conventions + official Obsidian docs.",
+    "status": "in_progress",
+    "depends_on": []
+  },
+  {
+    "id": "B-057",
+    "slug": "shared-unit-facts-renderer",
+    "title": "Extract shared UnitFacts; migrate DocumentBuilder + NoteBuilder onto it",
+    "severity": "low",
+    "category": "refactor",
+    "layer": "formatting",
+    "files": [
+      "lib/woods/export/unit_facts.rb",
+      "lib/woods/unblocked/document_builder.rb",
+      "lib/woods/obsidian/note_builder.rb"
+    ],
+    "description": "Woods::Obsidian::NoteBuilder (B-056) and Woods::Unblocked::DocumentBuilder independently walk unit metadata (associations-by-type, blast-radius buckets, entry points, side effects, schema highlights, deps/dependents-by-type). That selection/shaping logic is format-agnostic; only the final string assembly (plain-text + GitHub URIs vs wikilinks + frontmatter) diverges. Extract a Woods::Export::UnitFacts that turns a unit_data hash into a structured intermediate, and make both builders thin formatters over it, so a unit-type metadata change is fixed in one place. PREREQUISITE: Unblocked detects changes by hashing the rendered body (Exporter#fingerprint = SHA256(title + body)), and its specs guard determinism/structure but NOT byte-exact output, so a refactor could pass CI green yet force a one-time mass re-push. Before touching DocumentBuilder, add golden-output regression specs that pin its exact body bytes per unit type. Until this lands, B-056 mitigates drift with a shared metadata-shape fixture asserted by both spec suites.",
+    "status": "open",
+    "depends_on": ["B-056"]
   }
 ]

@@ -448,7 +448,13 @@ rake woods:clean               # Remove index output (alias: woods:clear)
 rake woods:embed               # Embed units for semantic search (alias: woods:nest)
 rake woods:embed_incremental   # Embed changed units only (alias: woods:hone)
 rake woods:notion_sync         # Sync models/columns to Notion (alias: woods:send)
+rake woods:obsidian            # Export to an Obsidian vault — graph view + Bases (alias: woods:vault)
 ```
+
+> **Visualize connections in Obsidian.** `woods:obsidian` renders the codebase as a self-contained
+> [Obsidian](https://obsidian.md) vault: one interlinked note per unit (explore the dependency graph
+> in graph view), a filterable [Bases](https://help.obsidian.md/bases) table, and a `_woods/` machine
+> sidecar so agents can load the whole topology in one read. See [Obsidian Integration](docs/OBSIDIAN_INTEGRATION.md).
 
 ---
 
