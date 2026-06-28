@@ -302,6 +302,11 @@ module Woods
         false
       end
 
+      # Recognizes only a canonical fence: the file must open with exactly "---\n"
+      # and close with exactly "---\n" (what woods emits). Anything looser — a
+      # fence with trailing characters, CRLF, or no close within the cap — reads
+      # as unmanaged. Deliberately conservative: the sweep deletes managed notes,
+      # so when in doubt we must not claim a file as ours.
       def frontmatter_head(abs)
         File.open(abs, 'r:UTF-8') do |file|
           return nil unless file.gets == "---\n"

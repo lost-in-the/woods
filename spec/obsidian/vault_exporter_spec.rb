@@ -248,6 +248,17 @@ RSpec.describe Woods::Obsidian::VaultExporter do
       expect(File).to exist(File.join(@vault, 'models/MyOwnNote.md'))
     end
 
+    it 'never sweeps a file whose frontmatter fence is non-canonical (conservative — only exact ---\\n notes)' do
+      exporter.export_all
+      # Contains the marker but closes with "--- " (trailing space), not "---\n".
+      # A loose matcher would treat this as ours and DELETE it; we must not.
+      foreign = File.join(@vault, 'models/Ambiguous.md')
+      File.write(foreign, "---\nwoods_managed: true\n--- \n# not a woods note\n")
+
+      exporter.export_all
+      expect(File).to exist(foreign)
+    end
+
     it 'refuses a mass purge above 30% unless force_purge is set' do
       exporter.export_all
       10.times { |i| write_managed_note("models/Stale#{i}.md") }
