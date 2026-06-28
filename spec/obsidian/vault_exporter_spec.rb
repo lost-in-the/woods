@@ -130,6 +130,30 @@ RSpec.describe Woods::Obsidian::VaultExporter do
         File.read(f, encoding: 'UTF-8')
       end.join).not_to include('Ghost')
     end
+
+    it 'skips a unit whose file is corrupt (find_unit raises) without aborting the export' do
+      allow(reader).to receive(:find_unit) do |id|
+        raise JSON::ParserError, 'truncated json' if id == 'Account'
+
+        units[id]
+      end
+      stats = exporter.export_all
+      expect(stats[:exported]).to eq(2) # User + UsersController; Account dropped
+      expect(stats[:skipped]).to be >= 1
+      expect(File).not_to exist(File.join(@vault, 'models/Account.md'))
+      expect(read_vault('models/User.md')).not_to include('[[models/Account') # no dangling link
+    end
+
+    it 'dedupes duplicate graph edges so a note renders one bullet per target/via' do
+      graph['edges']['User'] = [
+        { 'target' => 'Account', 'via' => 'belongs_to' },
+        { 'target' => 'Account', 'via' => 'belongs_to' }
+      ]
+      exporter.export_all
+      note = read_vault('models/User.md')
+      expect(note.scan('[[models/Account|Account]] — *belongs_to*').size).to eq(1)
+      expect(frontmatter('models/User.md')['dependency_count']).to eq(1)
+    end
   end
 
   describe 'machine sidecar' do

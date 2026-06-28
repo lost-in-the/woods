@@ -48,8 +48,9 @@ module Woods
       # @param id [String] bare unit identifier (graph node key)
       # @param unit [Hash] parsed unit JSON (used only for body facts)
       # @param depends_on [Array<Hash>] [{ target:, via: }] filtered to the emitted set
-      # @param used_by [Array<String>] dependent ids filtered to the emitted set
-      # @return [String, nil] the note, or nil when an enabled source scrub failed (skip the write)
+      # @param used_by [Array<String>] unique dependent ids filtered to the emitted set
+      # @return [String] the rendered note. A failed source scrub omits the source
+      #   section (the note is still written); build never returns nil.
       def build(id:, unit:, depends_on:, used_by:)
         sections = [
           frontmatter(id, unit, depends_on, used_by),
@@ -150,13 +151,13 @@ module Woods
       def used_by_section(used_by)
         return nil if used_by.empty?
 
-        shown = used_by.uniq.sort.first(USED_BY_DISPLAY_CAP)
-        lines = ["## Used by (#{used_by.uniq.size})"]
+        shown = used_by.sort.first(USED_BY_DISPLAY_CAP)
+        lines = ["## Used by (#{used_by.size})"]
         shown.group_by { |sid| @nodes.dig(sid, 'type') || 'other' }.sort.each do |type, sids|
           links = sids.sort.filter_map { |sid| @mapper.wikilink(sid) }
           lines << "**#{pluralize(type)}:** #{links.join(', ')}" unless links.empty?
         end
-        more = used_by.uniq.size - shown.size
+        more = used_by.size - shown.size
         lines << "*…and #{more} more (see graph)*" if more.positive?
         lines.join("\n")
       end

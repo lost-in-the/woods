@@ -41,6 +41,10 @@ module Woods
       SENTINEL = '.woods-vault'
       SIDECAR_DIR = '_woods'
       FRAMEWORK_TYPES = %w[rails_source gem_source].freeze
+      # Upper bound on frontmatter lines scanned when identifying a managed note
+      # during the sweep — our frontmatter is ~12 lines; this just bounds work on
+      # a malformed file that opens with "---" but never closes the fence.
+      MAX_FRONTMATTER_LINES = 200
 
       # @param index_dir [String] extraction output directory to read
       # @param vault_path [String] directory to write the vault into
@@ -108,10 +112,27 @@ module Woods
           known.include?(id)
         end.sort
 
-        emitted = []
+        # Load each candidate once and keep it: confirms the unit is readable
+        # (a corrupt/missing file is skipped, not fatal) and lets Pass 2 render
+        # from this cache instead of re-reading every file past the reader's
+        # small LRU — avoiding ~2x disk reads + JSON parses on a large vault.
+        # Holding the units for one batch export is an acceptable memory trade.
+        @units = {}
         skipped = 0
-        candidates.each { |id| @reader.find_unit(id) ? (emitted << id) : (skipped += 1) }
-        [emitted, skipped]
+        candidates.each do |id|
+          unit = load_unit(id)
+          unit ? (@units[id] = unit) : (skipped += 1)
+        end
+        [@units.keys, skipped]
+      end
+
+      # Load a unit, treating an unreadable/corrupt file as absent rather than
+      # letting one bad JSON parse abort the whole export.
+      def load_unit(id)
+        @reader.find_unit(id)
+      rescue StandardError => e
+        log "  skipped #{id}: #{e.class}: #{e.message}"
+        nil
       end
 
       def known_ids
@@ -139,7 +160,8 @@ module Woods
         reverse = graph['reverse'] || {}
         emitted.each_with_object({}) do |id, map|
           deps = Array(edges[id]).filter_map { |edge| forward_edge(edge, id, emitted) }
-          used = Array(reverse[id]).select { |sid| sid != id && emitted.include?(sid) }
+                                 .uniq { |edge| [edge[:target], edge[:via]] }
+          used = Array(reverse[id]).select { |sid| sid != id && emitted.include?(sid) }.uniq
           map[id] = { depends_on: deps, used_by: used }
         end
       end
@@ -157,8 +179,8 @@ module Woods
       def write_notes(emitted, mapper, edge_map, builder, written, errors)
         exported = 0
         emitted.each do |id|
-          unit = @reader.find_unit(id)
-          next unless unit # defensive — partition_emitted already confirmed loadable
+          unit = @units[id]
+          next unless unit # defensive — partition_emitted already cached loadable units
 
           edges = edge_map[id] || { depends_on: [], used_by: [] }
           note = builder.build(id: id, unit: unit, depends_on: edges[:depends_on], used_by: edges[:used_by])
@@ -270,17 +292,30 @@ module Woods
         end
       end
 
+      # Only our notes carry this frontmatter flag. Reads just the frontmatter
+      # head (notes can be large when include_source is on) rather than the whole
+      # file, and bails on anything that isn't a leading "---" fence.
       def managed_marker?(abs)
-        content = File.read(abs)
-        return false unless content.start_with?("---\n")
-
-        fm_end = content.index("\n---", 4)
-        return false unless fm_end
-
-        fm = YAML.safe_load(content[0..fm_end])
+        fm = frontmatter_head(abs)
         fm.is_a?(Hash) && fm['woods_managed'] == true
       rescue StandardError
         false
+      end
+
+      def frontmatter_head(abs)
+        File.open(abs, 'r:UTF-8') do |file|
+          return nil unless file.gets == "---\n"
+
+          lines = []
+          MAX_FRONTMATTER_LINES.times do
+            line = file.gets
+            break if line.nil?
+            return YAML.safe_load(lines.join) if line == "---\n"
+
+            lines << line
+          end
+          nil
+        end
       end
 
       def guard_blocks_purge?(stale, managed)
