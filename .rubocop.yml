@@ -28,6 +28,7 @@ Metrics/BlockLength:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
   AllowedMethods:
     - 'refine'
 
@@ -45,6 +46,7 @@ Metrics/ModuleLength:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/ClassLength:
   Exclude:
@@ -61,6 +63,7 @@ Metrics/ClassLength:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/MethodLength:
   Max: 20
@@ -77,6 +80,7 @@ Metrics/MethodLength:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/AbcSize:
   Max: 25
@@ -94,6 +98,7 @@ Metrics/AbcSize:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/CyclomaticComplexity:
   Exclude:
@@ -109,6 +114,7 @@ Metrics/CyclomaticComplexity:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/PerceivedComplexity:
   Exclude:
@@ -124,6 +130,7 @@ Metrics/PerceivedComplexity:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/BlockNesting:
   Exclude:
@@ -139,6 +146,7 @@ Metrics/BlockNesting:
     - 'lib/woods/dependency_graph.rb'
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 Metrics/ParameterLists:
   Exclude:
@@ -156,6 +164,7 @@ Metrics/ParameterLists:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/retriever.rb'
     - 'lib/woods/unblocked/**/*'
+    - 'lib/woods/obsidian/**/*'
 
 # MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars
 Layout/LineLength:
