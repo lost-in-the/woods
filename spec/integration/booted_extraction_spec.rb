@@ -138,4 +138,60 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(manifest).to have_key('git_branch')
     expect(manifest).to have_key('git_sha')
   end
+
+  # End-to-end Obsidian export (B-056) against the *real* extraction output above
+  # — not synthetic fixtures. Confirms the exporter consumes genuine artifacts
+  # (manifest, dependency_graph.json, per-unit JSON) and produces a coherent vault.
+  describe 'Obsidian vault export' do
+    before(:all) do
+      require 'stringio'
+      require 'yaml'
+      require 'woods/obsidian/vault_exporter'
+      @vault_dir = Dir.mktmpdir('woods_obsidian')
+      @export_stats = Woods::Obsidian::VaultExporter.new(
+        index_dir: @output_dir, vault_path: @vault_dir, output: StringIO.new
+      ).export_all
+    end
+
+    after(:all) { FileUtils.rm_rf(@vault_dir) if @vault_dir }
+
+    def vault_read(rel)
+      File.read(File.join(@vault_dir, rel), encoding: 'UTF-8')
+    end
+
+    it 'writes a note per application model with valid flat frontmatter' do
+      expect(@export_stats[:exported]).to be > 0
+      expect(File).to exist(File.join(@vault_dir, 'models/Post.md'))
+      expect(File).to exist(File.join(@vault_dir, 'models/Comment.md'))
+      fm = YAML.safe_load(vault_read('models/Post.md').split("\n---\n").first)
+      expect(fm).to include('id' => 'Post', 'type' => 'model', 'woods_managed' => true)
+    end
+
+    it 'encodes the real Post -> Comment dependency as a resolvable wikilink' do
+      expect(vault_read('models/Post.md')).to include('[[models/Comment|Comment]]')
+    end
+
+    it 'emits no dangling wikilinks across the whole vault' do
+      Dir.glob(File.join(@vault_dir, '**', '*.md')).each do |file|
+        File.read(file, encoding: 'UTF-8').scan(/\[\[([^\]|#^]+)[|\]]/).flatten.uniq.each do |target|
+          expect(File).to(exist(File.join(@vault_dir, "#{target}.md")), "dangling link [[#{target}]] in #{file}")
+        end
+      end
+    end
+
+    it 'writes a machine sidecar with a bijective id<->path manifest and a verbatim graph copy' do
+      manifest = JSON.parse(vault_read('_woods/manifest.json'))
+      expect(manifest['notes']).not_to be_empty
+      manifest['notes'].each { |id, info| expect(manifest['paths'][info['path']]).to eq(id) }
+      expect(File).to exist(File.join(@vault_dir, '_woods/dependency_graph.json'))
+    end
+
+    it 'is idempotent — a second export produces byte-identical notes' do
+      before_bytes = File.binread(File.join(@vault_dir, 'models/Post.md'))
+      Woods::Obsidian::VaultExporter.new(
+        index_dir: @output_dir, vault_path: @vault_dir, output: StringIO.new
+      ).export_all
+      expect(File.binread(File.join(@vault_dir, 'models/Post.md'))).to eq(before_bytes)
+    end
+  end
 end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'woods/export/unit_facts'
+
 module Woods
   module Unblocked
     # Converts extracted unit JSON into condensed Markdown documents
@@ -96,10 +98,10 @@ module Woods
         sections = []
 
         sections << model_header(unit, meta)
-        sections << model_associations(meta)
+        sections << model_associations(unit)
         sections << model_dependents(unit)
         sections << model_entry_points(unit)
-        sections << model_schema_highlights(meta)
+        sections << model_schema_highlights(unit)
         sections << model_side_effects(unit)
 
         sections.compact.join("\n\n")
@@ -116,22 +118,18 @@ module Woods
         parts.join("\n")
       end
 
-      def model_associations(meta)
-        assocs = meta['associations'] || []
-        return nil if assocs.empty?
+      def model_associations(unit)
+        facts = Woods::Export::UnitFacts.new(unit)
+        by_type = facts.associations_by_type
+        return nil if by_type.empty?
 
-        grouped = assocs.group_by { |a| a['type'] }
-        lines = ["## Associations (#{assocs.size})"]
+        lines = ["## Associations (#{facts.association_count})"]
 
         %w[belongs_to has_many has_one has_and_belongs_to_many].each do |type|
-          items = grouped[type]
+          items = by_type[type]
           next unless items&.any?
 
-          targets = items.map do |a|
-            name = a['target'] || a['name']
-            dep = a.dig('options', 'dependent')
-            dep ? "#{name} (#{dep})" : name
-          end
+          targets = items.map { |a| a[:dependent] ? "#{a[:target]} (#{a[:dependent]})" : a[:target] }
           # Sorted so the body is a function of association content, not order
           # (the exporter hashes this body to detect changes).
           lines << "**#{type}:** #{targets.sort.join(', ')}"
@@ -176,25 +174,21 @@ module Woods
         lines.join("\n")
       end
 
-      def model_schema_highlights(meta)
+      def model_schema_highlights(unit)
+        highlights = Woods::Export::UnitFacts.new(unit).schema_highlights
         parts = []
 
-        enums = meta['enums']
-        if enums.is_a?(Hash) && enums.any?
-          enum_strs = enums.sort_by { |name, _| name.to_s }
-                           .map { |name, values| "#{name} (#{format_enum_values(values)})" }
+        if highlights[:enums].any?
+          enum_strs = highlights[:enums].sort_by { |name, _| name.to_s }
+                                        .map { |name, values| "#{name} (#{format_enum_values(values)})" }
           parts << "**Enums:** #{enum_strs.join('; ')}"
         end
 
-        scopes = meta['scopes']
-        parts << "**Scopes:** #{scopes.map { |s| s['name'] }.sort.join(', ')}" if scopes.is_a?(Array) && scopes.any?
+        parts << "**Scopes:** #{highlights[:scopes].sort.join(', ')}" if highlights[:scopes].any?
+        parts << "**Concerns:** #{highlights[:concerns].sort.join(', ')}" if highlights[:concerns].any?
 
-        concerns = meta['inlined_concerns']
-        parts << "**Concerns:** #{concerns.sort.join(', ')}" if concerns.is_a?(Array) && concerns.any?
-
-        callbacks = meta['callbacks']
-        if callbacks.is_a?(Array) && callbacks.any?
-          parts << "**Callbacks (#{callbacks.size}):** #{format_callbacks(callbacks)}"
+        if highlights[:callbacks].any?
+          parts << "**Callbacks (#{highlights[:callbacks].size}):** #{format_callbacks(highlights[:callbacks])}"
         end
 
         return nil if parts.empty?
@@ -333,7 +327,7 @@ module Woods
       def format_callbacks(callbacks)
         # Sort before truncating so both the selection and order are stable
         # regardless of input order (the body is hashed for change detection).
-        callbacks.map { |cb| "#{cb['type']}: #{cb['filter']}" }.sort.first(5).join(', ')
+        callbacks.map { |cb| "#{cb[:type]}: #{cb[:filter]}" }.sort.first(5).join(', ')
       end
     end
   end

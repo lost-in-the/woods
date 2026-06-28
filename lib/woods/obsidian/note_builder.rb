@@ -2,6 +2,7 @@
 
 require 'set'
 require 'yaml'
+require 'woods/export/unit_facts'
 
 module Woods
   module Obsidian
@@ -58,6 +59,7 @@ module Woods
           depends_section(depends_on),
           used_by_section(used_by),
           associations_section(unit),
+          schema_section(unit),
           source_section(unit)
         ].compact
 
@@ -162,28 +164,46 @@ module Woods
       def associations_section(unit)
         return nil unless unit['type'] == 'model'
 
-        assocs = unit.dig('metadata', 'associations') || []
-        return nil if assocs.empty?
+        by_type = Woods::Export::UnitFacts.new(unit).associations_by_type
+        return nil if by_type.empty?
 
-        grouped = assocs.group_by { |a| a['type'] }
         lines = ['## Associations']
         ASSOCIATION_ORDER.each do |macro|
-          rendered = render_associations(grouped[macro])
+          rendered = render_associations(by_type[macro])
           lines << "**#{macro}:** #{rendered.join(', ')}" unless rendered.empty?
         end
         lines.size > 1 ? lines.join("\n") : nil
       end
 
+      # +items+ are UnitFacts association entries: { target:, dependent: }.
       def render_associations(items)
         return [] unless items
 
         items.filter_map do |assoc|
-          link = @mapper.wikilink(assoc['target'] || assoc['name'])
+          link = @mapper.wikilink(assoc[:target])
           next unless link
 
-          dependent = assoc.dig('options', 'dependent')
-          dependent ? "#{link} (dependent: #{dependent})" : link
+          assoc[:dependent] ? "#{link} (dependent: #{assoc[:dependent]})" : link
         end.sort
+      end
+
+      # Human-readable schema highlights (model only) — enums, scopes, concerns,
+      # callbacks — formatted from the shared UnitFacts.
+      def schema_section(unit)
+        return nil unless unit['type'] == 'model'
+
+        highlights = Woods::Export::UnitFacts.new(unit).schema_highlights
+        parts = []
+        parts << "**Enums:** #{highlights[:enums].keys.sort.join(', ')}" if highlights[:enums].any?
+        parts << "**Scopes:** #{highlights[:scopes].sort.join(', ')}" if highlights[:scopes].any?
+        parts << "**Concerns:** #{highlights[:concerns].sort.join(', ')}" if highlights[:concerns].any?
+        parts << "**Callbacks:** #{format_callbacks(highlights[:callbacks])}" if highlights[:callbacks].any?
+
+        parts.empty? ? nil : (['## Schema'] + parts).join("\n")
+      end
+
+      def format_callbacks(callbacks)
+        callbacks.map { |cb| [cb[:type], cb[:filter]].compact.join(' ') }.sort.join(', ')
       end
 
       # Renders the source block when enabled. If the credential scrub fails it

@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'yaml'
 require 'woods/obsidian/name_mapper'
 require 'woods/obsidian/note_builder'
+require_relative '../fixtures/unblocked/golden_units'
 
 RSpec.describe Woods::Obsidian::NoteBuilder do
   let(:nodes) do
@@ -133,6 +134,18 @@ RSpec.describe Woods::Obsidian::NoteBuilder do
       expect(note).to include('(dependent: destroy)')
     end
 
+    it 'renders a schema section for a model with enums/scopes/concerns/callbacks (via UnitFacts)' do
+      unit = user_unit.merge('metadata' => user_unit['metadata'].merge(
+        'enums' => { 'status' => %w[a b] },
+        'scopes' => [{ 'name' => 'recent' }],
+        'inlined_concerns' => %w[Auditable],
+        'callbacks' => [{ 'type' => 'before_save', 'filter' => 'normalize' }]
+      ))
+      note = builder.build(id: 'User', unit: unit, depends_on: [], used_by: [])
+      expect(note).to include('## Schema', '**Enums:** status', '**Scopes:** recent',
+                              '**Concerns:** Auditable', '**Callbacks:** before_save normalize')
+    end
+
     it 'does not emit a dangling wikilink for an unknown dependency target' do
       note = build_user(depends_on: [{ target: 'NotExported', via: 'code_reference' }])
       expect(note).not_to include('NotExported')
@@ -181,6 +194,26 @@ RSpec.describe Woods::Obsidian::NoteBuilder do
     it 'produces identical output across builds' do
       args = { depends_on: [{ target: 'Account', via: 'belongs_to' }], used_by: %w[UsersController SyncJob] }
       expect(build_user(**args)).to eq(build_user(**args))
+    end
+  end
+
+  # Cross-checks the SAME fixture the Unblocked golden suite uses (GoldenUnits),
+  # so a change to a unit type's metadata shape breaks both spec suites — the
+  # drift guard for the shared UnitFacts layer (B-057).
+  describe 'shared metadata-shape fixture' do
+    let(:fixture_mapper) do
+      Woods::Obsidian::NameMapper.new(%w[Order User LineItem Payment Invoice].to_h { |t| [t, 'models'] })
+    end
+
+    it 'renders the shared model fixture associations + schema through UnitFacts' do
+      note = described_class.new(name_mapper: fixture_mapper, nodes: {})
+                            .build(id: 'Order', unit: GoldenUnits.model, depends_on: [], used_by: [])
+      expect(note).to include(
+        '## Associations',
+        '[[models/User|User]]',
+        '[[models/LineItem|LineItem]] (dependent: destroy)',
+        '## Schema', '**Enums:** status', '**Concerns:** Auditable, Timestamps'
+      )
     end
   end
 end
