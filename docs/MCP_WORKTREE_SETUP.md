@@ -2,6 +2,8 @@
 
 When you work in a git worktree — a separate directory checked out from the same repository — your MCP tools may not be available to subagents running in that directory. This page explains why, how to fix it, and how to confirm the registration took effect.
 
+> **Tired of re-enabling the woods servers after every worktree switch?** That's a registration-*scope* problem, not a per-worktree-file problem. See [MCP_REGISTRATION.md](MCP_REGISTRATION.md) for the project-scope / plugin-manifest fix (servers ride into every worktree, zero re-enable), plus a concise multi-app naming convention and a tool-surface token audit.
+
 ## Why Worktree Subagents May Not See Woods Tools
 
 MCP server registration in Claude Code is controlled by `.mcp.json` files. Claude Code discovers these files by walking up the directory tree from the working directory. It stops at the first `.mcp.json` it finds (or at `~/.claude/settings.json` for global registrations).
