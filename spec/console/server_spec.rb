@@ -33,15 +33,19 @@ RSpec.describe Woods::Console::Server do
   end
 
   describe 'tool registration' do
-    it 'registers all tools on the server' do
+    # By default all four tiers register, but console_eval is gated behind the
+    # unsafe-eval opt-in (off by default), so a default build advertises every
+    # tool EXCEPT console_eval. See server_tier_gating_spec for the gating.
+    it 'registers every tool except the opt-in console_eval' do
       server = described_class.build(config: config)
       tools = server.instance_variable_get(:@tools)
 
       expected_count = described_class::TIER1_TOOLS.size +
                        described_class::TIER2_TOOLS.size +
                        described_class::TIER3_TOOLS.size +
-                       described_class::TIER4_TOOLS.size
+                       described_class::TIER4_TOOLS.size - 1 # console_eval gated off
       expect(tools.size).to eq(expected_count)
+      expect(tools).not_to have_key('console_eval')
     end
 
     it 'registers all Tier 1 tool names' do
@@ -71,13 +75,12 @@ RSpec.describe Woods::Console::Server do
       end
     end
 
-    it 'registers all Tier 4 tool names' do
+    it 'registers the non-eval Tier 4 tool names (console_sql, console_query)' do
       server = described_class.build(config: config)
       tools = server.instance_variable_get(:@tools)
 
-      described_class::TIER4_TOOLS.each do |tool|
-        expect(tools).to have_key("console_#{tool}")
-      end
+      expect(tools).to have_key('console_sql')
+      expect(tools).to have_key('console_query')
     end
   end
 

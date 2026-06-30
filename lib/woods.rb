@@ -139,7 +139,19 @@ module Woods
                   :cache_store, :cache_options,
                   :dump_retention_count
     attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
-                :cache_enabled
+                :cache_enabled, :console_enabled_tiers
+
+    # Console toolset selector. Maps human-friendly toolset names to the
+    # numeric tier they enable, so hosts can write
+    # `console_enabled_tiers = %w[read analytics]` instead of `[1, 3]`.
+    # See docs/MCP_REGISTRATION.md (console tier gating) and CONSOLE_MCP_SETUP.md.
+    CONSOLE_TIER_NAMES = {
+      'read' => 1, 'read_only' => 1, 'readonly' => 1, 'tier1' => 1,
+      'domain' => 2, 'domain_aware' => 2, 'tier2' => 2,
+      'analytics' => 3, 'tier3' => 3,
+      'guarded' => 4, 'tier4' => 4
+    }.freeze
+    CONSOLE_TIERS = [1, 2, 3, 4].freeze
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -181,6 +193,12 @@ module Woods
       @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true
+      # Which console tool tiers to register (1 read-only / 2 domain / 3
+      # analytics / 4 guarded). Defaults to all four for backward
+      # compatibility; restrict via config or WOODS_CONSOLE_TIERS to trim the
+      # advertised tool catalog (e.g. `1` for read-only sessions). See
+      # docs/MCP_REGISTRATION.md.
+      @console_enabled_tiers = console_tiers_from_env || CONSOLE_TIERS.dup
       @console_credential_rotation_warning = true
       @console_unsafe_eval_enabled = nil # nil = fall back to env WOODS_CONSOLE_UNSAFE_EVAL
       # Required collaborators when the opt-in is on. Both default to nil;
@@ -270,6 +288,22 @@ module Woods
       @cache_enabled = value
     end
 
+    # Select which console tool tiers register. Accepts tier numbers (1-4),
+    # toolset names (see {CONSOLE_TIER_NAMES}: "read", "domain", "analytics",
+    # "guarded"), comma-joined strings, or "all". Normalizes to a sorted,
+    # de-duplicated Array of Integers.
+    #
+    # @param value [Integer, String, Symbol, Array] Tiers/toolsets to enable
+    # @raise [ConfigurationError] if the selection is empty or names an unknown tier
+    #
+    # @example read-only sessions only
+    #   Woods.configure { |c| c.console_enabled_tiers = [1] }
+    # @example by name
+    #   Woods.configure { |c| c.console_enabled_tiers = %w[read analytics] }
+    def console_enabled_tiers=(value)
+      @console_enabled_tiers = normalize_console_tiers!(value)
+    end
+
     # Add a gem to be indexed
     #
     # @param gem_name [String] Name of the gem
@@ -285,6 +319,44 @@ module Woods
       return if value.is_a?(TrueClass) || value.is_a?(FalseClass)
 
       raise ConfigurationError, "#{name} must be true or false, got #{value.inspect}"
+    end
+
+    # Parse WOODS_CONSOLE_TIERS (e.g. "1", "1,2", "read,analytics", "all").
+    # Returns nil when unset/blank so the default (all tiers) applies.
+    def console_tiers_from_env
+      raw = ENV.fetch('WOODS_CONSOLE_TIERS', nil)
+      return nil if raw.nil? || raw.strip.empty?
+
+      normalize_console_tiers!(raw)
+    end
+
+    # Coerce an arbitrary tier selection into a sorted, unique Array<Integer>.
+    def normalize_console_tiers!(value)
+      tokens = Array(value).flat_map { |v| v.is_a?(String) ? v.split(',') : v }
+      tiers = tokens.flat_map { |t| coerce_console_tier(t) }.uniq.sort
+      raise ConfigurationError, 'console_enabled_tiers must select at least one tier (1-4)' if tiers.empty?
+
+      tiers
+    end
+
+    # Map a single tier token (Integer, "all", a name, or "1".."4") to tiers.
+    def coerce_console_tier(token)
+      return validate_console_tier_int!(token) if token.is_a?(Integer)
+
+      key = token.to_s.strip.downcase
+      return [] if key.empty?
+      return CONSOLE_TIERS.dup if key == 'all'
+      return [CONSOLE_TIER_NAMES[key]] if CONSOLE_TIER_NAMES.key?(key)
+      return [key.to_i] if key.match?(/\A[1-4]\z/)
+
+      raise ConfigurationError,
+            "unknown console tier #{token.inspect} (use 1-4, a toolset name, or 'all')"
+    end
+
+    def validate_console_tier_int!(int)
+      return [int] if CONSOLE_TIERS.include?(int)
+
+      raise ConfigurationError, "console tier must be 1-4, got #{int.inspect}"
     end
   end
 

@@ -9,7 +9,7 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
   let(:config) { { 'mode' => 'direct', 'command' => 'echo test' } }
 
   describe 'tool registration across all tiers' do
-    it 'registers exactly the expected number of tools' do
+    it 'registers exactly the expected number of tools (all tiers minus the gated console_eval)' do
       server = Woods::Console::Server.build(config: config)
       tools = server.instance_variable_get(:@tools)
 
@@ -18,7 +18,9 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       tier3 = Woods::Console::Server::TIER3_TOOLS.size
       tier4 = Woods::Console::Server::TIER4_TOOLS.size
 
-      expect(tools.size).to eq(tier1 + tier2 + tier3 + tier4)
+      # console_eval registers only under the unsafe-eval opt-in (off here).
+      expect(tools.size).to eq(tier1 + tier2 + tier3 + tier4 - 1)
+      expect(tools).not_to have_key('console_eval')
     end
 
     it 'prefixes all tool names with console_' do
@@ -30,7 +32,7 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       end
     end
 
-    it 'registers tools from all four tiers' do
+    it 'registers tools from all four tiers (console_eval excepted — opt-in gated)' do
       server = Woods::Console::Server.build(config: config)
       tools = server.instance_variable_get(:@tools)
 
@@ -39,7 +41,7 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
         Woods::Console::Server::TIER2_TOOLS +
         Woods::Console::Server::TIER3_TOOLS +
         Woods::Console::Server::TIER4_TOOLS
-      ).map { |t| "console_#{t}" }
+      ).map { |t| "console_#{t}" } - ['console_eval']
 
       all_expected.each do |name|
         expect(tools).to have_key(name), "Expected tool '#{name}' to be registered"

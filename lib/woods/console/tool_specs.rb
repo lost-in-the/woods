@@ -16,6 +16,11 @@ module Woods
                        job_schedule redis_info cache_stats channel_status].freeze
       TIER4_TOOLS = %w[eval sql query].freeze
 
+      # Shared one-line help for `scope:` predicate filters, referenced by the
+      # Tier-1 read tools instead of repeating the suffix list verbatim in each
+      # description (saves catalog tokens; keeps the wording in one place).
+      SCOPE_PREDICATE_HELP = 'predicate suffixes: _eq _gt _lt _in _null _present'
+
       # Value object that holds a single MCP tool's declarative specification.
       #
       # @!attribute [r] name
@@ -56,10 +61,8 @@ module Woods
           description: 'Count records matching scope conditions.',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            scope: { type: 'object', description: 'Filter: {status: "paid", total_refund_gt: 0, ' \
-                                                  'transaction_id_not_null: true}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' }
+            scope: { type: 'object',
+                     description: "WHERE filter, e.g. {status: \"paid\", total_gt: 0} (#{SCOPE_PREDICATE_HELP})" }
           },
           required: ['model'],
           tier: 1,
@@ -72,9 +75,8 @@ module Woods
             model: { type: 'string', description: 'Model name' },
             limit: { type: 'integer', description: 'Max records (default 5, max 25)' },
             columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' },
-            scope: { type: 'object', description: 'Filter: {status: "paid", amount_gt: 100}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' }
+            scope: { type: 'object',
+                     description: "WHERE filter, e.g. {status: \"paid\", amount_gt: 100} (#{SCOPE_PREDICATE_HELP})" }
           },
           required: ['model'],
           tier: 1,
@@ -107,9 +109,8 @@ module Woods
           properties: {
             model: { type: 'string', description: 'Model name' },
             columns: { type: 'array', items: { type: 'string' }, description: 'Column names to pluck' },
-            scope: { type: 'object', description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' },
+            scope: { type: 'object',
+                     description: "WHERE filter, e.g. {status_in: [\"paid\",\"refunded\"]} (#{SCOPE_PREDICATE_HELP})" },
             limit: { type: 'integer', description: 'Max records (default 100, max 1000)' },
             distinct: { type: 'boolean', description: 'Return unique values only' }
           },
@@ -132,8 +133,8 @@ module Woods
             model: { type: 'string', description: 'Model name' },
             function: { type: 'string', description: 'Aggregate function: sum, average, minimum, maximum, count' },
             column: { type: 'string', description: 'Column to aggregate (optional for count)' },
-            scope: { type: 'object', description: 'Filter conditions: {col: val} or predicate suffixes ' \
-                                                  '(_gt, _lt, _in, _null, etc.)' }
+            scope: { type: 'object',
+                     description: "WHERE filter, e.g. {status: \"paid\", total_gt: 0} (#{SCOPE_PREDICATE_HELP})" }
           },
           required: %w[model function],
           tier: 1,
@@ -150,9 +151,8 @@ module Woods
             model: { type: 'string', description: 'Model name' },
             id: { type: 'integer', description: 'Record primary key' },
             association: { type: 'string', description: 'Association name' },
-            scope: { type: 'object', description: 'Filter on association: {status: "paid", amount_gt: 0}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' }
+            scope: { type: 'object',
+                     description: "WHERE filter on the association, e.g. {status: \"paid\"} (#{SCOPE_PREDICATE_HELP})" }
           },
           required: %w[model id association],
           tier: 1,
@@ -183,9 +183,8 @@ module Woods
             order_by: { type: 'string', description: 'Column to sort by (default: created_at)' },
             direction: { type: 'string', description: 'Sort direction: asc or desc (default: desc)' },
             limit: { type: 'integer', description: 'Max records (default 10, max 50)' },
-            scope: { type: 'object', description: 'Filter: {status: "paid", total_gt: 0}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' },
+            scope: { type: 'object',
+                     description: "WHERE filter, e.g. {status: \"paid\", total_gt: 0} (#{SCOPE_PREDICATE_HELP})" },
             columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' }
           },
           required: ['model'],

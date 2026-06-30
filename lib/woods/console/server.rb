@@ -274,9 +274,34 @@ module Woods
         # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
         # @return [void]
         def register_tier_tools(server, conn_mgr, ctx, tier:, renderer: nil)
-          TOOL_SPECS.select { |spec| spec.tier == tier }.each do |spec|
+          TOOL_SPECS.select { |spec| spec.tier == tier && registerable?(spec) }.each do |spec|
             register(spec, server, conn_mgr, ctx, renderer: renderer)
           end
+        end
+
+        # Whether a tool spec should be advertised at all. `console_eval` is a
+        # guaranteed refusal unless the unsafe-eval opt-in is on, so registering
+        # it otherwise only adds catalog noise (mirrors the index server, which
+        # skips registration of unwired tools). All other specs always register
+        # within an enabled tier.
+        #
+        # @param spec [ToolSpec]
+        # @return [Boolean]
+        def registerable?(spec)
+          return unsafe_eval_enabled? if spec.name == 'console_eval'
+
+          true
+        end
+
+        # Console tiers to register, from Woods.configuration.console_enabled_tiers
+        # (default: all four). Falls back to all tiers when Woods is not
+        # configured (e.g. some specs build a server without `Woods.configure`).
+        #
+        # @return [Array<Integer>]
+        def enabled_tiers
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          tiers = config&.console_enabled_tiers
+          tiers.nil? || tiers.empty? ? [1, 2, 3, 4] : tiers
         end
 
         # Register Tier 1 read-only tools on the server.
@@ -477,10 +502,11 @@ module Woods
 
           renderer = build_console_renderer
 
-          register_tier1_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier2_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier3_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier4_tools(server, conn_mgr, ctx, renderer: renderer)
+          # Only register the configured tiers (default: all). `registerable?`
+          # additionally gates console_eval behind the unsafe-eval opt-in.
+          enabled_tiers.each do |tier|
+            register_tier_tools(server, conn_mgr, ctx, tier: tier, renderer: renderer)
+          end
           server
         end
 

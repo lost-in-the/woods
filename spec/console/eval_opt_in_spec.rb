@@ -56,10 +56,12 @@ RSpec.describe 'console_eval opt-in safety contract' do
   end
 
   describe 'console_eval tool description' do
-    let(:server) do
-      Woods::Console::Server.build_embedded(model_validator: validator, safe_context: safe_context)
+    # console_eval is gated out of the registered catalog when the unsafe-eval
+    # opt-in is off (the default), so assert against the spec table directly —
+    # the description text is what we care about, independent of registration.
+    let(:description) do
+      Woods::Console::Server::TOOL_SPECS.find { |s| s.name == 'console_eval' }.description
     end
-    let(:description) { server.instance_variable_get(:@tools)['console_eval'].description }
 
     it 'states the tool is currently disabled' do
       expect(description).to match(/disabled|refusal/i)

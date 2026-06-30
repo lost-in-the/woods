@@ -31,7 +31,7 @@ RSpec.describe 'Woods::Console::Server.build_embedded' do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers all 31 tools (same as bridge-based build)' do
+    it 'registers every tool except the opt-in console_eval (same set as bridge build)' do
       server = Woods::Console::Server.build_embedded(
         model_validator: validator,
         safe_context: safe_context
@@ -41,8 +41,9 @@ RSpec.describe 'Woods::Console::Server.build_embedded' do
       expected_count = Woods::Console::Server::TIER1_TOOLS.size +
                        Woods::Console::Server::TIER2_TOOLS.size +
                        Woods::Console::Server::TIER3_TOOLS.size +
-                       Woods::Console::Server::TIER4_TOOLS.size
+                       Woods::Console::Server::TIER4_TOOLS.size - 1 # console_eval gated off
       expect(tools.size).to eq(expected_count)
+      expect(tools).not_to have_key('console_eval')
     end
 
     it 'registers all Tier 1 tool names' do
