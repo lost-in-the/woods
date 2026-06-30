@@ -115,11 +115,12 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 | `structure` | Get codebase structure: manifest summary or full unit breakdown by type. |
 | `recent_changes` | List recently modified units sorted by git timestamp. |
 
-#### Graph Analysis (3)
+#### Graph Analysis (4)
 
 | Tool | Description |
 |------|-------------|
 | `graph_analysis` | Structural analysis: orphans, dead ends, hubs, cycles, bridges. |
+| `domain_clusters` | Group units into semantic domains by namespace + graph connectivity; returns hubs, entry points, boundary edges. |
 | `pagerank` | PageRank importance scores — higher means more structurally central. |
 | `framework` | Search Rails/gem framework source by concept keyword (e.g., "has_many", "before_action"). |
 
@@ -170,11 +171,12 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 |------|-------------|
 | `notion_sync` | Sync models and columns to a Notion database. Requires `notion_api_token` and `notion_database_ids` configuration. |
 
-#### Utility (1)
+#### Utility (2)
 
 | Tool | Description |
 |------|-------------|
 | `reload` | Reload extraction data from disk without restarting the server. |
+| `woods_status` | Diagnose index/server health: extraction metadata plus the hydrated/degraded/failed lifecycle and why semantic search is on or off. |
 
 ### Resources
 
