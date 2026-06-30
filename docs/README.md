@@ -20,7 +20,8 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide — vector stores, embedding providers, metadata stores, cost modeling |
 | [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | Design and usage for the HTTP/Rack MCP transport (`exe/woods-mcp-http`) |
 | [MCP_WORKTREE_SETUP.md](MCP_WORKTREE_SETUP.md) | MCP registration in git worktrees — why tools may be missing for subagents, how to fix it |
-| [MCP_REGISTRATION.md](MCP_REGISTRATION.md) | Registration scope (no re-enable after worktree switch), multi-app naming convention, and a tool-surface token audit |
+| [MCP_REGISTRATION.md](MCP_REGISTRATION.md) | Configure MCP optimally — worktree-safe registration, multi-app naming convention, and console tool-catalog gating to cut token cost |
+| [MCP_FEATURE_STATUS.md](MCP_FEATURE_STATUS.md) | What MCP/console features and config knobs exist, what's on by default, and how to check what's active in your app |
 | [FAQ.md](FAQ.md) | Frequently asked questions — general, setup, extraction, MCP servers, Docker, storage |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause → fix for extraction, MCP, embedding, storage, Docker, and Notion problems |
 | [WHY_WOODS.md](WHY_WOODS.md) | What Woods is, why it exists, before/after examples |

@@ -303,6 +303,8 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 See [MCP Servers](docs/MCP_SERVERS.md) for the full tool catalog and [MCP Tool Cookbook](docs/MCP_TOOL_COOKBOOK.md) for scenario-based examples.
 
+> **Optimizing a real setup?** [MCP Registration](docs/MCP_REGISTRATION.md) covers worktree-safe registration (servers survive worktree switches with zero re-enable), a multi-app naming convention, and console tier gating (`console_enabled_tiers`) to cut tool-catalog token cost. [MCP Feature Status](docs/MCP_FEATURE_STATUS.md) lists what's implemented, what's on by default, and how to check what's active in your app.
+
 ---
 
 ## What Gets Extracted

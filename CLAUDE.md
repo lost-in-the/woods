@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; console server — up to 31 tools across 4 tiers, gated by `console_enabled_tiers`, default 30 since `console_eval` is opt-in), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
 
 ## Commands
 
@@ -205,6 +205,7 @@ See `docs/README.md` for the documentation index and roadmap.
 Key references:
 - Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
 - Coverage gaps + future extractor work → `docs/COVERAGE_GAP_ANALYSIS.md`
+- MCP setup/optimization (registration scope, naming, console tier gating) → `docs/MCP_REGISTRATION.md`; what's implemented + how to check → `docs/MCP_FEATURE_STATUS.md`. Agent playbook: `.claude/skills/mcp-optimize/SKILL.md`.
 - Historical design documents (from the build phase) → `_project-resources/docs/`
 
 ## Backlog Workflow
@@ -248,6 +249,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
 - The Index Server (`woods-mcp`) boots in **pattern-only mode by default** when no `woods.json` is present and no embedding provider is configured (#138) — extract-only hosts get every always-on tool with no env var. `codebase_retrieve` (semantic search) activates only when a provider is configured. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot (raises `MissingArtifact`); `WOODS_ALLOW_AUTODETECT` is now a back-compat no-op. The strict-vs-default decision lives in `ConfigResolver.resolve_without_artifact`.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
+- Console tool registration is gated to limit catalog/token cost. `Server.build`/`build_embedded` register only the tiers in `Woods.configuration.console_enabled_tiers` (default `[1,2,3,4]`; settable via config or `WOODS_CONSOLE_TIERS`, accepts numbers/names/`all`). `console_eval` is additionally gated by `registerable?` — it registers only when `unsafe_eval_enabled?` is true, so a default console exposes 30 tools, not 31. Gating happens at boot only (no runtime `tools/list_changed`). When changing the tool count, update `spec/console/server_spec.rb`, `server_embedded_spec.rb`, `spec/integration/console_server_spec.rb`, and `docs/MCP_FEATURE_STATUS.md`.
 - Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
 - `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."
 - `EmbeddedExecutor` blocks sql/query tools by default. Set `read_tools_enabled: true` (via `embedded_read_tools:` on `RackMiddleware` or `Server.build_embedded`) to enable them. Even when enabled, SqlValidator + SafeContext rollback provide defense-in-depth.

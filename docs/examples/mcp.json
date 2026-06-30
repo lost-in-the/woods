@@ -1,6 +1,6 @@
 {
   "//": "Woods multi-app MCP registration template. See docs/MCP_REGISTRATION.md.",
-  "//naming": "Server key = <app>-<surface>. surface: 'woods' = static read-only index, 'live' = live Rails console. No '-mcp' suffix (everything here is an MCP server). Don't put 'console' in the key — console tools already carry the console_ prefix.",
+  "//naming": "Server key = <app>-<surface>. surface: 'woods' = static read-only index, 'live' = live Rails console. No '-mcp' suffix (everything here is an MCP server). Don't put 'console' in the key; console tools already carry the console_ prefix.",
   "mcpServers": {
     "app-one-woods": {
       "command": "woods-mcp-start",

@@ -297,7 +297,19 @@ CODEBASE_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
 
 ## Tool Support by Mode
 
-All 31 tools are registered and visible in the MCP server regardless of transport. However, **Tier 2–4 tools return an "unsupported in embedded mode" error** when called via Options A–C (embedded executor). Only the bridge architecture (Option D) supports those tiers.
+By default the console registers every tool except `console_eval` (30 tools);
+which tiers register is controlled by **`console_enabled_tiers`** (config) or
+**`WOODS_CONSOLE_TIERS`** (env). Of the registered tools, **Tier 2–4 return an
+"unsupported in embedded mode" error** when called via Options A–C (embedded
+executor); only the bridge architecture (Option D) executes those tiers.
+
+> **Trim the catalog.** If a deployment only runs embedded (Options A–C), the
+> Tier 2–4 tools are visible but non-functional, so they're pure token cost —
+> set `console_enabled_tiers = [1]` (or `WOODS_CONSOLE_TIERS=1`) to advertise
+> only the 9 working read-only tools. See [MCP_REGISTRATION.md](MCP_REGISTRATION.md).
+>
+> **`console_eval`** registers only when `console_unsafe_eval_enabled` is true
+> **and** Tier 4 is enabled; otherwise it is omitted entirely.
 
 ### Tier 1: Read-Only (9 tools) — Supported in all modes
 

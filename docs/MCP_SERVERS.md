@@ -214,7 +214,19 @@ connection:
   # compose_file: docker-compose.yml
 ```
 
-### Tools (31)
+### Tools (up to 31)
+
+Tool registration is gated to keep the catalog (and its token cost) small:
+
+- **Tier gating** — `console_enabled_tiers` (config) / `WOODS_CONSOLE_TIERS` (env)
+  selects which of the four tiers register. Default is all four; restrict to
+  e.g. `[1]` (`read`) to advertise only the 9 read-only tools.
+- **`console_eval` is opt-in** — it does not register unless
+  `console_unsafe_eval_enabled` is true **and** Tier 4 is enabled, so a default
+  console advertises **30** tools, not 31.
+
+See [MCP_REGISTRATION.md](MCP_REGISTRATION.md) for tuning and
+[MCP_FEATURE_STATUS.md](MCP_FEATURE_STATUS.md) for the full gating matrix.
 
 #### Tier 1: Read-Only (9 tools)
 

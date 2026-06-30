@@ -330,13 +330,14 @@ deployment guide including defense layers.
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every HTTP request. **Required in production** — the Railtie raises `Woods::ConfigurationError` when `console_mcp_enabled` is true but no token is set. In non-prod without a token the middleware refuses to mount (warn + skip). Generate with `SecureRandom.hex(32)`. |
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
 | `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
+| `console_enabled_tiers` | Array | `[1, 2, 3, 4]` | Which console tool tiers register, to trim the advertised catalog (token cost). Accepts tier numbers `1`-`4`, toolset names (`read`=1, `domain`=2, `analytics`=3, `guarded`=4), `"all"`, or a comma-joined string; normalized to sorted unique integers. Overridable via `WOODS_CONSOLE_TIERS`. Restricting to `[1]` drops ~⅔ of the catalog. See [MCP_REGISTRATION.md](MCP_REGISTRATION.md). |
 | `console_embedded_read_tools` | Boolean | `false` | Enable the Tier 4 read tools `console_sql` / `console_query` in embedded (Rack) mode. Bridge-mode deployments always expose them. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
 | `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses. |
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
 | `console_credential_defense_enabled` | Boolean | `true` | Layer 5 toggle for the CredentialScanner. Leave on unless you have a specific reason to disable. |
 | `console_credential_rotation_warning` | Boolean | `true` | Emit a structured log warning when any Rails credentials file is modified after process start. |
-| `console_unsafe_eval_enabled` | Boolean | `false` | Gate for `console_eval`. Off by default; no execution path is currently wired. |
+| `console_unsafe_eval_enabled` | Boolean | `false` | Gate for `console_eval`. Off by default, and when off the tool is **not registered** at all (a default console advertises 30 tools, not 31). Set true (and enable Tier 4) to surface it; refuses to boot in `Rails.env.production?`. |
 
 ## Environment Variables
 
@@ -345,6 +346,8 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | Variable | Read by | Default | Purpose |
 |----------|---------|---------|---------|
 | `WOODS_DIR` | `woods-mcp` bootstrapper | `Dir.pwd` | Path to the extraction output directory. |
+| `WOODS_CONSOLE_TIERS` | `Woods::Configuration` (console) | unset (all tiers) | Comma-joined console tier selector read at configuration time, e.g. `1`, `1,3`, `read,analytics`, `all`. Equivalent to setting `console_enabled_tiers`. |
+| `WOODS_CONSOLE_UNSAFE_EVAL` | console server | unset | Set to `"true"` to opt into `console_eval` (also requires Tier 4). Refuses in production. |
 | `WOODS_REQUIRE_INDEX` | `woods-mcp` bootstrapper | unset | Set to `"1"` to fail closed: the Index Server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host (ran `woods:extract`, no embedding provider) boots in pattern/structural mode without it. |
 | `WOODS_ALLOW_AUTODETECT` | `woods-mcp` bootstrapper | unset | **Deprecated no-op.** Auto-detect is now the default when no `woods.json` and no provider are present; this flag is still accepted for backward compatibility but has no effect. |
 | `WOODS_SEARCH_MAX_SCAN` | `woods-mcp` `search` tool | `500` | Cap on the number of unit files loaded during a phase-2 (metadata/source_code) search. When the cap is hit, the response includes `partial: true`. Set empty or unset to use the default. |

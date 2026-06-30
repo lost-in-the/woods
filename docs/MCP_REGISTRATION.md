@@ -112,91 +112,71 @@ A copy-pasteable template lives at [`examples/mcp.json`](examples/mcp.json).
 
 ---
 
-## 3. Tool-surface audit
+## 3. Trimming the tool catalog (token cost on load)
 
-Estimated `tools/list` payload (description + JSON schema), at the repo's own
-4.0 chars/token floor (`docs/TOKEN_BENCHMARK.md`). These are conservative
-description-and-schema estimates; real payloads include extra JSON structure, so
-treat them as a floor.
+Every registered tool's name + description + JSON schema is sent to the model on
+every turn. Two woods servers per app is ~60 tools; several apps multiply that.
+Tool-selection accuracy also degrades as the catalog grows, so registering only
+what a session needs is both cheaper and more accurate. Woods gives you three
+levers, all live today.
 
-| Server | Tools | Est. tokens | Conditional gating today? |
+### Console tier gating (`console_enabled_tiers`)
+
+The console server's 31 tools fall into four tiers; most sessions only need
+Tier 1. Register just the tiers you use:
+
+| Tier | Name | Tools | Typical use |
 |---|---|---|---|
-| Index (`woods-mcp`) | 29 | ~3,221 | **Yes** — 14 always-on, 15 register only when their collaborator is wired (operator, feedback, snapshot, session-trace, notion) |
-| Console (`woods-console`) | 31 | ~2,402 | **No** — all 31 register unconditionally |
-| **Combined, one app** | 60 | **~5,623** | — |
-| **Two apps × both servers** | 120 | **~11,250** | — |
+| 1 | `read` | 9 read-only (count, sample, find, pluck, aggregate, association_count, schema, recent, status) | Almost every session |
+| 2 | `domain` | 9 domain-aware (diagnose_model, validate_*, check_*, decorate, …) | App-specific diagnostics |
+| 3 | `analytics` | 10 (slow_endpoints, error_rates, job_*, redis_info, cache_stats, …) | Perf / ops investigations |
+| 4 | `guarded` | sql, query (+ opt-in eval) | Raw SQL / custom query building |
 
-For context, Anthropic reports tool-selection accuracy degrading once tool
-definitions pass ~10K tokens / 10+ tools, and recommends dynamic discovery past
-that point. A single combined 60-tool server lands squarely in that zone, which
-is the central argument against merging the two servers into one flat surface.
+```ruby
+# config/initializers/woods.rb — read-only sessions only (9 tools instead of ~30)
+Woods.configure { |c| c.console_enabled_tiers = [1] }
 
-### A. Could tools be combined into toolsets?
+# By toolset name; equivalent to [1, 3]
+Woods.configure { |c| c.console_enabled_tiers = %w[read analytics] }
+```
 
-**Group, don't merge.** Collapsing distinct operations into one parameter-overloaded
-mega-tool (e.g. a single `console_read` with an `op:` discriminator) trades a
-lower tool count for per-call ambiguity — the opposite of what improves
-selection accuracy. The prevailing pattern (GitHub MCP's `--toolsets`) is to keep
-tools distinct but **gate which groups load**.
+Or set it without touching code — the env var is read at configuration time and
+works for both MySQL and PostgreSQL hosts identically:
 
-- **Index server — already done.** It registers 14 always-on tools and gates the
-  other 15 behind wiring (operator/feedback/snapshot/session-trace/notion). A
-  pattern-only extract host sees only the 14 it can use. No change needed.
-- **Console server — the opportunity.** It registers all 31 tools regardless of
-  use. Most sessions touch only **Tier 1** (the 9 read-only tools:
-  count/sample/find/pluck/aggregate/association_count/schema/recent/status).
-  Tiers 2 (domain, 9), 3 (analytics, 10), and 4 (guarded, 3) are coherent groups
-  that many sessions never call. Gating them behind a config/env toolset selector
-  — mirroring the index server's conditional registration — would let a typical
-  session load ~9 console tools instead of 31, cutting roughly two-thirds of the
-  console catalog.
+```bash
+WOODS_CONSOLE_TIERS=1          # read-only only
+WOODS_CONSOLE_TIERS=read,analytics
+WOODS_CONSOLE_TIERS=all        # default
+```
 
-### B. Bloat reduction (token count on load)
+The default is all four tiers (no behavior change on upgrade). Restricting to
+Tier 1 drops roughly two-thirds of the console catalog.
 
-Concrete, low-risk trims, in priority order:
+### `console_eval` is opt-in and off by default
 
-1. **Don't register `console_eval` when it's disabled.** In embedded mode
-   `console_eval` always returns an instructional refusal, yet it still registers
-   and advertises a long four-sentence description. Skipping registration when
-   the unsafe-eval opt-in is off removes dead catalog weight (same principle the
-   index server already applies to unwired tools).
-2. **Add console toolset gating** (see A) — the single largest lever:
-   ~9 tools instead of 31 for read-only sessions.
-3. **De-duplicate the scope-suffix boilerplate.** The string
-   *"Suffixes: _eq _gt _lt _in _null _present. Complex queries: use
-   console_query."* is repeated verbatim in ~6 Tier-1 tool descriptions
-   (~110 chars each). State it once (server-level guidance) and trim it from the
-   per-tool descriptions.
-4. **Tighten the longest index descriptions.** Index descriptions average ~291
-   chars vs the console server's ~131; a pass over the wordiest ones (`lookup`,
-   `search`, `codebase_retrieve`, `domain_clusters`) recovers a few hundred
-   tokens without losing meaning.
-5. **Apply the naming convention** (§2) — ~450 tokens of repeated prefix across a
-   two-app setup.
+`console_eval` proposes arbitrary Ruby and is a guaranteed refusal unless the
+unsafe-eval opt-in is on, so it no longer registers by default — a default
+console advertises **30** tools, not 31. It appears only when
+`console_unsafe_eval_enabled = true` (or `WOODS_CONSOLE_UNSAFE_EVAL=true`) **and**
+Tier 4 is enabled. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for the full
+eval safety contract.
 
-None of these require merging servers; they're independent, additive cleanups.
+### Index server gating is automatic
 
-### C. Namespacing
+The index server already registers only what's wired: 14 tools are always on, and
+15 more (operator, feedback, snapshot, session-trace, notion) register only when
+their collaborator is configured. A pattern-only extract host sees just the 14 it
+can use — nothing to configure.
 
-Covered in §2. Two structural notes the audit surfaced:
+### Naming (recap)
 
-- **Redundant `console` doubling** — `mcp__<app>-console__console_count`. The
-  `<app>-live` convention removes it.
-- **The server key is the only namespace you get.** Since the spec offers none
-  and a future namespacing proposal (SEP-993) is still a closed draft, treat the
-  key as a deliberate, short, structured identifier rather than a free-form
-  label. If you later front several servers with an aggregator/proxy, it will
-  prefix tools as `Server__tool` — another reason to keep the server key concise.
+Apply the `<app>-<surface>` convention from §2 — it removes the redundant
+`console` doubling and ~450 tokens of repeated server-key prefix across a two-app
+setup.
 
----
-
-## 4. What this does *not* do
-
-This guide deliberately stops at registration + audit. It does **not** merge the
-two servers. The consolidation research concluded that the live-database console
-surface should stay isolated from the always-on read-only index (privilege
-isolation, blast-radius containment, and avoiding a flat 60-tool catalog), and
-that the re-enable friction — the thing that motivated the question — is fully
-solved by registration scope (§1). The optional, additive combined executable and
-the console-toolset gating in §3A remain available as future work if convenience
-demand justifies them.
+> **Why not merge the two servers into one?** Keeping the live-database console
+> isolated from the always-on read-only index is deliberate — privilege
+> isolation and blast-radius containment. The re-enable friction that tempts a
+> merge is solved by registration scope (§1), and the token cost by the gating
+> above, so a merge buys little. A combined opt-in executable could be added
+> later if convenience demand justifies it.
