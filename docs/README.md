@@ -4,7 +4,7 @@ Woods is a Ruby gem that extracts structured data from Rails applications for AI
 
 ## Current State
 
-All major layers are implemented: 34 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
+All major layers are implemented: 34 extractors (including state machines, events, decorators, database views, caching patterns, factories, test mappings, and more), retrieval pipeline (query classification, hybrid search, RRF ranking), storage backends (pgvector, Qdrant, SQLite), embedding providers (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, Svelte Flow visualization, and evaluation harness. Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config introspection (`BehavioralProfile`), and optional pre-computed request flow maps (`FlowPrecomputer`).
 
 What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remaining coverage work (HAML/Slim expansion, configuration semantic parsing, Stimulus/Hotwire).
 
@@ -38,6 +38,8 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [TOKEN_BENCHMARK.md](TOKEN_BENCHMARK.md) | Token estimation benchmark — tiktoken comparison, divisor calibration |
 | [USE_CASES_AND_FEATURE_GAPS.md](USE_CASES_AND_FEATURE_GAPS.md) | 37 use cases across 4 categories with implementation status |
 | [NOTION_INTEGRATION.md](NOTION_INTEGRATION.md) | Sync codebase data to Notion databases (Data Models + Columns schemas) |
+| [SVELTE_FLOW_VISUALIZATION.md](SVELTE_FLOW_VISUALIZATION.md) | Interactive graph visualization of dependencies, clusters, and request flows |
+| [SVELTE_FLOW_QUERY_REFACTOR.md](SVELTE_FLOW_QUERY_REFACTOR.md) | Design doc — refactor the visualization toward query-driven, agent-rendered subgraphs (scope endpoint, source pane, self-contained export) |
 | [UNBLOCKED_INTEGRATION.md](UNBLOCKED_INTEGRATION.md) | Sync extraction data to an Unblocked collection — incremental sync, CI setup, API quirks |
 | [OBSIDIAN_INTEGRATION.md](OBSIDIAN_INTEGRATION.md) | Export to a self-contained Obsidian vault — graph view, Bases, agent sidecar, safe re-runs |
 | [PG_QUERY_SPIKE.md](PG_QUERY_SPIKE.md) | Design doc — evaluation of optional `pg_query` AST identifier extraction for the Console MCP SQL scanner |

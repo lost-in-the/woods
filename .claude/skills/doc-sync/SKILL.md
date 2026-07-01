@@ -13,6 +13,9 @@ After any implementation that changes extraction output, dependencies, configura
 2. **`docs/design/OPTIMIZATION_BACKLOG.md`** — Is the resolved item marked ✅ with commit ref?
 3. **`CLAUDE.md`** — Do the Architecture, Gotchas, or Commands sections reflect the change?
 4. **Design docs** — If the change implements something from a design doc, update the doc to reflect what was actually built vs. what was planned.
+5. **`docs/CONFIGURATION_REFERENCE.md`** — Are new config options documented with type, default, and description?
+6. **`docs/SVELTE_FLOW_VISUALIZATION.md`** — If changes affect visualization data, layout, API endpoints, or node/edge schema, update the integration guide.
+7. **`CHANGELOG.md`** — Add new features, fixes, and changes to the `[Unreleased]` section.
 
 ## Rules
 

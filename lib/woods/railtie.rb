@@ -9,7 +9,7 @@ module Woods
       load File.expand_path('../tasks/woods.rake', __dir__)
     end
 
-    initializer 'woods.session_tracer' do |app|
+    initializer 'woods.session_tracer', after: :load_config_initializers do |app|
       config = Woods.configuration
       next unless config.session_tracer_enabled
 
@@ -34,7 +34,7 @@ module Woods
       )
     end
 
-    initializer 'woods.console_mcp' do |app|
+    initializer 'woods.console_mcp', after: :load_config_initializers do |app|
       config = Woods.configuration
       next unless config.console_mcp_enabled
 
@@ -73,6 +73,18 @@ module Woods
         path: config.console_mcp_path,
         embedded_read_tools: config.console_embedded_read_tools
       )
+    end
+
+    initializer 'woods.svelte_flow', after: :load_config_initializers do |app|
+      config = Woods.configuration
+      if config.svelte_flow_enabled
+        require 'woods/svelte_flow/rack_middleware'
+
+        app.middleware.use(
+          Woods::SvelteFlow::RackMiddleware,
+          path: config.svelte_flow_path
+        )
+      end
     end
   end
 end

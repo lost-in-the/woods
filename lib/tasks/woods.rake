@@ -650,6 +650,67 @@ namespace :woods do
   desc 'Relay findings to Unblocked (alias for unblocked_sync)'
   task relay: :unblocked_sync
 
+  desc 'Export Svelte Flow visualization data'
+  task svelte_flow_export: :environment do
+    require 'woods/svelte_flow/exporter'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    svelte_flow_dir = ENV.fetch('SVELTE_FLOW_OUTPUT', File.join(output_dir.to_s, 'svelte_flow'))
+
+    puts 'Exporting Svelte Flow visualization data...'
+    puts "  Index directory:  #{output_dir}"
+    puts "  Output directory: #{svelte_flow_dir}"
+    puts
+
+    exporter = Woods::SvelteFlow::Exporter.new(index_dir: output_dir.to_s, output_dir: svelte_flow_dir)
+    stats = exporter.export_all
+
+    puts 'Export complete!'
+    puts "  Nodes:    #{stats[:nodes]}"
+    puts "  Edges:    #{stats[:edges]}"
+    puts "  Clusters: #{stats[:clusters]}"
+    puts "  Flows:    #{stats[:flows]}"
+    puts "  Output:   #{stats[:output_dir]}"
+  end
+
+  desc 'Map the terrain — full Svelte Flow export, or a self-contained HTML for NODES=A,B,C'
+  task map: :environment do
+    nodes = ENV.fetch('NODES', '').split(',').map(&:strip).reject(&:empty?)
+
+    if nodes.empty?
+      Rake::Task['woods:svelte_flow_export'].invoke
+      next
+    end
+
+    require 'woods/svelte_flow/exporter'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    svelte_flow_dir = ENV.fetch('SVELTE_FLOW_OUTPUT', File.join(output_dir.to_s, 'svelte_flow'))
+    depth = ENV.fetch('DEPTH', '0').to_i
+    via = ENV.fetch('VIA', '').split(',').map(&:strip).reject(&:empty?)
+
+    via_note = via.empty? ? '' : ", via #{via.join(', ')}"
+    puts 'Rendering a self-contained subgraph map...'
+    puts "  Nodes: #{nodes.join(', ')}  (depth #{depth}#{via_note})"
+    puts
+
+    exporter = Woods::SvelteFlow::Exporter.new(index_dir: output_dir.to_s, output_dir: svelte_flow_dir)
+    begin
+      stats = exporter.export_standalone(nodes: nodes, depth: depth, via: via)
+    rescue Woods::ExtractionError => e
+      warn "ERROR: #{e.message}"
+      exit 1
+    end
+
+    puts 'Export complete!'
+    puts "  Nodes:   #{stats[:nodes]}"
+    puts "  Edges:   #{stats[:edges]}"
+    puts "  Dropped: #{stats[:dropped].join(', ')}" unless stats[:dropped].empty?
+    puts "  Output:  #{stats[:path]}"
+    puts
+    puts "Open it in a browser: file://#{stats[:path]}"
+  end
+
   desc 'Export extraction data to a self-contained Obsidian vault'
   task obsidian: :environment do
     require 'woods/obsidian/vault_exporter'

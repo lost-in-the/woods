@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, Svelte Flow visualization, and evaluation harness.
 
 ## Commands
 
@@ -21,7 +21,8 @@ bundle exec rake woods:stats             # Show extraction stats
 bundle exec rake woods:clean             # Remove index output
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
 bundle exec rake woods:obsidian          # Export to an Obsidian vault (alias: woods:vault)
-# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate)
+bundle exec rake woods:svelte_flow_export # Export Svelte Flow visualization JSON
+# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate), woods:map (svelte_flow_export)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
@@ -121,6 +122,7 @@ lib/
 │   ├── export/                          # Shared export fact extraction (UnitFacts) over unit metadata
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
 │   ├── obsidian/                        # Obsidian vault export (VaultExporter, NoteBuilder, NameMapper, VaultAssets)
+│   ├── svelte_flow/                     # Svelte Flow visualization (Transformer, Exporter, RackMiddleware, assets)
 │   ├── mcp/                             # MCP Index Server (29 tools — 14 always-on + 15 wiring-conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion; 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tools across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
@@ -270,6 +272,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `CachingExtractor` scans controllers, models, and view templates (`.erb`) — the `file_type` parameter on `extract_caching_file` defaults to nil (auto-detected from path).
 - `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.
 - Notion export requires `notion_api_token` and `notion_database_ids` to be configured. If only one database ID is set, the other sync (columns or data_models) is skipped gracefully. Environment variable `NOTION_API_TOKEN` overrides config. The Notion API enforces 3 req/sec — `RateLimiter` handles this automatically.
+- Svelte Flow visualization requires extraction to have been run first — the exporter reads from `dependency_graph.json` and the `flows/` directory. Enable `precompute_flows` for flow visualizations. The `RackMiddleware` lazy-loads data on first request and caches with manifest staleness detection. Pre-built frontend assets ship with the gem — no Node.js required.
 - Obsidian export (`woods:obsidian`, `lib/woods/obsidian/`) writes a local vault — no API/token/Configuration accessors (path + flags are constructor kwargs, exposed via `WOODS_OBSIDIAN_*` env). It reads `raw_graph_data` (string keys + **persisted** pagerank — never `reader.dependency_graph`, which drops pagerank and symbolizes types). All edges derive from the graph's `edges`/`reverse`; per-unit JSON is read only for note bodies. Frontmatter is **flat-scalars-only** (Obsidian's Properties UI corrupts nested objects) emitted via Psych; structured edges live in the `_woods/` sidecar. The stale-note sweep and `.obsidian/` config writes are both gated behind a `.woods-vault` ownership sentinel + a 30% purge guard (mirrors Unblocked). `include_framework` covers `rails_source` only (`gem_source` is unreachable via `IndexReader::TYPE_DIRS`). See `docs/OBSIDIAN_INTEGRATION.md`.
 - Navigation edge extraction (`link_to`, `redirect_to`, `form_action`) is gated by `extract_navigation_edges` config (default: true). Extractors that scan for navigation edges must include both `SharedDependencyScanner` and `RouteHelperResolver`, and call `build_route_helper_map` in their initializer.
 - `RouteHelperResolver` uses `IGNORED_HELPER_PREFIXES` to filter false positives from non-route `_path`/`_url` suffixes (e.g., `file_path`, `base_url`, `log_path`). Add new prefixes there when false positives are discovered in host apps.

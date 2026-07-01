@@ -130,6 +130,7 @@ module Woods
                   :console_mcp_allowed_origins,
                   :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
+                  :svelte_flow_enabled, :svelte_flow_path, :svelte_flow_repo_url,
                   :console_blocked_tables, :console_disabled_scanner_patterns,
                   :console_credential_defense_enabled,
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
@@ -178,6 +179,11 @@ module Woods
       @console_redacted_columns = DEFAULT_CONSOLE_REDACTED_COLUMNS.dup
       @console_redacted_key_values = []
       @console_embedded_read_tools = false
+      @svelte_flow_enabled = false
+      @svelte_flow_path = '/woods/visualize'
+      # Base repo URL for GitHub "view source" deep links (e.g.
+      # 'https://github.com/org/app'). Nil disables the GitHub link.
+      @svelte_flow_repo_url = ENV.fetch('WOODS_SVELTE_FLOW_REPO_URL', nil)
       @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true
