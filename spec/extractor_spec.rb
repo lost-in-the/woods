@@ -239,6 +239,93 @@ RSpec.describe Woods::Extractor do
       expect(manifest['git_branch']).to eq('unknown')
       expect(manifest['git_sha']).to eq('unknown')
     end
+
+    it 'derives counts from persisted _index.json files in incremental mode, not the empty @results' do
+      allow(Rails).to receive(:version).and_return('7.1.0')
+      allow(Time).to receive(:current).and_return(Time.now)
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(File.join(output_dir, 'models'))
+      FileUtils.mkdir_p(File.join(output_dir, 'controllers'))
+      File.write(
+        File.join(output_dir, 'models', '_index.json'),
+        JSON.generate([{ identifier: 'User', chunk_count: 2 }, { identifier: 'Post', chunk_count: 1 }])
+      )
+      File.write(
+        File.join(output_dir, 'controllers', '_index.json'),
+        JSON.generate([{ identifier: 'UsersController', chunk_count: 3 }])
+      )
+      # Incremental runs never populate @results — the manifest must not zero out.
+      extractor.instance_variable_set(:@results, {})
+
+      provenance = instance_double(Woods::GitProvenance, to_h: { git_branch: 'main', git_sha: 'abc' })
+      allow(Woods::GitProvenance).to receive(:new).and_return(provenance)
+
+      extractor.send(:write_manifest, incremental: true)
+
+      manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+      expect(manifest['counts']).to eq('models' => 2, 'controllers' => 1)
+      expect(manifest['total_units']).to eq(3)
+      expect(manifest['total_chunks']).to eq(6)
+    end
+
+    it 'still derives counts from @results in full mode' do
+      allow(Rails).to receive(:version).and_return('7.1.0')
+      allow(Time).to receive(:current).and_return(Time.now)
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(output_dir)
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.chunks = [{ chunk_index: 0 }]
+      extractor.instance_variable_set(:@results, { models: [unit] })
+
+      provenance = instance_double(Woods::GitProvenance, to_h: { git_branch: 'main', git_sha: 'abc' })
+      allow(Woods::GitProvenance).to receive(:new).and_return(provenance)
+
+      extractor.send(:write_manifest)
+
+      manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+      expect(manifest['counts']).to eq('models' => 1)
+      expect(manifest['total_units']).to eq(1)
+      expect(manifest['total_chunks']).to eq(1)
+    end
+  end
+
+  # ── regenerate_type_index ───────────────────────────────────────────
+
+  describe '#regenerate_type_index' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
+    it 'recomputes estimated_tokens from unit JSON instead of indexing null' do
+      output_dir = File.join(tmpdir, 'output')
+      type_dir = File.join(output_dir, 'models')
+      FileUtils.mkdir_p(type_dir)
+      # Unit JSON as written by ExtractedUnit#to_h — no estimated_tokens key.
+      File.write(
+        File.join(type_dir, 'User.json'),
+        JSON.generate(
+          identifier: 'User',
+          file_path: 'app/models/user.rb',
+          namespace: nil,
+          source_code: 'x' * 40,
+          metadata: {},
+          chunks: [{ chunk_index: 0 }]
+        )
+      )
+
+      extractor.send(:regenerate_type_index, :models)
+
+      index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+      expect(index.size).to eq(1)
+      expect(index.first['estimated_tokens']).to eq(10) # 40 chars / 4.0
+      expect(index.first['chunk_count']).to eq(1)
+    end
   end
 
   # ── extract_all_concurrent — warning survival ──────────────────────
@@ -246,6 +333,15 @@ RSpec.describe Woods::Extractor do
   describe '#extract_all_concurrent' do
     before do
       require 'woods'
+      # The extraction threads call Time.current for timing logs. In a Rails
+      # host it's always defined, but in this suite it only works if another
+      # spec happened to load the exts first — require them here so this
+      # example doesn't depend on suite ordering (the thread's rescue would
+      # otherwise swallow the NameError and @extractors would never be
+      # populated). isolated_execution_state backs Time.zone, which
+      # Time.current consults before falling back to Time.now.
+      require 'active_support/isolated_execution_state'
+      require 'active_support/core_ext/time'
       Woods.configuration ||= Woods::Configuration.new
       Woods.configuration.concurrent_extraction = true
     end

@@ -316,11 +316,17 @@ module Woods
         regenerate_type_index(type_key)
       end
 
-      # Update graph, manifest, and summary
+      # Update graph, manifest, and summary. No capture_snapshot here:
+      # snapshots must hash the FULL unit set, and incremental runs only
+      # re-extract affected units (@results stays empty) — capturing would
+      # record a snapshot whose diff reports every unit as deleted.
+      # Snapshots are captured on full extraction only.
       write_dependency_graph
-      write_manifest
+      write_manifest(incremental: true)
       write_structural_summary
-      capture_snapshot
+      if Woods.configuration.enable_snapshots
+        Rails.logger.info '[Woods] Skipping snapshot capture — snapshots are captured on full extraction only'
+      end
 
       affected_ids
     end
@@ -745,12 +751,23 @@ module Woods
       )
     end
 
-    def write_manifest
+    def write_manifest(incremental: false)
       # Worktree-aware git provenance. In a linked worktree +.git+ is a file
       # pointing at the real git dir; when that dir is unreachable (e.g. an
       # unmounted host path inside a container) this resolves to "unknown"
       # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
       provenance = GitProvenance.new(root: Rails.root).to_h
+
+      # Incremental runs never populate @results — deriving counts from
+      # memory would clobber a good manifest with zeros. Recompute from the
+      # persisted per-type _index.json files instead.
+      counts, total_chunks =
+        if incremental
+          persisted_counts
+        else
+          [@results.transform_values(&:size),
+           @results.sum { |_, units| units.sum { |u| u.chunks.size } }]
+        end
 
       manifest = {
         extracted_at: Time.current.iso8601,
@@ -758,11 +775,11 @@ module Woods
         ruby_version: RUBY_VERSION,
 
         # Counts by type
-        counts: @results.transform_values(&:size),
+        counts: counts,
 
         # Total stats
-        total_units: @results.values.sum(&:size),
-        total_chunks: @results.sum { |_, units| units.sum { |u| u.chunks.size } },
+        total_units: counts.values.sum,
+        total_chunks: total_chunks,
 
         # Git provenance (branch/sha), or "unknown" when unresolvable
         git_sha: provenance[:git_sha],
@@ -777,6 +794,26 @@ module Woods
         @output_dir.join('manifest.json'),
         json_serialize(manifest)
       )
+    end
+
+    # Unit and chunk counts derived from the per-type _index.json files on
+    # disk — the source of truth after an incremental run, where only the
+    # affected units were re-extracted.
+    #
+    # @return [Array(Hash{Symbol => Integer}, Integer)] counts by type, total chunk count
+    def persisted_counts
+      counts = {}
+      chunks = 0
+
+      Dir[@output_dir.join('*/_index.json').to_s].each do |index_path|
+        entries = JSON.parse(File.read(index_path))
+        counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
+        chunks += entries.sum { |e| e['chunk_count'].to_i }
+      rescue JSON::ParserError
+        next
+      end
+
+      [counts, chunks]
     end
 
     # Capture a temporal snapshot after extraction completes.
@@ -915,7 +952,10 @@ module Woods
           identifier: data['identifier'],
           file_path: data['file_path'],
           namespace: data['namespace'],
-          estimated_tokens: data['estimated_tokens'],
+          # Unit JSON has no estimated_tokens field (ExtractedUnit#to_h
+          # doesn't emit one) — recompute it, or every unit of a type
+          # touched by an incremental run would index as null.
+          estimated_tokens: estimated_tokens_from(data),
           chunk_count: (data['chunks'] || []).size
         }
       end
@@ -924,6 +964,20 @@ module Woods
         type_dir.join('_index.json'),
         json_serialize(index)
       )
+    end
+
+    # Token estimate for a unit parsed back from JSON, mirroring
+    # ExtractedUnit#estimated_tokens (see docs/TOKEN_BENCHMARK.md).
+    #
+    # @param data [Hash] Parsed unit JSON (string keys)
+    # @return [Integer]
+    def estimated_tokens_from(data)
+      source = data['source_code']
+      metadata = data['metadata'] || {}
+
+      source_tokens = source ? (source.length / 4.0).ceil : 0
+      metadata_tokens = metadata.any? ? (metadata.to_json.length / 4.0).ceil : 0
+      source_tokens + metadata_tokens
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1023,11 +1077,19 @@ module Woods
 
       return unless unit
 
-      # Update dependency graph
+      # Update dependency graph. Register BEFORE normalizing the path —
+      # the graph's file_map stores absolute paths (affected_by matches
+      # changed files against them), exactly as full extraction registers
+      # in Phase 1 and only normalizes in Phase 4.5.
       @dependency_graph.register(unit)
 
       # Track which type was affected
       affected_types&.add(extractor_key)
+
+      # Unit JSON carries Rails.root-relative paths (full extraction's
+      # Phase 4.5); writing the raw absolute source_location here would
+      # leak container-absolute paths into the index after incremental runs.
+      unit.file_path = normalize_file_path(unit.file_path)
 
       # Write updated unit
       type_dir = @output_dir.join(extractor_key.to_s)
