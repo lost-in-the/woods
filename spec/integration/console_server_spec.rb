@@ -189,11 +189,12 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
     it 'auto_approve mode always grants confirmation' do
       confirmation = Woods::Console::Confirmation.new(mode: :auto_approve)
 
-      result = confirmation.request_confirmation(
-        tool: 'console_eval', description: 'Execute code', params: { code: '1+1' }
-      )
+      expect do
+        confirmation.request_confirmation(
+          tool: 'console_eval', description: 'Execute code', params: { code: '1+1' }
+        )
+      end.not_to raise_error
 
-      expect(result).to be true
       expect(confirmation.history.size).to eq(1)
       expect(confirmation.history.first[:approved]).to be true
     end
@@ -216,10 +217,11 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       callback = ->(req) { req[:tool] != 'console_eval' }
       confirmation = Woods::Console::Confirmation.new(mode: :callback, callback: callback)
 
-      result = confirmation.request_confirmation(
-        tool: 'console_sql', description: 'SELECT query', params: {}
-      )
-      expect(result).to be true
+      expect do
+        confirmation.request_confirmation(
+          tool: 'console_sql', description: 'SELECT query', params: {}
+        )
+      end.not_to raise_error
 
       expect do
         confirmation.request_confirmation(
@@ -307,10 +309,11 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       sql = 'SELECT count(*) FROM orders WHERE status = \'active\''
 
       # Step 1: Confirmation
-      confirmed = confirmation.request_confirmation(
-        tool: 'console_sql', description: sql, params: { sql: sql }
-      )
-      expect(confirmed).to be true
+      expect do
+        confirmation.request_confirmation(
+          tool: 'console_sql', description: sql, params: { sql: sql }
+        )
+      end.not_to raise_error
 
       # Step 2: SQL Validation
       expect(validator.valid?(sql)).to be true
@@ -338,10 +341,11 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       sql = 'DROP TABLE users'
 
       # Step 1: Confirmation (passes — it's the validator that catches this)
-      confirmed = confirmation.request_confirmation(
-        tool: 'console_sql', description: sql, params: { sql: sql }
-      )
-      expect(confirmed).to be true
+      expect do
+        confirmation.request_confirmation(
+          tool: 'console_sql', description: sql, params: { sql: sql }
+        )
+      end.not_to raise_error
 
       # Step 2: SQL Validation blocks it
       expect(validator.valid?(sql)).to be false

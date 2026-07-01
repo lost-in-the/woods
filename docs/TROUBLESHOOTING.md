@@ -138,6 +138,16 @@ bundle exec rake woods:extract
 
 ---
 
+### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
+
+**Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct — only the provenance metadata is off.
+
+**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory — often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg). See [#137].
+
+**Fix:** Make the worktree's git directory reachable from the extraction environment — for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly — Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
+
+---
+
 ## MCP Server Problems
 
 ### "No manifest.json" error when starting the Index Server
@@ -166,6 +176,23 @@ ls ./tmp/woods/manifest.json
 ```
 
 If this fails, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
+
+---
+
+### Index Server exits with `MissingArtifact`
+
+**Symptom:** `woods-mcp` exits 2 with `MissingArtifact: No woods.json found ...`.
+
+**Cause:** Strict mode is enabled (`WOODS_REQUIRE_INDEX=1`) but no embedding index has been written. By default the server boots without `woods.json` — it serves pattern/regex/structural tools and skips semantic search. You only see this error when you've explicitly opted into fail-closed behavior.
+
+**Fix:** Either generate the index so semantic search is available:
+
+```bash
+bundle exec rake woods:extract
+bundle exec rake woods:embed          # writes woods.json + vector dumps
+```
+
+…or unset `WOODS_REQUIRE_INDEX` to boot in pattern-only mode. (The older `WOODS_ALLOW_AUTODETECT=1` flag is no longer needed — auto-detect is the default.)
 
 ---
 
@@ -276,6 +303,44 @@ console_sample(model: "Order", scope: { created_at: { gte: "2025-01-01" } })
 
 ## Embedding Problems
 
+### Configuring vector search on MySQL
+
+**Symptom:** You're on MySQL (or Percona / MariaDB / Aurora MySQL) and `config.vector_store = :pgvector` fails at boot, or you can't find a `:mysql` vector adapter in `lib/woods/storage/`.
+
+**Cause:** MySQL has no native vector-search extension equivalent to `pgvector`. Woods does not emulate vector search in MySQL — every vector adapter the gem ships delegates to a real vector engine. The metadata + graph layer happily lives in MySQL (`config.metadata_store = :mysql`, recursive CTEs on 8.0+), but vectors have to go somewhere else.
+
+**Fix:** Pair MySQL with one of the supported external vector backends. Qdrant is the recommended default for self-hosted / Docker stacks:
+
+```ruby
+# config/initializers/woods.rb — MySQL host with Qdrant for vectors
+Woods.configure do |config|
+  config.metadata_store = :mysql
+  config.metadata_store_connection = ENV.fetch("DATABASE_URL")
+
+  config.vector_store = :qdrant
+  config.vector_store_url = ENV.fetch("QDRANT_URL", "http://localhost:6333")
+end
+```
+
+The Postgres equivalent (in-database vectors) is shown for contrast:
+
+```ruby
+# PostgreSQL host with pgvector for vectors
+Woods.configure do |config|
+  config.metadata_store = :postgresql
+  config.metadata_store_connection = ENV.fetch("DATABASE_URL")
+
+  config.vector_store = :pgvector
+  config.vector_store_connection = ENV.fetch("DATABASE_URL")
+end
+```
+
+For local development against a MySQL app, `config.vector_store = :sqlite` (or `:in_memory` with the `:shared_filesystem` preset) is a reasonable stand-in — it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant (or Pinecone for managed environments).
+
+See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL section](BACKEND_MATRIX.md#mysql) for graph-traversal details (recursive CTEs on 8.0+).
+
+---
+
 ### "Dimension mismatch" error when querying embeddings
 
 **Symptom:** `codebase_retrieve` raises an error about vector dimensions not matching.
@@ -331,8 +396,40 @@ For 429 — embedding generation is automatically retried with backoff. If rate 
 3. If using a non-default port, update config:
 
 ```ruby
-config.embedding_options = { base_url: 'http://localhost:11434' }
+config.embedding_options = { host: 'http://localhost:11434' }
 ```
+
+---
+
+### Ollama `400 "the input length exceeds the context length"`
+
+**Symptom:** `rake woods:embed` fails with `Ollama API error: 400 {"error":"the input length exceeds the context length"}`. Individual chunks may look smaller than the configured `num_ctx`.
+
+**Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source — so chunks that look safe by char count still trip the 2048-token ceiling.
+
+**Fix:** Upgrade to Woods 1.3+ and install the `tokenizers` gem:
+
+```ruby
+# Gemfile
+gem 'woods', '~> 1.3'
+gem 'tokenizers', '~> 0.5'   # exact BERT WordPiece token counting
+```
+
+Woods now:
+
+1. Advertises the native context ceiling per model (2048 for `nomic-embed-text`, 8192 for `bge-m3`/`snowflake-arctic-embed2`, etc.) so the chunker sizes inputs correctly.
+2. Uses the real BERT tokenizer to verify every chunk, catching the 10–20% gap between char-based estimates and Ollama's internal count.
+
+If you want fewer chunks per unit and have the disk space, switch to a larger-context model:
+
+```ruby
+config.embedding_options = {
+  model: 'bge-m3',       # 8192 native context, 1024 dims
+  host: 'http://localhost:11434'
+}
+```
+
+Pull the model first (`ollama pull bge-m3`) and **drop the vector index before re-embedding** — the dimension change (768 → 1024) is incompatible with existing vectors. See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full tradeoff matrix.
 
 ---
 
@@ -551,3 +648,18 @@ config.notion_database_ids = {
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
+| HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
+| HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ORIGINS="https://example.com"` |
+| Tool returns `error_code: :not_configured` | Feature flag or credential not set | Check `config_key` in `_meta` and the linked `doc_link` |
+| Tool returns `error_code: :rate_limited` | `PipelineGuard` 5-min cooldown hit | Wait `retry_after_seconds` from `_meta`, then retry |
+
+### First-Pass Diagnostics
+
+For a single-call health snapshot, call the Index Server's `woods_status` tool. It reports:
+
+- Extraction freshness (last run time, unit count, index version)
+- Console-bridge reachability
+- Which optional features are configured (embedding provider, Notion, session tracer)
+- Per-feature config-key hints for anything missing
+
+Agents cold-connecting to a server should call `woods_status` before any other tool — it eliminates most "why is this empty?" guesswork.

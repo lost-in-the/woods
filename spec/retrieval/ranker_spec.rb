@@ -5,6 +5,7 @@ require 'woods/retrieval/search_executor'
 require 'woods/retrieval/query_classifier'
 require 'woods/retrieval/ranker'
 require 'woods/storage/metadata_store'
+require 'woods/storage/graph_store'
 
 RSpec.describe Woods::Retrieval::Ranker do
   let(:metadata_store) { instance_double(Woods::Storage::MetadataStore::Interface) }
@@ -184,6 +185,112 @@ RSpec.describe Woods::Retrieval::Ranker do
       trivial = candidate(identifier: 'Trivial', score: 0.5)
 
       result = ranker.rank([trivial, important], classification: classification)
+
+      expect(result.first.identifier).to eq('Important')
+    end
+  end
+
+  describe 'pagerank importance integration' do
+    let(:graph_store) { instance_double(Woods::Storage::GraphStore::Interface) }
+    let(:ranker) { described_class.new(metadata_store: metadata_store, graph_store: graph_store) }
+
+    it 'prefers high-pagerank candidates over low-pagerank ones' do
+      allow(graph_store).to receive(:pagerank).and_return(
+        'Hot' => 0.9, 'Warm' => 0.1, 'Cold' => 0.001
+      )
+      allow(metadata_store).to receive(:find).and_return(nil)
+
+      candidates = %w[Cold Warm Hot].map { |id| candidate(identifier: id, score: 0.5) }
+
+      result = ranker.rank(candidates, classification: classification)
+
+      expect(result.map(&:identifier)).to eq(%w[Hot Warm Cold])
+    end
+
+    it 'uses rank-percentile rather than raw pagerank values' do
+      # Raw values span 4 orders of magnitude, but percentile compresses
+      # ranking into 1.0 (top) down to 1/n (bottom) — order is what matters.
+      allow(graph_store).to receive(:pagerank).and_return(
+        'Top' => 0.9, 'Mid' => 0.0005, 'Bottom' => 0.00001
+      )
+      allow(metadata_store).to receive(:find).and_return(nil)
+
+      candidates = %w[Bottom Mid Top].map { |id| candidate(identifier: id, score: 0.5) }
+
+      result = ranker.rank(candidates, classification: classification)
+
+      expect(result.map(&:identifier)).to eq(%w[Top Mid Bottom])
+    end
+
+    it 'falls back to bucketed metadata importance for identifiers absent from pagerank' do
+      # Known is the lowest-ranked unit in a 5-node graph (percentile ≈ 0.2)
+      allow(graph_store).to receive(:pagerank).and_return(
+        'A' => 0.9, 'B' => 0.7, 'C' => 0.5, 'D' => 0.3, 'Known' => 0.01
+      )
+      allow(metadata_store).to receive(:find).with('Known').and_return(nil)
+      allow(metadata_store).to receive(:find).with('NewUnit')
+                                             .and_return({ metadata: { importance: :high } })
+
+      known = candidate(identifier: 'Known', score: 0.5)
+      # NewUnit isn't in the graph yet, but its bucketed importance is :high (=> 1.0)
+      new_unit = candidate(identifier: 'NewUnit', score: 0.5)
+
+      result = ranker.rank([known, new_unit], classification: classification)
+
+      expect(result.first.identifier).to eq('NewUnit')
+    end
+
+    it 'falls back entirely when graph store returns an empty pagerank hash' do
+      allow(graph_store).to receive(:pagerank).and_return({})
+      allow(metadata_store).to receive(:find).with('Important')
+                                             .and_return({ metadata: { importance: :high } })
+      allow(metadata_store).to receive(:find).with('Trivial')
+                                             .and_return({ metadata: { importance: :low } })
+
+      candidates = [
+        candidate(identifier: 'Trivial', score: 0.5),
+        candidate(identifier: 'Important', score: 0.5)
+      ]
+
+      result = ranker.rank(candidates, classification: classification)
+
+      expect(result.first.identifier).to eq('Important')
+    end
+
+    it 'swallows graph store errors and falls back to bucketed importance' do
+      allow(graph_store).to receive(:pagerank).and_raise(StandardError, 'graph unavailable')
+      allow(metadata_store).to receive(:find).with('Important')
+                                             .and_return({ metadata: { importance: :high } })
+
+      candidates = [candidate(identifier: 'Important', score: 0.5)]
+
+      expect { ranker.rank(candidates, classification: classification) }.not_to raise_error
+    end
+
+    it 'computes pagerank map once even across multiple rank() calls' do
+      allow(graph_store).to receive(:pagerank).and_return('A' => 0.9, 'B' => 0.1).once
+      allow(metadata_store).to receive(:find).and_return(nil)
+
+      2.times do
+        ranker.rank([candidate(identifier: 'A', score: 0.5)], classification: classification)
+      end
+    end
+  end
+
+  describe 'ranker without graph_store (backwards compat)' do
+    it 'falls back to bucketed metadata importance' do
+      allow(metadata_store).to receive(:find).with('Important')
+                                             .and_return({ metadata: { importance: :high } })
+      allow(metadata_store).to receive(:find).with('Trivial')
+                                             .and_return({ metadata: { importance: :low } })
+
+      ranker_without_graph = described_class.new(metadata_store: metadata_store)
+      candidates = [
+        candidate(identifier: 'Trivial', score: 0.5),
+        candidate(identifier: 'Important', score: 0.5)
+      ]
+
+      result = ranker_without_graph.rank(candidates, classification: classification)
 
       expect(result.first.identifier).to eq('Important')
     end

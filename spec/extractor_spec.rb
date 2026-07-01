@@ -186,6 +186,59 @@ RSpec.describe Woods::Extractor do
 
       expect { extractor.send(:capture_snapshot) }.not_to raise_error
     end
+
+    it 'skips snapshotting when git_sha is unresolvable ("unknown") (#137)' do
+      Woods.configuration.enable_snapshots = true
+
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(output_dir)
+      File.write(File.join(output_dir, 'manifest.json'), '{"git_sha":"unknown"}')
+
+      # An "unknown" provenance must not key or collide a snapshot.
+      expect(extractor).not_to receive(:build_snapshot_store)
+
+      extractor.send(:capture_snapshot)
+    end
+  end
+
+  # ── write_manifest — git provenance ─────────────────────────────────
+
+  describe '#write_manifest' do
+    # json_serialize reads Woods.configuration.pretty_json; ensure a config
+    # exists regardless of suite ordering (another spec may have left it nil).
+    # Requiring active_support's time ext defines Time.current so the stub below
+    # is valid under verify_partial_doubles even when this file runs standalone
+    # (`rake spec SPEC=...`), regardless of which other spec loaded it first.
+    before do
+      require 'woods'
+      require 'active_support/core_ext/time'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
+    it 'delegates branch/sha to a Rails.root-rooted GitProvenance (#137)' do
+      allow(Rails).to receive(:version).and_return('7.1.0')
+      # Stub Time.current (now defined by the require above) so the real one —
+      # which needs ActiveSupport::IsolatedExecutionState / a loaded Time.zone —
+      # is never invoked.
+      allow(Time).to receive(:current).and_return(Time.now)
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(output_dir)
+      extractor.instance_variable_set(:@results, {})
+
+      provenance = instance_double(Woods::GitProvenance, to_h: { git_branch: 'unknown', git_sha: 'unknown' })
+      expect(Woods::GitProvenance).to receive(:new).with(root: rails_root).and_return(provenance)
+
+      extractor.send(:write_manifest)
+
+      manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+      expect(manifest['git_branch']).to eq('unknown')
+      expect(manifest['git_sha']).to eq('unknown')
+    end
   end
 
   # ── extract_all_concurrent — warning survival ──────────────────────

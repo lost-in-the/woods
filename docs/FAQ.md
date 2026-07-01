@@ -12,7 +12,7 @@ No — Woods requires a booted Rails environment for extraction. It uses runtime
 
 ### What Rails versions does Woods support?
 
-Woods supports Rails 6.1 and newer, with Ruby 3.0 or newer. It is tested against Rails 7.x and 8.x. Rails 6.0 and earlier are not supported because the gem relies on Zeitwerk autoloading and several reflection APIs introduced in 6.1.
+Woods supports **Rails 6.0 and newer**, on **Ruby 3.0 through 4.0**. CI runs an end-to-end extraction against Rails 6.0, 6.1, 7.0, 7.1, 7.2, and 8.0 (see the version matrix in [CONTRIBUTING.md](../CONTRIBUTING.md)). The gem declares `railties >= 6.0`; the only 6.1-introduced APIs it touches (`connection_db_config`, `has_many_inversing`) are `respond_to?`-guarded and degrade cleanly on 6.0.
 
 ---
 
@@ -36,7 +36,7 @@ No. Extraction is entirely read-only. It uses ActiveRecord reflection APIs (`col
 
 ### Can I run Woods in production?
 
-Extraction is designed for development and CI environments — it requires a fully booted Rails environment and takes 10-30 seconds. The MCP servers are read-only development tools. Running extraction in production is technically possible but not recommended. The common pattern is to extract in CI and publish the JSON output as a build artifact.
+Extraction itself is designed for development and CI — it requires a fully booted Rails environment and takes 10-30 seconds. The MCP Index Server is read-only and can safely run in any environment as long as the HTTP transport is properly secured (bearer token required for non-loopback, origin allow-list via `OriginGuard`, TLS via reverse proxy — see [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md)). The Console Server should stay disabled in production regardless of its safety layers. The common production pattern is to extract in CI and publish the JSON output as a build artifact, then run the Index Server against the artifact.
 
 ---
 
@@ -220,7 +220,7 @@ You're using the embedded console mode (launched via `rake woods:console` or `do
 
 ### Is the Console Server safe to use?
 
-The Console Server implements multiple safety layers. Every query runs inside a database transaction that is always rolled back, so writes are silently discarded. `SqlValidator` rejects DML and DDL at the string level before any database interaction. Model names are validated against `ActiveRecord::Base.descendants` to prevent arbitrary class instantiation. Tier 4 tools (eval, raw SQL) require explicit human confirmation. The Console Server is designed for development environments — treat it accordingly and avoid exposing it publicly.
+The Console Server implements five defense-in-depth layers: a feature gate (`console_mcp_enabled`, default `false`), a conservative `DEFAULT_CONSOLE_BLOCKED_TABLES` list covering `users`, `accounts`, `sessions`, `api_keys`, `credentials`, `oauth_applications`, `oauth_access_tokens`, and `active_storage_blobs`, a `CredentialScanner` that redacts credential-shaped values, column-name-based redaction via `DEFAULT_CONSOLE_REDACTED_COLUMNS`, and `SqlValidator` + rolled-back transactions on every query. Tier 4 tools (eval, raw SQL) require explicit human confirmation. These layers are defense-in-depth, not primary controls — the Console Server is a development/staging tool and should stay disabled in production regardless of configuration. See [CONSOLE_MCP_SETUP.md — Safety Model](CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
 
 ---
 
@@ -337,18 +337,26 @@ All backends work with both MySQL and PostgreSQL application databases. pgvector
 Two embedding providers are supported:
 
 - **OpenAI** — `text-embedding-3-small` (1536 dimensions, default) or `text-embedding-3-large`. Requires an `OPENAI_API_KEY`. Billed per token.
-- **Ollama** — Any locally installed model (e.g., `nomic-embed-text`, `mxbai-embed-large`). Runs locally, no API key or cost. Requires Ollama to be running at `localhost:11434`.
+- **Ollama** — Any locally installed model (e.g., `nomic-embed-text`, `bge-m3`, `mxbai-embed-large`). Runs locally, no API key or cost. Requires Ollama to be running at `localhost:11434`.
 
 ```ruby
 # OpenAI
 config.embedding_provider = :openai
-config.embedding_model = 'text-embedding-3-small'
-config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
+config.embedding_options = {
+  api_key: ENV['OPENAI_API_KEY'],
+  model: 'text-embedding-3-small'
+}
 
-# Ollama
+# Ollama — default (2048-token context)
 config.embedding_provider = :ollama
-config.embedding_model = 'nomic-embed-text'
+config.embedding_options = { model: 'nomic-embed-text' }
+
+# Ollama — bge-m3 (8192-token context, fewer chunks per unit)
+config.embedding_provider = :ollama
+config.embedding_options = { model: 'bge-m3' }
 ```
+
+See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the Ollama model comparison and the procedure for adding a new model.
 
 ---
 
@@ -492,7 +500,7 @@ bundle exec rake woods:validate
 bundle exec rake woods:stats
 ```
 
-The `pipeline_status` MCP tool also reports the last extraction time, unit counts, and whether the index is stale relative to the current git HEAD.
+The `pipeline_status` MCP tool reports the last extraction time, unit counts, and whether the index is stale relative to the current git HEAD. The `woods_status` tool (Index Server) reports a single-call health snapshot covering extraction freshness, console-bridge reachability, embedding/Notion/session-tracer configuration state, and index version — useful for agents cold-connecting to a server.
 
 ---
 

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
 require 'digest'
 require 'json'
@@ -52,6 +53,34 @@ module Woods
         @identifier_map = nil
       end
 
+      # Pre-populate cached state so the first MCP tool call doesn't pay
+      # for disk reads + JSON parsing.
+      #
+      # Touches every lazy accessor: manifest, summary, dependency_graph,
+      # graph_analysis, and the identifier_map (which reads all _index.json
+      # files). Each step is individually rescued so a missing optional
+      # artefact (e.g. graph_analysis.json) never blocks the rest.
+      #
+      # Safe to call multiple times — lazy accessors short-circuit on the
+      # memoized value.
+      #
+      # @return [Hash] Per-step outcome: `{step => true | Exception}`
+      def warmup!
+        steps = {
+          manifest: -> { manifest },
+          summary: -> { summary },
+          dependency_graph: -> { dependency_graph },
+          graph_analysis: -> { graph_analysis },
+          identifier_map: -> { identifier_map }
+        }
+        steps.each_with_object({}) do |(step, runner), result|
+          runner.call
+          result[step] = true
+        rescue StandardError => e
+          result[step] = e
+        end
+      end
+
       # Clear all cached state so the next access re-reads from disk.
       #
       # @return [void]
@@ -71,6 +100,17 @@ module Woods
       # @return [Hash] Parsed manifest.json
       def manifest
         @manifest ||= parse_json('manifest.json')
+      end
+
+      # Template engines the extraction pipeline currently understands.
+      # Delegates to {ViewTemplateExtractor.supported_template_engines} so
+      # the list stays honest as engines are added or removed. Surfaced by
+      # the MCP `structure` tool (#86).
+      #
+      # @return [Array<Symbol>]
+      def template_engines
+        require_relative '../extractors/view_template_extractor'
+        Woods::Extractors::ViewTemplateExtractor.supported_template_engines.dup
       end
 
       # @return [String, nil] SUMMARY.md content, or nil if not present
@@ -138,13 +178,31 @@ module Woods
       # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500).
       # When the cap is reached the result includes :partial => true.
       #
-      # @param query [String] Search pattern (case-insensitive regex)
+      # The optional +exact_prefix+ / +exact_suffix+ filters restrict results to
+      # identifiers whose start/end matches the given string literally (case-
+      # insensitive). They are ANDed with the +query+ regex and are safer than
+      # hand-escaping regex anchors — metacharacters like +::+ are treated as
+      # literal text.
+      #
+      # @param query [String, nil] Search pattern (case-insensitive regex). Optional when
+      #   +exact_prefix+ or +exact_suffix+ is provided; otherwise required.
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param fields [Array<String>] Fields to search: "identifier", "metadata", "source_code"
       # @param limit [Integer] Maximum results to return
+      # @param exact_prefix [String, nil] Literal identifier prefix filter (case-insensitive)
+      # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
-      def search(query, types: nil, fields: %w[identifier], limit: 20)
-        pattern = compile_search_pattern(query)
+      # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
+      def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
+        prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
+        suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
+        if query.blank? && !prefix && !suffix
+          raise ArgumentError, 'search requires a query or exact_prefix/exact_suffix filter'
+        end
+
+        # When only prefix/suffix are provided, the regex acts as a match-all
+        # wildcard so the existing phase-1/phase-2 pipeline still works.
+        pattern = compile_search_pattern(query.to_s.empty? ? '.*' : query)
         max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
         max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
         max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
@@ -160,46 +218,77 @@ module Woods
                  TYPE_DIRS
                end
 
+        # Phase 2 candidates are collected per-dir and then scanned in
+        # round-robin across dirs. Exhausting the per-run scan cap linearly
+        # down TYPE_DIRS order would starve later types (`concerns` at pos
+        # 13, `test_mappings` at pos 31) on any codebase where the earlier
+        # dirs together exceed max_scan entries. Interleaving guarantees
+        # every type contributes to the scanned set.
+        phase2_queues = {}
+
         dirs.each do |dir|
           type_name = DIR_TO_TYPE[dir]
           entries = read_index(dir)
 
           # Broad-match detection: warn when pattern matches >50% of dir entries
           if entries.size > 1
-            matching_count = entries.count { |e| pattern.match?(e['identifier']) }
+            matching_count = entries.count do |e|
+              identifier_passes_filters?(e['identifier'], pattern, prefix, suffix)
+            end
             if matching_count > entries.size / 2.0
               notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
             end
           end
 
           entries.each do |entry|
-            break if results.size >= limit
-
             id = entry['identifier']
+            next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
-            # Phase 1: identifier matching
+            # Phase 1: identifier matching (still in-order per dir)
             if fields.include?('identifier') && pattern.match?(id)
+              next if results.size >= limit
+
               results << { identifier: id, type: type_name, match_field: 'identifier' }
               next
             end
 
-            # Phase 2: metadata/source_code matching (requires loading full unit)
+            # Phase 2 is only reached when the caller opted into deeper fields.
             next unless fields.include?('metadata') || fields.include?('source_code')
 
-            if phase2_scanned >= max_scan
-              partial = true
-              next
-            end
+            (phase2_queues[dir] ||= []) << [type_name, id]
+          end
+        end
 
-            unit = find_unit(id)
-            next unless unit
+        if results.size < limit && phase2_queues.any?
+          queues = phase2_queues.values.map(&:dup)
+          catch(:phase2_done) do
+            loop do
+              progressed = false
+              queues.each do |queue|
+                next if queue.empty?
 
-            phase2_scanned += 1
+                throw :phase2_done if results.size >= limit
 
-            if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
-              results << { identifier: id, type: type_name, match_field: 'source_code' }
-            elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
-              results << { identifier: id, type: type_name, match_field: 'metadata' }
+                if phase2_scanned >= max_scan
+                  partial = true
+                  throw :phase2_done
+                end
+
+                type_name, id = queue.shift
+                progressed = true
+
+                unit = find_unit(id)
+                next unless unit
+
+                phase2_scanned += 1
+
+                if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
+                  results << { identifier: id, type: type_name, match_field: 'source_code' }
+                elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
+                  results << { identifier: id, type: type_name, match_field: 'metadata' }
+                end
+              end
+              break unless progressed
             end
           end
         end
@@ -241,7 +330,12 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
-        pattern = Regexp.new(Regexp.escape(keyword), Regexp::IGNORECASE)
+        # Multi-word keywords ("ActiveRecord callbacks") are split on
+        # whitespace and ANDed. Single-word queries behave as before.
+        tokens = keyword.to_s.strip.split(/\s+/)
+        return [] if tokens.empty?
+
+        patterns = tokens.map { |t| Regexp.new(Regexp.escape(t), Regexp::IGNORECASE) }
         results = []
 
         entries = read_index('rails_source')
@@ -252,9 +346,12 @@ module Woods
           unit = find_unit(id)
           next unless unit
 
-          matched = pattern.match?(id) ||
-                    (unit['source_code'] && pattern.match?(unit['source_code'])) ||
-                    (unit['metadata'] && pattern.match?(unit['metadata'].to_json))
+          metadata_json = unit['metadata']&.to_json
+          matched = patterns.all? do |pat|
+            pat.match?(id) ||
+              (unit['source_code'] && pat.match?(unit['source_code'])) ||
+              (metadata_json && pat.match?(metadata_json))
+          end
 
           next unless matched
 
@@ -300,7 +397,8 @@ module Woods
               identifier: id,
               type: DIR_TO_TYPE[dir],
               file_path: unit['file_path'],
-              last_modified: last_modified
+              last_modified: last_modified,
+              author: unit.dig('metadata', 'git', 'last_author')
             }
           end
         end
@@ -330,6 +428,26 @@ module Woods
         Regexp.new(query, Regexp::IGNORECASE)
       rescue RegexpError
         Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+      end
+
+      # Case-insensitive literal prefix/suffix check on an identifier.
+      # Nil filters are treated as "no restriction".
+      def identifier_passes_prefix_suffix?(identifier, prefix, suffix)
+        return false unless identifier
+
+        downcased = identifier.downcase
+        return false if prefix && !downcased.start_with?(prefix)
+        return false if suffix && !downcased.end_with?(suffix)
+
+        true
+      end
+
+      # Combined regex + prefix/suffix check used only by broad-match detection,
+      # which reports how many identifiers would actually surface.
+      def identifier_passes_filters?(identifier, pattern, prefix, suffix)
+        return false unless identifier_passes_prefix_suffix?(identifier, prefix, suffix)
+
+        pattern.match?(identifier)
       end
 
       # Memoized normalized edges — converts bare strings (old format) to hashes once.
@@ -446,14 +564,18 @@ module Woods
                        neighbors
                      end
 
+          # At max depth, record the node with empty deps so the renderer
+          # doesn't emit an extra level of unexpanded neighbors. The parent
+          # node's deps list already shows this node as a child.
+          will_expand = current_depth < depth
           node_meta = nodes_data[current]
           result_nodes[current] = {
             type: node_meta&.dig('type'),
             depth: current_depth,
-            deps: filtered
+            deps: will_expand ? filtered : []
           }
 
-          next if current_depth >= depth
+          next unless will_expand
 
           filtered.each do |neighbor|
             unless visited.include?(neighbor)

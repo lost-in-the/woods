@@ -56,10 +56,27 @@ module Woods
       # @param query [String] The original query text
       # @param classification [QueryClassifier::Classification] Classified query
       # @param limit [Integer] Maximum candidates to return
+      # @param type_filter [Array<String>, nil] When set, vector and hybrid
+      #   strategies push this down into the vector store's metadata
+      #   filter — used by {Retriever#retrieve} to rank-within-type when
+      #   the unfiltered global top-K had no candidate of the requested type.
+      #   Overrides the classifier-derived +target_type+ in filter construction.
+      # @param strategy [Symbol, nil] Override the classifier-selected strategy.
+      #   {Retriever#within_type_fallback} passes +:vector+ here because the
+      #   vector path is the only one that honors +type_filter+; if the
+      #   classifier picked +:keyword+ / +:graph+ / +:direct+ the fallback
+      #   would otherwise silently re-run the same strategy, get filtered to
+      #   empty, and violate the "never empty when units exist" contract.
       # @return [ExecutionResult] Candidates with strategy metadata
-      def execute(query:, classification:, limit: 20)
-        strategy = select_strategy(classification)
-        candidates = run_strategy(strategy, query: query, classification: classification, limit: limit)
+      def execute(query:, classification:, limit: 20, type_filter: nil, strategy: nil)
+        strategy ||= select_strategy(classification)
+        candidates = run_strategy(
+          strategy,
+          query: query,
+          classification: classification,
+          limit: limit,
+          type_filter: type_filter
+        )
 
         ExecutionResult.new(
           candidates: candidates.first(limit),
@@ -104,17 +121,18 @@ module Woods
       # @param query [String] Original query text
       # @param classification [QueryClassifier::Classification]
       # @param limit [Integer] Max results
+      # @param type_filter [Array<String>, nil] Pushed into vector filters
       # @return [Array<Candidate>]
-      def run_strategy(strategy, query:, classification:, limit:)
+      def run_strategy(strategy, query:, classification:, limit:, type_filter: nil)
         case strategy
         when :vector
-          execute_vector(query, classification: classification, limit: limit)
+          execute_vector(query, classification: classification, limit: limit, type_filter: type_filter)
         when :keyword
           execute_keyword(classification: classification, limit: limit)
         when :graph
           execute_graph(classification: classification, limit: limit)
         when :hybrid
-          execute_hybrid(query, classification: classification, limit: limit)
+          execute_hybrid(query, classification: classification, limit: limit, type_filter: type_filter)
         when :direct
           execute_direct(classification: classification, limit: limit)
         end
@@ -123,9 +141,9 @@ module Woods
       # Vector strategy: embed the query and search by similarity.
       #
       # @return [Array<Candidate>]
-      def execute_vector(query, classification:, limit:)
+      def execute_vector(query, classification:, limit:, type_filter: nil)
         query_vector = @embedding_provider.embed(query)
-        filters = build_vector_filters(classification)
+        filters = build_vector_filters(classification, type_filter: type_filter)
 
         results = @vector_store.search(query_vector, limit: limit, filters: filters)
         results.map do |r|
@@ -209,9 +227,10 @@ module Woods
       # Hybrid strategy: combine vector, keyword, and graph expansion.
       #
       # @return [Array<Candidate>]
-      def execute_hybrid(query, classification:, limit:)
+      def execute_hybrid(query, classification:, limit:, type_filter: nil)
         # Gather from all three sources
-        vector_candidates = execute_vector(query, classification: classification, limit: limit)
+        vector_candidates = execute_vector(query, classification: classification, limit: limit,
+                                                  type_filter: type_filter)
         keyword_candidates = execute_keyword(classification: classification, limit: limit)
 
         # Graph expansion on top vector results
@@ -266,13 +285,23 @@ module Woods
         candidates
       end
 
-      # Build metadata filters for vector search based on classification.
+      # Build metadata filters for vector search based on classification
+      # and an optional explicit type filter from the caller.
+      #
+      # The caller's explicit +type_filter+ overrides classifier-derived
+      # +target_type+ when both are present — the caller opted into a
+      # specific set of types and that intent beats a heuristic.
       #
       # @param classification [QueryClassifier::Classification]
+      # @param type_filter [Array<String>, nil]
       # @return [Hash]
-      def build_vector_filters(classification)
+      def build_vector_filters(classification, type_filter: nil)
         filters = {}
-        filters[:type] = classification.target_type.to_s if classification.target_type
+        if type_filter && !type_filter.empty?
+          filters[:type] = type_filter.map(&:to_s)
+        elsif classification.target_type
+          filters[:type] = classification.target_type.to_s
+        end
         filters
       end
 

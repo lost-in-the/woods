@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (27-tool index server + 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion export, Svelte Flow visualization, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 6 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server — 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, Svelte Flow visualization, and evaluation harness.
 
 ## Commands
 
@@ -20,11 +20,75 @@ bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
 bundle exec rake woods:clean             # Remove index output
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
+bundle exec rake woods:obsidian          # Export to an Obsidian vault (alias: woods:vault)
 bundle exec rake woods:svelte_flow_export # Export Svelte Flow visualization JSON
 # Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate), woods:map (svelte_flow_export)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
+
+## Host app for integration testing: `woods-testbed`
+
+Extraction, the Console MCP server, and the ERD middleware all require a booted Rails environment to validate. We maintain a companion repo — [`lost-in-the/woods-testbed`](https://github.com/lost-in-the/woods-testbed) — with one Rails app per supported Rails version. Clone it alongside this gem and `docker compose up` the variant you need.
+
+**Variants** (add more by contributing a new `apps/rails-X.Y/` directory):
+
+| Variant | Rails | Port | Container |
+|---|---|---|---|
+| `apps/rails-8.0` | 8.0.x | 3010 | `woods-testbed-rails-8.0` |
+| `apps/rails-7.2` | ~> 7.2.0 | 3011 | `woods-testbed-rails-7.2` |
+| `apps/rails-6.0` | ~> 6.0.0 | 3012 | `woods-testbed-rails-6.0` |
+
+**Typical setup** (sibling-repo layout — the testbed's compose file defaults to `../woods` for the gem mount):
+
+```bash
+# Once:
+cd ~/where-you-keep-code
+git clone https://github.com/lost-in-the/woods.git
+git clone https://github.com/lost-in-the/woods-testbed.git
+
+# Bring a variant up (from inside woods-testbed/):
+cd woods-testbed
+docker compose up -d rails-8.0   # or rails-7.2
+
+# Override the gem path for a worktree or a different checkout:
+WOODS_GEM_PATH=/absolute/path/to/woods-worktree docker compose up -d rails-8.0
+```
+
+**Invoking woods tasks inside a variant:**
+
+```bash
+docker exec woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails woods:extract'
+docker exec woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails woods:stats'
+
+# Shared smoke scripts live at scripts/ in the testbed repo and are mounted
+# read-only at /app/script/shared inside every variant:
+docker exec woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails runner script/shared/woods_smoke.rb'
+docker exec woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails runner script/shared/woods_credentials_smoke.rb'
+
+# Interactive console:
+docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
+```
+
+**Extraction output** lands under `apps/rails-<version>/tmp/woods/` inside the testbed checkout — bind-mounted read-write, so the host can read `_index.json`, `dependency_graph.json`, etc. directly.
+
+**Adding coverage.** Smoke scripts go in the testbed's `scripts/` directory so they run unchanged against every variant. Each variant's `config/initializers/woods_console.rb` can be tweaked independently when a test needs version-specific configuration.
+
+**The testbed is a playground.** Agents working on the gem have permission to modify anything under the testbed's `apps/` — add models, migrations, controllers, initializers, smoke scripts, seeds. Reshape it to fit the scenario. Only gem changes under `lib/woods/` go through the normal review gate.
+
+**When to use each host:**
+- **`woods-testbed` `rails-8.0`** — default. Day-to-day Rails 8 validation. Fast, small, self-contained.
+- **`woods-testbed` `rails-7.2`** — when a change could plausibly behave differently on Rails 7 (Zeitwerk load paths, callback-chain internals, `eager_load!` error paths).
+- **`woods-testbed` `rails-6.0`** — the supported floor (`railties >= 6.0`, #135). Use when a change touches 6.0/6.1-era APIs (e.g. `connection_db_config`, `has_many_inversing` guards) or to validate the lowest end of the matrix. Boots on Ruby 3.0.
+- **`~/work/test_app`** (local-only host) — when a change needs a committed integration spec, or maps cleanly to `spec/integration/` fixtures. No Docker, runs on Rails 8.1.
+- **A production-shaped MySQL host app** (local-only, see `.claude/rules/integration-testing.md`) — only when a problem demands a large real codebase: namespace collisions, large callback chains, non-standard service directories, many-model PageRank behaviour.
+
+**Gotchas:**
+- `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
+- Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
+- If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container.
+
+See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
 
 ## Architecture
 
@@ -39,8 +103,14 @@ lib/
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
+│   ├── flow_assembler.rb               # Per-query runtime flow aggregation
+│   ├── flow_document.rb                # Serialization envelope for flow output
 │   ├── filename_utils.rb               # Safe filename generation
-│   ├── extractors/                      # 34 extractors + callback_analyzer + behavioral_profile + route_helper_resolver
+│   ├── index_artifact.rb               # Dump promotion + safe path handling
+│   ├── atomic_file.rb                   # Crash-safe temp+fsync+rename file writes (shared)
+│   ├── resolved_config.rb              # Frozen configuration snapshot
+│   ├── token_utils.rb                  # Token count estimation helpers
+│   ├── extractors/                      # 34 extractors + 6 helpers (shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -49,10 +119,12 @@ lib/
 │   ├── storage/                         # Storage backends (VectorStore, MetadataStore, GraphStore, Pgvector, Qdrant)
 │   ├── retrieval/                       # Retrieval pipeline (QueryClassifier, SearchExecutor, Ranker, ContextAssembler)
 │   ├── formatting/                      # LLM context formatting (Claude, GPT, Generic, Human)
+│   ├── export/                          # Shared export fact extraction (UnitFacts) over unit metadata
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
+│   ├── obsidian/                        # Obsidian vault export (VaultExporter, NoteBuilder, NameMapper, VaultAssets)
 │   ├── svelte_flow/                     # Svelte Flow visualization (Transformer, Exporter, RackMiddleware, assets)
-│   ├── mcp/                             # MCP Index Server (27 tools, 2 resources, 2 templates)
-│   ├── console/                         # Console MCP Server (31 tools, 4 tiers, job/cache adapters)
+│   ├── mcp/                             # MCP Index Server (29 tools — 14 always-on + 15 wiring-conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion; 2 resources, 2 templates)
+│   ├── console/                         # Console MCP Server (31 tools across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; job/cache adapters)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
 │   ├── operator/                        # Pipeline management (StatusReporter, ErrorEscalator, PipelineGuard)
@@ -63,7 +135,8 @@ lib/
 │   ├── session_tracer/                  # Session tracing middleware + flow assembly (FileStore, RedisStore, SolidCacheStore)
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
-│   └── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
+│   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
+│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
 │   └── woods.rake                       # Rake task definitions
@@ -93,7 +166,7 @@ exe/
 - All extractors return `Array<ExtractedUnit>`
 - Use `Rails.root.join()` for paths, never string concatenation
 - JSON output uses string keys, snake_case
-- Token estimation: `(string.length / 4.0).ceil` — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md.
+- Token estimation: `(string.length / 4.0).ceil` for the OpenAI path — Benchmarked against tiktoken (cl100k_base) on 19 Ruby source files. Actual mean is 4.41 chars/token. Uses 4.0 as a conservative floor (~10.6% overestimate). See docs/TOKEN_BENCHMARK.md. The Ollama path uses 1.5 chars/token (BERT WordPiece) — see `Builder#chars_per_token_for` and `docs/EMBEDDING_MODELS.md`.
 - Error handling: raise `Woods::ExtractionError` for recoverable extraction failures, let unexpected errors propagate. Always `rescue StandardError`, never bare `rescue`.
 
 ## Testing
@@ -101,6 +174,7 @@ exe/
 **Two test suites** — the gem has unit specs with mocks, and a separate Rails app has integration specs that run real extractions.
 
 - **Gem unit specs** (`spec/`): RSpec with `rubocop-rspec` enforcement. Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
+- **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained — Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`.
 - **Integration specs** (in a separate Rails app): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Set up a host Rails app per the Getting Started guide, then run `bundle exec rspec spec/integration/`.
 - Every extractor needs tests for: happy path extraction, edge cases (empty files, namespaced classes, STI), concern inlining, dependency detection
 - Test `ExtractedUnit#to_h` serialization round-trips
@@ -149,6 +223,14 @@ At the end of a session, update `.claude/context/session-state.md` with breadcru
 
 At the start of a session, read `.claude/context/session-state.md` for context from the previous session.
 
+> **Local-only files.** `.claude/context/session-state.md` and
+> `.claude/rules/integration-testing.md` are intentionally gitignored
+> (see `.gitignore`) — they're session-local and host-local notes, not
+> shared conventions. If either file is missing in a fresh clone, create
+> it (templates live in `.claude/skills/backlog-workflow/SKILL.md`'s
+> references and this section). `.claude/skills/backlog-workflow/SKILL.md`
+> is tracked — the workflow itself is shared.
+
 ## Gotchas
 
 - Extraction **must** run inside a Rails app — the gem has no standalone extraction mode. All extractors assume `Rails`, `ActiveRecord::Base`, etc. are defined.
@@ -156,15 +238,17 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - Service discovery scans `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`. If a host app uses a non-standard directory, it won't be found without configuration.
 - The dependency graph can have cycles (A depends on B depends on A). Graph traversal must handle this — see `DependencyGraph#visited` tracking.
 - MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax. Any database-touching code must handle both. Never write PostgreSQL-only SQL and assume it works.
-- `eager_load!` is called once in the orchestrator (`Extractor`), not in individual extractors. Don't add `Rails.application.eager_load!` calls to extractors.
+- `eager_load!` is called once per extraction mode in the orchestrator (`Extractor#extract_all` and `Extractor#extract_changed`), not in individual extractors. Don't add `Rails.application.eager_load!` calls to extractors.
 - Git commands use `Open3.capture2` (not backticks) to prevent shell injection. Never use backtick-style command execution for external processes.
 - `callback.options` doesn't exist on modern Rails (removed in 4.2) — use `@if`/`@unless` ivars + ActionFilter duck-typing (check for `@actions` ivar as a `Set`) to extract `:only`/`:except` action lists from callbacks.
 - `eager_load!` aborts completely on a single `NameError` (e.g., `app/graphql/` referencing an uninstalled gem). Zeitwerk processes dirs alphabetically, so a failure in `graphql/` prevents `models/` from loading. The gem falls back to per-directory loading via `EXTRACTION_DIRECTORIES` when this happens.
 - `CallbackChain#size` does not exist on any Rails version (7.0–8.1) — `CallbackChain` includes `Enumerable` but never defines `#size`. Use `#count` instead.
 - `git_available?` is memoized — won't detect git becoming available mid-extraction (acceptable tradeoff).
-- Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit.
+- Manifest `git_branch`/`git_sha` come from `Woods::GitProvenance` (`lib/woods/git_provenance.rb`), not `run_git` directly — it's worktree-aware (`.git` can be a *file* with a `gitdir:` pointer) and runs `git -C <root>` so it's cwd-independent. When a `.git` is present but git can't resolve the ref (e.g. an unmounted worktree git dir in a container) it returns `"unknown"` rather than a stale `GIT_BRANCH`/`GIT_SHA` env value; the env vars are honored only when there's **no** `.git` at the root (a non-repo checkout — `GitProvenance#git_working_tree?`) or git is unavailable. `capture_snapshot` treats `"unknown"` as no-sha (#137). The per-file `batch_git_data`/`run_git` enrichment path is separate and still cwd-based.
+- Model name scanning uses a precomputed regex via `ModelNameCache` — invalidated per extraction run, not per unit. Three passes resolve references: (1) fully-qualified names via the whole-word regex; (2) string literals passed to `.constantize` / `const_get(...)` when the literal matches a known model; (3) bare short names (e.g., `Book` inside `module Library` for a `Library::Book` model) via `ModelNameCache.resolve_short_name` when unambiguous. Ambiguous short names (same inner class across multiple namespaces) are skipped to avoid false positives.
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
+- The Index Server (`woods-mcp`) boots in **pattern-only mode by default** when no `woods.json` is present and no embedding provider is configured (#138) — extract-only hosts get every always-on tool with no env var. `codebase_retrieve` (semantic search) activates only when a provider is configured. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot (raises `MissingArtifact`); `WOODS_ALLOW_AUTODETECT` is now a back-compat no-op. The strict-vs-default decision lives in `ConfigResolver.resolve_without_artifact`.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
 - Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
 - `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."
@@ -189,6 +273,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.
 - Notion export requires `notion_api_token` and `notion_database_ids` to be configured. If only one database ID is set, the other sync (columns or data_models) is skipped gracefully. Environment variable `NOTION_API_TOKEN` overrides config. The Notion API enforces 3 req/sec — `RateLimiter` handles this automatically.
 - Svelte Flow visualization requires extraction to have been run first — the exporter reads from `dependency_graph.json` and the `flows/` directory. Enable `precompute_flows` for flow visualizations. The `RackMiddleware` lazy-loads data on first request and caches with manifest staleness detection. Pre-built frontend assets ship with the gem — no Node.js required.
+- Obsidian export (`woods:obsidian`, `lib/woods/obsidian/`) writes a local vault — no API/token/Configuration accessors (path + flags are constructor kwargs, exposed via `WOODS_OBSIDIAN_*` env). It reads `raw_graph_data` (string keys + **persisted** pagerank — never `reader.dependency_graph`, which drops pagerank and symbolizes types). All edges derive from the graph's `edges`/`reverse`; per-unit JSON is read only for note bodies. Frontmatter is **flat-scalars-only** (Obsidian's Properties UI corrupts nested objects) emitted via Psych; structured edges live in the `_woods/` sidecar. The stale-note sweep and `.obsidian/` config writes are both gated behind a `.woods-vault` ownership sentinel + a 30% purge guard (mirrors Unblocked). `include_framework` covers `rails_source` only (`gem_source` is unreachable via `IndexReader::TYPE_DIRS`). See `docs/OBSIDIAN_INTEGRATION.md`.
 - Navigation edge extraction (`link_to`, `redirect_to`, `form_action`) is gated by `extract_navigation_edges` config (default: true). Extractors that scan for navigation edges must include both `SharedDependencyScanner` and `RouteHelperResolver`, and call `build_route_helper_map` in their initializer.
 - `RouteHelperResolver` uses `IGNORED_HELPER_PREFIXES` to filter false positives from non-route `_path`/`_url` suffixes (e.g., `file_path`, `base_url`, `log_path`). Add new prefixes there when false positives are discovered in host apps.
 - `DependencyGraph` edges are stored as `[{ target:, via: }]` hashes (symbol keys). `IndexReader` normalizes from JSON to `[{ 'target' => ..., 'via' => ... }]` (string keys). The two normalizers (`DependencyGraph.normalize_edges` vs `IndexReader.normalize_all_edges`) are intentionally separate — do not merge them.

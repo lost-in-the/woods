@@ -69,27 +69,64 @@ module Woods
         @provider.model_name
       end
 
+      # Delegate the per-provider input cap. The retry wrapper does not
+      # change the provider's budget, so just hand through whatever the
+      # inner provider reports. Without this, `respond_to?` returns true
+      # via Interface but the call raises NotImplementedError.
+      #
+      # @return [Integer, nil]
+      def max_input_tokens
+        return @provider.max_input_tokens if @provider.respond_to?(:max_input_tokens)
+
+        nil
+      end
+
+      # Maximum backoff delay in seconds. Without a cap, attempts 8+ sleep
+      # longer than most service-level timeouts (>25s) and compound retry
+      # storms across correlated workers.
+      MAX_BACKOFF_SECONDS = 30.0
+
+      # Base multiplier for exponential backoff. Delay is roughly
+      # `BACKOFF_BASE * 2**attempt` with full jitter applied on top.
+      BACKOFF_BASE = 0.1
+
       private
 
-      # Execute a block with retry logic and exponential backoff.
+      # Execute a block with retry logic, exponential backoff, and jitter.
+      #
+      # Argument errors surface immediately (non-retryable — they indicate
+      # a programming mistake or invalid input, not a transient failure).
       #
       # @yield The block to execute
       # @return [Object] The return value of the block
       # @raise [CircuitOpenError] immediately without retrying
+      # @raise [ArgumentError] immediately without retrying
       # @raise [StandardError] the last error if all retries are exhausted
       def with_retries
         attempt = 0
         begin
           attempt += 1
           yield
-        rescue CircuitOpenError
+        rescue CircuitOpenError, ArgumentError
           raise
         rescue StandardError => e
           raise e if attempt > @max_retries
 
-          sleep((2**attempt) * 0.1)
+          sleep(backoff_seconds(attempt))
           retry
         end
+      end
+
+      # Full-jitter exponential backoff with a hard cap. See "Exponential
+      # Backoff and Jitter", AWS Architecture Blog (Marc Brooker, 2015):
+      # a uniformly random delay in [0, base*2**attempt] de-correlates
+      # competing retry waves.
+      #
+      # @param attempt [Integer] 1-based attempt counter
+      # @return [Float] seconds to sleep before the next retry
+      def backoff_seconds(attempt)
+        ceiling = [BACKOFF_BASE * (2**attempt), MAX_BACKOFF_SECONDS].min
+        rand * ceiling
       end
 
       # Route a call through the circuit breaker if one is configured.

@@ -41,3 +41,8 @@ bin/context7
 
 # Frontend build dependencies (dev only)
 frontend/node_modules/
+
+.claude/worktrees/
+
+# Appraisal per-version lockfiles (resolved fresh in CI)
+gemfiles/*.gemfile.lock

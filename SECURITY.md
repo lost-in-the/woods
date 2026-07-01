@@ -49,15 +49,25 @@ Extracted data is written to `tmp/woods/` by default. This directory contains yo
 
 ### Console Server
 
-The Console MCP Server provides live database access. It includes multiple safety layers:
-
-- **SafeContext** wraps all operations in a rolled-back transaction
-- **SqlValidator** rejects DML/DDL statements before execution
-- **Confirmation** gates guard destructive operations
-- **AuditLogger** records all operations to JSONL
-
-Despite these safeguards, the Console Server should only be used in development/staging environments, never in production.
+The Console MCP Server provides live database access through a five-layer defense-in-depth stack (feature gate, blocked tables, credential scanner, column redaction, and SqlValidator + rolled-back transactions). Tier 4 tools additionally require confirmation and are recorded in an audit log. Despite these safeguards, the Console Server should only be used in development/staging environments, never in production. See [docs/CONSOLE_MCP_SETUP.md — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
 
 ### MCP Transport
 
-The MCP Index Server supports both stdio and HTTP transports. When using HTTP transport, ensure it is not exposed to untrusted networks. The server has no built-in authentication — secure it at the network level.
+The MCP Index Server supports both stdio and HTTP transports. stdio is the default and has no network exposure. The HTTP transport (`exe/woods-mcp-http`) refuses to bind a non-loopback host unless `WOODS_MCP_HTTP_TOKEN` is set and validates incoming `Authorization: Bearer …` headers. It also enforces a default `Origin` allow-list via `OriginGuard` to mitigate DNS-rebinding attacks. TLS is not terminated in-process — front the HTTP transport with a reverse proxy (nginx, caddy) when exposing it beyond loopback. See [docs/MCP_HTTP_TRANSPORT.md](docs/MCP_HTTP_TRANSPORT.md) for the full deployment guide.
+
+## Blast Radius
+
+If extraction output leaks, what can an attacker do with it?
+
+**What the output contains.** Application source code (inlined concerns, callback-resolved behavior), database schema (column names, types, indexes, foreign keys), route tables, migration history, gem versions, and git metadata (commit history, contributor emails, file change frequency).
+
+**What the output does not contain.** No row-level data from your database — Woods extracts schema only. No environment variables, no `Rails.application.credentials`, no API keys, no session state, no request logs, no customer data.
+
+| Leak scenario | Attacker gains | Attacker does not gain |
+|---|---|---|
+| `tmp/woods/` directory exfiltrated | Source code + schema equivalent to a git clone + `rails db:schema:dump` | Database rows, secrets, tokens, customer data |
+| MCP Index Server token leaked (HTTP transport) | Read-only query access to the extracted index — no write or execution paths | Shell access, database row data, secrets |
+| Notion sync database compromised | Model and column summaries synced to Notion | Anything not mirrored — source code stays local |
+| Console MCP Server exposed (dev/staging) | Read-only database access through a rolled-back transaction, bounded by TableGate + Redactor + SqlValidator | Write access (rolled back), full credentials (redacted), blocked tables |
+
+**Mitigation.** Treat `tmp/woods/` as source-equivalent — keep it out of world-readable directories and public container images. Rotate `WOODS_MCP_HTTP_TOKEN` on compromise. Keep `console_mcp_enabled = false` in production regardless of environment, since the console layers are defense-in-depth and not primary controls.

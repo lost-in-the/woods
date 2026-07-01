@@ -174,5 +174,121 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(store.count).to eq(1)
       end
     end
+
+    describe 'missing sqlite3 gem' do
+      it 'raises a friendly Woods::ConfigurationError instead of LoadError' do
+        # Simulate the gem not being present in the host bundle.
+        original_method = Kernel.instance_method(:require)
+        allow_any_instance_of(Woods::Storage::MetadataStore::SQLite)
+          .to receive(:require).with('sqlite3').and_raise(LoadError)
+
+        expect { described_class.new(':memory:') }
+          .to raise_error(Woods::ConfigurationError, /sqlite3 gem.+Gemfile.+:in_memory/m)
+      ensure
+        Kernel.send(:define_method, :require, original_method) if original_method
+      end
+    end
+  end
+
+  describe Woods::Storage::MetadataStore::InMemory do
+    let(:store) { described_class.new }
+
+    # The in-memory adapter and the SQLite adapter must be substitutable
+    # — Builder picks one based on config without the rest of the pipeline
+    # caring. These specs lock the contract: same shape in, same shape out.
+
+    describe '#store / #count / #find' do
+      it 'tracks count and round-trips a record' do
+        expect(store.count).to eq(0)
+
+        store.store('User', { type: 'model', file_path: 'app/models/user.rb' })
+        expect(store.count).to eq(1)
+
+        result = store.find('User')
+        expect(result['type']).to eq('model')
+        expect(result['file_path']).to eq('app/models/user.rb')
+      end
+
+      it 'upserts on duplicate IDs' do
+        store.store('User', { type: 'model', version: 1 })
+        store.store('User', { type: 'model', version: 2 })
+
+        expect(store.count).to eq(1)
+        expect(store.find('User')['version']).to eq(2)
+      end
+
+      it 'returns nil for missing IDs' do
+        expect(store.find('Nonexistent')).to be_nil
+      end
+
+      it 'stringifies symbol keys to match the SQLite contract' do
+        store.store('User', { type: :model, namespace: :Admin })
+
+        result = store.find('User')
+        expect(result['type']).to eq(:model)
+        expect(result['namespace']).to eq(:Admin)
+      end
+    end
+
+    describe '#find_by_type' do
+      before do
+        store.store('User', { type: 'model' })
+        store.store('Order', { type: 'model' })
+        store.store('AuthService', { type: 'service' })
+      end
+
+      it 'returns all units of the given type' do
+        results = store.find_by_type('model')
+
+        expect(results.map { |r| r['id'] }).to contain_exactly('User', 'Order')
+      end
+
+      it 'accepts symbol types' do
+        expect(store.find_by_type(:service).map { |r| r['id'] }).to eq(['AuthService'])
+      end
+    end
+
+    describe '#search' do
+      before do
+        store.store('User', { type: 'model', description: 'User account model' })
+        store.store('AuthService', { type: 'service', description: 'Authentication service' })
+      end
+
+      it 'searches across all metadata fields by default' do
+        ids = store.search('account').map { |r| r['id'] }
+        expect(ids).to eq(['User'])
+      end
+
+      it 'restricts to specified fields when given' do
+        ids = store.search('account', fields: ['description']).map { |r| r['id'] }
+        expect(ids).to eq(['User'])
+      end
+
+      it 'returns empty when nothing matches' do
+        expect(store.search('nope')).to be_empty
+      end
+    end
+
+    describe '#delete' do
+      it 'removes a unit by ID' do
+        store.store('User', { type: 'model' })
+        store.delete('User')
+
+        expect(store.find('User')).to be_nil
+        expect(store.count).to eq(0)
+      end
+    end
+
+    describe '#find_batch' do
+      it 'returns a hash of id => record for found ids' do
+        store.store('User', { type: 'model' })
+        store.store('Order', { type: 'model' })
+
+        result = store.find_batch(%w[User Order Missing])
+
+        expect(result.keys).to contain_exactly('User', 'Order')
+        expect(result['User']['type']).to eq('model')
+      end
+    end
   end
 end

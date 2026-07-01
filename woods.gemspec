@@ -44,6 +44,16 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   # Runtime dependencies
-  spec.add_dependency 'mcp', '~> 0.6'
-  spec.add_dependency 'railties', '>= 6.1'
+  spec.add_dependency 'mcp', '>= 0.9.2', '< 1.0'
+  spec.add_dependency 'msgpack', '>= 1.5'
+  # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
+  # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
+  # Prism vs the parser gem — this dep guarantees the Prism path on the lower
+  # Ruby range so the guard's behavior stays consistent across the support matrix.
+  spec.add_dependency 'prism', '~> 1.4'
+  # Floor is Rails 6.0: Woods runs cleanly on the 6.0 series (extraction + index
+  # MCP serving). The only 6.1-introduced APIs touched (connection_db_config,
+  # has_many_inversing) are respond_to?-guarded and degrade on 6.0. The Rails
+  # version matrix in CI gates this floor. See #135 / #136.
+  spec.add_dependency 'railties', '>= 6.0'
 end

@@ -27,6 +27,8 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation — what each of the 34 extractors captures, edge cases, example output |
 | [AGENT_GUIDE.md](AGENT_GUIDE.md) | Deep reference for AI agents — workflows, full tool table, relationship type catalog, gotchas |
 | [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples — question → tool → parameters → expected output |
+| [RETRIEVAL_GUIDE.md](RETRIEVAL_GUIDE.md) | Query classification, search strategies, RRF ranking, token budget tuning, and troubleshooting |
+| [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) | Picking an Ollama embedding model — context windows, dimensions, tradeoffs, and how the context-length registry works |
 
 ## Reference
 
@@ -37,15 +39,29 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [USE_CASES_AND_FEATURE_GAPS.md](USE_CASES_AND_FEATURE_GAPS.md) | 37 use cases across 4 categories with implementation status |
 | [NOTION_INTEGRATION.md](NOTION_INTEGRATION.md) | Sync codebase data to Notion databases (Data Models + Columns schemas) |
 | [SVELTE_FLOW_VISUALIZATION.md](SVELTE_FLOW_VISUALIZATION.md) | Interactive graph visualization of dependencies, clusters, and request flows |
+| [UNBLOCKED_INTEGRATION.md](UNBLOCKED_INTEGRATION.md) | Sync extraction data to an Unblocked collection — incremental sync, CI setup, API quirks |
+| [OBSIDIAN_INTEGRATION.md](OBSIDIAN_INTEGRATION.md) | Export to a self-contained Obsidian vault — graph view, Bases, agent sidecar, safe re-runs |
+| [PG_QUERY_SPIKE.md](PG_QUERY_SPIKE.md) | Design doc — evaluation of optional `pg_query` AST identifier extraction for the Console MCP SQL scanner |
 | [self-analysis/](self-analysis/) | Woods analyzed by itself — extraction output, quality audit |
 
 Historical design documents from the build phase are in [design/](design/) (see [design/README.md](design/README.md)).
+
+## Benchmarks
+
+The `bench/` directory contains opt-in benchmarks for console-layer components. Run any bench individually:
+
+```bash
+bundle exec ruby bench/credential_scanner_bench.rb
+bundle exec ruby bench/sql_validator_bench.rb
+bundle exec ruby bench/table_gate_bench.rb
+```
+
+These benchmarks are **not part of the test suite** and are never run in CI. They exist so performance claims can be proven or disproven without scaffolding from scratch. Each file documents what it measures, how to run it, and rough IPS targets at the top.
 
 ## Planned Documentation
 
 | Document | Scope |
 |----------|-------|
-| RETRIEVAL_GUIDE.md | Query classification, search strategies, RRF ranking, token budget tuning |
 | API_REFERENCE.md | Key public classes and interfaces (may generate from YARD) |
 
 ## Documentation Principles

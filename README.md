@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/woods-wordmark-white-with-bg.png" width="400" alt="woods">
+</p>
+
 # Woods
 
 **Your AI coding assistant is guessing about your Rails app. Woods gives it the real answers.**
@@ -251,7 +255,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 ### Index Server — Reads Pre-Extracted Data (No Rails Required)
 
-27 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. Reads static JSON from disk — fast, no Rails boot needed.
+29 tools for code lookup, dependency traversal, semantic search, graph analysis, and more (14 always-on + 15 that register based on wiring: 5 operator / 4 feedback / 4 snapshot / 1 session-trace / 1 Notion). Reads static JSON from disk — fast, no Rails boot needed.
 
 **Claude Code** — add to `.mcp.json` in your project root:
 
@@ -400,7 +404,7 @@ Woods.configure do |config|
     config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
   else
     config.embedding_provider = :ollama
-    config.embedding_options = { base_url: 'http://localhost:11434' }
+    config.embedding_options = { model: 'nomic-embed-text', host: 'http://localhost:11434' }
   end
 end
 ```
@@ -444,7 +448,13 @@ rake woods:clean               # Remove index output (alias: woods:clear)
 rake woods:embed               # Embed units for semantic search (alias: woods:nest)
 rake woods:embed_incremental   # Embed changed units only (alias: woods:hone)
 rake woods:notion_sync         # Sync models/columns to Notion (alias: woods:send)
+rake woods:obsidian            # Export to an Obsidian vault — graph view + Bases (alias: woods:vault)
 ```
+
+> **Visualize connections in Obsidian.** `woods:obsidian` renders the codebase as a self-contained
+> [Obsidian](https://obsidian.md) vault: one interlinked note per unit (explore the dependency graph
+> in graph view), a filterable [Bases](https://help.obsidian.md/bases) table, and a `_woods/` machine
+> sidecar so agents can load the whole topology in one read. See [Obsidian Integration](docs/OBSIDIAN_INTEGRATION.md).
 
 ---
 
@@ -520,7 +530,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Embed     │───>│ Vector Store│    │  MCP Index Server    │  │
-│  │  OpenAI /  │    │ pgvector /  │    │  27 tools            │  │
+│  │  OpenAI /  │    │ pgvector /  │    │  29 tools            │  │
 │  │  Ollama    │    │ Qdrant      │    │  No Rails required   │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 │                                                                  │
@@ -569,8 +579,10 @@ See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases
 
 ## Requirements
 
-- Ruby >= 3.0
-- Rails >= 6.1
+- Ruby >= 3.0 (through Ruby 4.0)
+- Rails >= 6.0
+
+CI exercises Rails 6.0, 6.1, 7.0, 7.1, 7.2, and 8.0 across Ruby 3.0–4.0 — see the supported-version table in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required for basic extraction — embedding and vector search are optional add-ons.
 

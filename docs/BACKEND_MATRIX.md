@@ -8,7 +8,41 @@ The goal is that an agent or developer reading this document can make an informe
 
 ---
 
+## Persistence Story
+
+Every backend combination falls into one of three shapes based on how data survives process boundaries. The right shape depends on whether the embed process and the query process share a Ruby VM, a filesystem, or neither.
+
+| Shape | Vector store | Metadata store | Durability | Right preset |
+|---|---|---|---|---|
+| **Single-process** | `:in_memory` | `:in_memory` or `:sqlite` | Lives and dies with the Ruby VM | `:local` |
+| **Shared filesystem** | `:in_memory` + `Snapshotter` dump to `output_dir` | `:in_memory` + `Snapshotter` dump to `output_dir` | Process-local, hydrated from disk on MCP boot; dumps retained per `dump_retention_count` (default 3) | `:shared_filesystem` |
+| **Distributed** | `:pgvector`, `:qdrant` | `:sqlite` (or future `:mysql`/`:postgresql`) | Fully external; multiple processes read/write concurrently | `:postgresql`, `:production` |
+
+The shape determines the capability matrix:
+
+| Capability | Single-process | Shared filesystem | Distributed |
+|---|---|---|---|
+| Survives process restart | No | Yes (via dump) | Yes (backend) |
+| Multi-writer embedding | No | No (single writer assumed) | Yes (backend-dependent) |
+| Requires sqlite3 gem in host | With `:local` | No | With `:local`/`:postgresql`/`:production` |
+| Requires external service | No | No | Yes |
+| Cross-machine query | No | No | Yes |
+| `woods.json` schema-versioned config snapshot | — | Yes | Host config used directly |
+
+---
+
 ## Vector Stores
+
+### Database compatibility
+
+The vector store you can use depends on the primary database your Rails app uses. MySQL stacks **must** pair with an external vector backend; PostgreSQL stacks have the option of running pgvector inside the same database.
+
+| Primary database | Supported vector stores | Required? |
+|---|---|---|
+| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant`, `:pinecone` (external), `:sqlite` (local dev only) | Yes — MySQL has no native vector extension |
+| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`, `:pinecone`, `:sqlite` (local dev only) | No — `:pgvector` runs inside the same database |
+
+**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of the InnoDB / MyISAM storage engines and cannot be added via plugin. Woods does not emulate vector search in MySQL — the gem only ships adapters that delegate to a real vector engine. The recommended pairing is `:mysql` (metadata + graph) + `:qdrant` (vectors); the [MySQL section below](#mysql) covers this stack end to end.
 
 ### pgvector (PostgreSQL Extension)
 
@@ -136,6 +170,11 @@ volumes:
 
 ### Pinecone
 
+> **Status: planned, not yet implemented.** There is no `lib/woods/storage/pinecone.rb`
+> adapter in the shipped gem. The section below documents the design target.
+> Track progress in #83 or open a new issue if you need this sooner. Current
+> shipped vector stores: `:pgvector`, `:qdrant`, `:sqlite` (in-memory).
+
 **What it is:** Fully managed cloud vector database.
 
 **Best for:** Teams that prefer managed services and don't want to operate vector infrastructure.
@@ -203,6 +242,9 @@ config.vector_store = :sqlite_faiss
 
 ### Chroma
 
+> **Status: planned, not yet implemented.** No `lib/woods/storage/chroma.rb`
+> adapter in the shipped gem. The section below documents the design target.
+
 **What it is:** Open-source embedding database with a focus on developer experience.
 
 **Best for:** Prototyping, Python-heavy teams (Ruby client exists but is third-party).
@@ -226,6 +268,9 @@ config.vector_store = :sqlite_faiss
 ---
 
 ### Milvus
+
+> **Status: planned, not yet implemented.** No `lib/woods/storage/milvus.rb`
+> adapter in the shipped gem. The section below documents the design target.
 
 **What it is:** Open-source vector database designed for massive scale.
 
@@ -287,17 +332,25 @@ config.vector_store = :sqlite_faiss
 
 **Best for:** Code-specific retrieval where embedding quality matters. Code 3's 32K token window is significant — many extracted units exceed 8K tokens, especially with inlined concerns. The lower dimensionality (1024 vs 1536) also reduces vector storage costs.
 
-### Ollama / Nomic-embed-text (Self-hosted)
+### Ollama (Self-hosted)
 
-**Dimensions:** 768 (nomic-embed-text) / varies by model
-**Max tokens:** 8192 (nomic)
+| Model | Native context | Dimensions | Weights | Notes |
+|---|---|---|---|---|
+| `nomic-embed-text` (default) | 2048 | 768 | 274 MB | General-purpose, ships with Ollama |
+| `bge-m3` | **8192** | 1024 | 1.2 GB | Fewer chunks per unit, stronger code-search benchmarks |
+| `snowflake-arctic-embed2` | 8192 | 1024 | 1.2 GB | Multilingual variant of bge-m3 |
+| `mxbai-embed-large` | 512 | 1024 | 670 MB | Best for short text |
+| `all-minilm` | 256 | 384 | 46 MB | Tight-memory environments |
+
 **Cost:** Hardware only
 **Latency:** ~200ms single (GPU), ~2s single (CPU)
 
 **Strengths:** Fully self-hosted, no data leaves infrastructure, no API costs, works offline.
-**Weaknesses:** Requires GPU for reasonable performance (CPU is 10x slower), lower quality than commercial models, smaller dimensions may reduce retrieval precision.
+**Weaknesses:** Requires GPU for reasonable performance (CPU is 10× slower). `nomic-embed-text`'s 2048-token ceiling requires chunking most real-world Rails units — switch to `bge-m3` for fewer chunks if disk space allows.
 
 **Best for:** Security-sensitive environments, air-gapped networks, cost-sensitive at scale.
+
+> Ollama's `/api/embed` enforces the model's native context length regardless of the `options.num_ctx` override ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). Woods advertises the native ceiling per model so the chunker sizes inputs correctly — see [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md).
 
 ### Anthropic Embeddings
 
@@ -312,6 +365,7 @@ config.vector_store = :sqlite_faiss
 | **Best for large units** | Voyage Code 3 (32K context) |
 | **Lowest cost** | Ollama + nomic-embed-text |
 | **No external dependencies** | Ollama + nomic-embed-text |
+| **Self-hosted + large units** | Ollama + bge-m3 |
 | **Maximum quality** | OpenAI text-embedding-3-large |
 
 **Critical consideration:** Embedding dimensions must match across your entire index. Changing embedding providers requires a full re-index. Choose carefully at the start.
@@ -319,6 +373,15 @@ config.vector_store = :sqlite_faiss
 ---
 
 ## Metadata Stores
+
+> **Status note.** The shipped gem implements two metadata adapters:
+> `:sqlite` (file-based SQLite) and `:in_memory`. The PostgreSQL and MySQL
+> sections below document the design targets — they describe the schema
+> shape a future adapter would use. For MySQL- or PostgreSQL-backed
+> deployments today, pair `:sqlite` metadata with your preferred vector
+> store (`:pgvector` or `:qdrant`). See
+> [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for the
+> implemented symbols.
 
 ### PostgreSQL
 

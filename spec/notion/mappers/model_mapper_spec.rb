@@ -102,6 +102,17 @@ RSpec.describe Woods::Notion::Mappers::ModelMapper do
         expect(desc[:rich_text].first[:text][:content]).to include('Represents a registered user account')
       end
 
+      it 'Description property content is a String (not a scanner-tuple Array)' do
+        # Regression: `extract_description` used to return the raw
+        # `CredentialScanner#scan` tuple `[redacted, counts]`, which
+        # `rich_text_property` serialised as a stringified Array blob in
+        # Notion.
+        content = result['Description'][:rich_text].first[:text][:content]
+        expect(content).to be_a(String)
+        expect(content).not_to include('[{}]')
+        expect(content).not_to start_with('["')
+      end
+
       it 'formats associations' do
         assoc = result['Associations'][:rich_text].first[:text][:content]
         expect(assoc).to include('has_many :posts')

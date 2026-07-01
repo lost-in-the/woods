@@ -102,7 +102,11 @@ module Woods
           %w[rails_version ruby_version git_branch git_sha extracted_at].each do |key|
             lines << "- **#{key.tr('_', ' ').capitalize}:** #{manifest[key]}" if manifest[key]
           end
-          lines << "- **Total units:** #{manifest['total_units']}" if manifest['total_units']
+          lines << "- **Total units indexed:** #{manifest['total_units']}" if manifest['total_units']
+          template_engines = fetch_key(data, :template_engines)
+          if template_engines.is_a?(Array) && template_engines.any?
+            lines << "- **Supported template engines:** #{template_engines.join(', ')}"
+          end
           lines << ''
 
           counts = manifest['counts']
@@ -120,9 +124,30 @@ module Woods
             lines << '### Summary'
             lines << ''
             lines << summary
+            lines << ''
           end
 
+          lines << structure_denominators_glossary
           lines.join("\n").rstrip
+        end
+
+        # Canonical glossary of the three index denominators that differ
+        # across Woods' tools. Surfaced once in the structure tool so
+        # readers don't have to cross-reference other tools' outputs to
+        # understand why the numbers disagree. Resolves #105.
+        def structure_denominators_glossary
+          <<~GLOSSARY
+            ### Denominators
+
+            - **units_indexed** (manifest.json, `structure` tool) — total
+              ExtractedUnits written by the extractor. Canonical count.
+            - **graph_nodes** (`pagerank`, `dependencies`, `dependents`) —
+              units present in the dependency graph. Excludes orphans
+              that have no incoming or outgoing edges.
+            - **searchable_entries** (`codebase_retrieve`) — retriever-store
+              entries, including per-chunk rows for units long enough to
+              be chunked. Always ≥ units_indexed.
+          GLOSSARY
         end
 
         # ── graph_analysis ──────────────────────────────────────────
@@ -236,7 +261,7 @@ module Woods
           lines = []
           lines << '## PageRank Scores'
           lines << ''
-          lines << "#{fetch_key(data, :total_nodes)} nodes in graph."
+          lines << "Ranking #{fetch_key(data, :total_nodes)} nodes in the dependency graph."
           lines << ''
           lines << '| Rank | Identifier | Type | Score |'
           lines << '|------|-----------|------|-------|'
@@ -301,6 +326,15 @@ module Woods
           end
 
           lines.join("\n").rstrip
+        end
+
+        # ── trace_flow ──────────────────────────────────────────────
+
+        # @param data [Hash] Serialized FlowDocument
+        # @return [String] Markdown flow document with a step-by-step operations table
+        def render_trace_flow(data, **)
+          require_relative '../../flow_document'
+          Woods::FlowDocument.from_h(data).to_markdown
         end
 
         # ── Default fallback ────────────────────────────────────────

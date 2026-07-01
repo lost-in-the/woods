@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'woods/export/unit_facts'
+
 module Woods
   module Unblocked
     # Converts extracted unit JSON into condensed Markdown documents
@@ -27,34 +29,66 @@ module Woods
       def build(unit_data)
         type = unit_data['type']
         identifier = unit_data['identifier']
-        file_path = unit_data['file_path']
 
         {
           title: "#{identifier} (#{type})",
           body: build_body(unit_data),
-          uri: build_uri(file_path)
+          uri: uri_for(unit_data)
         }
       end
 
-      private
-
-      def build_uri(file_path)
+      # The citation URI for a unit (GitHub blob URL, or the repo root when the
+      # unit has no file_path). Public so callers can compute a unit's URI
+      # cheaply — e.g. to build the set of currently-existing URIs — without
+      # building the full document body.
+      #
+      # @param unit_data [Hash] Parsed unit JSON (needs 'file_path')
+      # @return [String] Citation URI
+      def uri_for(unit_data)
+        file_path = unit_data['file_path']
         return @repo_url unless file_path
 
         "#{@repo_url}/blob/main/#{file_path}"
       end
 
+      private
+
       def build_body(unit_data)
         type = unit_data['type']
-        case type
-        when 'model' then build_model_body(unit_data)
-        when 'controller' then build_controller_body(unit_data)
-        when 'service', 'job', 'mailer', 'manager', 'decorator', 'concern'
-          build_generic_body(unit_data)
-        when 'graphql', 'graphql_type', 'graphql_mutation', 'graphql_resolver', 'graphql_query'
-          build_graphql_body(unit_data)
-        else build_generic_body(unit_data)
-        end
+        body = case type
+               when 'model' then build_model_body(unit_data)
+               when 'controller' then build_controller_body(unit_data)
+               when 'service', 'job', 'mailer', 'manager', 'decorator', 'concern'
+                 build_generic_body(unit_data)
+               when 'graphql', 'graphql_type', 'graphql_mutation', 'graphql_resolver', 'graphql_query'
+                 build_graphql_body(unit_data)
+               else build_generic_body(unit_data)
+               end
+        # Defensive credential scrub — current builders only emit structured
+        # metadata, but if a future formatter adds source_code or comments
+        # (mirroring Notion's `ModelMapper#extract_description`) the scrub
+        # keeps credential material from reaching Unblocked.
+        redact_credentials(body)
+      end
+
+      # Run the assembled body through CredentialScanner. Fails closed (empty
+      # body) if the scanner raises, so a shipping failure never leaks
+      # unredacted content.
+      #
+      # @param body [String]
+      # @return [String]
+      def redact_credentials(body)
+        return body if body.nil? || body.empty?
+
+        require 'woods/console/credential_scanner'
+        redacted, _counts = credential_scanner.scan(body)
+        redacted
+      rescue StandardError
+        ''
+      end
+
+      def credential_scanner
+        @credential_scanner ||= Woods::Console::CredentialScanner.new
       end
 
       # ── Model formatting ─────────────────────────────────────────────
@@ -64,10 +98,10 @@ module Woods
         sections = []
 
         sections << model_header(unit, meta)
-        sections << model_associations(meta)
+        sections << model_associations(unit)
         sections << model_dependents(unit)
         sections << model_entry_points(unit)
-        sections << model_schema_highlights(meta)
+        sections << model_schema_highlights(unit)
         sections << model_side_effects(unit)
 
         sections.compact.join("\n\n")
@@ -84,23 +118,21 @@ module Woods
         parts.join("\n")
       end
 
-      def model_associations(meta)
-        assocs = meta['associations'] || []
-        return nil if assocs.empty?
+      def model_associations(unit)
+        facts = Woods::Export::UnitFacts.new(unit)
+        by_type = facts.associations_by_type
+        return nil if by_type.empty?
 
-        grouped = assocs.group_by { |a| a['type'] }
-        lines = ["## Associations (#{assocs.size})"]
+        lines = ["## Associations (#{facts.association_count})"]
 
         %w[belongs_to has_many has_one has_and_belongs_to_many].each do |type|
-          items = grouped[type]
+          items = by_type[type]
           next unless items&.any?
 
-          targets = items.map do |a|
-            name = a['target'] || a['name']
-            dep = a.dig('options', 'dependent')
-            dep ? "#{name} (#{dep})" : name
-          end
-          lines << "**#{type}:** #{targets.join(', ')}"
+          targets = items.map { |a| a[:dependent] ? "#{a[:target]} (#{a[:dependent]})" : a[:target] }
+          # Sorted so the body is a function of association content, not order
+          # (the exporter hashes this body to detect changes).
+          lines << "**#{type}:** #{targets.sort.join(', ')}"
         end
 
         lines.join("\n")
@@ -111,7 +143,7 @@ module Woods
         return nil if deps.empty?
 
         grouped = deps.group_by { |d| d['type'] }
-        summary_parts = grouped.map { |type, items| "#{items.size} #{type}s" }
+        summary_parts = grouped.sort_by { |type, _| type.to_s }.map { |type, items| "#{items.size} #{type}s" }
 
         lines = ["## Dependents (#{deps.size} units)"]
         lines << summary_parts.join(', ')
@@ -135,31 +167,28 @@ module Woods
         return nil if controllers.empty? && graphql.empty?
 
         lines = ['## Entry Points']
-        lines << "**Controllers:** #{controllers.map { |c| c['identifier'] }.join(', ')}" if controllers.any?
-        lines << "**GraphQL:** #{graphql.map { |g| g['identifier'] }.join(', ')}" if graphql.any?
-        lines << "**Jobs:** #{jobs.map { |j| j['identifier'] }.join(', ')}" if jobs.any?
+        lines << "**Controllers:** #{controllers.map { |c| c['identifier'] }.sort.join(', ')}" if controllers.any?
+        lines << "**GraphQL:** #{graphql.map { |g| g['identifier'] }.sort.join(', ')}" if graphql.any?
+        lines << "**Jobs:** #{jobs.map { |j| j['identifier'] }.sort.join(', ')}" if jobs.any?
 
         lines.join("\n")
       end
 
-      def model_schema_highlights(meta)
+      def model_schema_highlights(unit)
+        highlights = Woods::Export::UnitFacts.new(unit).schema_highlights
         parts = []
 
-        enums = meta['enums']
-        if enums.is_a?(Hash) && enums.any?
-          enum_strs = enums.map { |name, values| "#{name} (#{format_enum_values(values)})" }
+        if highlights[:enums].any?
+          enum_strs = highlights[:enums].sort_by { |name, _| name.to_s }
+                                        .map { |name, values| "#{name} (#{format_enum_values(values)})" }
           parts << "**Enums:** #{enum_strs.join('; ')}"
         end
 
-        scopes = meta['scopes']
-        parts << "**Scopes:** #{scopes.map { |s| s['name'] }.join(', ')}" if scopes.is_a?(Array) && scopes.any?
+        parts << "**Scopes:** #{highlights[:scopes].sort.join(', ')}" if highlights[:scopes].any?
+        parts << "**Concerns:** #{highlights[:concerns].sort.join(', ')}" if highlights[:concerns].any?
 
-        concerns = meta['inlined_concerns']
-        parts << "**Concerns:** #{concerns.join(', ')}" if concerns.is_a?(Array) && concerns.any?
-
-        callbacks = meta['callbacks']
-        if callbacks.is_a?(Array) && callbacks.any?
-          parts << "**Callbacks (#{callbacks.size}):** #{format_callbacks(callbacks)}"
+        if highlights[:callbacks].any?
+          parts << "**Callbacks (#{highlights[:callbacks].size}):** #{format_callbacks(highlights[:callbacks])}"
         end
 
         return nil if parts.empty?
@@ -175,8 +204,8 @@ module Woods
         return nil if jobs.empty? && mailers.empty?
 
         lines = ['## Side Effects']
-        lines << "**Jobs:** #{jobs.map { |j| j['identifier'] }.join(', ')}" if jobs.any?
-        lines << "**Mailers:** #{mailers.map { |m| m['identifier'] }.join(', ')}" if mailers.any?
+        lines << "**Jobs:** #{jobs.map { |j| j['identifier'] }.sort.join(', ')}" if jobs.any?
+        lines << "**Mailers:** #{mailers.map { |m| m['identifier'] }.sort.join(', ')}" if mailers.any?
 
         lines.join("\n")
       end
@@ -204,18 +233,21 @@ module Woods
         routes = meta['routes']
         return nil unless routes.is_a?(Hash) && routes.any?
 
-        lines = ['## Routes']
+        route_lines = []
         routes.each do |action, route_list|
           next unless route_list.is_a?(Array)
 
           route_list.each do |route|
             next unless route.is_a?(Hash)
 
-            lines << "- `#{route['verb']} #{route['path']}` (#{action})"
+            route_lines << "- `#{route['verb']} #{route['path']}` (#{action})"
           end
         end
 
-        lines.size > 1 ? lines.first(20).join("\n") : nil
+        # Sort before truncating so the kept subset is stable across runs.
+        return nil if route_lines.empty?
+
+        (['## Routes'] + route_lines.sort.first(20)).join("\n")
       end
 
       def controller_dependencies(unit)
@@ -225,7 +257,7 @@ module Woods
         models = deps.select { |d| d['type'] == 'model' }.map { |d| d['target'] }
         return nil if models.empty?
 
-        "## Dependencies\n**Models:** #{models.join(', ')}"
+        "## Dependencies\n**Models:** #{models.sort.join(', ')}"
       end
 
       def controller_dependents(unit)
@@ -233,7 +265,7 @@ module Woods
         views = deps.select { |d| d['type'] == 'view_template' }
         return nil if views.empty?
 
-        "## Views\n#{views.map { |v| "- `#{v['identifier']}`" }.first(10).join("\n")}"
+        "## Views\n#{views.map { |v| "- `#{v['identifier']}`" }.sort.first(10).join("\n")}"
       end
 
       # ── GraphQL formatting ───────────────────────────────────────────
@@ -246,7 +278,7 @@ module Woods
 
         deps = unit['dependencies'] || []
         models = deps.select { |d| d['type'] == 'model' }.map { |d| d['target'] }
-        sections << "**Models:** #{models.join(', ')}" if models.any?
+        sections << "**Models:** #{models.sort.join(', ')}" if models.any?
 
         dependents = unit['dependents'] || []
         sections << "**Referenced by:** #{dependents.size} units" if dependents.any?
@@ -267,14 +299,15 @@ module Woods
         deps = unit['dependencies'] || []
         if deps.any?
           by_type = deps.group_by { |d| d['type'] }
-          dep_parts = by_type.map { |type, items| "#{type}: #{items.map { |d| d['target'] }.join(', ')}" }
+          dep_parts = by_type.sort_by { |type, _| type.to_s }
+                             .map { |type, items| "#{type}: #{items.map { |d| d['target'] }.sort.join(', ')}" }
           sections << "## Dependencies\n#{dep_parts.join("\n")}"
         end
 
         dependents = unit['dependents'] || []
         if dependents.any?
           grouped = dependents.group_by { |d| d['type'] }
-          summary = grouped.map { |type, items| "#{items.size} #{type}s" }
+          summary = grouped.sort_by { |type, _| type.to_s }.map { |type, items| "#{items.size} #{type}s" }
           sections << "## Dependents (#{dependents.size})\n#{summary.join(', ')}"
         end
 
@@ -292,9 +325,9 @@ module Woods
       end
 
       def format_callbacks(callbacks)
-        callbacks.first(5).map do |cb|
-          "#{cb['type']}: #{cb['filter']}"
-        end.join(', ')
+        # Sort before truncating so both the selection and order are stable
+        # regardless of input order (the body is hashed for change detection).
+        callbacks.map { |cb| "#{cb[:type]}: #{cb[:filter]}" }.sort.first(5).join(', ')
       end
     end
   end

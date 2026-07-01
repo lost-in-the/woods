@@ -145,7 +145,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
       result = retriever.retrieve('How does the User model work?')
 
       expect(result.context).to include('Codebase:')
-      expect(result.context).to include('units')
+      expect(result.context).to include('searchable entries')
     end
   end
 

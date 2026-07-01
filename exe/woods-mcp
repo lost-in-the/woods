@@ -11,6 +11,20 @@
 # them via the Model Context Protocol (stdio transport).
 # Does NOT require Rails — only reads pre-extracted data.
 
+# Suppress json-schema MultiJSON deprecation notice that would otherwise pollute
+# stderr during MCP stdio transport. The deprecation fires the first time
+# +json-schema+ is required — earlier revisions set the flag *after* the
+# +require_relative '../lib/woods'+ chain, which lost the race. Any MCP client
+# that parses stderr would trip on the banner. Require +json-schema+ explicitly,
+# set the flag, *then* load Woods.
+begin
+  require 'json-schema'
+  JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Validator.respond_to?(:use_multi_json=)
+rescue LoadError
+  # json-schema isn't in every bundle — MCP clients without schema validation
+  # just don't see the deprecation notice either.
+end
+
 require_relative '../lib/woods'
 require_relative '../lib/woods/dependency_graph'
 require_relative '../lib/woods/graph_analyzer'
@@ -19,15 +33,24 @@ require_relative '../lib/woods/mcp/bootstrapper'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
-# Suppress json-schema MultiJSON deprecation notice that would pollute stderr
-# during MCP stdio transport. The notice fires when multi_json is in the bundle.
-JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Validator.respond_to?(:use_multi_json=)
+begin
+  index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
+  retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+  snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
+rescue Woods::MCP::BootstrapError => e
+  warn "[woods-mcp] #{e.class.name.split('::').last}: #{e.message}"
+  warn "[woods-mcp] details: #{e.details.inspect}" if e.respond_to?(:details) && !e.details.empty?
+  exit 2
+end
 
-index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
-retriever = Woods::MCP::Bootstrapper.build_retriever
-snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
+retriever_reloader = lambda do
+  Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir)
+end
 
-server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store)
+server = Woods::MCP::Server.build(
+  index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
+  bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
+)
 
 # Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
 if ENV['MCP_PROTOCOL_VERSION']

@@ -354,33 +354,11 @@ namespace :woods do
   desc 'Embed all extracted units'
   task embed: :environment do
     require 'woods'
-    require 'woods/embedding/indexer'
-    require 'woods/embedding/text_preparer'
-    require 'woods/embedding/provider'
-    require 'woods/storage/vector_store'
+    require 'woods/tasks'
 
-    config = Woods.configuration
-    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-
-    provider = Woods::Embedding::Provider::Ollama.new
-    text_preparer = Woods::Embedding::TextPreparer.new
-    vector_store = Woods::Storage::VectorStore::InMemory.new
-
-    indexer = Woods::Embedding::Indexer.new(
-      provider: provider,
-      text_preparer: text_preparer,
-      vector_store: vector_store,
-      output_dir: output_dir
-    )
-
+    indexer = Woods::Tasks.build_embed_indexer
     puts 'Embedding all extracted units...'
-    stats = indexer.index_all
-
-    puts
-    puts 'Embedding complete!'
-    puts "  Processed: #{stats[:processed]}"
-    puts "  Skipped:   #{stats[:skipped]}"
-    puts "  Errors:    #{stats[:errors]}"
+    Woods::Tasks.print_embed_stats(indexer.index_all, mode: :full)
   end
 
   desc 'Nest the data — embed all units (alias for embed)'
@@ -389,33 +367,11 @@ namespace :woods do
   desc 'Embed changed units only (incremental)'
   task embed_incremental: :environment do
     require 'woods'
-    require 'woods/embedding/indexer'
-    require 'woods/embedding/text_preparer'
-    require 'woods/embedding/provider'
-    require 'woods/storage/vector_store'
+    require 'woods/tasks'
 
-    config = Woods.configuration
-    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-
-    provider = Woods::Embedding::Provider::Ollama.new
-    text_preparer = Woods::Embedding::TextPreparer.new
-    vector_store = Woods::Storage::VectorStore::InMemory.new
-
-    indexer = Woods::Embedding::Indexer.new(
-      provider: provider,
-      text_preparer: text_preparer,
-      vector_store: vector_store,
-      output_dir: output_dir
-    )
-
+    indexer = Woods::Tasks.build_embed_indexer
     puts 'Embedding changed units (incremental)...'
-    stats = indexer.index_incremental
-
-    puts
-    puts 'Incremental embedding complete!'
-    puts "  Processed: #{stats[:processed]}"
-    puts "  Skipped:   #{stats[:skipped]}"
-    puts "  Errors:    #{stats[:errors]}"
+    Woods::Tasks.print_embed_stats(indexer.index_incremental, mode: :incremental)
   end
 
   desc 'Hone the blade — incremental embedding (alias for embed_incremental)'
@@ -648,25 +604,46 @@ namespace :woods do
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
+    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
+    force_full = env_flag.call('UNBLOCKED_FORCE_FULL_SYNC')
+    force_purge = env_flag.call('UNBLOCKED_FORCE_PURGE')
 
     puts 'Syncing extraction data to Unblocked...'
     puts "  Output dir:     #{output_dir}"
     puts "  Collection:     #{config.unblocked_collection_id}"
     puts "  Repo URL:       #{config.unblocked_repo_url}"
+    puts '  Mode:           full re-sync (UNBLOCKED_FORCE_FULL_SYNC set)' if force_full
     puts
 
-    exporter = Woods::Unblocked::Exporter.new(index_dir: output_dir)
+    exporter = Woods::Unblocked::Exporter.new(
+      index_dir: output_dir,
+      force_full: force_full,
+      force_purge: force_purge
+    )
     stats = exporter.sync_all
 
     puts
     puts 'Sync complete!'
     puts "  Documents synced:   #{stats[:synced]}"
     puts "  Documents skipped:  #{stats[:skipped]}"
+    puts "  Documents deleted:  #{stats[:deleted]}"
 
     if stats[:errors].any?
       puts "  Errors:             #{stats[:errors].size}"
       stats[:errors].first(5).each { |e| puts "    - #{e}" }
       puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+
+      # Fail the task so CI notices — a printed-but-green run is invisible in
+      # post-merge pipelines (a dead token would otherwise stay green forever).
+      # Exception: budget exhaustion *with* partial progress is the expected
+      # cold-start shape; it converges on the next run.
+      budget_only = stats[:errors].all? { |e| e.include?('daily budget exhausted') }
+      unless budget_only && stats[:synced].positive?
+        puts
+        puts 'Sync completed with errors — failing so CI surfaces it.'
+        exit 1
+      end
     end
   end
 
@@ -698,4 +675,61 @@ namespace :woods do
 
   desc 'Map the terrain — Svelte Flow export (alias for svelte_flow_export)'
   task map: :svelte_flow_export
+
+  desc 'Export extraction data to a self-contained Obsidian vault'
+  task obsidian: :environment do
+    require 'woods/obsidian/vault_exporter'
+
+    config = Woods.configuration
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+    vault_path = ENV.fetch('WOODS_OBSIDIAN_VAULT', File.join(output_dir.to_s, 'obsidian_vault'))
+    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
+    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
+
+    puts 'Exporting extraction data to an Obsidian vault...'
+    puts "  Output dir: #{output_dir}"
+    puts "  Vault:      #{vault_path}"
+    puts
+
+    begin
+      exporter = Woods::Obsidian::VaultExporter.new(
+        index_dir: output_dir,
+        vault_path: vault_path,
+        include_source: env_flag.call('WOODS_OBSIDIAN_INCLUDE_SOURCE'),
+        include_framework: env_flag.call('WOODS_OBSIDIAN_INCLUDE_FRAMEWORK'),
+        force_purge: env_flag.call('WOODS_OBSIDIAN_FORCE_PURGE')
+      )
+      stats = exporter.export_all
+    rescue Woods::Obsidian::ExportError => e
+      puts "ERROR: #{e.message}"
+      exit 1
+    end
+
+    puts 'Export complete!'
+    puts "  Notes:    #{stats[:exported]}"
+    puts "  Indexes:  #{stats[:indexes]}"
+    puts "  Swept:    #{stats[:swept]}"
+    puts "  Skipped:  #{stats[:skipped]}"
+    puts
+    puts "Open it in Obsidian: 'Open folder as vault' -> #{vault_path}"
+
+    if stats[:errors].any?
+      puts "  Errors:   #{stats[:errors].size}"
+      stats[:errors].first(5).each { |e| puts "    - #{e}" }
+      puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+      exit 1
+    end
+  end
+
+  desc 'Render the codebase as an Obsidian vault (alias for obsidian)'
+  task vault: :obsidian
+
+  desc 'Generate a random bearer token for woods-mcp-http (WOODS_MCP_HTTP_TOKEN)'
+  task :generate_token do
+    require 'securerandom'
+    token = SecureRandom.hex(32)
+    puts token
+    warn 'Set WOODS_MCP_HTTP_TOKEN to this value in the environment where woods-mcp-http runs,'
+    warn 'and send it as `Authorization: Bearer <token>` from clients.'
+  end
 end

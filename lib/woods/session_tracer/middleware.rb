@@ -17,11 +17,45 @@ module Woods
     #                               Woods::SessionTracer::Middleware
     #
     class Middleware
+      # Full Store interface every backend (FileStore, RedisStore,
+      # SolidCacheStore) implements. Middleware itself only calls
+      # {#record} — the read-side methods are used by the session_trace
+      # MCP tool and other consumers. Surfaced as a constant so operators
+      # can assert the full interface eagerly when they want:
+      #
+      #   missing = Woods::SessionTracer::Middleware::FULL_STORE_INTERFACE
+      #                .reject { |m| store.respond_to?(m) }
+      #   raise "incomplete store: #{missing}" unless missing.empty?
+      FULL_STORE_INTERFACE = %i[record read sessions clear clear_all].freeze
+
+      # Methods the middleware actually calls at request time. Validated
+      # at init so a half-configured store fails loudly at boot.
+      REQUIRED_STORE_METHODS = %i[record].freeze
+
       # @param app [#call] The downstream Rack application
-      # @param store [Store] Session trace store backend
+      # @param store [Store] Session trace store backend. Must respond to
+      #   `#record` (called by this middleware). Consumers that use the
+      #   read-side ({FULL_STORE_INTERFACE}) should assert on their own
+      #   contract; middleware does not enforce it to stay backward-
+      #   compatible with minimal `#record`-only implementations.
       # @param session_id_proc [Proc, nil] Custom session ID extraction (receives env)
       # @param exclude_paths [Array<String>] Path prefixes to skip
+      # @raise [ArgumentError] if the store is nil or does not implement
+      #   `:record`. Boot-time validation is preferable to the fire-and-
+      #   forget rescue in {#call} silently swallowing every request trace
+      #   when the store has the wrong shape.
       def initialize(app, store:, session_id_proc: nil, exclude_paths: [])
+        raise ArgumentError, 'session tracer middleware requires a store' if store.nil?
+
+        missing = REQUIRED_STORE_METHODS.reject { |m| store.respond_to?(m) }
+        unless missing.empty?
+          raise ArgumentError,
+                'session tracer store is missing required methods ' \
+                "#{missing.inspect} (got #{store.class}). " \
+                "Required: #{REQUIRED_STORE_METHODS.inspect}. " \
+                "Full interface: #{FULL_STORE_INTERFACE.inspect}."
+        end
+
         @app = app
         @store = store
         @session_id_proc = session_id_proc

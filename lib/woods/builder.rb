@@ -8,6 +8,10 @@ require_relative 'storage/metadata_store'
 require_relative 'storage/graph_store'
 require_relative 'embedding/provider'
 require_relative 'embedding/openai'
+require_relative 'embedding/text_preparer'
+require_relative 'embedding/token_counter'
+require_relative 'token_utils'
+require_relative 'chunking/semantic_chunker'
 
 module Woods
   # Builder reads a {Configuration} and instantiates the appropriate adapters,
@@ -29,13 +33,23 @@ module Woods
   class Builder # rubocop:disable Metrics/ClassLength
     # Named presets mapping to default adapter types.
     #
-    # :local      — fully local, no external services required
-    # :postgresql — pgvector for vectors, OpenAI for embeddings
-    # :production — Qdrant for vectors, OpenAI for embeddings
+    # :local              — fully local, no external services required (requires sqlite3 gem)
+    # :shared_filesystem  — Shape 2: rake embed → separate MCP server reads from disk.
+    #                       All stores in-memory + persisted to output_dir via the
+    #                       Snapshotter. No sqlite3 gem needed. Requires output_dir set
+    #                       AND readable by both the embed process and the MCP server.
+    # :postgresql         — pgvector for vectors, OpenAI for embeddings
+    # :production         — Qdrant for vectors, OpenAI for embeddings
     PRESETS = {
       local: {
         vector_store: :in_memory,
         metadata_store: :sqlite,
+        graph_store: :in_memory,
+        embedding_provider: :ollama
+      },
+      shared_filesystem: {
+        vector_store: :in_memory,
+        metadata_store: :in_memory,
         graph_store: :in_memory,
         embedding_provider: :ollama
       },
@@ -78,17 +92,30 @@ module Woods
     # {Cache::CachedEmbeddingProvider} and the retriever is wrapped with
     # {Cache::CachedRetriever} for transparent caching of expensive operations.
     #
+    # Callers that need stores pre-populated from a dump (the Shape-2
+    # MCP-serve path) can inject them via +vector_store:+ / +metadata_store:+.
+    # Without these, fresh empty stores are constructed from config. This
+    # is how the Bootstrapper hydrates from `Snapshotter.load_or_empty`
+    # without Builder needing to know the Snapshotter exists.
+    #
+    # @param vector_store [Storage::VectorStore::Interface, nil]
+    # @param metadata_store [Storage::MetadataStore::Interface, nil]
+    # @param graph_store [Storage::GraphStore::Interface, nil] Pre-populated
+    #   graph store. Without this, the retriever gets a fresh empty graph,
+    #   which silently degrades +:hybrid+ retrieval (graph expansion returns
+    #   no candidates). The Bootstrapper hydrates from +dependency_graph.json+
+    #   on disk and passes the populated store here.
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
-    def build_retriever
+    def build_retriever(vector_store: nil, metadata_store: nil, graph_store: nil)
       provider = build_embedding_provider
       cache = build_cache_store
 
       provider = wrap_with_embedding_cache(provider, cache) if cache
 
       retriever = Retriever.new(
-        vector_store: build_vector_store,
-        metadata_store: build_metadata_store,
-        graph_store: build_graph_store,
+        vector_store: vector_store || build_vector_store,
+        metadata_store: metadata_store || build_metadata_store,
+        graph_store: graph_store || build_graph_store,
         embedding_provider: provider
       )
 
@@ -110,17 +137,153 @@ module Woods
 
     # Instantiate the embedding provider specified by the configuration.
     #
+    # Strips `embedding_options` keys that belong to the ResolvedConfig layer
+    # (like `:dimension`) before splatting into the provider's constructor —
+    # those keys are useful for the Snapshotter's schema header but
+    # aren't part of the provider's API.
+    #
     # @return [Embedding::Provider::Interface] Embedding provider instance
     # @raise [ArgumentError] if the configured type is not recognized
     def build_embedding_provider
+      opts = provider_kwargs
       case @config.embedding_provider
-      when :openai then Embedding::Provider::OpenAI.new(**(@config.embedding_options || {}))
-      when :ollama then Embedding::Provider::Ollama.new(**(@config.embedding_options || {}))
+      when :openai then Embedding::Provider::OpenAI.new(**opts)
+      when :ollama then Embedding::Provider::Ollama.new(**opts)
       else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
       end
     end
 
+    # Kwargs accepted by embedding provider constructors — everything in
+    # `embedding_options` except metadata fields that live there for
+    # ResolvedConfig bookkeeping.
+    SNAPSHOT_ONLY_KEYS = %i[dimension].freeze
+    private_constant :SNAPSHOT_ONLY_KEYS
+
+    def provider_kwargs
+      opts = (@config.embedding_options || {}).transform_keys(&:to_sym)
+      SNAPSHOT_ONLY_KEYS.each { |k| opts.delete(k) }
+      opts
+    end
+    private :provider_kwargs
+
+    # Build a {Embedding::TextPreparer} calibrated to a given provider.
+    #
+    # OpenAI embedders use tiktoken (cl100k_base) — 4.0 chars/token is a
+    # good conservative average. Ollama BERT/WordPiece tokenizers
+    # (nomic-embed-text, bge-*) run much hotter on dense Ruby/Rails
+    # source — long CamelCase constants, docstrings, callback DSLs, and
+    # heavy symbol use all sit below 2.0 chars/token in practice.
+    # Empirically, a 16 KB chunk of `ActionMailer::Base` still blows the
+    # 8192-token budget at 2.0 chars/token, so we budget at 1.5 to stay
+    # clear of tokenizer surprises even on the densest Rails internals.
+    #
+    # `max_tokens` tracks the provider's actual input budget when it
+    # reports one, falling back to the TextPreparer default otherwise.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Embedding::TextPreparer]
+    def build_text_preparer(provider)
+      chars_per_token = chars_per_token_for(provider)
+      budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
+      max_tokens = budget || Embedding::TextPreparer::DEFAULT_MAX_TOKENS
+
+      Embedding::TextPreparer.new(max_tokens: max_tokens, chars_per_token: chars_per_token)
+    end
+
+    # Build a {Chunking::SemanticChunker} sized to a given provider.
+    #
+    # `max_chars` is derived from the provider's input budget and the
+    # matching chars-per-token ratio, minus the context-prefix
+    # allowance the Indexer accounts for separately. Units that exceed
+    # this ceiling get sliced so no single chunk can blow the provider's
+    # input cap.
+    #
+    # For Ollama (and other BERT/WordPiece-backed models), char-based
+    # estimation is unreliable — CamelCase, `::` separators, and symbol
+    # literals tokenize much denser than chars/token averages suggest.
+    # When the optional `tokenizers` gem is installed, pass a
+    # {Embedding::TokenCounter} and `max_tokens` so the chunker can
+    # verify every slice with the real tokenizer and re-split any piece
+    # that still exceeds `num_ctx`. See docs/EMBEDDING_MODELS.md.
+    #
+    # Ollama v0.13.5+ stopped honouring `truncate: true` on `/api/embed`
+    # (ollama/ollama#14186), so any chunk that exceeds `num_ctx` returns
+    # a 400 rather than being silently truncated. Exact client-side
+    # sizing is the only reliable path until the regression is fixed
+    # upstream.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Chunking::SemanticChunker]
+    def build_chunker(provider)
+      budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
+      max_chars = ((budget * chars_per_token_for(provider)).floor - CHUNKER_PREFIX_ALLOWANCE if budget)
+
+      # Guard against a budget so small that the prefix allowance leaves
+      # no room for content. Without this, SemanticChunker#slice_by_lines
+      # passes a negative repeat count to String#scan, which returns []
+      # — every chunk becomes empty and is silently dropped, producing
+      # zero embeddings with no error. Surface the misconfiguration loudly.
+      raise ArgumentError, chunker_budget_message(provider, budget) if max_chars && max_chars <= 0
+
+      token_counter = token_counter_for(provider)
+      max_tokens = token_counter && budget ? budget - PREFIX_TOKEN_ALLOWANCE : nil
+
+      Chunking::SemanticChunker.new(
+        max_chars: max_chars,
+        token_counter: token_counter,
+        max_tokens: max_tokens
+      )
+    end
+
+    # Character allowance reserved for the TextPreparer context prefix
+    # ([type] id / namespace / file / deps) — kept in sync with the
+    # Indexer's own PREFIX_CHAR_ALLOWANCE constant.
+    CHUNKER_PREFIX_ALLOWANCE = 512
+    private_constant :CHUNKER_PREFIX_ALLOWANCE
+
+    # Token-side sibling of {CHUNKER_PREFIX_ALLOWANCE}. Reserved for the
+    # TextPreparer prefix when tokenizer-driven sizing is active — a bit
+    # generous to cover long file paths and dep lists.
+    PREFIX_TOKEN_ALLOWANCE = 256
+    private_constant :PREFIX_TOKEN_ALLOWANCE
+
     private
+
+    # Return a TokenCounter for providers that benefit from exact token
+    # counting. OpenAI's tiktoken ratios are already stable at 4.0
+    # chars/token on code, so it doesn't need this.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Embedding::TokenCounter, nil]
+    def token_counter_for(provider)
+      return unless provider.is_a?(Embedding::Provider::Ollama)
+
+      Embedding::TokenCounter.new
+    end
+
+    # Tokenizer-calibrated chars/token ratio for the given provider.
+    # Delegates to {Woods::TokenUtils.chars_per_token_for} — the single
+    # source of truth — after reducing the provider instance to a symbol.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Float]
+    def chars_per_token_for(provider)
+      symbol = case provider
+               when Embedding::Provider::Ollama then :ollama
+               else :openai
+               end
+      TokenUtils.chars_per_token_for(symbol)
+    end
+
+    # Diagnostic for the build_chunker budget guard.
+    def chunker_budget_message(provider, budget)
+      "embedding model '#{provider.respond_to?(:model) ? provider.model : provider.class}' " \
+        "reports a max_input_tokens of #{budget}, which leaves no room for " \
+        "the chunk prefix (#{CHUNKER_PREFIX_ALLOWANCE} chars). Configure a " \
+        'model with a larger native context, or set num_ctx explicitly.'
+    end
+
+    public
 
     # Instantiate the metadata store adapter specified by the configuration.
     #
@@ -144,6 +307,8 @@ module Woods
       else raise ArgumentError, "Unknown graph_store: #{@config.graph_store}"
       end
     end
+
+    private
 
     # Build a cache store from configuration, or nil if caching is disabled.
     #

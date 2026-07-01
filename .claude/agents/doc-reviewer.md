@@ -22,13 +22,13 @@ You review whether documentation is in sync with the current implementation.
 
 | If this changed... | Check these docs... |
 |---|---|
-| Extractor behavior | `CLAUDE.md` Architecture/Gotchas, `docs/design/OPTIMIZATION_BACKLOG.md` |
+| Extractor behavior | `CLAUDE.md` Architecture/Gotchas, `.claude/rules/extractors.md` |
 | New extractor added | `CLAUDE.md` Architecture tree, `.claude/rules/extractors.md` |
 | MCP server tools | `docs/MCP_SERVERS.md`, `docs/design/AGENTIC_STRATEGY.md` |
 | Configuration options | `docs/CONFIGURATION_REFERENCE.md`, `CLAUDE.md` Commands |
 | Dependency graph changes | `docs/design/RETRIEVAL_ARCHITECTURE.md` graph traversal section |
 | Output format changes | `docs/design/CONTEXT_AND_CHUNKING.md` |
-| Backlog item completed | `docs/design/OPTIMIZATION_BACKLOG.md` — mark ✅ with resolution + commit ref |
+| Backlog item completed | `docs/backlog.json` — flip `status` to `resolved` (see `.claude/skills/backlog-workflow/SKILL.md`). `docs/design/OPTIMIZATION_BACKLOG.md` is an **archived design document from the gem's initial build phase** — do not update it when closing backlog items. The live tracker is `docs/backlog.json`. |
 
 ## What You Don't Do
 

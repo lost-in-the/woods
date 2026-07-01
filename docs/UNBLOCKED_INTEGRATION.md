@@ -21,21 +21,38 @@ citation links in Unblocked answers.
 
 ### 1. Create an Unblocked Collection
 
-In the [Unblocked web app](https://getunblocked.com):
-
-1. Go to **Settings** → **Data Sources** → **Add Data Sources**
-2. Scroll to the documentation section and select **Create a Custom Source**
-3. Name it (e.g., "Codebase Architecture") and save
-4. Copy the collection ID from the URL or API
-
-Or via the API:
+Collections for custom sources are created **via the API** (the web app does
+not currently offer a creation path for them):
 
 ```bash
 curl -X POST https://getunblocked.com/api/v1/collections \
   -H "Authorization: Bearer $UNBLOCKED_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Codebase Architecture", "description": "Structural metadata from Woods extraction — models, controllers, services, dependencies, and blast radius analysis."}'
+  -d '{"name": "Codebase Architecture", "description": "Structural metadata from Woods extraction — models, controllers, services, dependencies, and blast radius analysis.", "iconUrl": "https://raw.githubusercontent.com/lost-in-the/woods/main/assets/woods-mark-black.svg"}'
 ```
+
+> **Known API quirk:** the live API rejects collection creation with a bare
+> `400 Bad Request` unless `iconUrl` is included, even though the API docs mark
+> it optional. Always pass an `iconUrl` — the Woods mark above is a stable,
+> repo-hosted square SVG you can use directly.
+
+Creating the collection from Ruby is simpler — `Client#create_collection`
+defaults `iconUrl` to the Woods mark (`Client::DEFAULT_ICON_URL`), so the quirk
+can't bite:
+
+```ruby
+require 'woods/unblocked/client'
+
+client = Woods::Unblocked::Client.new(api_token: ENV['UNBLOCKED_API_TOKEN'])
+collection = client.create_collection(
+  name: 'Codebase Architecture',
+  description: 'Structural metadata from Woods extraction — models, ' \
+               'controllers, services, dependencies, and blast radius analysis.'
+)
+collection['id'] # => use as UNBLOCKED_COLLECTION_ID
+```
+
+Pass `icon_url:` to use your own icon instead of the default.
 
 ### 2. Create an API Token
 
@@ -133,11 +150,52 @@ sync uses ~800-1200 calls for the initial build. If your app exceeds 1,000 units
 
 ## CI Integration
 
-Add a post-merge Buildkite (or GitHub Actions) step:
+Add a post-merge step. The sync is incremental (see below), so the one thing CI
+must do beyond running the task is **persist the sync manifest between runs** —
+otherwise every deploy starts from scratch and re-pushes everything.
+
+### GitHub Actions
+
+`actions/cache` entries are **immutable** — an exact-key hit skips the post-job
+save, which would freeze the manifest at its first-run state forever. Use a
+unique key plus `restore-keys` so every run saves a fresh manifest and the next
+run restores the most recent one:
 
 ```yaml
-# Buildkite example
+env:
+  UNBLOCKED_COLLECTION_ID: "..."
+
+steps:
+  - uses: actions/cache@v4
+    with:
+      path: tmp/woods/unblocked_sync_manifest.json
+      key: unblocked-sync-${{ env.UNBLOCKED_COLLECTION_ID }}-${{ github.run_id }}
+      restore-keys: |
+        unblocked-sync-${{ env.UNBLOCKED_COLLECTION_ID }}-
+  - run: bin/rails woods:extract
+  - run: bin/rails woods:unblocked_sync
+    env:
+      UNBLOCKED_API_TOKEN: "ubk_..."
+      UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
+```
+
+### Buildkite
+
+Buildkite has no native cache primitive. Note that plain
+`buildkite-agent artifact download` is **scoped to the current build** — it
+cannot restore a previous build's manifest on its own. Use the S3-backed
+[cache plugin](https://github.com/buildkite-plugins/cache-buildkite-plugin)
+(simplest), or resolve the last successful build's ID via the REST API and pass
+`--build`:
+
+```yaml
 - label: ":trees: Woods → Unblocked"
+  plugins:
+    - cache#v1.7.0:
+        manifest: Gemfile.lock          # any stable file; key below does the work
+        path: tmp/woods/unblocked_sync_manifest.json
+        restore: pipeline
+        save: pipeline
   command:
     - bin/rails woods:extract
     - bin/rails woods:unblocked_sync
@@ -148,16 +206,53 @@ Add a post-merge Buildkite (or GitHub Actions) step:
     UNBLOCKED_REPO_URL: "https://github.com/your-org/your-repo"
 ```
 
-This keeps the Unblocked collection in sync with main after every merge.
+If you prefer the artifact API, the restore step must target a previous build
+explicitly, e.g.
+`buildkite-agent artifact download --build "$(previous_passed_build_id)" "tmp/woods/unblocked_sync_manifest.json" .`
+where `previous_passed_build_id` queries the REST API for the last passed build
+on the pipeline. Declaring `artifact_paths: tmp/woods/**/*` still uploads the
+fresh manifest for free at the end of each run.
+
+> **Concurrency:** two syncs racing (e.g. per-deploy CI on quick successive
+> merges) can interleave manifest writes and put/delete calls. Gating this is
+> the host pipeline's responsibility — set a Buildkite `concurrency_group` (or
+> the GitHub Actions `concurrency:` key) on the sync step.
 
 ## Incremental Updates
 
-The current implementation pushes all qualifying units on each sync (upsert
-ensures idempotency). For large codebases, you can combine with
-`woods:incremental` to only re-extract changed files, though the sync itself
-still pushes all documents.
+The sync is incremental. A **sync manifest**
+(`<output_dir>/unblocked_sync_manifest.json`) records the content hash and remote
+document id of everything last pushed. On each run the exporter:
 
-Future versions may support diff-based sync that only pushes changed documents.
+- **skips** documents whose built body hash is unchanged,
+- **pushes** only new or changed documents,
+- **deletes** documents whose source unit has disappeared.
+
+Documents are upserted by URI, so the sync is always safe to re-run. If the
+manifest is missing (first run, or a CI cache miss) the exporter reconciles
+document ids from the remote collection and falls back to a full re-push,
+rebuilding the manifest — correct, just more API calls than one run. In steady
+state an unchanged codebase costs ~0 calls.
+
+Pair with `woods:incremental` to re-extract only changed files; the sync then
+pushes only the documents whose content actually changed.
+
+### Escape hatches
+
+- `UNBLOCKED_FORCE_FULL_SYNC=1` — re-push every document, ignoring the unchanged
+  check (still uses the manifest for deletes). Use after a `DocumentBuilder`
+  format change, which alters every body.
+- `UNBLOCKED_FORCE_PURGE=1` — bypass the mass-deletion guard. The guard refuses
+  to delete more than 30% of a manifest tracking ≥10 documents in one run, which
+  protects against running the sync against a **partial index** (e.g.
+  `woods:incremental` output in a fresh directory), where the current unit set
+  is a small subset and an unguarded purge would wipe the collection.
+
+  The guard also fires on *intentional* large removals: dropping a unit type
+  from the sync set, changing `unblocked_repo_url` (every URI changes), or a
+  big codebase deletion can all legitimately exceed 30%. The refusal warning
+  names the counts — if the deletions are expected, re-run once with
+  `UNBLOCKED_FORCE_PURGE=1`.
 
 ## Troubleshooting
 

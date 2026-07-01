@@ -23,9 +23,57 @@ module Woods
     #
     class SnapshotStore # rubocop:disable Metrics/ClassLength
       # @param connection [Object] Database connection supporting #execute and #get_first_row
-      def initialize(connection:)
+      # @param validate_schema [Boolean] If true (default), probe both required
+      #   tables at construction time and raise a descriptive error pointing at
+      #   migrations 004+005 when they are missing. Set false in tests that
+      #   construct the store with a bare mock.
+      def initialize(connection:, validate_schema: true)
         @db = connection
+        validate_schema! if validate_schema
       end
+
+      REQUIRED_TABLES = %w[woods_snapshots woods_snapshot_units].freeze
+
+      # Probe that `woods_snapshots` and `woods_snapshot_units` exist. If
+      # they don't, raise with guidance to run migrations 004 + 005 —
+      # without this, the first call to {#capture}/{#find} raises a generic
+      # adapter error that doesn't tell operators why.
+      #
+      # When the connection responds to `#columns` (ActiveRecord-shaped) or
+      # `#table_exists?`, use that — these are hard to spoof from a test
+      # mock, so a partial mock can no longer silently pass. Falls back to
+      # the `SELECT 1 FROM t LIMIT 1` probe for minimal connections.
+      #
+      # @raise [Woods::Error]
+      def validate_schema!
+        REQUIRED_TABLES.each { |t| probe_table!(t) }
+      rescue Woods::Error
+        raise
+      rescue StandardError => e
+        raise Woods::Error, schema_error_message(e)
+      end
+
+      private
+
+      def probe_table!(table)
+        if @db.respond_to?(:table_exists?)
+          raise Woods::Error, schema_error_message("table `#{table}` does not exist") unless @db.table_exists?(table)
+        elsif @db.respond_to?(:columns)
+          cols = @db.columns(table)
+          raise Woods::Error, schema_error_message("no columns for `#{table}`") if cols.nil? || cols.empty?
+        else
+          @db.execute("SELECT 1 FROM #{table} LIMIT 1")
+        end
+      end
+
+      def schema_error_message(detail)
+        'SnapshotStore requires the `woods_snapshots` and ' \
+          '`woods_snapshot_units` tables (migrations 004 + 005 under ' \
+          '`lib/woods/db/migrations/`). Run `rake woods:migrate` on the ' \
+          "metadata DB and retry. Underlying error: #{detail}"
+      end
+
+      public
 
       # Capture a snapshot after extraction completes.
       #
@@ -37,7 +85,10 @@ module Woods
       # @return [Hash] Snapshot record with diff stats
       def capture(manifest, unit_hashes)
         git_sha = mget(manifest, 'git_sha')
-        return nil unless git_sha
+        # Snapshots are keyed by commit SHA — skip a missing or non-SHA value
+        # (e.g. the "unknown" provenance sentinel, #137) so it can't key or
+        # collide a snapshot row. Mirrors JsonSnapshotStore's path validation.
+        return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
         previous = find_latest
         upsert_snapshot(manifest, git_sha, unit_hashes.size)

@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
+require 'fileutils'
+require 'tmpdir'
 require 'woods/dependency_graph'
 require 'woods/mcp/index_reader'
 
@@ -66,6 +69,51 @@ RSpec.describe Woods::MCP::IndexReader do
 
     it 'contains expected orphans' do
       expect(reader.graph_analysis['orphans']).to include('PostsController')
+    end
+  end
+
+  describe '#warmup!' do
+    it 'reports success for every step when artefacts are present' do
+      result = reader.warmup!
+
+      expect(result).to eq(
+        manifest: true,
+        summary: true,
+        dependency_graph: true,
+        graph_analysis: true,
+        identifier_map: true
+      )
+    end
+
+    it 'populates caches so subsequent accessors do not re-read from disk' do
+      reader.warmup!
+
+      # After warmup, calling a lazy accessor should not parse JSON again.
+      # Prove this by spying on File.read: subsequent calls hit zero reads.
+      allow(File).to receive(:read).and_call_original
+      reader.manifest
+      reader.dependency_graph
+      reader.graph_analysis
+
+      expect(File).not_to have_received(:read)
+    end
+
+    it 'is idempotent — second call reuses the memoized values' do
+      first_graph = reader.warmup! && reader.dependency_graph
+      second_graph = reader.warmup! && reader.dependency_graph
+
+      expect(first_graph).to equal(second_graph)
+    end
+
+    it 'records per-step exceptions without aborting the rest' do
+      # Force one step to raise. graph_analysis.json is optional and easy to target.
+      allow(reader).to receive(:graph_analysis).and_raise(StandardError, 'boom')
+
+      result = reader.warmup!
+
+      expect(result[:graph_analysis]).to be_a(StandardError)
+      expect(result[:manifest]).to be(true)
+      expect(result[:identifier_map]).to be(true)
     end
   end
 
@@ -260,6 +308,122 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(identifiers).to include('UserMailer')
       expect(identifiers).not_to include('Post', 'PostsController')
     end
+
+    describe 'exact_prefix / exact_suffix filters' do
+      it 'restricts identifier matches to those starting with exact_prefix' do
+        results = reader.search('.', exact_prefix: 'Post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+        expect(identifiers).not_to include('Comment', 'UserMailer', 'Publishable')
+      end
+
+      it 'restricts identifier matches to those ending with exact_suffix' do
+        results = reader.search('.', exact_suffix: 'Controller')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'is case-insensitive for prefix matching' do
+        results = reader.search('.', exact_prefix: 'post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'is case-insensitive for suffix matching' do
+        results = reader.search('.', exact_suffix: 'controller')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'treats prefix as a literal string (no regex metacharacter handling)' do
+        # "External::" contains "::" which would be regex noise if escaped naively.
+        # The filter must match literally.
+        results = reader.search('.', exact_prefix: 'External::')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['External::Analytics'])
+      end
+
+      it 'combines with regex query via AND' do
+        # Query matches "Post" OR "Comment"; prefix restricts to starts-with-Post.
+        results = reader.search('Post|Comment', exact_prefix: 'Post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController')
+        expect(identifiers).not_to include('Comment')
+      end
+
+      it 'combines exact_prefix and exact_suffix together' do
+        results = reader.search('.', exact_prefix: 'Post', exact_suffix: 'Controller')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'ignores blank exact_prefix values' do
+        results = reader.search('Post', exact_prefix: '')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'ignores blank exact_suffix values' do
+        results = reader.search('Post', exact_suffix: '')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'applies to source_code matches by filtering on identifier' do
+        # "has_many" matches Post.source_code, but Post starts with "Post".
+        # Suffix "Comment" should exclude it.
+        results = reader.search('has_many', fields: %w[source_code], exact_suffix: 'Comment')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).not_to include('Post')
+      end
+
+      it 'returns no results when prefix excludes every candidate' do
+        result = reader.search('.', exact_prefix: 'NoSuchPrefix')
+        expect(result[:results]).to be_empty
+      end
+
+      it 'accepts nil query when exact_prefix is provided' do
+        results = reader.search(nil, exact_prefix: 'Post')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('Post', 'PostsController', 'PostDecorator')
+      end
+
+      it 'accepts nil query when exact_suffix is provided' do
+        results = reader.search(nil, exact_suffix: 'Mailer')[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['UserMailer'])
+      end
+
+      it 'raises ArgumentError when query and both filters are blank' do
+        expect { reader.search(nil) }.to raise_error(ArgumentError, /requires a query/)
+        expect { reader.search('') }.to raise_error(ArgumentError, /requires a query/)
+        expect { reader.search('', exact_prefix: '', exact_suffix: nil) }
+          .to raise_error(ArgumentError, /requires a query/)
+      end
+
+      it 'composes with the types filter' do
+        results = reader.search('.', exact_prefix: 'Post', types: ['controller'])[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to eq(['PostsController'])
+      end
+
+      it 'composes with metadata field matching' do
+        # "ApplicationController" appears in PostsController's parent_class metadata.
+        # exact_suffix restricts to identifiers ending in "Controller".
+        results = reader.search('ApplicationController', exact_suffix: 'Controller',
+                                                         fields: %w[metadata])[:results]
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('PostsController')
+      end
+
+      it 'reports broad-match counts based on the filtered candidate set' do
+        # ".*" would match all entries in a dir — without the filter it triggers
+        # the broad-pattern note. With exact_suffix: "Controller" only one entry
+        # in the controllers dir matches, so no broad-pattern warning should fire.
+        result = reader.search('.*', exact_suffix: 'Controller', types: ['model'])
+        expect(result[:note]).to be_nil
+      end
+    end
   end
 
   describe '#traverse_dependencies' do
@@ -293,6 +457,61 @@ RSpec.describe Woods::MCP::IndexReader do
     it 'returns found: true for known identifier' do
       result = reader.traverse_dependencies('Comment', depth: 1)
       expect(result[:found]).to be true
+    end
+
+    describe 'depth bounding (#109)' do
+      # Seed a 3-hop chain Order → Account → Currency → USD so the
+      # off-by-one is observable on real data. The fixture graph is
+      # too shallow to demonstrate the bug.
+      let(:tmp_dir) { Dir.mktmpdir('woods-traverse-depth') }
+      let(:reader) { described_class.new(tmp_dir) }
+
+      before do
+        File.write(File.join(tmp_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        File.write(
+          File.join(tmp_dir, 'dependency_graph.json'),
+          JSON.pretty_generate(
+            nodes: {
+              'Order' => { 'type' => 'model' },
+              'Account' => { 'type' => 'model' },
+              'Currency' => { 'type' => 'model' },
+              'USD' => { 'type' => 'model' }
+            },
+            edges: {
+              'Order' => [{ 'target' => 'Account', 'via' => 'belongs_to' }],
+              'Account' => [{ 'target' => 'Currency', 'via' => 'belongs_to' }],
+              'Currency' => [{ 'target' => 'USD', 'via' => 'belongs_to' }]
+            },
+            reverse: {
+              'Account' => ['Order'], 'Currency' => ['Account'], 'USD' => ['Currency']
+            }
+          )
+        )
+      end
+
+      after { FileUtils.remove_entry(tmp_dir) if File.directory?(tmp_dir) }
+
+      it 'at depth: 1 exposes only the root and its immediate children' do
+        result = reader.traverse_dependencies('Order', depth: 1)
+        expect(result[:nodes].keys).to contain_exactly('Order', 'Account')
+        # Account is at max depth, so its own entry has empty deps (its
+        # parent's deps list already shows it as a child).
+        expect(result[:nodes]['Account'][:deps]).to eq([])
+        expect(result[:nodes]['Order'][:deps]).to eq(['Account'])
+      end
+
+      it 'at depth: 2 expands one more level' do
+        result = reader.traverse_dependencies('Order', depth: 2)
+        expect(result[:nodes].keys).to contain_exactly('Order', 'Account', 'Currency')
+        expect(result[:nodes]['Currency'][:deps]).to eq([])
+        expect(result[:nodes]['Account'][:deps]).to eq(['Currency'])
+      end
+
+      it 'at depth: 0 returns only the root with empty deps' do
+        result = reader.traverse_dependencies('Order', depth: 0)
+        expect(result[:nodes].keys).to eq(['Order'])
+        expect(result[:nodes]['Order'][:deps]).to eq([])
+      end
     end
   end
 
@@ -349,6 +568,36 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(result[:file_path]).to include('activerecord')
       expect(result[:metadata]).to include('gem_name' => 'activerecord')
     end
+
+    describe 'multi-word keywords (#107)' do
+      it 'ANDs each whitespace-separated token' do
+        results = reader.framework_sources('ActiveRecord Persistence')
+        identifiers = results.map { |r| r[:identifier] }
+        expect(identifiers).to include('ActiveRecord::Base')
+      end
+
+      it 'returns empty when not all tokens match the same unit' do
+        # "Persistence" lives in ActiveRecord::Base source_code; "controller"
+        # only in ActionController::Base metadata — no unit has both.
+        results = reader.framework_sources('Persistence controller')
+        expect(results).to be_empty
+      end
+
+      it 'returns empty when two of three tokens match but the third does not' do
+        # Both "ActiveRecord" and "Persistence" appear in ActiveRecord::Base;
+        # "nonexistent_marker" does not. The AND semantic must reject.
+        results = reader.framework_sources('ActiveRecord Persistence nonexistent_marker')
+        expect(results).to be_empty
+      end
+
+      it 'returns empty for a whitespace-only keyword rather than raising' do
+        expect(reader.framework_sources('   ')).to eq([])
+      end
+
+      it 'returns empty for an empty keyword' do
+        expect(reader.framework_sources('')).to eq([])
+      end
+    end
   end
 
   describe '#recent_changes' do
@@ -386,6 +635,35 @@ RSpec.describe Woods::MCP::IndexReader do
       results = reader.recent_changes(limit: 1)
       result = results.first
       expect(result).to include(:identifier, :type, :file_path, :last_modified)
+    end
+
+    it 'populates :author from metadata.git.last_author (#106)' do
+      results = reader.recent_changes(limit: 1)
+      expect(results.first[:author]).to eq('dev@example.com')
+    end
+
+    it 'leaves :author nil when git metadata has no last_author entry' do
+      Dir.mktmpdir('woods-author-nil') do |tmp|
+        File.write(File.join(tmp, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        FileUtils.mkdir_p(File.join(tmp, 'models'))
+        File.write(
+          File.join(tmp, 'models', '_index.json'),
+          JSON.pretty_generate([{ 'identifier' => 'Anon' }])
+        )
+        digest = Digest::SHA256.hexdigest('Anon')[0, 8]
+        File.write(
+          File.join(tmp, 'models', "Anon_#{digest}.json"),
+          JSON.pretty_generate(
+            type: 'model', identifier: 'Anon',
+            metadata: { git: { last_modified: '2026-04-01T00:00:00Z' } }
+          )
+        )
+
+        reader = described_class.new(tmp)
+        results = reader.recent_changes(limit: 1)
+        expect(results.first[:identifier]).to eq('Anon')
+        expect(results.first[:author]).to be_nil
+      end
     end
   end
 
@@ -449,6 +727,87 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(results).to include(
         a_hash_including(identifier: 'External::Analytics', type: 'lib')
       )
+    end
+  end
+
+  describe 'Phase-2 scan budget distribution across type directories (#104)' do
+    # Phase 2 used to iterate TYPE_DIRS in order and increment a single
+    # global counter, so a codebase with more than max_scan units in the
+    # early dirs (models, controllers) would starve later dirs like
+    # concerns (pos 13) and test_mappings (pos 31). Interleaving ensures
+    # every populated dir gets a share of the scan budget.
+
+    let(:synthetic_dir) { Dir.mktmpdir('woods-search-budget') }
+    let(:synthetic_reader) { described_class.new(synthetic_dir) }
+
+    before do
+      # Satisfy IndexReader's manifest requirement.
+      File.write(
+        File.join(synthetic_dir, 'manifest.json'),
+        JSON.pretty_generate(total_units: 0, counts: {})
+      )
+
+      # 20 models — enough to exhaust any reasonable scan cap on its own.
+      FileUtils.mkdir_p(File.join(synthetic_dir, 'models'))
+      model_entries = 20.times.map do |i|
+        identifier = "Model#{i}"
+        write_unit(synthetic_dir, 'models', identifier, type: 'model', source: 'class body')
+        { 'identifier' => identifier }
+      end
+      File.write(File.join(synthetic_dir, 'models', '_index.json'), JSON.pretty_generate(model_entries))
+
+      # One concern whose source contains the target phrase. Positionally
+      # 13th in TYPE_DIRS — guaranteed to be starved by linear scan when
+      # max_scan is below ~20 models.
+      FileUtils.mkdir_p(File.join(synthetic_dir, 'concerns'))
+      write_unit(
+        synthetic_dir, 'concerns', 'ApiAuthentication',
+        type: 'concern',
+        source: "module ApiAuthentication\n  def requires_authentication\n    true\n  end\nend"
+      )
+      File.write(
+        File.join(synthetic_dir, 'concerns', '_index.json'),
+        JSON.pretty_generate([{ 'identifier' => 'ApiAuthentication' }])
+      )
+    end
+
+    after { FileUtils.remove_entry(synthetic_dir) if File.directory?(synthetic_dir) }
+
+    def write_unit(base, dir, identifier, type:, source:)
+      digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+      filename = "#{identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')}_#{digest}.json"
+      File.write(
+        File.join(base, dir, filename),
+        JSON.pretty_generate(
+          type: type, identifier: identifier, source_code: source,
+          metadata: {}, dependencies: [], dependents: []
+        )
+      )
+    end
+
+    it 'reaches the concerns dir even when models dir alone exceeds max_scan' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '5'
+      begin
+        result = synthetic_reader.search('requires_authentication', fields: %w[source_code])
+        identifiers = result[:results].map { |r| r[:identifier] }
+        expect(identifiers).to include('ApiAuthentication')
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
+    end
+
+    it 'still sets :partial when the scan cap actually runs out before all candidates load' do
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '3'
+      begin
+        result = synthetic_reader.search('class body', fields: %w[source_code])
+        expect(result[:partial]).to be true
+      ensure
+        ENV.delete('WOODS_SEARCH_MAX_SCAN')
+        ENV['WOODS_SEARCH_MAX_SCAN'] = original if original
+      end
     end
   end
 

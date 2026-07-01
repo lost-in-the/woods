@@ -115,4 +115,28 @@ RSpec.describe Woods::Evaluation::BaselineRunner do
       expect(described_class::VALID_STRATEGIES).to contain_exactly(:grep, :random, :file_level)
     end
   end
+
+  describe 'seeded random baseline (J-5)' do
+    let(:store) do
+      instance_double('MetadataStore', all_identifiers: %w[A B C D E F G H I J])
+    end
+
+    it 'produces the same sample twice when seeded' do
+      first  = described_class.new(metadata_store: store, seed: 1234).run('q', strategy: :random, limit: 4)
+      second = described_class.new(metadata_store: store, seed: 1234).run('q', strategy: :random, limit: 4)
+      expect(first).to eq(second)
+    end
+
+    it 'produces different samples for different seeds' do
+      a = described_class.new(metadata_store: store, seed: 1).run('q', strategy: :random, limit: 10)
+      b = described_class.new(metadata_store: store, seed: 2).run('q', strategy: :random, limit: 10)
+      expect(a).not_to eq(b)
+    end
+
+    it 'falls back to system entropy when no seed is given' do
+      results = described_class.new(metadata_store: store).run('q', strategy: :random, limit: 3)
+      expect(results.length).to eq(3)
+      expect(results.uniq.length).to eq(3)
+    end
+  end
 end

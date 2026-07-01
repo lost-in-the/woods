@@ -4,6 +4,7 @@ require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'route_helper_resolver'
 
 module Woods
   module Extractors
@@ -225,10 +226,10 @@ module Woods
 
           # Parent chain for understanding inherited behavior
           ancestors: controller.ancestors
-                     .take_while { |a| a != ActionController::Base && a != ActionController::API }
-                     .grep(Class)
-                     .map(&:name)
-                     .compact,
+                               .take_while { |a| a != ActionController::Base && a != ActionController::API }
+                               .grep(Class)
+                               .map(&:name)
+                               .compact,
 
           # Concerns included
           included_concerns: extract_included_concerns(controller),

@@ -1,5 +1,13 @@
 # frozen_string_literal: true
 
+if ENV['COVERAGE']
+  require 'simplecov'
+  SimpleCov.start do
+    add_filter '/spec/'
+    minimum_coverage 88
+  end
+end
+
 require 'rspec'
 require 'active_support/core_ext/string/inflections'
 require 'woods/extracted_unit'
@@ -22,6 +30,19 @@ RSpec.configure do |config|
   config.shared_context_metadata_behavior = :apply_to_host_groups
   config.order = :random
   Kernel.srand config.seed
+
+  # Perf-tagged specs (see spec/performance/) are wall-clock regression
+  # guards — measurably jittery on shared CI runners. Excluded from the
+  # default suite; opt in with `rspec --tag perf` from a dedicated job
+  # against a predictable box.
+  config.filter_run_excluding(perf: true) unless ENV['WOODS_RUN_PERF_SPECS']
+
+  # Booted-app specs (spec/integration/booted_extraction_spec.rb) boot a real
+  # Rails app in-process and require full Rails (activerecord + actionpack),
+  # which the default unit Gemfile doesn't bundle. Excluded from the default
+  # suite; the CI Rails-version matrix opts in via WOODS_RUN_BOOTED_APP using
+  # the per-version gemfiles under gemfiles/.
+  config.filter_run_excluding(booted_app: true) unless ENV['WOODS_RUN_BOOTED_APP']
 
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)

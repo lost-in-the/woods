@@ -127,8 +127,9 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
       response = call_tool(server, 'codebase_retrieve', query: 'How does the User model work?')
       text = response_text(response)
 
-      # Structural context is "Codebase: N units (X models, ...)"
+      # Structural context is "Codebase: N searchable entries (X models, ...)"
       expect(text).to include('Codebase:')
+      expect(text).to include('searchable entries')
     end
 
     it 'respects a custom budget parameter' do
@@ -227,13 +228,14 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
       expect(mock_assembler).to have_received(:assemble).with('PostsController#create', max_depth: 3)
     end
 
-    it 'returns an error when assembly fails' do
+    it 'returns an MCP error when assembly fails' do
       allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'unit not found')
 
       response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
-      data = parse_response(response)
 
-      expect(data['error']).to eq('unit not found')
+      expect(response.error?).to be(true)
+      expect(response_text(response)).to include('trace_flow failed')
+      expect(response_text(response)).to include('unit not found')
     end
   end
 

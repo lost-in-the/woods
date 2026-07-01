@@ -30,13 +30,69 @@ module Woods
     module SharedDependencyScanner
       # Scan for ActiveRecord model references using the precomputed regex.
       #
+      # Three passes:
+      # 1. Fully-qualified names via the main `\b(?:Foo|Bar::Baz)\b` regex.
+      # 2. `.constantize` / `const_get(...)` string-literal arguments —
+      #    a `"Library::Book".constantize` used to return zero edges
+      #    because the scan ran over raw source and the regex didn't pick
+      #    up the quoted constant. Now we extract the string argument and
+      #    resolve it.
+      # 3. Bare short names (e.g. `Book` inside `module Library`)
+      #    resolved through {ModelNameCache.resolve_short_name} when
+      #    unambiguous.
+      #
       # @param source [String] Ruby source code to scan
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_model_dependencies(source, via: :code_reference)
-        source.scan(ModelNameCache.model_names_regex).uniq.map do |model_name|
-          { type: :model, target: model_name, via: via }
+        targets = Set.new
+        source.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
+        extract_constantize_targets(source).each { |t| targets << t }
+
+        # Short-name + constantize resolution are additive passes guarded
+        # by `respond_to?` so partial test doubles that only stub
+        # `model_names_regex` still work. Real extraction runs always
+        # have the full API.
+        if ModelNameCache.respond_to?(:short_names_regex) && ModelNameCache.respond_to?(:resolve_short_name)
+          # Strip `#` line comments before scanning so references inside
+          # YARD docstrings / TODO comments don't generate ghost edges.
+          # The negative lookahead `(?!\{)` keeps Ruby's `#{...}` string
+          # interpolation intact — stripping blindly would eat every model
+          # reference inside `"Book: #{Library::Book.new}"` etc., which
+          # is a common ERB/Phlex/string pattern.
+          scannable = source.gsub(/#(?!\{)[^\n]*/, '')
+          scannable.scan(ModelNameCache.short_names_regex).each do |short|
+            resolved = ModelNameCache.resolve_short_name(short)
+            targets << resolved if resolved
+          end
         end
+
+        targets.map { |model_name| { type: :model, target: model_name, via: via } }
+      end
+
+      # Extract string-literal arguments passed to `.constantize` or
+      # `const_get(...)`. Matches both `"Library::Book".constantize`
+      # and `Object.const_get("Library::Book")` / `const_get("...")`.
+      # Only returns names actually present in {ModelNameCache.model_names}
+      # so non-model uses (e.g. `"String".constantize` in infra code) do
+      # not produce ghost edges.
+      #
+      # @param source [String]
+      # @return [Array<String>]
+      def extract_constantize_targets(source)
+        return [] unless ModelNameCache.respond_to?(:model_names)
+
+        known = ModelNameCache.model_names.to_set
+        return [] if known.empty?
+
+        targets = []
+        source.scan(/(["'])([A-Z][\w:]*)\1\s*\.\s*constantize\b/) do |_quote, name|
+          targets << name if known.include?(name)
+        end
+        source.scan(/const_get\s*\(\s*(["'])([A-Z][\w:]*)\1/) do |_quote, name|
+          targets << name if known.include?(name)
+        end
+        targets
       end
 
       # Scan for service object references (e.g., FooService.call, FooService::new).

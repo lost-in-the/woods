@@ -56,6 +56,7 @@ module Woods
         # @see Interface#store
         def store(id, vector, metadata = {})
           validate_vector!(vector)
+          validate_dimensions!(vector) if @dimensions
           entry = format_entry(id, vector, metadata)
 
           @connection.execute(<<~SQL)
@@ -71,13 +72,20 @@ module Woods
         # Store multiple vectors in a single multi-row INSERT.
         #
         # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
+        # @raise [ArgumentError] if any entry has a non-numeric or wrong-dimension vector.
+        #   Validation runs BEFORE any INSERT so partial-batch writes can't occur.
         def store_batch(entries)
           return if entries.empty?
 
-          values = entries.map do |entry|
-            validate_vector!(entry[:vector])
-            format_entry(entry[:id], entry[:vector], entry[:metadata] || {})
+          # Pre-validate every vector before any SQL — prevents partial-batch
+          # state when a later entry's dimension doesn't match.
+          entries.each_with_index do |entry, idx|
+            vector = entry[:vector]
+            validate_vector!(vector)
+            validate_dimensions!(vector, index: idx) if @dimensions
           end
+
+          values = entries.map { |entry| format_entry(entry[:id], entry[:vector], entry[:metadata] || {}) }
 
           @connection.execute(<<~SQL)
             INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
@@ -98,7 +106,7 @@ module Woods
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {})
           validate_vector!(query_vector)
-          vector_literal = "[#{query_vector.join(',')}]"
+          vector_literal = build_vector_literal(query_vector)
           where_clause = build_where(filters)
 
           sql = <<~SQL
@@ -142,8 +150,27 @@ module Woods
         def format_entry(id, vector, metadata)
           quoted_id = @connection.quote(id)
           quoted_metadata = @connection.quote(JSON.generate(metadata))
-          vector_literal = "[#{vector.join(',')}]"
+          vector_literal = build_vector_literal(vector)
           "(#{quoted_id}, '#{vector_literal}', #{quoted_metadata}::jsonb, CURRENT_TIMESTAMP)"
+        end
+
+        # Build the `[x,y,z]` pgvector literal from a validated numeric vector.
+        # Coerces each element through `Float()` first — `Float#to_s` is
+        # guaranteed to produce only digits, `.`, `-`, and `e`, which closes
+        # the theoretical `Numeric`-subclass `#to_s` injection vector even
+        # though {#validate_vector!} already rejects non-Numeric inputs.
+        # `Float()` raises `RangeError` on `Complex` values with an imaginary
+        # part — we surface that as an `ArgumentError` so callers see the
+        # same error shape as the other vector-validation paths instead of
+        # the raw coercion error.
+        def build_vector_literal(vector)
+          coerced = vector.each_with_index.map do |element, i|
+            Float(element).to_s
+          rescue RangeError, TypeError, ArgumentError => e
+            raise ArgumentError,
+                  "Vector element at index #{i} cannot be coerced to Float: #{element.inspect} (#{e.class})"
+          end
+          "[#{coerced.join(',')}]"
         end
 
         # Convert a database row to a SearchResult.
@@ -173,21 +200,56 @@ module Woods
               raise ArgumentError, "Invalid filter key: #{key_s.inspect}"
             end
 
-            "metadata->>'#{key_s}' = #{@connection.quote(value.to_s)}"
+            # Belt-and-suspenders: regex above already rejects any value that
+            # could alter the SQL shape, but we still pass the key through
+            # `@connection.quote` so the quoting story is uniform across the
+            # key and value positions and a future regex-relaxation does not
+            # silently unlock injection.
+            if value.is_a?(Array)
+              # Membership filter. An empty Array would produce `IN ()`
+              # which is a syntax error; emit an always-false predicate
+              # so the query still parses and returns no rows.
+              next 'FALSE' if value.empty?
+
+              quoted = value.map { |v| @connection.quote(v.to_s) }.join(', ')
+              "metadata->>#{@connection.quote(key_s)} IN (#{quoted})"
+            else
+              "metadata->>#{@connection.quote(key_s)} = #{@connection.quote(value.to_s)}"
+            end
           end
           "WHERE #{conditions.join(' AND ')}"
         end
 
-        # Validate that all vector elements are numeric.
+        # Validate that all vector elements are numeric and finite.
+        # Rejecting NaN / Infinity also closes a defense-in-depth gap
+        # around the vector-literal SQL construction — `Float::NAN.to_s`
+        # yields `"NaN"` which pgvector rejects, but other float-like
+        # sentinels can leak through string construction unexpectedly.
         #
         # @param vector [Array] The vector to validate
-        # @raise [ArgumentError] if any element is not numeric
+        # @raise [ArgumentError] if any element is not numeric or is non-finite
         def validate_vector!(vector)
           vector.each_with_index do |element, i|
             unless element.is_a?(Numeric)
               raise ArgumentError, "Vector element at index #{i} is not numeric: #{element.inspect}"
             end
+            if element.is_a?(Float) && !element.finite?
+              raise ArgumentError, "Vector element at index #{i} is not finite: #{element.inspect}"
+            end
           end
+        end
+
+        # Assert the provided vector matches the store's configured dimension.
+        #
+        # @param vector [Array<Numeric>]
+        # @param index [Integer, nil] position in the batch, used in the error message
+        # @raise [Woods::Error] on dimension mismatch
+        def validate_dimensions!(vector, index: nil)
+          return if vector.length == @dimensions
+
+          where = index ? " (entry #{index})" : ''
+          raise Woods::Error,
+                "Vector dimension mismatch#{where}: got #{vector.length}, expected #{@dimensions}"
         end
       end
     end

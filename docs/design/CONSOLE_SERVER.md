@@ -97,6 +97,17 @@ The bridge validates model names against `ActiveRecord::Base.descendants`, valid
 
 ### Connection Modes
 
+> **Design doc, not shipping state.** The three connection modes below
+> describe the bridge-process architecture the protocol was designed
+> for. The class currently at `lib/woods/console/bridge.rb` is
+> `Woods::Console::StubBridge` — a JSON-lines protocol scaffold whose
+> handlers return static empty data. The executor that ships today is
+> `Woods::Console::EmbeddedExecutor` (in-process ActiveRecord, same
+> tool vocabulary via `Woods::Console::BridgeProtocol`). These
+> `rails runner lib/woods/console/bridge.rb` invocations will become
+> live once the real bridge-process implementation lands; until then,
+> prefer embedded mode (`mode: embedded`) for development work.
+
 **Docker exec (recommended for development):**
 
 ```yaml

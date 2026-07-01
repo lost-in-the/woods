@@ -1,6 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships 34 extractors — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **34 extractor classes** producing **39 distinct unit types** — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+
+> **Counts explained.** `lib/woods/extractors/` contains 40 files: 34 extractor classes (each ending in `_extractor.rb`) plus 6 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`). The 39 unit types comes from some extractors emitting multiple categories — e.g., `RailsSourceExtractor` produces `rails_source` and `gem_source`, `ConfigurationExtractor` produces multiple config-derived types. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing) but are not themselves extractors and do not appear in the unit type enumeration.
 
 ---
 
@@ -277,6 +279,8 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
+
+**Template engine coverage.** ERB only as a parsed template engine — HAML, Slim, and Turbo Streams are not parsed at all; an app using HAML or Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges — the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110 — HAML / Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier`, and append the class to `ENGINES`.
 
 ---
 
@@ -616,7 +620,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 | `source_code` | String | The full source code, potentially enriched: models have concerns inlined and schema prepended; controllers have a route context header prepended |
 | `metadata` | Hash | Type-specific structured data — associations, callbacks, actions, fields, etc. Keys and structure vary by extractor |
 | `dependencies` | Array\<Hash\> | Forward edges: `[{ type: :model, target: "User", via: "belongs_to" }, ...]` |
-| `dependents` | Array\<Hash\> | Reverse edges: populated in the second pass. `[{ type: :controller, identifier: "OrdersController" }, ...]` |
+| `dependents` | Array\<Hash\> | Reverse edges: **populated in Phase 2 (Resolve)**, not Phase 1 (Extract). After Phase 2 every field on a unit is effectively immutable. Shape: `[{ type: :controller, identifier: "OrdersController" }, ...]` |
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |
 | `estimated_tokens` | Integer | Approximate token count for `source_code + metadata.to_json` using 4.0 chars/token. Computed, not stored. |
 

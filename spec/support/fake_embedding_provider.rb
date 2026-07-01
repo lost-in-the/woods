@@ -51,6 +51,14 @@ module Woods
           'fake-embedding-test'
         end
 
+        # No input budget — signals the indexer to skip auto-chunking.
+        # Tests that need chunking behaviour should subclass and override.
+        #
+        # @return [nil]
+        def max_input_tokens
+          nil
+        end
+
         private
 
         # Convert text to a normalized vector using bag-of-words hashing.

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../token_utils'
+
 module Woods
   module Embedding
     # Prepares ExtractedUnit data for embedding by building context-prefixed text.
@@ -19,11 +21,24 @@ module Woods
     #   chunks = preparer.prepare_chunks(unit)
     class TextPreparer
       DEFAULT_MAX_TOKENS = 8192
+      # Aliased to the single source of truth in {Woods::TokenUtils} so the
+      # OpenAI 4.0 / Ollama 1.5 ratios stay consistent across TextPreparer,
+      # ContextAssembler, Builder, and cost_model/. See
+      # docs/TOKEN_BENCHMARK.md and lib/woods/token_utils.rb.
+      DEFAULT_CHARS_PER_TOKEN = TokenUtils::DEFAULT_CHARS_PER_TOKEN
 
       # @param max_tokens [Integer] maximum token budget for prepared text
-      def initialize(max_tokens: DEFAULT_MAX_TOKENS)
+      # @param chars_per_token [Float] tokenizer-calibrated char/token ratio
+      def initialize(max_tokens: DEFAULT_MAX_TOKENS, chars_per_token: DEFAULT_CHARS_PER_TOKEN)
         @max_tokens = max_tokens
+        @chars_per_token = chars_per_token
       end
+
+      # @return [Float] configured chars-per-token ratio
+      attr_reader :chars_per_token
+
+      # @return [Integer] configured token budget
+      attr_reader :max_tokens
 
       # Prepare text for embedding from an ExtractedUnit.
       #
@@ -98,13 +113,18 @@ module Woods
 
       # Truncate text to fit within the token budget.
       #
+      # Uses the configured `chars_per_token` ratio to estimate both the
+      # token count and the safe character cap. Truncation is a last
+      # resort — by the time text reaches here the chunker should have
+      # already split oversize units into pieces that fit.
+      #
       # @param text [String] the text to truncate
       # @return [String] text within token limits
       def enforce_token_limit(text)
-        estimated = (text.length / 4.0).ceil
+        estimated = (text.length / @chars_per_token).ceil
         return text if estimated <= @max_tokens
 
-        max_chars = (@max_tokens * 4.0).floor
+        max_chars = (@max_tokens * @chars_per_token).floor
         text[0...max_chars]
       end
     end

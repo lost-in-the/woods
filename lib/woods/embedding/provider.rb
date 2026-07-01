@@ -49,6 +49,16 @@ module Woods
         def model_name
           raise NotImplementedError
         end
+
+        # Return the maximum input length the provider will accept for a
+        # single text, in tokens. Used by the indexer to decide when a unit
+        # must be chunked before embedding.
+        #
+        # @return [Integer, nil] token budget, or nil if the provider has no hard cap
+        # @raise [NotImplementedError] if not implemented by the provider
+        def max_input_tokens
+          raise NotImplementedError
+        end
       end
 
       # Ollama adapter for local embeddings via the Ollama HTTP API.
@@ -66,11 +76,56 @@ module Woods
         DEFAULT_MODEL = 'nomic-embed-text'
         DEFAULT_HOST = 'http://localhost:11434'
 
-        # @param model [String] Ollama model name (default: nomic-embed-text)
+        # Ollama enforces the model's native context length on `/api/embed`
+        # regardless of the `num_ctx` override — we've validated this
+        # against 0.15.x for nomic-embed-text (rejects >2048) and bge-m3
+        # (accepts up to 8192, silently truncates above). Advertise the
+        # native ceiling so the chunker can size inputs correctly. Models
+        # outside this registry fall back to Ollama's conservative 2048
+        # default.
+        #
+        # See `docs/EMBEDDING_MODELS.md` for the tradeoff matrix and
+        # instructions for adding a new model here.
+        MODEL_CONTEXT_LENGTHS = {
+          'nomic-embed-text' => 2048,
+          'bge-m3' => 8192,
+          'mxbai-embed-large' => 512,
+          'snowflake-arctic-embed' => 512,
+          'snowflake-arctic-embed2' => 8192,
+          # all-minilm: 512 is the model's context length, NOT the 384
+          # embedding dimension and NOT the 256 some sources confuse with
+          # the dimension. With a 256-token budget the chunker formula
+          # produces a negative max_chars and silently drops every chunk.
+          'all-minilm' => 512
+        }.freeze
+
+        # Fallback when the configured model isn't in the registry.
+        FALLBACK_NUM_CTX = 2048
+
+        # Default read timeout for /api/embed. The previous 30s default
+        # was too short for batched embed calls on cold models — Ollama
+        # has to load the model on first call, and an N-item batch can
+        # easily exceed 30s on a CPU-only host. 120s leaves headroom
+        # without wedging the whole pipeline on a genuinely dead server.
+        DEFAULT_READ_TIMEOUT = 120
+
+        # @param model [String] Ollama model name (default: nomic-embed-text).
+        #   Set to `"bge-m3"` or `"snowflake-arctic-embed2"` for an 8192-token
+        #   context and skip most chunking for dense Rails units.
         # @param host [String] Ollama server URL (default: http://localhost:11434)
-        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST)
+        # @param num_ctx [Integer, nil] Ollama context window in tokens. When
+        #   `nil` (the default), the provider picks the model's native
+        #   context from `MODEL_CONTEXT_LENGTHS`, falling back to 2048 for
+        #   unknown models. Set explicitly only if running a model with a
+        #   known-larger native context that isn't in the registry yet.
+        # @param read_timeout [Integer] HTTP read timeout in seconds.
+        #   Bump this for slow / cold-start hosts or very large batches.
+        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil,
+                       read_timeout: DEFAULT_READ_TIMEOUT)
           @model = model
           @host = host
+          @num_ctx = num_ctx || MODEL_CONTEXT_LENGTHS.fetch(model, FALLBACK_NUM_CTX)
+          @read_timeout = read_timeout
           @uri = URI("#{host}/api/embed")
         end
 
@@ -79,8 +134,11 @@ module Woods
         # @param text [String] the text to embed
         # @return [Array<Float>] the embedding vector
         # @raise [Woods::Error] if the API returns an error
+        # @raise [ArgumentError] if the text is nil or empty (avoids provider 400)
         def embed(text)
-          response = post_request({ model: @model, input: text })
+          raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
+
+          response = post_request(build_body(text))
           response['embeddings'].first
         end
 
@@ -89,8 +147,14 @@ module Woods
         # @param texts [Array<String>] the texts to embed
         # @return [Array<Array<Float>>] array of embedding vectors
         # @raise [Woods::Error] if the API returns an error
+        # @raise [ArgumentError] if the array is empty or any element is nil/empty
         def embed_batch(texts)
-          response = post_request({ model: @model, input: texts })
+          raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
+          if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
+            raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries'
+          end
+
+          response = post_request(build_body(texts))
           response['embeddings']
         end
 
@@ -110,20 +174,52 @@ module Woods
           @model
         end
 
+        # Maximum input length Ollama will accept — tracks the configured
+        # context window. Always populated: the constructor resolves
+        # `num_ctx` to the model's registry entry or {FALLBACK_NUM_CTX},
+        # so this method never returns nil for an Ollama provider.
+        #
+        # @return [Integer]
+        def max_input_tokens
+          @num_ctx
+        end
+
         private
+
+        # Cap interpolated response bodies so misconfigured Ollama responses
+        # (e.g. proxied HTML error pages) don't unbounded-leak into logs or
+        # re-raised error messages.
+        #
+        # @param body [String, nil]
+        # @return [String]
+        def truncate_response_body(body)
+          return '' if body.nil?
+
+          s = body.to_s
+          s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
+        end
+
+        # Build the JSON body for an `/api/embed` call. Adds `options.num_ctx`
+        # when configured — without it, Ollama silently truncates to 2048
+        # tokens and returns 400 when the input exceeds that default.
+        def build_body(input)
+          body = { model: @model, input: input }
+          body[:options] = { num_ctx: @num_ctx } if @num_ctx
+          body
+        end
 
         # Send a POST request to the Ollama API.
         #
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body)
+        def post_request(body) # rubocop:disable Metrics/AbcSize
           request = Net::HTTP::Post.new(@uri.path, 'Content-Type' => 'application/json')
           request.body = body.to_json
           response = http_client.request(request)
 
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Ollama API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Ollama API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
@@ -136,7 +232,7 @@ module Woods
             raise Woods::Error, "Ollama API error (retry failed): #{retry_error.message}"
           end
           unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Ollama API error: #{response.code} #{response.body}"
+            raise Woods::Error, "Ollama API error: #{response.code} #{truncate_response_body(response.body)}"
           end
 
           JSON.parse(response.body)
@@ -151,7 +247,7 @@ module Woods
           http = Net::HTTP.new(@uri.host, @uri.port)
           http.use_ssl = @uri.scheme == 'https'
           http.open_timeout = 10
-          http.read_timeout = 30
+          http.read_timeout = @read_timeout
           http.keep_alive_timeout = 30
           http.start
           @http_client = http
