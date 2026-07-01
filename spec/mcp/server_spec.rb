@@ -1013,6 +1013,43 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  describe 'pipeline serialization (pipeline_start/pipeline_finish)' do
+    after do
+      # Release any lock this group's examples may have left held.
+      described_class.send(:pipeline_finish, :extraction)
+    end
+
+    it 'has an eagerly-initialized mutex (no lazy ||= race under the HTTP transport)' do
+      expect(described_class.instance_variable_get(:@pipeline_mutex)).to be_a(Mutex)
+    end
+
+    it 'admits exactly one starter for a given kind until it finishes' do
+      expect(described_class.send(:pipeline_start, :extraction)).to be(true)
+      expect(described_class.send(:pipeline_start, :extraction)).to be(false)
+
+      described_class.send(:pipeline_finish, :extraction)
+      expect(described_class.send(:pipeline_start, :extraction)).to be(true)
+    end
+
+    it 'admits exactly one starter under concurrent contention' do
+      described_class.send(:pipeline_finish, :extraction) # ensure released
+      results = Queue.new
+      barrier = Queue.new
+
+      threads = 25.times.map do
+        Thread.new do
+          barrier.pop # release all threads together
+          results << described_class.send(:pipeline_start, :extraction)
+        end
+      end
+      25.times { barrier << true }
+      threads.each(&:join)
+
+      admitted = Array.new(25) { results.pop }.count(true)
+      expect(admitted).to eq(1)
+    end
+  end
+
   describe '.coerce_integer' do
     it 'passes Integer through unchanged' do
       expect(described_class.send(:coerce_integer, 7)).to eq(7)

@@ -119,6 +119,66 @@ RSpec.describe Woods::Resilience::CircuitBreaker do
 
         expect(breaker.state).to eq(:open)
       end
+
+      it 'admits only a single probe at a time, rejecting concurrent calls' do
+        probe_started = Queue.new
+        release_probe = Queue.new
+        rejected = nil
+
+        probe = Thread.new do
+          breaker.call do
+            probe_started << true
+            release_probe.pop # hold the half_open probe in flight
+            'recovered'
+          end
+        end
+
+        probe_started.pop # ensure the probe is executing (state is half_open)
+        begin
+          breaker.call { 'second probe' }
+        rescue Woods::Resilience::CircuitOpenError => e
+          rejected = e
+        end
+
+        release_probe << true
+        probe.join
+
+        expect(rejected).to be_a(Woods::Resilience::CircuitOpenError)
+        expect(breaker.state).to eq(:closed) # the single probe succeeded and closed the circuit
+      end
+    end
+
+    context 'when half_open with a success_threshold > 1' do
+      subject(:breaker) { described_class.new(threshold: 2, reset_timeout: 0.1, success_threshold: 2) }
+
+      before do
+        2.times do
+          breaker.call { raise StandardError, 'fail' }
+        rescue StandardError
+          nil
+        end
+        sleep 0.3
+      end
+
+      it 'requires the configured number of consecutive successful probes to close' do
+        breaker.call { 'probe 1' }
+        expect(breaker.state).to eq(:half_open) # not closed after a single success
+
+        breaker.call { 'probe 2' }
+        expect(breaker.state).to eq(:closed)
+      end
+
+      it 'reopens and resets progress if a probe fails mid-recovery' do
+        breaker.call { 'probe 1' }
+        expect(breaker.state).to eq(:half_open)
+
+        begin
+          breaker.call { raise StandardError, 'regressed' }
+        rescue StandardError
+          nil
+        end
+        expect(breaker.state).to eq(:open)
+      end
     end
   end
 

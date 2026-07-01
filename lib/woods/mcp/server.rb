@@ -27,6 +27,15 @@ module Woods
     #   transport.open
     #
     module Server
+      # Module-level pipeline serialization state, eagerly initialized at load
+      # time (self == Server here). The HTTP transport dispatches tool handlers
+      # concurrently, so a lazy `@pipeline_mutex ||= Mutex.new` inside
+      # pipeline_start would let two handlers each create a DIFFERENT mutex and
+      # synchronize on separate locks — defeating the exclusion and allowing two
+      # concurrent pipelines of the same kind.
+      @pipeline_mutex = Mutex.new
+      @pipeline_in_flight = {}
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -1015,8 +1024,9 @@ module Woods
         # pipeline). Module-level state — a single MCP server process
         # serializes its own pipelines.
         def pipeline_start(kind)
-          @pipeline_mutex ||= Mutex.new
-          @pipeline_in_flight ||= {}
+          # @pipeline_mutex / @pipeline_in_flight are initialized eagerly in
+          # the module body — no lazy `||=` here, which would race under the
+          # concurrent HTTP transport.
           @pipeline_mutex.synchronize do
             return false if @pipeline_in_flight[kind]
 
@@ -1026,7 +1036,7 @@ module Woods
         end
 
         def pipeline_finish(kind)
-          @pipeline_mutex&.synchronize { @pipeline_in_flight&.delete(kind) }
+          @pipeline_mutex.synchronize { @pipeline_in_flight.delete(kind) }
         end
 
         def define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)

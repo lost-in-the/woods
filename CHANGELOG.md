@@ -77,6 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keys.
 - The MCP CLI integration spec no longer fails under a POSIX/C locale (UTF-8
   subprocess output is normalized before regex matching).
+- **`CircuitBreaker` admits only a single probe in `half_open`.** It let every
+  concurrent call through while half-open (a thundering herd against a
+  recovering service), and a slow probe's success could wipe failures recorded
+  by an overlapping probe. Concurrent probes are now rejected with
+  `CircuitOpenError`, and an optional `success_threshold` requires N consecutive
+  successful probes to close (default 1).
+- **`Retry-After` honors the HTTP-date form.** The Notion and Unblocked clients
+  parsed the header with `.to_f`, turning an HTTP-date into `0.0` and retrying
+  immediately against a throttling server. A shared `Woods::RetryAfter` helper
+  now handles both the delta-seconds and HTTP-date forms.
+- **The MCP pipeline lock is no longer racy under the HTTP transport.** The
+  `@pipeline_mutex ||= Mutex.new` lazy init let two concurrent handlers create
+  separate mutexes and run two pipelines of the same kind; the mutex is now
+  eagerly initialized.
 
 ### Changed
 
