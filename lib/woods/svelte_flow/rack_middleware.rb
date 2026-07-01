@@ -3,6 +3,7 @@
 require 'json'
 require 'set'
 require_relative 'transformer'
+require_relative 'edge_data'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
 
@@ -72,22 +73,24 @@ module Woods
       # @return [Array] Rack response triple
       def route_request(sub_path, env)
         case sub_path
-        when '/'
-          serve_html
-        when '/api/graph'
-          serve_graph_json
-        when '/api/clusters'
-          serve_clusters_json
-        when '/api/flows'
-          serve_flows_index
-        when '/api/graph/neighbors'
-          serve_neighbors_json(env)
-        when %r{\A/api/flows/(.+)\z}
-          serve_flow_json(Regexp.last_match(1))
-        when %r{\A/assets/(.+)\z}
-          serve_asset(Regexp.last_match(1))
-        else
-          not_found
+        when '/'                    then serve_html
+        when '/api/graph'           then serve_graph_json
+        when '/api/clusters'        then serve_clusters_json
+        when '/api/flows'           then serve_flows_index
+        when '/api/graph/neighbors' then serve_neighbors_json(env)
+        else pattern_route(sub_path)
+        end
+      end
+
+      # Route sub-paths that carry a captured segment (flows, assets).
+      #
+      # @param sub_path [String] Path after the mount point
+      # @return [Array] Rack response triple
+      def pattern_route(sub_path)
+        case sub_path
+        when %r{\A/api/flows/(.+)\z} then serve_flow_json(Regexp.last_match(1))
+        when %r{\A/assets/(.+)\z}    then serve_asset(Regexp.last_match(1))
+        else not_found
         end
       end
 
@@ -280,61 +283,76 @@ module Woods
       #
       # @param env [Hash] Rack environment (reads QUERY_STRING for node and depth params)
       # @return [Array] Rack response triple
-      def serve_neighbors_json(env) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+      def serve_neighbors_json(env)
         query = Rack::Utils.parse_query(env['QUERY_STRING'] || '')
         node_id = query['node']
         return bad_request('Missing required parameter: node') unless node_id && !node_id.strip.empty?
 
-        depth = [(query['depth'] || '1').to_i, 5].min
-        depth = 1 if depth < 1
-
         transformer = ensure_transformer
         return service_unavailable unless transformer
+        return not_found unless transformer.graph.node_exists?(node_id)
 
-        graph = transformer.graph
-        return not_found unless graph.node_exists?(node_id)
+        nodes, edges, reverse = graph_adjacency(transformer.graph)
+        visited = collect_neighborhood(node_id, clamp_depth(query['depth']), edges: edges, reverse: reverse)
 
+        json_response(build_subgraph_payload(transformer, visited, nodes: nodes, edges: edges, reverse: reverse))
+      end
+
+      # Destructure a graph's adjacency maps from its serialized form.
+      #
+      # @param graph [DependencyGraph]
+      # @return [Array(Hash, Hash, Hash)] nodes, forward edges, reverse edges
+      def graph_adjacency(graph)
         graph_data = graph.to_h
-        nodes = graph_data[:nodes] || graph_data['nodes'] || {}
-        edges = graph_data[:edges] || graph_data['edges'] || {}
-        reverse = graph_data[:reverse] || graph_data['reverse'] || {}
+        [
+          graph_data[:nodes] || graph_data['nodes'] || {},
+          graph_data[:edges] || graph_data['edges'] || {},
+          graph_data[:reverse] || graph_data['reverse'] || {}
+        ]
+      end
 
-        visited = collect_neighborhood(node_id, depth, edges: edges, reverse: reverse)
+      # Clamp a raw depth query param to the supported 1..5 range.
+      #
+      # @param raw [String, nil]
+      # @return [Integer]
+      def clamp_depth(raw)
+        (raw || '1').to_i.clamp(1, 5)
+      end
 
-        scoped_nodes, scoped_forward, scoped_reverse = build_scoped_graph(visited, nodes: nodes, edges: edges,
-                                                                                   reverse: reverse)
-
-        pagerank_scores = graph.pagerank
-        highest_pagerank = pagerank_scores.max_by { |_k, v| v }&.first
+      # Build the Svelte Flow subgraph payload for a resolved set of visited
+      # node IDs. Shared core behind the neighbor endpoint (and future
+      # query-scoped endpoints): scope the graph to `visited`, then run the
+      # node and edge builders over the scoped slice.
+      #
+      # @param transformer [Transformer]
+      # @param visited [Set<String>] Node IDs to include
+      # @param nodes [Hash] Full node map
+      # @param edges [Hash] Full forward-edge map ({ target:, via: } entries)
+      # @param reverse [Hash] Full reverse-edge map (identifier-string arrays)
+      # @return [Hash] { 'nodes' =>, 'edges' =>, 'highest_pagerank' => }
+      def build_subgraph_payload(transformer, visited, nodes:, edges:, reverse:)
+        scoped_nodes, scoped_forward, scoped_reverse =
+          build_scoped_graph(visited, nodes: nodes, edges: edges, reverse: reverse)
 
         analyzer = transformer.analyzer
-        unit_metadata = transformer.unit_metadata
+        pagerank_scores = transformer.graph.pagerank
 
         node_builder = NodeBuilder.new(
-          nodes: scoped_nodes,
-          positions: {},
-          pagerank: pagerank_scores,
+          nodes: scoped_nodes, positions: {}, pagerank: pagerank_scores,
           analysis: build_neighbor_analysis(analyzer),
-          unit_metadata: unit_metadata || {},
-          forward_edges: scoped_forward,
-          reverse_edges: scoped_reverse
+          unit_metadata: transformer.unit_metadata || {},
+          forward_edges: scoped_forward, reverse_edges: scoped_reverse
         )
-
-        cycle_edges = build_neighbor_cycle_edges(analyzer, visited)
-
         edge_builder = EdgeBuilder.new(
-          edges: scoped_forward,
-          valid_node_ids: visited,
-          cycle_edges: cycle_edges
+          edges: scoped_forward, valid_node_ids: visited,
+          cycle_edges: build_neighbor_cycle_edges(analyzer, visited)
         )
 
-        data = {
+        {
           'nodes' => node_builder.build,
           'edges' => edge_builder.build,
-          'highest_pagerank' => highest_pagerank
+          'highest_pagerank' => pagerank_scores.max_by { |_k, v| v }&.first
         }
-
-        json_response(data)
       end
 
       # BFS from node_id up to depth hops, traversing both forward and reverse edges.
@@ -351,13 +369,9 @@ module Woods
         depth.times do
           next_frontier = []
           frontier.each do |current|
-            (edges[current] || []).each do |dep|
-              next if visited.include?(dep)
-
-              visited.add(dep)
-              next_frontier << dep
-            end
-            (reverse[current] || []).each do |dep|
+            # Forward edges are { target:, via: } hashes; reverse edges are plain identifier strings.
+            neighbors = EdgeData.targets(edges[current]) + (reverse[current] || [])
+            neighbors.each do |dep|
               next if visited.include?(dep)
 
               visited.add(dep)
@@ -379,18 +393,32 @@ module Woods
       # @return [Array(Hash, Hash, Hash)] scoped_nodes, scoped_forward, scoped_reverse
       def build_scoped_graph(visited, nodes:, edges:, reverse:)
         scoped_nodes = {}
-        visited.each { |id| scoped_nodes[id] = nodes[id] if nodes.key?(id) }
-
         scoped_forward = {}
         scoped_reverse = {}
+
         visited.each do |source|
-          fwd = (edges[source] || []).select { |t| visited.include?(t) }
+          scoped_nodes[source] = nodes[source] if nodes.key?(source)
+
+          # Keep forward entries as { target:, via: } hashes so EdgeBuilder can label edges.
+          fwd = select_visited(edges[source], visited) { |entry| EdgeData.target(entry) }
           scoped_forward[source] = fwd unless fwd.empty?
-          rev = (reverse[source] || []).select { |t| visited.include?(t) }
+
+          rev = select_visited(reverse[source], visited) { |target| target }
           scoped_reverse[source] = Set.new(rev) unless rev.empty?
         end
 
         [scoped_nodes, scoped_forward, scoped_reverse]
+      end
+
+      # Select edge entries whose (yielded) target identifier is in `visited`.
+      #
+      # @param entries [Array, nil] Edge entries for one source
+      # @param visited [Set<String>] Node IDs in scope
+      # @yieldparam entry [Object] An edge entry
+      # @yieldreturn [String, nil] The entry's target identifier
+      # @return [Array] Entries kept in scope
+      def select_visited(entries, visited)
+        (entries || []).select { |entry| visited.include?(yield(entry)) }
       end
 
       # Build analysis hash for NodeBuilder, scoped gracefully to what the analyzer provides.

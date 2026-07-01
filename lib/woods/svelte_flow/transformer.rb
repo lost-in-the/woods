@@ -3,6 +3,7 @@
 require_relative 'node_builder'
 require_relative 'edge_builder'
 require_relative 'association_edge_builder'
+require_relative 'edge_data'
 
 module Woods
   module SvelteFlow
@@ -70,10 +71,10 @@ module Woods
         end
 
         exclude_pairs = Set.new
-        edges.each do |source, targets|
+        edges.each do |source, entries|
           next unless model_ids.include?(source)
 
-          targets.each do |target|
+          EdgeData.targets(entries).each do |target|
             exclude_pairs.add([source, target]) if model_ids.include?(target)
           end
         end
@@ -175,10 +176,12 @@ module Woods
 
         boundary = EdgeBuilder.boundary_edges(all_boundary_edges, valid_node_ids: valid_ids)
 
-        # Also include intra-cluster dependency edges
+        # Also include intra-cluster dependency edges. Keep the { target:, via: }
+        # entries (not just target strings) so cluster edges carry relationship labels.
+        member_set = cluster_member_ids.to_set
         intra_edges = cluster_member_ids.each_with_object({}) do |id, h|
-          targets = (edges[id] || []) & cluster_member_ids
-          h[id] = targets unless targets.empty?
+          entries = (edges[id] || []).select { |entry| member_set.include?(EdgeData.target(entry)) }
+          h[id] = entries unless entries.empty?
         end
         intra_edge_builder = EdgeBuilder.new(edges: intra_edges, valid_node_ids: valid_ids)
 

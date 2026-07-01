@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'edge_data'
 
 module Woods
   module SvelteFlow
@@ -37,14 +38,15 @@ module Woods
       def build
         result = []
 
-        @edges.each do |source, targets|
+        @edges.each do |source, entries|
           next unless @valid_node_ids.include?(source)
 
-          targets.each do |target|
+          entries.each do |entry|
+            target = EdgeData.target(entry)
             next unless @valid_node_ids.include?(target)
             next if @exclude_pairs.include?([source, target])
 
-            result << build_dependency_edge(source, target)
+            result << build_dependency_edge(source, target, EdgeData.via(entry))
           end
         end
 
@@ -111,8 +113,9 @@ module Woods
       #
       # @param source [String] Source node ID
       # @param target [String] Target node ID
+      # @param via [Symbol, nil] Relationship label (e.g. :belongs_to, :render, :link_to)
       # @return [Hash] Svelte Flow edge object
-      def build_dependency_edge(source, target)
+      def build_dependency_edge(source, target, via = nil)
         is_cycle = @cycle_edges.include?([source, target])
 
         edge = {
@@ -122,6 +125,7 @@ module Woods
           'type' => 'default',
           'data' => {
             'relationship' => 'dependency',
+            'via' => via&.to_s,
             'isCycle' => is_cycle
           }
         }
