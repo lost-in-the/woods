@@ -25,7 +25,11 @@ module Woods
       # @param reader [Object, nil] IndexReader instance (auto-created from index_dir if nil)
       # @raise [ConfigurationError] if notion_api_token is not configured
       def initialize(index_dir:, config: Woods.configuration, client: nil, reader: nil)
-        api_token = config.notion_api_token
+        # NOTION_API_TOKEN overrides the configured token (documented
+        # contract; also what the MCP notion_wired? gate keys on). Resolve
+        # it here, the single consumption point, so the MCP tool and rake
+        # task behave identically on an ENV-only host.
+        api_token = ENV['NOTION_API_TOKEN'] || config.notion_api_token
         raise ConfigurationError, 'notion_api_token is required for Notion export' unless api_token
 
         @database_ids = config.notion_database_ids || {}

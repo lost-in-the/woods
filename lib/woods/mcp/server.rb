@@ -881,11 +881,33 @@ module Woods
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
             input_schema: {
               properties: {
-                incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' }
+                incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' },
+                changed_files: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Required when incremental is true: repo-relative paths of changed files ' \
+                               '(the MCP server has no git context to compute them itself).'
+                }
               }
             }
-          ) do |server_context:, incremental: nil|
+          ) do |server_context:, incremental: nil, changed_files: nil|
             next op_missing.call('pipeline_extract') unless operator
+
+            # Incremental extraction re-extracts only the units affected by
+            # the given files. The MCP server has no git-diff context (unlike
+            # the rake task, which derives them from CHANGED_FILES / CI env),
+            # so an empty list would re-extract nothing while still bumping
+            # the manifest timestamp — a silent no-op reporting success.
+            # Require the caller to supply the changed files explicitly.
+            files = Array(changed_files).map(&:to_s).reject(&:empty?)
+            if incremental && files.empty?
+              next respond_err.call(
+                'Incremental extraction requires a non-empty changed_files list. ' \
+                'Pass the changed paths, or run `rake woods:incremental` which derives them from git.',
+                code: :invalid_params,
+                tool: 'pipeline_extract'
+              )
+            end
 
             guard = operator[:pipeline_guard]
             if guard && !guard.allow?(:extraction)
@@ -916,7 +938,7 @@ module Woods
               extractor = Woods::Extractor.new(
                 output_dir: Woods.configuration.output_dir
               )
-              incremental ? extractor.extract_changed([]) : extractor.extract_all
+              incremental ? extractor.extract_changed(files) : extractor.extract_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline extract failed: #{e.message}")
@@ -1054,9 +1076,11 @@ module Woods
               )
             end
 
+            # Pass the client-supplied class name so class-keyed patterns
+            # (Timeout, Net::, Errno::ENOENT, …) match — a bare
+            # StandardError would classify everything as :unknown.
             error = StandardError.new(error_message)
-            # Set the class name in the error string for pattern matching
-            result = escalator.classify(error)
+            result = escalator.classify(error, class_name: error_class)
             result[:original_class] = error_class
             respond.call(JSON.pretty_generate(result))
           end
@@ -1308,7 +1332,11 @@ module Woods
             }
           ) do |server_context:|
             config = Woods.configuration
-            unless config.notion_api_token
+            # Mirror notion_wired? (which gates registration) and the
+            # Exporter: the NOTION_API_TOKEN env var satisfies the token
+            # requirement. Reading config alone rejected ENV-only hosts even
+            # though the tool was registered for them.
+            if (ENV['NOTION_API_TOKEN'] || config.notion_api_token).to_s.empty?
               next respond_err.call(
                 'notion_api_token is not configured. Set it in Woods.configure or via the NOTION_API_TOKEN env var.',
                 code: :not_configured,

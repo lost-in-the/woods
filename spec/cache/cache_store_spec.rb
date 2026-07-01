@@ -284,6 +284,22 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
 
       expect(provider).to have_received(:embed).twice
     end
+
+    it 'does not serve one model\'s cached vector to a different model' do
+      # A shared persistent backend must not hand a switched/upgraded model
+      # the previous model's vector for the same text.
+      allow(provider).to receive(:embed).with('hello').and_return([0.1, 0.2])
+      cached_provider.embed('hello')
+
+      other_provider = instance_double('EmbeddingProvider', dimensions: 1536, model_name: 'other-model')
+      allow(other_provider).to receive(:embed).with('hello').and_return([0.9, 0.8, 0.7])
+      other_cached = described_class.new(provider: other_provider, cache_store: cache_store, ttl: 3600)
+
+      result = other_cached.embed('hello')
+
+      expect(result).to eq([0.9, 0.8, 0.7])
+      expect(other_provider).to have_received(:embed).once
+    end
   end
 
   describe '#embed_batch' do

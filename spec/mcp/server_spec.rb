@@ -784,9 +784,19 @@ RSpec.describe Woods::MCP::Server do
       Woods.configuration = nil
     end
 
-    it 'calls extract_changed when incremental is true' do
-      wait_for_threads { call_tool(server_with_operator, 'pipeline_extract', incremental: true) }
-      expect(mock_extractor).to have_received(:extract_changed).with([])
+    it 'calls extract_changed with the supplied changed_files when incremental is true' do
+      wait_for_threads do
+        call_tool(server_with_operator, 'pipeline_extract',
+                  incremental: true, changed_files: ['app/models/user.rb'])
+      end
+      expect(mock_extractor).to have_received(:extract_changed).with(['app/models/user.rb'])
+    end
+
+    it 'rejects incremental without changed_files instead of silently re-extracting nothing' do
+      response = call_tool(server_with_operator, 'pipeline_extract', incremental: true)
+
+      expect(response_text(response)).to include('changed_files')
+      expect(mock_extractor).not_to have_received(:extract_changed)
     end
 
     it 'calls extract_all when incremental is false' do

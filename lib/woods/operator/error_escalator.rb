@@ -37,22 +37,33 @@ module Woods
 
       # Classify an error by severity and suggest remediation.
       #
+      # Most patterns key on the error's class name, so a caller that only
+      # has the class name as a string (e.g. the pipeline_diagnose MCP tool,
+      # which receives error_class over the wire and can't reconstruct the
+      # real exception class) must pass +class_name:+ — otherwise the
+      # synthesized StandardError makes every class-keyed pattern miss and
+      # the error falls through to :unknown.
+      #
       # @param error [StandardError] The error to classify
+      # @param class_name [String, nil] Override for the class name used in
+      #   pattern matching and reported as :error_class (defaults to
+      #   error.class.name)
       # @return [Hash] :severity (:transient or :permanent), :category, :remediation, :error_class, :message
-      def classify(error)
-        error_string = "#{error.class} #{error.message}"
+      def classify(error, class_name: nil)
+        resolved_class = class_name || error.class.name
+        error_string = "#{resolved_class} #{error.message}"
 
         match = find_match(error_string, TRANSIENT_PATTERNS, :transient) ||
                 find_match(error_string, PERMANENT_PATTERNS, :permanent)
 
         if match
-          match.merge(error_class: error.class.name, message: error.message)
+          match.merge(error_class: resolved_class, message: error.message)
         else
           {
             severity: :unknown,
             category: 'unclassified',
             remediation: 'Investigate error details and check logs',
-            error_class: error.class.name,
+            error_class: resolved_class,
             message: error.message
           }
         end

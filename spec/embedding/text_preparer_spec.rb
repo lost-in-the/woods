@@ -110,6 +110,29 @@ RSpec.describe Woods::Embedding::TextPreparer do
       end
     end
 
+    context 'with string-keyed dependencies (Indexer#build_unit shape)' do
+      # The indexer reads unit JSON and leaves dependency keys as strings,
+      # so the embedded text must still surface them.
+      let(:unit_with_string_deps) do
+        Woods::ExtractedUnit.new(
+          type: :model,
+          identifier: 'Order',
+          file_path: 'app/models/order.rb'
+        ).tap do |u|
+          u.source_code = 'class Order; end'
+          u.dependencies = [
+            { 'type' => 'model', 'target' => 'User' },
+            { 'type' => 'service', 'target' => 'ChargeService' }
+          ]
+        end
+      end
+
+      it 'includes dependency names from string-keyed hashes' do
+        result = preparer.prepare(unit_with_string_deps)
+        expect(result).to include('dependencies: User, ChargeService')
+      end
+    end
+
     context 'with more than 10 dependencies' do
       let(:many_deps_unit) do
         deps = (1..15).map { |i| { type: :model, target: "Model#{i}" } }
