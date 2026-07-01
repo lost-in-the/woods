@@ -41,6 +41,20 @@ RSpec.describe Woods::ModelNameCache do
       # The dot should be literal, not match any character
       expect('App::V2XUser').not_to match(regex)
     end
+
+    it 'matches the longest name when one model name prefixes another' do
+      # Alternation is ordered, not longest-match: with Library::Book first,
+      # "Library::Book::Chapter" would match the shorter name (\b holds at
+      # the ":"), producing a dependency edge to the wrong model.
+      stub_const(
+        'ActiveRecord::Base',
+        double('AR::Base', descendants: [double(name: 'Library::Book'), double(name: 'Library::Book::Chapter')])
+      )
+
+      regex = described_class.model_names_regex
+      expect('Library::Book::Chapter.create!(book: b)'[regex]).to eq('Library::Book::Chapter')
+      expect('Library::Book.find(1)'[regex]).to eq('Library::Book')
+    end
   end
 
   describe '.reset!' do

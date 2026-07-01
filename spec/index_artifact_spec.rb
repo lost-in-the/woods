@@ -207,6 +207,16 @@ RSpec.describe Woods::IndexArtifact do
       FileUtils.rm_rf(outside.to_s) if outside
     end
 
+    it 'raises ArgumentError for a sibling directory whose name merely prefixes with dumps_root' do
+      # ".../dumps-evil" passes a bare start_with?(".../dumps") check; the
+      # containment test must require a path-separator boundary.
+      sibling = Pathname.new("#{artifact.dumps_root}-evil")
+      FileUtils.mkdir_p(sibling.to_s)
+      expect { artifact.promote(sibling) }.to raise_error(ArgumentError, /dumps_root/)
+    ensure
+      FileUtils.rm_rf(sibling.to_s) if sibling
+    end
+
     it 'raises ArgumentError when dump_dir does not exist' do
       ghost = artifact.dumps_root.join('2099-01-01T00-00-00Z')
       expect { artifact.promote(ghost) }.to raise_error(ArgumentError)

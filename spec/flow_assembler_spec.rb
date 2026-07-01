@@ -139,6 +139,54 @@ RSpec.describe Woods::FlowAssembler do
       expect(cycle_step[:unit]).to eq('ServiceA')
     end
 
+    it 'does not emit a cycle marker for a shared (diamond) dependency' do
+      # Controller calls two services that both call AuditLog — a DAG, not
+      # a cycle. The second encounter is dedup, not circular execution.
+      write_unit('OrdersController', source_code: <<~RUBY)
+        class OrdersController < ApplicationController
+          def create
+            BillingService.call
+            ShippingService.call
+          end
+        end
+      RUBY
+
+      write_unit('BillingService', type: 'service', source_code: <<~RUBY)
+        class BillingService
+          def call
+            AuditLog.record!
+          end
+        end
+      RUBY
+
+      write_unit('ShippingService', type: 'service', source_code: <<~RUBY)
+        class ShippingService
+          def call
+            AuditLog.record!
+          end
+        end
+      RUBY
+
+      write_unit('AuditLog', type: 'service', source_code: <<~RUBY)
+        class AuditLog
+          def record!
+            true
+          end
+        end
+      RUBY
+
+      stub_graph_defaults
+      %w[BillingService ShippingService AuditLog].each do |id|
+        allow(graph).to receive(:node_exists?).with(id).and_return(true)
+      end
+
+      assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+      flow = assembler.assemble('OrdersController#create')
+
+      expect(flow.steps.map { |s| s[:type] }).not_to include('cycle')
+      expect(flow.steps.count { |s| s[:unit] == 'AuditLog' }).to eq(1)
+    end
+
     it 'respects max_depth limit' do
       write_unit('A', type: 'service', source_code: <<~RUBY)
         class A
