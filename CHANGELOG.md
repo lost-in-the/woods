@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Console `sample`/`recent` tools now validate `columns` against the model's
+  real columns.** They passed the raw array to ActiveRecord's `.select`, which
+  treats string args as SQL fragments — a crafted column could smuggle a
+  subquery into the SELECT list, bypassing TableGate and column redaction
+  (`pluck` already validated; `sample`/`recent` didn't).
+- **`trace_flow` sanitizes the entry point before building the flow file path.**
+  Only `::`→`__` was applied, so `/` and `..` in a client-supplied entry point
+  could traverse outside the `flows/` directory (a file-read oracle over the
+  HTTP transport). Both path segments now go through the `FilenameUtils`
+  allow-list.
+- **TableGate's SQL table detector no longer misses tables on PostgreSQL.** It
+  hardcoded MySQL literal-stripping, so on PostgreSQL (`standard_conforming_strings`)
+  the MySQL `\'` rule could over-strip and swallow a real `FROM <blocked>`
+  clause. It now strips under both dialects and unions the identifiers.
+- **`EvalGuard` rejects `%x` shell literals with any delimiter.** It keyed off a
+  hand-picked delimiter set, so `%x/…/`, `%x~…~` slipped through to
+  `instance_eval`.
+- **`PipelineLock` no longer allows two processes to hold the lock.** A TOCTOU
+  race in stale-lock takeover and an ownership-unchecked release are fixed:
+  takeover is an atomic rename, and release verifies an ownership token before
+  deleting.
+
+### Fixed
+
+- **Incremental extraction no longer corrupts the index.** `rake woods:incremental`
+  overwrote `manifest.json` with zero counts, captured an empty temporal snapshot
+  (making the diff report every unit as deleted), wrote absolute file paths into
+  the index, and re-indexed affected units with a null `estimated_tokens`.
+- **Retrieval ranking signals work on real backends again.** Recency, importance,
+  type-match, and diversity read metadata with symbol keys, but every store
+  returns string keys — so all four scored every unit at their neutral fallback
+  in production. The ranker now reads both key forms.
+- **The embedding cache is now scoped to the provider model.** The cache key was
+  `SHA256(text)` with no model or dimensions, so a persistent shared backend
+  served the previous model's vector after a model switch. `model_name` and
+  `dimensions` are now part of the key.
+- **`callback_count` reports real counts.** It called the nonexistent
+  `CallbackChain#size`, which raised and left the count silently at 0 for every
+  model; switched to `#count`.
+- **`ResolvedConfig` is now deeply immutable.** Nested strings in
+  `embedding_provider`/`stores` stayed mutable, so the frozen snapshot could be
+  corrupted in place.
+- **Model dependency edges are correct for nested and re-registered units.** The
+  `ModelNameCache` alternation matched a prefixed parent (`Library::Book` for
+  `Library::Book::Chapter`); `DependencyGraph#register` left stale reverse edges
+  on re-registration, inflating incremental blast radius.
+- **Precomputed request flows are no longer empty/stale.** `FlowPrecomputer` ran
+  before unit JSON was written to disk; it now runs after `write_results`.
+- **`FlowAssembler` no longer reports DAG diamonds as cycles**, and
+  `IndexArtifact#promote` no longer accepts sibling directories that merely
+  share a name prefix with `dumps/`.
+- **`implicit_belongs_to` metadata is accurate.** It was flagged on every
+  ActiveRecord presence validator; it now keys on `belongs_to` reflections.
+- **Dependency scanning ignores commented references consistently** across all
+  three passes (a commented `Library::Book` still produced a ghost edge).
+- **`pipeline_extract(incremental: true)` requires `changed_files`** instead of
+  silently re-extracting nothing while reporting success.
+- **`pipeline_diagnose` classifies by the supplied error class** (it built a bare
+  `StandardError`, so every `Timeout`/`Net::`/`Errno` error came back
+  `:unknown`).
+- **`notion_sync` honors the `NOTION_API_TOKEN` env var**, matching the gate that
+  registers the tool (ENV-only hosts previously saw the tool but every call
+  failed).
+- **Embedded documents include the `dependencies:` line again** — the indexer
+  leaves dependency hashes string-keyed and the text preparer only read symbol
+  keys.
+- The MCP CLI integration spec no longer fails under a POSIX/C locale (UTF-8
+  subprocess output is normalized before regex matching).
+
+### Changed
+
+- Directory globbing and dependency deduplication across the extractor fleet are
+  centralized in `SharedUtilityMethods#find_files_in_directories` and
+  `SharedDependencyScanner#consolidate_dependencies` (behavior-preserving).
+
+### Documentation
+
+- Added an in-container Index Server section to `DOCKER_SETUP.md` (#139),
+  corrected stale tool counts, corrected backend config examples that referenced
+  nonexistent adapters (#83), and listed the previously-undocumented rake tasks.
+
 ## [1.5.0] - 2026-06-23
 
 ### Added
