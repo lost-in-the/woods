@@ -249,12 +249,6 @@ module Woods
       Rails.logger.info '[Woods] Analyzing dependency graph...'
       @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
 
-      # Phase 3.5: Precompute request flows (opt-in)
-      if Woods.configuration.precompute_flows
-        Rails.logger.info '[Woods] Precomputing request flows...'
-        precompute_flows
-      end
-
       # Phase 4: Enrich with git data
       Rails.logger.info '[Woods] Enriching with git data...'
       enrich_with_git_data
@@ -266,6 +260,17 @@ module Woods
       # Phase 5: Write output
       Rails.logger.info '[Woods] Writing output...'
       write_results
+
+      # Phase 5.5: Precompute request flows (opt-in). Must run AFTER
+      # write_results — FlowAssembler loads unit JSON from disk, so running
+      # earlier assembled every flow from absent (fresh output dir) or
+      # stale (previous run's) data. precompute_flows re-writes the
+      # controller units it annotates with metadata[:flow_paths].
+      if Woods.configuration.precompute_flows
+        Rails.logger.info '[Woods] Precomputing request flows...'
+        precompute_flows
+      end
+
       write_dependency_graph
       write_graph_analysis
       write_manifest
@@ -512,9 +517,30 @@ module Woods
       all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
       flow_map = precomputer.precompute
+      rewrite_flow_annotated_units
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
     rescue StandardError => e
       Rails.logger.error "[Woods] Flow precomputation failed: #{e.message}"
+    end
+
+    # Precompute runs after write_results (FlowAssembler reads unit JSON
+    # from disk), so units annotated in memory with metadata[:flow_paths]
+    # must be re-written and their type index refreshed to pick up the
+    # annotation.
+    def rewrite_flow_annotated_units
+      @results.each do |type, units|
+        annotated = units.select { |u| u.metadata[:flow_paths] }
+        next if annotated.empty?
+
+        type_dir = @output_dir.join(type.to_s)
+        annotated.each do |unit|
+          File.write(
+            type_dir.join(collision_safe_filename(unit.identifier)),
+            json_serialize(unit.to_h)
+          )
+        end
+        regenerate_type_index(type)
+      end
     end
 
     # ──────────────────────────────────────────────────────────────────────

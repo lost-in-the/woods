@@ -289,6 +289,94 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── extract_all phase ordering ──────────────────────────────────────
+
+  describe '#extract_all flow precompute ordering' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.concurrent_extraction = false
+      Woods.configuration.precompute_flows = true
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
+    it 'precomputes flows only after write_results has written unit JSON to disk' do
+      # FlowAssembler loads unit JSON from disk — precomputing before
+      # write_results assembled every flow from absent or stale data.
+      %i[setup_output_directory safe_eager_load! extract_all_sequential
+         deduplicate_results resolve_dependents enrich_with_git_data
+         normalize_file_paths write_dependency_graph write_graph_analysis
+         write_manifest write_structural_summary capture_snapshot
+         log_summary].each do |phase|
+        allow(extractor).to receive(phase)
+      end
+      allow(Woods::ModelNameCache).to receive(:reset!)
+      allow(Woods::GraphAnalyzer).to receive(:new).and_return(double('GraphAnalyzer', analyze: {}))
+
+      expect(extractor).to receive(:write_results).ordered
+      expect(extractor).to receive(:precompute_flows).ordered
+
+      extractor.extract_all
+    end
+  end
+
+  # ── rewrite_flow_annotated_units ────────────────────────────────────
+
+  describe '#rewrite_flow_annotated_units' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
+    it 're-writes units annotated with flow_paths and refreshes the type index' do
+      output_dir = File.join(tmpdir, 'output')
+      type_dir = File.join(output_dir, 'controllers')
+      FileUtils.mkdir_p(type_dir)
+
+      annotated = Woods::ExtractedUnit.new(
+        type: :controller, identifier: 'OrdersController', file_path: 'app/controllers/orders_controller.rb'
+      )
+      annotated.metadata = { flow_paths: { 'create' => 'flows/OrdersController_create.json' } }
+      plain = Woods::ExtractedUnit.new(
+        type: :controller, identifier: 'UsersController', file_path: 'app/controllers/users_controller.rb'
+      )
+      extractor.instance_variable_set(:@results, { controllers: [annotated, plain] })
+
+      extractor.send(:rewrite_flow_annotated_units)
+
+      written = Dir[File.join(type_dir, '*.json')].reject { |f| File.basename(f) == '_index.json' }
+      expect(written.size).to eq(1)
+      unit_json = JSON.parse(File.read(written.first))
+      expect(unit_json['identifier']).to eq('OrdersController')
+      expect(unit_json.dig('metadata', 'flow_paths', 'create')).to eq('flows/OrdersController_create.json')
+
+      index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+      expect(index.map { |e| e['identifier'] }).to eq(['OrdersController'])
+    end
+
+    it 'does nothing when no unit carries flow_paths' do
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(File.join(output_dir, 'controllers'))
+      plain = Woods::ExtractedUnit.new(
+        type: :controller, identifier: 'UsersController', file_path: 'app/controllers/users_controller.rb'
+      )
+      extractor.instance_variable_set(:@results, { controllers: [plain] })
+
+      extractor.send(:rewrite_flow_annotated_units)
+
+      expect(Dir[File.join(output_dir, 'controllers', '*.json')]).to be_empty
+    end
+  end
+
   # ── regenerate_type_index ───────────────────────────────────────────
 
   describe '#regenerate_type_index' do
