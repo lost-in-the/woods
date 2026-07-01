@@ -770,7 +770,7 @@ module Woods
           deps << { type: :graphql_resolver, target: resolver, via: :field_resolver }
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
 
       # ──────────────────────────────────────────────────────────────────────

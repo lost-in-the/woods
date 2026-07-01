@@ -42,7 +42,7 @@ module Woods
       def extract_all
         event_map = {}
 
-        @directories.flat_map { |dir| Dir[dir.join('**/*.rb')] }.each do |file_path|
+        find_files_in_directories(@directories).each do |file_path|
           scan_file(file_path, event_map)
         end
 
@@ -204,7 +204,7 @@ module Woods
       # @return [Array<Hash>]
       def build_dependencies(combined_source)
         deps = scan_common_dependencies(combined_source)
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

@@ -269,6 +269,60 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
     end
   end
 
+  # ── #consolidate_dependencies ────────────────────────────────────
+
+  describe '#consolidate_dependencies' do
+    it 'merges multiple dependency arrays' do
+      models = [{ type: :model, target: 'User', via: :code_reference }]
+      services = [{ type: :service, target: 'BillingService', via: :code_reference }]
+
+      result = scanner.consolidate_dependencies(models, services)
+      expect(result).to contain_exactly(
+        { type: :model, target: 'User', via: :code_reference },
+        { type: :service, target: 'BillingService', via: :code_reference }
+      )
+    end
+
+    it 'deduplicates by [type, target], keeping the first occurrence' do
+      first = { type: :model, target: 'User', via: :belongs_to }
+      second = { type: :model, target: 'User', via: :code_reference }
+
+      result = scanner.consolidate_dependencies([first], [second])
+      expect(result).to eq([first])
+    end
+
+    it 'keeps entries with the same target but different types' do
+      deps = [
+        { type: :model, target: 'Payment', via: :code_reference },
+        { type: :service, target: 'Payment', via: :code_reference }
+      ]
+
+      result = scanner.consolidate_dependencies(deps)
+      expect(result.size).to eq(2)
+    end
+
+    it 'removes nil entries' do
+      deps = [{ type: :model, target: 'User', via: :code_reference }, nil]
+
+      result = scanner.consolidate_dependencies(deps)
+      expect(result).to eq([{ type: :model, target: 'User', via: :code_reference }])
+    end
+
+    it 'accepts a single pre-built array as a drop-in for the inline uniq chain' do
+      deps = [
+        { type: :model, target: 'User', via: :code_reference },
+        { type: :model, target: 'User', via: :render }
+      ]
+
+      result = scanner.consolidate_dependencies(deps)
+      expect(result.size).to eq(1)
+    end
+
+    it 'returns an empty array when given only empty arrays' do
+      expect(scanner.consolidate_dependencies([], [])).to eq([])
+    end
+  end
+
   # ── #scan_navigation_dependencies ────────────────────────────────
 
   describe '#scan_navigation_dependencies' do

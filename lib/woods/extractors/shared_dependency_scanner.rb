@@ -23,7 +23,7 @@ module Woods
     #     def extract_dependencies(source)
     #       deps = scan_common_dependencies(source)
     #       deps << { type: :custom, target: "Bar", via: :special }
-    #       deps.uniq { |d| [d[:type], d[:target]] }
+    #       consolidate_dependencies(deps)
     #     end
     #   end
     #
@@ -141,12 +141,27 @@ module Woods
       # @param source [String] Ruby source code to scan
       # @return [Array<Hash>] Deduplicated dependency hashes
       def scan_common_dependencies(source)
-        deps = []
-        deps.concat(scan_model_dependencies(source))
-        deps.concat(scan_service_dependencies(source))
-        deps.concat(scan_job_dependencies(source))
-        deps.concat(scan_mailer_dependencies(source))
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(
+          scan_model_dependencies(source),
+          scan_service_dependencies(source),
+          scan_job_dependencies(source),
+          scan_mailer_dependencies(source)
+        )
+      end
+
+      # Merge dependency arrays and deduplicate by +[type, target]+.
+      #
+      # Centralizes the `deps.uniq { |d| [d[:type], d[:target]] }` chain
+      # duplicated at the end of most extractors' +extract_dependencies+
+      # methods. Arrays are flattened one level and nils removed; the first
+      # occurrence of each +[type, target]+ pair wins, so the first +:via+
+      # label recorded is preserved — identical to the inline chains this
+      # replaces.
+      #
+      # @param dependency_arrays [Array<Array<Hash>>] One or more dependency arrays
+      # @return [Array<Hash>] Flattened, nil-free, deduplicated dependency hashes
+      def consolidate_dependencies(*dependency_arrays)
+        dependency_arrays.flatten(1).compact.uniq { |d| [d[:type], d[:target]] }
       end
 
       # Match _path/_url route helpers anywhere in source.

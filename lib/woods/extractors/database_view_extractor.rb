@@ -271,7 +271,7 @@ module Woods
           deps << { type: :model, target: model_name, via: :table_name }
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

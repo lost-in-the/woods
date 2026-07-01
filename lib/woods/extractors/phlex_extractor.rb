@@ -254,7 +254,7 @@ module Woods
         deps.concat(scan_navigation_dependencies(source))
         deps.concat(scan_form_dependencies(source))
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

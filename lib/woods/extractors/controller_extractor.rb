@@ -320,7 +320,7 @@ module Woods
           deps.concat(scan_navigation_dependencies(source, via_type: :redirect_to))
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
 
       # ──────────────────────────────────────────────────────────────────────

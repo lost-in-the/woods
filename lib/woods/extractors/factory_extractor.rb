@@ -35,9 +35,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of factory units
       def extract_all
-        @directories.flat_map do |dir|
-          Dir[dir.join('**/*.rb')].flat_map { |file| extract_factory_file(file) }
-        end
+        find_files_in_directories(@directories).flat_map { |file| extract_factory_file(file) }
       end
 
       # Extract factory definitions from a single factory file.
@@ -282,7 +280,7 @@ module Woods
           deps << { type: :factory, target: assoc, via: :factory_association }
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

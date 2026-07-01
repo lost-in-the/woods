@@ -44,10 +44,8 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of service units
       def extract_all
-        @directories.flat_map do |dir|
-          Dir[dir.join('**/*.rb')].filter_map do |file|
-            extract_service_file(file)
-          end
+        find_files_in_directories(@directories).filter_map do |file|
+          extract_service_file(file)
         end
       end
 
@@ -210,7 +208,7 @@ module Woods
           deps << { type: :infrastructure, target: :redis, via: :code_reference }
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

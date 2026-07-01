@@ -654,7 +654,7 @@ module Woods
           end
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
 
       # Enrich callback metadata with side-effect analysis.

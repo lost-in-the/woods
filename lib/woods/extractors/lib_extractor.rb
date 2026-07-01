@@ -211,7 +211,7 @@ module Woods
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def extract_dependencies(source)
         deps = scan_common_dependencies(source)
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end
