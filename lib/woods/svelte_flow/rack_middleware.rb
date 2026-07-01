@@ -78,6 +78,7 @@ module Woods
         when '/api/clusters'        then serve_clusters_json
         when '/api/flows'           then serve_flows_index
         when '/api/graph/neighbors' then serve_neighbors_json(env)
+        when '/api/subgraph'        then serve_subgraph_json(env)
         else pattern_route(sub_path)
         end
       end
@@ -292,31 +293,93 @@ module Woods
         return service_unavailable unless transformer
         return not_found unless transformer.graph.node_exists?(node_id)
 
-        nodes, edges, reverse = graph_adjacency(transformer.graph)
-        visited = collect_neighborhood(node_id, clamp_depth(query['depth']), edges: edges, reverse: reverse)
+        adjacency = graph_adjacency(transformer.graph)
+        visited = collect_neighborhood(node_id, clamp_depth(query['depth']), adjacency)
 
-        json_response(build_subgraph_payload(transformer, visited, nodes: nodes, edges: edges, reverse: reverse))
+        json_response(build_subgraph_payload(transformer, visited, adjacency))
       end
 
-      # Destructure a graph's adjacency maps from its serialized form.
+      # Serve a subgraph scoped to an arbitrary set of node identifiers — the
+      # rendered form of an agent's query result (dependents, a flow, a search).
       #
-      # @param graph [DependencyGraph]
-      # @return [Array(Hash, Hash, Hash)] nodes, forward edges, reverse edges
-      def graph_adjacency(graph)
-        graph_data = graph.to_h
-        [
-          graph_data[:nodes] || graph_data['nodes'] || {},
-          graph_data[:edges] || graph_data['edges'] || {},
-          graph_data[:reverse] || graph_data['reverse'] || {}
-        ]
+      # Query params:
+      # - nodes  (required) comma-separated identifiers to render
+      # - depth  (optional, default 0, max 5) extra BFS hops pulled in around the set
+      # - via    (optional) comma-separated relationship filter (e.g. belongs_to,render)
+      #
+      # Unknown identifiers are dropped and reported back in `dropped`.
+      #
+      # @param env [Hash] Rack environment (reads QUERY_STRING)
+      # @return [Array] Rack response triple
+      def serve_subgraph_json(env)
+        query = Rack::Utils.parse_query(env['QUERY_STRING'] || '')
+        requested = parse_id_list(query['nodes'])
+        return bad_request('Missing required parameter: nodes') if requested.empty?
+
+        transformer = ensure_transformer
+        return service_unavailable unless transformer
+
+        adjacency = graph_adjacency(transformer.graph)
+        known, dropped = requested.partition { |id| adjacency[:nodes].key?(id) }
+        return not_found('None of the requested nodes exist', dropped: dropped) if known.empty?
+
+        payload = scoped_subgraph(transformer, adjacency, known,
+                                  depth: clamp_depth(query['depth'], min: 0), via_set: parse_via(query['via']))
+        json_response(payload.merge('requested' => known, 'dropped' => dropped))
       end
 
-      # Clamp a raw depth query param to the supported 1..5 range.
+      # Expand a seed set by `depth` hops and render it as a subgraph payload.
+      #
+      # @param transformer [Transformer]
+      # @param adjacency [Hash] { nodes:, edges:, reverse: }
+      # @param seeds [Array<String>] Seed identifiers (already known to exist)
+      # @param depth [Integer] Hops to expand
+      # @param via_set [Set<Symbol>, nil] Relationship filter
+      # @return [Hash] Subgraph payload
+      def scoped_subgraph(transformer, adjacency, seeds, depth:, via_set:)
+        visited = collect_neighborhood(seeds, depth, adjacency, via_set: via_set)
+        build_subgraph_payload(transformer, visited, adjacency, via_set: via_set)
+      end
+
+      # Parse a comma-separated identifier list, trimming blanks and duplicates.
       #
       # @param raw [String, nil]
+      # @return [Array<String>]
+      def parse_id_list(raw)
+        (raw || '').split(',').map(&:strip).reject(&:empty?).uniq
+      end
+
+      # Parse a comma-separated relationship (`via`) filter into a symbol set.
+      #
+      # @param raw [String, nil]
+      # @return [Set<Symbol>, nil] nil when no filter was supplied
+      def parse_via(raw)
+        labels = parse_id_list(raw).map(&:to_sym)
+        labels.empty? ? nil : Set.new(labels)
+      end
+
+      # A graph's adjacency maps from its serialized form, bundled so they can
+      # travel together through the scoping pipeline.
+      #
+      # @param graph [DependencyGraph]
+      # @return [Hash] { nodes:, edges:, reverse: }
+      def graph_adjacency(graph)
+        graph_data = graph.to_h
+        {
+          nodes: graph_data[:nodes] || graph_data['nodes'] || {},
+          edges: graph_data[:edges] || graph_data['edges'] || {},
+          reverse: graph_data[:reverse] || graph_data['reverse'] || {}
+        }
+      end
+
+      # Clamp a raw depth query param to the supported range. `min` is also the
+      # default when the param is absent (1 for neighbors, 0 for subgraphs).
+      #
+      # @param raw [String, nil]
+      # @param min [Integer] Lower bound and default
       # @return [Integer]
-      def clamp_depth(raw)
-        (raw || '1').to_i.clamp(1, 5)
+      def clamp_depth(raw, min: 1)
+        (raw || min.to_s).to_i.clamp(min, 5)
       end
 
       # Build the Svelte Flow subgraph payload for a resolved set of visited
@@ -326,13 +389,11 @@ module Woods
       #
       # @param transformer [Transformer]
       # @param visited [Set<String>] Node IDs to include
-      # @param nodes [Hash] Full node map
-      # @param edges [Hash] Full forward-edge map ({ target:, via: } entries)
-      # @param reverse [Hash] Full reverse-edge map (identifier-string arrays)
+      # @param adjacency [Hash] { nodes:, edges:, reverse: } full graph maps
+      # @param via_set [Set<Symbol>, nil] Optional relationship filter for rendered edges
       # @return [Hash] { 'nodes' =>, 'edges' =>, 'highest_pagerank' => }
-      def build_subgraph_payload(transformer, visited, nodes:, edges:, reverse:)
-        scoped_nodes, scoped_forward, scoped_reverse =
-          build_scoped_graph(visited, nodes: nodes, edges: edges, reverse: reverse)
+      def build_subgraph_payload(transformer, visited, adjacency, via_set: nil)
+        scoped_nodes, scoped_forward, scoped_reverse = build_scoped_graph(visited, adjacency, via_set: via_set)
 
         analyzer = transformer.analyzer
         pagerank_scores = transformer.graph.pagerank
@@ -355,23 +416,22 @@ module Woods
         }
       end
 
-      # BFS from node_id up to depth hops, traversing both forward and reverse edges.
+      # BFS from one or more seed nodes up to `depth` hops, traversing forward
+      # and (unless a via filter is set) reverse edges.
       #
-      # @param node_id [String]
-      # @param depth [Integer]
-      # @param edges [Hash<String, Array<String>>] Forward edges
-      # @param reverse [Hash<String, Array<String>>] Reverse edges (serialized as arrays after to_h)
+      # @param seeds [String, Array<String>, Set<String>] Seed identifier(s)
+      # @param depth [Integer] Number of hops to expand (0 = seeds only)
+      # @param adjacency [Hash] { nodes:, edges:, reverse: } full graph maps
+      # @param via_set [Set<Symbol>, nil] Optional relationship filter for expansion
       # @return [Set<String>]
-      def collect_neighborhood(node_id, depth, edges:, reverse:)
-        visited = Set.new([node_id])
-        frontier = [node_id]
+      def collect_neighborhood(seeds, depth, adjacency, via_set: nil)
+        visited = seeds.is_a?(Set) ? seeds.dup : Set.new(Array(seeds))
+        frontier = visited.to_a
 
         depth.times do
           next_frontier = []
           frontier.each do |current|
-            # Forward edges are { target:, via: } hashes; reverse edges are plain identifier strings.
-            neighbors = EdgeData.targets(edges[current]) + (reverse[current] || [])
-            neighbors.each do |dep|
+            neighbors_of(current, adjacency, via_set).each do |dep|
               next if visited.include?(dep)
 
               visited.add(dep)
@@ -384,14 +444,28 @@ module Woods
         visited
       end
 
+      # Neighbor identifiers of a node for BFS expansion. Forward edges are
+      # { target:, via: } hashes; reverse edges are plain identifier strings.
+      # When a `via_set` is given, only forward edges of those relationships are
+      # followed (reverse edges are unlabeled after serialization, so they are
+      # excluded rather than followed under an unknown relationship).
+      #
+      # @return [Array<String>]
+      def neighbors_of(current, adjacency, via_set)
+        entries = adjacency[:edges][current] || []
+        entries = entries.select { |e| via_set.include?(EdgeData.via(e)) } if via_set
+        forward = EdgeData.targets(entries)
+        via_set ? forward : forward + (adjacency[:reverse][current] || [])
+      end
+
       # Scope nodes and edges to the visited set.
       #
       # @param visited [Set<String>]
-      # @param nodes [Hash] All graph nodes
-      # @param edges [Hash<String, Array<String>>] Forward edges
-      # @param reverse [Hash<String, Array<String>>] Reverse edges (serialized as arrays)
+      # @param adjacency [Hash] { nodes:, edges:, reverse: } full graph maps
+      # @param via_set [Set<Symbol>, nil] Optional relationship filter
       # @return [Array(Hash, Hash, Hash)] scoped_nodes, scoped_forward, scoped_reverse
-      def build_scoped_graph(visited, nodes:, edges:, reverse:)
+      def build_scoped_graph(visited, adjacency, via_set: nil)
+        nodes = adjacency[:nodes]
         scoped_nodes = {}
         scoped_forward = {}
         scoped_reverse = {}
@@ -399,15 +473,27 @@ module Woods
         visited.each do |source|
           scoped_nodes[source] = nodes[source] if nodes.key?(source)
 
-          # Keep forward entries as { target:, via: } hashes so EdgeBuilder can label edges.
-          fwd = select_visited(edges[source], visited) { |entry| EdgeData.target(entry) }
+          fwd = scoped_forward_entries(adjacency[:edges][source], visited, via_set)
           scoped_forward[source] = fwd unless fwd.empty?
 
-          rev = select_visited(reverse[source], visited) { |target| target }
+          rev = select_visited(adjacency[:reverse][source], visited) { |target| target }
           scoped_reverse[source] = Set.new(rev) unless rev.empty?
         end
 
         [scoped_nodes, scoped_forward, scoped_reverse]
+      end
+
+      # Forward edge entries kept in scope: target in `visited`, and (if a via
+      # filter is set) relationship in `via_set`. Entries stay as { target:, via: }
+      # hashes so EdgeBuilder can label the rendered edges.
+      #
+      # @param entries [Array, nil] Forward entries for one source
+      # @param visited [Set<String>] Node IDs in scope
+      # @param via_set [Set<Symbol>, nil] Optional relationship filter
+      # @return [Array] Kept entries
+      def scoped_forward_entries(entries, visited, via_set)
+        kept = select_visited(entries, visited) { |entry| EdgeData.target(entry) }
+        via_set ? kept.select { |entry| via_set.include?(EdgeData.via(entry)) } : kept
       end
 
       # Select edge entries whose (yielded) target identifier is in `visited`.
@@ -477,11 +563,18 @@ module Woods
         [200, { 'content-type' => 'application/json' }, [JSON.generate(data)]]
       end
 
-      # Return a 404 response.
+      # Return a 404 response. Plain text by default; JSON (with an optional
+      # `dropped` list) when a message is supplied.
       #
+      # @param message [String, nil] Error message; nil yields a plain-text 404
+      # @param dropped [Array<String>, nil] Unresolved identifiers to report
       # @return [Array] Rack response triple
-      def not_found
-        [404, { 'content-type' => 'text/plain' }, ['Not Found']]
+      def not_found(message = nil, dropped: nil)
+        return [404, { 'content-type' => 'text/plain' }, ['Not Found']] if message.nil?
+
+        body = { 'error' => message }
+        body['dropped'] = dropped if dropped
+        [404, { 'content-type' => 'application/json' }, [JSON.generate(body)]]
       end
 
       # Return a 503 response when data is not available.

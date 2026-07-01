@@ -3,7 +3,7 @@
   import NodeDetail from './components/NodeDetail.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import ShowModeSelector from './components/ShowModeSelector.svelte';
-  import { fetchNeighbors, fetchFullGraph } from './lib/api.js';
+  import { fetchNeighbors, fetchFullGraph, fetchSubgraph } from './lib/api.js';
   import { computeVisibleNodes, expandRecursive } from './lib/graph-state.js';
 
   let allNodes = $state.raw([]);
@@ -28,6 +28,42 @@
   function getCenterFromUrl() {
     const params = new URLSearchParams(window.location.search);
     return params.get('center') || null;
+  }
+
+  // Read a query-scoped request (?nodes=A,B,C&depth=N&via=belongs_to,render) from
+  // the URL. When present, the app renders just that scoped subgraph — the
+  // rendered form of an agent's query — instead of the full dependency graph.
+  function getQueryFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const asList = (key) =>
+      (params.get(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
+    return {
+      nodes: asList('nodes'),
+      depth: parseInt(params.get('depth') || '0', 10) || 0,
+      via: asList('via'),
+    };
+  }
+
+  function mapNodes(data) {
+    return (data.nodes || []).map((n) => ({
+      ...n,
+      type: n.data?.unitType === 'model' ? 'model' : 'compact',
+      position: n.position || { x: 0, y: 0 },
+    }));
+  }
+
+  function mapEdges(data) {
+    return (data.edges || []).map((e) => ({
+      ...e,
+      animated: e.data?.isCycle || false,
+    }));
+  }
+
+  // Pick a center node: a preferred id if it's present, else highest PageRank.
+  function pickCenter(nodes, preferred) {
+    if (preferred && nodes.some((n) => n.id === preferred)) return preferred;
+    if (nodes.length === 0) return null;
+    return [...nodes].sort((a, b) => (b.data?.pagerank || 0) - (a.data?.pagerank || 0))[0].id;
   }
 
   function updateUrl(centerId) {
@@ -58,29 +94,40 @@
     loading = true;
     try {
       const data = await fetchFullGraph();
-      const rawNodes = (data.nodes || []).map((n) => ({
-        ...n,
-        type: n.data?.unitType === 'model' ? 'model' : 'compact',
-        position: n.position || { x: 0, y: 0 },
-      }));
-      const rawEdges = (data.edges || []).map((e) => ({
-        ...e,
-        animated: e.data?.isCycle || false,
-      }));
-      allNodes = rawNodes;
-      allEdges = rawEdges;
+      allNodes = mapNodes(data);
+      allEdges = mapEdges(data);
       fullGraphLoaded = true;
 
       // Auto-select highest pagerank node if no center, or restore from URL
-      if (!centerNodeId && rawNodes.length > 0) {
-        const urlCenter = getCenterFromUrl();
-        const targetId = urlCenter && rawNodes.some((n) => n.id === urlCenter)
-          ? urlCenter
-          : [...rawNodes].sort((a, b) => (b.data?.pagerank || 0) - (a.data?.pagerank || 0))[0].id;
-        setCenterNode(targetId);
+      if (!centerNodeId && allNodes.length > 0) {
+        setCenterNode(pickCenter(allNodes, getCenterFromUrl()));
       }
     } catch (e) {
       console.error('Failed to load graph:', e);
+    }
+    loading = false;
+  }
+
+  // Load a query-scoped subgraph: only the requested nodes (+ optional depth
+  // hops / relationship filter) are present, so exploration is bounded to the
+  // agent's query result.
+  async function loadSubgraph({ nodes, depth, via }) {
+    loading = true;
+    try {
+      const data = await fetchSubgraph(nodes, { depth, via });
+      allNodes = mapNodes(data);
+      allEdges = mapEdges(data);
+
+      if (data.dropped?.length > 0) {
+        console.warn('Subgraph: unknown nodes dropped:', data.dropped.join(', '));
+      }
+
+      if (allNodes.length > 0) {
+        const preferred = getCenterFromUrl() || (data.requested || nodes)[0];
+        setCenterNode(pickCenter(allNodes, preferred));
+      }
+    } catch (e) {
+      console.error('Failed to load subgraph:', e);
     }
     loading = false;
   }
@@ -160,8 +207,13 @@
     expandedBranches = next;
   }
 
-  // Initial load
-  loadFullGraph();
+  // Initial load: a query-scoped subgraph when ?nodes= is present, else the full graph.
+  const initialQuery = getQueryFromUrl();
+  if (initialQuery.nodes.length > 0) {
+    loadSubgraph(initialQuery);
+  } else {
+    loadFullGraph();
+  }
 </script>
 
 <div class="app-layout">

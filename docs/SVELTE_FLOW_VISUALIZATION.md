@@ -61,6 +61,24 @@ Visit `/woods/visualize` in your browser. The page provides three views:
 
 The middleware lazy-loads data from your extraction output on first request and caches it. When you re-run extraction, the visualization automatically picks up the new data on the next request.
 
+### Query-Scoped Mode (agent-driven)
+
+Instead of rendering the whole graph, you can render **just a set of units** — the result of a query an agent already ran (`dependents`, `trace_flow`, `search`) — and explore that scoped subgraph. Append `?nodes=` to the visualization URL:
+
+```
+/woods/visualize?nodes=PaymentService,Invoice,Refund
+/woods/visualize?nodes=Order&depth=2
+/woods/visualize?nodes=Order&depth=1&via=belongs_to
+```
+
+| Param | Meaning | Default |
+|-------|---------|---------|
+| `nodes` | Comma-separated identifiers to render (required) | — |
+| `depth` | Extra BFS hops pulled in around the set (0 = the set only) | `0` |
+| `via` | Comma-separated relationship filter for expansion/rendering (e.g. `belongs_to,render`) | all |
+
+Only the scoped units are loaded, so exploration is bounded to the query result. The agent workflow is: run an MCP query (e.g. `dependents PaymentService`), collect the identifiers, build the URL, and print or open it. Unknown identifiers are dropped and reported in the JSON response's `dropped` field (and logged in the browser console).
+
 ## What Gets Visualized
 
 ### Dependency Graph
@@ -152,6 +170,7 @@ When `svelte_flow_enabled = true`, the middleware serves:
 |----------|---------|
 | `GET /woods/visualize` | HTML page with embedded visualization app |
 | `GET /woods/visualize/api/graph` | Dependency graph as Svelte Flow JSON |
+| `GET /woods/visualize/api/subgraph?nodes=&depth=&via=` | Subgraph scoped to a set of identifiers (`nodes`, `edges`, `requested`, `dropped`) |
 | `GET /woods/visualize/api/clusters` | Domain clusters as Svelte Flow JSON |
 | `GET /woods/visualize/api/flows` | Flow index (entry point → filename mapping) |
 | `GET /woods/visualize/api/flows/:key` | Individual flow as Svelte Flow JSON |

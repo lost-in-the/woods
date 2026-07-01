@@ -25,3 +25,18 @@ export async function fetchNeighbors(nodeId, depth = 1) {
 export async function fetchFullGraph() {
   return fetchJSON('graph');
 }
+
+/**
+ * Fetch a subgraph scoped to an explicit set of node identifiers — the
+ * rendered form of an agent's query result (dependents, a flow, a search).
+ * @param {Array<string>} nodeIds - Identifiers to render
+ * @param {Object} [opts]
+ * @param {number} [opts.depth=0] - Extra BFS hops pulled in around the set
+ * @param {Array<string>} [opts.via] - Relationship filter (e.g. ['belongs_to'])
+ * @returns {Promise<{nodes: Array, edges: Array, requested: Array, dropped: Array}>}
+ */
+export async function fetchSubgraph(nodeIds, { depth = 0, via = [] } = {}) {
+  const params = new URLSearchParams({ nodes: nodeIds.join(','), depth: String(depth) });
+  if (via.length > 0) params.set('via', via.join(','));
+  return fetchJSON(`subgraph?${params}`);
+}

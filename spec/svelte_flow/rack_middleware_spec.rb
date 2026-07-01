@@ -162,6 +162,90 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
     end
   end
 
+  describe 'GET /api/subgraph' do
+    let(:fixture_dir) { Dir.mktmpdir }
+    let(:graph_data) do
+      {
+        'nodes' => {
+          'Account' => { 'type' => 'model' },
+          'Order' => { 'type' => 'model' },
+          'Invoice' => { 'type' => 'model' },
+          'OrdersController' => { 'type' => 'controller' }
+        },
+        'edges' => {
+          'Order' => [
+            { 'target' => 'Account', 'via' => 'belongs_to' },
+            { 'target' => 'Invoice', 'via' => 'code_reference' }
+          ],
+          'OrdersController' => [{ 'target' => 'Order', 'via' => 'code_reference' }]
+        },
+        'reverse' => {
+          'Account' => ['Order'], 'Invoice' => ['Order'], 'Order' => ['OrdersController']
+        },
+        'pagerank' => { 'Account' => 0.02, 'Order' => 0.03, 'Invoice' => 0.01, 'OrdersController' => 0.02 }
+      }
+    end
+
+    before do
+      File.write(File.join(fixture_dir, 'manifest.json'), JSON.generate({ 'version' => 1 }))
+      File.write(File.join(fixture_dir, 'dependency_graph.json'), JSON.generate(graph_data))
+      config = double('config', output_dir: fixture_dir)
+      allow(Woods).to receive(:configuration).and_return(config)
+    end
+
+    after { FileUtils.rm_rf(fixture_dir) }
+
+    def get_subgraph(query)
+      _status, _headers, body = middleware.call(mock_env("/woods/visualize/api/subgraph?#{query}"))
+      JSON.parse(body.first)
+    end
+
+    def node_ids(query)
+      get_subgraph(query)['nodes'].map { |n| n['id'] }
+    end
+
+    it 'returns 400 when the nodes parameter is missing' do
+      status, = middleware.call(mock_env('/woods/visualize/api/subgraph'))
+      expect(status).to eq(400)
+    end
+
+    it 'returns 404 with the dropped list when no requested node exists' do
+      status, _headers, body = middleware.call(mock_env('/woods/visualize/api/subgraph?nodes=Ghost,Phantom'))
+      expect(status).to eq(404)
+      expect(JSON.parse(body.first)['dropped']).to contain_exactly('Ghost', 'Phantom')
+    end
+
+    it 'renders exactly the requested set at depth 0 (induced subgraph)' do
+      data = get_subgraph('nodes=Order,Account')
+      expect(data['nodes'].map { |n| n['id'] }).to contain_exactly('Order', 'Account')
+      expect(data['requested']).to contain_exactly('Order', 'Account')
+      expect(data['dropped']).to be_empty
+    end
+
+    it 'includes the edge between two requested nodes at depth 0' do
+      edges = get_subgraph('nodes=Order,Account')['edges']
+      pair = edges.map { |e| [e['source'], e['target']] }
+      expect(pair).to include(%w[Order Account])
+    end
+
+    it 'pulls in forward and reverse neighbors at depth 1' do
+      expect(node_ids('nodes=Order&depth=1'))
+        .to contain_exactly('Order', 'Account', 'Invoice', 'OrdersController')
+    end
+
+    it 'restricts expansion to the via relationship when filtered' do
+      ids = node_ids('nodes=Order&depth=1&via=belongs_to')
+      expect(ids).to include('Order', 'Account')
+      expect(ids).not_to include('Invoice', 'OrdersController')
+    end
+
+    it 'reports unknown identifiers in dropped while rendering the known ones' do
+      data = get_subgraph('nodes=Order,Ghost')
+      expect(data['requested']).to contain_exactly('Order')
+      expect(data['dropped']).to contain_exactly('Ghost')
+    end
+  end
+
   describe 'custom mount path' do
     let(:middleware) { described_class.new(inner_app, path: '/custom/viz') }
 
