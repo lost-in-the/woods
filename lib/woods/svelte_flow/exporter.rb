@@ -196,7 +196,8 @@ module Woods
       # @param node_ids [Array<String>]
       # @return [Hash<String, Hash>]
       def build_sources(transformer, node_ids)
-        repo_url = Woods.configuration.svelte_flow_repo_url
+        # Configuration may be unset outside a booted host; degrade to no repo link.
+        repo_url = Woods.configuration&.svelte_flow_repo_url
         git_sha = manifest_git_sha
 
         node_ids.each_with_object({}) do |id, acc|

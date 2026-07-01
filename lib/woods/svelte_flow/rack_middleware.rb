@@ -194,7 +194,7 @@ module Woods
       # @return [String, nil]
       def github_blob_url(file_path)
         SourceLinks.github_blob_url(file_path,
-                                    repo_url: Woods.configuration.svelte_flow_repo_url,
+                                    repo_url: Woods.configuration&.svelte_flow_repo_url,
                                     git_sha: manifest_git_sha)
       end
 

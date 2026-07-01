@@ -252,6 +252,9 @@ RSpec.describe Woods::SvelteFlow::Exporter do
 
   describe '#export_standalone' do
     before do
+      # Isolate from any global Woods.configuration left by other specs.
+      allow(Woods).to receive(:configuration).and_return(double('config', svelte_flow_repo_url: nil))
+
       FileUtils.mkdir_p(File.join(tmpdir, 'model'))
       File.write(File.join(tmpdir, 'model', 'User.json'), JSON.generate(
                                                             'identifier' => 'User',
