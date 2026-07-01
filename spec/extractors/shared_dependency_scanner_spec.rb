@@ -65,6 +65,23 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       result = scanner.scan_model_dependencies(source)
       expect(result).to eq([])
     end
+
+    it 'ignores fully-qualified references inside comments' do
+      source = <<~RUBY
+        # TODO: migrate User to the new schema
+        post = Post.first
+      RUBY
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['Post'])
+    end
+
+    it 'still matches references inside string interpolation' do
+      # rubocop:disable Lint/InterpolationCheck -- the #{} is source under test, not spec interpolation
+      source = 'label = "owner: #{User.find(id).name}"'
+      # rubocop:enable Lint/InterpolationCheck
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['User'])
+    end
   end
 
   # ── #scan_service_dependencies ──────────────────────────────────

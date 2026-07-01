@@ -45,22 +45,26 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_model_dependencies(source, via: :code_reference)
+        # Strip `#` line comments before scanning so references inside
+        # YARD docstrings / TODO comments don't generate ghost edges.
+        # Applied to ALL passes — a commented `Library::Book` previously
+        # still produced an edge through the full-name pass, which the
+        # stripping was added to prevent. The negative lookahead `(?!\{)`
+        # keeps Ruby's `#{...}` string interpolation intact — stripping
+        # blindly would eat every model reference inside
+        # `"Book: #{Library::Book.new}"` etc., which is a common
+        # ERB/Phlex/string pattern.
+        scannable = source.gsub(/#(?!\{)[^\n]*/, '')
+
         targets = Set.new
-        source.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
-        extract_constantize_targets(source).each { |t| targets << t }
+        scannable.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
+        extract_constantize_targets(scannable).each { |t| targets << t }
 
         # Short-name + constantize resolution are additive passes guarded
         # by `respond_to?` so partial test doubles that only stub
         # `model_names_regex` still work. Real extraction runs always
         # have the full API.
         if ModelNameCache.respond_to?(:short_names_regex) && ModelNameCache.respond_to?(:resolve_short_name)
-          # Strip `#` line comments before scanning so references inside
-          # YARD docstrings / TODO comments don't generate ghost edges.
-          # The negative lookahead `(?!\{)` keeps Ruby's `#{...}` string
-          # interpolation intact — stripping blindly would eat every model
-          # reference inside `"Book: #{Library::Book.new}"` etc., which
-          # is a common ERB/Phlex/string pattern.
-          scannable = source.gsub(/#(?!\{)[^\n]*/, '')
           scannable.scan(ModelNameCache.short_names_regex).each do |short|
             resolved = ModelNameCache.resolve_short_name(short)
             targets << resolved if resolved

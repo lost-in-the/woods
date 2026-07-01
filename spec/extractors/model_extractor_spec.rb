@@ -68,6 +68,63 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  # ── implicit_belongs_to_validator? ────────────────────────────────
+
+  describe '#implicit_belongs_to_validator?' do
+    # A stand-in for ActiveRecord::Validations::PresenceValidator; is_a?
+    # checks need a real class, not a double.
+    let(:presence_validator_class) do
+      Class.new do
+        attr_reader :attributes
+
+        def initialize(attributes)
+          @attributes = attributes
+        end
+      end
+    end
+
+    before do
+      stub_const('ActiveRecord::Validations::PresenceValidator', presence_validator_class)
+    end
+
+    def model_with_belongs_to(*names)
+      reflections = names.map { |n| double('Reflection', name: n) }
+      model = double('Model')
+      allow(model).to receive(:reflect_on_all_associations).with(:belongs_to).and_return(reflections)
+      model
+    end
+
+    it 'flags a presence validator on a belongs_to association attribute' do
+      model = model_with_belongs_to(:author)
+      validator = presence_validator_class.new([:author])
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, validator)).to be true
+    end
+
+    it 'does not flag a presence validator on a plain attribute' do
+      # The previous source_location heuristic flagged EVERY AR presence
+      # validator — PresenceValidator#validate always lives in the gem.
+      model = model_with_belongs_to(:author)
+      validator = presence_validator_class.new([:title])
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, validator)).to be false
+    end
+
+    it 'does not flag when the model has no belongs_to associations' do
+      model = model_with_belongs_to
+      validator = presence_validator_class.new([:title])
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, validator)).to be false
+    end
+
+    it 'does not flag non-presence validators' do
+      model = model_with_belongs_to(:author)
+      other = double('FormatValidator')
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, other)).to be false
+    end
+  end
+
   # ── extract_scopes ────────────────────────────────────────────────
 
   describe '#extract_scopes' do
