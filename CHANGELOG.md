@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Query-driven Svelte Flow visualization.** The visualization can now render just the
+  result of a query — a blast radius, a flow, a search — instead of the whole graph, so an
+  agent can query Woods and hand the user an explorable map of exactly the relevant units.
+  - **`GET /api/subgraph?nodes=A,B,C&depth=N&via=...`** and the matching **`?nodes=` URL
+    param** render the induced subgraph over a set of identifiers, expanded by `depth` BFS
+    hops and optionally filtered to relationship types. Unknown ids are reported in
+    `dropped`; `requested` echoes the resolved seeds.
+  - **Source pane.** Clicking a node fetches its source (`GET /api/unit/:id/source`) into the
+    detail panel, with an editor deep link (`vscode://file/...`) and — when the new
+    `svelte_flow_repo_url` config is set — a **GitHub blob link pinned to the extraction's git
+    SHA**. References to the node's connected units are highlighted in the source.
+  - **Self-contained export.** `bundle exec rake woods:map NODES=A,B,C [DEPTH=n] [VIA=...]`
+    writes a single self-contained HTML file (scoped graph + sources inlined) that opens over
+    `file://` with no server — ideal for CI artifacts, agents, and sharing.
+  - **`:via` edge coloring + legend** (association / render / navigation / reference) and
+    **query-path emphasis** (depth-pulled neighbors are dimmed so the queried set stands out).
+- **New config: `svelte_flow_repo_url`** (env `WOODS_SVELTE_FLOW_REPO_URL`) — base repo URL for
+  "View on GitHub" source links.
+
+### Changed
+
+- **Svelte Flow edge consumers now handle `{ target:, via: }` edges correctly** — the
+  dependency-graph visualization previously dropped all edges because it iterated the
+  serialized adjacency as bare target strings. A shared `EdgeData` normalizer fixes this and
+  threads `:via` through to rendered edges. The scoping core (`SubgraphScoper`) and source-link
+  building (`SourceLinks`) are shared by the live endpoints and the offline export so the two
+  can't drift.
+- **`@xyflow/svelte` bumped to `^1.6`** (from `^1.0`) — improved `fitView`, keyboard
+  navigation, and accessibility. The canvas remains read-only.
+
 ## [1.5.0] - 2026-06-23
 
 ### Added
