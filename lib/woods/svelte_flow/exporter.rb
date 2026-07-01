@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'set'
 require 'fileutils'
 
 require_relative 'transformer'
+require_relative 'subgraph_scoper'
+require_relative 'source_links'
+require_relative 'standalone_renderer'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
 require_relative '../filename_utils'
@@ -127,7 +131,97 @@ module Woods
         { flow_count: flow_count }
       end
 
+      # Export a query-scoped subgraph as a single self-contained HTML file.
+      # The scoped graph and per-unit sources are inlined, so the file opens
+      # over file:// with no server — the offline mirror of the `?nodes=` URL.
+      #
+      # @param nodes [Array<String>] Seed identifiers to render
+      # @param depth [Integer] Extra BFS hops around the set
+      # @param via [Array<String>, nil] Relationship filter
+      # @param output_path [String, nil] Destination (defaults under output_dir)
+      # @return [Hash] { path:, nodes:, edges:, dropped: }
+      # @raise [Woods::ExtractionError] if none of the requested nodes exist
+      def export_standalone(nodes:, depth: 0, via: nil, output_path: nil)
+        transformer = build_transformer
+        seeds, known = resolve_seeds(transformer, nodes)
+        raise Woods::ExtractionError, "None of the requested nodes exist: #{seeds.join(', ')}" if known.empty?
+
+        payload = SubgraphScoper.new(transformer).payload(seeds: known, depth: depth, via_set: build_via_set(via))
+        html = render_standalone(transformer, payload, known)
+        path = write_standalone(html, output_path, known)
+
+        { path: path, nodes: payload['nodes'].size, edges: payload['edges'].size, dropped: seeds - known }
+      end
+
       private
+
+      # Normalize seed identifiers and split into known vs unknown.
+      #
+      # @return [Array(Array<String>, Array<String>)] [seeds, known]
+      def resolve_seeds(transformer, nodes)
+        seeds = Array(nodes).map(&:to_s).map(&:strip).reject(&:empty?).uniq
+        known = seeds.select { |id| transformer.graph.node_exists?(id) }
+        [seeds, known]
+      end
+
+      # Render the standalone HTML for a scoped payload.
+      #
+      # @return [String]
+      def render_standalone(transformer, payload, known)
+        sources = build_sources(transformer, payload['nodes'].map { |n| n['id'] })
+        StandaloneRenderer.new.render(graph: payload, sources: sources, title: "Woods — #{known.join(', ')}")
+      end
+
+      # Write the HTML file, returning its path.
+      #
+      # @return [String]
+      def write_standalone(html, output_path, known)
+        base = safe_filename(known.first).sub(/\.json\z/, '')
+        path = output_path || File.join(@output_dir, "subgraph-#{base}.html")
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, html)
+        path
+      end
+
+      # @param via [Array<String>, nil]
+      # @return [Set<Symbol>, nil]
+      def build_via_set(via)
+        labels = Array(via).map(&:to_s).map(&:strip).reject(&:empty?)
+        labels.empty? ? nil : Set.new(labels.map(&:to_sym))
+      end
+
+      # Build the inlined per-unit source map for the scoped nodes.
+      #
+      # @param transformer [Transformer]
+      # @param node_ids [Array<String>]
+      # @return [Hash<String, Hash>]
+      def build_sources(transformer, node_ids)
+        repo_url = Woods.configuration.svelte_flow_repo_url
+        git_sha = manifest_git_sha
+
+        node_ids.each_with_object({}) do |id, acc|
+          unit = transformer.unit_metadata[id]
+          next unless unit
+
+          file_path = unit['file_path']
+          acc[id] = {
+            'identifier' => id,
+            'filePath' => file_path,
+            'sourceCode' => unit['source_code'],
+            'blobUrl' => SourceLinks.github_blob_url(file_path, repo_url: repo_url, git_sha: git_sha)
+          }
+        end
+      end
+
+      # Read the extraction's git SHA from the manifest, if present.
+      #
+      # @return [String, nil]
+      def manifest_git_sha
+        manifest = JSON.parse(File.read(File.join(@index_dir, 'manifest.json')))
+        manifest['git_sha']
+      rescue JSON::ParserError, Errno::ENOENT
+        nil
+      end
 
       # Validate that the index directory exists and contains a manifest.
       #

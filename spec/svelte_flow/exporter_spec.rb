@@ -249,4 +249,49 @@ RSpec.describe Woods::SvelteFlow::Exporter do
       expect(metadata.size).to eq(1)
     end
   end
+
+  describe '#export_standalone' do
+    before do
+      FileUtils.mkdir_p(File.join(tmpdir, 'model'))
+      File.write(File.join(tmpdir, 'model', 'User.json'), JSON.generate(
+                                                            'identifier' => 'User',
+                                                            'type' => 'model',
+                                                            'file_path' => 'app/models/user.rb',
+                                                            'source_code' => "class User\nend\n"
+                                                          ))
+    end
+
+    it 'writes a self-contained HTML file and reports stats' do
+      stats = described_class.new(index_dir: tmpdir).export_standalone(nodes: %w[User Post])
+
+      expect(File.exist?(stats[:path])).to be(true)
+      expect(stats[:path]).to end_with('.html')
+      expect(stats[:nodes]).to eq(2)
+      expect(stats[:dropped]).to be_empty
+    end
+
+    it 'inlines the subgraph payload into the document' do
+      stats = described_class.new(index_dir: tmpdir).export_standalone(nodes: %w[User])
+      html = File.read(stats[:path])
+      expect(html).to include('window.__WOODS_SUBGRAPH__ =')
+    end
+
+    it 'reports unknown identifiers in dropped' do
+      stats = described_class.new(index_dir: tmpdir).export_standalone(nodes: %w[User Ghost])
+      expect(stats[:dropped]).to contain_exactly('Ghost')
+    end
+
+    it 'raises when none of the requested nodes exist' do
+      expect do
+        described_class.new(index_dir: tmpdir).export_standalone(nodes: %w[Ghost])
+      end.to raise_error(Woods::ExtractionError, /none of the requested nodes exist/i)
+    end
+
+    it 'honors an explicit output path' do
+      out = File.join(tmpdir, 'custom.html')
+      stats = described_class.new(index_dir: tmpdir).export_standalone(nodes: %w[User], output_path: out)
+      expect(stats[:path]).to eq(out)
+      expect(File.exist?(out)).to be(true)
+    end
+  end
 end

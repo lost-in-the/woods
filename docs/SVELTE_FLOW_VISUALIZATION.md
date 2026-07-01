@@ -38,8 +38,20 @@ tmp/woods/svelte_flow/
 Override output directories via environment variables:
 
 ```bash
-WOODS_OUTPUT=/path/to/extraction SVELTE_FLOW_OUTPUT=/path/to/output bundle exec rake woods:map
+WOODS_OUTPUT=/path/to/extraction SVELTE_FLOW_OUTPUT=/path/to/output bundle exec rake woods:svelte_flow_export
 ```
+
+### Self-Contained Export (no server)
+
+Render a query-scoped subgraph as a single self-contained HTML file — the offline mirror of the `?nodes=` URL. Pass `NODES=` to `woods:map`:
+
+```bash
+bundle exec rake woods:map NODES=PaymentService,Invoice,Refund
+bundle exec rake woods:map NODES=Order DEPTH=2
+bundle exec rake woods:map NODES=Order DEPTH=1 VIA=belongs_to
+```
+
+The scoped graph and the sources for those units are inlined into one file (written under `tmp/woods/svelte_flow/`), so it opens over `file://` with no server and no network — ideal for CI artifacts, agents, and sharing. The task prints the path. Without `NODES=`, `woods:map` performs the full JSON export above.
 
 ### Server Mode
 

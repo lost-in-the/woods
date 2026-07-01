@@ -3,7 +3,8 @@
 require 'json'
 require 'set'
 require_relative 'transformer'
-require_relative 'edge_data'
+require_relative 'subgraph_scoper'
+require_relative 'source_links'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
 
@@ -39,10 +40,6 @@ module Woods
         '.json' => 'application/json',
         '.svg' => 'image/svg+xml'
       }.freeze
-
-      # Anchors a repo-relative path at a recognized source root, for building
-      # GitHub blob links from stored (often absolute) file paths.
-      REPO_RELATIVE_RE = %r{(?:\A|/)((?:app|lib|config|spec|test|db|packs|components|frontend)/.+)\z}
 
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the visualization (default: '/woods/visualize')
@@ -191,28 +188,14 @@ module Woods
         )
       end
 
-      # Build a GitHub blob URL for a file, pinned to the extraction's git SHA.
-      # Returns nil unless `svelte_flow_repo_url` is configured.
+      # Build a GitHub blob URL for a file via the shared SourceLinks helper.
       #
       # @param file_path [String, nil]
       # @return [String, nil]
       def github_blob_url(file_path)
-        repo_url = Woods.configuration.svelte_flow_repo_url
-        return nil unless repo_url && file_path
-
-        sha = manifest_git_sha
-        ref = sha && sha != 'unknown' ? sha : 'HEAD'
-        "#{repo_url.chomp('/')}/blob/#{ref}/#{repo_relative_path(file_path)}"
-      end
-
-      # Reduce an absolute or app-rooted path to a repo-relative path by anchoring
-      # at a recognized source root. Falls back to stripping a leading slash.
-      #
-      # @param file_path [String]
-      # @return [String]
-      def repo_relative_path(file_path)
-        match = file_path.match(REPO_RELATIVE_RE)
-        match ? match[1] : file_path.sub(%r{\A/}, '')
+        SourceLinks.github_blob_url(file_path,
+                                    repo_url: Woods.configuration.svelte_flow_repo_url,
+                                    git_sha: manifest_git_sha)
       end
 
       # Read the extraction's git SHA from the manifest, if present.
@@ -357,10 +340,8 @@ module Woods
         return service_unavailable unless transformer
         return not_found unless transformer.graph.node_exists?(node_id)
 
-        adjacency = graph_adjacency(transformer.graph)
-        visited = collect_neighborhood(node_id, clamp_depth(query['depth']), adjacency)
-
-        json_response(build_subgraph_payload(transformer, visited, adjacency))
+        payload = SubgraphScoper.new(transformer).payload(seeds: node_id, depth: clamp_depth(query['depth']))
+        json_response(payload)
       end
 
       # Serve a subgraph scoped to an arbitrary set of node identifiers — the
@@ -383,26 +364,13 @@ module Woods
         transformer = ensure_transformer
         return service_unavailable unless transformer
 
-        adjacency = graph_adjacency(transformer.graph)
-        known, dropped = requested.partition { |id| adjacency[:nodes].key?(id) }
+        known, dropped = requested.partition { |id| transformer.graph.node_exists?(id) }
         return not_found('None of the requested nodes exist', dropped: dropped) if known.empty?
 
-        payload = scoped_subgraph(transformer, adjacency, known,
-                                  depth: clamp_depth(query['depth'], min: 0), via_set: parse_via(query['via']))
+        payload = SubgraphScoper.new(transformer).payload(
+          seeds: known, depth: clamp_depth(query['depth'], min: 0), via_set: parse_via(query['via'])
+        )
         json_response(payload.merge('requested' => known, 'dropped' => dropped))
-      end
-
-      # Expand a seed set by `depth` hops and render it as a subgraph payload.
-      #
-      # @param transformer [Transformer]
-      # @param adjacency [Hash] { nodes:, edges:, reverse: }
-      # @param seeds [Array<String>] Seed identifiers (already known to exist)
-      # @param depth [Integer] Hops to expand
-      # @param via_set [Set<Symbol>, nil] Relationship filter
-      # @return [Hash] Subgraph payload
-      def scoped_subgraph(transformer, adjacency, seeds, depth:, via_set:)
-        visited = collect_neighborhood(seeds, depth, adjacency, via_set: via_set)
-        build_subgraph_payload(transformer, visited, adjacency, via_set: via_set)
       end
 
       # Parse a comma-separated identifier list, trimming blanks and duplicates.
@@ -422,20 +390,6 @@ module Woods
         labels.empty? ? nil : Set.new(labels)
       end
 
-      # A graph's adjacency maps from its serialized form, bundled so they can
-      # travel together through the scoping pipeline.
-      #
-      # @param graph [DependencyGraph]
-      # @return [Hash] { nodes:, edges:, reverse: }
-      def graph_adjacency(graph)
-        graph_data = graph.to_h
-        {
-          nodes: graph_data[:nodes] || graph_data['nodes'] || {},
-          edges: graph_data[:edges] || graph_data['edges'] || {},
-          reverse: graph_data[:reverse] || graph_data['reverse'] || {}
-        }
-      end
-
       # Clamp a raw depth query param to the supported range. `min` is also the
       # default when the param is absent (1 for neighbors, 0 for subgraphs).
       #
@@ -444,170 +398,6 @@ module Woods
       # @return [Integer]
       def clamp_depth(raw, min: 1)
         (raw || min.to_s).to_i.clamp(min, 5)
-      end
-
-      # Build the Svelte Flow subgraph payload for a resolved set of visited
-      # node IDs. Shared core behind the neighbor endpoint (and future
-      # query-scoped endpoints): scope the graph to `visited`, then run the
-      # node and edge builders over the scoped slice.
-      #
-      # @param transformer [Transformer]
-      # @param visited [Set<String>] Node IDs to include
-      # @param adjacency [Hash] { nodes:, edges:, reverse: } full graph maps
-      # @param via_set [Set<Symbol>, nil] Optional relationship filter for rendered edges
-      # @return [Hash] { 'nodes' =>, 'edges' =>, 'highest_pagerank' => }
-      def build_subgraph_payload(transformer, visited, adjacency, via_set: nil)
-        scoped_nodes, scoped_forward, scoped_reverse = build_scoped_graph(visited, adjacency, via_set: via_set)
-
-        analyzer = transformer.analyzer
-        pagerank_scores = transformer.graph.pagerank
-
-        node_builder = NodeBuilder.new(
-          nodes: scoped_nodes, positions: {}, pagerank: pagerank_scores,
-          analysis: build_neighbor_analysis(analyzer),
-          unit_metadata: transformer.unit_metadata || {},
-          forward_edges: scoped_forward, reverse_edges: scoped_reverse
-        )
-        edge_builder = EdgeBuilder.new(
-          edges: scoped_forward, valid_node_ids: visited,
-          cycle_edges: build_neighbor_cycle_edges(analyzer, visited)
-        )
-
-        {
-          'nodes' => node_builder.build,
-          'edges' => edge_builder.build,
-          'highest_pagerank' => pagerank_scores.max_by { |_k, v| v }&.first
-        }
-      end
-
-      # BFS from one or more seed nodes up to `depth` hops, traversing forward
-      # and (unless a via filter is set) reverse edges.
-      #
-      # @param seeds [String, Array<String>, Set<String>] Seed identifier(s)
-      # @param depth [Integer] Number of hops to expand (0 = seeds only)
-      # @param adjacency [Hash] { nodes:, edges:, reverse: } full graph maps
-      # @param via_set [Set<Symbol>, nil] Optional relationship filter for expansion
-      # @return [Set<String>]
-      def collect_neighborhood(seeds, depth, adjacency, via_set: nil)
-        visited = seeds.is_a?(Set) ? seeds.dup : Set.new(Array(seeds))
-        frontier = visited.to_a
-
-        depth.times do
-          next_frontier = []
-          frontier.each do |current|
-            neighbors_of(current, adjacency, via_set).each do |dep|
-              next if visited.include?(dep)
-
-              visited.add(dep)
-              next_frontier << dep
-            end
-          end
-          frontier = next_frontier
-        end
-
-        visited
-      end
-
-      # Neighbor identifiers of a node for BFS expansion. Forward edges are
-      # { target:, via: } hashes; reverse edges are plain identifier strings.
-      # When a `via_set` is given, only forward edges of those relationships are
-      # followed (reverse edges are unlabeled after serialization, so they are
-      # excluded rather than followed under an unknown relationship).
-      #
-      # @return [Array<String>]
-      def neighbors_of(current, adjacency, via_set)
-        entries = adjacency[:edges][current] || []
-        entries = entries.select { |e| via_set.include?(EdgeData.via(e)) } if via_set
-        forward = EdgeData.targets(entries)
-        via_set ? forward : forward + (adjacency[:reverse][current] || [])
-      end
-
-      # Scope nodes and edges to the visited set.
-      #
-      # @param visited [Set<String>]
-      # @param adjacency [Hash] { nodes:, edges:, reverse: } full graph maps
-      # @param via_set [Set<Symbol>, nil] Optional relationship filter
-      # @return [Array(Hash, Hash, Hash)] scoped_nodes, scoped_forward, scoped_reverse
-      def build_scoped_graph(visited, adjacency, via_set: nil)
-        nodes = adjacency[:nodes]
-        scoped_nodes = {}
-        scoped_forward = {}
-        scoped_reverse = {}
-
-        visited.each do |source|
-          scoped_nodes[source] = nodes[source] if nodes.key?(source)
-
-          fwd = scoped_forward_entries(adjacency[:edges][source], visited, via_set)
-          scoped_forward[source] = fwd unless fwd.empty?
-
-          rev = select_visited(adjacency[:reverse][source], visited) { |target| target }
-          scoped_reverse[source] = Set.new(rev) unless rev.empty?
-        end
-
-        [scoped_nodes, scoped_forward, scoped_reverse]
-      end
-
-      # Forward edge entries kept in scope: target in `visited`, and (if a via
-      # filter is set) relationship in `via_set`. Entries stay as { target:, via: }
-      # hashes so EdgeBuilder can label the rendered edges.
-      #
-      # @param entries [Array, nil] Forward entries for one source
-      # @param visited [Set<String>] Node IDs in scope
-      # @param via_set [Set<Symbol>, nil] Optional relationship filter
-      # @return [Array] Kept entries
-      def scoped_forward_entries(entries, visited, via_set)
-        kept = select_visited(entries, visited) { |entry| EdgeData.target(entry) }
-        via_set ? kept.select { |entry| via_set.include?(EdgeData.via(entry)) } : kept
-      end
-
-      # Select edge entries whose (yielded) target identifier is in `visited`.
-      #
-      # @param entries [Array, nil] Edge entries for one source
-      # @param visited [Set<String>] Node IDs in scope
-      # @yieldparam entry [Object] An edge entry
-      # @yieldreturn [String, nil] The entry's target identifier
-      # @return [Array] Entries kept in scope
-      def select_visited(entries, visited)
-        (entries || []).select { |entry| visited.include?(yield(entry)) }
-      end
-
-      # Build analysis hash for NodeBuilder, scoped gracefully to what the analyzer provides.
-      # Returns the same shape as Transformer#build_analysis so NodeBuilder can consume it.
-      #
-      # @param analyzer [GraphAnalyzer]
-      # @return [Hash]
-      def build_neighbor_analysis(analyzer)
-        {
-          hubs: safe_analysis { analyzer.hubs(limit: 20) },
-          bridges: safe_analysis { analyzer.bridges(limit: 20) },
-          orphans: safe_analysis { analyzer.orphans }
-        }
-      end
-
-      # Safely call a GraphAnalyzer method, returning [] on any error.
-      #
-      # @return [Array]
-      def safe_analysis
-        yield
-      rescue StandardError
-        []
-      end
-
-      # Build cycle edge set scoped to visited node IDs.
-      #
-      # @param analyzer [GraphAnalyzer]
-      # @param visited [Set<String>]
-      # @return [Set<Array<String>>]
-      def build_neighbor_cycle_edges(analyzer, visited)
-        cycle_edges = Set.new
-        analyzer.cycles.each do |cycle|
-          cycle.each_cons(2) do |a, b|
-            cycle_edges.add([a, b]) if visited.include?(a) && visited.include?(b)
-          end
-        end
-        cycle_edges
-      rescue StandardError
-        Set.new
       end
 
       # Return a 400 Bad Request response with an error message.
