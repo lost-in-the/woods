@@ -1,7 +1,37 @@
 <script>
-  let { node, onClose } = $props();
+  import { fetchUnitSource } from '../lib/api.js';
+  import { highlightSource } from '../lib/highlight.js';
+
+  let { node, onClose, highlights = [] } = $props();
 
   const d = $derived(node?.data || {});
+
+  let sourceData = $state(null);
+  let sourceLoading = $state(false);
+  let sourceError = $state(false);
+  let showSource = $state(false);
+
+  // Fetch source lazily whenever the selected node changes; cancel stale loads.
+  $effect(() => {
+    const id = node?.id;
+    sourceData = null;
+    sourceError = false;
+    if (!id) return;
+
+    let cancelled = false;
+    sourceLoading = true;
+    fetchUnitSource(id)
+      .then((data) => { if (!cancelled) sourceData = data; })
+      .catch(() => { if (!cancelled) sourceError = true; })
+      .finally(() => { if (!cancelled) sourceLoading = false; });
+
+    return () => { cancelled = true; };
+  });
+
+  const editorUrl = $derived(sourceData?.filePath ? `vscode://file/${sourceData.filePath}` : null);
+  const highlightedHtml = $derived(
+    sourceData?.sourceCode ? highlightSource(sourceData.sourceCode, highlights) : '',
+  );
 
   const rows = $derived.by(() => {
     const r = [
@@ -53,5 +83,32 @@
         {/each}
       </div>
     {/if}
+
+    <div class="detail-section">
+      <div class="detail-section-title source-header">
+        <span>Source</span>
+        <div class="source-links">
+          {#if editorUrl}
+            <a class="source-link" href={editorUrl} title="Open in editor">editor</a>
+          {/if}
+          {#if sourceData?.blobUrl}
+            <a class="source-link" href={sourceData.blobUrl} target="_blank" rel="noopener" title="View on GitHub">GitHub</a>
+          {/if}
+          <button
+            class="source-toggle"
+            onclick={() => (showSource = !showSource)}
+            disabled={!sourceData?.sourceCode}
+          >{showSource ? 'Hide' : 'Show'}</button>
+        </div>
+      </div>
+
+      {#if sourceLoading}
+        <div class="source-status">Loading…</div>
+      {:else if sourceError}
+        <div class="source-status">Source unavailable</div>
+      {:else if showSource && sourceData?.sourceCode}
+        <pre class="source-code"><code>{@html highlightedHtml}</code></pre>
+      {/if}
+    </div>
   </div>
 {/if}

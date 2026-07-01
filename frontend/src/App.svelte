@@ -87,6 +87,17 @@
     return allNodes.find((n) => n.id === activeNodeId) || null;
   });
 
+  // Identifiers connected to the selected node, for highlighting references in its source.
+  const highlightTerms = $derived.by(() => {
+    if (!activeNodeId) return [];
+    const terms = new Set();
+    for (const e of allEdges) {
+      if (e.source === activeNodeId) terms.add(e.target);
+      if (e.target === activeNodeId) terms.add(e.source);
+    }
+    return [...terms];
+  });
+
   /**
    * Load the full dependency graph.
    */
@@ -251,7 +262,7 @@
         onNodeSelect={handleNodeSelect}
         onCanvasClick={handleCanvasClick}
       />
-      <NodeDetail node={selectedNode} onClose={handleCloseDetail} />
+      <NodeDetail node={selectedNode} highlights={highlightTerms} onClose={handleCloseDetail} />
     </div>
   </div>
 </div>

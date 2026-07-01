@@ -274,6 +274,7 @@ config.session_exclude_paths = ['/health', '/metrics', '/assets']
 |--------|------|---------|-------------|
 | `svelte_flow_enabled` | Boolean | `false` | Mount the visualization middleware in the Rails app |
 | `svelte_flow_path` | String | `'/woods/visualize'` | URL path where the visualization UI is served |
+| `svelte_flow_repo_url` | String | `nil` | Base repo URL for "View on GitHub" source links (env: `WOODS_SVELTE_FLOW_REPO_URL`) |
 
 ### Export Mode (No Configuration Needed)
 

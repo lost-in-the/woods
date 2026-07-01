@@ -40,3 +40,12 @@ export async function fetchSubgraph(nodeIds, { depth = 0, via = [] } = {}) {
   if (via.length > 0) params.set('via', via.join(','));
   return fetchJSON(`subgraph?${params}`);
 }
+
+/**
+ * Fetch a unit's source code and file links for the detail pane.
+ * @param {string} identifier
+ * @returns {Promise<{identifier: string, filePath: string, sourceCode: string, blobUrl: ?string}>}
+ */
+export async function fetchUnitSource(identifier) {
+  return fetchJSON(`unit/${encodeURIComponent(identifier)}/source`);
+}

@@ -40,6 +40,10 @@ module Woods
         '.svg' => 'image/svg+xml'
       }.freeze
 
+      # Anchors a repo-relative path at a recognized source root, for building
+      # GitHub blob links from stored (often absolute) file paths.
+      REPO_RELATIVE_RE = %r{(?:\A|/)((?:app|lib|config|spec|test|db|packs|components|frontend)/.+)\z}
+
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the visualization (default: '/woods/visualize')
       def initialize(app, path: '/woods/visualize')
@@ -89,8 +93,9 @@ module Woods
       # @return [Array] Rack response triple
       def pattern_route(sub_path)
         case sub_path
-        when %r{\A/api/flows/(.+)\z} then serve_flow_json(Regexp.last_match(1))
-        when %r{\A/assets/(.+)\z}    then serve_asset(Regexp.last_match(1))
+        when %r{\A/api/unit/(.+)/source\z} then serve_unit_source(Rack::Utils.unescape(Regexp.last_match(1)))
+        when %r{\A/api/flows/(.+)\z}       then serve_flow_json(Regexp.last_match(1))
+        when %r{\A/assets/(.+)\z}          then serve_asset(Regexp.last_match(1))
         else not_found
         end
       end
@@ -162,6 +167,65 @@ module Woods
         json_response(data)
       rescue JSON::ParserError, Errno::ENOENT
         not_found
+      end
+
+      # Serve a unit's source code and file links for the sidebar detail pane.
+      # Looked up by identifier against the extracted metadata — never a raw
+      # path — so this cannot be turned into an arbitrary-file read.
+      #
+      # @param identifier [String] Unit identifier
+      # @return [Array] Rack response triple
+      def serve_unit_source(identifier)
+        transformer = ensure_transformer
+        return service_unavailable unless transformer
+
+        unit = transformer.unit_metadata[identifier]
+        return not_found unless unit
+
+        file_path = unit['file_path'] || unit[:file_path]
+        json_response(
+          'identifier' => identifier,
+          'filePath' => file_path,
+          'sourceCode' => unit['source_code'] || unit[:source_code],
+          'blobUrl' => github_blob_url(file_path)
+        )
+      end
+
+      # Build a GitHub blob URL for a file, pinned to the extraction's git SHA.
+      # Returns nil unless `svelte_flow_repo_url` is configured.
+      #
+      # @param file_path [String, nil]
+      # @return [String, nil]
+      def github_blob_url(file_path)
+        repo_url = Woods.configuration.svelte_flow_repo_url
+        return nil unless repo_url && file_path
+
+        sha = manifest_git_sha
+        ref = sha && sha != 'unknown' ? sha : 'HEAD'
+        "#{repo_url.chomp('/')}/blob/#{ref}/#{repo_relative_path(file_path)}"
+      end
+
+      # Reduce an absolute or app-rooted path to a repo-relative path by anchoring
+      # at a recognized source root. Falls back to stripping a leading slash.
+      #
+      # @param file_path [String]
+      # @return [String]
+      def repo_relative_path(file_path)
+        match = file_path.match(REPO_RELATIVE_RE)
+        match ? match[1] : file_path.sub(%r{\A/}, '')
+      end
+
+      # Read the extraction's git SHA from the manifest, if present.
+      #
+      # @return [String, nil]
+      def manifest_git_sha
+        dir = resolve_output_dir
+        return nil unless dir
+
+        manifest = JSON.parse(File.read(File.join(dir, 'manifest.json')))
+        manifest['git_sha']
+      rescue JSON::ParserError, Errno::ENOENT
+        nil
       end
 
       # Serve a static asset file.

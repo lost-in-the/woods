@@ -79,6 +79,10 @@ Instead of rendering the whole graph, you can render **just a set of units** —
 
 Only the scoped units are loaded, so exploration is bounded to the query result. The agent workflow is: run an MCP query (e.g. `dependents PaymentService`), collect the identifiers, build the URL, and print or open it. Unknown identifiers are dropped and reported in the JSON response's `dropped` field (and logged in the browser console).
 
+### Inspecting a Unit
+
+Clicking a node opens a detail panel with its source code (fetched on demand). The panel offers an **editor** link (`vscode://file/...`) and, when `svelte_flow_repo_url` is set, a **GitHub** link to the file pinned at the extraction's git SHA. References to the node's connected units are highlighted in the source, so you can see where the graph edges live in the code.
+
 ## What Gets Visualized
 
 ### Dependency Graph
@@ -174,6 +178,7 @@ When `svelte_flow_enabled = true`, the middleware serves:
 | `GET /woods/visualize/api/clusters` | Domain clusters as Svelte Flow JSON |
 | `GET /woods/visualize/api/flows` | Flow index (entry point → filename mapping) |
 | `GET /woods/visualize/api/flows/:key` | Individual flow as Svelte Flow JSON |
+| `GET /woods/visualize/api/unit/:id/source` | A unit's source, file path, and GitHub blob URL (for the detail pane) |
 | `GET /woods/visualize/assets/*` | Static CSS/JS assets |
 
 Returns `503` with a JSON error message if extraction data is not available.
@@ -184,6 +189,7 @@ Returns `503` with a JSON error message if extraction data is not available.
 |--------|------|---------|-------------|
 | `svelte_flow_enabled` | Boolean | `false` | Mount the visualization middleware |
 | `svelte_flow_path` | String | `'/woods/visualize'` | URL mount path |
+| `svelte_flow_repo_url` | String | `nil` | Base repo URL (e.g. `https://github.com/org/app`) for "View on GitHub" source links; also settable via `WOODS_SVELTE_FLOW_REPO_URL` |
 | `precompute_flows` | Boolean | `false` | Generate per-action flow data during extraction (required for flow visualization) |
 
 ## Architecture

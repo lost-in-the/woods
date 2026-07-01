@@ -105,6 +105,64 @@ body {
   margin-bottom: 6px;
 }
 
+.source-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.source-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-link,
+.source-toggle {
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--accent, #22c55e);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.source-toggle:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.source-status {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.source-code {
+  max-height: 320px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  background: var(--bg-code, #0b1120);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre;
+}
+
+.source-code mark {
+  background: rgba(34, 197, 94, 0.28);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .detail-column-row {
   display: flex;
   align-items: center;

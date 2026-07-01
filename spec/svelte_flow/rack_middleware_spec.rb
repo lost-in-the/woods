@@ -246,6 +246,69 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
     end
   end
 
+  describe 'GET /api/unit/:id/source' do
+    let(:fixture_dir) { Dir.mktmpdir }
+    let(:repo_url) { nil }
+    let(:graph_data) do
+      { 'nodes' => { 'Order' => { 'type' => 'model', 'file_path' => '/srv/app/models/order.rb' } },
+        'edges' => {}, 'reverse' => {}, 'pagerank' => { 'Order' => 0.1 } }
+    end
+
+    let(:unit_json) do
+      {
+        'identifier' => 'Order',
+        'type' => 'model',
+        'file_path' => '/srv/app/models/order.rb',
+        'source_code' => "class Order < ApplicationRecord\nend\n",
+        'metadata' => {}
+      }
+    end
+
+    before do
+      File.write(File.join(fixture_dir, 'manifest.json'),
+                 JSON.generate({ 'version' => 1, 'git_sha' => 'abc1234def' }))
+      File.write(File.join(fixture_dir, 'dependency_graph.json'), JSON.generate(graph_data))
+      FileUtils.mkdir_p(File.join(fixture_dir, 'models'))
+      File.write(File.join(fixture_dir, 'models', 'Order.json'), JSON.generate(unit_json))
+      config = double('config', output_dir: fixture_dir, svelte_flow_repo_url: repo_url)
+      allow(Woods).to receive(:configuration).and_return(config)
+    end
+
+    after { FileUtils.rm_rf(fixture_dir) }
+
+    def get_source(id)
+      _status, _headers, body = middleware.call(mock_env("/woods/visualize/api/unit/#{id}/source"))
+      JSON.parse(body.first)
+    end
+
+    it 'returns 404 for an unknown identifier' do
+      status, = middleware.call(mock_env('/woods/visualize/api/unit/Ghost/source'))
+      expect(status).to eq(404)
+    end
+
+    it 'returns the source code and file path for a known unit' do
+      data = get_source('Order')
+      expect(data['identifier']).to eq('Order')
+      expect(data['filePath']).to eq('/srv/app/models/order.rb')
+      expect(data['sourceCode']).to include('class Order')
+    end
+
+    context 'without a configured repo url' do
+      it 'omits the GitHub blob url' do
+        expect(get_source('Order')['blobUrl']).to be_nil
+      end
+    end
+
+    context 'with a configured repo url' do
+      let(:repo_url) { 'https://github.com/org/app' }
+
+      it 'builds a blob url pinned to the git sha with a repo-relative path' do
+        expect(get_source('Order')['blobUrl'])
+          .to eq('https://github.com/org/app/blob/abc1234def/app/models/order.rb')
+      end
+    end
+  end
+
   describe 'custom mount path' do
     let(:middleware) { described_class.new(inner_app, path: '/custom/viz') }
 
