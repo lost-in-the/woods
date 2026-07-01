@@ -266,6 +266,20 @@ RSpec.describe Woods::ResolvedConfig do
       config = described_class.from_hash(v1_hash)
       expect(config.stores).to be_frozen
     end
+
+    it 'freezes nested string values, not just the containing hash' do
+      # A frozen hash still allows `hash[:model] << "-v2"` if the string
+      # itself is mutable — build the input with unfrozen strings to prove
+      # deep_freeze reaches them.
+      mutable = v1_hash.merge(
+        'embedding_provider' => v1_hash['embedding_provider'].merge('model' => +'nomic-embed-text')
+      )
+      config = described_class.from_hash(mutable)
+
+      model = config.embedding_provider[:model]
+      expect(model).to be_frozen
+      expect { model << '-v2' }.to raise_error(FrozenError)
+    end
   end
 
   describe '.from_configuration' do

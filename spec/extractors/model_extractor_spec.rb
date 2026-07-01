@@ -28,6 +28,46 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  # ── callback_count ────────────────────────────────────────────────
+
+  describe '#callback_count' do
+    # Mirrors ActiveSupport::Callbacks::CallbackChain: it includes
+    # Enumerable (so #count works) but defines NO #size. Stubbing with a
+    # plain Array here would mask a regression to #size — Arrays have both.
+    let(:chain_class) do
+      Class.new do
+        include Enumerable
+
+        def initialize(callbacks)
+          @callbacks = callbacks
+        end
+
+        def each(&block)
+          @callbacks.each(&block)
+        end
+      end
+    end
+
+    it 'sums callbacks across chains using an API CallbackChain actually has' do
+      model = double('Model')
+      %i[validation save create update destroy commit rollback].each do |type|
+        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new(%i[a b]))
+      end
+
+      expect(extractor.send(:callback_count, model)).to eq(14)
+    end
+
+    it 'counts a chain type as zero when reading it raises' do
+      model = double('Model')
+      %i[validation save create update destroy commit rollback].each do |type|
+        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new([:a]))
+      end
+      allow(model).to receive(:_commit_callbacks).and_raise(NoMethodError)
+
+      expect(extractor.send(:callback_count, model)).to eq(6)
+    end
+  end
+
   # ── extract_scopes ────────────────────────────────────────────────
 
   describe '#extract_scopes' do

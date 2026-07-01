@@ -975,7 +975,10 @@ module Woods
 
       def callback_count(model)
         %i[validation save create update destroy commit rollback].sum do |type|
-          model.send("_#{type}_callbacks").size
+          # CallbackChain includes Enumerable but defines no #size on any
+          # supported Rails version — #size raises and the rescue would
+          # zero the count. #count is the only correct API here.
+          model.send("_#{type}_callbacks").count
         rescue StandardError
           0
         end

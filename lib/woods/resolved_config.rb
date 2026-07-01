@@ -203,7 +203,10 @@ module Woods
         obj.each { |v| deep_freeze(v) }
         obj.frozen? ? obj : obj.freeze
       when String
-        obj.frozen? ? obj : obj.dup.freeze
+        # Freeze in place — returning a frozen dup would be discarded by the
+        # Hash/Array branches above (they recurse for side effects only),
+        # leaving every nested string mutable.
+        obj.frozen? ? obj : obj.freeze
       else
         obj
       end
