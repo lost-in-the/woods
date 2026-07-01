@@ -33,7 +33,7 @@ RSpec.describe Woods::Console::SqlTableScanner do
       # reads FROM blocked. Stripping with only the MySQL dialect (where
       # \' continues the string) folded the real FROM clause into a
       # literal, hiding the table from TableGate.
-      let(:sql) { %q{SELECT 'x\' FROM blocked WHERE secret LIKE 'a%'} }
+      let(:sql) { %q(SELECT 'x\' FROM blocked WHERE secret LIKE 'a%') }
 
       it 'still detects the table read by a PostgreSQL server' do
         expect(identifiers).to include('blocked')

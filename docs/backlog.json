@@ -612,5 +612,53 @@
     "description": "Woods::Obsidian::NoteBuilder (B-056) and Woods::Unblocked::DocumentBuilder independently walk unit metadata (associations-by-type, blast-radius buckets, entry points, side effects, schema highlights, deps/dependents-by-type). That selection/shaping logic is format-agnostic; only the final string assembly (plain-text + GitHub URIs vs wikilinks + frontmatter) diverges. Extract a Woods::Export::UnitFacts that turns a unit_data hash into a structured intermediate, and make both builders thin formatters over it, so a unit-type metadata change is fixed in one place. PREREQUISITE: Unblocked detects changes by hashing the rendered body (Exporter#fingerprint = SHA256(title + body)), and its specs guard determinism/structure but NOT byte-exact output, so a refactor could pass CI green yet force a one-time mass re-push. Before touching DocumentBuilder, add golden-output regression specs that pin its exact body bytes per unit type. Until this lands, B-056 mitigates drift with a shared metadata-shape fixture asserted by both spec suites. Tracked in #144. RESOLVED: added lib/woods/export/unit_facts.rb (associations_by_type, schema_highlights, blast_radius) + specs; added spec/unblocked/document_builder_golden_spec.rb pinning DocumentBuilder body bytes per unit type against spec/fixtures/unblocked/golden_units.rb + golden/*.md; migrated DocumentBuilder model_associations + model_schema_highlights onto UnitFacts with the golden suite confirming byte-identical output (no Unblocked re-push); migrated NoteBuilder associations onto UnitFacts and added a shared Schema section; GoldenUnits is now asserted by both the Unblocked golden suite and the Obsidian NoteBuilder suite as the shared metadata-shape fixture.",
     "status": "resolved",
     "depends_on": ["B-056"]
+  },
+  {
+    "id": "B-058",
+    "slug": "qdrant-point-id-uuid-mapping",
+    "title": "Qdrant adapter sends Woods identifiers as point IDs \u2014 every upsert 400s",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": ["lib/woods/storage/qdrant.rb", "lib/woods/embedding/indexer.rb"],
+    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passes Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path is non-functional. Fix: UUIDv5 point id + identifier in payload + reverse-map in search/delete. Needs live-Qdrant validation. Tracked in GH #147.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-059",
+    "slug": "incremental-embed-inmemory-data-loss",
+    "title": "Incremental embed against in-memory vector store discards vectors but advances checkpoint",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "embedding",
+    "files": ["lib/woods/embedding/indexer.rb"],
+    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-060",
+    "slug": "notion-column-name-collision",
+    "title": "Notion Columns sync collapses same-named columns across models",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "export",
+    "files": ["lib/woods/notion/exporter.rb", "lib/woods/notion/mappers/column_mapper.rb"],
+    "description": "Column pages are upserted by bare column name and found by title equality across the whole DB, so shared columns (id/created_at/updated_at) overwrite each other across models \u2014 the Columns DB collapses to one page per distinct name. Fix: qualify title (users.id) or filter lookup by Table relation. Tracked in GH #149.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-061",
+    "slug": "audit-medium-followups",
+    "title": "Audit follow-ups: medium-severity correctness/robustness findings",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "mcp",
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/notion/client.rb", "lib/woods/unblocked/client.rb", "lib/woods/resilience/circuit_breaker.rb", "lib/woods/mcp/bootstrapper.rb"],
+    "description": "HTTP transport concurrent-handler unsynchronized IndexReader cache + lazy pipeline mutex init; Notion/Unblocked POST retry on read-timeout duplicates; Retry-After to_f zeros HTTP-date form; CircuitBreaker half-open unlimited probes + reset on overlap; bootstrapper/reload string-keyed vector metadata vs symbol-keyed search filters. Tracked in GH #150.",
+    "status": "ready",
+    "depends_on": []
   }
 ]
