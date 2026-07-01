@@ -16,6 +16,9 @@
   let activeNodeId = $state(null);
   let focusNodeId = $state(null);
   let fullGraphLoaded = $state(false);
+  // In query mode, the explicitly-requested nodes (vs depth-pulled neighbors),
+  // used to emphasize the query result. Empty = no query scoping (full graph).
+  let queriedIds = $state(new Set());
 
   const SHOW_MODE_KEY = 'woods-flow-show-mode';
   let showMode = $state(localStorage.getItem(SHOW_MODE_KEY) || 'all_fields');
@@ -108,6 +111,7 @@
       allNodes = mapNodes(data);
       allEdges = mapEdges(data);
       fullGraphLoaded = true;
+      queriedIds = new Set();
 
       // Auto-select highest pagerank node if no center, or restore from URL
       if (!centerNodeId && allNodes.length > 0) {
@@ -128,6 +132,7 @@
       const data = await fetchSubgraph(nodes, { depth, via });
       allNodes = mapNodes(data);
       allEdges = mapEdges(data);
+      queriedIds = new Set(data.requested || nodes);
 
       if (data.dropped?.length > 0) {
         console.warn('Subgraph: unknown nodes dropped:', data.dropped.join(', '));
@@ -259,6 +264,7 @@
         {loading}
         {focusNodeId}
         {showMode}
+        {queriedIds}
         onNodeSelect={handleNodeSelect}
         onCanvasClick={handleCanvasClick}
       />

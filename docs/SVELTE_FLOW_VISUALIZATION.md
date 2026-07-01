@@ -89,7 +89,7 @@ Instead of rendering the whole graph, you can render **just a set of units** —
 | `depth` | Extra BFS hops pulled in around the set (0 = the set only) | `0` |
 | `via` | Comma-separated relationship filter for expansion/rendering (e.g. `belongs_to,render`) | all |
 
-Only the scoped units are loaded, so exploration is bounded to the query result. The agent workflow is: run an MCP query (e.g. `dependents PaymentService`), collect the identifiers, build the URL, and print or open it. Unknown identifiers are dropped and reported in the JSON response's `dropped` field (and logged in the browser console).
+Only the scoped units are loaded, so exploration is bounded to the query result. The explicitly-requested nodes are emphasized while depth-pulled neighbors are dimmed, so the query result stands out from its surrounding context. The agent workflow is: run an MCP query (e.g. `dependents PaymentService`), collect the identifiers, build the URL, and print or open it. Unknown identifiers are dropped and reported in the JSON response's `dropped` field (and logged in the browser console).
 
 ### Inspecting a Unit
 
@@ -109,6 +109,7 @@ Every extracted unit (model, controller, service, job, etc.) becomes a node. Dep
 | Bridge status | GraphAnalyzer | Orange "BRG" badge on cross-domain connectors |
 | Orphan status | GraphAnalyzer | Dimmed nodes with no dependents |
 | Cycle membership | GraphAnalyzer | Red animated edges for circular dependencies |
+| Relationship (`:via`) | Dependency edge | Edge color by category — association / render / navigation / reference — with an on-canvas legend |
 
 ### Domain Clusters
 

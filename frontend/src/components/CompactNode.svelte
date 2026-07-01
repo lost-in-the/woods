@@ -23,6 +23,7 @@
 
 <div
   class="compact-node {highlightClass}"
+  class:query-dimmed={data?.dimmed}
   style="background:{colors.bg}; border-color:{colors.border}; color:{colors.text};"
 >
   <Handle type="target" position={targetPosition || Position.Left} />

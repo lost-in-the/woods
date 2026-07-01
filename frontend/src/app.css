@@ -105,6 +105,13 @@ body {
   margin-bottom: 6px;
 }
 
+/* Query mode: fade nodes that were only pulled in as neighbors, so the
+   explicitly-queried set stands out. */
+.query-dimmed {
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
 .source-header {
   display: flex;
   align-items: center;

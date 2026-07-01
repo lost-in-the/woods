@@ -78,6 +78,7 @@
 
 <div
   class="model-node {highlightClass}"
+  class:query-dimmed={data?.dimmed}
   style="background:{colors.bg}; border-color:{borderColor}; color:{colors.text};"
 >
   <!-- Card-level handles — invisible, used only for non-column edges -->

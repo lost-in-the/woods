@@ -9,8 +9,10 @@
   import CompactNode from './CompactNode.svelte';
   import FocusNode from './FocusNode.svelte';
   import CardinalityMarkers from './CardinalityMarkers.svelte';
+  import EdgeLegend from './EdgeLegend.svelte';
   import { layoutColumns } from '../lib/column-layout.js';
   import { assignColumns } from '../lib/graph-state.js';
+  import { viaColor } from '../lib/edge-style.js';
 
   let {
     allNodes,
@@ -21,6 +23,7 @@
     loading,
     focusNodeId,
     showMode,
+    queriedIds = new Set(),
     onNodeSelect,
     onCanvasClick,
   } = $props();
@@ -29,12 +32,16 @@
 
   // Filter to visible nodes and edges
   const visibleNodes = $derived.by(() => {
+    // In query mode (queriedIds non-empty), dim nodes that were only pulled in
+    // as neighbors so the queried set stands out.
+    const scoping = queriedIds.size > 0;
     return allNodes.filter((n) => visibleNodeIds.has(n.id)).map((n) => ({
       ...n,
       type: n.data?.unitType === 'model' ? 'model' : 'compact',
       data: {
         ...n.data,
         isCenter: n.id === centerNodeId,
+        dimmed: scoping && !queriedIds.has(n.id),
         showMode,
       },
     }));
@@ -69,16 +76,17 @@
         const source = needsSwap ? e.target : e.source;
         const target = needsSwap ? e.source : e.target;
 
-        // Edge style per spec
+        // Edge style: color by relationship (:via) so associations, renders,
+        // navigation, and plain references read differently. Width/dash encode
+        // through-associations (dimmed) and cycles (dashed).
+        const color = viaColor(via);
         let style = '';
         if (isAssociation && e.data?.through) {
-          style = 'stroke: #475569; stroke-width: 1px; opacity: 0.4;';
-        } else if (isAssociation) {
-          style = 'stroke: #475569; stroke-width: 1.5px;';
+          style = `stroke: ${color}; stroke-width: 1px; opacity: 0.4;`;
         } else if (e.data?.isCycle) {
-          style = 'stroke: #64748b; stroke-width: 1px; stroke-dasharray: 4 3;';
+          style = `stroke: ${color}; stroke-width: 1px; stroke-dasharray: 4 3;`;
         } else {
-          style = 'stroke: #475569; stroke-width: 1.5px;';
+          style = `stroke: ${color}; stroke-width: 1.5px;`;
         }
 
         // Cardinality markers — assigned by via type, then swapped if edge was flipped.
@@ -179,6 +187,7 @@
       <Background />
       <FocusNode nodeId={focusNodeId} />
     </SvelteFlow>
+    <EdgeLegend edges={layoutedEdges} />
   {/if}
 </div>
 
