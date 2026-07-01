@@ -307,35 +307,37 @@ console_sample(model: "Order", scope: { created_at: { gte: "2025-01-01" } })
 
 **Symptom:** You're on MySQL (or Percona / MariaDB / Aurora MySQL) and `config.vector_store = :pgvector` fails at boot, or you can't find a `:mysql` vector adapter in `lib/woods/storage/`.
 
-**Cause:** MySQL has no native vector-search extension equivalent to `pgvector`. Woods does not emulate vector search in MySQL — every vector adapter the gem ships delegates to a real vector engine. The metadata + graph layer happily lives in MySQL (`config.metadata_store = :mysql`, recursive CTEs on 8.0+), but vectors have to go somewhere else.
+**Cause:** MySQL has no native vector-search extension equivalent to `pgvector`. Woods does not emulate vector search in MySQL — every vector adapter the gem ships delegates to a real vector engine. Note that being on MySQL only constrains the *vector* choice: Woods keeps its own metadata in SQLite or memory (`metadata_store: :sqlite | :in_memory`), never in your application database, so there is no MySQL metadata adapter to configure. (Native `:mysql` / `:postgresql` metadata adapters are future work — `BACKEND_MATRIX.md` documents the shape they would take.)
 
-**Fix:** Pair MySQL with one of the supported external vector backends. Qdrant is the recommended default for self-hosted / Docker stacks:
+**Fix:** Pair the host app with one of the supported external vector backends. Qdrant is the recommended default for self-hosted / Docker stacks:
 
 ```ruby
-# config/initializers/woods.rb — MySQL host with Qdrant for vectors
+# config/initializers/woods.rb — MySQL host app: vectors go to Qdrant
 Woods.configure do |config|
-  config.metadata_store = :mysql
-  config.metadata_store_connection = ENV.fetch("DATABASE_URL")
-
+  config.metadata_store = :sqlite   # Woods-internal metadata, not your app DB
   config.vector_store = :qdrant
-  config.vector_store_url = ENV.fetch("QDRANT_URL", "http://localhost:6333")
+  config.vector_store_options = {
+    url: ENV.fetch("QDRANT_URL", "http://localhost:6333"),
+    collection: "woods_units"
+  }
 end
 ```
 
-The Postgres equivalent (in-database vectors) is shown for contrast:
+The Postgres equivalent (in-database vectors via pgvector) is shown for contrast:
 
 ```ruby
-# PostgreSQL host with pgvector for vectors
+# PostgreSQL host: vectors can live in the same database via pgvector
 Woods.configure do |config|
-  config.metadata_store = :postgresql
-  config.metadata_store_connection = ENV.fetch("DATABASE_URL")
-
+  config.metadata_store = :sqlite
   config.vector_store = :pgvector
-  config.vector_store_connection = ENV.fetch("DATABASE_URL")
+  config.vector_store_options = {
+    connection: your_pg_connection,   # a PG::Connection to a pgvector-enabled DB
+    dimensions: 1536
+  }
 end
 ```
 
-For local development against a MySQL app, `config.vector_store = :sqlite` (or `:in_memory` with the `:shared_filesystem` preset) is a reasonable stand-in — it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant (or Pinecone for managed environments).
+For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)` — in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in — it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
 
 See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL section](BACKEND_MATRIX.md#mysql) for graph-traversal details (recursive CTEs on 8.0+).
 

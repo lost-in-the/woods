@@ -39,10 +39,10 @@ The vector store you can use depends on the primary database your Rails app uses
 
 | Primary database | Supported vector stores | Required? |
 |---|---|---|
-| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant`, `:pinecone` (external), `:sqlite` (local dev only) | Yes — MySQL has no native vector extension |
-| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`, `:pinecone`, `:sqlite` (local dev only) | No — `:pgvector` runs inside the same database |
+| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant` (external); `:in_memory` (local dev only); `:pinecone` planned | Yes — MySQL has no native vector extension |
+| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`; `:in_memory` (local dev only); `:pinecone` planned | No — `:pgvector` runs inside the same database |
 
-**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of the InnoDB / MyISAM storage engines and cannot be added via plugin. Woods does not emulate vector search in MySQL — the gem only ships adapters that delegate to a real vector engine. The recommended pairing is `:mysql` (metadata + graph) + `:qdrant` (vectors); the [MySQL section below](#mysql) covers this stack end to end.
+**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of the InnoDB / MyISAM storage engines and cannot be added via plugin. Woods does not emulate vector search in MySQL — the gem only ships adapters that delegate to a real vector engine. The recommended pairing today is `:qdrant` for vectors with Woods' own `:sqlite` metadata store (Woods never stores metadata in your application database; a native `:mysql` metadata adapter is a documented design target — see the [Metadata Stores status note](#metadata-stores)). The [MySQL section below](#mysql) covers the design-target stack end to end.
 
 ### pgvector (PostgreSQL Extension)
 
@@ -173,7 +173,7 @@ volumes:
 > **Status: planned, not yet implemented.** There is no `lib/woods/storage/pinecone.rb`
 > adapter in the shipped gem. The section below documents the design target.
 > Track progress in #83 or open a new issue if you need this sooner. Current
-> shipped vector stores: `:pgvector`, `:qdrant`, `:sqlite` (in-memory).
+> shipped vector stores: `:pgvector`, `:qdrant`, `:in_memory`.
 
 **What it is:** Fully managed cloud vector database.
 
@@ -542,8 +542,8 @@ config.metadata_store_connection = ENV["DATABASE_URL"]
 # Or use the application's existing ActiveRecord connection:
 config.metadata_store_connection = :active_record
 
-# Vector store must be separate
-config.vector_store = :qdrant  # or :pinecone, :sqlite_faiss
+# Vector store must be separate (shipped today: :qdrant; :pinecone is planned)
+config.vector_store = :qdrant
 ```
 
 **Performance notes:**
