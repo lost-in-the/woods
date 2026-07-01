@@ -458,6 +458,7 @@ module Woods
       end
 
       def handle_sample(params)
+        validate_select_columns!(params)
         model = resolve_model(params['model'])
         limit = [params.fetch('limit', 5).to_i, 25].min
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -563,6 +564,7 @@ module Woods
       end
 
       def handle_recent(params)
+        validate_select_columns!(params)
         model = resolve_model(params['model'])
         order_by = params.fetch('order_by', 'created_at')
         direction = params.fetch('direction', 'desc')
@@ -926,6 +928,20 @@ module Woods
       # @return [Boolean]
       def predicate_suffix?(scope)
         scope.any? { |k, _| ScopePredicateParser::SUFFIX_PATTERN.match?(k.to_s) }
+      end
+
+      # Validate that any requested +columns+ are real model columns before
+      # they reach +apply_columns+. ActiveRecord treats string args to
+      # +.select+ as raw SQL fragments, so an unvalidated column smuggles a
+      # subquery into the SELECT list (the sample/recent tools skip
+      # +check_sql!+, so this is their only gate). Mirrors +handle_pluck+.
+      #
+      # @param params [Hash] Tool params (uses 'model' and 'columns')
+      # @raise [ArgumentError] if any column is not declared on the model
+      def validate_select_columns!(params)
+        return unless params['columns']
+
+        @model_validator.validate_columns!(params['model'], params['columns'])
       end
 
       # Apply column selection to a relation.

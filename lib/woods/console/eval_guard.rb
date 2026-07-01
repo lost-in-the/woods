@@ -194,8 +194,12 @@ module Woods
         # `%x{cmd}`) — the AST flavor of these is `:xstr`/`:xstr_heredoc`,
         # which {Woods::Ast::Parser} may normalize differently across
         # Prism/parser-gem backends. A source-level refusal is both cheap
-        # and impossible to evade via AST normalization.
-        if code.include?('`') || code =~ /%x[{<|!@#(\[]/
+        # and impossible to evade via AST normalization. Ruby accepts ANY
+        # non-word character as the %x delimiter (`%x/ls/`, `%x~ls~`, …),
+        # so match \W rather than a hand-picked delimiter list — as a
+        # fail-safe, over-refusing odd-but-harmless source beats letting
+        # an unlisted delimiter through.
+        if code.include?('`') || code =~ /%x[^\w\s]/
           raise ForbiddenExpressionError, 'payload contains a shell-execution literal (backtick or %x)'
         end
 

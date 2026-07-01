@@ -628,6 +628,21 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(ordered).to have_received(:limit).with(25)
       end
+
+      it 'rejects columns that are not real model columns (SQL fragment injection)' do
+        # relation.select treats string args as raw SQL — a crafted column
+        # would smuggle a subquery into the SELECT list.
+        response = executor.send_request({
+                                           'tool' => 'sample',
+                                           'params' => {
+                                             'model' => 'User',
+                                             'columns' => ['(SELECT secret FROM api_tokens LIMIT 1) AS email']
+                                           }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/Unknown column/)
+      end
     end
 
     context 'find tool' do
@@ -919,6 +934,19 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error']).to match(/Unknown column 'nonexistent'/)
+      end
+
+      it 'rejects columns that are not real model columns (SQL fragment injection)' do
+        response = executor.send_request({
+                                           'tool' => 'recent',
+                                           'params' => {
+                                             'model' => 'Post',
+                                             'columns' => ['(SELECT secret FROM api_tokens LIMIT 1) AS title']
+                                           }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/Unknown column/)
       end
 
       it 'caps limit at 50' do

@@ -255,7 +255,13 @@ module Woods
           controller, action = entry_point.split('#', 2)
           return nil if controller.empty? || action.empty?
 
-          filename = "#{controller.gsub('::', '__')}_#{action}.json"
+          # entry_point is client input — allow-list both parts (the same
+          # character set FilenameUtils uses) so `/` and `..` can't traverse
+          # outside flows/. For legitimate controller/action names this is
+          # the identity transform, matching what FlowPrecomputer wrote.
+          safe_controller = controller.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+          safe_action = action.gsub(/[^a-zA-Z0-9_-]/, '_')
+          filename = "#{safe_controller}_#{safe_action}.json"
           path = File.join(index_dir, 'flows', filename)
           return nil unless File.exist?(path)
 

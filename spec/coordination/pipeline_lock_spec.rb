@@ -105,6 +105,52 @@ RSpec.describe Woods::Coordination::PipelineLock do
     end
   end
 
+  describe 'release ownership' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+
+    it 'does not delete a lock file that was taken over by another holder' do
+      lock.acquire
+      # Simulate a legitimate takeover after this holder went stale:
+      # the file now carries someone else's token.
+      File.write(lock_path, JSON.generate(pid: 99_999, token: 'someone-elses-token'))
+
+      lock.release
+
+      expect(File.exist?(lock_path)).to be true
+    end
+
+    it 'deletes the lock file when it still owns it' do
+      lock.acquire
+      lock.release
+
+      expect(File.exist?(lock_path)).to be false
+    end
+
+    it 'handles the lock file already being gone' do
+      lock.acquire
+      FileUtils.rm_f(lock_path)
+
+      expect { lock.release }.not_to raise_error
+      expect(lock.locked?).to be false
+    end
+  end
+
+  describe 'stale takeover race' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+
+    it 'backs off when another process retires the stale lock first' do
+      File.write(lock_path, '{}')
+      FileUtils.touch(lock_path, mtime: Time.now - 7200)
+
+      # The racing process wins the atomic rename between our stale check
+      # and our retirement attempt.
+      allow(File).to receive(:rename).and_raise(Errno::ENOENT)
+
+      expect(lock.acquire).to be false
+      expect(lock.locked?).to be false
+    end
+  end
+
   describe 'concurrent acquisition' do
     it 'only allows one thread to acquire the lock' do
       results = []

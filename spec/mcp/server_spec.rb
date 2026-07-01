@@ -988,6 +988,18 @@ RSpec.describe Woods::MCP::Server do
         File.write(File.join(tmp_dir, 'flows', 'X_y.json'), 'not json')
         expect(described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')).to be_nil
       end
+
+      it 'does not read files outside flows/ for traversal-shaped entry points' do
+        # "../evil#x" used to resolve to <tmp_dir>/flows/../evil_x.json —
+        # i.e. a file OUTSIDE the flows dir. The allow-list must neutralize
+        # path separators and dots.
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.write(
+          File.join(tmp_dir, 'evil_x.json'),
+          JSON.pretty_generate(entry_point: 'stolen', steps: [])
+        )
+        expect(described_class.send(:load_precomputed_flow, tmp_dir, '../evil#x')).to be_nil
+      end
     end
   end
 

@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'json'
+require 'securerandom'
 
 module Woods
   module Coordination
@@ -38,12 +39,13 @@ module Woods
       def acquire
         FileUtils.mkdir_p(@lock_dir)
 
-        # Check for stale lock first (separate from atomic creation)
         if File.exist?(@lock_path)
           return false unless stale?
-
-          # Remove stale lock
-          FileUtils.rm_f(@lock_path)
+          # Retire the stale lock atomically. A bare rm_f + create here is
+          # a TOCTOU race: two processes passing the stale check together
+          # could each delete-and-create, the second deleting the first's
+          # FRESH lock — both would then "hold" it.
+          return false unless retire_stale_lock
         end
 
         # Atomic lock creation: File::EXCL ensures this fails if file already exists
@@ -58,9 +60,21 @@ module Woods
 
       # Release the lock.
       #
+      # Deletes the lock file only if it still carries this instance's
+      # token — a run that outlived stale_timeout may have been
+      # legitimately taken over, and deleting unconditionally would drop
+      # the new holder's lock.
+      #
       # @return [void]
       def release
-        FileUtils.rm_f(@lock_path) if @held
+        return unless @held
+
+        begin
+          content = JSON.parse(File.read(@lock_path))
+          FileUtils.rm_f(@lock_path) if content['token'] == @token
+        rescue Errno::ENOENT, JSON::ParserError
+          # Lock already gone or unreadable — nothing of ours to release.
+        end
         @held = false
       end
 
@@ -100,9 +114,28 @@ module Woods
         true
       end
 
-      # @return [String] Lock file content (JSON with PID and timestamp)
+      # Atomically retire a stale lock file via rename. Rename is atomic on
+      # POSIX: of any processes racing to take over the same stale lock,
+      # exactly one rename succeeds; the losers get ENOENT and back off.
+      # Winning the rename does NOT guarantee winning the lock — another
+      # process may O_EXCL-create between our rename and our create, which
+      # the caller's EEXIST rescue handles.
+      #
+      # @return [Boolean] true if this process retired the stale lock
+      def retire_stale_lock
+        graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
+        File.rename(@lock_path, graveyard)
+        FileUtils.rm_f(graveyard)
+        true
+      rescue Errno::ENOENT
+        false
+      end
+
+      # @return [String] Lock file content (JSON with PID, timestamp, and
+      #   an ownership token release verifies before deleting)
       def lock_content
-        JSON.generate(pid: Process.pid, locked_at: Time.now.iso8601, name: @name)
+        @token = SecureRandom.hex(8)
+        JSON.generate(pid: Process.pid, locked_at: Time.now.iso8601, name: @name, token: @token)
       end
     end
   end
