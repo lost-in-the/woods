@@ -9,7 +9,7 @@ Woods has a split architecture: extraction requires a booted Rails environment (
 ```
 HOST                                    CONTAINER
 ─────────────────────────────           ──────────────────────
-Index Server (27 tools)                 Rails App
+Index Server (29 tools)                 Rails App
   reads JSON from disk                    bundle exec rake woods:extract
   no Rails needed                           writes to tmp/woods/
         ▲                                         │
@@ -141,7 +141,40 @@ woods-mcp-start ./tmp/woods
 
 The `woods-mcp-start` wrapper validates the index directory, checks for `manifest.json`, ensures dependencies are installed, and restarts on failure. Use it instead of `woods-mcp` directly.
 
-> **Common mistake:** Using the container path (`/app/tmp/woods`) in `.mcp.json`. The Index Server runs on the host — it needs the host-side path to the volume-mounted output.
+> **Common mistake:** Using the container path (`/app/tmp/woods`) in `.mcp.json`. The host-side Index Server needs the host-side path to the volume-mounted output. (The in-container variant below is the opposite — it takes the container path.)
+
+### In-container Index Server (tmpfs / non-host-visible indexes)
+
+The host-side setup above assumes the extraction output is readable from the host. That breaks when `/app/tmp` is mounted as **tmpfs** for speed, or when the index directory lives in a **named Docker volume** — in both cases the index is not host-visible, so the host cannot run `woods-mcp-start ./tmp/woods`.
+
+The alternative is to run the Index Server **inside the container** via `docker exec`, pointing at the **container path**:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "docker",
+      "args": ["exec", "-i", "my_app_web_1", "bundle", "exec", "woods-mcp", "/app/tmp/woods"]
+    }
+  }
+}
+```
+
+(With Compose, `"args": ["compose", "exec", "-i", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"]` works the same way. The `-i` flag is required, exactly as for the embedded Console Server.)
+
+This form is also **cwd-independent** — there is no relative launcher path to resolve, which matters when the same server entry is referenced from multiple project roots or git worktrees.
+
+Two gotchas:
+
+1. **tmpfs wipes the index on container restart.** If `/app/tmp` is tmpfs, re-run `rake woods:extract` after each restart, or persist the index by mounting a named volume at the index path (e.g. `- woods-data:/app/tmp/woods`) or writing the index outside the tmpfs mount.
+2. **Container path, not host path.** This is the mirror image of the host-side "common mistake" above: the in-container server needs `/app/tmp/woods` (the container path), while the host-side server needs the host path. Pick the path that matches where the server process actually runs.
+
+| | Host-side (`woods-mcp-start`) | In-container (`docker exec`) |
+|---|---|---|
+| **Index location** | Host-visible volume mount | Anywhere in the container (tmpfs, named volume) |
+| **Path in `.mcp.json`** | Host path (`./tmp/woods`) | Container path (`/app/tmp/woods`) |
+| **Survives container restart** | Yes (on host disk) | Only with a named volume |
+| **Needs Ruby on host** | Yes | No |
 
 ## Console Server Setup
 

@@ -19,9 +19,18 @@ bundle exec rake woods:extract_framework # Rails/gem sources
 bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
 bundle exec rake woods:clean             # Remove index output
+bundle exec rake woods:embed             # Embed all extracted units
+bundle exec rake woods:embed_incremental # Embed changed units only
+bundle exec rake "woods:retrieve[query]" # Ad-hoc retrieval against the index
+bundle exec rake "woods:flow[entry]"     # Execution flow document for an entry point
+bundle exec rake woods:console           # Embedded Console MCP server (stdio)
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
+bundle exec rake woods:unblocked_sync    # Sync to an Unblocked collection
 bundle exec rake woods:obsidian          # Export to an Obsidian vault (alias: woods:vault)
-# Woods-themed aliases: woods:scan (extract), woods:look (stats), woods:vet (validate)
+bundle exec rake woods:generate_token    # Random bearer token for woods-mcp-http
+# Woods-themed aliases: woods:scan (extract), woods:tend (incremental), woods:look (stats),
+# woods:vet (validate), woods:clear (clean), woods:nest (embed), woods:hone (embed_incremental),
+# woods:send (notion_sync), woods:relay (unblocked_sync)
 ```
 
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
