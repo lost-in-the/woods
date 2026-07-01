@@ -1,6 +1,6 @@
 # Query-Driven Svelte Flow Visualization
 
-**Status:** Design / planning doc. Implementation not started.
+**Status:** Phases 0–4 implemented and shipped on `claude/svelte-flow-refactor-n2df35`. The one remaining item — exact line-span highlighting — is deferred pending a product decision (see Phasing).
 **Scope:** `lib/woods/svelte_flow/` (Rack middleware, exporter, transformer) + `frontend/` (Svelte app) + one manifest/config addition.
 **Pairs with:** existing MCP index-server query tools (`dependencies`, `dependents`, `trace_flow`, `search`, `codebase_retrieve`). Additive — the current full-graph export/serve paths stay working.
 
@@ -186,16 +186,18 @@ No changes to `dependency_graph.json` / per-unit JSON shape — everything reads
 
 ## Scope & Phasing
 
-| Phase | Deliverable | Touches | Rough size |
+| Phase | Deliverable | Status | Notes |
 |---|---|---|---|
-| **0** | Fix 3 failing edge-builder specs; green baseline | `transformer.rb`, `edge_builder.rb`, specs | S |
-| **1** | `/api/subgraph` + `?nodes=` URL param + agent workflow | `rack_middleware.rb`, `App.svelte`, `api.js`, specs | M |
-| **2** | Source pane + local/GitHub deep links + `svelte_flow_repo_url` | `rack_middleware.rb`, `NodeDetail.svelte`, `woods.rb`, docs | M |
-| **3** | `woods:map QUERY=` self-contained HTML export | `exporter.rb`, `woods.rake`, specs | M |
-| **4** | `@xyflow/svelte ^1.6` bump, `:via` edge styling, path highlighting | `frontend/`, `edge_builder.rb`, rebuilt assets | M |
-| **later** | Exact line-span highlighting (extraction-side) | extractors, flow steps | L, separable |
+| **0** | Fix failing edge-builder specs; green baseline | ✅ Done | Root cause was `{ target:, via: }` edges not handled by the viz consumers; added `EdgeData` normalizer + cleared all pre-existing rubocop debt in `svelte_flow/` |
+| **1** | `/api/subgraph` + `?nodes=` URL param + agent workflow | ✅ Done | Shared scoping core; `requested`/`dropped` reporting; browser-validated |
+| **2** | Source pane + local/GitHub deep links + `svelte_flow_repo_url` | ✅ Done | Lazy `/api/unit/:id/source`; connected-unit substring highlighting; blob URLs pinned to git SHA |
+| **3** | `woods:map NODES=` self-contained HTML export | ✅ Done | `SubgraphScoper` + `SourceLinks` extracted for zero drift; `StandaloneRenderer` inlines graph + sources; validated over `file://` |
+| **4** | `@xyflow/svelte ^1.6` bump, `:via` edge styling + legend, query emphasis | ✅ Done | Resolves 1.6.1; `edge-style.js` + `EdgeLegend`; depth-pulled neighbors dimmed |
+| **later** | Exact line-span highlighting (extraction-side) | ⏸ Deferred | Needs extractor changes + a product decision (Open Question 4); substring approximation ships now |
 
-Phases 1–3 are independently shippable and each carry their own value. Phase 4 is polish and can interleave. The line-span work is deliberately deferred — it's the only piece that needs extractor changes.
+All shipped phases were validated in headless Chromium (server mode and `file://`) and covered by specs. The line-span work is deliberately deferred — it's the only piece that needs extractor changes.
+
+> **Note on where things landed.** The shared scoping core became `SubgraphScoper` (not a method on `Transformer`), and the deep-link building became `SourceLinks` — both are standalone modules reused by the middleware and the exporter so the live and offline paths can't drift. The `?scope=<id>` large-set fallback (Open Question 1) was deferred; the `?nodes=` list handles realistic result sets, and a cap can be added when a real app hits the URL limit. `EdgeBuilder` threads `:via` into edge `data` (it is not "flattened to `dependency`" as the earlier draft feared).
 
 ---
 
