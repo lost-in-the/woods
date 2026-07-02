@@ -69,30 +69,28 @@ module Woods
       def release
         return unless @held
 
+        # Clear @held up front so no later failure can leave this instance
+        # believing it still holds the lock.
+        @held = false
+
         # Rename first, then inspect: a plain read-then-unlink is a TOCTOU —
         # after we read our own token a takeover could replace the file, and
         # our unlink would then delete the NEW holder's lock. Renaming
-        # atomically captures whatever is at the path; if it turns out not to
-        # be ours (we were taken over), we put it back untouched.
+        # atomically captures whatever is at the path.
         graveyard = "#{@lock_path}.release.#{Process.pid}.#{SecureRandom.hex(4)}"
         begin
           File.rename(@lock_path, graveyard)
         rescue Errno::ENOENT
-          @held = false
-          return
+          return # already gone
         end
 
-        begin
-          content = JSON.parse(File.read(graveyard))
-          if content['token'] == @token
-            FileUtils.rm_f(graveyard)
-          else
-            File.rename(graveyard, @lock_path) # not ours — restore for the holder
-          end
-        rescue JSON::ParserError
-          FileUtils.rm_f(graveyard) # corrupt lock we already moved aside — discard
+        if own_lock?(graveyard)
+          FileUtils.rm_f(graveyard)
+        else
+          # We were legitimately taken over — put the successor's lock back
+          # without clobbering a still-newer holder (see {#restore_lock}).
+          restore_lock(graveyard)
         end
-        @held = false
       end
 
       # Execute a block while holding the lock.
@@ -153,8 +151,9 @@ module Woods
 
         unless stale_file?(graveyard)
           # We grabbed a lock that is no longer stale — a competitor already
-          # took over. Restore it and back off.
-          File.rename(graveyard, @lock_path)
+          # took over. Restore it (without clobbering a still-newer holder)
+          # and back off.
+          restore_lock(graveyard)
           return false
         end
 
@@ -162,6 +161,36 @@ module Woods
         true
       rescue Errno::ENOENT
         false
+      end
+
+      # Whether the lock file at +path+ carries this instance's token.
+      #
+      # @param path [String]
+      # @return [Boolean] true when the token matches, or the file is corrupt
+      #   (an unparseable lock we already renamed aside is treated as ours to
+      #   discard rather than restore).
+      def own_lock?(path)
+        JSON.parse(File.read(path))['token'] == @token
+      rescue JSON::ParserError
+        true
+      end
+
+      # Put a lock file we renamed aside back at @lock_path WITHOUT clobbering
+      # a lock another process may have O_EXCL-created in the meantime.
+      # `File.link` is atomic and fails with EEXIST if @lock_path already
+      # exists, so a newer holder always wins; the aside copy is discarded
+      # either way. A plain `File.rename` back would overwrite that newer
+      # holder's lock — reintroducing a double-hold.
+      #
+      # @param graveyard [String] path of the renamed-aside lock file
+      # @return [void]
+      def restore_lock(graveyard)
+        File.link(graveyard, @lock_path)
+      rescue Errno::EEXIST
+        # A newer holder already claimed the path — our copy is obsolete.
+        nil
+      ensure
+        FileUtils.rm_f(graveyard)
       end
 
       # Whether the file at +path+ is older than the stale timeout.

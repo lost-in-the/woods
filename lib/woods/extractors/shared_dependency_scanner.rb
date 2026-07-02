@@ -82,10 +82,12 @@ module Woods
       # `redirect "/posts#comments"; Post.touch` at the in-string `#`,
       # silently dropping the `Post` reference. This scanner walks each line
       # tracking quote state so only a genuine (unquoted) `#` starts a
-      # comment. Escapes (`\"`, `\'`) inside literals are honored. Heredocs
-      # and `%`-literals are not modeled — a `#` inside those is rare in the
-      # constant-bearing code this scans, and treating it as a comment only
-      # risks a missed edge, never a crash.
+      # comment. Escapes (`\"`, `\'`) inside literals are honored. Heredocs,
+      # `%`-literals, and character literals whose char is a quote (`?'`,
+      # `?"`) are not modeled — these are rare in the constant-bearing code
+      # this scans, and mis-reading one only risks a spurious edge (a comment
+      # left unstripped) or a missed edge, never a crash or a dropped-but-real
+      # reference outside those constructs.
       #
       # @param source [String] Ruby source code
       # @return [String] source with unquoted `#` comments removed

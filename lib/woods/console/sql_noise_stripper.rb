@@ -140,7 +140,15 @@ module Woods
             i = nl || len
           elsif ch == '/' && sql[i + 1] == '*'
             close = sql.index('*/', i + 2)
-            i = close ? close + 2 : len
+            if close
+              i = close + 2
+            else
+              # Unterminated block comment: never under-detect. Leave it in
+              # place (over-detection is safe; the old regex also required a
+              # closing */ and left an unterminated /* untouched).
+              out << ch
+              i += 1
+            end
           else
             out << ch
             i += 1

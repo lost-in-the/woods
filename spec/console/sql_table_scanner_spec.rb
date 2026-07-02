@@ -224,6 +224,16 @@ RSpec.describe Woods::Console::SqlTableScanner do
       end
     end
 
+    context 'with an unterminated block comment (must never under-detect)' do
+      # A `/*` with no closing `*/` must not swallow the rest of the statement
+      # — over-detection is safe for the gate, under-detection is not.
+      let(:sql) { 'SELECT 1 /* FROM blocked' }
+
+      it 'still surfaces the table after the unterminated comment' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
     context 'when content is hidden inside PG dollar-quoted literals' do
       let(:sql) { 'SELECT $tag$FROM authorizations$tag$ AS literal FROM users' }
 
