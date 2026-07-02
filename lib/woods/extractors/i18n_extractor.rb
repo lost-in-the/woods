@@ -2,6 +2,8 @@
 
 require 'yaml'
 
+require_relative 'shared_utility_methods'
+
 module Woods
   module Extractors
     # I18nExtractor handles internationalization locale file extraction.
@@ -16,6 +18,8 @@ module Woods
     #   en = units.find { |u| u.identifier == "en.yml" }
     #
     class I18nExtractor
+      include SharedUtilityMethods
+
       # Directories to scan for locale files
       I18N_DIRECTORIES = %w[
         config/locales
@@ -30,10 +34,8 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of i18n units
       def extract_all
-        @directories.flat_map do |dir|
-          Dir[dir.join('**/*.yml')].filter_map do |file|
-            extract_i18n_file(file)
-          end
+        find_files_in_directories(@directories, '**/*.yml').filter_map do |file|
+          extract_i18n_file(file)
         end
       end
 

@@ -95,7 +95,12 @@ module Woods
       def append_dependency_line(lines, dependencies)
         return unless dependencies&.any?
 
-        dep_names = dependencies.map { |d| d[:target] }.compact.first(10)
+        # Dependency hashes arrive symbol-keyed from the extractor's
+        # in-memory units but string-keyed from the indexer (Indexer#build_unit
+        # reads JSON and does not symbolize dependency keys, unlike chunks).
+        # Read both forms or the whole "dependencies:" prefix silently
+        # vanishes from every embedded document on the indexing path.
+        dep_names = dependencies.filter_map { |d| d[:target] || d['target'] }.first(10)
         lines << "dependencies: #{dep_names.join(', ')}" if dep_names.any?
       end
 

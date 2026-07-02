@@ -462,7 +462,7 @@ module Woods
         # Scan data migration code for common dependencies
         deps.concat(scan_common_dependencies(source))
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

@@ -36,9 +36,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of state machine units
       def extract_all
-        @directories.flat_map do |dir|
-          Dir[dir.join('**/*.rb')].flat_map { |file| extract_model_file(file) }
-        end
+        find_files_in_directories(@directories).flat_map { |file| extract_model_file(file) }
       end
 
       # Extract state machine definitions from a single model file.
@@ -391,7 +389,7 @@ module Woods
         deps = [{ type: :model, target: class_name, via: :state_machine }]
         deps.concat(scan_service_dependencies(source, via: :state_machine_callback))
         deps.concat(scan_job_dependencies(source, via: :state_machine_callback))
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

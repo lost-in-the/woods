@@ -36,50 +36,93 @@ module Woods
 
       # @param threshold [Integer] Number of consecutive failures before opening the circuit
       # @param reset_timeout [Numeric] Seconds to wait before transitioning from open to half_open
-      def initialize(threshold: 5, reset_timeout: 60)
+      # @param success_threshold [Integer] Number of consecutive successful probes required to
+      #   close the circuit from half_open (default 1). Higher values reduce flapping when a
+      #   recovering service is still intermittently failing.
+      def initialize(threshold: 5, reset_timeout: 60, success_threshold: 1)
         @threshold = threshold
         @reset_timeout = reset_timeout
+        @success_threshold = success_threshold
         @state = :closed
         @failure_count = 0
+        @success_count = 0
         @last_failure_time = nil
+        @half_open_probe_in_flight = false
         @mutex = Mutex.new
       end
 
       # Execute a block through the circuit breaker.
       #
+      # In half_open, only a SINGLE probe is admitted at a time: concurrent
+      # calls are rejected with {CircuitOpenError} until the probe resolves.
+      # This prevents a thundering herd of probes against a still-recovering
+      # service, and — because probes can't overlap — removes the race where a
+      # slow probe's success would wipe failures recorded by a concurrent one.
+      #
       # @yield The block to execute
       # @return [Object] The return value of the block
-      # @raise [CircuitOpenError] if the circuit is open and the timeout has not elapsed
+      # @raise [CircuitOpenError] if the circuit is open, or half_open with a probe already in flight
       # @raise [StandardError] re-raises any error from the block
       def call(&block)
-        # Phase 1: Check state under mutex
-        @mutex.synchronize do
-          case @state
-          when :open
-            unless monotonic_now - @last_failure_time >= @reset_timeout
-              raise CircuitOpenError, "Circuit breaker is open (#{@failure_count} failures)"
-            end
+        probing = admit_call!
 
-            @state = :half_open
+        begin
+          result = block.call
+        rescue CircuitOpenError
+          # A nested breaker tripped — release our probe slot but don't count
+          # it as this breaker's own failure.
+          @mutex.synchronize { @half_open_probe_in_flight = false if probing }
+          raise
+        rescue StandardError => e
+          @mutex.synchronize do
+            @half_open_probe_in_flight = false if probing
+            record_failure(probing)
           end
+          raise e
         end
 
-        # Phase 2: Execute outside mutex
-        result = block.call
-
-        # Phase 3: Record success under mutex
-        @mutex.synchronize { reset! }
-
+        @mutex.synchronize do
+          @half_open_probe_in_flight = false if probing
+          record_success(probing)
+        end
         result
-      rescue CircuitOpenError
-        raise
-      rescue StandardError => e
-        # Phase 4: Record failure under mutex
-        @mutex.synchronize { record_failure }
-        raise e
       end
 
       private
+
+      # Decide whether this call may proceed, transitioning open→half_open when
+      # the reset timeout has elapsed. Runs entirely under the mutex.
+      #
+      # @return [Boolean] true when this call is the half_open probe (so the
+      #   caller knows to release the probe slot when it finishes)
+      # @raise [CircuitOpenError] when the circuit is open, or half_open with a
+      #   probe already in flight
+      def admit_call!
+        @mutex.synchronize do
+          case @state
+          when :open
+            raise CircuitOpenError, "Circuit breaker is open (#{@failure_count} failures)" unless reset_timeout_elapsed?
+
+            # First caller after the timeout becomes the single half_open probe.
+            @state = :half_open
+            @half_open_probe_in_flight = true
+            true
+          when :half_open
+            raise CircuitOpenError, 'Circuit breaker is half-open (probe in flight)' if @half_open_probe_in_flight
+
+            @half_open_probe_in_flight = true
+            true
+          else
+            false
+          end
+        end
+      end
+
+      # @return [Boolean] whether enough time has passed since the last failure
+      #   to attempt a recovery probe
+      def reset_timeout_elapsed?
+        @last_failure_time && (monotonic_now - @last_failure_time >= @reset_timeout)
+      end
 
       # Monotonic clock reading — immune to NTP slews and DST adjustments.
       #
@@ -88,18 +131,49 @@ module Woods
         Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
 
-      # Record a failure and potentially open the circuit.
-      def record_failure
+      # Record a failure and potentially open the circuit. A failure while
+      # half_open reopens immediately, regardless of the failure threshold —
+      # but only when it is the genuine in-flight probe. A stale call
+      # admitted while the circuit was still closed, completing after the
+      # transition to half_open, is not the probe and must not decide
+      # recovery (its outcome reflects the pre-outage attempt, not the
+      # current one).
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def record_failure(probing)
+        return if @state == :half_open && !probing
+
         @failure_count += 1
         @last_failure_time = monotonic_now
-        @state = :open if @failure_count >= @threshold
+        @success_count = 0
+        @state = :open if @state == :half_open || @failure_count >= @threshold
+      end
+
+      # Record a success. In half_open, only the in-flight probe advances
+      # recovery — a stale non-probe success (a call admitted while closed
+      # that resolves after the circuit went half_open) must not count toward
+      # the success threshold or close the circuit. In closed, a success
+      # clears accumulated failures.
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def record_success(probing)
+        if @state == :half_open
+          return unless probing
+
+          @success_count += 1
+          reset! if @success_count >= @success_threshold
+        elsif @state == :closed
+          @failure_count = 0
+        end
       end
 
       # Reset the circuit breaker to closed state with zero failures.
       def reset!
         @state = :closed
         @failure_count = 0
+        @success_count = 0
         @last_failure_time = nil
+        @half_open_probe_in_flight = false
       end
     end
   end

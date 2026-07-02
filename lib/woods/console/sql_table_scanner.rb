@@ -109,23 +109,36 @@ module Woods
       # stripped before scanning. Both JOIN-style and ANSI-89 comma-join syntax
       # are handled.
       #
+      # Literals are stripped under BOTH supported dialects and the scans
+      # unioned. This scanner backs TableGate, so it may over-detect but must
+      # never under-detect: stripping with the wrong dialect's escape rules
+      # can swallow a real FROM clause — e.g. MySQL's `\'` escape applied on
+      # a PostgreSQL host (where backslash is literal under
+      # standard_conforming_strings) folds `'x\' FROM blocked WHERE y = '`
+      # into one literal, hiding `blocked` from the gate while PostgreSQL
+      # genuinely reads that table.
+      #
       # @param sql [String, nil] the SQL string to scan
-      # @return [Array<String>] identifiers in the order they were encountered;
-      #   may contain duplicates if the same table is referenced multiple times
+      # @return [Array<String>] identifiers in first-encounter order, deduplicated
       def self.identifiers_in(sql)
         return [] if sql.nil? || sql.empty?
 
-        stripped = strip_noise(sql)
         results = []
-        collect_join_identifiers(stripped, results)
-        collect_from_identifiers(stripped, results)
-        results
+        %i[postgres mysql].each do |dialect|
+          stripped = strip_noise(sql, dialect: dialect)
+          collect_join_identifiers(stripped, results)
+          collect_from_identifiers(stripped, results)
+        end
+        results.uniq
       end
 
       # @api private
-      def self.strip_noise(sql)
-        out = SqlNoiseStripper.strip_comments(sql)
-        SqlNoiseStripper.strip_literals(out, dialect: :mysql)
+      # Comments and literals must be stripped in a single combined pass —
+      # stripping them separately lets a comment marker inside a literal
+      # (`'-- '`) hide a real FROM clause from the gate. See
+      # {SqlNoiseStripper.strip_noise}.
+      def self.strip_noise(sql, dialect:)
+        SqlNoiseStripper.strip_noise(sql, dialect: dialect)
       end
       private_class_method :strip_noise
 

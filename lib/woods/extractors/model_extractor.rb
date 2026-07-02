@@ -501,7 +501,7 @@ module Woods
               options: v.options.except(:if, :unless, :on),
               conditions: format_validation_conditions(v)
             }
-            entry[:implicit_belongs_to] = true if implicit_belongs_to_validator?(v)
+            entry[:implicit_belongs_to] = true if implicit_belongs_to_validator?(model, v)
             entry
           end
         end
@@ -654,7 +654,7 @@ module Woods
           end
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
 
       # Enrich callback metadata with side-effect analysis.
@@ -922,17 +922,30 @@ module Woods
         conditions
       end
 
-      # Detect Rails-generated implicit belongs_to presence validators
+      # Detect Rails-generated implicit belongs_to presence validators.
       #
+      # `belongs_to` (with belongs_to_required_by_default, Rails 5+)
+      # registers an ActiveRecord PresenceValidator on the association
+      # attribute. Reflection offers no declaration provenance — the
+      # validator class and its #validate source_location are identical for
+      # an explicit `validates :assoc, presence: true` — so this flags any
+      # AR presence validator whose attributes are all belongs_to
+      # association names. (The previous source_location heuristic matched
+      # EVERY AR presence validator, since PresenceValidator#validate is
+      # always defined in the gem, never under Rails.root.)
+      #
+      # @param model [Class] The ActiveRecord model class
       # @param validator [ActiveModel::Validator]
       # @return [Boolean]
-      def implicit_belongs_to_validator?(validator)
-        if defined?(ActiveRecord::Validations::PresenceValidator) && !validator.is_a?(ActiveRecord::Validations::PresenceValidator)
-          return false
-        end
+      def implicit_belongs_to_validator?(model, validator)
+        return false unless defined?(ActiveRecord::Validations::PresenceValidator)
+        return false unless validator.is_a?(ActiveRecord::Validations::PresenceValidator)
 
-        loc = validator.class.instance_method(:validate).source_location&.first
-        loc && !loc.start_with?(Rails.root.to_s)
+        belongs_to_names = model.reflect_on_all_associations(:belongs_to).map { |r| r.name.to_sym }
+        return false if belongs_to_names.empty?
+
+        attributes = validator.respond_to?(:attributes) ? Array(validator.attributes) : []
+        attributes.any? && attributes.all? { |a| belongs_to_names.include?(a.to_sym) }
       rescue StandardError
         false
       end
@@ -975,7 +988,10 @@ module Woods
 
       def callback_count(model)
         %i[validation save create update destroy commit rollback].sum do |type|
-          model.send("_#{type}_callbacks").size
+          # CallbackChain includes Enumerable but defines no #size on any
+          # supported Rails version — #size raises and the rescue would
+          # zero the count. #count is the only correct API here.
+          model.send("_#{type}_callbacks").count
         rescue StandardError
           0
         end

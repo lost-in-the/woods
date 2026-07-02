@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative 'filename_utils'
+require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'dependency_graph'
 require_relative 'git_provenance'
@@ -249,12 +250,6 @@ module Woods
       Rails.logger.info '[Woods] Analyzing dependency graph...'
       @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
 
-      # Phase 3.5: Precompute request flows (opt-in)
-      if Woods.configuration.precompute_flows
-        Rails.logger.info '[Woods] Precomputing request flows...'
-        precompute_flows
-      end
-
       # Phase 4: Enrich with git data
       Rails.logger.info '[Woods] Enriching with git data...'
       enrich_with_git_data
@@ -266,6 +261,17 @@ module Woods
       # Phase 5: Write output
       Rails.logger.info '[Woods] Writing output...'
       write_results
+
+      # Phase 5.5: Precompute request flows (opt-in). Must run AFTER
+      # write_results — FlowAssembler loads unit JSON from disk, so running
+      # earlier assembled every flow from absent (fresh output dir) or
+      # stale (previous run's) data. precompute_flows re-writes the
+      # controller units it annotates with metadata[:flow_paths].
+      if Woods.configuration.precompute_flows
+        Rails.logger.info '[Woods] Precomputing request flows...'
+        precompute_flows
+      end
+
       write_dependency_graph
       write_graph_analysis
       write_manifest
@@ -316,11 +322,17 @@ module Woods
         regenerate_type_index(type_key)
       end
 
-      # Update graph, manifest, and summary
+      # Update graph, manifest, and summary. No capture_snapshot here:
+      # snapshots must hash the FULL unit set, and incremental runs only
+      # re-extract affected units (@results stays empty) — capturing would
+      # record a snapshot whose diff reports every unit as deleted.
+      # Snapshots are captured on full extraction only.
       write_dependency_graph
-      write_manifest
+      write_manifest(incremental: true)
       write_structural_summary
-      capture_snapshot
+      if Woods.configuration.enable_snapshots
+        Rails.logger.info '[Woods] Skipping snapshot capture — snapshots are captured on full extraction only'
+      end
 
       affected_ids
     end
@@ -506,9 +518,40 @@ module Woods
       all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
       flow_map = precomputer.precompute
+      rewrite_flow_annotated_units
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
     rescue StandardError => e
       Rails.logger.error "[Woods] Flow precomputation failed: #{e.message}"
+    end
+
+    # Precompute runs after write_results (FlowAssembler reads unit JSON
+    # from disk), so units annotated in memory with metadata[:flow_paths]
+    # must be re-written and their type index refreshed to pick up the
+    # annotation.
+    #
+    # The index is rebuilt from the in-memory `units` (the authoritative
+    # full-extraction `@results`), NOT from a disk glob: this is a full
+    # extraction, the output dir is never wiped, and globbing would
+    # resurrect stale unit files for app classes deleted since the last run.
+    # (The incremental path, which only holds changed units in memory, still
+    # rebuilds from disk via {#regenerate_type_index}.)
+    def rewrite_flow_annotated_units
+      @results.each do |type, units|
+        annotated = units.select { |u| u.metadata[:flow_paths] }
+        next if annotated.empty?
+
+        type_dir = @output_dir.join(type.to_s)
+        annotated.each do |unit|
+          File.write(
+            type_dir.join(collision_safe_filename(unit.identifier)),
+            json_serialize(unit.to_h)
+          )
+        end
+        File.write(
+          type_dir.join('_index.json'),
+          json_serialize(type_index_entries(units))
+        )
+      end
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -702,20 +745,29 @@ module Woods
         end
 
         # Also write a type index for fast lookups
-        index = units.map do |u|
-          {
-            identifier: u.identifier,
-            file_path: u.file_path,
-            namespace: u.namespace,
-            estimated_tokens: u.estimated_tokens,
-            chunk_count: u.chunks.size
-          }
-        end
-
         File.write(
           type_dir.join('_index.json'),
-          json_serialize(index)
+          json_serialize(type_index_entries(units))
         )
+      end
+    end
+
+    # Build the `_index.json` entry list for a set of in-memory units.
+    # Shared by {#write_results} and {#rewrite_flow_annotated_units} so both
+    # emit the index from the authoritative in-memory `@results` rather than
+    # re-deriving it from disk.
+    #
+    # @param units [Array<ExtractedUnit>]
+    # @return [Array<Hash>]
+    def type_index_entries(units)
+      units.map do |u|
+        {
+          identifier: u.identifier,
+          file_path: u.file_path,
+          namespace: u.namespace,
+          estimated_tokens: u.estimated_tokens,
+          chunk_count: u.chunks.size
+        }
       end
     end
 
@@ -745,12 +797,23 @@ module Woods
       )
     end
 
-    def write_manifest
+    def write_manifest(incremental: false)
       # Worktree-aware git provenance. In a linked worktree +.git+ is a file
       # pointing at the real git dir; when that dir is unreachable (e.g. an
       # unmounted host path inside a container) this resolves to "unknown"
       # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
       provenance = GitProvenance.new(root: Rails.root).to_h
+
+      # Incremental runs never populate @results — deriving counts from
+      # memory would clobber a good manifest with zeros. Recompute from the
+      # persisted per-type _index.json files instead.
+      counts, total_chunks =
+        if incremental
+          persisted_counts
+        else
+          [@results.transform_values(&:size),
+           @results.sum { |_, units| units.sum { |u| u.chunks.size } }]
+        end
 
       manifest = {
         extracted_at: Time.current.iso8601,
@@ -758,11 +821,11 @@ module Woods
         ruby_version: RUBY_VERSION,
 
         # Counts by type
-        counts: @results.transform_values(&:size),
+        counts: counts,
 
         # Total stats
-        total_units: @results.values.sum(&:size),
-        total_chunks: @results.sum { |_, units| units.sum { |u| u.chunks.size } },
+        total_units: counts.values.sum,
+        total_chunks: total_chunks,
 
         # Git provenance (branch/sha), or "unknown" when unresolvable
         git_sha: provenance[:git_sha],
@@ -777,6 +840,30 @@ module Woods
         @output_dir.join('manifest.json'),
         json_serialize(manifest)
       )
+    end
+
+    # Unit and chunk counts derived from the per-type _index.json files on
+    # disk — the source of truth after an incremental run, where only the
+    # affected units were re-extracted.
+    #
+    # @return [Array(Hash{Symbol => Integer}, Integer)] counts by type, total chunk count
+    def persisted_counts
+      counts = {}
+      chunks = 0
+
+      Dir[@output_dir.join('*/_index.json').to_s].each do |index_path|
+        entries = JSON.parse(File.read(index_path))
+        counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
+        chunks += entries.sum { |e| e['chunk_count'].to_i }
+      rescue JSON::ParserError => e
+        # An unreadable index silently drops that whole type from the manifest
+        # counts — warn rather than undercount without a trace.
+        type = File.basename(File.dirname(index_path))
+        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in manifest counts: #{e.message}")
+        next
+      end
+
+      [counts, chunks]
     end
 
     # Capture a temporal snapshot after extraction completes.
@@ -915,7 +1002,10 @@ module Woods
           identifier: data['identifier'],
           file_path: data['file_path'],
           namespace: data['namespace'],
-          estimated_tokens: data['estimated_tokens'],
+          # Unit JSON has no estimated_tokens field (ExtractedUnit#to_h
+          # doesn't emit one) — recompute it, or every unit of a type
+          # touched by an incremental run would index as null.
+          estimated_tokens: estimated_tokens_from(data),
           chunk_count: (data['chunks'] || []).size
         }
       end
@@ -924,6 +1014,20 @@ module Woods
         type_dir.join('_index.json'),
         json_serialize(index)
       )
+    end
+
+    # Token estimate for a unit parsed back from JSON, mirroring
+    # ExtractedUnit#estimated_tokens (see docs/TOKEN_BENCHMARK.md).
+    #
+    # @param data [Hash] Parsed unit JSON (string keys)
+    # @return [Integer]
+    def estimated_tokens_from(data)
+      source = data['source_code']
+      metadata = data['metadata'] || {}
+
+      source_tokens = source ? TokenUtils.estimate_tokens(source) : 0
+      metadata_tokens = metadata.any? ? TokenUtils.estimate_tokens(metadata.to_json) : 0
+      source_tokens + metadata_tokens
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1023,11 +1127,19 @@ module Woods
 
       return unless unit
 
-      # Update dependency graph
+      # Update dependency graph. Register BEFORE normalizing the path —
+      # the graph's file_map stores absolute paths (affected_by matches
+      # changed files against them), exactly as full extraction registers
+      # in Phase 1 and only normalizes in Phase 4.5.
       @dependency_graph.register(unit)
 
       # Track which type was affected
       affected_types&.add(extractor_key)
+
+      # Unit JSON carries Rails.root-relative paths (full extraction's
+      # Phase 4.5); writing the raw absolute source_location here would
+      # leak container-absolute paths into the index after incremental runs.
+      unit.file_path = normalize_file_path(unit.file_path)
 
       # Write updated unit
       type_dir = @output_dir.join(extractor_key.to_s)

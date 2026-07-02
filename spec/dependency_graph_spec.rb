@@ -48,6 +48,63 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.dependents_of('User')).to include('Order')
       expect(graph.dependencies_of('Order')).to include('User')
     end
+
+    it 'removes stale reverse edges when a unit is re-registered with different dependencies' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :model, identifier: 'Account'))
+
+      order_v1 = make_unit(
+        type: :model,
+        identifier: 'Order',
+        dependencies: [{ type: :model, target: 'User', via: :belongs_to }]
+      )
+      graph.register(order_v1)
+      expect(graph.dependents_of('User')).to include('Order')
+
+      # The Order source dropped its User dependency — incremental
+      # re-extraction registers into the already-loaded graph.
+      order_v2 = make_unit(
+        type: :model,
+        identifier: 'Order',
+        dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]
+      )
+      graph.register(order_v2)
+
+      expect(graph.dependents_of('User')).not_to include('Order')
+      expect(graph.dependents_of('User', via: :belongs_to)).not_to include('Order')
+      expect(graph.dependents_of('Account')).to include('Order')
+    end
+
+    it 'updates the file map when a unit is re-registered under a new path' do
+      graph.register(make_unit(type: :model, identifier: 'User', file_path: '/app/models/user.rb'))
+      graph.register(
+        make_unit(
+          type: :model,
+          identifier: 'Consumer',
+          dependencies: [{ type: :model, target: 'User', via: :code_reference }]
+        )
+      )
+      graph.register(make_unit(type: :model, identifier: 'User', file_path: '/app/models/core/user.rb'))
+
+      expect(graph.affected_by(['/app/models/user.rb'])).to be_empty
+      expect(graph.affected_by(['/app/models/core/user.rb'])).to contain_exactly('User', 'Consumer')
+    end
+
+    it 'cleans stale reverse edges when re-registering into a graph loaded from JSON' do
+      order = make_unit(
+        type: :model,
+        identifier: 'Order',
+        dependencies: [{ type: :model, target: 'User', via: :belongs_to }]
+      )
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(order)
+
+      loaded = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+      order_v2 = make_unit(type: :model, identifier: 'Order', dependencies: [])
+      loaded.register(order_v2)
+
+      expect(loaded.dependents_of('User')).not_to include('Order')
+    end
   end
 
   describe '#affected_by' do

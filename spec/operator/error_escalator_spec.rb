@@ -59,6 +59,23 @@ RSpec.describe Woods::Operator::ErrorEscalator do
       end
     end
 
+    context 'with a class_name override (pipeline_diagnose over-the-wire path)' do
+      it 'matches class-keyed patterns using the supplied class name, not the object class' do
+        # The MCP tool only has the class name as a string and hands a bare
+        # StandardError — without the override this misclassified as :unknown.
+        result = escalator.classify(StandardError.new('connection timed out'), class_name: 'Timeout::Error')
+        expect(result[:severity]).to eq(:transient)
+        expect(result[:category]).to eq('timeout')
+        expect(result[:error_class]).to eq('Timeout::Error')
+      end
+
+      it 'reports the supplied class name for unclassified errors too' do
+        result = escalator.classify(StandardError.new('weird'), class_name: 'Some::CustomError')
+        expect(result[:severity]).to eq(:unknown)
+        expect(result[:error_class]).to eq('Some::CustomError')
+      end
+    end
+
     it 'always includes error_class and message' do
       result = escalator.classify(RuntimeError.new('boom'))
       expect(result[:error_class]).to eq('RuntimeError')

@@ -27,6 +27,19 @@ RSpec.describe Woods::Console::SqlTableScanner do
       end
     end
 
+    context 'with a FROM clause hidden by MySQL-only escape rules (PostgreSQL bypass)' do
+      # On PostgreSQL (standard_conforming_strings on), backslash is
+      # literal: the server parses `'x\'` as one literal and genuinely
+      # reads FROM blocked. Stripping with only the MySQL dialect (where
+      # \' continues the string) folded the real FROM clause into a
+      # literal, hiding the table from TableGate.
+      let(:sql) { %q(SELECT 'x\' FROM blocked WHERE secret LIKE 'a%') }
+
+      it 'still detects the table read by a PostgreSQL server' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
     context 'with nil input' do
       let(:sql) { nil }
 
@@ -189,6 +202,35 @@ RSpec.describe Woods::Console::SqlTableScanner do
 
       it 'does not return identifiers from string literals' do
         expect(identifiers).not_to include('authorizations')
+      end
+    end
+
+    context 'when a comment marker sits inside a string literal (must not hide FROM)' do
+      # The `--` is inside a literal, so it is NOT a comment: the real
+      # `FROM blocked` must be detected. Stripping comments before literals
+      # swallowed it, letting a blocked table slip past TableGate.
+      let(:sql) { "SELECT 'a -- b' FROM blocked" }
+
+      it 'still detects the real table after the literal' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'when an apostrophe sits inside a line comment (must not hide FROM)' do
+      let(:sql) { "SELECT 1 -- it's fine\nFROM real_table" }
+
+      it 'detects the table on the line after the comment' do
+        expect(identifiers).to include('real_table')
+      end
+    end
+
+    context 'with an unterminated block comment (must never under-detect)' do
+      # A `/*` with no closing `*/` must not swallow the rest of the statement
+      # — over-detection is safe for the gate, under-detection is not.
+      let(:sql) { 'SELECT 1 /* FROM blocked' }
+
+      it 'still surfaces the table after the unterminated comment' do
+        expect(identifiers).to include('blocked')
       end
     end
 

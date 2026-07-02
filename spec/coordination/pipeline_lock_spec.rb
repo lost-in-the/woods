@@ -97,11 +97,87 @@ RSpec.describe Woods::Coordination::PipelineLock do
       # Create a lock file so File.exist? returns true
       File.write(lock_path, '{}')
 
-      # Simulate the race: File.exist? sees the file, but File.mtime raises ENOENT
+      # Simulate the race: File.exist? sees the file, but File.mtime raises
+      # ENOENT for the lock path (other paths, e.g. a graveyard file, behave
+      # normally).
+      allow(File).to receive(:mtime).and_call_original
       allow(File).to receive(:mtime).with(lock_path).and_raise(Errno::ENOENT)
 
       new_lock = described_class.new(lock_dir: lock_dir, name: 'extraction')
       expect { new_lock.acquire }.not_to raise_error
+    end
+  end
+
+  describe 'release ownership' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+
+    it 'does not delete a lock file that was taken over by another holder' do
+      lock.acquire
+      # Simulate a legitimate takeover after this holder went stale:
+      # the file now carries someone else's token.
+      File.write(lock_path, JSON.generate(pid: 99_999, token: 'someone-elses-token'))
+
+      lock.release
+
+      expect(File.exist?(lock_path)).to be true
+    end
+
+    it 'deletes the lock file when it still owns it' do
+      lock.acquire
+      lock.release
+
+      expect(File.exist?(lock_path)).to be false
+    end
+
+    it 'handles the lock file already being gone' do
+      lock.acquire
+      FileUtils.rm_f(lock_path)
+
+      expect { lock.release }.not_to raise_error
+      expect(lock.locked?).to be false
+    end
+  end
+
+  describe 'stale takeover race' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+
+    it 'backs off when another process retires the stale lock first' do
+      File.write(lock_path, '{}')
+      FileUtils.touch(lock_path, mtime: Time.now - 7200)
+
+      # The racing process wins the atomic rename between our stale check
+      # and our retirement attempt.
+      allow(File).to receive(:rename).and_raise(Errno::ENOENT)
+
+      expect(lock.acquire).to be false
+      expect(lock.locked?).to be false
+    end
+
+    it 'restores the file and backs off if the retired lock is no longer stale' do
+      # Simulates a competitor that already retired the stale lock and
+      # created a FRESH one between our stale? check and our rename: retiring
+      # blindly would clobber a live holder's lock and let both processes run.
+      File.write(lock_path, JSON.generate(token: 'competitor-fresh'))
+      # mtime is now (fresh), i.e. not older than stale_timeout.
+
+      expect(lock.send(:retire_stale_lock)).to be false
+      expect(File.exist?(lock_path)).to be true
+      expect(JSON.parse(File.read(lock_path))['token']).to eq('competitor-fresh')
+    end
+
+    it 'restore_lock does not clobber a lock created in the gap' do
+      # After we rename a captured lock aside, a newer holder may O_EXCL-create
+      # at @lock_path. Restoring via rename would overwrite it (double-hold);
+      # the link-based restore must leave the newer holder untouched and simply
+      # discard our aside copy.
+      graveyard = "#{lock_path}.grave"
+      File.write(graveyard, JSON.generate(token: 'ours-captured'))
+      File.write(lock_path, JSON.generate(token: 'newer-holder'))
+
+      lock.send(:restore_lock, graveyard)
+
+      expect(JSON.parse(File.read(lock_path))['token']).to eq('newer-holder')
+      expect(File.exist?(graveyard)).to be false
     end
   end
 

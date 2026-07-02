@@ -15,6 +15,14 @@ require 'tmpdir'
 # is exercised here as a boot-smoke test: we spawn it against a fixture,
 # let it block on stdin, then verify it produced no boot-time errors on stderr.
 RSpec.describe 'MCP CLI integration' do
+  # Subprocess output arrives in the locale's default external encoding.
+  # Under a POSIX/C locale (common in containers and CI) that's US-ASCII,
+  # and the server's boot log contains UTF-8 punctuation — matching a
+  # Regexp against it would raise ArgumentError. Normalize before matching.
+  def utf8(output)
+    output.force_encoding(Encoding::UTF_8).scrub
+  end
+
   let(:gem_root) { File.expand_path('../..', __dir__) }
   let(:wrapper) { File.join(gem_root, 'exe/woods-mcp-start') }
   let(:ruby_bin) { File.join(gem_root, 'exe/woods-mcp') }
@@ -28,16 +36,16 @@ RSpec.describe 'MCP CLI integration' do
       _out, err, status = Open3.capture3({ 'WOODS_DIR' => nil }, wrapper)
 
       expect(status.exitstatus).to eq(1)
-      expect(err).to match(/No index directory specified/i)
-      expect(err).to match(/Usage:/)
+      expect(utf8(err)).to match(/No index directory specified/i)
+      expect(utf8(err)).to match(/Usage:/)
     end
 
     it 'exits non-zero with a clear message when the index directory does not exist' do
       _out, err, status = Open3.capture3(wrapper, '/definitely/not/a/real/woods/dir')
 
       expect(status.exitstatus).to eq(1)
-      expect(err).to match(/does not exist/i)
-      expect(err).to match(/bundle exec rake woods:extract/)
+      expect(utf8(err)).to match(/does not exist/i)
+      expect(utf8(err)).to match(/bundle exec rake woods:extract/)
     end
 
     it 'exits non-zero when the directory is missing manifest.json' do
@@ -45,8 +53,8 @@ RSpec.describe 'MCP CLI integration' do
         _out, err, status = Open3.capture3(wrapper, empty_dir)
 
         expect(status.exitstatus).to eq(1)
-        expect(err).to match(/No manifest\.json/)
-        expect(err).to match(/bundle exec rake woods:extract/)
+        expect(utf8(err)).to match(/No manifest\.json/)
+        expect(utf8(err)).to match(/bundle exec rake woods:extract/)
       end
     end
   end
@@ -66,7 +74,7 @@ RSpec.describe 'MCP CLI integration' do
       Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
       wait_thr.join(5)
 
-      stderr_output = stderr.read
+      stderr_output = utf8(stderr.read)
       stdin.close
       stdout.close
       stderr.close
@@ -105,7 +113,7 @@ RSpec.describe 'MCP CLI integration' do
         booted = wait_thr.alive?
         Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
         wait_thr.join(5)
-        err = stderr.read
+        err = utf8(stderr.read)
         stdin.close
         stdout.close
         stderr.close
@@ -120,7 +128,7 @@ RSpec.describe 'MCP CLI integration' do
       _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, '/no/such/path')
 
       expect(status.exitstatus).to eq(1)
-      expect(err).to match(/Index directory does not exist/i)
+      expect(utf8(err)).to match(/Index directory does not exist/i)
     end
 
     it 'exits non-zero when the directory is missing manifest.json' do
@@ -129,7 +137,7 @@ RSpec.describe 'MCP CLI integration' do
         _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, empty_dir)
 
         expect(status.exitstatus).to eq(1)
-        expect(err).to match(/No manifest\.json/)
+        expect(utf8(err)).to match(/No manifest\.json/)
       end
     end
 
@@ -161,8 +169,8 @@ RSpec.describe 'MCP CLI integration' do
           _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, dir)
 
           expect(status.exitstatus).to eq(2)
-          expect(err).to match(/MissingArtifact/)
-          expect(err).to match(/WOODS_REQUIRE_INDEX/)
+          expect(utf8(err)).to match(/MissingArtifact/)
+          expect(utf8(err)).to match(/WOODS_REQUIRE_INDEX/)
         end
       end
     end

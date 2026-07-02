@@ -359,10 +359,27 @@ module Woods
 
       # Build a cache key for an embedding text.
       #
+      # The provider's model_name is folded into the key: a cached embedding
+      # is only valid for the exact model that produced it. Without this, a
+      # persistent shared backend (Redis/SolidCache) returns the previous
+      # model's vector after a model switch or upgrade — different dimensions
+      # error mid-batch, same dimensions silently corrupt similarity scores
+      # (which IndexValidator can't detect, since it checks provider-vs-store
+      # dims, not cache contents).
+      #
+      # model_name (a plain attribute) is used rather than dimensions on
+      # purpose: for every supported provider the model uniquely determines
+      # the vector dimensionality, and `Provider#dimensions` can force a live
+      # network probe (Ollama memoizes `embed('test').length`; OpenAI probes
+      # for unknown models). Keying on dimensions made every cache lookup —
+      # including hits — depend on the provider being reachable, defeating the
+      # cache exactly when the backend is down. model_name distinguishes
+      # models without any I/O.
+      #
       # @param text [String]
       # @return [String]
       def embedding_key(text)
-        Cache.cache_key(:embeddings, Digest::SHA256.hexdigest(text))
+        Cache.cache_key(:embeddings, @provider.model_name.to_s, Digest::SHA256.hexdigest(text))
       end
     end
 

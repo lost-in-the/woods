@@ -534,8 +534,10 @@ namespace :woods do
     require 'woods/notion/exporter'
 
     config = Woods.configuration
-    # Env var takes precedence over configured value
-    config.notion_api_token = ENV.fetch('NOTION_API_TOKEN', nil) || config.notion_api_token
+    # A non-blank env var takes precedence over the configured value; a blank
+    # NOTION_API_TOKEN is treated as absent. Shared resolution keeps the rake
+    # task, the exporter, and the MCP tool consistent.
+    config.notion_api_token = Woods.resolve_notion_token(config)
 
     unless config.notion_api_token
       puts 'ERROR: Notion API token not configured.'

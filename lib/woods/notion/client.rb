@@ -4,6 +4,7 @@ require 'json'
 require 'net/http'
 require 'uri'
 require 'woods'
+require_relative '../retry_after'
 require_relative 'rate_limiter'
 
 module Woods
@@ -135,7 +136,9 @@ module Woods
 
           if response.code == '429' && retries < MAX_RETRIES
             retries += 1
-            wait_time = (response['Retry-After'] || retries).to_f
+            # Retry-After may be an HTTP-date, which .to_f would collapse to
+            # 0.0 — honoring it as-is would hammer a throttling server.
+            wait_time = Woods::RetryAfter.seconds(response['Retry-After'], fallback: retries)
             sleep(wait_time)
             next
           end

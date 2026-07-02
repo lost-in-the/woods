@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'fileutils'
+require 'pathname'
+require 'tmpdir'
 require 'woods/extractors/shared_utility_methods'
 
 RSpec.describe Woods::Extractors::SharedUtilityMethods do
@@ -12,6 +15,54 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
   end
 
   subject(:utility) { test_class.new }
+
+  # ── #find_files_in_directories ────────────────────────────────
+
+  describe '#find_files_in_directories' do
+    let(:root) { Pathname.new(Dir.mktmpdir) }
+    let(:dir_a) { root.join('a').tap(&:mkpath) }
+    let(:dir_b) { root.join('b').tap(&:mkpath) }
+
+    before do
+      dir_a.join('one.rb').write('# one')
+      dir_a.join('nested').mkpath
+      dir_a.join('nested/two.rb').write('# two')
+      dir_a.join('notes.yml').write('---')
+      dir_b.join('three.rb').write('# three')
+    end
+
+    after do
+      FileUtils.remove_entry(root)
+    end
+
+    it 'globs Ruby files across all directories with the default pattern' do
+      files = utility.find_files_in_directories([dir_a, dir_b])
+      expect(files).to contain_exactly(
+        dir_a.join('one.rb').to_s,
+        dir_a.join('nested/two.rb').to_s,
+        dir_b.join('three.rb').to_s
+      )
+    end
+
+    it 'excludes files that do not match the default pattern' do
+      files = utility.find_files_in_directories([dir_a])
+      expect(files).not_to include(dir_a.join('notes.yml').to_s)
+    end
+
+    it 'accepts a custom glob pattern' do
+      files = utility.find_files_in_directories([dir_a], '**/*.yml')
+      expect(files).to contain_exactly(dir_a.join('notes.yml').to_s)
+    end
+
+    it 'concatenates results in directory order' do
+      files = utility.find_files_in_directories([dir_b, dir_a])
+      expect(files.first).to eq(dir_b.join('three.rb').to_s)
+    end
+
+    it 'returns an empty array for an empty directory list' do
+      expect(utility.find_files_in_directories([])).to eq([])
+    end
+  end
 
   # ── #app_source? ──────────────────────────────────────────────
 

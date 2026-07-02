@@ -65,6 +65,38 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       result = scanner.scan_model_dependencies(source)
       expect(result).to eq([])
     end
+
+    it 'ignores fully-qualified references inside comments' do
+      source = <<~RUBY
+        # TODO: migrate User to the new schema
+        post = Post.first
+      RUBY
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['Post'])
+    end
+
+    it 'still matches references inside string interpolation' do
+      # rubocop:disable Lint/InterpolationCheck -- the #{} is source under test, not spec interpolation
+      source = 'label = "owner: #{User.find(id).name}"'
+      # rubocop:enable Lint/InterpolationCheck
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['User'])
+    end
+
+    it 'keeps a model reference that follows a # inside a string literal' do
+      # A literal `#` (URL fragment, hex color, "Tag #ruby") is not a Ruby
+      # comment; comment-stripping must be string-literal-aware or the rest
+      # of the line — including the model reference — is silently dropped.
+      source = 'link_to "Tag #ruby", User.recent'
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['User'])
+    end
+
+    it 'strips a real trailing comment while keeping code on the same line' do
+      source = 'post = Post.first # see User for the join'
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['Post'])
+    end
   end
 
   # ── #scan_service_dependencies ──────────────────────────────────
@@ -249,6 +281,60 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
 
       result = scanner.scan_common_dependencies(source)
       expect(result).to all(satisfy { |d| d[:via] == :code_reference })
+    end
+  end
+
+  # ── #consolidate_dependencies ────────────────────────────────────
+
+  describe '#consolidate_dependencies' do
+    it 'merges multiple dependency arrays' do
+      models = [{ type: :model, target: 'User', via: :code_reference }]
+      services = [{ type: :service, target: 'BillingService', via: :code_reference }]
+
+      result = scanner.consolidate_dependencies(models, services)
+      expect(result).to contain_exactly(
+        { type: :model, target: 'User', via: :code_reference },
+        { type: :service, target: 'BillingService', via: :code_reference }
+      )
+    end
+
+    it 'deduplicates by [type, target], keeping the first occurrence' do
+      first = { type: :model, target: 'User', via: :belongs_to }
+      second = { type: :model, target: 'User', via: :code_reference }
+
+      result = scanner.consolidate_dependencies([first], [second])
+      expect(result).to eq([first])
+    end
+
+    it 'keeps entries with the same target but different types' do
+      deps = [
+        { type: :model, target: 'Payment', via: :code_reference },
+        { type: :service, target: 'Payment', via: :code_reference }
+      ]
+
+      result = scanner.consolidate_dependencies(deps)
+      expect(result.size).to eq(2)
+    end
+
+    it 'removes nil entries' do
+      deps = [{ type: :model, target: 'User', via: :code_reference }, nil]
+
+      result = scanner.consolidate_dependencies(deps)
+      expect(result).to eq([{ type: :model, target: 'User', via: :code_reference }])
+    end
+
+    it 'accepts a single pre-built array as a drop-in for the inline uniq chain' do
+      deps = [
+        { type: :model, target: 'User', via: :code_reference },
+        { type: :model, target: 'User', via: :render }
+      ]
+
+      result = scanner.consolidate_dependencies(deps)
+      expect(result.size).to eq(1)
+    end
+
+    it 'returns an empty array when given only empty arrays' do
+      expect(scanner.consolidate_dependencies([], [])).to eq([])
     end
   end
 

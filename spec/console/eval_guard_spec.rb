@@ -195,6 +195,23 @@ RSpec.describe Woods::Console::EvalGuard do
           .to raise_error(Woods::Console::ForbiddenExpressionError, /shell-execution/)
       end
 
+      it 'rejects %x literals with non-brace delimiters' do
+        # Ruby accepts any non-word char as the %x delimiter; the guard
+        # must not key off a hand-picked delimiter list.
+        ['%x/ls/', '%x~ls~', '%x!ls!', '%x.ls.'].each do |payload|
+          expect { described_class.check!(payload) }
+            .to raise_error(Woods::Console::ForbiddenExpressionError, /shell-execution/),
+                "expected #{payload} to be refused"
+        end
+      end
+
+      it 'rejects %x literals with whitespace (newline) delimiters' do
+        # A newline is a valid %x delimiter and executes: `%x\nwhoami\n`
+        # runs a shell command. `[^\w\s]` excluded it; `[^\w]` catches it.
+        expect { described_class.check!("%x\nwhoami\n") }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /shell-execution/)
+      end
+
       it 'rejects Kernel system/exec/spawn methods' do
         expect { described_class.check!('system("ls")') }
           .to raise_error(Woods::Console::ForbiddenExpressionError, /system/)

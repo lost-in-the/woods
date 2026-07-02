@@ -315,7 +315,7 @@ module Woods
           deps << { type: :route, target: route, via: :url_helper }
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

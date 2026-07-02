@@ -784,9 +784,19 @@ RSpec.describe Woods::MCP::Server do
       Woods.configuration = nil
     end
 
-    it 'calls extract_changed when incremental is true' do
-      wait_for_threads { call_tool(server_with_operator, 'pipeline_extract', incremental: true) }
-      expect(mock_extractor).to have_received(:extract_changed).with([])
+    it 'calls extract_changed with the supplied changed_files when incremental is true' do
+      wait_for_threads do
+        call_tool(server_with_operator, 'pipeline_extract',
+                  incremental: true, changed_files: ['app/models/user.rb'])
+      end
+      expect(mock_extractor).to have_received(:extract_changed).with(['app/models/user.rb'])
+    end
+
+    it 'rejects incremental without changed_files instead of silently re-extracting nothing' do
+      response = call_tool(server_with_operator, 'pipeline_extract', incremental: true)
+
+      expect(response_text(response)).to include('changed_files')
+      expect(mock_extractor).not_to have_received(:extract_changed)
     end
 
     it 'calls extract_all when incremental is false' do
@@ -988,6 +998,55 @@ RSpec.describe Woods::MCP::Server do
         File.write(File.join(tmp_dir, 'flows', 'X_y.json'), 'not json')
         expect(described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')).to be_nil
       end
+
+      it 'does not read files outside flows/ for traversal-shaped entry points' do
+        # "../evil#x" used to resolve to <tmp_dir>/flows/../evil_x.json —
+        # i.e. a file OUTSIDE the flows dir. The allow-list must neutralize
+        # path separators and dots.
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.write(
+          File.join(tmp_dir, 'evil_x.json'),
+          JSON.pretty_generate(entry_point: 'stolen', steps: [])
+        )
+        expect(described_class.send(:load_precomputed_flow, tmp_dir, '../evil#x')).to be_nil
+      end
+    end
+  end
+
+  describe 'pipeline serialization (pipeline_start/pipeline_finish)' do
+    after do
+      # Release any lock this group's examples may have left held.
+      described_class.send(:pipeline_finish, :extraction)
+    end
+
+    it 'has an eagerly-initialized mutex (no lazy ||= race under the HTTP transport)' do
+      expect(described_class.instance_variable_get(:@pipeline_mutex)).to be_a(Mutex)
+    end
+
+    it 'admits exactly one starter for a given kind until it finishes' do
+      expect(described_class.send(:pipeline_start, :extraction)).to be(true)
+      expect(described_class.send(:pipeline_start, :extraction)).to be(false)
+
+      described_class.send(:pipeline_finish, :extraction)
+      expect(described_class.send(:pipeline_start, :extraction)).to be(true)
+    end
+
+    it 'admits exactly one starter under concurrent contention' do
+      described_class.send(:pipeline_finish, :extraction) # ensure released
+      results = Queue.new
+      barrier = Queue.new
+
+      threads = 25.times.map do
+        Thread.new do
+          barrier.pop # release all threads together
+          results << described_class.send(:pipeline_start, :extraction)
+        end
+      end
+      25.times { barrier << true }
+      threads.each(&:join)
+
+      admitted = Array.new(25) { results.pop }.count(true)
+      expect(admitted).to eq(1)
     end
   end
 

@@ -20,6 +20,20 @@ module Woods
     #   end
     #
     module SharedUtilityMethods
+      # Glob files matching a pattern across a list of directories.
+      #
+      # Centralizes the `Dir[dir.join('**/*.rb')]` loop duplicated across
+      # the directory-scanning extractors. Directories are globbed in order
+      # and the per-directory results concatenated, matching the original
+      # per-directory iteration semantics.
+      #
+      # @param directories [Array<Pathname>] Directories to glob
+      # @param pattern [String] Glob pattern relative to each directory
+      # @return [Array<String>] Matching file paths
+      def find_files_in_directories(directories, pattern = '**/*.rb')
+        directories.flat_map { |dir| Dir[dir.join(pattern).to_s] }
+      end
+
       # Check whether a path points to application source (under app_root, but
       # not inside vendor/ or node_modules/ directories).
       #

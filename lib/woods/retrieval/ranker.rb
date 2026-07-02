@@ -256,7 +256,7 @@ module Woods
         return 0.5 unless unit
         return 0.5 unless classification.target_type
 
-        unit_type = dig_metadata(unit, :type) || unit[:type]
+        unit_type = dig_metadata(unit, :type)
         unit_type&.to_sym == classification.target_type ? 1.0 : 0.3
       end
 
@@ -297,17 +297,55 @@ module Woods
         penalty
       end
 
-      # Dig into unit metadata, handling both hash and object access.
+      # Dig a value out of a unit's metadata, tolerating both symbol and
+      # string keys at every level.
+      #
+      # Units come from the metadata store, which returns STRING keys on
+      # every real backend (SQLite round-trips through JSON.parse;
+      # InMemory#store calls stringify_keys). The previous implementation
+      # probed only symbol keys, so recency/importance/type_match/diversity
+      # silently scored every unit at their neutral fallback in production —
+      # the specs passed only because they stub symbol-keyed units.
+      #
+      # Looks under the `metadata` wrapper first, then falls back to a
+      # top-level field for single-key lookups (namespace/type live on the
+      # unit itself, not under metadata).
       #
       # @param unit [Hash, Object] Unit data
-      # @param keys [Array<Symbol>] Key path
+      # @param keys [Array<Symbol>] Key path within metadata
       # @return [Object, nil]
       def dig_metadata(unit, *keys)
-        if keys.size == 1
-          unit.is_a?(Hash) ? (unit.dig(:metadata, keys[0]) || unit[keys[0]]) : nil
-        else
-          unit.is_a?(Hash) ? unit.dig(:metadata, *keys) : nil
+        return nil unless unit.is_a?(Hash)
+
+        nested = dig_either(fetch_either(unit, :metadata), keys)
+        return nested unless nested.nil?
+
+        keys.size == 1 ? fetch_either(unit, keys.first) : nil
+      end
+
+      # Walk a key path through nested hashes, trying both key forms.
+      #
+      # @param hash [Object] Starting hash (nil-safe)
+      # @param keys [Array<Symbol>] Key path
+      # @return [Object, nil]
+      def dig_either(hash, keys)
+        keys.reduce(hash) do |acc, key|
+          break nil unless acc.is_a?(Hash)
+
+          fetch_either(acc, key)
         end
+      end
+
+      # Fetch a key trying its symbol form, then its string form.
+      #
+      # @param hash [Object] Hash to read (nil-safe)
+      # @param key [Symbol, String] Key to fetch
+      # @return [Object, nil]
+      def fetch_either(hash, key)
+        return nil unless hash.is_a?(Hash)
+
+        value = hash[key]
+        value.nil? ? hash[key.to_s] : value
       end
 
       # Build a Candidate struct compatible with SearchExecutor::Candidate.

@@ -34,9 +34,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of rake task units
       def extract_all
-        @directories.flat_map do |dir|
-          Dir[dir.join('**/*.rake')].flat_map { |file| extract_rake_file(file) }
-        end
+        find_files_in_directories(@directories, '**/*.rake').flat_map { |file| extract_rake_file(file) }
       end
 
       # Extract rake tasks from a single .rake file.
@@ -336,7 +334,7 @@ module Woods
           deps << { type: :rake_task, target: dep, via: :task_dependency }
         end
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

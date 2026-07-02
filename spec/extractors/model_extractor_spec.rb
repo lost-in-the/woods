@@ -28,6 +28,103 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  # ── callback_count ────────────────────────────────────────────────
+
+  describe '#callback_count' do
+    # Mirrors ActiveSupport::Callbacks::CallbackChain: it includes
+    # Enumerable (so #count works) but defines NO #size. Stubbing with a
+    # plain Array here would mask a regression to #size — Arrays have both.
+    let(:chain_class) do
+      Class.new do
+        include Enumerable
+
+        def initialize(callbacks)
+          @callbacks = callbacks
+        end
+
+        def each(&block)
+          @callbacks.each(&block)
+        end
+      end
+    end
+
+    it 'sums callbacks across chains using an API CallbackChain actually has' do
+      model = double('Model')
+      %i[validation save create update destroy commit rollback].each do |type|
+        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new(%i[a b]))
+      end
+
+      expect(extractor.send(:callback_count, model)).to eq(14)
+    end
+
+    it 'counts a chain type as zero when reading it raises' do
+      model = double('Model')
+      %i[validation save create update destroy commit rollback].each do |type|
+        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new([:a]))
+      end
+      allow(model).to receive(:_commit_callbacks).and_raise(NoMethodError)
+
+      expect(extractor.send(:callback_count, model)).to eq(6)
+    end
+  end
+
+  # ── implicit_belongs_to_validator? ────────────────────────────────
+
+  describe '#implicit_belongs_to_validator?' do
+    # A stand-in for ActiveRecord::Validations::PresenceValidator; is_a?
+    # checks need a real class, not a double.
+    let(:presence_validator_class) do
+      Class.new do
+        attr_reader :attributes
+
+        def initialize(attributes)
+          @attributes = attributes
+        end
+      end
+    end
+
+    before do
+      stub_const('ActiveRecord::Validations::PresenceValidator', presence_validator_class)
+    end
+
+    def model_with_belongs_to(*names)
+      reflections = names.map { |n| double('Reflection', name: n) }
+      model = double('Model')
+      allow(model).to receive(:reflect_on_all_associations).with(:belongs_to).and_return(reflections)
+      model
+    end
+
+    it 'flags a presence validator on a belongs_to association attribute' do
+      model = model_with_belongs_to(:author)
+      validator = presence_validator_class.new([:author])
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, validator)).to be true
+    end
+
+    it 'does not flag a presence validator on a plain attribute' do
+      # The previous source_location heuristic flagged EVERY AR presence
+      # validator — PresenceValidator#validate always lives in the gem.
+      model = model_with_belongs_to(:author)
+      validator = presence_validator_class.new([:title])
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, validator)).to be false
+    end
+
+    it 'does not flag when the model has no belongs_to associations' do
+      model = model_with_belongs_to
+      validator = presence_validator_class.new([:title])
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, validator)).to be false
+    end
+
+    it 'does not flag non-presence validators' do
+      model = model_with_belongs_to(:author)
+      other = double('FormatValidator')
+
+      expect(extractor.send(:implicit_belongs_to_validator?, model, other)).to be false
+    end
+  end
+
   # ── extract_scopes ────────────────────────────────────────────────
 
   describe '#extract_scopes' do

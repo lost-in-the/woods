@@ -52,11 +52,9 @@ module Woods
         units = []
 
         # File-based discovery (catches everything in known directories)
-        @directories.each do |dir|
-          Dir[dir.join('**/*.rb')].each do |file|
-            unit = extract_serializer_file(file)
-            units << unit if unit
-          end
+        find_files_in_directories(@directories).each do |file|
+          unit = extract_serializer_file(file)
+          units << unit if unit
         end
 
         # Class-based discovery for loaded gems
@@ -332,7 +330,7 @@ module Woods
 
         deps.concat(scan_service_dependencies(source))
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
     end
   end

@@ -7,6 +7,140 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Console `sample`/`recent` tools now validate `columns` against the model's
+  real columns.** They passed the raw array to ActiveRecord's `.select`, which
+  treats string args as SQL fragments — a crafted column could smuggle a
+  subquery into the SELECT list, bypassing TableGate and column redaction
+  (`pluck` already validated; `sample`/`recent` didn't).
+- **`trace_flow` sanitizes the entry point before building the flow file path.**
+  Only `::`→`__` was applied, so `/` and `..` in a client-supplied entry point
+  could traverse outside the `flows/` directory (a file-read oracle over the
+  HTTP transport). Both path segments now go through the `FilenameUtils`
+  allow-list.
+- **TableGate's SQL table detector no longer misses tables on PostgreSQL.** It
+  hardcoded MySQL literal-stripping, so on PostgreSQL (`standard_conforming_strings`)
+  the MySQL `\'` rule could over-strip and swallow a real `FROM <blocked>`
+  clause. It now strips under both dialects and unions the identifiers.
+- **TableGate no longer misses a table hidden behind a comment marker inside a
+  string literal.** `SqlNoiseStripper` stripped comments *before* literals, so
+  `SELECT '-- ' FROM blocked` had its real `FROM blocked` swallowed as a line
+  comment and slipped past the gate. Comment- and literal-stripping now run in a
+  single combined left-to-right pass (`SqlNoiseStripper.strip_noise`) — a
+  comment marker inside a literal, and a quote inside a comment, are each
+  protected by whichever opens first. `SqlValidator` and the scope-template
+  guard route through the same pass.
+- **`EvalGuard` rejects `%x` shell literals with any delimiter — including
+  whitespace.** The delimiter check excluded `\s`, but a newline is a valid `%x`
+  delimiter (`%x\ncmd\n` compiles and executes), so it slipped through to
+  `instance_eval`. The check now matches any non-word delimiter (`[^\w]`).
+- **`PipelineLock` no longer allows two processes to hold the lock.** Both the
+  stale-lock takeover and the release path had TOCTOU windows: a process that
+  passed the staleness check could rename away — or a plain read-then-unlink
+  release could delete — a competitor's *fresh* lock, so both would "hold" it.
+  Takeover now re-verifies the retired file is still stale (restoring it and
+  backing off if a competitor already took over), and release renames the file
+  aside and re-checks its ownership token before deleting.
+
+### Fixed
+
+- **Incremental extraction no longer corrupts the index.** `rake woods:incremental`
+  overwrote `manifest.json` with zero counts, captured an empty temporal snapshot
+  (making the diff report every unit as deleted), wrote absolute file paths into
+  the index, and re-indexed affected units with a null `estimated_tokens`.
+- **Retrieval ranking signals work on real backends again.** Recency, importance,
+  type-match, and diversity read metadata with symbol keys, but every store
+  returns string keys — so all four scored every unit at their neutral fallback
+  in production. The ranker now reads both key forms.
+- **The embedding cache is now scoped to the provider model.** The cache key was
+  `SHA256(text)` with no model, so a persistent shared backend served the
+  previous model's vector after a model switch. `model_name` is now part of the
+  key — a plain attribute rather than `dimensions`, whose Ollama implementation
+  is a live `embed('test')` probe (keying on it made every cache lookup, hits
+  included, depend on the provider being reachable, and defeated the cache while
+  the backend was down).
+- **`callback_count` reports real counts.** It called the nonexistent
+  `CallbackChain#size`, which raised and left the count silently at 0 for every
+  model; switched to `#count`.
+- **`ResolvedConfig` is now deeply immutable.** Nested strings in
+  `embedding_provider`/`stores` stayed mutable, so the frozen snapshot could be
+  corrupted in place.
+- **Model dependency edges are correct for nested and re-registered units.** The
+  `ModelNameCache` alternation matched a prefixed parent (`Library::Book` for
+  `Library::Book::Chapter`); `DependencyGraph#register` left stale reverse edges
+  on re-registration, inflating incremental blast radius.
+- **Precomputed request flows are no longer empty/stale.** `FlowPrecomputer` ran
+  before unit JSON was written to disk; it now runs after `write_results`.
+- **`trace_flow` resolves precomputed flows again.** The reader allow-listed the
+  entry point but the writer left the action name raw, so a flow for an action
+  outside `[A-Za-z0-9_-]` was written under one filename and looked up under
+  another (silently falling back to live assembly). Both sides now derive the
+  filename from the shared `FilenameUtils.flow_filename`.
+- **Flow annotation no longer resurrects deleted units.** On a full extraction
+  with `precompute_flows`, refreshing a type's `_index.json` rebuilt it from a
+  disk glob of the never-wiped output dir, re-adding unit files for classes
+  deleted from the app since the last run. The index is now rebuilt from the
+  in-memory `@results` (the incremental path, which only holds changed units,
+  still rebuilds from disk).
+- **`FlowAssembler` no longer reports DAG diamonds as cycles**, and
+  `IndexArtifact#promote` no longer accepts sibling directories that merely
+  share a name prefix with `dumps/`.
+- **`implicit_belongs_to` metadata is accurate.** It was flagged on every
+  ActiveRecord presence validator; it now keys on `belongs_to` reflections.
+- **Dependency scanning ignores commented references consistently** across all
+  three passes (a commented `Library::Book` still produced a ghost edge), while
+  keeping references that follow a `#` *inside a string literal* (`link_to "Tag
+  #ruby", Article.recent`). Comment-stripping is string-literal-aware — a plain
+  `#…` regex ate the rest of such lines and dropped the real edge.
+- **`pipeline_extract(incremental: true)` requires `changed_files`** instead of
+  silently re-extracting nothing while reporting success.
+- **`pipeline_diagnose` classifies by the supplied error class** (it built a bare
+  `StandardError`, so every `Timeout`/`Net::`/`Errno` error came back
+  `:unknown`).
+- **`notion_sync` honors the `NOTION_API_TOKEN` env var**, matching the gate that
+  registers the tool (ENV-only hosts previously saw the tool but every call
+  failed). A *blank* env var (docker-compose `${NOTION_API_TOKEN}` interpolation
+  of an unset host variable) is now treated as absent rather than masking a
+  configured token or passing through as a blank bearer. All four resolution
+  sites (exporter, `notion_wired?` gate, tool handler, rake task) share
+  `Woods.resolve_notion_token`.
+- **Embedded documents include the `dependencies:` line again** — the indexer
+  leaves dependency hashes string-keyed and the text preparer only read symbol
+  keys.
+- The MCP CLI integration spec no longer fails under a POSIX/C locale (UTF-8
+  subprocess output is normalized before regex matching).
+- **`CircuitBreaker` admits only a single probe in `half_open`.** It let every
+  concurrent call through while half-open (a thundering herd against a
+  recovering service), and a slow probe's success could wipe failures recorded
+  by an overlapping probe. Concurrent probes are now rejected with
+  `CircuitOpenError`, and an optional `success_threshold` requires N consecutive
+  successful probes to close (default 1). Recovery accounting is also keyed to
+  the per-call probe flag, not the shared state: a stale call admitted while the
+  circuit was *closed* that completes after the transition to `half_open` no
+  longer counts as the probe (it could otherwise close the circuit — or clear a
+  concurrent probe's slot — while the service was still down).
+- **`Retry-After` honors the HTTP-date form.** The Notion and Unblocked clients
+  parsed the header with `.to_f`, turning an HTTP-date into `0.0` and retrying
+  immediately against a throttling server. A shared `Woods::RetryAfter` helper
+  now handles both the delta-seconds and HTTP-date forms.
+- **The MCP pipeline lock is no longer racy under the HTTP transport.** The
+  `@pipeline_mutex ||= Mutex.new` lazy init let two concurrent handlers create
+  separate mutexes and run two pipelines of the same kind; the mutex is now
+  eagerly initialized.
+
+### Changed
+
+- Directory globbing and dependency deduplication across the extractor fleet are
+  centralized in `SharedUtilityMethods#find_files_in_directories` and
+  `SharedDependencyScanner#consolidate_dependencies` (behavior-preserving).
+
+### Documentation
+
+- Added an in-container Index Server section to `DOCKER_SETUP.md` (#139),
+  corrected stale tool counts, corrected backend config examples that referenced
+  nonexistent adapters (#83), and listed the previously-undocumented rake tasks.
+
 ## [1.5.0] - 2026-06-23
 
 ### Added

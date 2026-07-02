@@ -46,11 +46,9 @@ module Woods
         units = []
 
         # File-based discovery (catches everything)
-        @directories.each do |dir|
-          Dir[dir.join('**/*.rb')].each do |file|
-            unit = extract_job_file(file)
-            units << unit if unit
-          end
+        find_files_in_directories(@directories).each do |file|
+          unit = extract_job_file(file)
+          units << unit if unit
         end
 
         # Also try class-based discovery for ActiveJob
@@ -356,7 +354,7 @@ module Woods
 
         deps << { type: :infrastructure, target: :redis, via: :code_reference } if source.match?(/Redis\.current|REDIS/)
 
-        deps.uniq { |d| [d[:type], d[:target]] }
+        consolidate_dependencies(deps)
       end
 
       # Scan source for job class enqueue calls and return the list of enqueued job names.

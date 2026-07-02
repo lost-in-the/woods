@@ -7,6 +7,7 @@ require 'open3'
 require 'time'
 require 'set'
 require_relative '../tasks'
+require_relative '../filename_utils'
 require_relative 'index_reader'
 require_relative 'tool_response_renderer'
 
@@ -27,6 +28,15 @@ module Woods
     #   transport.open
     #
     module Server
+      # Module-level pipeline serialization state, eagerly initialized at load
+      # time (self == Server here). The HTTP transport dispatches tool handlers
+      # concurrently, so a lazy `@pipeline_mutex ||= Mutex.new` inside
+      # pipeline_start would let two handlers each create a DIFFERENT mutex and
+      # synchronize on separate locks — defeating the exclusion and allowing two
+      # concurrent pipelines of the same kind.
+      @pipeline_mutex = Mutex.new
+      @pipeline_in_flight = {}
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -152,15 +162,18 @@ module Woods
         end
 
         # Notion export needs both an API token and at least one database ID.
-        # NOTION_API_TOKEN env var overrides the config token (see
-        # docs/NOTION_EXPORT.md).
+        # A non-blank NOTION_API_TOKEN env var overrides the config token (see
+        # docs/NOTION_EXPORT.md). Resolution goes through
+        # Woods.resolve_notion_token so a blank env var is treated as absent
+        # (rather than masking a valid configured token) — matching the
+        # exporter and the notion_sync handler.
         def notion_wired?
           config = Woods.configuration
           return false unless config
 
-          token = ENV['NOTION_API_TOKEN'] || (config.respond_to?(:notion_api_token) ? config.notion_api_token : nil)
+          token = Woods.resolve_notion_token(config)
           ids = config.respond_to?(:notion_database_ids) ? config.notion_database_ids : nil
-          token && !token.empty? && ids && !ids.empty?
+          !token.nil? && ids && !ids.empty?
         end
 
         def text_response(text)
@@ -255,7 +268,11 @@ module Woods
           controller, action = entry_point.split('#', 2)
           return nil if controller.empty? || action.empty?
 
-          filename = "#{controller.gsub('::', '__')}_#{action}.json"
+          # entry_point is client input — FilenameUtils.flow_filename
+          # allow-lists both parts (so `/` and `..` can't traverse outside
+          # flows/) using the SAME transform FlowPrecomputer writes with, so a
+          # legitimately precomputed flow always resolves to the file on disk.
+          filename = Woods::FilenameUtils.flow_filename(controller, action)
           path = File.join(index_dir, 'flows', filename)
           return nil unless File.exist?(path)
 
@@ -875,11 +892,33 @@ module Woods
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
             input_schema: {
               properties: {
-                incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' }
+                incremental: { type: 'boolean', description: 'Run incremental extraction (default: false)' },
+                changed_files: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Required when incremental is true: repo-relative paths of changed files ' \
+                               '(the MCP server has no git context to compute them itself).'
+                }
               }
             }
-          ) do |server_context:, incremental: nil|
+          ) do |server_context:, incremental: nil, changed_files: nil|
             next op_missing.call('pipeline_extract') unless operator
+
+            # Incremental extraction re-extracts only the units affected by
+            # the given files. The MCP server has no git-diff context (unlike
+            # the rake task, which derives them from CHANGED_FILES / CI env),
+            # so an empty list would re-extract nothing while still bumping
+            # the manifest timestamp — a silent no-op reporting success.
+            # Require the caller to supply the changed files explicitly.
+            files = Array(changed_files).map(&:to_s).reject(&:empty?)
+            if incremental && files.empty?
+              next respond_err.call(
+                'Incremental extraction requires a non-empty changed_files list. ' \
+                'Pass the changed paths, or run `rake woods:incremental` which derives them from git.',
+                code: :invalid_params,
+                tool: 'pipeline_extract'
+              )
+            end
 
             guard = operator[:pipeline_guard]
             if guard && !guard.allow?(:extraction)
@@ -910,7 +949,7 @@ module Woods
               extractor = Woods::Extractor.new(
                 output_dir: Woods.configuration.output_dir
               )
-              incremental ? extractor.extract_changed([]) : extractor.extract_all
+              incremental ? extractor.extract_changed(files) : extractor.extract_all
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline extract failed: #{e.message}")
@@ -987,8 +1026,9 @@ module Woods
         # pipeline). Module-level state — a single MCP server process
         # serializes its own pipelines.
         def pipeline_start(kind)
-          @pipeline_mutex ||= Mutex.new
-          @pipeline_in_flight ||= {}
+          # @pipeline_mutex / @pipeline_in_flight are initialized eagerly in
+          # the module body — no lazy `||=` here, which would race under the
+          # concurrent HTTP transport.
           @pipeline_mutex.synchronize do
             return false if @pipeline_in_flight[kind]
 
@@ -998,7 +1038,7 @@ module Woods
         end
 
         def pipeline_finish(kind)
-          @pipeline_mutex&.synchronize { @pipeline_in_flight&.delete(kind) }
+          @pipeline_mutex.synchronize { @pipeline_in_flight.delete(kind) }
         end
 
         def define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)
@@ -1048,9 +1088,11 @@ module Woods
               )
             end
 
+            # Pass the client-supplied class name so class-keyed patterns
+            # (Timeout, Net::, Errno::ENOENT, …) match — a bare
+            # StandardError would classify everything as :unknown.
             error = StandardError.new(error_message)
-            # Set the class name in the error string for pattern matching
-            result = escalator.classify(error)
+            result = escalator.classify(error, class_name: error_class)
             result[:original_class] = error_class
             respond.call(JSON.pretty_generate(result))
           end
@@ -1302,7 +1344,12 @@ module Woods
             }
           ) do |server_context:|
             config = Woods.configuration
-            unless config.notion_api_token
+            # Mirror notion_wired? (which gates registration) and the
+            # Exporter via the shared resolver: a non-blank NOTION_API_TOKEN
+            # env var satisfies the token requirement (reading config alone
+            # rejected ENV-only hosts even though the tool was registered for
+            # them), while a blank env var is treated as absent.
+            if Woods.resolve_notion_token(config).nil?
               next respond_err.call(
                 'notion_api_token is not configured. Set it in Woods.configure or via the NOTION_API_TOKEN env var.',
                 code: :not_configured,

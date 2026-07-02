@@ -31,11 +31,19 @@ module Woods
       @to_h = nil
     end
 
-    # Register a unit in the graph
+    # Register a unit in the graph.
+    #
+    # Re-registering an identifier (incremental extraction registers into a
+    # graph loaded from disk) first removes the previous registration's
+    # reverse edges, file-map entry, and type-index entry — otherwise stale
+    # dependents accumulate across incremental runs and get persisted back
+    # to dependency_graph.json.
     #
     # @param unit [ExtractedUnit] The unit to register
     def register(unit)
       @to_h = nil
+
+      unregister(unit.identifier) if @nodes.key?(unit.identifier)
 
       @nodes[unit.identifier] = {
         type: unit.type,
@@ -54,6 +62,35 @@ module Woods
         (@reverse[dep[:target]] ||= Set.new).add(unit.identifier)
         (@reverse_via[[dep[:target], dep[:via]]] ||= Set.new).add(unit.identifier)
       end
+    end
+
+    # Remove an identifier's registration side effects: its contribution to
+    # the reverse indexes (derived from its recorded forward edges), its
+    # file-map entry, and its type-index entry. Forward node/edge data is
+    # overwritten by the caller (register), so it is not cleared here.
+    #
+    # @param identifier [String] Previously-registered unit identifier
+    # @return [void]
+    def unregister(identifier)
+      (@edges[identifier] || []).each do |edge|
+        if (set = @reverse[edge[:target]])
+          set.delete(identifier)
+          @reverse.delete(edge[:target]) if set.empty?
+        end
+
+        via_key = [edge[:target], edge[:via]]
+        next unless (set = @reverse_via[via_key])
+
+        set.delete(identifier)
+        @reverse_via.delete(via_key) if set.empty?
+      end
+
+      old_node = @nodes[identifier]
+      return unless old_node
+
+      old_path = old_node[:file_path]
+      @file_map.delete(old_path) if old_path && @file_map[old_path] == identifier
+      @type_index[old_node[:type]]&.delete(identifier)
     end
 
     # Find all units affected by changes to given files

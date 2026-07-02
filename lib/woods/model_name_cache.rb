@@ -87,7 +87,12 @@ module Woods
         names = model_names
         return /(?!)/ if names.empty? # never-matching regex
 
-        /\b(?:#{names.map { |n| Regexp.escape(n) }.join('|')})\b/
+        # Longest-first: regex alternation is ordered, not longest-match.
+        # Without the sort, a reference to Library::Book::Chapter can match
+        # the shorter Library::Book alternative (\b is satisfied at the
+        # following ":"), emitting an edge to the wrong model.
+        sorted = names.sort_by { |n| -n.length }
+        /\b(?:#{sorted.map { |n| Regexp.escape(n) }.join('|')})\b/
       end
 
       # Build short-name → full-name mapping. A short name that appears on

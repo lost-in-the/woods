@@ -190,6 +190,55 @@ RSpec.describe Woods::Retrieval::Ranker do
     end
   end
 
+  # The metadata store returns STRING keys on every real backend (SQLite
+  # via JSON.parse, InMemory via stringify_keys). These specs use that
+  # shape — with symbol-only key access, all four metadata signals scored
+  # every unit at its neutral fallback and these would fail.
+  describe 'string-keyed metadata (real store shape)' do
+    it 'scores recency from string-keyed git metadata' do
+      hot_meta = { 'metadata' => { 'git' => { 'change_frequency' => 'hot' } } }
+      dormant_meta = { 'metadata' => { 'git' => { 'change_frequency' => 'dormant' } } }
+      allow(metadata_store).to receive(:find).with('Hot').and_return(hot_meta)
+      allow(metadata_store).to receive(:find).with('Dormant').and_return(dormant_meta)
+
+      hot = candidate(identifier: 'Hot', score: 0.5)
+      dormant = candidate(identifier: 'Dormant', score: 0.5)
+
+      result = ranker.rank([dormant, hot], classification: classification)
+
+      expect(result.first.identifier).to eq('Hot')
+    end
+
+    it 'scores importance from string-keyed metadata' do
+      allow(metadata_store).to receive(:find).with('Important')
+                                             .and_return({ 'metadata' => { 'importance' => 'high' } })
+      allow(metadata_store).to receive(:find).with('Trivial')
+                                             .and_return({ 'metadata' => { 'importance' => 'low' } })
+
+      important = candidate(identifier: 'Important', score: 0.5)
+      trivial = candidate(identifier: 'Trivial', score: 0.5)
+
+      result = ranker.rank([trivial, important], classification: classification)
+
+      expect(result.first.identifier).to eq('Important')
+    end
+
+    it 'matches target_type from the string-keyed top-level type field' do
+      allow(metadata_store).to receive(:find).with('UserModel')
+                                             .and_return({ 'type' => 'model', 'metadata' => {} })
+      allow(metadata_store).to receive(:find).with('UserController')
+                                             .and_return({ 'type' => 'controller', 'metadata' => {} })
+
+      model_unit = candidate(identifier: 'UserModel', score: 0.5)
+      controller_unit = candidate(identifier: 'UserController', score: 0.5)
+
+      cls = classification(target_type: :model)
+      result = ranker.rank([controller_unit, model_unit], classification: cls)
+
+      expect(result.first.identifier).to eq('UserModel')
+    end
+  end
+
   describe 'pagerank importance integration' do
     let(:graph_store) { instance_double(Woods::Storage::GraphStore::Interface) }
     let(:ranker) { described_class.new(metadata_store: metadata_store, graph_store: graph_store) }

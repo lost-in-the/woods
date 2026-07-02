@@ -60,19 +60,26 @@ module Woods
 
     # Recursively expand a unit into flow steps.
     #
+    # A cycle is a re-encounter on the CURRENT recursion path (tracked in
+    # +path+, popped on exit — the gray set of a DFS). A unit already
+    # expanded via a sibling branch (a DAG diamond: two services calling
+    # the same model) is plain dedup, not a cycle — it is skipped silently
+    # rather than mislabeled with a cycle marker.
+    #
     # @param identifier [String] Unit identifier (may include #method)
     # @param steps [Array<Hash>] Accumulator for step hashes
-    # @param visited [Set<String>] Visited unit identifiers for cycle detection
+    # @param visited [Set<String>] Already-expanded unit identifiers (dedup)
     # @param depth [Integer] Current recursion depth
     # @param max_depth [Integer] Maximum recursion depth
-    def expand(identifier, steps, visited, depth:, max_depth:)
+    # @param path [Set<String>] Identifiers on the current recursion path
+    def expand(identifier, steps, visited, depth:, max_depth:, path: Set.new)
       return if depth > max_depth
 
       # Parse identifier into unit name and optional method
       unit_id, method_name = parse_identifier(identifier)
 
-      if visited.include?(unit_id)
-        # Cycle detected - emit a marker step
+      if path.include?(unit_id)
+        # Genuine cycle — the unit is an ancestor of itself on this path.
         steps << {
           unit: unit_id,
           type: 'cycle',
@@ -81,34 +88,44 @@ module Woods
         return
       end
 
+      # Already expanded through another branch — dedup, not a cycle.
+      return if visited.include?(unit_id)
+
       visited.add(unit_id)
+      path.add(unit_id)
 
-      # Load the unit data from disk
-      unit_data = load_unit(unit_id)
-      return unless unit_data
+      begin
+        # Load the unit data from disk
+        unit_data = load_unit(unit_id)
+        return unless unit_data
 
-      source_code = unit_data[:source_code]
-      return unless source_code && !source_code.empty?
+        source_code = unit_data[:source_code]
+        return unless source_code && !source_code.empty?
 
-      metadata = unit_data[:metadata] || {}
-      unit_type = unit_data[:type]&.to_s
-      file_path = unit_data[:file_path]
+        metadata = unit_data[:metadata] || {}
+        unit_type = unit_data[:type]&.to_s
+        file_path = unit_data[:file_path]
 
-      # Extract operations from the relevant method
-      operations = extract_operations(source_code, method_name, metadata, unit_type)
+        # Extract operations from the relevant method
+        operations = extract_operations(source_code, method_name, metadata, unit_type)
 
-      step = {
-        unit: identifier,
-        type: unit_type,
-        file_path: file_path,
-        operations: operations
-      }
+        step = {
+          unit: identifier,
+          type: unit_type,
+          file_path: file_path,
+          operations: operations
+        }
 
-      steps << step
+        steps << step
 
-      # Recursively expand targets that resolve to known units
-      operations.each do |op|
-        expand_operation(op, identifier, steps, visited, depth: depth, max_depth: max_depth)
+        # Recursively expand targets that resolve to known units
+        operations.each do |op|
+          expand_operation(op, identifier, steps, visited, depth: depth, max_depth: max_depth, path: path)
+        end
+      ensure
+        # Pop on every exit (including the early returns above) — a unit
+        # left on the path would make sibling branches report false cycles.
+        path.delete(unit_id)
       end
     end
 
@@ -178,7 +195,7 @@ module Woods
     # @param visited [Set<String>] Visited unit identifiers for cycle detection
     # @param depth [Integer] Current recursion depth
     # @param max_depth [Integer] Maximum recursion depth
-    def expand_operation(op, current_unit, steps, visited, depth:, max_depth:)
+    def expand_operation(op, current_unit, steps, visited, depth:, max_depth:, path: Set.new)
       case op[:type]
       when :call, :async
         target = op[:target]
@@ -187,14 +204,14 @@ module Woods
         candidate = resolve_target(target)
         return unless candidate
 
-        expand(candidate, steps, visited, depth: depth + 1, max_depth: max_depth)
+        expand(candidate, steps, visited, depth: depth + 1, max_depth: max_depth, path: path)
       when :transaction
         (op[:nested] || []).each do |nested_op|
-          expand_operation(nested_op, current_unit, steps, visited, depth: depth, max_depth: max_depth)
+          expand_operation(nested_op, current_unit, steps, visited, depth: depth, max_depth: max_depth, path: path)
         end
       when :conditional
         ((op[:then_ops] || []) + (op[:else_ops] || [])).each do |branch_op|
-          expand_operation(branch_op, current_unit, steps, visited, depth: depth, max_depth: max_depth)
+          expand_operation(branch_op, current_unit, steps, visited, depth: depth, max_depth: max_depth, path: path)
         end
       end
     end

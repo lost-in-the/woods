@@ -82,6 +82,119 @@ module Woods
         pattern = dialect == :mysql ? SINGLE_QUOTED_MYSQL : SINGLE_QUOTED_POSTGRES
         out.gsub(pattern, "''")
       end
+
+      # Strip BOTH comments and string literals in a single left-to-right
+      # pass, so a comment marker inside a literal and a quote inside a
+      # comment are each protected by whichever construct opens first.
+      #
+      # Running {.strip_comments} then {.strip_literals} (or vice versa) is
+      # unsafe: `SELECT '-- ' FROM blocked` has its real `FROM blocked`
+      # swallowed as a line comment (the `--` sits inside a string literal),
+      # letting a blocked table slip past {TableGate}; the reverse order
+      # mis-handles an apostrophe inside a `--` comment. Only a combined scan
+      # that tracks literal/comment state correctly resolves both. This
+      # scanner backs security checks (SqlValidator, TableGate) so it must
+      # never under-detect: an unterminated literal is treated as an ordinary
+      # character rather than swallowing the rest of the statement.
+      #
+      # @param sql [String] the SQL string to process
+      # @param dialect [Symbol] `:postgres` (default) or `:mysql` — controls
+      #   single-quote escape rules (see {.strip_literals}).
+      # @return [String] a new string with comments removed and every string
+      #   literal replaced by `''`
+      # @raise [ArgumentError] if an unsupported dialect is provided
+      def self.strip_noise(sql, dialect: :postgres) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity,Metrics/AbcSize
+        unless SUPPORTED_DIALECTS.include?(dialect)
+          raise ArgumentError, "Unknown dialect #{dialect.inspect}. Supported: #{SUPPORTED_DIALECTS.inspect}"
+        end
+
+        mysql = dialect == :mysql
+        out = +''
+        i = 0
+        len = sql.length
+
+        while i < len
+          ch = sql[i]
+
+          if ch == "'"
+            close = single_quote_end(sql, i, mysql: mysql)
+            if close
+              out << "''"
+              i = close
+            else
+              # Unterminated literal — never under-detect; keep the char.
+              out << ch
+              i += 1
+            end
+          elsif ch == '$' && (tag = dollar_tag_at(sql, i))
+            close = sql.index(tag, i + tag.length)
+            if close
+              out << "''"
+              i = close + tag.length
+            else
+              out << ch
+              i += 1
+            end
+          elsif ch == '-' && sql[i + 1] == '-'
+            nl = sql.index("\n", i)
+            i = nl || len
+          elsif ch == '/' && sql[i + 1] == '*'
+            close = sql.index('*/', i + 2)
+            if close
+              i = close + 2
+            else
+              # Unterminated block comment: never under-detect. Leave it in
+              # place (over-detection is safe; the old regex also required a
+              # closing */ and left an unterminated /* untouched).
+              out << ch
+              i += 1
+            end
+          else
+            out << ch
+            i += 1
+          end
+        end
+
+        out
+      end
+
+      # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
+      # `$tag$`) at the start of the given slice.
+      DOLLAR_TAG = /\A\$\w*\$/
+      private_constant :DOLLAR_TAG
+
+      # Return the dollar-quote tag opening at +index+, or nil.
+      #
+      # @api private
+      def self.dollar_tag_at(sql, index)
+        m = DOLLAR_TAG.match(sql[index..])
+        m && m[0]
+      end
+      private_class_method :dollar_tag_at
+
+      # Return the index just past the closing quote of the single-quoted
+      # literal that opens at +start+, honoring `''` (both dialects) and `\'`
+      # (MySQL only) escapes. Returns nil when the literal is unterminated.
+      #
+      # @api private
+      def self.single_quote_end(sql, start, mysql:)
+        i = start + 1
+        len = sql.length
+        while i < len
+          c = sql[i]
+          if mysql && c == '\\'
+            i += 2
+          elsif c == "'"
+            return i + 1 unless sql[i + 1] == "'" # closing quote
+
+            i += 2 # doubled-quote escape — literal continues
+          else
+            i += 1
+          end
+        end
+        nil
+      end
+      private_class_method :single_quote_end
     end
   end
 end

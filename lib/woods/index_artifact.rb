@@ -127,7 +127,11 @@ module Woods
       target_real = target.exist? ? target.realpath.to_s : ''
       # Resolve symlinks on both sides before comparing (handles macOS /tmp → /private/var)
       root_resolved = Pathname.new(root_real).exist? ? Pathname.new(root_real).realpath.to_s : root_real
-      unless target.exist? && target_real.start_with?(root_resolved)
+      # Prefix must end at a path boundary — a bare start_with? would accept
+      # sibling directories like "dumps-backup" or "dumpsevil", and the
+      # basename-only pointer written below would then name a directory that
+      # doesn't exist under dumps_root.
+      unless target.exist? && target_real.start_with?("#{root_resolved}#{File::SEPARATOR}")
         raise ArgumentError,
               'dump_dir must exist inside dumps_root. ' \
               "Got: #{dump_dir.inspect}, dumps_root: #{dumps_root}"

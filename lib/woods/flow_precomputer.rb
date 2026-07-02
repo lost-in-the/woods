@@ -2,6 +2,7 @@
 
 require 'json'
 require 'fileutils'
+require_relative 'filename_utils'
 require_relative 'flow_assembler'
 
 module Woods
@@ -80,7 +81,7 @@ module Woods
     def assemble_and_write(assembler, entry_point, controller_id, action)
       flow = assembler.assemble(entry_point, max_depth: @max_depth)
 
-      filename = "#{controller_id.gsub('::', '__')}_#{action}.json"
+      filename = Woods::FilenameUtils.flow_filename(controller_id, action)
       flow_path = File.join(@flows_dir, filename)
 
       File.write(flow_path, canonical_json(flow.to_h))
