@@ -152,8 +152,7 @@ module Woods
       # @param sql [String]
       # @return [Boolean]
       def contains_multiple_statements?(sql)
-        stripped = SqlNoiseStripper.strip_comments(sql)
-        stripped = SqlNoiseStripper.strip_literals(stripped)
+        stripped = SqlNoiseStripper.strip_noise(sql)
         stripped.include?(';')
       end
 

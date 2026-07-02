@@ -205,6 +205,25 @@ RSpec.describe Woods::Console::SqlTableScanner do
       end
     end
 
+    context 'when a comment marker sits inside a string literal (must not hide FROM)' do
+      # The `--` is inside a literal, so it is NOT a comment: the real
+      # `FROM blocked` must be detected. Stripping comments before literals
+      # swallowed it, letting a blocked table slip past TableGate.
+      let(:sql) { "SELECT 'a -- b' FROM blocked" }
+
+      it 'still detects the real table after the literal' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'when an apostrophe sits inside a line comment (must not hide FROM)' do
+      let(:sql) { "SELECT 1 -- it's fine\nFROM real_table" }
+
+      it 'detects the table on the line after the comment' do
+        expect(identifiers).to include('real_table')
+      end
+    end
+
     context 'when content is hidden inside PG dollar-quoted literals' do
       let(:sql) { 'SELECT $tag$FROM authorizations$tag$ AS literal FROM users' }
 

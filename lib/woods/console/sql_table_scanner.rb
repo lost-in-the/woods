@@ -133,9 +133,12 @@ module Woods
       end
 
       # @api private
+      # Comments and literals must be stripped in a single combined pass —
+      # stripping them separately lets a comment marker inside a literal
+      # (`'-- '`) hide a real FROM clause from the gate. See
+      # {SqlNoiseStripper.strip_noise}.
       def self.strip_noise(sql, dialect:)
-        out = SqlNoiseStripper.strip_comments(sql)
-        SqlNoiseStripper.strip_literals(out, dialect: dialect)
+        SqlNoiseStripper.strip_noise(sql, dialect: dialect)
       end
       private_class_method :strip_noise
 

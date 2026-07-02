@@ -69,11 +69,28 @@ module Woods
       def release
         return unless @held
 
+        # Rename first, then inspect: a plain read-then-unlink is a TOCTOU —
+        # after we read our own token a takeover could replace the file, and
+        # our unlink would then delete the NEW holder's lock. Renaming
+        # atomically captures whatever is at the path; if it turns out not to
+        # be ours (we were taken over), we put it back untouched.
+        graveyard = "#{@lock_path}.release.#{Process.pid}.#{SecureRandom.hex(4)}"
         begin
-          content = JSON.parse(File.read(@lock_path))
-          FileUtils.rm_f(@lock_path) if content['token'] == @token
-        rescue Errno::ENOENT, JSON::ParserError
-          # Lock already gone or unreadable — nothing of ours to release.
+          File.rename(@lock_path, graveyard)
+        rescue Errno::ENOENT
+          @held = false
+          return
+        end
+
+        begin
+          content = JSON.parse(File.read(graveyard))
+          if content['token'] == @token
+            FileUtils.rm_f(graveyard)
+          else
+            File.rename(graveyard, @lock_path) # not ours — restore for the holder
+          end
+        rescue JSON::ParserError
+          FileUtils.rm_f(graveyard) # corrupt lock we already moved aside — discard
         end
         @held = false
       end
@@ -121,12 +138,38 @@ module Woods
       # process may O_EXCL-create between our rename and our create, which
       # the caller's EEXIST rescue handles.
       #
-      # @return [Boolean] true if this process retired the stale lock
+      # Rename alone is not enough, though: a competitor that already passed
+      # `stale?` on the SAME original file may have retired it and created a
+      # FRESH lock before we run. Our rename would then move that fresh lock
+      # aside — and both processes would "hold" the lock. So after winning
+      # the rename we re-check the retired file's age; if it turns out to be
+      # fresh (someone beat us to the takeover), we put it back and lose the
+      # race instead of clobbering a live holder.
+      #
+      # @return [Boolean] true if this process retired a genuinely stale lock
       def retire_stale_lock
         graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
         File.rename(@lock_path, graveyard)
+
+        unless stale_file?(graveyard)
+          # We grabbed a lock that is no longer stale — a competitor already
+          # took over. Restore it and back off.
+          File.rename(graveyard, @lock_path)
+          return false
+        end
+
         FileUtils.rm_f(graveyard)
         true
+      rescue Errno::ENOENT
+        false
+      end
+
+      # Whether the file at +path+ is older than the stale timeout.
+      #
+      # @param path [String]
+      # @return [Boolean]
+      def stale_file?(path)
+        Time.now - File.mtime(path) > @stale_timeout
       rescue Errno::ENOENT
         false
       end

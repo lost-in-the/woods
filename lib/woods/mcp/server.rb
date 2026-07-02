@@ -7,6 +7,7 @@ require 'open3'
 require 'time'
 require 'set'
 require_relative '../tasks'
+require_relative '../filename_utils'
 require_relative 'index_reader'
 require_relative 'tool_response_renderer'
 
@@ -161,15 +162,18 @@ module Woods
         end
 
         # Notion export needs both an API token and at least one database ID.
-        # NOTION_API_TOKEN env var overrides the config token (see
-        # docs/NOTION_EXPORT.md).
+        # A non-blank NOTION_API_TOKEN env var overrides the config token (see
+        # docs/NOTION_EXPORT.md). Resolution goes through
+        # Woods.resolve_notion_token so a blank env var is treated as absent
+        # (rather than masking a valid configured token) — matching the
+        # exporter and the notion_sync handler.
         def notion_wired?
           config = Woods.configuration
           return false unless config
 
-          token = ENV['NOTION_API_TOKEN'] || (config.respond_to?(:notion_api_token) ? config.notion_api_token : nil)
+          token = Woods.resolve_notion_token(config)
           ids = config.respond_to?(:notion_database_ids) ? config.notion_database_ids : nil
-          token && !token.empty? && ids && !ids.empty?
+          !token.nil? && ids && !ids.empty?
         end
 
         def text_response(text)
@@ -264,13 +268,11 @@ module Woods
           controller, action = entry_point.split('#', 2)
           return nil if controller.empty? || action.empty?
 
-          # entry_point is client input — allow-list both parts (the same
-          # character set FilenameUtils uses) so `/` and `..` can't traverse
-          # outside flows/. For legitimate controller/action names this is
-          # the identity transform, matching what FlowPrecomputer wrote.
-          safe_controller = controller.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-          safe_action = action.gsub(/[^a-zA-Z0-9_-]/, '_')
-          filename = "#{safe_controller}_#{safe_action}.json"
+          # entry_point is client input — FilenameUtils.flow_filename
+          # allow-lists both parts (so `/` and `..` can't traverse outside
+          # flows/) using the SAME transform FlowPrecomputer writes with, so a
+          # legitimately precomputed flow always resolves to the file on disk.
+          filename = Woods::FilenameUtils.flow_filename(controller, action)
           path = File.join(index_dir, 'flows', filename)
           return nil unless File.exist?(path)
 
@@ -1343,10 +1345,11 @@ module Woods
           ) do |server_context:|
             config = Woods.configuration
             # Mirror notion_wired? (which gates registration) and the
-            # Exporter: the NOTION_API_TOKEN env var satisfies the token
-            # requirement. Reading config alone rejected ENV-only hosts even
-            # though the tool was registered for them.
-            if (ENV['NOTION_API_TOKEN'] || config.notion_api_token).to_s.empty?
+            # Exporter via the shared resolver: a non-blank NOTION_API_TOKEN
+            # env var satisfies the token requirement (reading config alone
+            # rejected ENV-only hosts even though the tool was registered for
+            # them), while a blank env var is treated as absent.
+            if Woods.resolve_notion_token(config).nil?
               next respond_err.call(
                 'notion_api_token is not configured. Set it in Woods.configure or via the NOTION_API_TOKEN env var.',
                 code: :not_configured,

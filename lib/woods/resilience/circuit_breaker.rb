@@ -76,14 +76,14 @@ module Woods
         rescue StandardError => e
           @mutex.synchronize do
             @half_open_probe_in_flight = false if probing
-            record_failure
+            record_failure(probing)
           end
           raise e
         end
 
         @mutex.synchronize do
           @half_open_probe_in_flight = false if probing
-          record_success
+          record_success(probing)
         end
         result
       end
@@ -132,21 +132,37 @@ module Woods
       end
 
       # Record a failure and potentially open the circuit. A failure while
-      # half_open reopens immediately, regardless of the failure threshold.
-      def record_failure
+      # half_open reopens immediately, regardless of the failure threshold —
+      # but only when it is the genuine in-flight probe. A stale call
+      # admitted while the circuit was still closed, completing after the
+      # transition to half_open, is not the probe and must not decide
+      # recovery (its outcome reflects the pre-outage attempt, not the
+      # current one).
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def record_failure(probing)
+        return if @state == :half_open && !probing
+
         @failure_count += 1
         @last_failure_time = monotonic_now
         @success_count = 0
         @state = :open if @state == :half_open || @failure_count >= @threshold
       end
 
-      # Record a success. In half_open, close only after enough consecutive
-      # successful probes; in closed, a success clears accumulated failures.
-      def record_success
+      # Record a success. In half_open, only the in-flight probe advances
+      # recovery — a stale non-probe success (a call admitted while closed
+      # that resolves after the circuit went half_open) must not count toward
+      # the success threshold or close the circuit. In closed, a success
+      # clears accumulated failures.
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def record_success(probing)
         if @state == :half_open
+          return unless probing
+
           @success_count += 1
           reset! if @success_count >= @success_threshold
-        else
+        elsif @state == :closed
           @failure_count = 0
         end
       end

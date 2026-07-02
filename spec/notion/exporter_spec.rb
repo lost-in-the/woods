@@ -96,8 +96,8 @@ RSpec.describe Woods::Notion::Exporter do
   describe '#initialize' do
     it 'raises ConfigurationError when notion_api_token is missing' do
       # Ensure no ambient ENV token satisfies the (new) ENV-override path.
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with('NOTION_API_TOKEN').and_return(nil)
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('NOTION_API_TOKEN', nil).and_return(nil)
       bad_config = double('Configuration', notion_api_token: nil, notion_database_ids: {})
       expect do
         described_class.new(index_dir: index_dir, config: bad_config, reader: reader)
@@ -111,13 +111,27 @@ RSpec.describe Woods::Notion::Exporter do
     it 'accepts the NOTION_API_TOKEN env var when config has no token' do
       # Documented override: an ENV-only host must construct successfully,
       # matching what the MCP notion_wired? gate promises.
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with('NOTION_API_TOKEN').and_return('secret_env_token')
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('NOTION_API_TOKEN', nil).and_return('secret_env_token')
       env_config = double('Configuration', notion_api_token: nil, notion_database_ids: { 'data_models' => 'db1' })
 
       expect do
         described_class.new(index_dir: index_dir, config: env_config, reader: reader)
       end.not_to raise_error
+    end
+
+    it 'treats a blank NOTION_API_TOKEN env var as absent, using the configured token' do
+      # A set-but-empty env var (docker-compose ${VAR} of an unset host var)
+      # must not mask a valid configured token nor pass through as a blank
+      # bearer that only fails later with 401s.
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('NOTION_API_TOKEN', nil).and_return('')
+      built = nil
+
+      expect do
+        built = described_class.new(index_dir: index_dir, config: config, reader: reader)
+      end.not_to raise_error
+      expect(built).to be_a(described_class)
     end
   end
 

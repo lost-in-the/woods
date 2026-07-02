@@ -319,6 +319,30 @@ module Woods
       end
     end
 
+    # Resolve the effective Notion API token.
+    #
+    # A non-blank +NOTION_API_TOKEN+ env var takes precedence; otherwise the
+    # configured +notion_api_token+ is used. A set-but-blank env var — common
+    # with docker-compose +${NOTION_API_TOKEN}+ interpolation of an unset
+    # host variable — is treated as absent, so it never masks a valid
+    # configured token nor slips through as a blank bearer. This is the single
+    # resolution point shared by the Notion exporter, the MCP +notion_sync+
+    # tool + its registration gate, and the rake task, so all four agree on a
+    # given host.
+    #
+    # @param config [Configuration] configuration to read the fallback from
+    # @return [String, nil] the resolved token, or nil when neither source
+    #   supplies a non-blank value
+    def resolve_notion_token(config = configuration)
+      env = ENV.fetch('NOTION_API_TOKEN', nil)
+      return env unless env.nil? || env.strip.empty?
+
+      configured = config.respond_to?(:notion_api_token) ? config.notion_api_token : nil
+      return nil if configured.nil? || configured.to_s.strip.empty?
+
+      configured
+    end
+
     # Build a Retriever wired with adapters from the current configuration.
     #
     # @return [Retriever] A fully wired retriever instance

@@ -905,8 +905,10 @@ module Woods
         # instead of a confusing adapter-level syntax failure. It also
         # neutralises `--` line comments and PostgreSQL dollar-quoted
         # strings that could carry forbidden keywords past a naive scan.
-        # `SqlNoiseStripper` is the same module SqlValidator uses.
-        stripped = SqlNoiseStripper.strip_literals(SqlNoiseStripper.strip_comments(template))
+        # `SqlNoiseStripper` is the same module SqlValidator uses. The
+        # combined single-pass strip_noise resolves comments and literals
+        # together so a comment marker inside a literal can't hide a keyword.
+        stripped = SqlNoiseStripper.strip_noise(template)
         if SCOPE_TEMPLATE_FORBIDDEN.match?(stripped)
           raise ValidationError,
                 'scope template contains forbidden SQL keywords ' \

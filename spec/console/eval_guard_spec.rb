@@ -205,6 +205,13 @@ RSpec.describe Woods::Console::EvalGuard do
         end
       end
 
+      it 'rejects %x literals with whitespace (newline) delimiters' do
+        # A newline is a valid %x delimiter and executes: `%x\nwhoami\n`
+        # runs a shell command. `[^\w\s]` excluded it; `[^\w]` catches it.
+        expect { described_class.check!("%x\nwhoami\n") }
+          .to raise_error(Woods::Console::ForbiddenExpressionError, /shell-execution/)
+      end
+
       it 'rejects Kernel system/exec/spawn methods' do
         expect { described_class.check!('system("ls")') }
           .to raise_error(Woods::Console::ForbiddenExpressionError, /system/)

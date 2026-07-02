@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative 'filename_utils'
+require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'dependency_graph'
 require_relative 'git_provenance'
@@ -527,6 +528,13 @@ module Woods
     # from disk), so units annotated in memory with metadata[:flow_paths]
     # must be re-written and their type index refreshed to pick up the
     # annotation.
+    #
+    # The index is rebuilt from the in-memory `units` (the authoritative
+    # full-extraction `@results`), NOT from a disk glob: this is a full
+    # extraction, the output dir is never wiped, and globbing would
+    # resurrect stale unit files for app classes deleted since the last run.
+    # (The incremental path, which only holds changed units in memory, still
+    # rebuilds from disk via {#regenerate_type_index}.)
     def rewrite_flow_annotated_units
       @results.each do |type, units|
         annotated = units.select { |u| u.metadata[:flow_paths] }
@@ -539,7 +547,10 @@ module Woods
             json_serialize(unit.to_h)
           )
         end
-        regenerate_type_index(type)
+        File.write(
+          type_dir.join('_index.json'),
+          json_serialize(type_index_entries(units))
+        )
       end
     end
 
@@ -734,20 +745,29 @@ module Woods
         end
 
         # Also write a type index for fast lookups
-        index = units.map do |u|
-          {
-            identifier: u.identifier,
-            file_path: u.file_path,
-            namespace: u.namespace,
-            estimated_tokens: u.estimated_tokens,
-            chunk_count: u.chunks.size
-          }
-        end
-
         File.write(
           type_dir.join('_index.json'),
-          json_serialize(index)
+          json_serialize(type_index_entries(units))
         )
+      end
+    end
+
+    # Build the `_index.json` entry list for a set of in-memory units.
+    # Shared by {#write_results} and {#rewrite_flow_annotated_units} so both
+    # emit the index from the authoritative in-memory `@results` rather than
+    # re-deriving it from disk.
+    #
+    # @param units [Array<ExtractedUnit>]
+    # @return [Array<Hash>]
+    def type_index_entries(units)
+      units.map do |u|
+        {
+          identifier: u.identifier,
+          file_path: u.file_path,
+          namespace: u.namespace,
+          estimated_tokens: u.estimated_tokens,
+          chunk_count: u.chunks.size
+        }
       end
     end
 
@@ -1001,8 +1021,8 @@ module Woods
       source = data['source_code']
       metadata = data['metadata'] || {}
 
-      source_tokens = source ? (source.length / 4.0).ceil : 0
-      metadata_tokens = metadata.any? ? (metadata.to_json.length / 4.0).ceil : 0
+      source_tokens = source ? TokenUtils.estimate_tokens(source) : 0
+      metadata_tokens = metadata.any? ? TokenUtils.estimate_tokens(metadata.to_json) : 0
       source_tokens + metadata_tokens
     end
 

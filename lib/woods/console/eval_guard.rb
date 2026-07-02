@@ -195,11 +195,13 @@ module Woods
         # which {Woods::Ast::Parser} may normalize differently across
         # Prism/parser-gem backends. A source-level refusal is both cheap
         # and impossible to evade via AST normalization. Ruby accepts ANY
-        # non-word character as the %x delimiter (`%x/ls/`, `%x~ls~`, …),
-        # so match \W rather than a hand-picked delimiter list — as a
-        # fail-safe, over-refusing odd-but-harmless source beats letting
-        # an unlisted delimiter through.
-        if code.include?('`') || code =~ /%x[^\w\s]/
+        # non-word character as the %x delimiter — including whitespace:
+        # `%x\ncmd\n` (newline-delimited) is valid and executes. Match
+        # every non-word char (`[^\w]`, which spans newline/space/tab, not
+        # `[^\w\s]` which excluded them and let `%x\n…` slip through). As a
+        # fail-safe, over-refusing odd-but-harmless source beats letting an
+        # unlisted delimiter through.
+        if code.include?('`') || code =~ /%x[^\w]/
           raise ForbiddenExpressionError, 'payload contains a shell-execution literal (backtick or %x)'
         end
 

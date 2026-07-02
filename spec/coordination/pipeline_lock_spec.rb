@@ -97,7 +97,10 @@ RSpec.describe Woods::Coordination::PipelineLock do
       # Create a lock file so File.exist? returns true
       File.write(lock_path, '{}')
 
-      # Simulate the race: File.exist? sees the file, but File.mtime raises ENOENT
+      # Simulate the race: File.exist? sees the file, but File.mtime raises
+      # ENOENT for the lock path (other paths, e.g. a graveyard file, behave
+      # normally).
+      allow(File).to receive(:mtime).and_call_original
       allow(File).to receive(:mtime).with(lock_path).and_raise(Errno::ENOENT)
 
       new_lock = described_class.new(lock_dir: lock_dir, name: 'extraction')
@@ -148,6 +151,18 @@ RSpec.describe Woods::Coordination::PipelineLock do
 
       expect(lock.acquire).to be false
       expect(lock.locked?).to be false
+    end
+
+    it 'restores the file and backs off if the retired lock is no longer stale' do
+      # Simulates a competitor that already retired the stale lock and
+      # created a FRESH one between our stale? check and our rename: retiring
+      # blindly would clobber a live holder's lock and let both processes run.
+      File.write(lock_path, JSON.generate(token: 'competitor-fresh'))
+      # mtime is now (fresh), i.e. not older than stale_timeout.
+
+      expect(lock.send(:retire_stale_lock)).to be false
+      expect(File.exist?(lock_path)).to be true
+      expect(JSON.parse(File.read(lock_path))['token']).to eq('competitor-fresh')
     end
   end
 

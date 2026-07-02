@@ -359,7 +359,35 @@ RSpec.describe Woods::Extractor do
       expect(unit_json['identifier']).to eq('OrdersController')
       expect(unit_json.dig('metadata', 'flow_paths', 'create')).to eq('flows/OrdersController_create.json')
 
+      # The refreshed index is built from the in-memory @results (both
+      # units), not from the on-disk files (only the annotated one was
+      # rewritten here) — matching what write_results emitted for this type.
       index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+      expect(index.map { |e| e['identifier'] }).to eq(%w[OrdersController UsersController])
+    end
+
+    it 'refreshes the type index from @results, not a disk glob (no stale-unit resurrection)' do
+      output_dir = File.join(tmpdir, 'output')
+      type_dir = File.join(output_dir, 'controllers')
+      FileUtils.mkdir_p(type_dir)
+
+      # A stale unit file from a previous run for a controller since deleted
+      # from the app. It is NOT present in @results.
+      File.write(
+        File.join(type_dir, 'DeletedController_abc1.json'),
+        JSON.generate(identifier: 'DeletedController', file_path: 'x', namespace: nil, chunks: [])
+      )
+
+      annotated = Woods::ExtractedUnit.new(
+        type: :controller, identifier: 'OrdersController', file_path: 'app/controllers/orders_controller.rb'
+      )
+      annotated.metadata = { flow_paths: { 'create' => 'flows/OrdersController_create.json' } }
+      extractor.instance_variable_set(:@results, { controllers: [annotated] })
+
+      extractor.send(:rewrite_flow_annotated_units)
+
+      index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+      # The deleted controller's stale file must NOT be resurrected into the index.
       expect(index.map { |e| e['identifier'] }).to eq(['OrdersController'])
     end
 

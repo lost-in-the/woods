@@ -300,6 +300,20 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
       expect(result).to eq([0.9, 0.8, 0.7])
       expect(other_provider).to have_received(:embed).once
     end
+
+    it 'builds the cache key without probing provider#dimensions (no network on lookup)' do
+      # For Ollama, #dimensions performs a live embed('test'); keying on it
+      # made every cache hit depend on the backend being reachable. The key
+      # must use model_name (a plain attribute) only.
+      probing_provider = instance_double('EmbeddingProvider', model_name: 'test-model')
+      allow(probing_provider).to receive(:dimensions).and_raise('network down')
+      allow(probing_provider).to receive(:embed).with('hello').and_return([0.1, 0.2])
+      cached = described_class.new(provider: probing_provider, cache_store: cache_store, ttl: 3600)
+
+      expect { cached.embed('hello') }.not_to raise_error # miss: stores
+      expect(cached.embed('hello')).to eq([0.1, 0.2]) # hit: reads
+      expect(probing_provider).not_to have_received(:dimensions)
+    end
   end
 
   describe '#embed_batch' do

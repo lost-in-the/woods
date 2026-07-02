@@ -82,6 +82,21 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
       expect(targets).to eq(['User'])
     end
+
+    it 'keeps a model reference that follows a # inside a string literal' do
+      # A literal `#` (URL fragment, hex color, "Tag #ruby") is not a Ruby
+      # comment; comment-stripping must be string-literal-aware or the rest
+      # of the line — including the model reference — is silently dropped.
+      source = 'link_to "Tag #ruby", User.recent'
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['User'])
+    end
+
+    it 'strips a real trailing comment while keeping code on the same line' do
+      source = 'post = Post.first # see User for the join'
+      targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
+      expect(targets).to eq(['Post'])
+    end
   end
 
   # ── #scan_service_dependencies ──────────────────────────────────

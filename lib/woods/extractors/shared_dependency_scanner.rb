@@ -47,14 +47,15 @@ module Woods
       def scan_model_dependencies(source, via: :code_reference)
         # Strip `#` line comments before scanning so references inside
         # YARD docstrings / TODO comments don't generate ghost edges.
-        # Applied to ALL passes — a commented `Library::Book` previously
-        # still produced an edge through the full-name pass, which the
-        # stripping was added to prevent. The negative lookahead `(?!\{)`
-        # keeps Ruby's `#{...}` string interpolation intact — stripping
-        # blindly would eat every model reference inside
-        # `"Book: #{Library::Book.new}"` etc., which is a common
-        # ERB/Phlex/string pattern.
-        scannable = source.gsub(/#(?!\{)[^\n]*/, '')
+        # Applied to ALL passes — a commented `Library::Book` should not
+        # produce an edge through the full-name pass. Stripping is
+        # string-literal-aware: a `#` inside a `"..."`/`'...'` literal is
+        # NOT a comment, so a line like `link_to "Tag #ruby", Article.recent`
+        # keeps its `Article` reference (a plain `#...` regex would have
+        # eaten the rest of the line and dropped the edge). String
+        # interpolation (`"Book: #{Library::Book.new}"`) is preserved for the
+        # same reason — the `#{...}` lives inside the literal.
+        scannable = strip_ruby_line_comments(source)
 
         targets = Set.new
         scannable.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
@@ -72,6 +73,56 @@ module Woods
         end
 
         targets.map { |model_name| { type: :model, target: model_name, via: via } }
+      end
+
+      # Remove `#` line comments from Ruby source without touching `#`
+      # characters that sit inside single- or double-quoted string literals.
+      #
+      # A naive `gsub(/#.*/, '')` truncates lines like
+      # `redirect "/posts#comments"; Post.touch` at the in-string `#`,
+      # silently dropping the `Post` reference. This scanner walks each line
+      # tracking quote state so only a genuine (unquoted) `#` starts a
+      # comment. Escapes (`\"`, `\'`) inside literals are honored. Heredocs
+      # and `%`-literals are not modeled — a `#` inside those is rare in the
+      # constant-bearing code this scans, and treating it as a comment only
+      # risks a missed edge, never a crash.
+      #
+      # @param source [String] Ruby source code
+      # @return [String] source with unquoted `#` comments removed
+      def strip_ruby_line_comments(source)
+        source.each_line.map { |line| strip_line_comment(line) }.join
+      end
+
+      # Strip a trailing `#` comment from a single line, ignoring `#` inside
+      # string literals. Preserves the line's trailing newline.
+      #
+      # @param line [String]
+      # @return [String]
+      def strip_line_comment(line)
+        in_single = false
+        in_double = false
+        i = 0
+        len = line.length
+        while i < len
+          ch = line[i]
+          if (in_single || in_double) && ch == '\\'
+            i += 2 # skip escaped char inside a literal
+            next
+          elsif in_single
+            in_single = false if ch == "'"
+          elsif in_double
+            in_double = false if ch == '"'
+          elsif ch == "'"
+            in_single = true
+          elsif ch == '"'
+            in_double = true
+          elsif ch == '#'
+            trailing = line[i..].end_with?("\n") ? "\n" : ''
+            return line[0...i] + trailing
+          end
+          i += 1
+        end
+        line
       end
 
       # Extract string-literal arguments passed to `.constantize` or
