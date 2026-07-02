@@ -61,4 +61,61 @@ RSpec.describe Woods::SvelteFlow::SubgraphScoper do
     payload = scoper.payload(seeds: %w[Order], depth: 0)
     expect(payload).to have_key('highest_pagerank')
   end
+
+  context 'with association metadata' do
+    let(:unit_metadata) do
+      {
+        'Order' => {
+          'type' => 'model',
+          'metadata' => {
+            'primary_key' => 'id',
+            'associations' => [{ 'type' => 'belongs_to', 'target' => 'Account', 'foreign_key' => 'account_id' }]
+          }
+        },
+        'Account' => { 'type' => 'model', 'metadata' => { 'primary_key' => 'id' } }
+      }
+    end
+
+    let(:transformer) do
+      Woods::SvelteFlow::Transformer.new(graph: graph, analyzer: analyzer, unit_metadata: unit_metadata)
+    end
+
+    def association_edges(payload)
+      payload['edges'].select { |e| e['type'] == 'association' }
+    end
+
+    it 'emits model relationships as association edges with column handles' do
+      edge = association_edges(scoper.payload(seeds: %w[Order Account], depth: 0)).first
+      expect(edge['source']).to eq('Order')
+      expect(edge['target']).to eq('Account')
+      expect(edge['data']['via']).to eq('belongs_to')
+      expect(edge['data']['foreignKey']).to eq('account_id')
+      expect(edge['data']['sourceHandle']).to eq('Order-account_id')
+      expect(edge['data']['targetHandle']).to eq('Account-id')
+    end
+
+    it 'does not also emit a generic edge for the association pair' do
+      payload = scoper.payload(seeds: %w[Order Account], depth: 0)
+      generic = payload['edges'].select do |e|
+        e['type'] == 'default' && [e['source'], e['target']].sort == %w[Account Order]
+      end
+      expect(generic).to be_empty
+    end
+
+    it 'keeps generic edges for pairs without association metadata' do
+      payload = scoper.payload(seeds: %w[Order Invoice], depth: 0)
+      pair = payload['edges'].map { |e| [e['source'], e['target'], e['type']] }
+      expect(pair).to include(%w[Order Invoice default])
+    end
+
+    it 'scopes association edges to the visited set' do
+      payload = scoper.payload(seeds: %w[Order], depth: 0)
+      expect(association_edges(payload)).to be_empty
+    end
+
+    it 'applies the via filter to association edges' do
+      payload = scoper.payload(seeds: %w[Order Account], depth: 0, via_set: Set[:code_reference])
+      expect(association_edges(payload)).to be_empty
+    end
+  end
 end

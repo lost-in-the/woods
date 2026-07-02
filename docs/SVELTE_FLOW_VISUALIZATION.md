@@ -93,7 +93,13 @@ Only the scoped units are loaded, so exploration is bounded to the query result.
 
 ### Inspecting a Unit
 
-Clicking a node opens a detail panel with its source code (fetched on demand). The panel offers an **editor** link (`vscode://file/...`) and, when `svelte_flow_repo_url` is set, a **GitHub** link to the file pinned at the extraction's git SHA. References to the node's connected units are highlighted in the source, so you can see where the graph edges live in the code.
+Clicking a node opens a detail panel with its source code (fetched on demand, with Ruby syntax highlighting; the panel widens to a readable code width while source is shown). In server mode the **live file** is read from disk — keyed off the unit's own extracted path, never a client-supplied one — so the panel tracks your working tree; the extraction snapshot is the fallback (flagged as such) when the file isn't readable, e.g. in a standalone export opened on another machine. A leading `annotate` schema block is stripped since the columns are already rendered structurally.
+
+The panel offers an **editor** link (`vscode://file/...` — mapped onto your local checkout when `svelte_flow_editor_root` is set, which is required whenever extraction ran in a container) and, when `svelte_flow_repo_url` is set, a **GitHub** link to the file pinned at the extraction's git SHA. References to the node's connected units are highlighted in the source, so you can see where the graph edges live in the code.
+
+### From an Agent (MCP)
+
+The index server's `visualize` tool closes the query→render loop without leaving MCP: `visualize(nodes:, depth:, via:)` writes the self-contained HTML in-process and returns its path, plus the live `?nodes=` URL when `svelte_flow_base_url` is configured. A typical agent flow is `dependents PaymentService` → collect identifiers → `visualize(nodes: [...])` → hand the user the link or file.
 
 ## What Gets Visualized
 
@@ -203,6 +209,8 @@ Returns `503` with a JSON error message if extraction data is not available.
 | `svelte_flow_enabled` | Boolean | `false` | Mount the visualization middleware |
 | `svelte_flow_path` | String | `'/woods/visualize'` | URL mount path |
 | `svelte_flow_repo_url` | String | `nil` | Base repo URL (e.g. `https://github.com/org/app`) for "View on GitHub" source links; also settable via `WOODS_SVELTE_FLOW_REPO_URL` |
+| `svelte_flow_editor_root` | String | `nil` | Absolute local project root for editor deep links (`vscode://file/<root>/<relative path>`) — needed when extraction ran in a container but the editor lives on the host; env `WOODS_SVELTE_FLOW_EDITOR_ROOT` |
+| `svelte_flow_base_url` | String | `nil` | Base URL where the middleware is reachable (e.g. `http://localhost:3000`) — enables the MCP `visualize` tool to return a live link; env `WOODS_SVELTE_FLOW_BASE_URL` |
 | `precompute_flows` | Boolean | `false` | Generate per-action flow data during extraction (required for flow visualization) |
 
 ## Architecture

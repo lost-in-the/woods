@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require 'erb'
 require 'json'
 require 'logger'
 require 'mcp'
+require 'tmpdir'
 require 'open3'
 require 'time'
 require 'set'
@@ -109,6 +111,7 @@ module Woods
           define_reload_tool(server, reader, respond, retriever_reloader)
           define_retrieve_tool(server, retriever, respond, respond_err)
           define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
+          define_visualize_tool(server, index_dir, respond, respond_err)
           # Conditionally register collaborator-dependent tools. Historically
           # all 15 stubs were registered unconditionally and returned
           # isError: true when the wiring was missing — that added token
@@ -807,6 +810,91 @@ module Woods
               data: { entry_point: entry_point, exception: e.class.name }
             )
           end
+        end
+
+        # Render an agent's query result (a set of unit identifiers) as an
+        # explorable visualization without leaving MCP. Always writes a
+        # self-contained HTML file in-process and returns its path; when
+        # `svelte_flow_base_url` is configured (or WOODS_SVELTE_FLOW_BASE_URL
+        # is set) it also returns the live server-mode URL. No host is ever
+        # fabricated — absent the config, only the file path is returned.
+        def define_visualize_tool(server, index_dir, respond, respond_err)
+          coerce_int = method(:coerce_integer)
+          build_url = method(:visualize_url)
+
+          server.define_tool(
+            name: 'visualize',
+            description: 'Render a set of units (a query result, blast radius, or flow) as an interactive ' \
+                         'graph visualization. Writes a self-contained HTML file (open via file://) and ' \
+                         'returns its path; also returns a live URL when the visualization server base URL ' \
+                         'is configured. Use after dependencies/dependents/search to show the user a map.',
+            input_schema: {
+              properties: {
+                nodes: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Unit identifiers to render (e.g. from dependents/search results)'
+                },
+                depth: {
+                  type: 'integer',
+                  description: 'Extra BFS hops pulled in around the set (default: 0 = the set only, max 5)'
+                },
+                via: {
+                  type: 'array', items: { type: 'string' },
+                  description: 'Optional relationship filter (e.g. ["belongs_to","has_many"])'
+                }
+              },
+              required: ['nodes']
+            }
+          ) do |nodes:, server_context:, depth: nil, via: nil|
+            require_relative '../svelte_flow/exporter'
+
+            hops = (coerce_int.call(depth) || 0).clamp(0, 5)
+            exporter = Woods::SvelteFlow::Exporter.new(index_dir: index_dir)
+            stats = begin
+              exporter.export_standalone(nodes: Array(nodes), depth: hops, via: Array(via))
+            rescue SystemCallError
+              # The index dir may be a read-only mount (host-side MCP reading a
+              # container volume) — fall back to the system temp dir.
+              out = File.join(Dir.tmpdir, 'woods_svelte_flow', "subgraph-#{Process.pid}-#{rand(1_000_000)}.html")
+              exporter.export_standalone(nodes: Array(nodes), depth: hops, via: Array(via), output_path: out)
+            end
+
+            result = {
+              'file_path' => stats[:path],
+              'nodes' => stats[:nodes],
+              'edges' => stats[:edges],
+              'dropped' => stats[:dropped]
+            }
+            url = build_url.call(Array(nodes), hops, Array(via))
+            result['url'] = url if url
+
+            respond.call(JSON.pretty_generate(result))
+          rescue Woods::ExtractionError => e
+            respond_err.call("visualize failed: #{e.message}", code: :not_found,
+                                                               data: { nodes: Array(nodes) })
+          rescue StandardError => e
+            respond_err.call("visualize failed: #{e.message}", code: :internal_error,
+                                                               data: { exception: e.class.name })
+          end
+        end
+
+        # Live server-mode URL for a scoped visualization, or nil when no base
+        # URL is configured (never fabricate a host).
+        #
+        # @param nodes [Array<String>]
+        # @param depth [Integer]
+        # @param via [Array<String>]
+        # @return [String, nil]
+        def visualize_url(nodes, depth, via)
+          config = defined?(Woods.configuration) ? Woods.configuration : nil
+          base = config&.svelte_flow_base_url || ENV.fetch('WOODS_SVELTE_FLOW_BASE_URL', nil)
+          return nil if base.nil? || base.strip.empty?
+
+          mount = config&.svelte_flow_path || '/woods/visualize'
+          params = ["nodes=#{nodes.map { |n| ERB::Util.url_encode(n) }.join(',')}"]
+          params << "depth=#{depth}" if depth.positive?
+          params << "via=#{via.map { |v| ERB::Util.url_encode(v) }.join(',')}" unless via.empty?
+          "#{base.chomp('/')}#{mount}?#{params.join('&')}"
         end
 
         def define_session_trace_tool(server, reader, respond, respond_err)

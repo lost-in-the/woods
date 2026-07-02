@@ -34,4 +34,24 @@ RSpec.describe Woods::SvelteFlow::SourceLinks do
       expect(described_class.repo_relative_path('/opt/thing.rb')).to eq('opt/thing.rb')
     end
   end
+
+  describe '.editor_url' do
+    it 'maps the repo-relative path onto a configured editor root' do
+      url = described_class.editor_url('/app/models/account.rb', editor_root: '/Users/me/work/shop')
+      expect(url).to eq('vscode://file//Users/me/work/shop/app/models/account.rb')
+    end
+
+    it 'falls back to the stored absolute path without an editor root' do
+      expect(described_class.editor_url('/srv/app/models/account.rb'))
+        .to eq('vscode://file//srv/app/models/account.rb')
+    end
+
+    it 'returns nil for a relative path without an editor root (cannot resolve)' do
+      expect(described_class.editor_url('app/models/account.rb')).to be_nil
+    end
+
+    it 'returns nil without a file path' do
+      expect(described_class.editor_url(nil, editor_root: '/x')).to be_nil
+    end
+  end
 end

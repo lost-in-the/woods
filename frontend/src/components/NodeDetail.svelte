@@ -28,7 +28,9 @@
     return () => { cancelled = true; };
   });
 
-  const editorUrl = $derived(sourceData?.filePath ? `vscode://file/${sourceData.filePath}` : null);
+  // Links are built server-side (SourceLinks) so container→local path mapping
+  // and repo pinning live in one tested place.
+  const editorUrl = $derived(sourceData?.editorUrl || null);
   const highlightedHtml = $derived(
     sourceData?.sourceCode ? highlightSource(sourceData.sourceCode, highlights) : '',
   );
@@ -61,7 +63,7 @@
 </script>
 
 {#if node}
-  <div class="detail-panel open">
+  <div class="detail-panel open" class:source-open={showSource && sourceData?.sourceCode}>
     <button class="close-btn" aria-label="Close detail panel" onclick={onClose}>&times;</button>
     <h3>{node.id}</h3>
     {#each rows as [label, value]}
@@ -107,6 +109,9 @@
       {:else if sourceError}
         <div class="source-status">Source unavailable</div>
       {:else if showSource && sourceData?.sourceCode}
+        {#if sourceData.live === false}
+          <div class="source-status">Extraction snapshot — file not readable here</div>
+        {/if}
         <pre class="source-code"><code>{@html highlightedHtml}</code></pre>
       {/if}
     </div>

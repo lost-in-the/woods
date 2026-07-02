@@ -249,6 +249,7 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
   describe 'GET /api/unit/:id/source' do
     let(:fixture_dir) { Dir.mktmpdir }
     let(:repo_url) { nil }
+    let(:editor_root) { nil }
     let(:graph_data) do
       { 'nodes' => { 'Order' => { 'type' => 'model', 'file_path' => '/srv/app/models/order.rb' } },
         'edges' => {}, 'reverse' => {}, 'pagerank' => { 'Order' => 0.1 } }
@@ -270,7 +271,8 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
       File.write(File.join(fixture_dir, 'dependency_graph.json'), JSON.generate(graph_data))
       FileUtils.mkdir_p(File.join(fixture_dir, 'models'))
       File.write(File.join(fixture_dir, 'models', 'Order.json'), JSON.generate(unit_json))
-      config = double('config', output_dir: fixture_dir, svelte_flow_repo_url: repo_url)
+      config = double('config', output_dir: fixture_dir, svelte_flow_repo_url: repo_url,
+                                svelte_flow_editor_root: editor_root)
       allow(Woods).to receive(:configuration).and_return(config)
     end
 
@@ -306,6 +308,40 @@ RSpec.describe Woods::SvelteFlow::RackMiddleware do
         expect(get_source('Order')['blobUrl'])
           .to eq('https://github.com/org/app/blob/abc1234def/app/models/order.rb')
       end
+    end
+
+    context 'when the unit file exists on disk' do
+      let(:unit_json) do
+        live_path = File.join(fixture_dir, 'live_order.rb')
+        File.write(live_path, "class Order\n  # live edit\nend\n")
+        {
+          'identifier' => 'Order', 'type' => 'model', 'file_path' => live_path,
+          'source_code' => "class Order\nend\n", 'metadata' => {}
+        }
+      end
+
+      it 'serves the live file instead of the extraction snapshot' do
+        data = get_source('Order')
+        expect(data['sourceCode']).to include('live edit')
+        expect(data['live']).to be(true)
+      end
+    end
+
+    it 'marks fallback-to-snapshot responses as not live' do
+      expect(get_source('Order')['live']).to be(false)
+    end
+
+    context 'with a configured editor root' do
+      let(:editor_root) { '/Users/me/work/app' }
+
+      it 'maps the editor link onto the local checkout' do
+        expect(get_source('Order')['editorUrl'])
+          .to eq('vscode://file//Users/me/work/app/app/models/order.rb')
+      end
+    end
+
+    it 'falls back to the stored absolute path for the editor link' do
+      expect(get_source('Order')['editorUrl']).to eq('vscode://file//srv/app/models/order.rb')
     end
   end
 

@@ -35,6 +35,27 @@ module Woods
         match = file_path.match(REPO_RELATIVE_RE)
         match ? match[1] : file_path.sub(%r{\A/}, '')
       end
+
+      # Build a vscode://file editor link. When an editor root is configured it
+      # maps the repo-relative path onto the reader's local checkout — the
+      # editor-side analogue of the GitHub repo URL, needed whenever extraction
+      # ran somewhere else (a container) than where the editor lives. Without a
+      # root, fall back to the stored absolute path (correct when extraction
+      # and editor share a filesystem); relative-only paths yield no link
+      # rather than a link that cannot resolve.
+      #
+      # @param file_path [String, nil]
+      # @param editor_root [String, nil] Absolute local project root
+      # @return [String, nil]
+      def editor_url(file_path, editor_root: nil)
+        return nil unless file_path
+
+        if editor_root
+          "vscode://file/#{File.join(editor_root, repo_relative_path(file_path))}"
+        elsif file_path.start_with?('/')
+          "vscode://file/#{file_path}"
+        end
+      end
     end
   end
 end

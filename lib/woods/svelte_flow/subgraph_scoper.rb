@@ -3,7 +3,9 @@
 require 'set'
 require_relative 'node_builder'
 require_relative 'edge_builder'
+require_relative 'association_edge_builder'
 require_relative 'edge_data'
+require_relative 'neighborhood'
 
 module Woods
   module SvelteFlow
@@ -31,7 +33,7 @@ module Woods
       # @return [Hash] { 'nodes' =>, 'edges' =>, 'highest_pagerank' => }
       def payload(seeds:, depth: 0, via_set: nil)
         adjacency = graph_adjacency
-        visited = collect_neighborhood(seeds, depth, adjacency, via_set: via_set)
+        visited = Neighborhood.collect(seeds, depth, adjacency, via_set: via_set)
         build_payload(visited, adjacency, via_set: via_set)
       end
 
@@ -45,50 +47,22 @@ module Woods
         { nodes: data[:nodes] || {}, edges: data[:edges] || {}, reverse: data[:reverse] || {} }
       end
 
-      # BFS from one or more seed nodes up to `depth` hops, traversing forward
-      # and (unless a via filter is set) reverse edges.
-      #
-      # @return [Set<String>]
-      def collect_neighborhood(seeds, depth, adjacency, via_set: nil)
-        visited = seeds.is_a?(Set) ? seeds.dup : Set.new(Array(seeds))
-        frontier = visited.to_a
-
-        depth.times do
-          next_frontier = []
-          frontier.each do |current|
-            neighbors_of(current, adjacency, via_set).each do |dep|
-              next if visited.include?(dep)
-
-              visited.add(dep)
-              next_frontier << dep
-            end
-          end
-          frontier = next_frontier
-        end
-
-        visited
-      end
-
-      # Neighbor identifiers of a node for BFS expansion. Forward edges are
-      # { target:, via: } hashes; reverse edges are plain identifier strings.
-      # When a `via_set` is given, only forward edges of those relationships are
-      # followed (reverse edges are unlabeled after serialization, so they are
-      # excluded rather than followed under an unknown relationship).
-      #
-      # @return [Array<String>]
-      def neighbors_of(current, adjacency, via_set)
-        entries = adjacency[:edges][current] || []
-        entries = entries.select { |e| via_set.include?(EdgeData.via(e)) } if via_set
-        forward = EdgeData.targets(entries)
-        via_set ? forward : forward + (adjacency[:reverse][current] || [])
-      end
-
       # Build the Svelte Flow payload for a resolved set of visited node IDs.
+      #
+      # Model↔model relationships are emitted as ERD-style association edges
+      # (type "association", FK/PK column handles, macro in data.via) via
+      # AssociationEdgeBuilder — same as the full-graph path — so the frontend
+      # can anchor them to columns and draw cardinality markers. The generic
+      # EdgeBuilder skips pairs covered by an association edge to avoid
+      # duplicates.
+      #
       # @return [Hash]
       def build_payload(visited, adjacency, via_set: nil)
         scoped_nodes, scoped_forward, scoped_reverse = build_scoped_graph(visited, adjacency, via_set: via_set)
 
         pagerank_scores = @transformer.graph.pagerank
+        cycle_edges = cycle_edges_for(visited)
+        association_edges = build_association_edges(visited, cycle_edges, via_set)
 
         node_builder = NodeBuilder.new(
           nodes: scoped_nodes, positions: {}, pagerank: pagerank_scores,
@@ -98,14 +72,47 @@ module Woods
         )
         edge_builder = EdgeBuilder.new(
           edges: scoped_forward, valid_node_ids: visited,
-          cycle_edges: cycle_edges_for(visited)
+          cycle_edges: cycle_edges,
+          exclude_pairs: association_pair_exclusions(association_edges)
         )
 
         {
           'nodes' => node_builder.build,
-          'edges' => edge_builder.build,
+          'edges' => association_edges + edge_builder.build,
           'highest_pagerank' => pagerank_scores.max_by { |_k, v| v }&.first
         }
+      end
+
+      # ERD-style association edges among the visited units. Metadata is sliced
+      # to the visited set first, so AssociationEdgeBuilder's own target-existence
+      # check keeps every edge inside the subgraph.
+      #
+      # @param visited [Set<String>]
+      # @param cycle_edges [Set<Array<String>>]
+      # @param via_set [Set<Symbol>, nil] Optional relationship filter
+      # @return [Array<Hash>]
+      def build_association_edges(visited, cycle_edges, via_set)
+        metadata = @transformer.unit_metadata || {}
+        scoped = visited.each_with_object({}) { |id, acc| acc[id] = metadata[id] if metadata.key?(id) }
+        edges = AssociationEdgeBuilder.new(unit_metadata: scoped, cycle_edges: cycle_edges).build
+        return edges unless via_set
+
+        edges.select { |edge| via_set.include?(edge['data']['via']&.to_sym) }
+      end
+
+      # Pairs already rendered as association edges, in both directions —
+      # Rails associations are declared bidirectionally, so the graph usually
+      # carries a directed edge each way for one relationship. Pairs with no
+      # association metadata (e.g. plain code references between models) are
+      # NOT excluded and still render as generic edges.
+      #
+      # @param association_edges [Array<Hash>]
+      # @return [Set<Array<String>>]
+      def association_pair_exclusions(association_edges)
+        association_edges.each_with_object(Set.new) do |edge, pairs|
+          pairs.add([edge['source'], edge['target']])
+          pairs.add([edge['target'], edge['source']])
+        end
       end
 
       # Scope nodes and edges to the visited set.

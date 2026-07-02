@@ -275,6 +275,8 @@ config.session_exclude_paths = ['/health', '/metrics', '/assets']
 | `svelte_flow_enabled` | Boolean | `false` | Mount the visualization middleware in the Rails app |
 | `svelte_flow_path` | String | `'/woods/visualize'` | URL path where the visualization UI is served |
 | `svelte_flow_repo_url` | String | `nil` | Base repo URL for "View on GitHub" source links (env: `WOODS_SVELTE_FLOW_REPO_URL`) |
+| `svelte_flow_editor_root` | String | `nil` | Absolute local project root for editor deep links — maps container/extraction paths onto the reader's checkout (env: `WOODS_SVELTE_FLOW_EDITOR_ROOT`) |
+| `svelte_flow_base_url` | String | `nil` | Base URL where the visualization middleware is reachable, e.g. `http://localhost:3000` — lets the MCP `visualize` tool return a browsable link (env: `WOODS_SVELTE_FLOW_BASE_URL`) |
 
 ### Export Mode (No Configuration Needed)
 

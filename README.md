@@ -255,7 +255,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 ### Index Server — Reads Pre-Extracted Data (No Rails Required)
 
-29 tools for code lookup, dependency traversal, semantic search, graph analysis, and more (14 always-on + 15 that register based on wiring: 5 operator / 4 feedback / 4 snapshot / 1 session-trace / 1 Notion). Reads static JSON from disk — fast, no Rails boot needed.
+30 tools for code lookup, dependency traversal, semantic search, graph analysis, visualization, and more (15 always-on + 15 that register based on wiring: 5 operator / 4 feedback / 4 snapshot / 1 session-trace / 1 Notion). Reads static JSON from disk — fast, no Rails boot needed.
 
 **Claude Code** — add to `.mcp.json` in your project root:
 
@@ -530,7 +530,7 @@ tmp/woods/
 │                                                                  │
 │  ┌────────────┐    ┌─────────────┐    ┌──────────────────────┐  │
 │  │  Embed     │───>│ Vector Store│    │  MCP Index Server    │  │
-│  │  OpenAI /  │    │ pgvector /  │    │  29 tools            │  │
+│  │  OpenAI /  │    │ pgvector /  │    │  30 tools            │  │
 │  │  Ollama    │    │ Qdrant      │    │  No Rails required   │  │
 │  └────────────┘    └─────────────┘    └──────────────────────┘  │
 │                                                                  │

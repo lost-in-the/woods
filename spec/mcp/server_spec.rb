@@ -17,7 +17,7 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers 14 tools when no optional collaborators are wired' do
+    it 'registers 15 tools when no optional collaborators are wired' do
       # Without operator / feedback_store / snapshot_store / session_store /
       # notion config, the 15 collaborator-dependent tools (5 pipeline_*, 4
       # retrieval_*, 4 snapshot/history, session_trace, notion_sync) are
@@ -25,7 +25,7 @@ RSpec.describe Woods::MCP::Server do
       # they're guaranteed to error just wastes LLM context. Core tools that
       # only need the on-disk index remain advertised.
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(14)
+      expect(tools.size).to eq(15)
     end
 
     it 'registers the always-on tool names when no optional collaborators are wired' do
@@ -34,7 +34,7 @@ RSpec.describe Woods::MCP::Server do
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'domain_clusters', 'pagerank', 'framework',
         'recent_changes', 'reload', 'codebase_retrieve',
-        'trace_flow',
+        'trace_flow', 'visualize',
         'woods_status'
       )
     end
@@ -988,6 +988,53 @@ RSpec.describe Woods::MCP::Server do
         File.write(File.join(tmp_dir, 'flows', 'X_y.json'), 'not json')
         expect(described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')).to be_nil
       end
+    end
+  end
+
+  describe 'tool: visualize' do
+    let(:viz_dir) { Dir.mktmpdir('woods-visualize') }
+    let(:viz_server) do
+      # Copy the fixture so the standalone HTML lands in a throwaway dir.
+      FileUtils.cp_r(File.join(fixture_dir, '.'), viz_dir)
+      described_class.build(index_dir: viz_dir, response_format: :json)
+    end
+
+    after { FileUtils.remove_entry(viz_dir) if File.directory?(viz_dir) }
+
+    it 'writes a self-contained HTML file and returns its path and stats' do
+      response = call_tool(viz_server, 'visualize', nodes: %w[Post Comment])
+      data = parse_response(response)
+
+      expect(File.exist?(data['file_path'])).to be(true)
+      expect(data['file_path']).to end_with('.html')
+      expect(data['nodes']).to eq(2)
+      expect(data['dropped']).to eq([])
+      expect(File.read(data['file_path'])).to include('window.__WOODS_SUBGRAPH__')
+    end
+
+    it 'omits the url when no base url is configured' do
+      data = parse_response(call_tool(viz_server, 'visualize', nodes: %w[Post]))
+      expect(data).not_to have_key('url')
+    end
+
+    it 'returns the server-mode url when a base url is configured' do
+      config = double('config', svelte_flow_base_url: 'http://localhost:3000',
+                                svelte_flow_path: '/woods/visualize',
+                                svelte_flow_repo_url: nil, svelte_flow_editor_root: nil)
+      allow(Woods).to receive(:configuration).and_return(config)
+
+      data = parse_response(call_tool(viz_server, 'visualize', nodes: %w[Post Comment], depth: 1))
+      expect(data['url']).to eq('http://localhost:3000/woods/visualize?nodes=Post,Comment&depth=1')
+    end
+
+    it 'reports unknown identifiers in dropped' do
+      data = parse_response(call_tool(viz_server, 'visualize', nodes: %w[Post Ghost]))
+      expect(data['dropped']).to eq(['Ghost'])
+    end
+
+    it 'returns an MCP error when none of the nodes exist' do
+      response = call_tool(viz_server, 'visualize', nodes: %w[Ghost])
+      expect(response.error?).to be(true)
     end
   end
 

@@ -7,6 +7,7 @@ require 'fileutils'
 require_relative 'transformer'
 require_relative 'subgraph_scoper'
 require_relative 'source_links'
+require_relative 'unit_source'
 require_relative 'standalone_renderer'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
@@ -196,21 +197,22 @@ module Woods
       # @param node_ids [Array<String>]
       # @return [Hash<String, Hash>]
       def build_sources(transformer, node_ids)
-        # Configuration may be unset outside a booted host; degrade to no repo link.
+        # Configuration may be unset outside a booted host; degrade to no links.
         repo_url = Woods.configuration&.svelte_flow_repo_url
+        editor_root = Woods.configuration&.svelte_flow_editor_root
         git_sha = manifest_git_sha
 
         node_ids.each_with_object({}) do |id, acc|
           unit = transformer.unit_metadata[id]
           next unless unit
 
-          file_path = unit['file_path']
-          acc[id] = {
+          # Live file when the export runs where the app lives; snapshot otherwise.
+          source = UnitSource.resolve(unit)
+          acc[id] = source.merge(
             'identifier' => id,
-            'filePath' => file_path,
-            'sourceCode' => unit['source_code'],
-            'blobUrl' => SourceLinks.github_blob_url(file_path, repo_url: repo_url, git_sha: git_sha)
-          }
+            'blobUrl' => SourceLinks.github_blob_url(source['filePath'], repo_url: repo_url, git_sha: git_sha),
+            'editorUrl' => SourceLinks.editor_url(source['filePath'], editor_root: editor_root)
+          )
         end
       end
 

@@ -52,6 +52,12 @@ body {
   transform: translateX(0);
 }
 
+/* When source is shown, widen the panel to a readable code width and let the
+   code flow at full height inside the panel's own scroll. */
+.detail-panel.source-open {
+  width: min(560px, 65vw);
+}
+
 .detail-panel h3 {
   font-size: 14px;
   margin-bottom: 12px;
@@ -112,6 +118,21 @@ body {
   transition: opacity 0.15s ease;
 }
 
+/* Relationship pills on association edges (belongs_to, has_many, ...). */
+:root {
+  --xy-edge-label-background-color: #1e293b;
+  --xy-edge-label-color: #94a3b8;
+}
+
+.svelte-flow__edge-label {
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 5px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  opacity: 0.9;
+}
+
 .source-header {
   display: flex;
   align-items: center;
@@ -149,16 +170,15 @@ body {
 }
 
 .source-code {
-  max-height: 320px;
-  overflow: auto;
+  overflow-x: auto;
   margin: 6px 0 0;
   padding: 8px;
   background: var(--bg-code, #0b1120);
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.55;
   color: var(--text-primary);
   white-space: pre;
 }
@@ -169,6 +189,15 @@ body {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* Ruby syntax tokens (see frontend/src/lib/highlight.js). */
+.source-code .tok-kw { color: #c084fc; }
+.source-code .tok-const { color: #7dd3fc; }
+.source-code .tok-str { color: #86efac; }
+.source-code .tok-sym { color: #fbbf24; }
+.source-code .tok-com { color: #64748b; font-style: italic; }
+.source-code .tok-var { color: #f0abfc; }
+.source-code .tok-num { color: #fda4af; }
 
 .detail-column-row {
   display: flex;

@@ -59,6 +59,10 @@
   // Order→Account where Order is in the right column), we swap source/target and their
   // handles/markers so the edge exits the inner side of each node toward center.
   const visibleEdges = $derived.by(() => {
+    // Per-side counters so parallel edges get distinct smoothstep offsets and
+    // their vertical runs separate instead of stacking on one line.
+    const sideCounts = { left: 0, right: 0 };
+
     return allEdges
       .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
       .filter((e) => e.source === centerNodeId || e.target === centerNodeId)
@@ -95,14 +99,14 @@
         let markerEnd;
         if (isAssociation && via) {
           if (via === 'has_many') {
-            markerStart = 'url(#marker-crow-foot)';
-            markerEnd = 'url(#marker-bar)';
+            markerStart = 'marker-crow-foot';
+            markerEnd = 'marker-bar';
           } else if (via === 'has_and_belongs_to_many') {
-            markerStart = 'url(#marker-crow-foot)';
-            markerEnd = 'url(#marker-crow-foot)';
+            markerStart = 'marker-crow-foot';
+            markerEnd = 'marker-crow-foot';
           } else {
             // belongs_to, has_one: bar on target (PK) end only
-            markerEnd = 'url(#marker-bar)';
+            markerEnd = 'marker-bar';
           }
 
           // Swap markers when edge direction was flipped
@@ -119,6 +123,11 @@
           targetHandle = needsSwap ? e.data?.sourceHandle : e.data?.targetHandle;
         }
 
+        // Spread parallel edges: each edge on a side of the center gets a
+        // progressively larger smoothstep offset so vertical runs don't stack.
+        const side = target === centerNodeId ? 'left' : 'right';
+        const lane = sideCounts[side]++;
+
         const edge = {
           ...e,
           source,
@@ -126,7 +135,12 @@
           type: 'smoothstep',
           animated: false,
           style,
+          pathOptions: { borderRadius: 6, offset: 14 + (lane % 10) * 12 },
         };
+
+        // Label association edges with their relationship (belongs_to,
+        // has_many, ...) — the cardinality is the point of a model graph.
+        if (isAssociation && via) edge.label = via;
 
         if (markerStart) edge.markerStart = markerStart;
         if (markerEnd) edge.markerEnd = markerEnd;

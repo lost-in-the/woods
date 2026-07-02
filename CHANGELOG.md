@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     **query-path emphasis** (depth-pulled neighbors are dimmed so the queried set stands out).
 - **New config: `svelte_flow_repo_url`** (env `WOODS_SVELTE_FLOW_REPO_URL`) — base repo URL for
   "View on GitHub" source links.
+- **MCP `visualize` tool** (index server, always-on — the 15th unconditional tool). Renders a set
+  of units as an interactive graph without leaving MCP: writes the self-contained HTML in-process
+  and returns its path; also returns the live `?nodes=` URL when the new **`svelte_flow_base_url`**
+  config (env `WOODS_SVELTE_FLOW_BASE_URL`) is set. Falls back to the system temp dir when the
+  index dir is a read-only mount.
+- **Live source in the detail panel.** The source endpoint (and standalone export) now reads the
+  unit's file from disk — keyed off the extracted path, never a client-supplied one — so the panel
+  tracks the working tree instead of the extraction snapshot (which remains the fallback, flagged
+  `live: false`). Leading `annotate` schema blocks are stripped since columns are rendered
+  structurally. Ruby syntax highlighting (self-contained tokenizer, no CDN) and a widened panel
+  make longer files readable.
+- **New config: `svelte_flow_editor_root`** (env `WOODS_SVELTE_FLOW_EDITOR_ROOT`) — absolute local
+  project root for `vscode://` editor links; maps container/extraction paths onto the reader's
+  checkout. Links are built server-side in `SourceLinks` alongside the GitHub URL.
+- **ERD-grade subgraph edges.** `/api/subgraph` and `/api/graph/neighbors` now emit model↔model
+  relationships as association edges (FK→PK column handles, macro in `data.via`, cardinality
+  markers) like the full-graph path, deduplicated against generic edges. Association edges carry a
+  relationship label pill (`belongs_to`, `has_many`, …) on canvas, and parallel edges get spread
+  smoothstep offsets so they no longer overlap.
 
 ### Changed
 

@@ -1,6 +1,6 @@
 # Woods — Agent Instructions
 
-Woods is a Ruby gem that extracts structured data from Rails applications via runtime introspection and serves it to AI tools via MCP (Model Context Protocol). It boots the Rails app, queries `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs, then writes JSON that AI tools read through two MCP servers: an **Index Server** (29 tools, reads pre-extracted JSON, no Rails required) and a **Console Server** (31 tools, bridges to a live Rails process for real data queries).
+Woods is a Ruby gem that extracts structured data from Rails applications via runtime introspection and serves it to AI tools via MCP (Model Context Protocol). It boots the Rails app, queries `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs, then writes JSON that AI tools read through two MCP servers: an **Index Server** (30 tools, reads pre-extracted JSON, no Rails required) and a **Console Server** (31 tools, bridges to a live Rails process for real data queries).
 
 ## Key Documentation
 

@@ -5,6 +5,7 @@ require 'set'
 require_relative 'transformer'
 require_relative 'subgraph_scoper'
 require_relative 'source_links'
+require_relative 'unit_source'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
 
@@ -179,12 +180,15 @@ module Woods
         unit = transformer.unit_metadata[identifier]
         return not_found unless unit
 
-        file_path = unit['file_path'] || unit[:file_path]
+        # Live file first (identifier-resolved path), extraction snapshot as fallback.
+        source = UnitSource.resolve(unit)
         json_response(
-          'identifier' => identifier,
-          'filePath' => file_path,
-          'sourceCode' => unit['source_code'] || unit[:source_code],
-          'blobUrl' => github_blob_url(file_path)
+          source.merge(
+            'identifier' => identifier,
+            'blobUrl' => github_blob_url(source['filePath']),
+            'editorUrl' => SourceLinks.editor_url(source['filePath'],
+                                                  editor_root: Woods.configuration&.svelte_flow_editor_root)
+          )
         )
       end
 

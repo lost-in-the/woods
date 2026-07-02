@@ -131,6 +131,7 @@ module Woods
                   :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
                   :svelte_flow_enabled, :svelte_flow_path, :svelte_flow_repo_url,
+                  :svelte_flow_editor_root, :svelte_flow_base_url,
                   :console_blocked_tables, :console_disabled_scanner_patterns,
                   :console_credential_defense_enabled,
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
@@ -184,6 +185,14 @@ module Woods
       # Base repo URL for GitHub "view source" deep links (e.g.
       # 'https://github.com/org/app'). Nil disables the GitHub link.
       @svelte_flow_repo_url = ENV.fetch('WOODS_SVELTE_FLOW_REPO_URL', nil)
+      # Absolute local project root for editor deep links (e.g.
+      # '/Users/me/work/app') — maps container/extraction paths onto the
+      # reader's checkout. Nil falls back to the stored absolute path.
+      @svelte_flow_editor_root = ENV.fetch('WOODS_SVELTE_FLOW_EDITOR_ROOT', nil)
+      # Base URL where the visualization middleware is reachable (e.g.
+      # 'http://localhost:3000') — lets the MCP `visualize` tool return a
+      # browsable link. Nil means no URL is fabricated.
+      @svelte_flow_base_url = ENV.fetch('WOODS_SVELTE_FLOW_BASE_URL', nil)
       @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true
