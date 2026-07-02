@@ -855,7 +855,11 @@ module Woods
         entries = JSON.parse(File.read(index_path))
         counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
         chunks += entries.sum { |e| e['chunk_count'].to_i }
-      rescue JSON::ParserError
+      rescue JSON::ParserError => e
+        # An unreadable index silently drops that whole type from the manifest
+        # counts — warn rather than undercount without a trace.
+        type = File.basename(File.dirname(index_path))
+        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in manifest counts: #{e.message}")
         next
       end
 
