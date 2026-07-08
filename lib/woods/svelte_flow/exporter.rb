@@ -9,6 +9,7 @@ require_relative 'subgraph_scoper'
 require_relative 'source_links'
 require_relative 'unit_source'
 require_relative 'standalone_renderer'
+require_relative 'mermaid_renderer'
 require_relative '../dependency_graph'
 require_relative '../graph_analyzer'
 require_relative '../filename_utils'
@@ -143,18 +144,51 @@ module Woods
       # @return [Hash] { path:, nodes:, edges:, dropped: }
       # @raise [Woods::ExtractionError] if none of the requested nodes exist
       def export_standalone(nodes:, depth: 0, via: nil, output_path: nil)
+        transformer, payload, known, dropped = scope(nodes, depth, via)
+        html = render_standalone(transformer, payload, known)
+        path = write_standalone(html, output_path, known)
+
+        { path: path, nodes: payload['nodes'].size, edges: payload['edges'].size, dropped: dropped }
+      end
+
+      # Export a query-scoped subgraph as a Mermaid `erDiagram` string — a text
+      # output that renders inline in GitHub, Markdown, and chat (no file/server).
+      #
+      # @param nodes [Array<String>] Seed identifiers to render
+      # @param depth [Integer] Extra BFS hops around the set
+      # @param via [Array<String>, nil] Relationship filter
+      # @param output_path [String, nil] When given, also writes the .mmd file
+      # @return [Hash] { mermaid:, path:, nodes:, edges:, dropped: }
+      # @raise [Woods::ExtractionError] if none of the requested nodes exist
+      def export_mermaid(nodes:, depth: 0, via: nil, output_path: nil)
+        _transformer, payload, _known, dropped = scope(nodes, depth, via)
+        mermaid = MermaidRenderer.new.render(payload)
+
+        path = nil
+        if output_path
+          FileUtils.mkdir_p(File.dirname(output_path))
+          File.write(output_path, mermaid)
+          path = output_path
+        end
+
+        { mermaid: mermaid, path: path, nodes: payload['nodes'].size, edges: payload['edges'].size, dropped: dropped }
+      end
+
+      private
+
+      # Resolve seeds and build the scoped payload shared by every export format.
+      #
+      # @return [Array(Transformer, Hash, Array<String>, Array<String>)]
+      #   transformer, payload, known, dropped
+      # @raise [Woods::ExtractionError] if none of the requested nodes exist
+      def scope(nodes, depth, via)
         transformer = build_transformer
         seeds, known = resolve_seeds(transformer, nodes)
         raise Woods::ExtractionError, "None of the requested nodes exist: #{seeds.join(', ')}" if known.empty?
 
         payload = SubgraphScoper.new(transformer).payload(seeds: known, depth: depth, via_set: build_via_set(via))
-        html = render_standalone(transformer, payload, known)
-        path = write_standalone(html, output_path, known)
-
-        { path: path, nodes: payload['nodes'].size, edges: payload['edges'].size, dropped: seeds - known }
+        [transformer, payload, known, seeds - known]
       end
-
-      private
 
       # Normalize seed identifiers and split into known vs unknown.
       #

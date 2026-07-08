@@ -298,4 +298,32 @@ RSpec.describe Woods::SvelteFlow::Exporter do
       expect(File.exist?(out)).to be(true)
     end
   end
+
+  describe '#export_mermaid' do
+    before do
+      allow(Woods).to receive(:configuration)
+        .and_return(double('config', svelte_flow_repo_url: nil, svelte_flow_editor_root: nil))
+    end
+
+    it 'returns a Mermaid erDiagram string with the requested entities' do
+      stats = described_class.new(index_dir: tmpdir).export_mermaid(nodes: %w[User Post])
+      expect(stats[:mermaid]).to start_with("erDiagram\n")
+      expect(stats[:mermaid]).to include('User {')
+      expect(stats[:nodes]).to eq(2)
+      expect(stats[:path]).to be_nil
+    end
+
+    it 'writes a .mmd file when an output path is given' do
+      out = File.join(tmpdir, 'graph.mmd')
+      stats = described_class.new(index_dir: tmpdir).export_mermaid(nodes: %w[User], output_path: out)
+      expect(stats[:path]).to eq(out)
+      expect(File.read(out)).to start_with("erDiagram\n")
+    end
+
+    it 'reports dropped identifiers and raises when none exist' do
+      exporter = described_class.new(index_dir: tmpdir)
+      expect(exporter.export_mermaid(nodes: %w[User Ghost])[:dropped]).to eq(['Ghost'])
+      expect { exporter.export_mermaid(nodes: %w[Ghost]) }.to raise_error(Woods::ExtractionError)
+    end
+  end
 end

@@ -28,10 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New config: `svelte_flow_repo_url`** (env `WOODS_SVELTE_FLOW_REPO_URL`) — base repo URL for
   "View on GitHub" source links.
 - **MCP `visualize` tool** (index server, always-on — the 15th unconditional tool). Renders a set
-  of units as an interactive graph without leaving MCP: writes the self-contained HTML in-process
-  and returns its path; also returns the live `?nodes=` URL when the new **`svelte_flow_base_url`**
-  config (env `WOODS_SVELTE_FLOW_BASE_URL`) is set. Falls back to the system temp dir when the
-  index dir is a read-only mount.
+  of units as a graph without leaving MCP: `format: "html"` (default) writes the self-contained HTML
+  in-process and returns its path (plus the live `?nodes=` URL when the new **`svelte_flow_base_url`**
+  config / env `WOODS_SVELTE_FLOW_BASE_URL` is set; falls back to the system temp dir on a read-only
+  index mount), and `format: "mermaid"` returns an inline `erDiagram` block.
+- **Mermaid `erDiagram` export.** `woods:map NODES=… FORMAT=mermaid` writes a `.mmd` file, and the
+  MCP `visualize` tool returns an inline Mermaid block — a text output that renders in GitHub,
+  Markdown, and chat with no file or server. Model relationships use crow's-foot cardinality
+  (`}o--||` FK→PK, `}o--o{` for `has_and_belongs_to_many`); non-association code dependencies render
+  as dashed non-identifying lines, labeled with the macro.
 - **Live source in the detail panel.** The source endpoint (and standalone export) now reads the
   unit's file from disk — keyed off the extracted path, never a client-supplied one — so the panel
   tracks the working tree instead of the extraction snapshot (which remains the fallback, flagged

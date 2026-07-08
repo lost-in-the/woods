@@ -673,7 +673,8 @@ namespace :woods do
     puts "  Output:   #{stats[:output_dir]}"
   end
 
-  desc 'Map the terrain — full Svelte Flow export, or a self-contained HTML for NODES=A,B,C'
+  desc 'Map the terrain — full Svelte Flow export, or a scoped subgraph for NODES=A,B,C ' \
+       '(FORMAT=html|mermaid, DEPTH=n, VIA=belongs_to,...)'
   task map: :environment do
     nodes = ENV.fetch('NODES', '').split(',').map(&:strip).reject(&:empty?)
 
@@ -688,15 +689,23 @@ namespace :woods do
     svelte_flow_dir = ENV.fetch('SVELTE_FLOW_OUTPUT', File.join(output_dir.to_s, 'svelte_flow'))
     depth = ENV.fetch('DEPTH', '0').to_i
     via = ENV.fetch('VIA', '').split(',').map(&:strip).reject(&:empty?)
+    format = ENV.fetch('FORMAT', 'html').strip.downcase
+    base = nodes.first.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
 
     via_note = via.empty? ? '' : ", via #{via.join(', ')}"
-    puts 'Rendering a self-contained subgraph map...'
+    puts "Rendering a scoped subgraph map (#{format})..."
     puts "  Nodes: #{nodes.join(', ')}  (depth #{depth}#{via_note})"
     puts
 
     exporter = Woods::SvelteFlow::Exporter.new(index_dir: output_dir.to_s, output_dir: svelte_flow_dir)
     begin
-      stats = exporter.export_standalone(nodes: nodes, depth: depth, via: via)
+      stats =
+        if format == 'mermaid'
+          exporter.export_mermaid(nodes: nodes, depth: depth, via: via,
+                                  output_path: File.join(svelte_flow_dir, "subgraph-#{base}.mmd"))
+        else
+          exporter.export_standalone(nodes: nodes, depth: depth, via: via)
+        end
     rescue Woods::ExtractionError => e
       warn "ERROR: #{e.message}"
       exit 1
@@ -708,7 +717,11 @@ namespace :woods do
     puts "  Dropped: #{stats[:dropped].join(', ')}" unless stats[:dropped].empty?
     puts "  Output:  #{stats[:path]}"
     puts
-    puts "Open it in a browser: file://#{stats[:path]}"
+    if format == 'mermaid'
+      puts 'Paste it into any Mermaid renderer (GitHub, Markdown, ...).'
+    else
+      puts "Open it in a browser: file://#{stats[:path]}"
+    end
   end
 
   desc 'Export extraction data to a self-contained Obsidian vault'

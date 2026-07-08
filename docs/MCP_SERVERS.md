@@ -134,7 +134,7 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 
 | Tool | Description |
 |------|-------------|
-| `visualize` | Render a set of units (a query result, blast radius, or flow) as an interactive graph. Always writes a self-contained HTML file and returns its path; also returns the live `/woods/visualize?nodes=…` URL when `svelte_flow_base_url` (env `WOODS_SVELTE_FLOW_BASE_URL`) is configured. |
+| `visualize` | Render a set of units (a query result, blast radius, or flow) as a graph. `format:"html"` (default) writes a self-contained HTML file and returns its path (plus the live `/woods/visualize?nodes=…` URL when `svelte_flow_base_url` / env `WOODS_SVELTE_FLOW_BASE_URL` is configured); `format:"mermaid"` returns an `erDiagram` block that renders inline in GitHub/Markdown/chat. |
 
 #### Semantic Search (1)
 

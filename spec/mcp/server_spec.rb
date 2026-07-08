@@ -1036,6 +1036,13 @@ RSpec.describe Woods::MCP::Server do
       response = call_tool(viz_server, 'visualize', nodes: %w[Ghost])
       expect(response.error?).to be(true)
     end
+
+    it 'returns an inline Mermaid erDiagram block when format is mermaid' do
+      text = response_text(call_tool(viz_server, 'visualize', nodes: %w[Post Comment], format: 'mermaid'))
+      expect(text).to include('```mermaid')
+      expect(text).to include('erDiagram')
+      expect(text).to match(/\d+ nodes, \d+ edges/)
+    end
   end
 
   describe '.coerce_integer' do

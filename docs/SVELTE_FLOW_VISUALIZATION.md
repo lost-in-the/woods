@@ -53,6 +53,15 @@ bundle exec rake woods:map NODES=Order DEPTH=1 VIA=belongs_to
 
 The scoped graph and the sources for those units are inlined into one file (written under `tmp/woods/svelte_flow/`), so it opens over `file://` with no server and no network — ideal for CI artifacts, agents, and sharing. The task prints the path. Without `NODES=`, `woods:map` performs the full JSON export above.
 
+Pass `FORMAT=mermaid` to emit a Mermaid `erDiagram` (`.mmd`) instead of HTML — a text format that renders inline in GitHub, Markdown, and chat, with no file to open:
+
+```bash
+bundle exec rake woods:map NODES=Order,Account FORMAT=mermaid
+bundle exec rake woods:map NODES=Order DEPTH=1 FORMAT=mermaid
+```
+
+Model relationships render with crow's-foot cardinality (`}o--||` FK→PK, `}o--o{` for `has_and_belongs_to_many`); non-association code dependencies render as dashed, non-identifying lines. The macro (`belongs_to`, `has_many`, …) is the edge label.
+
 ### Server Mode
 
 Mount an interactive visualization page in your Rails app:
