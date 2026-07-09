@@ -76,6 +76,47 @@ RSpec.describe Woods::UpdateCheck do
       expect(result[:update_available]).to be(false)
     end
 
+    it 'negative-caches a failed probe and does not re-fetch within FAILURE_TTL' do
+      calls = 0
+      fetcher = lambda do |_url|
+        calls += 1
+        raise SocketError, 'offline'
+      end
+
+      described_class.check(current: '1.5.0', cache_path: cache_path, now: now, fetcher: fetcher)
+      described_class.check(current: '1.5.0', cache_path: cache_path, now: now + 60, fetcher: fetcher)
+
+      expect(calls).to eq(1)
+    end
+
+    it 're-probes after FAILURE_TTL elapses' do
+      calls = 0
+      fetcher = lambda do |_url|
+        calls += 1
+        nil
+      end
+
+      described_class.check(current: '1.5.0', cache_path: cache_path, now: now, fetcher: fetcher)
+      described_class.check(
+        current: '1.5.0', cache_path: cache_path,
+        now: now + described_class::FAILURE_TTL + 1, fetcher: fetcher
+      )
+
+      expect(calls).to eq(2)
+    end
+
+    it 'ignores a corrupt cache whose JSON is not an object (degrades, never raises)' do
+      File.write(cache_path, '[]')
+
+      result = nil
+      expect do
+        result = described_class.check(
+          current: '1.5.0', cache_path: cache_path, now: now, fetcher: ->(_url) {}
+        )
+      end.not_to raise_error
+      expect(result[:update_available]).to be(false)
+    end
+
     it 'is a no-op when disabled via WOODS_NO_UPDATE_CHECK' do
       calls = 0
       allow(ENV).to receive(:[]).and_call_original
@@ -129,6 +170,15 @@ RSpec.describe Woods::UpdateCheck do
 
       expect(msg).to include('some_tool')
       expect(msg).to include('bundle update woods')
+    end
+
+    it 'still produces guidance when the cache is corrupt (non-object JSON)' do
+      File.write(cache_path, '42')
+
+      msg = nil
+      expect { msg = described_class.tool_not_found_message('x', current: '1.5.0', cache_path: cache_path) }
+        .not_to raise_error
+      expect(msg).to include('x').and include('bundle update woods')
     end
   end
 end

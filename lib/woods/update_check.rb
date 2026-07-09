@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require 'fileutils'
 require 'json'
 require 'time'
 require 'tmpdir'
 require_relative 'version'
+require_relative 'atomic_file'
 
 module Woods
   # Best-effort "is a newer Woods release available?" check.
@@ -31,8 +31,12 @@ module Woods
   module UpdateCheck
     # RubyGems endpoint returning +{ "version": "x.y.z" }+ for the latest release.
     RUBYGEMS_LATEST_URL = 'https://rubygems.org/api/v1/versions/woods/latest.json'
-    # How long a cached result is trusted before a re-fetch is attempted.
+    # How long a successful result is trusted before a re-fetch is attempted.
     CACHE_TTL = 24 * 60 * 60
+    # A *failed* probe is cached for a shorter window, so an unreachable or slow
+    # RubyGems throttles retries (rather than re-blocking on every call) without
+    # hiding a real update for a full day once connectivity returns.
+    FAILURE_TTL = 60 * 60
     # Open/read timeout for the (best-effort) network probe, in seconds.
     HTTP_TIMEOUT = 1.5
 
@@ -52,9 +56,7 @@ module Woods
               now: Time.now, fetcher: method(:fetch_latest_version))
       return result(current, nil) if disabled?
 
-      latest = cached_latest(cache_path, ttl, now)
-      latest ||= refresh(cache_path, now, fetcher)
-      result(current, latest)
+      result(current, cached_or_refreshed_latest(cache_path, ttl, now, fetcher))
     end
 
     # The +server.update+ sub-hash for +woods_status+. Keys are snake_case to
@@ -103,37 +105,56 @@ module Woods
       false
     end
 
-    # @return [String, nil] cached latest version if the cache is within TTL
-    def cached_latest(cache_path, ttl, now)
-      data = read_cache(cache_path)
-      return nil unless data
+    # Return the cached latest version when the cache entry is still fresh
+    # (a shorter window applies to a previously-failed probe), otherwise fetch
+    # once and cache the outcome — success *or* failure.
+    #
+    # @return [String, nil]
+    def cached_or_refreshed_latest(cache_path, ttl, now, fetcher)
+      entry = read_cache(cache_path)
+      return entry['latest'] if entry && fresh_entry?(entry, ttl, now)
 
-      checked_at = data['checked_at']
-      return nil unless checked_at.is_a?(Numeric) && (now.to_i - checked_at) < ttl
-
-      data['latest']
+      refresh(cache_path, now, fetcher)
     end
 
-    # Fetch, persist, and return the latest version (nil on any failure).
+    # A success entry is trusted for +ttl+; a failure entry (nil latest) only
+    # for {FAILURE_TTL}.
+    def fresh_entry?(entry, ttl, now)
+      checked_at = entry['checked_at']
+      return false unless checked_at.is_a?(Numeric)
+
+      effective_ttl = entry['latest'] ? ttl : FAILURE_TTL
+      (now.to_i - checked_at) < effective_ttl
+    end
+
+    # Fetch and cache the outcome. A nil latest (unreachable RubyGems, non-2xx,
+    # unparseable body) is cached too, so repeated failures are throttled by
+    # {FAILURE_TTL} instead of re-probing on every call.
+    #
+    # @return [String, nil] the latest version, or nil on failure
     def refresh(cache_path, now, fetcher)
       latest = fetcher.call(RUBYGEMS_LATEST_URL)
-      write_cache(cache_path, latest, now) if latest
+      write_cache(cache_path, latest, now)
       latest
     rescue StandardError
+      write_cache(cache_path, nil, now)
       nil
     end
 
+    # @return [Hash, nil] the parsed cache entry, or nil if absent, unreadable,
+    #   or not a JSON object (guards the "never raise" contract against a
+    #   corrupt/tampered cache holding e.g. +[]+ or +42+)
     def read_cache(cache_path)
       return nil unless File.exist?(cache_path)
 
-      JSON.parse(File.read(cache_path))
+      parsed = JSON.parse(File.read(cache_path))
+      parsed.is_a?(Hash) ? parsed : nil
     rescue StandardError
       nil
     end
 
     def write_cache(cache_path, latest, now)
-      FileUtils.mkdir_p(File.dirname(cache_path))
-      File.write(cache_path, JSON.generate('latest' => latest, 'checked_at' => now.to_i))
+      Woods::AtomicFile.write(cache_path, JSON.generate('latest' => latest, 'checked_at' => now.to_i))
     rescue StandardError
       nil
     end
