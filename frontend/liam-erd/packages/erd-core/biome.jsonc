@@ -1,0 +1,23 @@
+{
+  "extends": "//",
+  "root": false,
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noNodejsModules": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["*.config.ts", "*.config.js"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off"
+          }
+        }
+      }
+    }
+  ]
+}

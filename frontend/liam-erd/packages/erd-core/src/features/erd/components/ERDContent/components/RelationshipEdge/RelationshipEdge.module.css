@@ -1,0 +1,20 @@
+.edge {
+  stroke: var(--pane-border-hover);
+  stroke-width: 1px;
+  transition: stroke 0.3s var(--default-timing-function);
+}
+
+:global([data-loading='true']) .edge {
+  stroke: transparent;
+  opacity: 0;
+}
+
+/* Connected to hovered node — neutral color */
+.edge.hovered {
+  stroke: var(--overlay-50, #94a3b8);
+}
+
+/* Connected to active/selected node — bright accent */
+.edge.highlighted {
+  stroke: var(--node-layout);
+}

@@ -1,0 +1,12 @@
+.outerWrapper {
+  border-bottom: 1px solid var(--global-border);
+}
+
+.contentWrapper {
+  border-radius: var(--border-radius-smbase);
+  border: 1px solid var(--pane-border);
+  background: var(--global-background);
+  width: 92%;
+  height: 333px;
+  margin: var(--spacing-3);
+}

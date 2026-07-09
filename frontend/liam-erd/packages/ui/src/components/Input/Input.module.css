@@ -1,0 +1,124 @@
+.wrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  font-size: var(--font-size-4);
+  color: var(--color-white-alpha-100);
+  background-color: var(--global-background);
+  border: solid 1px var(--pane-border);
+  transition: border 0.3s var(--default-timing-function);
+}
+
+.wrapper:hover {
+  border: 1px solid var(--pane-border-hover);
+}
+
+.wrapper:focus-within {
+  outline: 1px solid var(--pane-border-hover);
+  outline-offset: -1px;
+}
+
+.disabled {
+  cursor: not-allowed;
+  background-color: var(--overlay-5);
+}
+
+.disabled.wrapper:hover {
+  border: solid 1px var(--pane-border);
+}
+
+.readOnly {
+  cursor: not-allowed;
+  background-color: var(--overlay-5);
+}
+
+.readOnly.wrapper:hover {
+  border: solid 1px var(--pane-border);
+}
+
+.error {
+  border: solid 1px var(--danger-default);
+}
+
+.error.wrapper:hover {
+  border: solid 1px var(--danger-hover);
+}
+
+.error.wrapper:focus-within {
+  outline: 1px solid var(--danger-default);
+}
+
+.md {
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--border-radius-md);
+}
+
+.sm {
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-3);
+  border-radius: var(--border-radius-base);
+}
+
+.xs {
+  gap: var(--spacing-half);
+  padding: var(--spacing-half) var(--spacing-1);
+  font-size: var(--font-size-2);
+  border-radius: var(--border-radius-sm);
+}
+
+.icon {
+  display: grid;
+  place-content: center;
+  color: var(--color-white-alpha-50);
+}
+
+.md .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.sm .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.xs .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.input {
+  width: 100%;
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--color-white-alpha-30);
+  transition: color 0.3s var(--default-timing-function);
+}
+
+.input:hover::placeholder {
+  color: var(--color-white-alpha-50);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+.input:disabled:hover::placeholder {
+  color: var(--color-white-alpha-30);
+}
+
+.input:read-only {
+  cursor: not-allowed;
+}
+
+.input:read-only:hover::placeholder {
+  color: var(--color-white-alpha-30);
+}
+
+.alignRight {
+  text-align: right;
+}

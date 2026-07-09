@@ -1,0 +1,16 @@
+.diffIcon {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.addedIcon {
+  color: var(--color-green-400);
+}
+
+.removedIcon {
+  color: var(--color-red-500);
+}
+
+.modifiedIcon {
+  color: #ffd748;
+}

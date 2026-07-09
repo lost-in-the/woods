@@ -1,0 +1,48 @@
+.wrapper {
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--spacing-1);
+  align-items: center;
+}
+
+.label {
+  color: var(--overlay-60);
+  font-size: var(--font-size-3);
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+}
+
+.content {
+  width: 11rem;
+}
+
+.sectionLabel {
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--overlay-60);
+  font-size: var(--font-size-2);
+  font-weight: 500;
+}
+
+.itemContent {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex: 1;
+}
+
+.colorDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.itemLabel {
+  flex: 1;
+}
+
+.checkIcon {
+  color: var(--overlay-60);
+  flex-shrink: 0;
+}

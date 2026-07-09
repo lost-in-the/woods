@@ -1,0 +1,7 @@
+@import url('@liam-hq/ui/src/styles/globals.css');
+@import './variables.css';
+
+/* https://github.com/radix-ui/primitives/issues/2908 */
+[data-radix-popper-content-wrapper] {
+  font-family: var(--main-font);
+}

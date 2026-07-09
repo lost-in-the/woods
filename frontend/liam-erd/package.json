@@ -1,0 +1,10 @@
+{
+  "name": "woods-liam-erd",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter @liam-hq/schema build && pnpm --filter @liam-hq/cli build:vite",
+    "build:schema": "pnpm --filter @liam-hq/schema build",
+    "build:vite": "pnpm --filter @liam-hq/cli build:vite",
+    "dev": "pnpm --filter @liam-hq/cli dev:app"
+  }
+}

@@ -1,0 +1,32 @@
+/**
+ * Do not edit directly, this file was auto-generated.
+ * Generated on Fri, 09 May 2025 07:06:12 GMT
+ */
+
+:root {
+  --font-size-1: 10px;
+  --font-size-2: 11px;
+  --font-size-3: 12px;
+  --font-size-4: 13px;
+  --font-size-5: 14px;
+  --font-size-6: 16px;
+  --font-size-7: 18px;
+  --font-size-8: 20px;
+  --font-size-9: 22px;
+  --font-size-10: 24px;
+  --font-size-14: 32px;
+  --font-size-16: 40px;
+  --font-size-18: 48px;
+  --font-size-5half: 15px;
+  --text-weight-en-light: Light;
+  --text-weight-en-regular: Regular;
+  --text-weight-en-medium: Medium;
+  --text-weight-en-semibold: SemiBold;
+  --text-weight-en-bold: Bold;
+  --text-weight-ja-regular: W3;
+  --text-weight-ja-bold: W6;
+  --main-font: Inter;
+  --message-font: Montserrat;
+  --main-font-ja: Hiragino Sans;
+  --code-font: IBM Plex Mono;
+}

@@ -1,0 +1,18 @@
+.wrapper {
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--spacing-1);
+  align-items: center;
+}
+
+.label {
+  color: var(--overlay-60);
+  font-size: var(--font-size-3);
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+}
+
+.content {
+  width: 9.75rem;
+}

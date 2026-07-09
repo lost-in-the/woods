@@ -1,0 +1,167 @@
+.wrapper {
+  min-width: 60px;
+  display: inline-flex;
+  place-content: center;
+  place-items: center;
+  font-weight: 500;
+  line-height: normal;
+  color: var(--button-primary-foreground);
+}
+
+.wrapper:focus-visible {
+  outline: 2px solid var(--primary-accent);
+  outline-offset: 2px;
+  box-shadow: 0px 0px 60px 8px var(--primary-overlay-40);
+}
+
+.icon {
+  display: flex;
+  place-content: center;
+  place-items: center;
+}
+
+.disabled {
+  color: var(--button-disabled-foreground);
+  background: var(--button-disabled-background);
+  border: 1px solid var(--button-border);
+}
+
+.disabled.outlineOverlay {
+  color: var(--overlay-30);
+  background: var(--overlay-10);
+  border: 1px solid var(--overlay-10);
+}
+
+.solidPrimary {
+  background: var(--button-primary-background);
+  border: 1px solid var(--button-primary-background);
+  transition:
+    background-color var(--default-hover-animation-duration)
+    var(--default-timing-function),
+    border-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.solidPrimary:hover {
+  background-color: var(--button-primary-background-hover);
+  border-color: var(--button-primary-background-hover);
+}
+
+.solidDanger {
+  color: var(--button-danger-foreground);
+  background: var(--button-danger);
+  border: 1px solid var(--button-danger);
+  transition:
+    background-color var(--default-hover-animation-duration)
+    var(--default-timing-function),
+    border-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.solidDanger:hover {
+  background-color: var(--button-danger-background-hover);
+  border-color: var(--button-danger-background-hover);
+}
+
+.solidInverse {
+  color: var(--button-solid-inverse-foreground);
+  background: var(--button-solid-inverse-background);
+  border: 1px solid var(--button-solid-inverse-background);
+  transition:
+    background-color var(--default-hover-animation-duration)
+    var(--default-timing-function),
+    border-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.solidInverse:hover {
+  background-color: var(--button-solid-inverse-background-hover);
+  border-color: var(--button-solid-inverse-background-hover);
+}
+
+.outlineSecondary {
+  color: var(--button-danger-foreground);
+  background-color: transparent;
+  border: 1px solid var(--button-border);
+  transition: background-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.outlineSecondary:hover {
+  background-color: var(--button-background-hover);
+}
+
+.ghostSecondary {
+  color: var(--button-secondary-foreground);
+  transition: background-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.ghostSecondary:hover {
+  background-color: var(--overlay-5);
+}
+
+.outlineOverlay {
+  color: var(--button-secondary-foreground);
+  background-color: transparent;
+  border: 1px solid var(--overlay-20);
+  transition:
+    background-color var(--default-hover-animation-duration)
+    var(--default-timing-function),
+    border-color var(--default-hover-animation-duration)
+    var(--default-timing-function);
+}
+
+.outlineOverlay:hover {
+  background-color: var(--overlay-10);
+  border-color: transparent;
+}
+
+.xs {
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-1half);
+  font-size: var(--font-size-2);
+  border-radius: var(--border-radius-smbase);
+  line-height: 1;
+}
+
+.xs .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.sm {
+  gap: var(--spacing-1half);
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-3);
+  border-radius: var(--border-radius-base);
+}
+
+.sm .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.md {
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--font-size-4);
+  border-radius: var(--border-radius-md);
+}
+
+.md .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.lg {
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  font-size: var(--font-size-6);
+  border-radius: var(--border-radius-md);
+}
+
+.lg .icon {
+  width: 16px;
+  height: 16px;
+}

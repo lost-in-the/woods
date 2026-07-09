@@ -32,6 +32,7 @@ Gem::Specification.new do |spec|
   spec.files = Dir[
     'lib/**/*',
     'exe/*',
+    'vendor/assets/liam-erd/**/*',
     'LICENSE.txt',
     'README.md',
     'CHANGELOG.md',

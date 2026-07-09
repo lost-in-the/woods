@@ -96,6 +96,18 @@ RSpec.describe Woods::Configuration do
     it 'sets console_disabled_scanner_patterns to empty array' do
       expect(config.console_disabled_scanner_patterns).to eq([])
     end
+
+    it 'sets erd_enabled to false' do
+      expect(config.erd_enabled).to eq(false)
+    end
+
+    it 'sets erd_path to /woods/erd' do
+      expect(config.erd_path).to eq('/woods/erd')
+    end
+
+    it 'sets erd_layers to all supported layers' do
+      expect(config.erd_layers).to eq(%i[models controllers jobs services mailers])
+    end
   end
 
   describe 'console MCP configuration' do

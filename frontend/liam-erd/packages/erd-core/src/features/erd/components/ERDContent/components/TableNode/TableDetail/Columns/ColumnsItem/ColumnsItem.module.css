@@ -1,0 +1,13 @@
+.wrapper {
+  display: grid;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+}
+
+.heading {
+  color: var(--global-foreground);
+  font-size: var(--font-size-2);
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+}
