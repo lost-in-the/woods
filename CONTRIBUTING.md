@@ -28,7 +28,36 @@ Open an issue describing:
 5. Ensure the test suite passes: `bundle exec rake spec`
 6. Ensure code style passes: `bundle exec rubocop`
 7. Update CHANGELOG.md with your changes
-8. Open a pull request
+8. Complete the **Pre-PR requirements** below
+9. Open a pull request
+
+### Pre-PR requirements
+
+These are hard gates — a PR that fails either is incomplete:
+
+1. **Documentation must be current.** Any doc affected by the change — README, `docs/`, the
+   `plugin/skills/` user guides, `CHANGELOG.md` — must be updated in the *same* PR. Don't ship
+   behavior the docs still describe the old way.
+2. **Investigate plugin-functionality impact.** If the change touches anything the distributed
+   user skills rely on — a rake task, MCP tool or its arguments, an executable (`woods-mcp`,
+   `woods-mcp-start`, `woods-console-mcp`, `woods-mcp-http`), a config key, or setup steps —
+   investigate whether `plugin/skills/{woods-setup,woods-mcp-config,woods-diagnose}` need to
+   change.
+
+### Claude Code plugin changes
+
+`plugin/` is distributed as the `woods-plugin` via the
+[`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) marketplace (a `git-subdir`
+reference to this subtree). Installed users may run an **older** gem than `main`, so:
+
+- If a change adds/removes/renames a tool, task, executable, or config key that a skill
+  documents, **update the skill in the same PR**.
+- The skills carry a Version Preflight (operate only against the installed version). **Land the
+  skill change with the release that ships the capability** — never document a feature in a
+  skill before the version that provides it is released. Bump `plugin/.claude-plugin/plugin.json`
+  `version` when the skill content changes.
+- If the change requires a new marketplace entry, `ref` pin, or metadata edit, open a **paired
+  PR against `lost-in-the/plugins`** and link it from this PR.
 
 ## Development Setup
 

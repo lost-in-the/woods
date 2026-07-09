@@ -9,6 +9,22 @@ Use this guide to produce a correct `.mcp.json` for your environment. Answer the
 
 ---
 
+## Version Preflight
+
+Confirm the installed Woods version before generating config — the available MCP executables
+and tool tiers depend on it:
+
+```bash
+bundle info woods        # installed version + path
+```
+
+This guide targets **Woods ≥ 1.5.0**. If the installed gem is older, some executables
+(`woods-mcp-http`, `woods-console-mcp`) or console tool tiers referenced below may not exist —
+tell the user to update (`bundle update woods`) rather than wiring config for tools the
+installed version doesn't ship.
+
+---
+
 ## Environment Detection
 
 **1. Is the Rails app running in Docker?**
@@ -167,7 +183,7 @@ When the Console Server runs as a Rack middleware endpoint instead of a subproce
 }
 ```
 
-Requires `config.console_mcp_enabled = true` in your initializer. See [CONSOLE_MCP_SETUP.md](../../CONSOLE_MCP_SETUP.md) Option C for full setup.
+Requires `config.console_mcp_enabled = true` in your initializer. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option C for full setup.
 
 ---
 

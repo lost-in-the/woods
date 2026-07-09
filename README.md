@@ -249,6 +249,31 @@ Static tools miss `status_active?`, `status_pending?`, `build_line_item`, `creat
 
 ---
 
+## Claude Code plugin
+
+Woods publishes three **user-facing guide skills** as a Claude Code plugin so agents can walk
+you through setup, MCP configuration, and troubleshooting without leaving your editor:
+
+- `woods-setup` — install, configure, extract, verify, connect MCP servers
+- `woods-mcp-config` — generate a correct `.mcp.json` for your environment
+- `woods-diagnose` — systematic troubleshooting for extraction/MCP/embedding/storage
+
+The plugin ships from the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins)
+marketplace suite, which references this repo's `plugin/` subtree via a `git-subdir` source —
+so installing fetches only the skill files, not the whole gem:
+
+```bash
+# In Claude Code:
+/plugin marketplace add lost-in-the/plugins
+/plugin install woods-plugin@lost-in-the-plugins
+```
+
+The skill files live in this repo under [`plugin/skills/`](plugin/skills/) (the plugin root is
+[`plugin/`](plugin/), with its manifest at `plugin/.claude-plugin/plugin.json`). Each skill
+opens with a Version Preflight so agents operate only against your installed Woods version. To
+test a local checkout: `claude --plugin-dir /path/to/woods/plugin`. Requires **Woods ≥ 1.5.0**.
+The internal dev-workflow skills under `.claude/skills/` are **not** part of this plugin.
+
 ## Connect to Your AI Tool
 
 Woods ships two MCP servers. Most users only need the **Index Server**.

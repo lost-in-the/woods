@@ -13,6 +13,7 @@ require 'active_support/core_ext/string/inflections'
 require 'woods/extracted_unit'
 require 'woods/dependency_graph'
 require 'woods/graph_analyzer'
+require 'woods/update_check'
 
 Dir[File.join(__dir__, 'support', '**', '*.rb')].each { |f| require f }
 
@@ -46,5 +47,17 @@ RSpec.configure do |config|
 
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
+  end
+
+  # Keep the RubyGems update check hermetic and deterministic across the suite:
+  # never touch the network, and isolate the cache to a per-process tmp file so
+  # an incidental `build_status`/`woods_status` call can't hit rubygems.org or
+  # read a developer's real ~/.cache. Specs that exercise the update path inject
+  # their own fetcher/cache_path or override these stubs.
+  config.before do
+    cache = File.join(Dir.tmpdir, "woods-update-check-test-#{Process.pid}.json")
+    FileUtils.rm_f(cache)
+    allow(Woods::UpdateCheck).to receive(:default_cache_path).and_return(cache)
+    allow(Woods::UpdateCheck).to receive(:fetch_latest_version).and_return(nil)
   end
 end

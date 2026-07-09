@@ -10,6 +10,7 @@ Woods is a Ruby gem that extracts structured data from Rails applications via ru
 | [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) | Deep reference for agents using the MCP tools |
 | [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) | Full tool catalog, setup for all clients |
 | [docs/MCP_TOOL_COOKBOOK.md](docs/MCP_TOOL_COOKBOOK.md) | Scenario-based tool usage examples |
+| [plugin/skills/](plugin/skills/) | User-facing Claude Code guide skills (`woods-setup`, `woods-mcp-config`, `woods-diagnose`), published via the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) suite |
 
 ## MCP Server Setup
 
