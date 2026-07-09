@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MCP update awareness.** A new `Woods::UpdateCheck` module performs a best-effort,
+  24h-cached RubyGems lookup for a newer `woods` release (disable with
+  `WOODS_NO_UPDATE_CHECK=1`). The Index Server's `woods_status` tool now reports
+  `server.update` (`current_version` / `latest_version` / `update_available`), and a call to a
+  tool the installed gem doesn't define now returns version-aware guidance ("not available in
+  the installed Woods vX — run `bundle update woods`") instead of a bare "Tool not found". This
+  keeps agents that follow a newer guide skill from silently failing against an older gem.
 - **Claude Code plugin.** The three user-facing guide skills (`woods-setup`,
   `woods-mcp-config`, `woods-diagnose`) are now packaged as the `woods-plugin`, distributed
   from the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) marketplace suite

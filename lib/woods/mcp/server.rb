@@ -8,8 +8,10 @@ require 'time'
 require 'set'
 require_relative '../tasks'
 require_relative '../filename_utils'
+require_relative '../update_check'
 require_relative 'index_reader'
 require_relative 'tool_response_renderer'
+require_relative 'version_aware_tool_dispatch'
 
 module Woods
   module MCP
@@ -97,6 +99,9 @@ module Woods
             resources: resources,
             resource_templates: resource_templates
           )
+          # Rewrite "Tool not found" into version-aware update guidance for agents
+          # running against an older gem than the skill they're following assumes.
+          server.singleton_class.prepend(VersionAwareToolDispatch)
 
           define_lookup_tool(server, reader, respond, respond_err, renderer)
           define_search_tool(server, reader, respond, respond_err, renderer)
@@ -1468,7 +1473,8 @@ module Woods
             server: {
               name: 'woods',
               version: Woods::VERSION,
-              index_dir: index_dir.to_s
+              index_dir: index_dir.to_s,
+              update: Woods::UpdateCheck.status_hash
             },
             index: index_section(manifest, extracted_at, staleness, index_dir),
             retriever: {

@@ -16,6 +16,26 @@ RSpec.describe 'woods_status tool' do
       expect(status[:server]).to include(name: 'woods', version: Woods::VERSION, index_dir: fixture_dir.to_s)
     end
 
+    it 'embeds an update sub-hash reporting the installed version (no update by default)' do
+      # spec_helper stubs the network fetch to nil, so a hermetic run reports no update.
+      expect(status[:server][:update]).to eq(
+        current_version: Woods::VERSION,
+        latest_version: nil,
+        update_available: false
+      )
+    end
+
+    it 'reports update_available=true when a newer version is published' do
+      allow(Woods::UpdateCheck).to receive(:fetch_latest_version).and_return('999.0.0')
+
+      s = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: fixture_dir)
+      expect(s[:server][:update]).to include(
+        current_version: Woods::VERSION,
+        latest_version: '999.0.0',
+        update_available: true
+      )
+    end
+
     it 'surfaces extraction metadata from the manifest' do
       expect(status[:index]).to include(
         extracted_at: '2026-01-15T12:00:00Z',

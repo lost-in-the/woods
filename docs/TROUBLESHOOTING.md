@@ -663,5 +663,8 @@ For a single-call health snapshot, call the Index Server's `woods_status` tool. 
 - Console-bridge reachability
 - Which optional features are configured (embedding provider, Notion, session tracer)
 - Per-feature config-key hints for anything missing
+- `server.update` — the installed gem version, the latest published version, and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)
 
 Agents cold-connecting to a server should call `woods_status` before any other tool — it eliminates most "why is this empty?" guesswork.
+
+If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
