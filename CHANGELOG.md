@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Code plugin.** The three user-facing guide skills (`woods-setup`,
+  `woods-mcp-config`, `woods-diagnose`) are now packaged as the `woods-plugin`, distributed
+  from the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) marketplace suite
+  via a `git-subdir` source (installs fetch only the `plugin/` subtree, not the whole gem).
+  Install with `/plugin marketplace add lost-in-the/plugins` then
+  `/plugin install woods-plugin@lost-in-the-plugins`. Each skill gained a **Version Preflight**
+  step so agents operate only against the installed Woods version (≥ 1.5.0) instead of
+  suggesting tools or tasks an older gem lacks.
+
+### Changed
+
+- The user-facing guide skills moved from `docs/skills/` to `plugin/skills/` to form a valid
+  Claude Code plugin root (`plugin/.claude-plugin/plugin.json`). In-repo dev-workflow skills
+  under `.claude/skills/` are unaffected and remain undistributed.
+
 ### Security
 
 - **Console `sample`/`recent` tools now validate `columns` against the model's

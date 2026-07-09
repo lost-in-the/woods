@@ -9,6 +9,21 @@ Follow these steps to set up Woods in a Rails application. Each step builds on t
 
 ---
 
+## Version Preflight
+
+Check which Woods version is installed and operate only against it:
+
+```bash
+bundle info woods        # installed version + path (once the gem is in the Gemfile)
+```
+
+This guide targets **Woods ≥ 1.5.0**. If the installed gem is older, some rake tasks, MCP
+tools, or config keys referenced below may not exist — tell the user to update
+(`bundle update woods`) rather than running commands the installed version doesn't support.
+If a newer release is available on RubyGems, mention it so the user can pick up new features.
+
+---
+
 ## Step 1: Install the Gem
 
 Add to your Rails app's `Gemfile`:
@@ -207,6 +222,6 @@ This should output the tool list and then hang (waiting for more input). Press C
 ## Next Steps
 
 - Run incremental extraction after code changes: `bundle exec rake woods:incremental`
-- Set up CI extraction: see the GitHub Actions example in [MCP_TOOL_COOKBOOK.md](../../MCP_TOOL_COOKBOOK.md)
-- Enable Tier 2–4 console tools (diagnostics, SQL, Ruby eval): see [CONSOLE_MCP_SETUP.md](../../CONSOLE_MCP_SETUP.md) Option D
+- Set up CI extraction: see the GitHub Actions example in [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_TOOL_COOKBOOK.md)
+- Enable Tier 2–4 console tools (diagnostics, SQL, Ruby eval): see [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option D
 - Enable temporal snapshots for change tracking: set `enable_snapshots: true` in your initializer

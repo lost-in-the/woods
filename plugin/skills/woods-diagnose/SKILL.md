@@ -9,6 +9,21 @@ Work through these steps in order. Most problems are caught by Step 1 or Step 2.
 
 ---
 
+## Version Preflight
+
+Confirm which Woods version is installed and diagnose only against it:
+
+```bash
+bundle info woods        # installed version + path
+```
+
+This workflow targets **Woods ≥ 1.5.0**. Tool counts and behaviors below (29-tool index
+server, 31-tool console) assume a current gem. If the installed version is older, some tools
+or flags mentioned here may not exist — before treating their absence as a bug, check the
+installed version and, if outdated, advise the user to update (`bundle update woods`).
+
+---
+
 ## Step 1: Verify Rails Boots
 
 Woods requires a booted Rails environment. If Rails can't boot, extraction produces no output.
@@ -159,7 +174,7 @@ tools/list returns empty or error?
 
 This is expected behavior for embedded mode (rake task / Docker). Tier 2–4 tools (`console_diagnose_model`, `console_eval`, `console_sql`, etc.) require bridge mode.
 
-To get all 31 tools, switch to Option D (SSH/bridge) from [CONSOLE_MCP_SETUP.md](../../CONSOLE_MCP_SETUP.md).
+To get all 31 tools, switch to Option D (SSH/bridge) from [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md).
 
 ### MCP client shows "connection refused" on HTTP transport
 
