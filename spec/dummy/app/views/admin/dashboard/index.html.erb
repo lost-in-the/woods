@@ -1,0 +1,9 @@
+<h1>Admin dashboard</h1>
+
+<p>Users: <%= @user_count %></p>
+
+<p><%= link_to 'All posts', posts_path %></p>
+
+<div class="recent-posts">
+  <%= render partial: 'posts/post', collection: @recent_posts %>
+</div>

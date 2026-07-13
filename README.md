@@ -474,7 +474,14 @@ rake woods:embed               # Embed units for semantic search (alias: woods:n
 rake woods:embed_incremental   # Embed changed units only (alias: woods:hone)
 rake woods:notion_sync         # Sync models/columns to Notion (alias: woods:send)
 rake woods:obsidian            # Export to an Obsidian vault — graph view + Bases (alias: woods:vault)
+rake woods:explore             # Interactive HTML data explorer (alias: woods:wander)
 ```
+
+> **Explore the codebase visually.** `woods:explore` renders the extraction as a self-contained
+> HTML explorer — a force-directed dependency graph (PageRank-sized, family-colored), an ERD of
+> your schema, a path finder ("how does this view reach that job?"), health dashboards (hubs,
+> cycles, orphans), and a per-unit "Copy for AI" digest — one file, zero dependencies, works from
+> `file://`. A `data.json` sidecar carries the same payload for agents. See [Explorer](docs/EXPLORER.md).
 
 > **Visualize connections in Obsidian.** `woods:obsidian` renders the codebase as a self-contained
 > [Obsidian](https://obsidian.md) vault: one interlinked note per unit (explore the dependency graph

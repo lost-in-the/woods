@@ -1,0 +1,13 @@
+<h1><%= @post.title %></h1>
+
+<p><%= link_to 'Edit', edit_post_path(@post) %></p>
+<p><%= link_to 'Author', user_path(@post.user_id) if @post.user_id %></p>
+
+<section class="comments">
+  <%= render partial: 'comments/comment', collection: @post.comments %>
+</section>
+
+<%= form_with url: post_comments_path(@post) do |f| %>
+  <%= f.text_area :body %>
+  <%= f.submit 'Add comment' %>
+<% end %>

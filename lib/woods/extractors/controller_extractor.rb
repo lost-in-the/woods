@@ -195,10 +195,18 @@ module Woods
       end
 
       def extract_filter_chain(controller)
-        controller._process_action_callbacks.map do |callback|
+        controller._process_action_callbacks.filter_map do |callback|
+          # A raw Proc filter would serialize with its object address and
+          # break byte-identical re-extraction; stable_filter_name labels
+          # app-defined procs by source location and drops gem-defined ones.
+          # Named (symbol) filters pass through untouched.
+          filter = callback.filter
+          filter = stable_filter_name(filter) unless filter.is_a?(Symbol) || filter.is_a?(String)
+          next nil unless filter
+
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
-          result = { kind: callback.kind, filter: callback.filter }
+          result = { kind: callback.kind, filter: filter }
           result[:only] = only if only.any?
           result[:except] = except if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?

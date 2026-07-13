@@ -295,7 +295,9 @@ module Woods
     def extract_changed(changed_files)
       # Load existing graph
       graph_path = @output_dir.join('dependency_graph.json')
-      @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path))) if graph_path.exist?
+      if graph_path.exist?
+        @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path, encoding: 'UTF-8')))
+      end
 
       ModelNameCache.reset!
 
@@ -852,7 +854,7 @@ module Woods
       chunks = 0
 
       Dir[@output_dir.join('*/_index.json').to_s].each do |index_path|
-        entries = JSON.parse(File.read(index_path))
+        entries = JSON.parse(File.read(index_path, encoding: 'UTF-8'))
         counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
         chunks += entries.sum { |e| e['chunk_count'].to_i }
       rescue JSON::ParserError => e
@@ -879,7 +881,7 @@ module Woods
       manifest_path = @output_dir.join('manifest.json')
       return unless manifest_path.exist?
 
-      manifest = JSON.parse(File.read(manifest_path))
+      manifest = JSON.parse(File.read(manifest_path, encoding: 'UTF-8'))
       # Snapshots are keyed on the commit SHA — an unresolvable provenance
       # ("unknown", see GitProvenance/#137) must not key or collide a snapshot.
       git_sha = manifest['git_sha']
@@ -997,7 +999,7 @@ module Woods
       index = Dir[type_dir.join('*.json')].filter_map do |file|
         next if File.basename(file) == '_index.json'
 
-        data = JSON.parse(File.read(file))
+        data = JSON.parse(File.read(file, encoding: 'UTF-8'))
         {
           identifier: data['identifier'],
           file_path: data['file_path'],

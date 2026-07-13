@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Woods Explorer — interactive HTML data explorer** (`rake woods:explore`, alias
+  `woods:wander`; `lib/woods/explorer/`). Renders an extraction index as a single
+  self-contained `index.html` (no dependencies, no network, works from `file://`) with four
+  views — force-directed dependency **Graph** (PageRank-sized nodes, family colors + letter
+  glyphs, via-labeled edges), models-only **ERD** with schema boxes, sortable **Table**, and an
+  **Overview** dashboard (units-by-type, top PageRank, hubs, cycles, orphans/bridges,
+  provenance) — plus a shortest-**path finder**, neighborhood focus mode, type-ahead search,
+  deep links (`#/unit/Post`), light/dark themes with CVD-validated palettes, keyboard
+  navigation, and a per-unit "Copy for AI" markdown digest. A `data.json` sidecar
+  (`woods-explorer/1` schema) carries the same payload for agents and scripts. Output is
+  byte-identical across re-runs of an unchanged extraction; a `.woods-explorer` sentinel
+  guards against overwriting foreign directories (`WOODS_EXPLORER_FORCE=1` to override).
+  Env: `WOODS_EXPLORER_OUTPUT`, `WOODS_EXPLORER_INCLUDE_FRAMEWORK`. See `docs/EXPLORER.md`.
+- The `spec/dummy` booted-app fixture grew from a 2-model blog to a small forum domain
+  (8 models incl. STI + polymorphic + has_many :through, namespaced admin controllers,
+  concerns with callbacks, services, decorator, mailer + templates, 13 view templates) so
+  booted extraction exercises every major `:via` edge kind — 59 app units, 13 edge kinds.
+
 - **MCP update awareness.** A new `Woods::UpdateCheck` module performs a best-effort,
   24h-cached RubyGems lookup for a newer `woods` release (disable with
   `WOODS_NO_UPDATE_CHECK=1`). The Index Server's `woods_status` tool now reports
@@ -24,6 +42,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/plugin install woods-plugin@lost-in-the-plugins`. Each skill gained a **Version Preflight**
   step so agents operate only against the installed Woods version (≥ 1.5.0) instead of
   suggesting tools or tasks an older gem lacks.
+
+### Fixed
+
+- **Model callback extraction never worked on any Rails version.** `extract_callbacks`
+  queried per-kind chains (`_before_save_callbacks`) that Rails has never defined — the chains
+  are per-event (`_save_callbacks`), so the rescue swallowed a `NoMethodError` per event and
+  every extracted model reported `callbacks: []` (while the old raw-chain count reported
+  non-zero). Callbacks are now read from the real per-event chains — including
+  `before_commit`, which Rails registers as its own event — with the public name derived as
+  kind + event (`before_save`), framework-owned callbacks (`ActiveRecord::AutosaveAssociation`,
+  Dirty, etc.) excluded via `Method#owner` introspection rather than a name blocklist, and
+  `metadata[:callback_count]` derived from the same filtered list so the summary chunk can't
+  contradict the callbacks it sits next to. Inline proc/lambda callbacks defined in the app
+  are kept with a stable source-anchored label (`(inline app/models/post.rb:12)`) instead of
+  being invisible; gem-defined procs are dropped (`Proc#to_s` embeds object addresses and
+  breaks byte-identical re-extraction). Gem-installed *named* callbacks (paper_trail, etc.)
+  are included by design — they're real save-time behavior. Callback side-effect analysis
+  (columns written, jobs enqueued) now actually reaches extraction output, chunks, and
+  exporters.
+- **Controller filter chains no longer serialize raw Procs.** `extract_filter_chain` emitted
+  `#<Proc:0x...>` strings for inline `before_action` blocks (Devise/Turbo-style), changing on
+  every boot and breaking byte-identical re-extraction of unchanged controllers. App-defined
+  procs now get the same stable source-anchored label as model callbacks (via the shared
+  `SharedUtilityMethods#stable_filter_name`); gem-defined procs are dropped.
+- **Extraction artifacts are now read as UTF-8 everywhere.** A non-UTF-8 default locale
+  (e.g. a container without `LANG`) failed unit loads with
+  `Encoding::InvalidByteSequenceError`. All readers of gem-generated output — IndexReader,
+  the MCP bootstrapper, flow documents, rake stats/validate/flow, IndexValidator, the
+  embedding indexer, incremental extraction, IndexArtifact, snapshot stores, and the operator
+  status reporter — read with an explicit `encoding: 'UTF-8'` now. `SUMMARY.md` additionally
+  scrubs invalid bytes (hosts may hand-edit it).
 
 ### Changed
 

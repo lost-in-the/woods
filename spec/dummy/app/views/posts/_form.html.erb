@@ -1,0 +1,5 @@
+<%= form_with model: @post, url: posts_path do |f| %>
+  <%= f.text_field :title %>
+  <%= f.text_field :slug %>
+  <%= f.submit %>
+<% end %>

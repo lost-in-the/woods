@@ -91,7 +91,7 @@ module Woods
     def read_config
       return nil unless config_path.exist?
 
-      JSON.parse(config_path.read)
+      JSON.parse(config_path.read(encoding: 'UTF-8'))
     end
 
     # Creates a new timestamped dump directory and returns its path.

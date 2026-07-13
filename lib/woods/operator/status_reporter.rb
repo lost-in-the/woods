@@ -48,7 +48,7 @@ module Woods
         path = File.join(@output_dir, 'manifest.json')
         return nil unless File.exist?(path)
 
-        JSON.parse(File.read(path))
+        JSON.parse(File.read(path, encoding: 'UTF-8'))
       rescue JSON::ParserError
         nil
       end

@@ -328,7 +328,7 @@ module Woods
                 'stores. Populate the durable backend via the extraction write path instead.'
         end
 
-        graph = Woods::DependencyGraph.from_h(JSON.parse(graph_json.read))
+        graph = Woods::DependencyGraph.from_h(JSON.parse(graph_json.read(encoding: 'UTF-8')))
         Woods::Storage::GraphStore::Memory.new(graph)
       rescue Woods::Storage::InapplicableBackend
         raise

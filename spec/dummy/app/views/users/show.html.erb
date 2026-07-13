@@ -1,0 +1,7 @@
+<h1><%= @user.display_name %></h1>
+
+<p><%= link_to 'All posts', posts_path %></p>
+
+<div class="user-posts">
+  <%= render partial: 'posts/post', collection: @posts %>
+</div>

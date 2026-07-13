@@ -1,0 +1,7 @@
+<p>Hi <%= @user.display_name %>, here is what happened this week:</p>
+
+<ul>
+  <% @posts.each do |post| %>
+    <li><%= link_to post.title, post_url(post) %></li>
+  <% end %>
+</ul>

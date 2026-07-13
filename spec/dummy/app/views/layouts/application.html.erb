@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Woods Dummy Forum</title>
+  </head>
+  <body>
+    <nav>
+      <%= link_to 'Home', root_path %>
+      <%= link_to 'Posts', posts_path %>
+      <%= link_to 'Admin', admin_root_path %>
+    </nav>
+    <%= yield %>
+  </body>
+</html>

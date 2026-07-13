@@ -51,11 +51,43 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       create_table :posts, force: true do |t|
         t.string :title
         t.integer :status, default: 0
+        t.string :type
+        t.string :slug
+        t.integer :user_id
         t.timestamps
       end
       create_table :comments, force: true do |t|
         t.references :post
+        t.integer :user_id
         t.text :body
+        t.timestamps
+      end
+      create_table :users, force: true do |t|
+        t.string :email
+        t.string :name
+        t.timestamps
+      end
+      create_table :profiles, force: true do |t|
+        t.references :user
+        t.text :bio
+        t.timestamps
+      end
+      create_table :tags, force: true do |t|
+        t.string :name
+        t.string :slug
+        t.timestamps
+      end
+      create_table :taggings, force: true do |t|
+        t.references :tag
+        t.string :taggable_type
+        t.integer :taggable_id
+        t.timestamps
+      end
+      create_table :notifications, force: true do |t|
+        t.references :user
+        t.string :notifiable_type
+        t.integer :notifiable_id
+        t.boolean :read, default: false
         t.timestamps
       end
     end
@@ -134,6 +166,15 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(graph).not_to be_empty
   end
 
+  it 'extracts app-defined callbacks from the real chains (kind + event naming)' do
+    post_unit = find_unit(:models, 'Post')
+    callbacks = post_unit['metadata']['callbacks'] || []
+    filters = callbacks.map { |cb| [cb['type'], cb['filter']] }
+
+    expect(filters).to include(%w[before_save normalize_title])
+    expect(callbacks.map { |cb| cb['filter'] }).not_to include(a_string_starting_with('autosave_'))
+  end
+
   it 'records git provenance (resolved or "unknown"), never crashing on a non-repo dummy' do
     expect(manifest).to have_key('git_branch')
     expect(manifest).to have_key('git_sha')
@@ -192,6 +233,78 @@ RSpec.describe 'Booted-app extraction', :booted_app do
         index_dir: @output_dir, vault_path: @vault_dir, output: StringIO.new
       ).export_all
       expect(File.binread(File.join(@vault_dir, 'models/Post.md'))).to eq(before_bytes)
+    end
+  end
+
+  # End-to-end HTML explorer export against the *real* extraction output above
+  # — not synthetic fixtures. Confirms the SiteBuilder consumes genuine
+  # artifacts (manifest, dependency_graph.json, per-unit JSON) and produces a
+  # self-contained site with a coherent embedded payload.
+  describe 'HTML explorer export' do
+    before(:all) do
+      require 'stringio'
+      require 'woods/explorer/site_builder'
+      @explorer_dir = Dir.mktmpdir('woods_explorer')
+      @explorer_stats = Woods::Explorer::SiteBuilder.new(
+        index_dir: @output_dir, output_dir: @explorer_dir, output: StringIO.new
+      ).export_all
+    end
+
+    after(:all) { FileUtils.rm_rf(@explorer_dir) if @explorer_dir }
+
+    def explorer_read(rel)
+      File.read(File.join(@explorer_dir, rel), encoding: 'UTF-8')
+    end
+
+    def explorer_payload
+      JSON.parse(explorer_read('data.json'))
+    end
+
+    def node_index(payload, id)
+      payload['nodes'].index { |n| n['id'] == id }
+    end
+
+    it 'exports a substantial node count from the real extraction' do
+      expect(@explorer_stats[:nodes]).to be > 30
+    end
+
+    it 'writes an index.html embedding parseable JSON that carries the app units' do
+      html = explorer_read('index.html')
+      segment = html[%r{<script id="woods-data" type="application/json">(.*?)</script>}m, 1]
+      expect(segment).not_to be_nil
+      ids = JSON.parse(segment)['nodes'].map { |n| n['id'] }
+      expect(ids).to include('Post', 'PostsController')
+    end
+
+    it 'writes a data.json sidecar under the versioned schema' do
+      expect(explorer_payload['schema']).to eq('woods-explorer/1')
+    end
+
+    it 'distills real model facts including callback side-effects for Post' do
+      payload = explorer_payload
+      post = payload['nodes'][node_index(payload, 'Post')]
+      expect(post['facts']['table_name']).to eq('posts')
+
+      publish = (post['facts']['callbacks'] || []).find { |cb| cb['filter'] == 'schedule_publish' }
+      expect(publish).not_to be_nil
+      expect(publish.dig('side_effects', 'jobs_enqueued')).to include('PublishPostJob')
+    end
+
+    it 'encodes the real Comment -> Post association as an indexed belongs_to edge' do
+      payload = explorer_payload
+      comment_idx = node_index(payload, 'Comment')
+      post_idx = node_index(payload, 'Post')
+      expect(comment_idx).not_to be_nil
+      expect(post_idx).not_to be_nil
+      expect(payload['edges']).to include([comment_idx, post_idx, 'belongs_to'])
+    end
+
+    it 'is idempotent — a second export produces a byte-identical index.html' do
+      before_bytes = File.binread(File.join(@explorer_dir, 'index.html'))
+      Woods::Explorer::SiteBuilder.new(
+        index_dir: @output_dir, output_dir: @explorer_dir, output: StringIO.new
+      ).export_all
+      expect(File.binread(File.join(@explorer_dir, 'index.html'))).to eq(before_bytes)
     end
   end
 end

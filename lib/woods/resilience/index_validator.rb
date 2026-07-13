@@ -75,7 +75,7 @@ module Woods
           return
         end
 
-        index_entries = JSON.parse(File.read(index_path))
+        index_entries = JSON.parse(File.read(index_path, encoding: 'UTF-8'))
         indexed_identifiers = Set.new
 
         index_entries.each do |entry|
@@ -126,7 +126,7 @@ module Woods
       # @param identifier [String] The unit identifier (for error messages)
       # @param errors [Array<String>] Accumulated errors
       def validate_content_hash(unit_file, identifier, errors)
-        data = JSON.parse(File.read(unit_file))
+        data = JSON.parse(File.read(unit_file, encoding: 'UTF-8'))
         source_code = data['source_code']
         stored_hash = data['source_hash']
 
