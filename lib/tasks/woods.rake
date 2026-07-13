@@ -719,7 +719,8 @@ namespace :woods do
         index_dir: output_dir,
         output_dir: explorer_dir,
         include_framework: env_flag.call('WOODS_EXPLORER_INCLUDE_FRAMEWORK'),
-        force: env_flag.call('WOODS_EXPLORER_FORCE')
+        force: env_flag.call('WOODS_EXPLORER_FORCE'),
+        labels_path: ENV.fetch('WOODS_EXPLORER_LABELS', nil)
       )
       stats = builder.export_all
     rescue Woods::Explorer::ExportError => e
@@ -728,8 +729,10 @@ namespace :woods do
     end
 
     puts 'Explorer complete!'
-    puts "  Nodes:  #{stats[:nodes]}"
-    puts "  Edges:  #{stats[:edges]}"
+    puts "  Nodes:   #{stats[:nodes]}"
+    puts "  Edges:   #{stats[:edges]}"
+    puts "  Screens: #{stats[:screens]}"
+    puts "  Flows:   #{stats[:flows]}"
     puts "  Skipped units: #{stats[:skipped_units]}, skipped edges: #{stats[:skipped_edges]}"
     puts
     puts "Open #{File.join(explorer_dir, 'index.html')} in a browser,"

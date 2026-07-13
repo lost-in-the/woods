@@ -3,6 +3,7 @@
 require 'woods/explorer/errors'
 require 'woods/explorer/type_groups'
 require 'woods/explorer/unit_summarizer'
+require 'woods/explorer/screen_builder'
 
 module Woods
   module Explorer
@@ -17,7 +18,8 @@ module Woods
     # per-unit JSON only for node detail bodies.
     class DataBuilder
       # Payload schema identifier. Bump when the shape changes incompatibly.
-      SCHEMA = 'woods-explorer/1'
+      # v2 adds screens, flow summaries + inverted indexes, and flow_ops.
+      SCHEMA = 'woods-explorer/2'
 
       # Unit types excluded unless include_framework is set. gem_source units
       # are unreachable via IndexReader::TYPE_DIRS but can still appear as
@@ -29,9 +31,15 @@ module Woods
 
       # @param reader [Woods::MCP::IndexReader]
       # @param include_framework [Boolean] include rails_source/gem_source nodes
-      def initialize(reader:, include_framework: false)
+      # @param flow_digest [Hash, nil] FlowDigest#build output (injected by
+      #   SiteBuilder; nil degrades to a flow-less payload)
+      # @param labels [Hash] parsed woods_labels.yml
+      def initialize(reader:, include_framework: false, flow_digest: nil, labels: {})
         @reader = reader
         @include_framework = include_framework
+        @flow_digest = flow_digest || { 'summaries' => [], 'ops' => [],
+                                        'unit_index' => {}, 'method_index' => {} }
+        @labels = labels
         @stats = { skipped_units: 0, skipped_edges: 0 }
       end
 
@@ -151,12 +159,25 @@ module Woods
           'via_counts' => via_counts(edges),
           'nodes' => nodes,
           'edges' => edges,
+          'screens' => build_screens(nodes, edges),
+          'flows' => {
+            'available' => !@flow_digest['summaries'].empty?,
+            'summaries' => @flow_digest['summaries'],
+            'unit_index' => @flow_digest['unit_index'],
+            'method_index' => @flow_digest['method_index']
+          },
+          'flow_ops' => @flow_digest['ops'],
           'analysis' => remap_analysis(index_of),
           'meta' => { 'include_framework' => @include_framework,
                       'skipped_units' => @stats[:skipped_units],
                       'skipped_edges' => @stats[:skipped_edges],
                       'graph_stats' => graph['stats'].is_a?(Hash) ? graph['stats'] : {} }
         }
+      end
+
+      def build_screens(nodes, edges)
+        ScreenBuilder.new(nodes: nodes, edges: edges,
+                          flow_digest: @flow_digest, labels: @labels).build
       end
 
       def app_info

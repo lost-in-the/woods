@@ -5,12 +5,14 @@ require 'tmpdir'
 require 'json'
 require 'fileutils'
 require 'stringio'
+require 'yaml'
 require 'woods'
 require 'woods/explorer/site_builder'
 
 RSpec.describe Woods::Explorer::SiteBuilder do
   around do |example|
     Dir.mktmpdir do |dir|
+      @index_dir = dir
       @out = File.join(dir, 'explorer')
       example.run
     end
@@ -69,9 +71,16 @@ RSpec.describe Woods::Explorer::SiteBuilder do
       end
     end
 
-    it 'returns stats with path and node/edge/skip counters' do
+    it 'returns stats with path, node/edge/skip counters, and screen/flow counts' do
       expect(builder.export_all).to eq(path: @out, nodes: 2, edges: 1,
+                                       screens: 0, flows: 0,
                                        skipped_units: 0, skipped_edges: 0)
+    end
+
+    it 'writes no flows.js and no flows.js script tag when the ops fit inline' do
+      builder.export_all
+      expect(File).not_to exist(File.join(@out, 'flows.js'))
+      expect(read_out('index.html')).not_to include('<script src="flows.js"')
     end
 
     it 'embeds the exact data.json payload inside index.html' do
@@ -111,6 +120,105 @@ RSpec.describe Woods::Explorer::SiteBuilder do
     it 'round-trips the hostile value intact through the JSON escape' do
       post = JSON.parse(segment)['nodes'].find { |n| n['id'] == 'Post' }
       expect(post['facts']['table_name']).to eq('x</script><script>alert(1)</script>')
+    end
+  end
+
+  describe 'flow packaging' do
+    def write_flows_fixture
+      flow_doc = {
+        'entry_point' => 'PostsController#create',
+        'route' => { 'verb' => 'POST', 'path' => '/posts' },
+        'steps' => [
+          { 'unit' => 'PostsController#create', 'type' => 'controller',
+            'operations' => [{ 'type' => 'call', 'target' => 'Post',
+                               'method' => 'create!', 'line' => 3 }] }
+        ]
+      }
+      flows_dir = File.join(@index_dir, 'flows')
+      FileUtils.mkdir_p(flows_dir)
+      File.write(File.join(flows_dir, 'PostsController_create.json'), JSON.generate(flow_doc))
+    end
+
+    before { write_flows_fixture }
+
+    def flow_builder
+      builder(index_dir: @index_dir)
+    end
+
+    it 'embeds flow ops inline under the default limit and counts the flow in stats' do
+      stats = flow_builder.export_all
+      expect(stats[:flows]).to eq(1)
+      expect(File).not_to exist(File.join(@out, 'flows.js'))
+      embedded = JSON.parse(embedded_data_segment(read_out('index.html')))
+      expect(embedded['flow_ops']).to eq([[{ 'u' => 'PostsController#create', 't' => 'controller',
+                                             'ops' => [{ 't' => 'call', 'tgt' => 'Post',
+                                                         'm' => 'create!', 'line' => 3 }] }]])
+    end
+
+    context 'when the compacted ops exceed FLOW_EMBED_LIMIT' do
+      before do
+        stub_const('Woods::Explorer::SiteBuilder::FLOW_EMBED_LIMIT', 10)
+        flow_builder.export_all
+      end
+
+      it 'writes the ops to a flows.js sidecar assigning window.WOODS_FLOWOPS' do
+        flows_js = read_out('flows.js')
+        expect(flows_js).to start_with('window.WOODS_FLOWOPS = ')
+        expect(flows_js).to include('PostsController#create')
+      end
+
+      it 'replaces the embedded flow_ops with the external marker' do
+        embedded = JSON.parse(embedded_data_segment(read_out('index.html')))
+        expect(embedded['flow_ops']).to eq('external:flows.js')
+      end
+
+      it 'references the sidecar with a script tag in index.html' do
+        expect(read_out('index.html')).to include('<script src="flows.js"></script>')
+      end
+
+      it 'still writes the full flow_ops into data.json' do
+        flow_ops = JSON.parse(read_out('data.json'))['flow_ops']
+        expect(flow_ops).to be_an(Array)
+        expect(flow_ops.first.first).to include('u' => 'PostsController#create')
+      end
+    end
+  end
+
+  describe 'screen labels via labels_path' do
+    let(:graph) do
+      super().tap do |g|
+        g['nodes'] = g['nodes'].merge(
+          'PostsController' => { 'type' => 'controller',
+                                 'file_path' => 'app/controllers/posts_controller.rb' }
+        )
+      end
+    end
+
+    let(:units) do
+      super().merge(
+        'PostsController' => {
+          'identifier' => 'PostsController', 'type' => 'controller',
+          'file_path' => 'app/controllers/posts_controller.rb',
+          'metadata' => { 'actions' => %w[index],
+                          'routes' => { 'index' => [{ 'verb' => 'GET', 'path' => '/posts' }] } }
+        }
+      )
+    end
+
+    def screen_for(id)
+      JSON.parse(read_out('data.json'))['screens'].find { |s| s['id'] == id }
+    end
+
+    it 'accepts a labels_path and applies its screen labels to the payload' do
+      labels_file = File.join(@index_dir, 'woods_labels.yml')
+      File.write(labels_file, { 'screens' => { 'PostsController#index' => 'The Feed' } }.to_yaml)
+      builder(labels_path: labels_file).export_all
+      expect(screen_for('PostsController#index')['label']).to eq('The Feed')
+    end
+
+    it 'falls back to humanized labels when no labels file exists' do
+      builder.export_all
+      expect(screen_for('PostsController#index')['label']).to eq('Posts — Index')
     end
   end
 

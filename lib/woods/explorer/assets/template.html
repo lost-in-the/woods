@@ -22,10 +22,11 @@
       <ul id="search-results" role="listbox" aria-label="Search results" hidden></ul>
     </div>
     <nav class="tabs" aria-label="Views">
-      <button class="tab" data-view="overview">Overview</button>
-      <button class="tab" data-view="graph">Graph</button>
-      <button class="tab" data-view="erd">ERD</button>
-      <button class="tab" data-view="table">Table</button>
+      <button class="tab" data-view="home">Home</button>
+      <button class="tab" data-view="trace">Trace</button>
+      <button class="tab" data-view="impact">Impact</button>
+      <button class="tab" data-view="routes">Routes</button>
+      <button class="tab" data-view="atlas">Atlas</button>
     </nav>
     <div class="top-actions">
       <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle color theme">◐</button>
@@ -64,6 +65,12 @@
     </aside>
 
     <main id="stage" aria-label="Explorer canvas">
+      <nav id="atlas-tabs" class="atlas-tabs" aria-label="Atlas views" hidden>
+        <button class="tab" data-view="overview">Overview</button>
+        <button class="tab" data-view="graph">Graph</button>
+        <button class="tab" data-view="erd">ERD</button>
+        <button class="tab" data-view="table">Table</button>
+      </nav>
       <div id="path-bar" class="path-bar" hidden>
         <span class="path-label">Path</span>
         <input id="path-from" type="text" placeholder="From…" autocomplete="off" aria-label="Path start unit">
@@ -86,6 +93,11 @@
       </div>
       <div id="overview" class="doc-view" hidden></div>
       <div id="table-view" class="doc-view" hidden></div>
+      <div id="home" class="doc-view" hidden></div>
+      <div id="trace-view" class="doc-view" hidden></div>
+      <div id="impact-view" class="doc-view" hidden></div>
+      <div id="routes-view" class="doc-view" hidden></div>
+      <div id="review-view" class="doc-view" hidden></div>
     </main>
 
     <aside id="detail" aria-label="Unit details" hidden>
@@ -101,13 +113,15 @@
 
   <dialog id="help">
     <h2>Woods Explorer</h2>
-    <p>An interactive map of this Rails application, generated from a Woods
-    extraction. Node size tracks PageRank importance; color and the letter
-    glyph mark the unit family; arrows point from a unit to what it depends on.</p>
+    <p>What this Rails application does, generated from a Woods extraction.
+    <strong>Home</strong> lists every screen; <strong>Trace</strong> shows what one
+    request does, step by step; <strong>Impact</strong> maps a unit's blast radius;
+    <strong>Routes</strong> audits every endpoint; <strong>Atlas</strong> holds the
+    dependency graph, ERD, table, and overview.</p>
     <table class="help-keys">
       <tbody>
         <tr><td><kbd>/</kbd></td><td>Search</td></tr>
-        <tr><td><kbd>1</kbd>–<kbd>4</kbd></td><td>Switch view (Overview, Graph, ERD, Table)</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>5</kbd></td><td>Switch view (Home, Trace, Impact, Routes, Atlas)</td></tr>
         <tr><td><kbd>←→↑↓</kbd></td><td>Move between nodes (canvas focused)</td></tr>
         <tr><td><kbd>Enter</kbd></td><td>Open selected unit's details</td></tr>
         <tr><td><kbd>f</kbd></td><td>Focus neighborhood of selected node</td></tr>
@@ -124,6 +138,7 @@
   </dialog>
 </div>
 <script id="woods-data" type="application/json">__WOODS_DATA__</script>
+<!--__WOODS_FLOWS__-->
 <script>/*__WOODS_APP__*/</script>
 </body>
 </html>

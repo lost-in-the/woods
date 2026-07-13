@@ -101,6 +101,9 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     @original_woods_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.concurrent_extraction = false
+    # Produce flows/*.json so the explorer export below exercises its flow
+    # digest tier against real precomputed request flows.
+    Woods.configuration.precompute_flows = true
 
     Woods::Extractor.new(output_dir: @output_dir).extract_all
   end
@@ -277,7 +280,17 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     end
 
     it 'writes a data.json sidecar under the versioned schema' do
-      expect(explorer_payload['schema']).to eq('woods-explorer/1')
+      expect(explorer_payload['schema']).to eq('woods-explorer/2')
+    end
+
+    it 'derives screens from the real routes' do
+      expect(@explorer_stats[:screens]).to be > 0
+    end
+
+    it 'digests the precomputed request flows into embeddable summaries' do
+      expect(@explorer_stats[:flows]).to be > 0
+      entries = explorer_payload['flows']['summaries'].map { |s| s['entry'] }
+      expect(entries).to include('PostsController#create')
     end
 
     it 'distills real model facts including callback side-effects for Post' do

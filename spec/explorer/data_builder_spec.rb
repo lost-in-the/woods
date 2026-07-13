@@ -59,7 +59,9 @@ RSpec.describe Woods::Explorer::DataBuilder do
                      'file_path' => 'app/models/comment.rb', 'metadata' => {} },
       'PostsController' => { 'identifier' => 'PostsController', 'type' => 'controller',
                              'file_path' => 'app/controllers/posts_controller.rb',
-                             'metadata' => { 'actions' => %w[index] } },
+                             'metadata' => { 'actions' => %w[index],
+                                             'routes' => { 'index' => [{ 'verb' => 'GET',
+                                                                         'path' => '/posts' }] } } },
       'ActiveRecord::Base' => { 'identifier' => 'ActiveRecord::Base', 'type' => 'rails_source',
                                 'metadata' => {} }
     }
@@ -83,7 +85,7 @@ RSpec.describe Woods::Explorer::DataBuilder do
     let(:payload) { builder.build }
 
     it 'stamps the versioned schema key' do
-      expect(payload['schema']).to eq('woods-explorer/1')
+      expect(payload['schema']).to eq('woods-explorer/2')
     end
 
     it 'sorts nodes by identifier and excludes framework nodes by default' do
@@ -189,6 +191,55 @@ RSpec.describe Woods::Explorer::DataBuilder do
 
     it 'is deterministic — two independent builds produce equal payloads' do
       expect(build.build).to eq(build.build)
+    end
+  end
+
+  describe '#build flows and screens' do
+    let(:digest) do
+      { 'summaries' => [{ 'entry' => 'PostsController#index', 'responses' => [],
+                          'units' => ['PostsController#index'], 'calls' => ['Post#recent'] }],
+        'ops' => [[{ 'u' => 'PostsController#index', 't' => 'controller', 'ops' => [] }]],
+        'unit_index' => { 'PostsController' => [0] },
+        'method_index' => { 'Post#recent' => [0] } }
+    end
+
+    context 'with an injected flow digest' do
+      let(:payload) { build(flow_digest: digest).build }
+
+      it 'marks flows available and passes the summary tier through verbatim' do
+        expect(payload['flows']).to eq(
+          'available' => true,
+          'summaries' => digest['summaries'],
+          'unit_index' => { 'PostsController' => [0] },
+          'method_index' => { 'Post#recent' => [0] }
+        )
+      end
+
+      it 'passes the compacted ops through as flow_ops' do
+        expect(payload['flow_ops']).to eq(digest['ops'])
+      end
+
+      it 'builds screens from the controller route facts' do
+        screen = payload['screens'].find { |s| s['id'] == 'PostsController#index' }
+        expect(screen).to include('routes' => ['GET /posts'], 'flow' => 0,
+                                  'controller' => 'PostsController')
+      end
+    end
+
+    context 'without a flow digest' do
+      let(:payload) { build(flow_digest: nil).build }
+
+      it 'degrades to an unavailable, empty flows section' do
+        expect(payload['flows']).to eq('available' => false, 'summaries' => [],
+                                       'unit_index' => {}, 'method_index' => {})
+        expect(payload['flow_ops']).to eq([])
+      end
+
+      it 'still builds screens from route facts alone' do
+        screen = payload['screens'].find { |s| s['id'] == 'PostsController#index' }
+        expect(screen).to include('routes' => ['GET /posts'])
+        expect(screen['flow']).to be_nil
+      end
     end
   end
 end

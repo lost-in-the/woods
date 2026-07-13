@@ -29,6 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persist across reloads, filter rows gain hover "only"/"show all" controls, arrowheads sit
   on their curves, and table/overview clicks no longer yank you back to the graph ("Show in
   graph" is an explicit detail-panel action). See `docs/EXPLORER.md`.
+- **Explorer v2 — from data map to understanding tool** (payload schema `woods-explorer/2`).
+  The explorer is now organized around questions instead of data types, with five top-level
+  views: **Home** (screen catalog grouped by URL domain with behavior badges — sends email,
+  queues jobs, writes data, branches — plus search over screens/units/flows), **Trace** (per-
+  screen operation tree rendered as a box-drawing `├─ └─` tree: before_action gate rail with
+  only/except ghosting, params contract, calls with file:line, conditionals with verbatim
+  conditions, transactions, job/mailer enqueues, responses with resolved redirect
+  destinations, and a consequence footer showing the model callbacks that fire on the
+  action's writes), **Impact** (entry-point surfaces with explicit evidence tiers —
+  flow-PROVEN vs graph-POSSIBLE — member-level scoping to a single callback/column/action/
+  association, covering-spec lookup, destroy-cascade simulation, and a **Review** mode that
+  turns a pasted `git diff --name-only` into a regression checklist), **Routes** (every
+  screen with unreachable/dead-end/untested/no-flow badges and CSV export), and **Atlas**
+  (the v1 Graph/ERD/Table/Overview). Traces and cascades export as **plain text trees**,
+  **Mermaid flowcharts** (`flowchart TD` with decision diamonds), or AI-ready markdown; a
+  **Plain language ⇄ Technical** toggle rewrites rows for non-engineers without hiding
+  information. New Ruby pieces: `Woods::Explorer::FlowDigest` ingests `FlowPrecomputer`
+  output (`precompute_flows = true`) into per-flow summaries + compacted op trees + inverted
+  unit/method indexes, and `Woods::Explorer::ScreenBuilder` derives screens (controller
+  action + routes + render-closure navigation + flow linkage + URL domain). Flow trees over
+  ~1.5 MB split into a `flows.js` sidecar (`<script src>` keeps `file://` working). Optional
+  `woods_labels.yml` (`WOODS_EXPLORER_LABELS`) gives screens and domains product names.
+  Every impact/trace view carries a fixed blind-spot box stating analysis limits.
 - The `spec/dummy` booted-app fixture grew from a 2-model blog to a small forum domain
   (8 models incl. STI + polymorphic + has_many :through, namespaced admin controllers,
   concerns with callbacks, services, decorator, mailer + templates, 13 view templates) so
