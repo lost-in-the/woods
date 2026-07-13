@@ -36,17 +36,18 @@
   <div class="workspace">
     <aside id="sidebar" aria-label="Filters and legend">
       <section class="side-section" id="legend-section">
-        <h2>Families</h2>
+        <h2>Families <button id="legend-reset" class="reset-link" hidden>show all</button></h2>
         <div id="legend" role="group" aria-label="Filter by unit family"></div>
       </section>
       <section class="side-section" id="via-section">
-        <h2>Relationships</h2>
+        <h2>Relationships <button id="via-reset" class="reset-link" hidden>show all</button></h2>
         <div id="via-filter" role="group" aria-label="Filter by relationship kind"></div>
       </section>
       <section class="side-section" id="graph-options">
         <h2>Display</h2>
         <label class="opt"><input type="checkbox" id="opt-labels" checked> Node labels</label>
         <label class="opt"><input type="checkbox" id="opt-orphans" checked> Unconnected units</label>
+        <label class="opt" id="opt-cap-row" hidden><input type="checkbox" id="opt-cap"> <span id="opt-cap-text">Top units only</span></label>
         <div class="opt path-launch">
           <button id="path-mode-btn" class="btn">Find a path…</button>
         </div>
@@ -75,6 +76,7 @@
       <div id="canvas-wrap">
         <canvas id="canvas" tabindex="0" role="application"
                 aria-label="Dependency graph. Arrow keys move between nodes, Enter opens details, Escape clears selection."></canvas>
+        <div id="canvas-banner" class="canvas-banner" role="status" hidden></div>
         <div id="canvas-toolbar">
           <button class="icon-btn" id="zoom-in" aria-label="Zoom in">+</button>
           <button class="icon-btn" id="zoom-out" aria-label="Zoom out">−</button>

@@ -21,7 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`woods-explorer/1` schema) carries the same payload for agents and scripts. Output is
   byte-identical across re-runs of an unchanged extraction; a `.woods-explorer` sentinel
   guards against overwriting foreign directories (`WOODS_EXPLORER_FORCE=1` to override).
-  Env: `WOODS_EXPLORER_OUTPUT`, `WOODS_EXPLORER_INCLUDE_FRAMEWORK`. See `docs/EXPLORER.md`.
+  Env: `WOODS_EXPLORER_OUTPUT`, `WOODS_EXPLORER_INCLUDE_FRAMEWORK`. Validated against a real
+  6,600-unit production extraction: past ~1,200 units the graph defaults to the top 600 by
+  PageRank (opt-out in Display), the ERD caps at the 100 most connected models with
+  focus-neighborhood reach to the rest, unconnected units park in a static grid instead of
+  dragging the camera, the view auto-fits until first interaction, filters/display options
+  persist across reloads, filter rows gain hover "only"/"show all" controls, arrowheads sit
+  on their curves, and table/overview clicks no longer yank you back to the graph ("Show in
+  graph" is an explicit detail-panel action). See `docs/EXPLORER.md`.
 - The `spec/dummy` booted-app fixture grew from a 2-model blog to a small forum domain
   (8 models incl. STI + polymorphic + has_many :through, namespaced admin controllers,
   concerns with callbacks, services, decorator, mailer + templates, 13 view templates) so

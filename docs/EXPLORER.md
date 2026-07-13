@@ -44,6 +44,29 @@ explorer traces the shortest dependency chain between them, rendered as a
 left-to-right storyboard — "how does a request in this view end up enqueueing
 that job?"
 
+## Large codebases
+
+Tested against a real 6,600-unit / 6,100-edge production app. At that size the
+explorer changes its defaults (everything below is automatic past ~1,200
+units):
+
+- **Top slice first.** The graph opens with the top 600 units by PageRank —
+  the core of the app — instead of the full hairball. The status bar says so;
+  the Display checkbox ("Top 600 by PageRank only") turns it off, and Focus /
+  path / search always reach the full graph.
+- **ERD caps at the 100 most connected models** with a banner; *Focus
+  neighborhood* on any model shows its full association neighborhood (and
+  stays in the ERD).
+- **Unconnected units sit in a static grid** beside the simulated cluster
+  instead of drifting off and dragging the camera with them.
+- The camera **auto-fits while the layout settles** and stops the moment you
+  pan or zoom; nodes never shrink below a visible size.
+
+Filters, display options, and the cap all **persist across reloads**
+(localStorage). Each family/relationship row has a hover **"only"** button to
+isolate it, and each section header gets a **"show all"** reset once anything
+is off.
+
 ## Filters and interaction
 
 - **Families** (sidebar) — toggle the eight unit families (Models & data,
@@ -54,6 +77,9 @@ that job?"
 - **Search** (`/`) — type-ahead across identifiers and file paths.
 - **Keyboard** — arrow keys walk the graph spatially, `Enter` opens details,
   `f` focuses a neighborhood, `1`–`4` switch views, `?` shows help.
+- **Navigation never steals your view** — clicking a unit in the table,
+  overview, or detail panel opens the detail panel in place; the detail
+  panel's *Show in graph* action does the explicit jump.
 - **Detail panel** — schema columns, associations, validations, callbacks
   *with analyzed side-effects* (columns written, jobs enqueued, mailers
   triggered), scopes, routes, filters, permitted params, dependencies and
