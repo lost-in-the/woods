@@ -1,0 +1,50 @@
+API Tokens Can Be Scoped to Specific Data Sources
+When creating a Personal API Token or Team API Token for MCP (Settings → API Tokens), you can limit which data sources the token has access to via a checklist under "Data Sources."
+
+This means that the API tooling that uploads to unblocked also has access to context from the collection. It explicitly has access to:
+* admin repo
+* storefront repo
+* themes repos
+* admin woods and storefront woods
+* linear
+
+With this, the CLI or MCP may have better context than the code review tooling.
+
+----
+
+Unblocked context:
+Good catch — there **is** actually a relevant capability I missed. Let me highlight it:
+## API Tokens Can Be Scoped to Specific Data Sources
+When creating a **Personal API Token** or **Team API Token** for MCP (Settings → API Tokens), you can **limit which data sources the token has access to** via a checklist under "Data Sources."
+This isn't exactly a "shared preset" — it's a per-token data source filter. But it's functionally similar: you could create a token that's scoped to include the Admin Woods custom collection (and whatever else is relevant), then use that token for your MCP or CLI automation.
+However, this is a **restriction** mechanism, not a prioritization one. It controls which sources the token _can_ access, not which sources it _should prefer_. And it applies at the token level, not per-query.
+## What This Means for Your Use Case
+For the GitHub Action → CLI/MCP approach, you could:
+1. **Create a Team API Token** scoped to include only the Admin Woods collection (and source code repos)
+2. Use that token in the GitHub Action to run `unblocked context-research` via the CLI or MCP
+3. The results would be **constrained** to only those data sources, effectively forcing it to use the Woods profiles
+```yaml
+- name: Run Woods-scoped analysis
+  env:
+    UNBLOCKED_TOKEN: ${{ secrets.UNBLOCKED_WOODS_TOKEN }}  # token scoped to Admin Woods + source code
+  run: |
+    result=$(unblocked context-research \
+      --query "What is the blast radius of destroying ProductOption? List dependents, entry points, and side effect callbacks." \
+      --instruction "Focus on structural codebase profiles describing model associations, dependents, and callbacks." \
+      --effort high)
+    
+    gh pr comment "${{ github.event.pull_request.number }}" \
+      --repo "${{ github.repository }}" \
+      --body "## Woods Context Analysis
+    ${result}"
+
+```
+This is the closest thing to "use a specific data source profile from the CLI/MCP" that exists today. It's not a shared preset selection per se, but by scoping the token, you achieve the same outcome — the CLI/MCP can only search within the data sources you've allowed on that token.
+## Key Distinction
+| Surface | Preset/Scope Support | Mechanism |
+| --- | --- | --- |
+| Web dashboard Q&A | ✅ Data Source Presets | Per-query preset selection |
+| Slack auto-answers | ✅ Data Source Presets | Per-channel configuration |
+| CLI / MCP | ✅ Token-level scoping | Per-token data source filter |
+| PR Chat (`@unblocked`) | ❌ None | Searches all connected sources |
+So for the automated GitHub Action path, **scoped API tokens + CLI/MCP is your best bet** for reliably hitting the Woods collection. PR Chat remains the one surface where you can't control data source scope at all.
