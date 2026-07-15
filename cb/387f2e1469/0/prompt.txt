@@ -1,0 +1,4 @@
+Per chris' comment:
+Done. Registered `UNBLOCKED_API_TOKEN` + `UNBLOCKED_COLLECTION_ID` as Buildkite agent env on all 12 SLC agents (slc01–12), for both admin and storefront — stored in the vaulted `buildkite_env_hooks`, sourced per job via the global `environment` hook and reaching the container through the `ci-compose.yml` allowlist (same path as `RAILS_MASTER_KEY`, no secret interpolation in pipeline YAML).
+
+Verified end to end: the env hook resolves both vars for admin and storefront jobs, and they match the 1Password values (Team vault, "Unblocked - {Admin,Storefront} Woods API Token"). Did the storefront pipeline at the same time, which covers ENG-5477's agent-env step. Remaining per pipeline: create the Buildkite schedule and drop `soft_fail` after two green runs.
