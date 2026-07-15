@@ -1,0 +1,10 @@
+Test it now regardless. Let's ask it about this high-blast radius rails upgrade ticket:
+what's the highest blast radius ticket in this project
+
+    GAL-1734 — "YAML read-compat: yaml_column_permitted_classes + rewrite YamlFallback to safe_load (storefront)" — is the highest blast-radius ticket in the project.
+
+    Why it tops the list: its failure mode is a site-wide storefront 500 on every page render. theme_instances.settings is read on essentially every storefront render, and if the rewritten coder can't parse a row that admin already wrote (Set/Symbol values under Psych 4+), every buyer-facing store breaks at once. It's marked Blast radius: Critical / Risk: Critical, it's the keystone of Invariant 2 (storefront must read every YAML shape admin writes), and it carries the project's hardest ordering rule — it must land on the 6.1→7.0 hop before the Ruby/Psych-4 bump (GAL-1738), or the failure is discovered in production instead of in review. It corresponds to risk rows 1–2 in the plan doc, the only rows rated Critical.
+
+    Runner-up: GAL-1698 (inbound webhook raw_post HMAC characterization) — also rated Critical, but its blast is silent Stripe/PayPal/Postmark webhook failure, which is severe-but-narrower than every-page-every-store.
+
+    Worth noting the current state, though: GAL-1734's risk (not its blast radius) has been substantially de-risked by the validation work in this session — the proposed safe_load allowlist passed every row in the dev DB and a 13-store adversarial production sample (including the six stalest theme_instances.settings rows in all of production), and the structural finding that no production settings row predates the 2021-06-08 platform-wide re-save means syck-era YAML appears structurally gone. The blast radius if something still goes wrong remains "all of storefront," which is why the ticket keeps its Critical rating and its pre-deploy re-scan step even after the clean sample.
