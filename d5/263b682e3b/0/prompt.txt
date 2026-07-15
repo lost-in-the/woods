@@ -1,0 +1,1 @@
+Could we build the blast radius on the PR, then pass that to the comments tagging unblocked with details or something similar? We get free unblocked for now, claude is a bit higher cost/commitment generally speaking.
