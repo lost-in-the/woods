@@ -1,0 +1,1 @@
+Fold them into the flow doc and create an html page that contains the proposed solution, data flows, etc using previous findings from unblocked tests, how the data flows, OOO and any other relevant details to present. Use charts when appropriate for data flows.
