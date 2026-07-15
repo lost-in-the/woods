@@ -1,0 +1,236 @@
+Base directory for this skill: /Users/leah/.claude/skills/dev-feedback-writeups
+
+# Linear & GitHub Writeups: Mixed-Audience Dev Feedback
+
+Generates and reviews short-form writeups for Linear issues, GitHub PRs, and other async dev channels where engineers, PMs, and QAs all read the same thread.
+
+## Why this skill exists
+
+Engineer-drafted Linear/GitHub posts default to engineer-to-engineer prose: technical narrative interleaved with evidence, headline buried, asks scattered, jargon unhooked. PMs and QAs scanning on phones bail out before reaching the part that matters to them. This skill enforces structure that lets all readers exit early with what they need, while still preserving full technical depth for engineers who scroll.
+
+## Mode selection
+
+- **Writing mode** — user asks to draft, write, post, or send an update. Produce the writeup directly using the template below.
+- **Review mode** — user asks to review, audit, improve, or check a draft. Score the draft and rewrite the worst sections.
+
+Default to writing mode if unclear.
+
+---
+
+## The strict 4-section template
+
+Every writeup follows this structure, in this order. No exceptions for incidents, feature updates, status reports, or PR descriptions — the section meanings adapt to context but the structure does not.
+
+### 1. Headline (1–2 lines)
+
+What happened and current status, in plain language. A reader who reads ONLY this line should know: is this resolved? do I need to act?
+
+Adapts by context:
+- **Incident**: "Webhook delivery to shipping integrations was delayed 3–4 hours this morning. Resolved by 1pm ET, no data lost."
+- **Feature**: "Shipping label preview is live for all users as of today. No action needed."
+- **PR**: "Refactor of `OrderProcessor` to extract retry logic. Ready for review — touches 4 files, no behavior change."
+- **Status**: "Migration is 60% complete. On track for Friday. One open question for QA below."
+
+Banned in headline: bare ticket IDs (`PROJ-1525` with no gloss), engineer-only jargon, multi-clause technical compounds, "Investigation complete" / "Root cause identified" lead-ins.
+
+### 2. Impact (1–3 lines)
+
+Who was affected and how, in user/customer terms. If nothing was lost or no users were affected, SAY SO HERE — it is often the most important sentence for non-engineers.
+
+For PRs and feature updates, this section answers "what changes for users when this lands?" If the answer is "nothing visible," write that.
+
+Banned in impact: raw latency numbers without translation ("queue latency 3h 54m" → "users saw a 3–4 hour delay"), pure technical metrics with no user framing.
+
+### 3. Asks (clear, owned, scannable)
+
+Bulleted list. Every ask owns:
+- **Who** — tag with `@person` or a team
+- **What** — concrete action verb
+- **Why-brief** — one short clause
+
+If there are no asks, write a single line: "**No asks** — informational only." Then skip to Detail.
+
+Use status anchors as bullet prefixes when helpful: `✅ Done`, `🔜 Next`, `❓ Open question`, `🚧 Blocked`, `⏳ Waiting on`. One anchor per ask, never in headline or impact.
+
+Banned in asks: asks buried inside narrative paragraphs, multiple questions stacked in one bullet, "we should consider" hedging without an owner.
+
+### 4. Detail (collapsed or below the fold)
+
+Evidence, code references, technical narrative, tables, methodology, alternatives considered, links to logs/dashboards. Engineering-only context lives here.
+
+On GitHub, wrap in `<details><summary><b>Technical detail</b></summary>...</details>` when the section is over ~10 lines. On Linear, use a `---` divider with a clear `**Technical detail**` heading and put it last.
+
+Jargon is fine here — engineers reading this section have signed up for depth.
+
+---
+
+## Reading-level targets
+
+These targets are how the structural rules cash out concretely. They apply to the top three sections only — the Detail section is engineering territory.
+
+| Section | Target reading level | Heuristic |
+|---|---|---|
+| Headline | ~8th grade | A non-developer reading this on their phone understands the situation in one pass. |
+| Impact | ~8th grade | Same — should be readable without a glossary. |
+| Asks | ~8th–10th grade | Action verbs and named owners are fine; tool/system names may appear if anchored. |
+| Detail | ~12th grade and up | Stack-specific jargon, function names, queue/worker terminology, code references all OK. |
+
+If a sentence in Headline or Impact contains more than one engineer-only term, it belongs in Detail. If a Rails/Sidekiq/Postgres/etc. specific term **must** appear in the top sections, anchor it on first use (see "Anchor jargon on first use" below). When in doubt, demote technical content into Detail rather than glossing it in place.
+
+For an additional readability pass — especially for users with ADHD, Anomic Aphasia, or other word-finding/scanning needs — chain into `adhd-aphasia-reviewer` after drafting.
+
+---
+
+## Writing rules (apply in both modes)
+
+### Lead with what changed for users
+The headline is about the user-facing outcome, not the investigation. "Webhook delivery was delayed 3–4 hours" — not "the background work queue experienced starvation."
+
+### Anchor jargon on first use
+First mention of any term a non-engineer might not know gets a plain-language hook attached. After that, the term can stand alone.
+
+```
+❌ "Queue starvation caused the delay."
+✅ "Queue starvation (the work pile got so big new jobs sat waiting for hours) caused the delay."
+
+❌ "Sidekiq fan-out collapsed onto the default queue."
+✅ "A burst of 1.3M cleanup jobs landed on the shared work queue and crowded out everything else."
+```
+
+### Cross-references earn their place
+A bare `PROJ-1525` means nothing to a PM. Either:
+- Drop the bare ID into the Detail section only, or
+- Add a phrase that explains the reference: "the prior incident ([PROJ-1525](url))"
+
+### Progressive disclosure: collapse the dense stuff
+Tables, multi-step investigation, code spelunking, stacks of references all go inside `<details>` (GitHub) or below the `---` Detail divider (Linear). Non-engineers scroll past; engineers expand.
+
+---
+
+## Banned patterns — never in the artifact
+
+These are the highest-frequency failure modes for AI-drafted ticket posts. Scan the draft against this list before posting:
+
+- **Meta-commentary callouts** — `★ Insight ─────`, `─── Drafting notes ───`, or anything else that explains drafting choices inside the artifact. The post is a permanent record. Drafting commentary belongs in the chat reply alongside the draft, never in the draft itself.
+- **Preamble that addresses the human drafter** — "Here's a draft you can paste...", "Let me know if you want a different tone...", "Feel free to adjust...". These belong in the chat reply.
+- **Tone hedges** — "I think maybe we might consider possibly...". Either it's an ask or it isn't.
+- **Bare ticket IDs in lead/impact** — see cross-references rule above.
+- **Jargon-only sentences in headline or impact** — read the sentence aloud and ask "would a non-engineer understand this in one pass?"
+- **Asks buried in narrative** — every ask gets its own bullet in section 3.
+- **Headline-as-investigation-status** — "Root cause identified", "Investigation complete", "Update" tell the reader nothing about what happened or what to do.
+
+---
+
+## Mode: Writing
+
+Produce the writeup directly using the template. In the chat reply (NOT in the writeup itself), briefly note:
+
+- Whether the audience is mixed (Linear, broad GitHub issue) or engineer-only (PR code-review nit thread). Engineer-only threads can compress the template — Headline + Detail is acceptable.
+- Anything you had to guess about audience, severity, or asks.
+
+If the user provides facts that don't fit cleanly into a section, ask before omitting them — don't silently drop content.
+
+## Mode: Review
+
+When reviewing a draft, provide:
+
+### 1. Verdict
+One line: `[1-5 rating] — [one-sentence summary]`
+
+Example: `2/5 — Solid investigation, but headline is buried 5 paragraphs deep; a PM scanning this on mobile bails before reaching impact.`
+
+### 2. Section-by-section check
+For each of Headline / Impact / Asks / Detail, mark:
+- ✅ Present and clear, or
+- ⚠️ Present but weak (and why), or
+- ❌ Missing or buried (and where it currently lives)
+
+### 3. Top 3 problems
+Quote the problematic text. Explain which reader (PM, QA, on-call engineer, future-self) hits a wall there.
+
+### 4. Concrete rewrite of the lead
+Always rewrite Headline + Impact in full. These are the highest-leverage fixes. Rewrite Asks if buried. Don't rewrite Detail unless it has its own structural problem.
+
+### 5. Banned-pattern + reading-level scan
+Quick checklist with ✅/❌:
+- [ ] No `★ Insight` or other meta-callouts
+- [ ] No "Here's a draft..." preamble inside the artifact
+- [ ] No bare ticket IDs without context in lead/impact
+- [ ] No jargon-only sentences in headline or impact (~8th grade target)
+- [ ] Asks are bulleted and owned
+- [ ] Stack-specific jargon (Rails, Sidekiq, Postgres, framework internals) lives in Detail, not the lead
+
+---
+
+## When NOT to use this skill
+
+- One-line factual replies ("Merged, thanks!", "Reverted, see ticket.").
+- Pure engineer-to-engineer code-review nits inside a PR thread where no PM/QA is subscribed.
+- Long-form documents that live as standalone pages (PRDs, RFCs, design docs, full postmortems) — use `tech-docs` instead.
+- Real-time chat (Slack DMs, async standups) — the template overhead doesn't pay off at chat tempo.
+
+---
+
+## Canonical before/after
+
+A Rails-flavored incident writeup, and what it should have been. The "Before" version deliberately keeps the stack jargon in the lead to show the failure mode; the "After" preserves every word of the technical depth but moves it below the fold.
+
+### Before (the dense version)
+
+> **Investigation — root cause identified**
+>
+> This is a recurrence of the PROJ-1525 / PROJ-1524 incident shape: Sidekiq `default` queue starvation causing `WebhookWorker` deliveries (including the ShipFlow integration) to sit behind a maintenance fan-out for hours. The APM dashboards confirm it.
+>
+> [...600 words of investigation, queue metrics table, root cause analysis, three nested possibilities for what fired the cleanup jobs, then at the very bottom...]
+>
+> Users' orders all delivered eventually; no data was lost. Same outcome as PROJ-1524 / PROJ-1525.
+>
+> `★ Insight ─────────────────────────────────────`
+> Two deliberate framing choices in this draft worth flagging...
+> `─────────────────────────────────────────────────`
+
+**What's wrong:**
+- Headline ("Investigation — root cause identified") tells a non-engineer nothing.
+- "Users' orders all delivered eventually" — the most important sentence for non-engineers — is the second-to-last line.
+- Asks are split: recommended fix at bottom, open question for @alice in the middle of the body, neither is in the lead.
+- `★ Insight` callout is meta-commentary leaking drafting reasoning into a permanent ticket record.
+- Bare `PROJ-1525 / PROJ-1524` references in the lead with no context for non-engineers.
+- Top sections are ~14th–16th grade reading level (Sidekiq, queue starvation, fan-out, `WebhookWorker`). PMs bail.
+
+### After (template-enforced)
+
+> **Webhook delivery to ShipFlow, PrintMate, and other shipping integrations was delayed 3–4 hours yesterday morning. Resolved by 1pm ET — no orders lost. Same root cause as the prior incident ([PROJ-1525](url)).**
+>
+> **Impact**
+>
+> Users on ShipFlow shipping (and other webhook-based integrations) saw orders show up in their downstream tools 3–4 hours late, roughly 7am–1pm ET. Dana filed the report at 7:16am ET, near peak delay. The work queue drained naturally by 1pm; no manual intervention required. All orders eventually delivered.
+>
+> **Asks**
+>
+> - 🔜 Ship [PROJ-1545](url) — move webhook delivery to its own dedicated work queue. ~10-line change, no data risk, prevents this incident shape entirely.
+> - ❓ **@alice** — the dormancy cleanup job is now retired (your [PR #4421](url)). What fired the ~1.3M cleanup runs yesterday morning? Three possibilities listed in the technical detail below; you have the context to answer in seconds.
+>
+> ---
+>
+> <details>
+> <summary><b>Technical detail</b></summary>
+>
+> [full investigation: Sidekiq queue metrics table, `default`-queue starvation analysis, `WebhookWorker` retry timing, the three possibilities for what fired the cleanup jobs, comparison to the April incident, code references — exactly as in the original draft, unchanged]
+>
+> </details>
+
+**What changed:**
+- Headline now lets a non-engineer exit after one line knowing status + impact + that it's resolved. ~8th grade reading level.
+- Impact section is concrete (named integrations, 3–4 hours, 7am–1pm ET) instead of "blast radius." Still ~8th grade.
+- Asks are bulleted, owned, with action verbs. @alice sees her open question in 2 seconds.
+- All evidence, code references, Sidekiq/queue specifics, and the 3-possibility analysis are preserved verbatim in the collapsed Detail section — engineers lose nothing.
+- The `★ Insight` callout is gone from the artifact. (It can still appear in the chat reply that delivers the draft.)
+
+---
+
+## Tone
+
+- Direct, specific, no padding. Match the voice of `adhd-aphasia-reviewer`.
+- Assume readers are competent — optimize for scan-ability and retrieval, not simplification of substance.
+- Don't soften technical content; just structure it so non-engineers can exit early and engineers can scroll for depth.
+- The skill enforces structure and reading-level targets; it does not flatten substance.
