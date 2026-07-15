@@ -1,0 +1,1 @@
+<bash-stdout>https://github.com/bigcartel/admin/pull/13892</bash-stdout><bash-stderr></bash-stderr>
