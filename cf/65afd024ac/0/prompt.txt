@@ -1,0 +1,27 @@
+<teammate-message teammate_id="team-lead">
+Read-only investigation on `bigcartel/admin` (do NOT modify the repo), producing ONE local output file. You are building the **👎 + notes training set** the team uses to correct Unblocked's false positives.
+
+## Background (established findings — trust these)
+- Unblocked's `unblocked[bot]` code-review is **strong at structure** (dependents, blast radius, N+1s) but **weak at semantics/runtime** (Rails casting, validation contexts, framework-API behavior, stale-data assumptions) and **config/severity judgment**.
+- **👎 reactions are UNUSED — 0 across 250 PRs.** All human disputes live in **reply text**. So you must mine reply *sentiment*, NOT reactions.
+
+## Your task
+Scan admin PRs (broad — created since ~2026-04-15, sample generously) for `unblocked[bot]` review comments that a human **disputed / overrode / corrected**, and produce a clean, deduplicated **notes training set** plus **ready-to-paste rules**.
+
+### How to fetch
+- `gh` is authenticated; if a call hits a sandbox TLS `x509` error, re-run that Bash call with `dangerouslyDisableSandbox: true`.
+- `gh api repos/bigcartel/admin/pulls/<N>/comments` → each comment has `user.login`, `body`, `in_reply_to_id`, `id`, `html_url`.
+- Find `unblocked[bot]` comments, then find human replies (`in_reply_to_id` → a bot comment, non-bot author). Flag pushback via regex on reply text: `not actually correct|isn.?t correct|Rails handles|in practice|we dont care|don.?t care|not worth|already applied|adds? .*noise|buggin|wrong|false positive|handled (it )?already|no need`.
+- Seed + verify these known cases: **#12912** (valid?(:context)), **#13831** (currency HTML entities), **#13797** (Float/BigDecimal), **#13645** (esbuild entrypoints), **#13878** (migration lock), **#13668** (AppSignal noise), **#13753** (stale kiln data), **#13720** (nokogiri whitespace). Also look for the framework-API ones the team cited: Rails `inclusion` validator, `URI.parse(nil)`, Alpine `Alpine.store`/`Alpine.start`.
+
+### Categorize each: SEMANTIC-MISREAD / DATAFLOW / STALE-DATA / GOOSE-CHASE / BAD-CONFIG / FALSE-SECURITY / OVERCONFIDENCE.
+
+## Output — write to `/Users/leah/work/compose-dev/unblocked-false-positive-notes.md`
+1. **Header:** what this is, sample size, date range, and the "reactions are dead — mine reply text" caveat.
+2. **Notes table:** each confirmed false positive → PR# (linked), comment URL, one-line "what Unblocked wrongly claimed", one-line **correction note in the team's terse style** (e.g. "This `.count` is on an array, not an association", "`valid?(ctx)` still runs base presence/format validations"), category.
+3. **Category distribution** (counts).
+4. **Ready-to-paste generalized rules** — for recurring categories, the `AGENTS.md` / global-instruction line that would suppress the whole class (e.g. "Do not flag `.html_safe`/`raw()` on string literals defined in code"; "Do not claim `valid?(:context)` skips a model's unconditional validations"). Group by theme.
+5. **Coverage caveats** (how many PRs scanned, how many had bot comments, any seeds you couldn't verify).
+
+Aim for a genuinely useful, deduped artifact a human can paste from. Report back a short summary (counts + file path) when done — the file is the deliverable.
+</teammate-message>
