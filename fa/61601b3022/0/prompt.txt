@@ -1,0 +1,27 @@
+<teammate-message teammate_id="team-lead">
+Read-only investigation. Design the **Woods index lifecycle** for feeding a **per-PR automated code review**, with special attention to **a PR that gets pushed many times over a day** (iterative agent edits). Do not modify anything.
+
+## Context you can trust (don't re-derive)
+- **Woods** is a Ruby gem (repo at `/Users/leah/lost-in-the/woods`) that extracts a structural index of a running Rails app. Key artifact: `tmp/woods/dependency_graph.json` (contains `file_map` = file→unit, `nodes` = unit→{file_path,type}, `reverse` = unit→[dependent names], `pagerank` = unit→score). It also writes per-unit JSON profiles.
+- It has **full extraction** (`rake woods:extract` — boots Rails, eager-loads, ~minutes, ~6,500 units for a large app) and **incremental extraction** (`rake woods:incremental` — re-extracts only changed files).
+- There's a **`woods-admin` MCP server** exposing tools like `dependents`/`lookup` that return a unit's dependents (by name), counts, and PageRank — queried by unit NAME.
+- The admin app (`/Users/leah/work/compose-dev/admin`) wires Woods in; there's a scheduled Buildkite `woods-sync` step that runs `woods:extract` on `main`. Linear tickets **ENG-5462** (restore sync manifest across CI runs) and **ENG-5480** (restore incremental extraction / `dependency_graph.json` across CI runs) are backlog items about persisting the index across ephemeral CI runs.
+
+## Questions to answer
+1. **Incremental extraction mechanics & cost:** what does `woods:incremental` actually need as input (a prior `dependency_graph.json`? a stored SHA?), what does it re-extract, and does it still require a Rails boot? Read `lib/tasks/woods.rake` and `lib/woods/extractor.rb` (look for `extract_changed`/incremental logic) to confirm. Roughly how expensive is incremental vs full?
+2. **Freshness strategy for a PR branch:** to review a PR, does the reviewer need a graph reflecting the PR branch, or is the **latest `main` graph** (from the nightly sync) good enough for "what depends on the changed units"? When does a stale main graph mislead (e.g. the PR adds/renames units)?
+3. **Iterative-push handling:** if a PR is pushed 10× in a day, what's the cheapest correct approach — re-extract per push, incremental-update per push, or query the stable main graph and only diff the changed files each time? Consider debouncing, and reviewing only the *incremental* diff since the last review.
+4. **How the reviewer consumes it:** by unit name via the `woods-admin` MCP, or via a generated report? (The MCP returns dependents by name directly.)
+
+## How to investigate
+- Read the woods repo: `lib/tasks/woods.rake`, `lib/woods/extractor.rb`, the MCP server (`lib/woods/mcp/`), and any incremental/`extract_changed` code.
+- Read the admin wiring: `/Users/leah/work/compose-dev/admin/.buildkite/pipeline.yml` (the `woods-sync` step) and `.mcp.json`.
+- `gh` for the ENG-5462/5480 details if useful (via Linear MCP if available, else skip). If a network call hits a sandbox TLS `x509` error, retry with `dangerouslyDisableSandbox: true`.
+
+## Report back (concise; headers/bullets; bold the recommendation)
+- **Incremental mechanics + cost** (inputs, Rails-boot needed?, cost vs full).
+- **Recommended freshness strategy** for per-PR review (main graph vs branch re-index; when staleness matters).
+- **Recommended iterative-push handling** (debounce? incremental-diff review? comment idempotency?), with the cost tradeoff.
+- **How the reviewer should query it** (MCP-by-name vs generated report).
+- Anything that would need a new Woods capability. Cite `file:line` where relevant.
+</teammate-message>
