@@ -1,0 +1,82 @@
+One last bit of context that seems to be important. Here's the output of condensed information from a chat with the unblocked agent:
+# Unblocked Code Review — Research Summary
+## How Automated Code Reviews Work
+- Automatically triggered on PR creation/update for enabled repos; completes in ~3 minutes
+- Analyzes code diffs for bugs, logic errors, security vulnerabilities, and best-practice violations
+- Posts **inline comments** with suggested fixes (one-click apply on GitHub)
+- When no issues found: auto-approves, leaves a comment, or stays silent (configurable)
+- Reads existing PR comment threads to avoid duplicate findings
+- Learns from **historical PR conversations** and cites them when relevant
+- Supports **risk assessment** via `.unblocked/risk-policies.yaml` (scores: lowest → highest)
+- Customizable via repo rule files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `.cursor/rules`) and global instructions (up to 10 KB)
+- **PR Chat** (`@unblocked` in PR comments) allows on-demand interaction with full workspace context
+## Data Source Access
+| Context Source | Automated Review | PR Chat |
+| --- | --- | --- |
+| Code diff & repo files | ✅ | ✅ |
+| Historical PR conversations | ✅ | ✅ |
+| Repo rule files (AGENTS.md, etc.) | ✅ | ✅ |
+| Global instructions | ✅ | ✅ |
+| Web search (fact-checking) | ✅ | ❌ |
+| Risk policy YAML | ✅ | ❌ |
+| Slack, Notion, Confluence, custom collections, etc. | ❌ | ✅ |
+**Key gap:** Automated reviews cannot access custom collections (e.g., Admin Woods). PR Chat can.
+## Workaround: GitHub Action → PR Chat Bridge
+Since PR Chat has access to custom collections but automated reviews don't, a GitHub Action can **automatically post an ****`@unblocked`**** comment** on PRs, effectively creating a second automated pass with full collection access.
+### Example Workflow
+```yaml
+name: "Unblocked: Woods Context Review"
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+jobs:
+  woods-review:
+    if: "!github.event.pull_request.draft"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if Woods review warranted
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=$(gh pr diff "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --name-only)
+          if echo "$files" | grep -qE '(app/models/|app/services/|db/migrate/)'; then
+            echo "trigger=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post @unblocked PR Chat comment
+        if: steps.check.outputs.trigger == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          changed=$(gh pr diff "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --name-only \
+            | grep '\.rb$' \
+            | sed 's|.*/||; s|\.rb$||' \
+            | sort -u | head -15 | paste -sd ', ' -)
+
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "@unblocked Using the Admin Woods collection, analyze this PR for:
+          1. **Blast radius** — which models, jobs, mailers, and controllers depend on the changed units? Flag any high-dependent-count models (>20 dependents) whose tests are not touched in this diff.
+          2. **Entry point impact** — are there controllers, GraphQL resolvers, or background jobs that reference the changed code?
+          3. **Side effects** — does anything changed trigger callbacks, workers, or mailers not covered by the diff?
+          Changed units: ${changed}
+          Cite relevant Woods profiles by name."
+
+```
+### Design Considerations
+| Concern | Approach |
+| --- | --- |
+| Noise on small PRs | Gate on file count, diff size, or changed paths |
+| Force-push spam | Only fire on `opened` + `ready_for_review`, use `synchronize` sparingly |
+| Targeted prompts | Dynamically extract changed file names and inject into the prompt |
+| Multiple repos | Duplicate workflow per repo, pointing at the relevant collection |
+## Can the Automated Reviewer Be Instructed to Access Collections or Self-Trigger PR Chat?
+**No to both.**
+- **Instruction files (****`AGENTS.md`****, global instructions) are prompts, not capability grants.** They influence review focus/conventions but cannot expand the agent's tool access. Writing "consult the Woods collection" would be ignored.
+- **The automated reviewer cannot post freeform PR comments** — its output is fixed to inline code comments and approvals. It cannot trigger PR Chat.
+- **No conditional logic in instructions** — rule files are static text with no if/then branching.
+**The automation must live outside Unblocked** — GitHub Actions is the right orchestration layer to decide _when_ to trigger and _what_ to ask, with PR Chat providing the context-rich answer.
