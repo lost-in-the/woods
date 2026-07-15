@@ -1,0 +1,1 @@
+I can run the sync now if required to validate consecutive builds. What's traffic looking like at the moment?
