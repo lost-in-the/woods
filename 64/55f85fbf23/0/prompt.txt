@@ -1,0 +1,23 @@
+<teammate-message teammate_id="team-lead" summary="New task: hunt Unblocked misses (false negatives)">
+New investigation — the complement to the false-positive notes: **Unblocked's MISSES (false negatives).**
+
+## Context
+We've shown Unblocked's *structural* claims are reliable and its false positives are semantic/config. The untested half is what Unblocked **misses** — PRs it approved / found no or only minor issues on, where a human reviewer later surfaced real concerns. **sbrudz (Steve Brudz)** — confirmed GitHub login `sbrudz`, e.g. his reply on #13797 — often does thorough, Claude-assisted PR reviews that catch things Unblocked missed. Find those.
+
+## Goal
+Identify concerns raised by human reviewers (**especially sbrudz**, and other high-comment-count reviews) on admin PRs that `unblocked[bot]` did NOT flag. For each, categorize — and answer the one question that matters:
+
+> **Do Unblocked's misses cluster in STRUCTURAL territory (blast radius / dependents / cross-file impact — where a dependency graph like Woods could plausibly help catch them) or elsewhere (logic, product intent, semantics, security, test gaps)?**
+
+This is the last remaining test of whether Woods could add review value — from the false-negative side.
+
+## Method
+- Find PRs where **sbrudz** left substantive review comments: `gh api repos/bigcartel/admin/pulls/comments` + `issues/comments` filtered to `user.login == "sbrudz"`; also `gh search`. Prioritize PRs with **many** review comments (thorough reviews).
+- For each, check what `unblocked[bot]` actually did on that PR (its review + inline comments). **A "miss" only counts if Unblocked actually reviewed the PR** and either approved / found nothing / commented only on unrelated points — while a human raised a real concern it didn't surface. Distinguish "missed it" from "wasn't asked / didn't review."
+- For each miss: PR#, the concern (one line), who raised it, what Unblocked did, and CATEGORY: **STRUCTURAL / SEMANTIC / SECURITY / LOGIC / TEST-GAP / PRODUCT-INTENT / PERF.**
+- Sample ~10–15 substantive PRs.
+- gh network: if a call hits a sandbox TLS `x509` error, re-run that Bash call with `dangerouslyDisableSandbox: true`.
+
+## Output
+Write to `/Users/leah/work/compose-dev/unblocked-misses.md`: a table of misses + category distribution + a bolded **verdict** on structural-vs-not (with the sample size + caveats). Report a short summary + the file path when done.
+</teammate-message>
