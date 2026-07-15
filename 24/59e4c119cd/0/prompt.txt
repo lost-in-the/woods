@@ -1,0 +1,2 @@
+On your drafts, use checkboxes instead of emojis for status/asks and keep the context shorter. They're too verbose and too information dense.
+I created the admin-ci and storefront-ci schedules already (disabled until merge). No need to open the ticket again. Just a status update with the details on that ticket.
