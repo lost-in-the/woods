@@ -1,0 +1,101 @@
+Base directory for this skill: /Users/leah/.claude/skills/investigate
+
+# Investigate
+
+A **router**, not a doer. When you have a question, this skill tells you which
+source to reach for, in what order, and how to trust the answer. It points to
+the dedicated per-tool skills you already have rather than repeating them — see
+`references/sources.md` for the exact tools, commands, and gotchas per source.
+
+The goal: **understand the real situation before you plan, fix, or write.** Most
+wasted work comes from acting on an assumption that five minutes of research
+would have corrected.
+
+## Current working context
+
+_Auto-detected at load (read-only git; degrades to a placeholder outside a
+repo). If a line below is blank or says "not in a git repo," gather the same
+facts yourself or ask the user._
+
+- **Branch:** main
+- **Ticket hint (parsed from branch name):** (Bash completed with no output)
+
+**Changes on this branch vs its base:** if the branch above is a real repo,
+run these read-only commands yourself to see what this branch changed (they're
+kept as model-run steps rather than a load-time block so the skill always
+initializes):
+
+```bash
+base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null || git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)
+git log --oneline "$base"..HEAD 2>/dev/null | head -15   # commits on this branch
+git diff --stat "$base"...HEAD 2>/dev/null | tail -40    # changed files
+```
+
+If `base` comes back empty, you couldn't determine a base branch — fall back to
+`git diff --stat HEAD` or ask the user which branch to diff against.
+
+## Start here: orient before you act
+
+Three things come before any routing below:
+
+1. **Read the tied ticket first.** If a ticket exists for this task, read it
+   before anything else. Identify it from the **ticket hint** above — admin
+   branches embed the ticket ID (e.g. `user/BIG-123-short-title`) — or from what
+   the user told you. If you can't identify it, **ask which ticket; don't
+   guess.** Fetch it with Linear `get_issue` and let it anchor scope.
+2. **Understand what's already changed.** Review the branch diff above. If it's
+   non-trivial, read the actual diff before proposing changes — never treat the
+   current file state as the baseline without checking what this branch did.
+3. **Only then** route your remaining open questions through the table below.
+
+## Routing table
+
+Tiers: **🌐 global** (any project) · **🔧 admin** (`~/work/compose-dev/admin`,
+when those tools are available). Detail for each is in `references/sources.md`.
+
+| Your question | Reach for | Tier |
+|:--------------|:----------|:-----|
+| *Why* is it like this? decisions, rejected approaches | Unblocked (`context_research`, PR search) | 🌐 |
+| Is there in-flight or related work before I start? | open GitHub PRs, Linear `list_issues` | 🔧 / 🌐 |
+| *What / where* is the current code? callers, structure | woods index → Grep/Glob → Unblocked code search | 🔧→🌐 |
+| Is this a known / already-tracked bug? | Linear + Unblocked issues | 🌐 |
+| What's erroring in production? exceptions, perf | Appsignal | 🔧 |
+| What actually happened in a specific request? | Lograge structured logs | 🔧 |
+| Why is CI red? | Buildkite (`buildkite-build-output`) | 🔧 |
+| What did we decide in a meeting? | Granola transcript | 🌐 |
+| What did the team say informally? | Slack | 🌐 |
+| How big is the impact / who's affected? | Amplitude | 🌐 |
+| How does this library / framework work? | Context7 / `fetch-markdown` / `deep-research` | 🌐 |
+| Have I investigated this before? | Obsidian Devlog | 🌐 |
+
+When a question spans entities or needs synthesis (the "why," prior art,
+constraints), Unblocked's `context_research` is usually the strongest single
+starting move — fire it in parallel with your first code exploration.
+
+## Discipline (applies to every source)
+
+- **Fire research early, in parallel** with your first code reads — it costs
+  almost no wall-clock and stops you building on a wrong assumption.
+- **Triangulate.** Any claim that drives a decision gets confirmed across ≥2
+  independent sources. Code tells you *what*; Unblocked/Slack/PRs tell you *why*.
+- **Cite.** Keep the URL, PR number, `file:line`, or verbatim quote so a
+  reviewer can check your reasoning — and so you can.
+- **Three buckets, kept distinct:** stated fact · labeled inference · unknown.
+  Never let an inference harden into a "fact."
+- **Ask, don't assume.** When a material fact is missing and no tool can supply
+  it, ask the user a specific question rather than inventing an answer.
+- **Multi-modal.** One search angle is not enough. A local grep miss may just
+  mean the code lives in an associated repo — try Unblocked code search before
+  concluding something doesn't exist.
+
+## How other skills use this
+
+Skills that need context before producing output — `linear-ticket-writer`,
+`double-diamond-planning`, `tech-docs`, and debugging flows — should invoke
+`investigate` to gather and verify context rather than carrying their own source
+lists. This skill is the single place that knows the toolset and the discipline.
+
+## Reference
+
+- `references/sources.md` — per-source detail: exact tools/commands, which tier,
+  what each is best for, gotchas, and which existing skill to invoke.
