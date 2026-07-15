@@ -1,0 +1,85 @@
+One final thing to check before creating B. I had the linear agent gather a list of tickets that deployed and resulted in bugs requiring follow-up work. That means issues were missed in code reviews, etc. Here's it's report:
+I extended this to 2 years and kept it workspace-wide, including older Orkin-fed reports.
+
+What held up best were **high-confidence chains** where I could see:
+
+* a rollout/release issue or clearly shipped behavior
+* a later bug/error issue
+* and, ideally, comments or relations explicitly tying the bug back to the shipped work
+
+## High-confidence original issue → follow-up tickets
+
+### Critical customer impact
+
+Customer-facing breakage, checkout/payment/order flow failure, or fulfillment/data integrity risk.
+
+* [GAL-1397](https://linear.app/bigcartel/issue/GAL-1397/roll-out-migration-to-100percent) → combined shipping rollout to 100%
+  * Follow-ups:
+    * [GAL-1402](https://linear.app/bigcartel/issue/GAL-1402/orders-with-mixed-digital-and-physical-shipments-get-stuck-in) — mixed digital/physical orders stuck in partially shipped state
+    * [GAL-1409](https://linear.app/bigcartel/issue/GAL-1409/edit-profile-setting-group-ships-alone-bug) — ships-alone setting fails to persist on edit
+    * [GAL-1316](https://linear.app/bigcartel/issue/GAL-1316/shipping-rate-selections-change-at-checkout-when-cart-is-updated-and) — checkout shipping selection changes after cart recalculation
+    * [GAL-1569](https://linear.app/bigcartel/issue/GAL-1569/ships-alone-bugs-consolidated) — consolidated ships-alone bug bundle
+    * support-side follow-up signal: [ORK-524](https://linear.app/bigcartel/issue/ORK-524/checkout-defaults-to-local-pickup-after-returning-to-cart)
+  * Why it matters: checkout/shipping correctness and order-state integrity
+* [GAL-627](https://linear.app/bigcartel/issue/GAL-627/rollout-logic-to-existing-sellers) and [GAL-318](https://linear.app/bigcartel/issue/GAL-318/rollout-implementation-new-sellers) → real-time rate calculation rollout for new + existing sellers
+  * Follow-ups:
+    * [GAL-626](https://linear.app/bigcartel/issue/GAL-626/investigate-shipment-adjustments-error) — post-ship error spike investigation
+    * [GAL-636](https://linear.app/bigcartel/issue/GAL-636/saving-everywhere-profile-causing-lock-errors) — lock/time-out errors saving Everywhere profile
+    * [GAL-467](https://linear.app/bigcartel/issue/GAL-467/bugs-on-shipping-settings) — shipping settings bug cluster
+    * mitigation/hardening: [GAL-621](https://linear.app/bigcartel/issue/GAL-621/add-initial-safeguard-in-order-to-get-to-100percent-rollout)
+  * Why it matters: shipping/rate failures directly affect checkout and seller setup
+* Released Printify reconnect/disconnect behavior → follow-up bug chain anchored by [GAL-1752](https://linear.app/bigcartel/issue/GAL-1752/seller-disconnectedreconnected-printify-and-now-seeing-duplicate)
+  * Follow-ups:
+    * [GAL-1754](https://linear.app/bigcartel/issue/GAL-1754/recovery-script-salvage-printify-reconnect-duplicated-products) — recovery script for duplicated products
+    * [GAL-1756](https://linear.app/bigcartel/issue/GAL-1756/printify-reconnect-dupes-residual-cases-after-the-gal-1754-cleanup) — residual cases after cleanup
+  * Why it matters: duplicate hidden products and broken Printify linkage risk fulfillment problems
+  * Note: I can confidently trace the bug and recovery chain, but the exact “original shipped issue” for this workflow is less explicit than the Galileo shipping rollouts
+
+### High customer impact
+
+Broken seller journeys or production regressions, but narrower blast radius.
+
+* vNext paid signup flow change → [MJ-717](https://linear.app/bigcartel/issue/MJ-717/new-paid-sign-ups-see-admin-before-survey-email-verification)
+  * Follow-up source in comments says this was caused by recent shipped work and was happening in production
+  * Why it matters: new paid signups land in the wrong flow before survey/email verification
+* Released vNext launch flow behavior → [CRUST-2065](https://linear.app/bigcartel/issue/CRUST-2065/fix-launch-prompt-taking-vnext-users-to-legacy)
+  * Follow-ups:
+    * duplicate report: [CRUST-2081](https://linear.app/bigcartel/issue/CRUST-2081/maintenance-mode-banner-links-to-legacy-not-vnext)
+  * Why it matters: launch prompt routed vNext users to legacy
+  * Note: strong bug chain, weaker mapping to a single original implementation issue
+
+### Medium customer impact
+
+Errors or degraded UX that confuse sellers, but don’t look like total checkout/payment failure.
+
+* vNext Admin release/migration behavior → [MJ-871](https://linear.app/bigcartel/issue/MJ-871/legacy-products-arent-displaying-helpful-errors-when-editing-in-vnext)
+  * Follow-up issue after legacy-created products hit generic errors in vNext editing flows
+  * Why it matters: repeated support reports, but mainly error clarity rather than hard data loss
+
+## Agent-friendly list
+
+* **Critical**
+  * [GAL-1397](https://linear.app/bigcartel/issue/GAL-1397/roll-out-migration-to-100percent) → [GAL-1402](https://linear.app/bigcartel/issue/GAL-1402/orders-with-mixed-digital-and-physical-shipments-get-stuck-in), [GAL-1409](https://linear.app/bigcartel/issue/GAL-1409/edit-profile-setting-group-ships-alone-bug), [GAL-1316](https://linear.app/bigcartel/issue/GAL-1316/shipping-rate-selections-change-at-checkout-when-cart-is-updated-and), [GAL-1569](https://linear.app/bigcartel/issue/GAL-1569/ships-alone-bugs-consolidated), [ORK-524](https://linear.app/bigcartel/issue/ORK-524/checkout-defaults-to-local-pickup-after-returning-to-cart)
+  * [GAL-318](https://linear.app/bigcartel/issue/GAL-318/rollout-implementation-new-sellers) / [GAL-627](https://linear.app/bigcartel/issue/GAL-627/rollout-logic-to-existing-sellers) → [GAL-467](https://linear.app/bigcartel/issue/GAL-467/bugs-on-shipping-settings), [GAL-626](https://linear.app/bigcartel/issue/GAL-626/investigate-shipment-adjustments-error), [GAL-636](https://linear.app/bigcartel/issue/GAL-636/saving-everywhere-profile-causing-lock-errors), [GAL-621](https://linear.app/bigcartel/issue/GAL-621/add-initial-safeguard-in-order-to-get-to-100percent-rollout)
+  * Printify reconnect/disconnect behavior → [GAL-1752](https://linear.app/bigcartel/issue/GAL-1752/seller-disconnectedreconnected-printify-and-now-seeing-duplicate), [GAL-1754](https://linear.app/bigcartel/issue/GAL-1754/recovery-script-salvage-printify-reconnect-duplicated-products), [GAL-1756](https://linear.app/bigcartel/issue/GAL-1756/printify-reconnect-dupes-residual-cases-after-the-gal-1754-cleanup)
+* **High**
+  * recent vNext signup flow work → [MJ-717](https://linear.app/bigcartel/issue/MJ-717/new-paid-sign-ups-see-admin-before-survey-email-verification)
+  * released vNext launch flow → [CRUST-2065](https://linear.app/bigcartel/issue/CRUST-2065/fix-launch-prompt-taking-vnext-users-to-legacy), [CRUST-2081](https://linear.app/bigcartel/issue/CRUST-2081/maintenance-mode-banner-links-to-legacy-not-vnext)
+* **Medium**
+  * legacy→vNext product editing behavior → [MJ-871](https://linear.app/bigcartel/issue/MJ-871/legacy-products-arent-displaying-helpful-errors-when-editing-in-vnext)
+
+## Patterns
+
+* **Galileo dominates** the strongest examples.
+* **Orkin adds useful evidence** mostly as downstream support reports and duplicate confirmations rather than the original shipped work itself.
+* The strongest release-risk pattern is: **shipping/checkout rollouts → follow-up bugs in production → support confirms repeat reports → engineering adds hardening/cleanup issues**.
+
+## Caveat
+
+I did **not** include every “post-release cleanup” or every bug near a release. I filtered toward cases where the linkage looked operationally useful for an agent doing release-risk review.
+
+Possible next steps:
+
+* I can turn this into a **CSV-style audit table** with columns for original issue, follow-up issue, team, impact, and confidence
+* I can narrow this to **only customer-visible regressions**
+* I can save this as a reusable issue-research skill for future release retrospectives
