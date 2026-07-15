@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bdj0dyq82</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/bdj0dyq82.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll fan-out PR #13893 for Woods-ON review" completed (exit code 0)</summary>
+</task-notification>
