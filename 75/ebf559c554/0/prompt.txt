@@ -1,0 +1,3 @@
+Create a PR with the fix unless unblocked can give you better context on the open question.
+
+Also, running on production would require me to paste the tokens into the shell. Isn't that bad practice?
