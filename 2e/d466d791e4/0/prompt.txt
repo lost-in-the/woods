@@ -1,0 +1,1 @@
+That's not what I meant. Also only storefront is on 6 which isn't indexed yet. I meant take a concept from the ticket, ask it a vague question about a change and potential blast radius. Worst case, we remove test it, disable the collection, and test again (or disable then test)
