@@ -1,0 +1,116 @@
+Base directory for this skill: /Users/leah/.claude/skills/buildkite-build-output
+
+# Fetching Buildkite build output with `bk`
+
+The goal is almost always the same: **a human (or you) wants to read what a failing
+CI job actually printed**, without clicking through the Buildkite web UI. The `bk`
+CLI exposes this, but there is no single "show me the failures" command — it's a
+two-step flow, because Buildkite separates the *structured* part (which jobs failed)
+from the *unstructured* part (the raw log text each job emitted).
+
+## Prerequisite: authentication (read-only is enough)
+
+Everything here needs only read access. Authenticate with the `read_only` scope
+group so the token can't trigger or cancel builds:
+
+```bash
+bk auth login --scopes read_only
+```
+
+This is an **interactive OAuth browser flow** — you cannot run it for the user.
+Ask them to run it themselves (in Claude Code they can prefix with `! ` so the
+output lands in the session). If they belong to more than one org, the right one
+must be selected:
+
+```bash
+bk auth switch <org-slug>     # e.g. bigcartel
+bk auth status                # confirm who/where you're authed as
+```
+
+`read_only` expands to every `read_*` scope, which covers `build view`,
+`job list`, and `job log` — the only commands this skill uses.
+
+## The sandbox TLS gotcha (read this before assuming auth is broken)
+
+If `bk` fails with:
+
+```
+tls: failed to verify certificate: x509: OSStatus -26276
+```
+
+this is **not** an authentication problem and **not** a `bk` bug. It's the Claude
+Code command sandbox intercepting HTTPS with a cert `bk` won't trust. `gh` fails
+the same way. The fix is to run the `bk` command with the sandbox disabled
+(`dangerouslyDisableSandbox: true` on the Bash tool), since `bk` only talks to the
+Buildkite API over the network. Don't burn cycles re-authenticating — the auth was
+fine.
+
+## Step 1 — find the failing jobs in the latest build
+
+`bk build view` with no build number resolves the most recent build on the branch.
+Filter to just the jobs that went wrong:
+
+```bash
+# Most recent build on a branch, only failed/broken jobs, human-readable
+bk build view -b <branch> -s failed,broken
+```
+
+Useful flags:
+
+- `-b <branch>` — target a branch (omit to use the current git branch)
+- `-s failed,broken` — filter jobs by state (also: `running`, `passed`, `canceled`,
+  `skipped`, `not_run`)
+- `-p <pipeline>` — needed if you're not inside the repo, or to disambiguate
+- `<build-number>` — view a specific build instead of the latest
+- `-w` — open the build in a browser instead (handy to hand back to a human)
+- `--json` — machine-readable, for extracting job UUIDs (see below)
+
+The text output lists each failing job with its **UUID** — that's what Step 2 needs.
+
+## Step 2 — pull the log for a failing job
+
+```bash
+bk job log <job-uuid> --no-timestamps
+```
+
+- `--no-timestamps` strips the per-line time prefixes so the output greps cleanly
+  for errors/backtraces. Almost always want this when feeding the log to yourself.
+- `bk job log` emits **raw text**, not JSON — there are no `--json`/`-o` flags here.
+  Pipe it to `grep`/`tail` to find the actual failure.
+
+**Version nuance worth knowing:** older `bk` (≈3.37) insists on `-b <build-number>`
+(and sometimes `-p <pipeline>`) alongside the UUID; newer versions treat the UUID as
+self-contained and ignore those flags. If `bk job log <uuid>` errors asking for
+build context, retry with `-b <build-number>`.
+
+## Putting it together
+
+Text-first is the most robust path because it doesn't depend on the exact JSON shape:
+
+```bash
+# 1. See what failed (note the UUIDs)
+bk build view -b my-branch -s failed,broken
+
+# 2. Read the log for a specific failed job
+bk job log <uuid> --no-timestamps | tail -100
+```
+
+If you want to automate the hand-off between the two steps, `--json` + `jq` works —
+but **verify the field names against a real response first** rather than trusting a
+remembered shape, since the JSON schema varies by `bk` version:
+
+```bash
+bk build view -b my-branch -s failed,broken --json | jq .   # inspect shape first
+# then extract the job id field you actually see, e.g.:
+bk build view -b my-branch -s failed,broken --json \
+  | jq -r '.jobs[]? | select(.state=="failed" or .state=="broken") | .id'
+```
+
+## Related: this is not the only CI diagnostic tool
+
+`bk` gives you **what a job printed**. For a *flaky feature spec*, the more useful
+question is often **why it raced**, and a repo may ship a purpose-built tool for that.
+In the Big Cartel admin repo, `bin/query-flaky-spec-traces <spec>:<line>` pulls the
+OTEL trace waterfall (Turbo events, console errors captured as spans) from SigNoz for
+a failed test — a different and often better lens than the raw build log. Reach for
+that when chasing a flake; reach for `bk job log` when you just need the failure text.
