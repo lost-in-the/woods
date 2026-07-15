@@ -1,0 +1,1 @@
+Wait for the notes-harvester teammate to report, but consider investigating tickets where there are more comments, especially by sbrudz. He often uses Claude to review PRs, and as a result, often many concerns are found that unblocked missed when approving.
