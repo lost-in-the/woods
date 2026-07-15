@@ -1,0 +1,14 @@
+Yes, and note this additional reply when asking "Do your indexes of the codebase not have the same 'blast radius' style context independently?":
+Good question. The short answer is: **no, not in the same way.**
+Unblocked's code index is **semantic/embedding-based search**. It lets you (or the reviewer) find files by meaning — "retry logic in billing service" → relevant snippets. It's great for _finding_ code, but it doesn't model _relationships between_ code.
+What it **can** do:
+- Find a file or symbol by description
+- Surface snippets relevant to a query
+- Pull in PR history, docs, and messages as context
+What it **cannot** do (that Woods provides):
+- **Enumerate all callers/dependents** of a given class or method (requires static analysis, not search)
+- **Quantify coupling** — "this model has 127 inbound edges" is a graph computation, not a retrieval problem
+- **Rank by structural centrality** — PageRank over a dependency graph isn't something embeddings produce
+- **Trace triggered side effects** — callbacks, workers, mailers invoked transitively
+The fundamental difference: Unblocked's index answers "what code is _semantically similar_ to this query?" Woods answers "what code is _structurally connected_ to this change?" These are orthogonal questions. A class called `PaymentProcessor` might never appear in a diff's context window, but if the changed model triggers a callback that enqueues a job that calls it, Woods surfaces that chain. Unblocked's embeddings wouldn't — unless someone explicitly searched for it.
+So Woods genuinely adds something Unblocked can't replicate with its current indexing approach. Static dependency graphs and embedding-based retrieval solve different problems.
