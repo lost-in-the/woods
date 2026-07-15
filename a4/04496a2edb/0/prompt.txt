@@ -1,0 +1,65 @@
+Per unblocked, here are some potential suggestions:
+This is **not** a lost cause — the collection is populated and PR Chat _can_ access it. The issue is that PR Chat uses **semantic search** to find relevant documents, so discoverability depends on how well the document content matches the query. Here are concrete improvements:
+## 1. Strengthen Document Titles
+From your screenshot, the document names look like raw class names (`OrderShipmentUpdateInputType`, `ShipmentItemInputType`). These are precise but semantically thin — a query about "blast radius of ProductOption" may not rank a document titled `ProductOption` highly if the content is too terse.
+**Recommendation:** Prefix titles with the unit type and add a keyword hint:
+```
+ProductOption (model) — associations, dependents, blast radius
+
+```
+instead of just `ProductOption`. This gives the semantic index more signal. The title change would need to happen in the Woods gem's `Unblocked::Exporter` (or equivalent) where it sets the document title for the API call.
+## 2. Add a Preamble to Each Document Body
+If the markdown profiles jump straight into tables/lists, the embedding may miss the "what is this document?" signal. Add a 1–2 line natural-language preamble at the top of each document:
+```markdown
+# ProductOption (model)
+
+Structural profile of the `ProductOption` model in the Big Cartel admin Rails app.
+This document describes its associations, dependent count, blast radius, entry points,
+and side effects, extracted by the Woods gem.
+
+## Associations
+...
+
+```
+This gives the embeddings a clear semantic anchor. Queries like _"what depends on ProductOption"_ or _"blast radius of ProductOption"_ will match the preamble strongly.
+## 3. Embed Cross-References in the Content
+If a model's profile lists dependents by name, those names become searchable tokens. Make sure dependent/entry-point lists use the **full class name** (not just a count):
+```markdown
+## Dependents (127)
+Account, Order, Product, Checkout::Session, ...
+
+## Entry Points
+- Mutations::ProductOptionCreate (GraphQL mutation)
+- Mutations::ProductOptionUpdate (GraphQL mutation)
+- ProductDraftOperation::ProductOptionDelete (draft operation)
+
+```
+This way, searching for `ProductOptionCreate` surfaces both the mutation's own profile _and_ `ProductOption`'s profile (because it's mentioned as an entry point).
+## 4. Add Collection-Level Keywords to the Prompt Description
+You already have a great prompt description on the collection (from the setup docs). Consider adding explicit trigger phrases that match how people naturally ask questions in PR Chat:
+> ...Use these profiles to answer questions about **blast radius**, **dependents**, **who depends on X**, **entry points**, **side effects**, **callbacks**, **workers triggered by**, and **structural impact** of changes to any code unit.
+This helps Unblocked's retrieval logic associate these query patterns with the collection.
+## 5. The "PR Chat Didn't Find It" Problem
+The most likely reason PR Chat said _"I don't have access"_ is that the query explicitly asked it to use a **named collection** — PR Chat doesn't route by collection name, it does semantic retrieval across all connected sources. When it couldn't interpret "Admin Woods collection" as a tool or data source name, it gave up rather than searching.
+**Fix the prompt wording.** Don't name the collection — describe the _content_:
+```
+@unblocked Based on the structural codebase profiles (model associations, 
+dependents, blast radius, entry points, side effects), what is the blast 
+radius of destroying ProductOption? Which controllers, GraphQL resolvers, 
+jobs, and mailers reference it? What callbacks or side effects fire on destroy?
+
+```
+This should cause semantic search to find the Woods profiles naturally. The collection name is an implementation detail PR Chat doesn't understand — the _content_ is what it can search.
+## Summary
+| Change | Where | Impact |
+| --- | --- | --- |
+| Descriptive titles (`Model — associations, blast radius`) | Woods exporter code | Higher title-match ranking |
+| Natural-language preamble per document | Woods exporter code | Better embedding signal |
+| Full class names in dependent/entry-point lists | Woods exporter code | Cross-reference discoverability |
+| Trigger-phrase keywords in collection description | Unblocked collection settings | Better retrieval association |
+| **Don't name the collection in prompts** | `@unblocked` comment text | Prevents the "I don't have access" failure |
+The last point is the most important immediate fix — try rephrasing your PR comment without mentioning "Admin Woods collection" and see if PR Chat finds the profiles.
+---
+Sources referenced above:
+Reference: d39d8d2e Repo: bigcartel/admin URL: [https://github.com/bigcartel/admin/blob/HEAD/docs/woods-unblocked.md](https://github.com/bigcartel/admin/blob/HEAD/docs/woods-unblocked.md)
+Reference: e932de53 Repo: bigcartel/admin URL: [https://github.com/bigcartel/admin/blob/HEAD/docs/woods-unblocked.md](https://github.com/bigcartel/admin/blob/HEAD/docs/woods-unblocked.md)
