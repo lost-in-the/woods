@@ -1,0 +1,4 @@
+I can't actually "turn it off", I can just change which profiles load it by default. Would it be better to:
+a) remove the woods docs
+b) test it regardless with the shared presets having woods disabled
+c) add global instructions not to use the woods admin data source for code reviews
