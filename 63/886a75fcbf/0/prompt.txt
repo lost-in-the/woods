@@ -1,0 +1,104 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   The session evolved through many explicit requests:
+   - Investigate ENG-5477 (Woods storefront parity) and related tickets; review the "first run" process for the Woods→Unblocked sync.
+   - Review storefront PR #747 for merge-readiness (delegated to an agent); then remove the unrelated Postmark commit (it lives in PR #737) — rebase and force-push (explicitly authorized).
+   - Create a PR fixing a discovered deploy-trigger bug (scheduled builds would trigger prod deploy); apply the same fix to storefront #747.
+   - Validate the schedule cron time (`0 8 * * *` UTC) is off-peak; help create schedules.
+   - Draft + post Linear comments (ENG-5434/5477/5476) using checkboxes not emojis, kept concise.
+   - Fix the budget cap (`UNBLOCKED_DAILY_BUDGET`) not reaching the container → PR #13888 (ci-compose allowlist).
+   - Run a large evaluation of whether the synced Woods collection improves Unblocked reviews; query Unblocked against cases it got wrong; test whether Unblocked (automated review, PR Chat, CLI context-research) can consume Woods; investigate false positives (250-PR census) and false negatives (sbrudz misses); test scoped API tokens.
+   - File PII-free improvement issues on the woods repo (#152 preamble, #153 dependent-names).
+   - Pivot: investigate integrating Woods with the "Hermes agent" for code review; design the OOO/flow, especially for a PR pushed many times a day; use fresh/targeted agents.
+   - Answer 5 architecture questions (MCP hosting, index location, blast-radius value, new connections, deep-investigation rebuild).
+   - Fold Q1-Q5 into the flow doc and build an HTML presentation deck (with data-flow charts) for a meeting that night.
+   - Most recent: fix 4 deck issues — (1) SVG alignment/overflow, (2) drop bc-agents references, (3) drop claude-code-action (Hermes handles it alone — don't double work), (4) address that the MCP appears to need a live Rails server.
+
+2. Key Technical Concepts:
+   - Woods gem (lost-in-the/woods): Rails structural extraction; `dependency_graph.json` with `file_map` (file→unit), `nodes` (unit→{file_path,type}), `reverse` (unit→[dependent names]), `pagerank`. Index Server MCP (`woods-mcp`/`woods-mcp-http` = `woods-admin`) reads static JSON, NO Rails. Console MCP (`woods-console-mcp` = `woods-admin-console`) needs booted Rails.
+   - Unblocked: automated review (no custom-collection access), PR Chat (unscoped, can't retrieve Woods), CLI `context-research` (query/instruction/effort only — no profile flag; needs a data-source-SCOPED API token to surface Woods; is a retriever not a reasoner). `unblocked mcp` = the MCP server the CLI provides.
+   - Hermes: NousResearch open-source agent gateway self-hosted on VM `claw01`; Python + `anthropic` SDK + Claude Code; MCP-native (GitHub/minion-gru/AppSignal/Buildkite MCP); currently dependabot-only on 2h timer, drafts→Slack (ENG-5445); minion/gru MCP (`spawn_minion`, `minion_claude`, `destroy_minion`) for ephemeral booted envs. Defined in `bigcartel/ansible` `roles/hermes_agent/`.
+   - Buildkite: `admin-ci` / `storefront-ci` pipelines; `woods-sync` step gated `build.branch == "main" && build.source == "schedule"`; deploy trigger was gated only `build.branch == "main"`; agent-env vars via `ci-compose.yml` allowlist; artifacts per-build.
+   - claude-code-action@v1 (dropped per user).
+   - PII guard hook (`~/.claude/hooks/pii-guard-msg.sh`) blocks bigcartel/admin/personal/home-path in gh/write operations; woods OSS repo requires PII-free content.
+   - Token handling: `op read`/`op item get` into env vars; never paste tokens (visible in ps).
+
+3. Files and Code Sections:
+   - `/Users/leah/work/compose-dev/woods-pr-review-deck.html` (MOST IMPORTANT, most recently edited): the meeting HTML deck. Fully rewritten in the last correction pass. Design: palette `--paper #F4F6F3`, `--ink #10201A`, `--moss #2F6B4E` (accent), `--slate #5E6E66`, `--rust #B5502F` (risk semantic), `--gold #B98A2E`; system-sans display + monospace utility (no webfonts, CSP-safe); hand-built inline SVG diagrams. Sections: hero thesis, evaluation findings (stat tiles 340/41/46/~7, comparison bar, surface×Woods matrix table with chips), the reframe diagram, "The runtime — Hermes" (fast path/deep path cols + PR-trigger callout), data-flow SVG (nightly extract→S3→Index MCP→Hermes→sticky comment), two Rails callouts, OOO 6 steps, Q1-Q5, decision panel. Published at https://claude.ai/code/artifact/cfaabed6-d2b1-4f3a-9d5c-0dd279b43418 (redeploy uses same file path → same URL).
+   - `/Users/leah/work/compose-dev/woods-pr-review-flow.md`: OOO doc. Has a top "DECISION UPDATE" note (Hermes single runtime; claude-code-action dropped; Index MCP Rails-free; Console MCP=live Rails via minion). Two bc-agents references removed in the last edits.
+   - `/Users/leah/work/compose-dev/eng5434-woods-eval-draft.md`: full evaluation record (unposted to Linear).
+   - `/Users/leah/work/compose-dev/woods-review-solutions.md`: options analysis + meeting brief.
+   - `/Users/leah/work/compose-dev/unblocked-false-positive-notes.md` and `unblocked-misses.md`: teammate deliverables.
+   - `exe/woods-mcp` (woods repo): line 12 verbatim: "Does NOT require Rails — only reads pre-extracted data." Reads via `IndexReader.new(index_dir)` (server.rb:48). Confirms Index MCP is Rails-free.
+   - `lib/woods/unblocked/exporter.rb`: `FULL_SYNC_TYPES` (model/controller/service/job/mailer/manager/decorator/concern/serializer/graphql...) + `PARTIAL_SYNC_TYPES` [['poro',100],['lib',50]]; `break if @budget_exhausted`; `sync_type(type)` reads any type via `@reader.list_units(type:)`. `rails_source`/`gem_source` NOT in FULL_SYNC_TYPES.
+   - `lib/woods/unblocked/rate_limiter.rb`: `DEFAULT_BUDGET = 1000`, `@calls_today = 0` in constructor, no persistence (per-run, not per-day).
+   - `lib/woods/unblocked/document_builder.rb`: title = `"#{identifier} (#{type})"`; `model_dependents` shows counts-by-type not names; body opens with H1, no NL preamble.
+   - `lib/woods/extractors/rails_source_extractor.rb`: `RAILS_PATHS` covers behavioral internals (callbacks/persistence/associations); NOT ActiveModel validations/type-casting/URI/JS.
+   - `/Users/leah/.claude/jobs/ec7ff385/tmp/woods_blast_radius.rb`: spike proving deterministic blast-radius (maps changed files → units via nodes.file_path → reverse+pagerank).
+   - GitHub PRs created (all test/fix PRs; #13890/#13891/#13892/#13893 closed+branches deleted; #13895/#13896 open): admin #13885 (deploy fix, merged), #13888 (budget allowlist, merged). woods issues #152, #153.
+
+4. Errors and fixes:
+   - Over-concluded twice on the Woods-review evaluation. First declared "Woods doesn't help reviews" then "decisively closed" — both on flawed tests. User corrected: "It doesn't seem to ever cite its sources, not certain that's a solid test." I pivoted to citation-independent probes (graph-only dependent counts). Then the "no access" from PR Chat turned out to be because I named the collection (PR Chat routes by semantic content, not name) — user surfaced Unblocked's own explanation. Then the CLI "empty" turned out to need a data-source-scoped token — user provided token IDs. I owned each reversal explicitly.
+   - PII guard blocked my `gh pr create`/`gh issue create` (home path + bigcartel/admin). Fix: user runs commands via `!` prefix (bypasses my PreToolUse hook); issue bodies were PII-free (block was the /Users/leah temp file path in my command).
+   - `file_map` lossiness: account.rb → ProductsExtension::Account (0 deps) instead of Account (340). Fix: map via `nodes[*].file_path` (all co-located units).
+   - Deck SVG text overflow (user issue #1): boxes too narrow for mono labels. Fix: rewrote SVGs with wider boxes, shorter labels (≤~22 chars), node-s at 10.5px.
+
+5. Problem Solving:
+   - Solved: identified the true architecture — Unblocked can't consume Woods on review surfaces; Woods' value is direct MCP structural queries; the bug-catcher = reasoning agent + complete structure. Concluded Hermes (persistent, MCP-native, minion-capable) as the single reviewer runtime, reading a Rails-free Index MCP over an S3-stored nightly index; deep cases use a minion. The single hard prerequisite: a durable "latest-main-index" S3 store.
+   - Verified deck issue #4: Index MCP is Rails-free (only Console MCP needs Rails).
+
+6. All user messages:
+   - "Woods was merged into main and released to production. Check the ticket and relevant tickets for details, then review the prcesses set in place to complete the first run. (ENG-5477 and subtasks/comments)"
+   - "Let's do 1. Have another agent review the storefront branch/pr to determine what's required to get the PR merged"
+   - "How do I run the sync on prod?"
+   - "Check for a buildkite mcp in the other worktrees please. I know one exists"
+   - "Per chris' comment: [Chris Cameron's comment about agent-env being done on 12 SLC agents; remaining = schedule + drop soft_fail]"
+   - "Create a PR with the fix unless unblocked can give you better context on the open question. Also, running on production would require me to paste the tokens into the shell. Isn't that bad practice?"
+   - [copy/bash-input showing gh pr create → #13885]
+   - "Should we add clear (admin) identifiers to the ':card_index: Scheduled Woods → Unblocked sync' message since there's one for admin and one for storefront?"
+   - "Proceed and force push however you'd like to address it" (authorization for the #747 force-push)
+   - "Is the time you designated actual off-hours? Check amplitude if that's a good resource."
+   - "I can run the sync now if required to validate consecutive builds. What's traffic looking like at the moment?"
+   - "Admin via the schedule tooling only this time. Going to do two manual runs from the UI, one after the second completes."
+   - [images of New Build dialog] "Concerns with this before I proceed?"
+   - [image of schedule set to 25 23] 
+   - "the cold push is an unblocked or buildkite limit?"
+   - "Here's the unblocked integration dashboard...showing our plan: [Enterprise]"
+   - "Does this answer your question? Extraction complete!...Total: 6825 units"
+   - "Will the daily budget run the full set if we've already done a run today?"
+   - "Yes, create the PR." (#13888)
+   - [copy showing #13888 created]
+   - "When complete, query unblocked against something it struggled with before or got wrong in a code review."
+   - "(b) hunt for a candidate now"
+   - [pasted Unblocked examples of failures: db/structure.sql exclusion, #12912 valid?(:context), wild goose chases]
+   - [pasted more patterns: Alpine.js, inclusion validator, URI.parse(nil), .html_safe false alarms, supreme confidence]
+   - "Fold the PR examples into the draft. Determine if any other strategy exists. Presumably, unblocked is indexing the entire codebase itself without woods, but maybe we just need to pinpoint it's weak spots... Are you able to query comments on PRs citing or mentioning unblocked to find possible instances where it failed and required feedback?"
+   - "Doesn't woods document route binding as well?..."
+   - "And this: [Unblocked's account of its index being embedding-based, not a dependency graph]"
+   - "3 then 1" (close #13891, write up findings, then run harder test)
+   - "Yes, let's spike option 1. to be sure I'm reading it right, the plan is to add a step to build woods index when the PR is created...? Would this depend on the unblocked agent for the call or what would actually analyze the data?"
+   - "Could we build the blast radius on the PR, then pass that to the comments tagging unblocked with details or something similar? We get free unblocked for now, claude is a bit higher cost/commitment"
+   - "Instead of doing this on comments...The point was that buildkite could ping the unblocked CLI which allows passing specific profiles...Can we test the CLI with a meaningful query test?"
+   - "Woods isn't a profile. I created one, try this profile: 'Woods (test)'"
+   - [pasted: API Tokens Can Be Scoped to Specific Data Sources; tokens have access to admin/storefront/themes/woods/linear]
+   - "For JUST woods: zwb3umd3paz6lo7vvix7zvc4ue / For the full-set...laq65yumksgjbvx6pfk2n5kpg4. Test one, then the other with a PR diff. Maybe this one is a candidate? [PR #13896]"
+   - "We're actually discussing now integrating with our Hermes agent for code reviews instead... still complete your tests just for insights before I wrap this up for the day. We'll be meeting on this tonight"
+   - "Is the woods issue we opened still relevant?"
+   - "Can you investigate how the flow might work with a hermes agent? What would be the OOO to handle this? (eg: PR opens, hermes pulls, generates index, reviews, replies?) Think this through, and consider a PR that gets many pushes iteratively over a day... Use the standard unblocked MCP, relevant github repos in the org, or whatever other tools you have access to... Approach this with fresher context, or spin up a targeted agent(s) to investigate"
+   - "Hermes-agent hold long-term context, builds custom skills as it identifies issues, and a broader toolset using claude as the agent behind the actions. You keep referencing the MCP, but this leaves open questions for me: * where does the mcp get hosted/run from? * If information from if the index is being built by the ci, where does it live? * What is the benefit of the blast radius if the Hermes agent can just view the diff and hit the mcp? * How can it potentially understand the new connections formed in the PR without indexing? * Granted the blast radius feature could help provide that insight, but if the agent needs to investigate further, will it be required to build the index again since it isn't persisted on BuildKite?"
+   - "Fold them into the flow doc and create an html page that contains the proposed solution, data flows, etc using previous findings from unblocked tests, how the data flows, OOO and any other relevant details to present. Use charts when appropriate for data flows."
+   - "Some issues: 1. Alignment is off in some places & overflowing: [images] 2. We're dropping bc-agents, don't reference it. 3. Why do we need claude-code-action? It's going to double the work that the hermes agent could handle on its own 4. The MCP still depends on a live rails server to function. This appears overlooked in this plan"
+
+7. Pending Tasks:
+   - None explicitly outstanding beyond the 4 deck corrections just completed. (The user has a meeting "tonight" on the Hermes integration; the deck + flow doc are the deliverables.)
+
+8. Current Work:
+   Immediately before this summary, I was fixing the 4 deck issues the user raised. I: (a) verified in `exe/woods-mcp` that the Index MCP "Does NOT require Rails"; (b) fully rewrote `/Users/leah/work/compose-dev/woods-pr-review-deck.html` — fixed SVG overflow (wider boxes/shorter labels/10.5px sub-text/Hermes-only labels), dropped claude-code-action (made Hermes the single runtime with "fast path/deep path" columns + a "PR-event trigger to add" callout), scrubbed all bc-agents references, retitled to "Woods × Hermes PR review", and added a Rails-free clarification callout ("The blast-radius MCP is Rails-free" — Index MCP static vs Console MCP live-Rails-via-minion); (c) redeployed to the same artifact URL (cfaabed6-d2b1-4f3a-9d5c-0dd279b43418) with label "hermes-single-runtime"; (d) updated `woods-pr-review-flow.md` with a top "DECISION UPDATE" note (Hermes single runtime, claude-code-action dropped, Rails-free clarification) and edited two lines to remove bc-agents references (both Edits succeeded).
+
+9. Optional Next Step:
+   All four requested corrections are complete (deck rewritten + redeployed, flow doc scrubbed of bc-agents and reframed to Hermes-only with the Rails note). The appropriate next step is to briefly confirm to the user that all four issues are addressed — the deck is redeployed at the same URL (https://claude.ai/code/artifact/cfaabed6-d2b1-4f3a-9d5c-0dd279b43418) with SVG overflow fixed, claude-code-action and bc-agents removed, Hermes as the single runtime, and the Rails-free Index-MCP vs live-Rails-Console-MCP distinction made explicit — and then hold for the user's review ahead of their meeting. No new work should begin without user confirmation, consistent with the user's stated preference to stop and wait after delivering.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/leah/.claude/projects/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
