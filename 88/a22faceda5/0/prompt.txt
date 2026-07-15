@@ -1,0 +1,1 @@
+<bash-input> gh pr create --repo bigcartel/admin --base main --head leah/account-product-images-teardown --title "perf(account): use delete_all for product images on account teardown" --body-file "/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/scratchpad/admin-ab-twin-pr-body.md"</bash-input>
