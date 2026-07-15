@@ -1,0 +1,1 @@
+Apply the same to storefront as well. Should the ({env}) suffix be added to the pipeline files as well?
