@@ -1,0 +1,1 @@
+<bash-input> gh pr create --repo bigcartel/admin --base main --head leah/exclude-scheduled-builds-from-prod-deploy --title "fix(buildkite): exclude scheduled builds from production deploy trigger" --body-file "/private/tmp/claude-501/-Users-leah-lost-in-the-woods/7ba74349-ad3e-4bb8-b790-2f4db03a6ab3/scratchpad/admin-deploy-fix-pr-body.md"</bash-input>
