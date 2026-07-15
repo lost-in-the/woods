@@ -1,0 +1,72 @@
+<task-notification>
+<task-id>a108cd52e43fdb09a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/a108cd52e43fdb09a.output</output-file>
+<status>completed</status>
+<summary>Agent "Hunt Unblocked false positives in admin PRs" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have enough to report. Let me compile the findings.
+
+---
+
+## Unblocked[bot] false-positive investigation — bigcartel/admin
+
+**VERDICT (one line): Unblocked's failure mode is overwhelmingly semantic/runtime (Rails casting, validation contexts, stale data-model assumptions) and config/severity judgment — I found ZERO structural false positives. In fact every structural/behavioral claim in the sample was confirmed correct ("good catch robo"). This confirms the hypothesis: the weakness is semantic, not structural.**
+
+### Method / sample size
+- Scanned **250 admin PRs** (created since 2026-05-01, ~2 months) via `gh api .../pulls/&lt;N&gt;/comments`.
+- **18** `unblocked[bot]` review comments had either a 👎 reaction or a human reply thread. Of those, **~9 were disputed as wrong / overridden**; the rest were the bot being *right* (accepted or praised).
+- Also verified seed #12912 directly and searched issue/PR comments for corrective language.
+
+### Notable meta-finding
+**Nobody uses 👎 reactions.** Across all 250 PRs, `-1` count was **0** on every bot comment. All disputes live in **reply text**, not reactions. Your training-set harvester must read reply sentiment — reactions are a dead signal here.
+
+### Category counts (disputed-as-wrong cases)
+- **SEMANTIC-MISREAD: 3** (validation context, Float/BigDecimal, stale currency data)
+- **GOOSE-CHASE: 3** (technically-true-but-irrelevant / out-of-scope)
+- **BAD-CONFIG: 2** (severity/convention misjudgment)
+- **DATAFLOW-MISJUDGMENT: 0**
+- **STRUCTURAL: 0** ← the important negative result
+
+### Concrete disputed/wrong findings
+
+| PR | What Unblocked claimed | Why it was wrong/disputed | Category | Quote |
+|---|---|---|---|---|
+| **#12912** (seed, merged unaddressed) | `account.valid?(:contact_email)` runs no validations because model lacks `on: :contact_email` | Misreads Rails: `valid?(ctx)` runs base validations too; the presence/format checks DO fire. Merged as-is. | SEMANTIC-MISREAD | (bot) "will not run any validations because…does not specify `on:`" |
+| **#13831** | `number_to_currency` will emit literal `&amp;pound;`/`&amp;yen;` HTML entities from `currencies.yml` | Codebase already migrated to unicode symbols (¥); the entity data it "read" no longer exists | SEMANTIC-MISREAD | benreyn: "**This isnt actually correct**, we now use unicode (¥) instead of an HTML entity" |
+| **#13797** | Comparing ActiveModel `:float` `amount` to a `decimal` BigDecimal causes float-precision refund bugs | Rails type-casts the attribute; comparison is safe | SEMANTIC-MISREAD | sbrudz: "**Rails 4 handles the conversion. I added a test to verify it.**" |
+| **#13645** | esbuild `entryPoints()` evaluated once → new JS files never rebuilt on chokidar add/unlink | True in theory but no new top-level entrypoints are ever added in practice | GOOSE-CHASE | outerim: "This is true **but in practice…this mitigation is unnecessary**" |
+| **#13753** | Renamed section `type` string breaks existing `kiln_page_versions.data` JSON rows | Out of scope; stale data intentionally not supported yet | GOOSE-CHASE | rachaelsweetman: "**we dont care about stale data right now**" |
+| **#13720** | `Nokogiri…fragment.text` concatenates block text with no whitespace ("care.Ships") | Suggested fix doesn't fix it; issue not worth fixing (temporary code) | GOOSE-CHASE | rachaelsweetman: "**your solution doesnt fix the issue**…not worth any fix" |
+| **#13878** (merged unaddressed) | Migration on hot `accounts` table should pass `algorithm: :inplace, lock: :none` | Bot's own text concedes MySQL 8 defaults to INPLACE; already safely applied in prod | BAD-CONFIG | benreyn: "**Migration already applied in production. this should be safe.**" |
+| **#13668** | Alpine `select.js` catch should `Appsignal.sendError` like other components | Deliberate — user-facing recover message; extra reporting is noise they're actively reducing | BAD-CONFIG | rebagliatte: "would just **add to the AppSignal noise we are trying to reduce**" |
+| **#13889** | `public_send` preset-default fallback always reads `primary_button` for secondary | Hypothetical; handled without the bot's suggested `public_send` | SEMANTIC (weak) | alessandrapereyra: "there's no need of using a `public_send`…Handled it already" |
+
+### STRUCTURAL claims — all CORRECT (the counter-evidence)
+These are the ones that matter for your thesis. When Unblocked made a **structural/behavioral** claim, humans confirmed it:
+- **#13743** — N+1 on `account` association via `sold_out?` under a partial `includes` → *"ay good catch robo"*
+- **#13743** — same `in_stock_variants` JSON serialized 3× per option group → *"another good catch robo"*
+- **#13779** — banner partial rendered unconditionally in layout where `current_account` may be nil → *"added this"* (fixed)
+- **#13686** — worker signature `perform(1 arg)` → `perform(2 args)` breaks in-flight enqueued jobs → *"Addressed"*
+- **#13820** — per-product aggregate MIN/MAX price query + `.images.first` N+1 → *"valid, fixed"*
+- **#13826** — `.to_i` missing on one branch of a color-index helper → *"Good bot."*
+
+**No structural false positive appeared in 250 PRs.** Structural/blast-radius reasoning is where it's *strongest*.
+
+### Seeds I could NOT verify (flagging honestly)
+- **`db/structure.sql` exclusion suggestion** — not located in the admin PR-comment corpus via search. Likely lives in a review-config / Slack / Linear discussion, not an inline PR comment. Needs a different source to confirm.
+- **"wild goose chases at least as often as it's accurate" (Lee/outerim)** — **not found verbatim** in admin. The only "wild goose chase" hit is **#6486**, which is a **false lead** — a 2020 human-to-human exchange (outerim apologizing about DB unique-constraint data), unrelated to Unblocked. The real quote is probably in Slack or Linear.
+
+### Starter 👎 + notes training set (clearest false positives)
+- **#12912** — "`valid?(:contact_email)` still runs base presence/format validations — an unknown context doesn't disable them, it just adds context-scoped ones. Not a bug."
+- **#13831** — "Currency symbols are unicode (¥), not HTML entities, in current `currencies.yml`. The `&amp;yen;` data you're reasoning about was removed."
+- **#13797** — "ActiveModel casts the `:float` attribute before comparison; Rails handles Float↔BigDecimal here. Covered by a test."
+- **#13645** — "Correct in isolation but no new top-level esbuild entrypoints are ever added; mitigation is dead weight."
+- **#13878** — "MySQL 8 InnoDB `ADD INDEX` is already INPLACE by default; explicit lock options add noise, not safety. Already applied in prod."
+- **#13668** — "Intentional: user gets a retry message; routing this to AppSignal adds to noise we're actively cutting."
+- **#13753** — "Out of scope — stale `kiln_page_versions.data` rows are not supported yet by design."
+- **#13720** — "Suggested fix doesn't address the whitespace concatenation, and the code is temporary — not worth fixing."
+
+**Bottom line for the training set:** filter on reply-text pushback (regex for "not actually correct / Rails handles / in practice / we dont care / not worth / already applied / adds noise"), not on 👎 reactions — reactions are unused. And weight semantic/runtime + config-severity examples; structural negatives essentially don't occur here.</result>
+<usage><subagent_tokens>81480</subagent_tokens><tool_uses>19</tool_uses><duration_ms>298931</duration_ms></usage>
+</task-notification>
