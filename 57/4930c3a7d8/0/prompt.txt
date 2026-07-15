@@ -1,0 +1,37 @@
+You are releasing v1.5.0 of the `woods` Ruby gem (GitHub repo: lost-in-the/woods)
+from this local checkout, which has push rights. Release prep is ALREADY merged to
+`main` — the ONLY remaining step is to create and push the `v1.5.0` git tag, which
+triggers the release workflow. Do NOT bump the version, edit any files, or open a PR.
+Current state (already done, do not redo):
+- `main` is at commit 8bcff8f313f2b4ff2b9dcf9a5f6bfcd27b205e17
+  ("chore(release): prepare v1.5.0 (#142)").
+- `lib/woods/version.rb` reads VERSION = '1.5.0' and CHANGELOG.md has a dated
+  "## [1.5.0] - 2026-06-23" section.
+- `.github/workflows/release.yml` triggers on push of tags matching `v*`: it runs
+  tests + rubocop, then a `publish` job that builds the gem, pushes to RubyGems via
+  trusted publishing (environment: release, id-token: write), and cuts a GitHub release.
+Do this:
+1. cd into the woods checkout. Run: git fetch origin --tags
+2. Safety checks — abort and report if either fails:
+   a. `git show origin/main:lib/woods/version.rb` must contain 1.5.0.
+   b. `git ls-remote --tags origin v1.5.0` must be EMPTY. If a v1.5.0 tag already
+      exists, STOP — it may already be released; report and do nothing.
+3. Tag and push:
+   - git tag -a v1.5.0 -m "v1.5.0" origin/main
+   - git push origin v1.5.0
+   If origin/main is NOT at 8bcff8f… it advanced after prep: confirm the new HEAD
+   still has version 1.5.0 and is the intended release content before tagging; if
+   unsure, STOP and ask.
+   If the push is rejected (403/permission), STOP and report — this checkout lacks
+   tag-push rights and a human with access must do it.
+4. Watch the release run: `gh run list --workflow=release.yml` (or the Actions UI),
+   wait for it to finish, and confirm BOTH the `test` and `publish` jobs succeed.
+   If `publish` fails, fetch the job logs (`gh run view <id> --log-failed`) and report
+   the error — do NOT blindly retry; trusted-publishing / environment-protection
+   failures need a human.
+5. Verify the release landed:
+   - RubyGems: `gem list -r -e woods` shows 1.5.0, or
+     `curl -s https://rubygems.org/api/v1/versions/woods.json` includes 1.5.0.
+   - GitHub release exists: `gh release view v1.5.0`.
+6. Report back: tag pushed (Y/N), workflow result, RubyGems 1.5.0 live (Y/N), and the
+   GitHub release URL.
