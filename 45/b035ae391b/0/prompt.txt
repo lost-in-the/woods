@@ -1,0 +1,5 @@
+Some issues:
+1. Alignment is off in some places & overflowing: [Image #7] [Image #8] [Image #9]
+2. We're dropping bc-agents, don't reference it.
+3. Why do we need claude-code-action? It's going to double the work that the hermes agent could handle on its own
+4. The MCP still depends on a live rails server to function. This appears overlooked in this plan
