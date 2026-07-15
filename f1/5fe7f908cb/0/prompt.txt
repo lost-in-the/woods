@@ -1,0 +1,40 @@
+Does this answer your question? 
+Extraction complete!
+==================================================
+  models         : 228 units
+  controllers    : 372 units
+  graphql        : 307 units
+  components     : 96 units
+  view_components: 0 units
+  services       : 52 units
+  jobs           : 132 units
+  mailers        : 3 units
+  serializers    : 43 units
+  managers       : 17 units
+  policies       : 2 units
+  validators     : 7 units
+  concerns       : 44 units
+  routes         : 1055 units
+  middleware     : 1 units
+  i18n           : 76 units
+  pundit_policies: 0 units
+  configurations : 57 units
+  engines        : 13 units
+  view_templates : 119 units
+  migrations     : 416 units
+  action_cable_channels: 4 units
+  scheduled_jobs : 0 units
+  rake_tasks     : 61 units
+  state_machines : 0 units
+  events         : 2 units
+  decorators     : 23 units
+  database_views : 0 units
+  caching        : 16 units
+  factories      : 153 units
+  test_mappings  : 2321 units
+  rails_source   : 140 units
+  poros          : 820 units
+  libs           : 245 units
+==================================================
+  Total: 6825 units
+Output written to: /app/tmp/woods
