@@ -1,0 +1,64 @@
+<task-notification>
+<task-id>a621f44acdbe0bcaa</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/7ba74349-ad3e-4bb8-b790-2f4db03a6ab3/tasks/a621f44acdbe0bcaa.output</output-file>
+<status>completed</status>
+<summary>Agent "Review storefront PR #747 merge-readiness" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All parity items verified. I have everything needed for the assessment.
+
+---
+
+# PR #747 Merge-Readiness Assessment
+
+**PR:** feat(woods): codebase extraction + Unblocked context sync (storefront parity)
+https://github.com/bigcartel/storefront/pull/747 · `storefront-woods` → `main` · head `2a64b3f`
+
+## VERDICT
+**Not mergeable yet — one hard blocker: it needs a human approving review.** Everything else is green: CI passes, no merge conflicts, no unresolved review threads, and all ENG-5477 parity files are present and correct.
+
+## Blockers to merge
+
+1. **[HARD] Missing human approval.** `reviewDecision: REVIEW_REQUIRED`, `mergeStateStatus: BLOCKED`. The only "review" on record is the **`unblocked` bot** ("No issues found", on commit `f88bd61`) — bots don't satisfy the branch protection rule. **Action:** get one human reviewer to approve. This is the single thing standing between the PR and a clean merge.
+
+2. **[SOFT] Branch is 5 commits behind `origin/main`.** `mergeable: MERGEABLE` and a `merge-tree` dry run shows **no conflicts**, so GitHub will merge it as-is. Updating the branch is optional (CI would re-run). **Action:** none required; optionally "Update branch" if you want CI green against latest main before merging.
+
+3. **[SOFT / scope note] Bundled unrelated fix.** The PR carries a non-woods change — commit `2f27213d` "silence `Postmark::InactiveRecipientError` from AppSignal" (`app/controllers/contact_controller.rb`, `config/locales/en.yml`, `spec/controllers/contact_controller_spec.rb`). It's small and has a spec, but it's outside the ENG-5477 parity scope. **Action:** decide whether the reviewer is OK approving it in this PR or wants it split out.
+
+## CI status — all green (Buildkite build [#2593](https://buildkite.com/bigcartel/storefront-ci/builds/2593))
+- `buildkite/storefront-ci` — SUCCESS
+- `buildkite/storefront-ci/docker-build` — SUCCESS
+- `buildkite/storefront-ci/docker-linting` — SUCCESS
+- `buildkite/storefront-ci/rails-specs` — SUCCESS
+- `buildkite/storefront-ci/pipeline-pipeline-upload` — SUCCESS
+- GitHub Actions "Helm chart Tests" (×2) — SUCCESS
+
+No failing or pending checks. The new `woods-sync` pipeline step is correctly gated to scheduled main builds only, so it does **not** run in PR CI (nothing to fail there).
+
+## Branch freshness
+Behind by **5 commits**, **no conflicts** (`mergeable: MERGEABLE`, clean `merge-tree`). Local checkout at `/Users/leah/work/compose-dev/storefront-woods` is in sync with the PR head (`2a64b3f`).
+
+## Parity gaps — **none, all present**
+Every ENG-5477 / admin-#13304 acceptance item is in the diff (`git diff --stat origin/main...HEAD`, 16 files) and content-verified:
+
+| Item | Status |
+|---|---|
+| `gem "woods", "1.5.0"` in `:development, :test` | ✅ Gemfile:52, Gemfile.lock:591/654 |
+| `config/initializers/woods.rb` (tmp/woods, console_mcp_enabled, prod guard) | ✅ has `return unless defined? Woods`, `output_dir tmp/woods`, `console_mcp_enabled = true` |
+| `bin/woods-start` + `bin/woods-console-start` → `bc_storefront` | ✅ both target `bc_storefront` / `bc_storefront_agent_${SLOT}` |
+| `.mcp.json` with `woods-storefront`, `woods-storefront-console`, `unblocked` | ✅ all three present |
+| `querying-codebase-structure` skill | ✅ `.claude/skills/querying-codebase-structure/SKILL.md` |
+| Scheduled Unblocked sync gated `main` + `schedule`, no secret interpolation, no `agents: queue:` | ✅ `if: build.branch == "main" &amp;&amp; build.source == "schedule"`; secrets via allowlist, not `${VAR}`; no queue |
+| `UNBLOCKED_*` in `ci-compose.yml` allowlist | ✅ API_TOKEN, COLLECTION_ID, REPO_URL added |
+| `.unblocked/risk-policies.yaml` | ✅ present |
+| `.claude/rules/woods-unblocked.md` | ✅ present |
+| `AGENTS.md` pointer | ✅ "Structural context (Woods)" section added |
+| `docs/woods-unblocked.md` | ✅ present |
+
+## Recommended next actions (ordered)
+1. **Request/obtain one human approval** — the only real blocker.
+2. Confirm with the reviewer whether the bundled Postmark contact-form fix stays in this PR or gets split out.
+3. (Optional) Click "Update branch" to re-run CI against latest `main` — not required; no conflicts exist.
+4. Merge once approved — `mergeStateStatus` will flip from `BLOCKED` to `CLEAN`.</result>
+<usage><subagent_tokens>62099</subagent_tokens><tool_uses>7</tool_uses><duration_ms>88134</duration_ms></usage>
+</task-notification>
