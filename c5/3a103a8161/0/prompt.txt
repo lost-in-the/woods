@@ -1,0 +1,3 @@
+With this, do we still need these issues? 
+https://github.com/lost-in-the/woods/issues/153
+https://github.com/lost-in-the/woods/issues/152
