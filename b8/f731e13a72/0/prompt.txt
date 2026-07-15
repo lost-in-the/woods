@@ -1,0 +1,3 @@
+Put these in your local notes.
+Review the depth of past PRs out of curiosity. If there's no noticable improvement, I'm going to do a soft reset
+I'd like you to connect to unblocked and remove all the documents from the collection and let it sit overnight ot determine if it just has the knowledge indexed now. Otherw
