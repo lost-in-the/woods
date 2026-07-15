@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bn7biuxh3</task-id>
+<tool-use-id>toolu_01NoWT1GeeohSLQp2E8ZkQ48</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/bn7biuxh3.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll #13895 for the Woods-directed PR-Chat reply" completed (exit code 0)</summary>
+</task-notification>
