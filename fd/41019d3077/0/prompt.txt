@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bkh1sv2sk</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/bkh1sv2sk.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR #13890 for the Unblocked review" completed (exit code 0)</summary>
+</task-notification>
