@@ -1,0 +1,1 @@
+<bash-input> gh pr create --repo bigcartel/admin --base main --head leah/cleanup-orphaned-product-options --title "chore(one-off): clean up orphaned product options" --body-file "/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/scratchpad/admin-b-cascade-pr-body.md"</bash-input>
