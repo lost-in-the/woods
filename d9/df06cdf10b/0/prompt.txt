@@ -1,0 +1,23 @@
+<teammate-message teammate_id="team-lead">
+Investigate **"Hermes"** — an agent at **Big Cartel** (GitHub org `bigcartel`) being considered for automated **PR code reviews**. The goal is to understand its capabilities and integration model well enough to design a code-review flow around it. This is a read-only research task; do not modify anything.
+
+## The specific questions to answer
+1. **What is Hermes?** A Claude/LLM agent? Built on the Claude Agent SDK, Claude Code, or something custom? A service, a bot, a CLI?
+2. **How is it triggered?** GitHub App / webhook on PR events? A Buildkite step? Slack? Manual invocation? A cron/queue?
+3. **Can it call MCP servers or external tools/APIs?** This is the single most important question — a Woods integration depends on whether Hermes can query an MCP server (e.g. `woods-admin`) or run external commands. Look for tool/MCP configuration, tool-use loops, or an allow-list.
+4. **Does it already do code review** (or anything on PRs)? If so, how — what's the current flow (pull diff → analyze → post comment)?
+5. **Where does it run** (CI runner, a hosted service, a container) and **what repo/config defines it**?
+
+## How to investigate
+- **GitHub org search:** `gh search repos --owner bigcartel hermes`, `gh search code --owner bigcartel hermes --limit 50`, and look for a `hermes` repo — read its README, entrypoint, deploy config, any `.mcp.json`/tool config, and how it's triggered (`.github/workflows`, buildkite pipeline, webhook handler).
+- **Unblocked (institutional context):** load the tool first with `ToolSearch` query `select:mcp__unblocked__context_research`, then call `mcp__unblocked__context_research` with queries like *"What is the Hermes agent at Big Cartel — how does it work, how is it triggered, does it review PRs, can it use MCP servers or external tools?"* and follow-ups on its architecture/rollout. Cite what you find (PRs, docs, Slack, repos).
+- Use `gh` for any repo/PR/README reads. If a `gh`/network call hits a sandbox TLS `x509` error, re-run that Bash call with `dangerouslyDisableSandbox: true`.
+
+## Report back (concise; the requester has ADHD — headers, bullets, bold the key facts)
+- **What Hermes is** (one paragraph) + its runtime/stack.
+- **Trigger model** (how it fires on PRs, or how it's invoked).
+- **Tool/MCP capability** — CAN IT CALL MCP SERVERS / EXTERNAL TOOLS? (bold yes/no + evidence).
+- **Current PR-review behavior** (if any) + the flow.
+- **Where it's defined** (repo, config paths).
+- **Unknowns** you couldn't resolve. Cite sources (repo/PR/doc/Slack) for everything.
+</teammate-message>
