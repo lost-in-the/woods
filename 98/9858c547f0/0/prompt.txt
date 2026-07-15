@@ -1,0 +1,1 @@
+Background agent "Read-only investigation on `bigcartel/admin` (do N..." was stopped by the user.
