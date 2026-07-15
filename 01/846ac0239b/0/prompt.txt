@@ -1,0 +1,52 @@
+<task-notification>
+<task-id>a425a6a12e8b21ff3</task-id>
+<tool-use-id>toolu_01MbdQwfYdLf6MkuW1kzxQr2</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/a425a6a12e8b21ff3.output</output-file>
+<status>completed</status>
+<summary>Agent "Assess depth of past Unblocked PR reviews" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have enough evidence. All 15 sampled PRs had substantive inline reviews. Here is my assessment.
+
+---
+
+## VERDICT
+
+**Yes — pre-Woods Unblocked reviews were already routinely DEEP.** They regularly cited other files, callers, sibling classes, and blast radius well beyond the changed lines. Cross-file structural reasoning was the norm, not the exception, before Woods existed.
+
+## Distribution
+
+**Sample:** 15 merged admin PRs with an `unblocked[bot]` inline review, all merged **2026-06-18 → 2026-07-01 (before 19:00 UTC)**. (Note: many PRs in the window had *no* unblocked inline comment at all — I checked ~58 to find these 15.)
+
+- **DEEP: 8** — 13786, 13860, 13831, 13779, 13873, 13824, 13820, 13815
+- **MEDIUM: 6** — 13879, 13878, 13832, 13797, 13866, 13826
+- **SHALLOW: 1** — 13795
+
+## Deepest pre-Woods examples (all cite structure beyond the diff)
+
+**PR 13873** — caught a `Retry-After` epoch-vs-delay-seconds bug *and flagged the same bug in two other controllers*:
+&gt; "the same bug exists in `signups_controller.rb` and `oauth_initiation_controller.rb`; you may want to fix those too."
+
+**PR 13824** — traced a changed method-return contract across sibling classes sharing one controller:
+&gt; "Other sections that share this generic controller still define `add_item` as `items &lt;&lt; X` (e.g. `Kiln::EndorsementsSection#add_item` … `Kiln::FaqSection#add_item`), which returns the **array**, not the new item. `new_item.id` then … raising `NoMethodError`."
+
+**PR 13786** — followed a new hidden form field into the controller and reasoned about the response:
+&gt; "`Next::Orders::ShipmentsController#update` only redirects `unless permitted_params[:shippo_id]` … Because it now carries `shippo_id`, the controller falls through … (Rails responds `204 No Content`) … The added spec only checks the form/disclaimer renders, not the submit."
+
+**PR 13860** — assessed OpenSearch reindex blast radius from a model callback:
+&gt; "When any of these order fields change, only payment transactions are reindexed — refund documents in OpenSearch will retain stale `item_net_cents` and `currency_id` values."
+
+**PR 13779** — traced an unconditionally-rendered partial back to the layout and a nil-account crash:
+&gt; "This partial is rendered unconditionally in `app/views/layouts/base.html.haml` (R72) … When `current_account` is nil, `reauthorize_banner_required?` … raising `NoMethodError` on `nil` and crashing the page."
+
+(Also strong: **13820** N+1 analysis citing how `ProductCardGrid`/`Collection#products_q` already eager-load; **13831** currency-sign double-escaping identifying a second affected site in `fan_support_section.rb`; **13815** naming verbatim-duplicated constant maps across three rendering files.)
+
+## Caveats
+
+- **Sample is single-comment-heavy.** Every one of these 15 PRs had exactly **1** unblocked inline comment — Unblocked posts one focused finding per PR, not a scattershot list. So "depth" here = the quality of that one comment, which was consistently high.
+- **Low coverage rate.** Roughly **only ~1 in 4** merged PRs in the window got an unblocked inline comment at all; the rest returned zero inline comments (I did not separately mine review-summary bodies, which may contain lighter prose — the inline comments are where the substance was).
+- **Convention-citing muddies "cross-file."** Several findings (13878, 13832, 13795, 13866) lean on `AGENTS.md`/prior-PR links rather than tracing live code — genuine repo-context awareness, but a different flavor than dependency-tracing. I scored those MEDIUM/SHALLOW.
+- **Border calls:** 13797 (Float vs BigDecimal) and 13815 (DRY across 3 files) are defensible either way; reclassifying them wouldn't change the verdict.
+
+**Bottom line for your key question:** Unblocked was already citing cross-file structure and blast radius *before* Woods — verifiably, in PRs **13786, 13873, 13824, 13860, 13779, 13820, 13831, 13815**.</result>
+<usage><subagent_tokens>64025</subagent_tokens><tool_uses>4</tool_uses><duration_ms>125852</duration_ms></usage>
+</task-notification>
