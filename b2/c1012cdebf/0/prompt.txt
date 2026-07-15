@@ -1,0 +1,37 @@
+**No, PR Chat cannot currently be configured with a Shared Preset or any custom data source configuration.**
+Based on the documentation, **Data Source Presets** are only available in two contexts:
+1. **Q&A answers** — In the dashboard, you can select a Data Source Preset to control which sources are included in your answer (Business/Enterprise plan required).
+2. **Slack auto-answers** — Each Slack channel can be configured with a specific Data Source Preset, answer length, tone, and research depth.
+PR Chat has **no equivalent configuration surface**. There's no way to:
+- Assign a Data Source Preset to PR Chat
+- Specify which data sources PR Chat should prioritize
+- Configure answer preferences (tone, depth, length) for PR Chat responses
+PR Chat searches across all connected workspace context implicitly — it's not scoped or configurable per-repo or per-team.
+## What This Means for Your Woods Use Case
+PR Chat _should_ be able to find the Admin Woods profiles via semantic search across all connected sources, but you can't force it to prioritize that collection. The key levers you have are:
+1. **Improve document discoverability** — as we discussed (better titles, preambles, cross-references in the collection documents)
+2. **Phrase prompts to match the content** — don't name the collection; instead use terms that match what's _in_ the documents ("structural codebase profiles," "model associations," "dependents," "blast radius")
+3. **Use the Unblocked CLI or MCP as an alternative** — the CLI's `context-research` command does support full workspace context and could be wired into a GitHub Action that posts results as a PR comment, bypassing PR Chat entirely
+### CLI-Based Alternative
+If PR Chat continues to miss the collection, you could use the CLI in a GitHub Action instead:
+```yaml
+- name: Run Woods-aware analysis via CLI
+  env:
+    UNBLOCKED_TOKEN: ${{ secrets.UNBLOCKED_PAT }}
+  run: |
+    result=$(unblocked context-research \
+      "Based on structural codebase profiles, what is the blast radius \
+       of destroying ProductOption? List dependents, entry points, and \
+       side effect callbacks.")
+    
+    gh pr comment "${{ github.event.pull_request.number }}" \
+      --repo "${{ github.repository }}" \
+      --body "## Woods Context Analysis
+    ${result}"
+
+```
+This approach uses Unblocked's full retrieval pipeline (same as Q&A) rather than relying on PR Chat's retrieval, and the CLI has access to all connected data sources including custom collections. It would give you more reliable access to the Woods profiles without depending on PR Chat's implicit search behavior.
+Let's take this insight, analyze our available tooling suite, and determine what the best possible solution is to attempt to catch bugs and PR concerns sooner. Evaluate multiple options such as:
+* CLI or API use
+* Buildkite configs (build, script, or agent)
+* Slack integrations
