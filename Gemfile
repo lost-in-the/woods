@@ -34,7 +34,7 @@ group :development, :test do
   gem 'rubocop', '~> 1.50'
   gem 'rubocop-rails', '~> 2.19'
   gem 'rubocop-rspec', '~> 3.9'
-  gem 'simplecov', '~> 0.22', require: false
+  gem 'simplecov', '~> 1.0', require: false
   gem 'sqlite3', *sqlite3_requirement
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
