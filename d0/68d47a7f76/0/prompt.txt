@@ -1,0 +1,3 @@
+We're actually discussing now integrating with our Hermes agent for code reviews instead. This may be the bigger option since it should be capable of much more. 
+
+Either way, still complete your tests just for insights before I wrap this up for the day. We'll be meeting on this tonight
