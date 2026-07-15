@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b33itemon</task-id>
+<tool-use-id>toolu_01EyEAku5YyiJsLi6H9JFUFS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/b33itemon.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Experiment B PR #13895 for Woods-ON review" completed (exit code 0)</summary>
+</task-notification>
