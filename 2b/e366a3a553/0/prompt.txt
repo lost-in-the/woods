@@ -1,0 +1,3 @@
+Instead of doing this on comments which isn't what we're testing necessarily. The point was that buildkite could ping the unblocked CLI which allows passing specific profiles, and will have full access to the data collections. 
+
+Can we test the CLI with a meaningful query test?
