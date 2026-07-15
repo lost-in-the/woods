@@ -1,0 +1,1 @@
+update session-state.md with the v1.5.0 release
