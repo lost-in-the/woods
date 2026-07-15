@@ -1,0 +1,3 @@
+Looks better. Can we do one more pass with a section that showcases what it _could_ do with an active rails server for the agent running somewhere? eg: Test the changes in browser, run against woods console for efficient data queries, live-build the index, propose fixes
+
+This would also be helpful for approaches where the agent investigates a bug report and creates a draft PR from a linear ticket as support creates them or otherwise, right? Woods is one part of the equation. Access to the rest of the context is important in some cases.
