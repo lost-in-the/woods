@@ -1,0 +1,5 @@
+Last change: propose the lightest possible solution first, then propose the hosted rails app example as the secondary option. Essentially:
+1. A context-generated output for the agent to review with minimal overhead
+2. A functional agent that is capable of generating an index specific to the branch and/or validating against console and real-time testing
+
+Label these however seems fit, these are just concept to run with not explicit guidelines on how to present it
