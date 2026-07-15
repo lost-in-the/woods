@@ -1,0 +1,1 @@
+<bash-input> gh pr comment 13895 --repo bigcartel/admin --body-file "/Users/leah/.claude/jobs/ec7ff385/tmp/woods_prchat_prompt.md"</bash-input>
