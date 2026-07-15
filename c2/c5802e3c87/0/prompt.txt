@@ -1,0 +1,8 @@
+Hermes-agent hold long-term context, builds custom skills as it identifies issues, and a broader toolset using claude as the agent behind the actions.
+
+You keep referencing the MCP, but this leaves open questions for me:
+* where does the mcp get hosted/run from?
+* If information from if the index is being built by the ci, where does it live?
+* What is the benefit of the blast radius if the Hermes agent can just view the diff and hit the mcp?
+* How can it potentially understand the new connections formed in the PR without indexing?
+* Granted the blast radius feature could help provide that insight, but if the agent needs to investigate further, will it be required to build the index again since it isn't persisted on BuildKite?
