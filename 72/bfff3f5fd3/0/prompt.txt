@@ -1,0 +1,1 @@
+I can see woods sync in the queue and it build the index fine already
