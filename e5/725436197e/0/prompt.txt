@@ -1,0 +1,1 @@
+Close it, draft the ticket locally for review after (i want the full suite tested and a few days to burn on it), and set up the MCP test
