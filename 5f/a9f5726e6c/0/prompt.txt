@@ -1,0 +1,2 @@
+Yes, let's spike option 1. to be sure I'm reading it right, the plan is to add a step to build woods index when the PR is created and analyze the blast radius to post as a comment? 
+Would this depend on the unblocked agent for the call or what would actually analyze the data?
