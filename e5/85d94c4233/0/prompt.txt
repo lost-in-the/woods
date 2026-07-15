@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b55qgqn7w</task-id>
+<tool-use-id>toolu_011LnCzzzzSoMdqeR9Zknidx</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/ec7ff385-553e-4f6c-ab61-38e1e6a45fee/tasks/b55qgqn7w.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll #13895 for the Account dependent-count probe reply" completed (exit code 0)</summary>
+</task-notification>
