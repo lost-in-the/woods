@@ -1,0 +1,2 @@
+Doesn't woods document route binding as well? Wouldn't that potentially assist in reviews? If you don't see any other areas to improve in woods before doing so, let's proceed with B.
+Current Unblocked config is woods admin loaded into relevant groups, repo instructions & collection enabled. So, "on"
