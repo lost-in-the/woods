@@ -53,7 +53,11 @@ woods-mcp-http /path/to/rails-app/tmp/woods
 
 **Extract-only works out of the box.** If you've run `rake woods:extract` but not `rake woods:embed` (no embedding provider configured), the server still boots and serves all pattern/regex/structural tools — `lookup`, `search`, `dependencies`, `structure`, `graph_analysis`, `pagerank`, and the rest. Only `codebase_retrieve` (semantic search) needs embeddings, and it activates automatically once a provider is configured and `woods:embed` has run. No environment variable is required.
 
-To fail closed instead — refuse to boot unless a real index (`woods.json`) is present — set `WOODS_REQUIRE_INDEX=1`. (The legacy `WOODS_ALLOW_AUTODETECT` flag is now a no-op; auto-detect is the default.)
+**Boot-before-extract works too.** A `woods-mcp` (or `woods-mcp-start`) pointed at a directory with no `manifest.json` — for example, registered in an editor/agent config that launches MCP servers at session start, before the first extraction has ever run — boots in *awaiting-index mode*: `woods_status` reports `index.present: false` with guidance, index-backed tools answer "run `bundle exec rake woods:extract`" instead of erroring, and the server picks the index up automatically once it's written.
+
+**The index auto-reloads.** Every tool call stats `manifest.json` (one `stat(2)`, no parsing) and drops the server's caches when the file changed — so after a re-extraction, a long-lived MCP connection serves the new index on the next call with no manual `reload` and no reconnect. The explicit `reload` tool remains useful after `rake woods:embed`, since it also re-hydrates the retriever's in-memory vector/metadata/graph stores from the latest dumps.
+
+To fail closed instead — refuse to boot unless a real index (`woods.json`) is present, and exit 1 when `manifest.json` is missing — set `WOODS_REQUIRE_INDEX=1`. (The legacy `WOODS_ALLOW_AUTODETECT` flag is now a no-op; auto-detect is the default.)
 
 ### Claude Code Configuration
 
@@ -174,7 +178,7 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 
 | Tool | Description |
 |------|-------------|
-| `reload` | Reload extraction data from disk without restarting the server. |
+| `reload` | Reload extraction data from disk without restarting the server. Rarely needed for extraction changes — the index auto-reloads on every tool call — but still the way to re-hydrate the retriever's in-memory stores after `rake woods:embed`. |
 
 ### Resources
 

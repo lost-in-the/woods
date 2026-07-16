@@ -15,6 +15,7 @@ bundle exec rubocop --auto-gen-config             # Update .rubocop_todo.yml
 # In a host Rails app (extraction requires Rails boot)
 bundle exec rake woods:extract           # Full extraction
 bundle exec rake woods:incremental       # Changed files only
+bundle exec rake woods:sync              # Cursor-based sync (extract changes since last sync)
 bundle exec rake woods:extract_framework # Rails/gem sources
 bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
@@ -116,6 +117,7 @@ lib/
 │   ├── filename_utils.rb               # Safe filename generation
 │   ├── index_artifact.rb               # Dump promotion + safe path handling
 │   ├── atomic_file.rb                   # Crash-safe temp+fsync+rename file writes (shared)
+│   ├── sync.rb                          # Cursor-based incremental sync (woods:sync)
 │   ├── resolved_config.rb              # Frozen configuration snapshot
 │   ├── token_utils.rb                  # Token count estimation helpers
 │   ├── extractors/                      # 34 extractors + 6 helpers (shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction)
@@ -256,6 +258,8 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
 - The Index Server (`woods-mcp`) boots in **pattern-only mode by default** when no `woods.json` is present and no embedding provider is configured (#138) — extract-only hosts get every always-on tool with no env var. `codebase_retrieve` (semantic search) activates only when a provider is configured. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot (raises `MissingArtifact`); `WOODS_ALLOW_AUTODETECT` is now a back-compat no-op. The strict-vs-default decision lives in `ConfigResolver.resolve_without_artifact`.
+- The Index Server **auto-reloads the index** and **boots without one**. `IndexAutoRefresh` (prepended onto the server instance, like `VersionAwareToolDispatch`) runs before every tools/call: it stats `manifest.json` (`IndexReader#refresh_if_stale!`, mtime+size fingerprint) and reloads on change, and when no manifest exists it answers the tools in `INDEX_REQUIRED_TOOLS` with "run woods:extract" guidance (`error_code: no_index`). `Server.build` constructs its reader with `allow_missing: true`; an explicitly named dir (argv/`WOODS_DIR`) missing its manifest boots in awaiting-index mode — the bare `Dir.pwd` fallback stays strict, and `WOODS_REQUIRE_INDEX=1` restores exit-1. Auto-reload covers the `IndexReader` only; re-hydrating retriever stores after `woods:embed` still needs the `reload` tool. MCP *resource* reads don't trigger the refresh hook.
+- `woods:sync` (`Woods::Sync`) owns the per-merge loop: cursor at `output_dir/.sync_head`, `git diff --name-only <cursor> HEAD` filtered through `Sync::RELEVANT_PATTERNS` (shared with `woods:incremental`), full-extract fallback on missing index/cursor/undiffable SHA, cursor advanced only after success. The cursor is deliberately NOT `manifest.git_sha` (that's `"unknown"` in unmounted-worktree containers, #137). No git → full extract every run, cursor never written.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
 - Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
 - `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."

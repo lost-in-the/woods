@@ -72,33 +72,10 @@ namespace :woods do
                       output.lines.map(&:strip)
                     end
 
-    # Filter to relevant files
-    relevant_patterns = [
-      %r{^app/models/},
-      %r{^app/controllers/},
-      %r{^app/services/},
-      %r{^app/components/},
-      %r{^app/views/components/},
-      %r{^app/views/.*\.rb$},  # Phlex views
-      %r{^app/interactors/},
-      %r{^app/operations/},
-      %r{^app/commands/},
-      %r{^app/use_cases/},
-      %r{^app/jobs/},
-      %r{^app/workers/},       # Sidekiq workers
-      %r{^app/mailers/},
-      %r{^app/graphql/}, # GraphQL types/mutations/resolvers
-      %r{^app/serializers/},
-      %r{^app/decorators/},
-      %r{^app/blueprinters/},
-      %r{^db/migrate/},
-      %r{^db/schema\.rb$}, # Schema changes affect model metadata
-      %r{^config/routes\.rb$},
-      /^Gemfile\.lock$/ # Dependency changes trigger framework re-index
-    ]
-
+    # Filter to relevant files (single source of truth shared with woods:sync)
+    require 'woods/sync'
     changed_files = changed_files.select do |f|
-      relevant_patterns.any? { |p| f.match?(p) }
+      Woods::Sync::RELEVANT_PATTERNS.any? { |p| f.match?(p) }
     end
 
     if changed_files.empty?
@@ -134,6 +111,41 @@ namespace :woods do
 
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
+
+  desc 'Cursor-based sync — extract exactly what changed since the last successful sync'
+  task sync: :environment do
+    require 'woods/sync'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    result = Woods::Sync.new(output_dir: output_dir).run
+
+    case result.mode
+    when :up_to_date
+      puts "Index is up to date (cursor at #{result.cursor})."
+    when :full
+      reasons = {
+        no_cursor: 'no sync cursor yet (first sync)',
+        no_index: 'no index on disk',
+        git_unavailable: 'git unavailable — cursor not written; every sync will run full until git works',
+        diff_failed: 'cursor SHA could not be diffed (force push / shallow clone / gc)'
+      }
+      puts "Ran a full extraction: #{reasons.fetch(result.reason, result.reason)}."
+      puts "Cursor now at #{result.cursor}." if result.cursor
+    when :incremental
+      puts "Synced #{result.changed_files.size} changed file(s): " \
+           "#{result.affected.size} unit(s) re-extracted or added."
+      unless result.removed_units.empty?
+        puts "Removed #{result.removed_units.size} unit(s) whose source files were deleted:"
+        result.removed_units.each { |id| puts "  - #{id}" }
+      end
+      unless result.unhandled_files.empty?
+        puts "WARNING: #{result.unhandled_files.size} changed file(s) could not be mapped to any unit:"
+        result.unhandled_files.each { |f| puts "  - #{f}" }
+        puts 'Run woods:extract to index them.'
+      end
+      puts "Cursor now at #{result.cursor}."
+    end
+  end
 
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'
   task extract_framework: :environment do

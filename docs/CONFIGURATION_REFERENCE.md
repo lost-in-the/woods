@@ -345,7 +345,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | Variable | Read by | Default | Purpose |
 |----------|---------|---------|---------|
 | `WOODS_DIR` | `woods-mcp` bootstrapper | `Dir.pwd` | Path to the extraction output directory. |
-| `WOODS_REQUIRE_INDEX` | `woods-mcp` bootstrapper | unset | Set to `"1"` to fail closed: the Index Server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host (ran `woods:extract`, no embedding provider) boots in pattern/structural mode without it. |
+| `WOODS_REQUIRE_INDEX` | `woods-mcp` bootstrapper | unset | Set to `"1"` to fail closed: the Index Server exits 1 when the named index directory or its `manifest.json` is missing, and refuses to boot (raises `MissingArtifact`) unless a real embedding index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode, and a not-yet-extracted directory boots in awaiting-index mode (tools serve "run woods:extract" guidance and the index is picked up automatically once written). |
 | `WOODS_ALLOW_AUTODETECT` | `woods-mcp` bootstrapper | unset | **Deprecated no-op.** Auto-detect is now the default when no `woods.json` and no provider are present; this flag is still accepted for backward compatibility but has no effect. |
 | `WOODS_SEARCH_MAX_SCAN` | `woods-mcp` `search` tool | `500` | Cap on the number of unit files loaded during a phase-2 (metadata/source_code) search. When the cap is hit, the response includes `partial: true`. Set empty or unset to use the default. |
 | `WOODS_SNAPSHOTS` | `woods-mcp` bootstrapper | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |

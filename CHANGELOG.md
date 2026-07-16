@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Index Server auto-reloads when the index changes on disk.** Every tools/call
+  stats `manifest.json` (one `stat(2)`, no parsing) and drops the server's caches when
+  it changed — after a re-extraction, a long-lived MCP connection serves the current
+  index on the next call with no manual `reload` and no reconnect. The `reload` tool
+  remains the way to re-hydrate the retriever's in-memory stores after `woods:embed`.
+- **`woods-mcp` boots gracefully before the first extraction.** An explicitly named
+  index directory that is missing or has no `manifest.json` no longer hard-fails —
+  the server starts in awaiting-index mode: `woods_status` reports
+  `index: { present: false }` with "run woods:extract" guidance, index-backed tools
+  return the same guidance (`error_code: no_index`) instead of erroring, and the
+  index is picked up automatically once written (pairs with auto-reload). Editor and
+  agent configs can therefore register `woods-mcp` before any extraction has run.
+  `WOODS_REQUIRE_INDEX=1` restores the fail-closed exit; the bare-invocation
+  `Dir.pwd` fallback stays strict.
+- **`rake woods:sync` — cursor-based incremental extraction.** One shared entry point
+  for the loop per-merge consumers used to hand-roll: it stores the SHA of the last
+  successful sync in `tmp/woods/.sync_head`, diffs cursor..HEAD, extracts exactly the
+  relevant changed files (deletions drop their units), falls back to a full extraction
+  when there's no index/cursor or the cursor can't be diffed (force push, shallow
+  clone), and advances the cursor only on success. The cursor is owned by the
+  environment running the sync — deliberately not `manifest.git_sha`, which is
+  `"unknown"` when extraction runs in a container that can't resolve a linked
+  worktree's gitdir (#137). The changed-file relevance patterns are now shared between
+  `woods:sync` and `woods:incremental` (`Woods::Sync::RELEVANT_PATTERNS`).
+
 ### Fixed
 
 - **`woods:incremental` now extracts brand-new files as fresh units** (B-062). Changed

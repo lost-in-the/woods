@@ -21,26 +21,56 @@ module Woods
     # the stdio and HTTP server entry points.
     #
     module Bootstrapper
-      # Resolve and validate the index directory from CLI args or environment.
+      # Resolve the index directory from CLI args or environment.
+      #
+      # An explicitly named directory (argv or WOODS_DIR) that is missing —
+      # or exists without a manifest.json — boots in **awaiting-index mode**:
+      # the server starts, index-backed tools serve "run woods:extract"
+      # guidance, and the index is picked up automatically once written
+      # (editor/agent configs launch MCP servers before the first extraction
+      # has ever run). Set WOODS_REQUIRE_INDEX=1 for the fail-closed exit.
+      #
+      # The bare-invocation fallback (no argv, no WOODS_DIR → Dir.pwd) stays
+      # strict — silently serving an empty index rooted at whatever cwd the
+      # client happened to spawn us in would be a confusing default.
       #
       # @param argv [Array<String>] Command-line arguments
-      # @return [String] Validated index directory path
+      # @return [String] Index directory path (may not contain an index yet)
       def self.resolve_index_dir(argv)
-        dir = argv[0] || ENV['WOODS_DIR'] || Dir.pwd
+        explicit = argv[0] || ENV.fetch('WOODS_DIR', nil)
+        dir = explicit || Dir.pwd
+        strict = ENV['WOODS_REQUIRE_INDEX'] == '1' || explicit.nil?
 
         unless Dir.exist?(dir)
-          warn "Error: Index directory does not exist: #{dir}"
-          exit 1
+          if strict
+            warn "Error: Index directory does not exist: #{dir}"
+            exit 1
+          end
+          warn "[woods-mcp] Index directory does not exist yet: #{dir}"
+          warn awaiting_index_notice
+          return dir
         end
 
         unless File.exist?(File.join(dir, 'manifest.json'))
-          warn "Error: No manifest.json found in: #{dir}"
-          warn 'Run `bundle exec rake woods:extract` in your Rails app first.'
-          exit 1
+          if strict
+            warn "Error: No manifest.json found in: #{dir}"
+            warn 'Run `bundle exec rake woods:extract` in your Rails app first.'
+            exit 1
+          end
+          warn "[woods-mcp] No manifest.json found in: #{dir}"
+          warn awaiting_index_notice
         end
 
         dir
       end
+
+      # @return [String] Operator hint shared by both awaiting-index branches
+      def self.awaiting_index_notice
+        '[woods-mcp] Starting in awaiting-index mode — run `bundle exec rake woods:extract` ' \
+          '(or `woods:sync`) to populate it; the server picks the index up automatically. ' \
+          'Set WOODS_REQUIRE_INDEX=1 to fail closed instead.'
+      end
+      private_class_method :awaiting_index_notice
 
       # Build a snapshot store for temporal tracking.
       #

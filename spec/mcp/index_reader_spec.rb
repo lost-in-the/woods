@@ -26,6 +26,92 @@ RSpec.describe Woods::MCP::IndexReader do
       expect { described_class.new(Dir.tmpdir) }
         .to raise_error(ArgumentError, /No manifest\.json/)
     end
+
+    it 'tolerates a missing manifest with allow_missing: true' do
+      expect { described_class.new(Dir.tmpdir, allow_missing: true) }.not_to raise_error
+    end
+
+    it 'tolerates a non-existent directory with allow_missing: true' do
+      expect { described_class.new('/nonexistent/path', allow_missing: true) }.not_to raise_error
+    end
+  end
+
+  describe '#index_present?' do
+    it 'is true for a directory with a manifest' do
+      expect(reader.index_present?).to be true
+    end
+
+    it 'is false for an awaiting-index reader and flips true when the manifest appears' do
+      Dir.mktmpdir('woods_reader_test') do |dir|
+        waiting = described_class.new(dir, allow_missing: true)
+        expect(waiting.index_present?).to be false
+
+        File.write(File.join(dir, 'manifest.json'), '{"total_units": 0, "counts": {}}')
+        expect(waiting.index_present?).to be true
+      end
+    end
+  end
+
+  describe '#refresh_if_stale!' do
+    around do |example|
+      Dir.mktmpdir('woods_reader_stale') do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    def write_manifest(total_units:, mtime: nil)
+      path = File.join(@dir, 'manifest.json')
+      File.write(path, JSON.generate({ 'total_units' => total_units, 'counts' => {} }))
+      FileUtils.touch(path, mtime: mtime) if mtime
+      path
+    end
+
+    it 'keeps cached state while the manifest is unchanged' do
+      write_manifest(total_units: 1, mtime: Time.now - 60)
+      fresh = described_class.new(@dir)
+      cached = fresh.manifest
+
+      fresh.refresh_if_stale!
+      expect(fresh.manifest).to equal(cached)
+    end
+
+    it 'reloads when the manifest changes on disk' do
+      write_manifest(total_units: 1, mtime: Time.now - 60)
+      fresh = described_class.new(@dir)
+      expect(fresh.manifest['total_units']).to eq(1)
+
+      write_manifest(total_units: 7, mtime: Time.now + 60)
+      fresh.refresh_if_stale!
+
+      expect(fresh.manifest['total_units']).to eq(7)
+    end
+
+    it 'picks up an index that appears after an awaiting-index boot' do
+      fresh = described_class.new(@dir, allow_missing: true)
+      fresh.refresh_if_stale!
+      expect(fresh.index_present?).to be false
+
+      write_manifest(total_units: 3)
+      fresh.refresh_if_stale!
+
+      expect(fresh.index_present?).to be true
+      expect(fresh.manifest['total_units']).to eq(3)
+    end
+
+    it 'does not raise when the index directory never existed' do
+      fresh = described_class.new('/nonexistent/path', allow_missing: true)
+      expect { fresh.refresh_if_stale! }.not_to raise_error
+    end
+  end
+
+  describe '#warmup! without an index' do
+    it 'returns an empty result rather than raising' do
+      Dir.mktmpdir('woods_reader_warmup') do |dir|
+        waiting = described_class.new(dir, allow_missing: true)
+        expect(waiting.warmup!).to eq({})
+      end
+    end
   end
 
   describe '#manifest' do

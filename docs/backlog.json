@@ -708,5 +708,41 @@
     "description": "Discovered while fixing B-062 and confirmed by the 1.6.0 field report: when CHANGED_FILES includes a deleted file that IS in the file_map, affected_by finds its unit but re_extract_unit returned early (File.exist? fails), leaving the deleted class's unit in the index, graph, and counts until the next full extraction — and the run still logged 'Re-extracted 1 affected units'. Renames were the sharp edge: the new path was extracted (B-062) while the old unit lingered, so consumers saw the same class twice. Fixed: extract_changed runs remove_deleted_file_units before re-extraction (after affected_by, so the deleted unit's dependents still refresh) — it deletes each unit's JSON, removes it from the graph via the new DependencyGraph#remove (node, edges, file_map, type/reverse indexes), queues its type for index regeneration, and excludes it from the re-extracted count; co-located units sharing the deleted file are found by scanning nodes, not just the single-entry file_map. Removals are reported via Extractor#removed_unit_ids and a dedicated rake output block. Regression specs in extractor_incremental_new_files_spec (extract_changed end-to-end: JSON gone, _index.json/manifest/graph clean, co-located units, no false deletions) and dependency_graph_spec (#remove).",
     "status": "resolved",
     "depends_on": []
+  },
+  {
+    "id": "B-066",
+    "slug": "mcp-index-auto-reload",
+    "title": "Index Server should auto-reload when the index changes on disk",
+    "severity": "low",
+    "category": "enhancement",
+    "layer": "mcp",
+    "files": ["lib/woods/mcp/index_reader.rb", "lib/woods/mcp/index_auto_refresh.rb", "lib/woods/mcp/server.rb"],
+    "description": "Field request: the server loaded tmp/woods/ once at boot; after a re-extraction, clients had to call `reload` or restart the MCP connection. Fixed: IndexAutoRefresh (prepended onto the server instance like VersionAwareToolDispatch) runs IndexReader#refresh_if_stale! before every tools/call — a single stat of manifest.json (mtime+size fingerprint) that reloads the reader's caches on change. Retriever store re-hydration after woods:embed remains on the explicit reload tool; resource reads don't trigger the hook. Specs: index_reader_spec (#refresh_if_stale!), index_auto_refresh_spec (dispatch-level, via handle_json).",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-067",
+    "slug": "mcp-awaiting-index-boot",
+    "title": "Index Server should boot gracefully when the index directory is missing or empty",
+    "severity": "low",
+    "category": "enhancement",
+    "layer": "mcp",
+    "files": ["lib/woods/mcp/bootstrapper.rb", "lib/woods/mcp/index_reader.rb", "lib/woods/mcp/index_auto_refresh.rb", "exe/woods-mcp-start"],
+    "description": "Field request: woods-mcp registered in an editor/agent config launches at session start, possibly before the first extraction — and hard-exited without manifest.json. Fixed: IndexReader.new(dir, allow_missing: true) + Bootstrapper.resolve_index_dir warn-and-continue for an explicitly named dir (awaiting-index mode); index-backed tools (INDEX_REQUIRED_TOOLS) answer with run-woods:extract guidance (error_code: no_index), woods_status reports index.present:false + guidance, reload responds without raising, and the index is picked up automatically once written (pairs with B-066). WOODS_REQUIRE_INDEX=1 restores the fail-closed exit; the bare Dir.pwd fallback stays strict. The bash wrapper mirrors the policy. Specs: index_auto_refresh_spec, bootstrapper_spec, cli_integration_spec (live awaiting-index boot).",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-068",
+    "slug": "woods-sync-cursor-entry-point",
+    "title": "woods:sync — cursor-based incremental extraction entry point",
+    "severity": "low",
+    "category": "enhancement",
+    "layer": "extraction",
+    "files": ["lib/woods/sync.rb", "lib/tasks/woods.rake"],
+    "description": "Field request: per-merge consumers hand-rolled the same loop (remember last-extraction SHA, git diff, CHANGED_FILES, full-extract fallback, advance cursor). Shipped Woods::Sync + rake woods:sync: cursor at output_dir/.sync_head (AtomicFile), git diff --name-only cursor HEAD via Open3 with -C root, relevance filter shared with woods:incremental (Sync::RELEVANT_PATTERNS), full-extract fallback on no-cursor/no-index/undiffable SHA (force push, shallow clone) or unavailable git (cursor withheld so nothing silently drifts), cursor advanced only after successful extraction. Deliberately does not use manifest.git_sha as the cursor — it is 'unknown' in unmounted-worktree containers (#137 design); the cursor belongs to the environment that runs the sync and has working git. Spec: sync_spec.rb.",
+    "status": "resolved",
+    "depends_on": []
   }
 ]

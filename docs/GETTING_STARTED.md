@@ -191,7 +191,15 @@ See [MCP_SERVERS.md](MCP_SERVERS.md) for detailed setup instructions.
 
 ## 6. Incremental Updates
 
-After the initial extraction, use incremental mode to update only changed files:
+After the initial extraction, the simplest way to keep the index current is `woods:sync` — it remembers the commit of the last successful sync (in `tmp/woods/.sync_head`), diffs it against `HEAD`, and extracts exactly what changed (deleted files drop their units too):
+
+```bash
+bundle exec rake woods:sync
+```
+
+Run it after every merge (or on a schedule); it falls back to a full extraction automatically when there's no index yet, no cursor, or the cursor commit can't be diffed (force push, shallow clone). The cursor lives alongside the index and is owned by whichever environment runs the sync — it deliberately does not rely on `manifest.git_sha`, which is `"unknown"` when extraction runs in a container that can't resolve a linked worktree's git directory.
+
+If you'd rather compute the changed-file list yourself (e.g. your CI already knows the merge range), use incremental mode directly:
 
 ```bash
 bundle exec rake woods:incremental

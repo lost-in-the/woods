@@ -7,6 +7,15 @@ require 'woods'
 require 'woods/mcp/bootstrapper'
 
 RSpec.describe Woods::MCP::Bootstrapper do
+  # Run a block with ENV overrides, restoring prior values afterwards.
+  def with_env(overrides)
+    saved = overrides.keys.to_h { |k| [k, ENV.fetch(k, nil)] }
+    overrides.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+    yield
+  ensure
+    saved.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+  end
+
   describe '.resolve_index_dir' do
     let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
 
@@ -47,45 +56,52 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
-    context 'when the directory does not exist' do
-      it 'exits with status 1' do
+    # Graceful awaiting-index boot: an explicitly named directory (argv or
+    # WOODS_DIR) that is missing — or exists without a manifest — no longer
+    # hard-fails. Editor/agent configs launch MCP servers at session start,
+    # possibly before the first extraction has ever run; the server boots,
+    # serves guidance, and picks the index up once it appears.
+    # WOODS_REQUIRE_INDEX=1 restores the fail-closed exit.
+    context 'when the explicitly named directory does not exist' do
+      it 'returns the directory and warns instead of exiting' do
+        result = nil
         expect do
-          described_class.resolve_index_dir(['/definitely/not/a/real/woods/dir'])
-        end.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
+          result = described_class.resolve_index_dir(['/definitely/not/a/real/woods/dir'])
+        end.to output(/awaiting-index/i).to_stderr
+        expect(result).to eq('/definitely/not/a/real/woods/dir')
       end
 
-      it 'emits a descriptive error to stderr' do
-        expect do
-          described_class.resolve_index_dir(['/definitely/not/a/real/woods/dir'])
-        end.to output(/Index directory does not exist/).to_stderr
-           .and raise_error(SystemExit)
+      it 'exits with status 1 under WOODS_REQUIRE_INDEX=1' do
+        with_env('WOODS_REQUIRE_INDEX' => '1') do
+          expect do
+            expect do
+              described_class.resolve_index_dir(['/definitely/not/a/real/woods/dir'])
+            end.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
+          end.to output(/Index directory does not exist/).to_stderr
+        end
       end
     end
 
     context 'when the directory exists but lacks manifest.json' do
-      it 'exits with status 1' do
+      it 'returns the directory and suggests woods:extract instead of exiting' do
         Dir.mktmpdir do |dir|
+          result = nil
           expect do
-            described_class.resolve_index_dir([dir])
-          end.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
-        end
-      end
-
-      it 'mentions manifest.json in the error output' do
-        Dir.mktmpdir do |dir|
-          expect do
-            described_class.resolve_index_dir([dir])
-          end.to output(/manifest\.json/).to_stderr
-             .and raise_error(SystemExit)
-        end
-      end
-
-      it 'suggests running woods:extract' do
-        Dir.mktmpdir do |dir|
-          expect do
-            described_class.resolve_index_dir([dir])
+            result = described_class.resolve_index_dir([dir])
           end.to output(/woods:extract/).to_stderr
-             .and raise_error(SystemExit)
+          expect(result).to eq(dir)
+        end
+      end
+
+      it 'exits with status 1 under WOODS_REQUIRE_INDEX=1, mentioning manifest.json' do
+        with_env('WOODS_REQUIRE_INDEX' => '1') do
+          Dir.mktmpdir do |dir|
+            expect do
+              expect do
+                described_class.resolve_index_dir([dir])
+              end.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
+            end.to output(/No manifest\.json/).to_stderr
+          end
         end
       end
     end

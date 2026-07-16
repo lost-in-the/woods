@@ -27,16 +27,26 @@ if [[ -z "$INDEX_DIR" ]]; then
   exit 1
 fi
 
+# A named directory that is missing or has no manifest boots in
+# awaiting-index mode: the server serves "run woods:extract" guidance and
+# picks the index up automatically once written. WOODS_REQUIRE_INDEX=1
+# restores the fail-closed exit (mirrors exe/woods-mcp).
 if [[ ! -d "$INDEX_DIR" ]]; then
-  echo "Error: Index directory does not exist: $INDEX_DIR" >&2
-  echo "Run extraction first: bundle exec rake woods:extract" >&2
-  exit 1
-fi
-
-if [[ ! -f "$INDEX_DIR/manifest.json" ]]; then
-  echo "Error: No manifest.json in: $INDEX_DIR" >&2
-  echo "Run extraction first: bundle exec rake woods:extract" >&2
-  exit 1
+  if [[ "${WOODS_REQUIRE_INDEX:-}" == "1" ]]; then
+    echo "Error: Index directory does not exist: $INDEX_DIR" >&2
+    echo "Run extraction first: bundle exec rake woods:extract" >&2
+    exit 1
+  fi
+  echo "Index directory does not exist yet: $INDEX_DIR" >&2
+  echo "Starting in awaiting-index mode — run: bundle exec rake woods:extract" >&2
+elif [[ ! -f "$INDEX_DIR/manifest.json" ]]; then
+  if [[ "${WOODS_REQUIRE_INDEX:-}" == "1" ]]; then
+    echo "Error: No manifest.json in: $INDEX_DIR" >&2
+    echo "Run extraction first: bundle exec rake woods:extract" >&2
+    exit 1
+  fi
+  echo "No manifest.json in: $INDEX_DIR" >&2
+  echo "Starting in awaiting-index mode — run: bundle exec rake woods:extract" >&2
 fi
 
 # --- Ensure Ruby dependencies are installed ---

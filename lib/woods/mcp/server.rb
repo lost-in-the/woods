@@ -10,6 +10,7 @@ require_relative '../tasks'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
+require_relative 'index_auto_refresh'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -57,7 +58,12 @@ module Woods
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
                   bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil)
-          reader = IndexReader.new(index_dir)
+          # allow_missing: the server must boot before the first extraction has
+          # ever run (editor/agent configs launch MCP servers at session start).
+          # Index-backed tools answer with guidance until a manifest appears —
+          # see IndexAutoRefresh. Strict boot is enforced (when requested) at
+          # the exe layer via Bootstrapper.resolve_index_dir + WOODS_REQUIRE_INDEX.
+          reader = IndexReader.new(index_dir, allow_missing: true)
           reader.warmup! if warmup
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
@@ -102,6 +108,12 @@ module Woods
           # Rewrite "Tool not found" into version-aware update guidance for agents
           # running against an older gem than the skill they're following assumes.
           server.singleton_class.prepend(VersionAwareToolDispatch)
+          # Reconcile the in-memory index with disk before every tools/call:
+          # auto-reload on manifest change, guidance when no index exists yet.
+          # Prepended after VersionAwareToolDispatch so this hook runs first.
+          server.instance_variable_set(:@woods_index_reader, reader)
+          server.instance_variable_set(:@woods_index_dir, index_dir)
+          server.singleton_class.prepend(IndexAutoRefresh)
 
           define_lookup_tool(server, reader, respond, respond_err, renderer)
           define_search_tool(server, reader, respond, respond_err, renderer)
@@ -675,6 +687,16 @@ module Woods
                          'externally — their counts in the response reflect the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
+            unless reader.index_present?
+              next respond.call(JSON.pretty_generate({
+                                                       reloaded: false,
+                                                       guidance: 'No Woods index to reload — run `bundle exec rake ' \
+                                                                 'woods:extract` (or `woods:sync`) in the Rails app ' \
+                                                                 'first. The server picks it up automatically once ' \
+                                                                 'written.'
+                                                     }))
+            end
+
             reader.reload!
             manifest = reader.manifest
             payload = {
@@ -1458,6 +1480,23 @@ module Woods
         # provider in use. Without this, operators debugging "wrong provider" see
         # status claiming +embedding_model: "text-embedding-3-small"+ next to
         # +embedding_provider: "ollama"+ and reasonably distrust every field.
+        # Guidance response for index-backed tools called before the first
+        # extraction has run. Used by {IndexAutoRefresh}; public because the
+        # dispatch hook lives on the server instance, outside this class.
+        #
+        # @param tool [String] Tool name being answered
+        # @param index_dir [String, Pathname] Where the server expects the index
+        # @return [MCP::Tool::Response]
+        def no_index_response(tool, index_dir)
+          error_response(
+            "No Woods index found in #{index_dir} — this tool reads extraction output. " \
+            'Run `bundle exec rake woods:extract` (or `woods:sync`) in the Rails app, then retry: ' \
+            'the server picks up the new index automatically, no reconnect needed.',
+            code: :no_index, config_key: 'output_dir',
+            doc_link: 'docs/GETTING_STARTED.md', tool: tool
+          )
+        end
+
         def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
@@ -1469,7 +1508,10 @@ module Woods
           resolved = bootstrap_state&.resolved_config
 
           {
-            ready: manifest && !manifest['counts'].to_h.empty?,
+            # A strict boolean — with no manifest this used to serialize as
+            # null, and agents branching on `ready == false` missed the
+            # not-ready state.
+            ready: !manifest.nil? && !manifest['counts'].to_h.empty?,
             server: {
               name: 'woods',
               version: Woods::VERSION,
@@ -1506,7 +1548,17 @@ module Woods
         # hard-refusing responses would be much more disruptive than a loudly-
         # visible staleness flag that agents can branch on.
         def index_section(manifest, extracted_at, staleness, index_dir)
+          if manifest.nil?
+            return {
+              present: false,
+              guidance: "No index found in #{index_dir} — run `bundle exec rake woods:extract` " \
+                        '(or `woods:sync`) in the Rails app. The server picks it up automatically ' \
+                        'once written.'
+            }
+          end
+
           base = {
+            present: true,
             extracted_at: extracted_at,
             staleness_seconds: staleness,
             rails_version: manifest && manifest['rails_version'],

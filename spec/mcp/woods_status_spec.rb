@@ -258,9 +258,9 @@ RSpec.describe 'woods_status tool' do
       end.new
 
       status = Woods::MCP::Server.build_status(reader: broken_reader, retriever: nil, index_dir: '/nope')
-      expect(status[:ready]).to be_falsey
-      expect(status[:index][:extracted_at]).to be_nil
-      expect(status[:index][:counts]).to eq({})
+      expect(status[:ready]).to be false
+      expect(status[:index][:present]).to be false
+      expect(status[:index][:guidance]).to include('woods:extract')
     end
   end
 end

@@ -40,17 +40,21 @@ RSpec.describe 'MCP CLI integration' do
       expect(utf8(err)).to match(/Usage:/)
     end
 
-    it 'exits non-zero with a clear message when the index directory does not exist' do
-      _out, err, status = Open3.capture3(wrapper, '/definitely/not/a/real/woods/dir')
+    # Awaiting-index boot: a named-but-empty (or missing) index dir no longer
+    # hard-fails by default — WOODS_REQUIRE_INDEX=1 restores the strict exit.
+    it 'exits non-zero for a missing index directory under WOODS_REQUIRE_INDEX=1' do
+      env = { 'WOODS_REQUIRE_INDEX' => '1' }
+      _out, err, status = Open3.capture3(env, wrapper, '/definitely/not/a/real/woods/dir')
 
       expect(status.exitstatus).to eq(1)
       expect(utf8(err)).to match(/does not exist/i)
       expect(utf8(err)).to match(/bundle exec rake woods:extract/)
     end
 
-    it 'exits non-zero when the directory is missing manifest.json' do
+    it 'exits non-zero for a directory missing manifest.json under WOODS_REQUIRE_INDEX=1' do
       Dir.mktmpdir do |empty_dir|
-        _out, err, status = Open3.capture3(wrapper, empty_dir)
+        env = { 'WOODS_REQUIRE_INDEX' => '1' }
+        _out, err, status = Open3.capture3(env, wrapper, empty_dir)
 
         expect(status.exitstatus).to eq(1)
         expect(utf8(err)).to match(/No manifest\.json/)
@@ -123,21 +127,48 @@ RSpec.describe 'MCP CLI integration' do
       end
     end
 
-    it 'exits non-zero when pointed at a missing index directory' do
-      env = { 'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile') }
+    it 'exits non-zero for a missing index directory under WOODS_REQUIRE_INDEX=1' do
+      env = { 'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'), 'WOODS_REQUIRE_INDEX' => '1' }
       _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, '/no/such/path')
 
       expect(status.exitstatus).to eq(1)
       expect(utf8(err)).to match(/Index directory does not exist/i)
     end
 
-    it 'exits non-zero when the directory is missing manifest.json' do
+    it 'exits non-zero for a directory missing manifest.json under WOODS_REQUIRE_INDEX=1' do
       Dir.mktmpdir do |empty_dir|
-        env = { 'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile') }
+        env = { 'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'), 'WOODS_REQUIRE_INDEX' => '1' }
         _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, empty_dir)
 
         expect(status.exitstatus).to eq(1)
         expect(utf8(err)).to match(/No manifest\.json/)
+      end
+    end
+
+    # Awaiting-index boot (default): an explicitly named directory with no
+    # manifest boots into the stdio transport and stays alive, announcing
+    # awaiting-index mode on stderr — so editor/agent configs can register
+    # woods-mcp before the first extraction has ever run.
+    it 'boots in awaiting-index mode for a named directory with no manifest.json' do
+      Dir.mktmpdir do |empty_dir|
+        env = {
+          'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
+          'WOODS_REQUIRE_INDEX' => nil,
+          'OPENAI_API_KEY' => nil,
+          'OLLAMA_BASE_URL' => 'http://127.0.0.1:19999'
+        }
+        stdin, stdout, stderr, wait_thr = Open3.popen3(env, 'bundle', 'exec', 'ruby', ruby_bin, empty_dir)
+        sleep 2
+        booted = wait_thr.alive?
+        Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
+        wait_thr.join(5)
+        err = utf8(stderr.read)
+        stdin.close
+        stdout.close
+        stderr.close
+
+        expect(booted).to be(true)
+        expect(err).to match(/awaiting-index/i)
       end
     end
 

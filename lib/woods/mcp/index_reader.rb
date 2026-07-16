@@ -42,15 +42,44 @@ module Woods
       MAX_UNIT_CACHE = 50
 
       # @param index_dir [String] Path to extraction output directory
-      # @raise [ArgumentError] if directory doesn't exist or has no manifest.json
-      def initialize(index_dir)
+      # @param allow_missing [Boolean] When true, a missing directory or
+      #   manifest.json doesn't raise — the reader boots "awaiting index"
+      #   ({#index_present?} false) and picks the index up via
+      #   {#refresh_if_stale!} once an extraction writes it. Used by the MCP
+      #   server so a woods-mcp registered in an editor config can start
+      #   before the first extraction has ever run.
+      # @raise [ArgumentError] if directory doesn't exist or has no
+      #   manifest.json (unless allow_missing)
+      def initialize(index_dir, allow_missing: false)
         @index_dir = Pathname.new(index_dir)
-        raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
-        raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
+        unless allow_missing
+          raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
+          raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
+        end
 
         @unit_cache = {}
         @unit_cache_order = []
         @identifier_map = nil
+        @manifest_fingerprint = manifest_fingerprint
+      end
+
+      # @return [Boolean] true when a manifest.json exists on disk
+      def index_present?
+        @index_dir.join('manifest.json').file?
+      end
+
+      # Reload cached state when the index changed on disk since it was last
+      # read. The check is a single stat of manifest.json (mtime + size) —
+      # cheap enough to run before every tool call, so long-lived MCP
+      # connections always serve the current index without a manual `reload`.
+      # Also flips an awaiting-index reader live once the first extraction
+      # writes a manifest.
+      #
+      # @return [void]
+      def refresh_if_stale!
+        return if manifest_fingerprint == @manifest_fingerprint
+
+        reload!
       end
 
       # Pre-populate cached state so the first MCP tool call doesn't pay
@@ -66,6 +95,8 @@ module Woods
       #
       # @return [Hash] Per-step outcome: `{step => true | Exception}`
       def warmup!
+        return {} unless index_present?
+
         steps = {
           manifest: -> { manifest },
           summary: -> { summary },
@@ -95,6 +126,7 @@ module Woods
         @graph_analysis = nil
         @raw_graph_data = nil
         @normalized_graph_edges = nil
+        @manifest_fingerprint = manifest_fingerprint
       end
 
       # @return [Hash] Parsed manifest.json
@@ -516,6 +548,18 @@ module Woods
       def parse_json(filename)
         path = @index_dir.join(filename)
         JSON.parse(path.read)
+      end
+
+      # Identity of the on-disk manifest for staleness checks — one stat call.
+      # nil when no manifest exists (awaiting index), so absence→presence and
+      # presence→absence both register as changes.
+      #
+      # @return [Array(Float, Integer), nil] [mtime, size], or nil
+      def manifest_fingerprint
+        stat = @index_dir.join('manifest.json').stat
+        [stat.mtime.to_f, stat.size]
+      rescue Errno::ENOENT, Errno::EACCES
+        nil
       end
 
       # BFS traversal in either direction.
