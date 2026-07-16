@@ -132,5 +132,19 @@ RSpec.describe 'Woods::MCP::Server index auto-refresh' do
       expect(response.dig('result', 'isError')).to be_falsey
       expect(result_text(response)).to include('Post')
     end
+
+    it 'answers resource reads with guidance instead of an internal error' do
+      server = Woods::MCP::Server.build(index_dir: @dir, warmup: false)
+
+      request = JSON.generate(
+        jsonrpc: '2.0', id: 1, method: 'resources/read',
+        params: { uri: 'codebase://manifest' }
+      )
+      response = JSON.parse(server.handle_json(request))
+
+      expect(response).not_to have_key('error')
+      text = response.dig('result', 'contents', 0, 'text')
+      expect(text).to include('woods:extract')
+    end
   end
 end

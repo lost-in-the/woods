@@ -46,17 +46,25 @@ module Woods
       app/serializers app/decorators app/blueprinters db/migrate
     ].freeze
 
-    # Changed-file relevance filter shared with `rake woods:incremental` —
-    # paths outside these patterns can't produce or affect extracted units,
-    # so syncing them would only generate unhandled-file warnings. Beyond
-    # the directory roots: Phlex views, the schema (model metadata), the
-    # routes file, and Gemfile.lock (framework re-index).
-    RELEVANT_PATTERNS = (RELEVANT_DIRS.map { |dir| %r{^#{Regexp.escape(dir)}/} } + [
-      %r{^app/views/.*\.rb$},
+    # Relevant paths whose units can only be refreshed by a FULL extraction:
+    # routes/schema map to file-less unit types the incremental path skips,
+    # and Gemfile.lock signals a framework re-index (woods:extract_framework).
+    # Feeding them to extract_changed would only produce misleading
+    # unhandled-file warnings and phantom re-extracted counts — sync reports
+    # them via Result#full_extract_pending instead.
+    FULL_EXTRACT_ONLY_PATTERNS = [
       %r{^db/schema\.rb$},
       %r{^config/routes\.rb$},
       /^Gemfile\.lock$/
-    ]).freeze
+    ].freeze
+
+    # Changed-file relevance filter shared with `rake woods:incremental` —
+    # paths outside these patterns can't produce or affect extracted units,
+    # so syncing them would only generate unhandled-file warnings. Beyond
+    # the directory roots: Phlex views, plus the FULL_EXTRACT_ONLY_PATTERNS
+    # trio (schema / routes / Gemfile.lock).
+    RELEVANT_PATTERNS = (RELEVANT_DIRS.map { |dir| %r{^#{Regexp.escape(dir)}/} } +
+      [%r{^app/views/.*\.rb$}] + FULL_EXTRACT_ONLY_PATTERNS).freeze
 
     # Outcome of a {#run}.
     #
@@ -75,8 +83,12 @@ module Woods
     #   @return [Array<String>] units removed for deleted source files
     # @!attribute unhandled_files
     #   @return [Array<String>] changed files no unit type could be mapped to
+    # @!attribute full_extract_pending
+    #   @return [Array<String>] relevant changed files (schema / routes /
+    #     Gemfile.lock) whose units only refresh on a full extraction
     Result = Struct.new(:mode, :reason, :cursor, :changed_files, :affected,
-                        :removed_units, :unhandled_files, keyword_init: true)
+                        :removed_units, :unhandled_files, :full_extract_pending,
+                        keyword_init: true)
 
     # @param output_dir [String, Pathname, nil] Extraction output directory
     #   (default: Rails.root/tmp/woods, or WOODS_OUTPUT via the rake task)
@@ -105,7 +117,7 @@ module Woods
       return full_extract(reason: :no_cursor, advance_to: head) unless cursor
       return full_extract(reason: :no_index, advance_to: head) unless index_present?
 
-      return up_to_date(head) if cursor == head
+      return result(mode: :up_to_date, cursor: head) if cursor == head
 
       changed = changed_files_between(cursor, head)
       return full_extract(reason: :diff_failed, advance_to: head) if changed.nil?
@@ -117,18 +129,24 @@ module Woods
 
     # Extract the relevant subset of +changed+ and advance the cursor.
     # An all-irrelevant diff just advances the cursor — nothing to extract.
+    # Full-extraction-only paths are split out and reported, not extracted.
     def incremental_extract(changed, head)
       relevant = changed.select { |f| RELEVANT_PATTERNS.any? { |p| f.match?(p) } }
-      if relevant.empty?
-        write_cursor(head)
-        return up_to_date(head)
+      full_only, extractable = relevant.partition do |f|
+        FULL_EXTRACT_ONLY_PATTERNS.any? { |p| f.match?(p) }
       end
 
-      affected = extractor.extract_changed(relevant)
+      if extractable.empty?
+        write_cursor(head)
+        return result(mode: :up_to_date, cursor: head, full_extract_pending: full_only)
+      end
+
+      affected = extractor.extract_changed(extractable)
       write_cursor(head)
-      Result.new(
-        mode: :incremental, cursor: head, changed_files: relevant, affected: affected,
-        removed_units: extractor.removed_unit_ids, unhandled_files: extractor.unhandled_changed_files
+      result(
+        mode: :incremental, cursor: head, changed_files: extractable, affected: affected,
+        removed_units: extractor.removed_unit_ids, unhandled_files: extractor.unhandled_changed_files,
+        full_extract_pending: full_only
       )
     end
 
@@ -142,24 +160,31 @@ module Woods
       result(mode: :full, reason: reason, cursor: advance_to)
     end
 
-    def up_to_date(head)
-      result(mode: :up_to_date, cursor: head)
-    end
-
     # Result with empty-collection defaults for the no-work fields.
     def result(**fields)
-      Result.new(changed_files: [], affected: [], removed_units: [], unhandled_files: [], **fields)
+      Result.new(changed_files: [], affected: [], removed_units: [],
+                 unhandled_files: [], full_extract_pending: [], **fields)
     end
 
     # @return [Array<String>, nil] Changed paths, or nil when the diff can't
     #   be resolved (unknown cursor SHA — force push, shallow clone, gc)
     #
-    # `-c core.quotepath=false` makes git emit non-ASCII paths verbatim —
-    # under the default quotepath a path like app/models/café.rb comes back
-    # as `"app/models/caf\303\251.rb"` (quoted, octal-escaped), which would
-    # never match the file map or the filesystem.
+    # Three flags reconcile git's porcelain defaults with what extraction
+    # needs (each hides changes without them):
+    # - `-c core.quotepath=false`: emit non-ASCII paths verbatim — default
+    #   quotepath returns `"app/models/caf\303\251.rb"` (quoted,
+    #   octal-escaped), matching neither the file map nor the filesystem.
+    # - `--no-renames`: rename detection is ON by default and collapses a
+    #   `git mv` to just the NEW path in --name-only output — the old path
+    #   never reached extract_changed, so the B-065 ghost-removal was dead
+    #   code for exactly the rename case it exists for.
+    # - `--relative`: diff paths are repo-root-relative; in a monorepo
+    #   (Rails app in a subdirectory) nothing matched the Rails.root-anchored
+    #   RELEVANT_PATTERNS and every sync silently no-opped as up-to-date.
+    #   --relative scopes and rewrites paths to @root.
     def changed_files_between(cursor, head)
-      output = run_git('-c', 'core.quotepath=false', 'diff', '--name-only', cursor, head)
+      output = run_git('-c', 'core.quotepath=false', 'diff',
+                       '--no-renames', '--relative', '--name-only', cursor, head)
       return nil unless output
 
       output.lines.map(&:strip).reject(&:empty?)
@@ -170,10 +195,8 @@ module Woods
     end
 
     def read_cursor
-      return nil unless cursor_path.file?
-
-      sha = cursor_path.read.strip
-      sha.empty? ? nil : sha
+      sha = cursor_path.read.strip if cursor_path.file?
+      sha unless sha.nil? || sha.empty?
     end
 
     def write_cursor(sha)

@@ -53,22 +53,28 @@ namespace :woods do
     # Determine changed files from CI environment or git
     require 'open3'
 
+    # Shared diff flags (see Woods::Sync#changed_files_between for the full
+    # rationale): --no-renames so the delete half of a rename isn't collapsed
+    # away (its unit must be removed), --relative so paths are Rails.root-
+    # relative in monorepos, quotepath off so non-ASCII paths come back
+    # verbatim.
+    git_diff = ['git', '-c', 'core.quotepath=false', 'diff',
+                '--no-renames', '--relative', '--name-only'].freeze
     changed_files = if ENV['CHANGED_FILES']
                       # Explicit list from CI
                       ENV['CHANGED_FILES'].split(',').map(&:strip)
                     elsif ENV['CI_COMMIT_BEFORE_SHA']
                       # GitLab CI
-                      output, = Open3.capture2('git', 'diff', '--name-only',
+                      output, = Open3.capture2(*git_diff,
                                                "#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}")
                       output.lines.map(&:strip)
                     elsif ENV['GITHUB_BASE_REF']
                       # GitHub Actions PR
-                      output, = Open3.capture2('git', 'diff', '--name-only',
-                                               "origin/#{ENV['GITHUB_BASE_REF']}...HEAD")
+                      output, = Open3.capture2(*git_diff, "origin/#{ENV['GITHUB_BASE_REF']}...HEAD")
                       output.lines.map(&:strip)
                     else
                       # Default: changes since last commit
-                      output, = Open3.capture2('git', 'diff', '--name-only', 'HEAD~1')
+                      output, = Open3.capture2(*git_diff, 'HEAD~1')
                       output.lines.map(&:strip)
                     end
 
@@ -144,6 +150,13 @@ namespace :woods do
         puts 'Run woods:extract to index them.'
       end
       puts "Cursor now at #{result.cursor}."
+    end
+
+    unless result.full_extract_pending.empty?
+      puts
+      puts "NOTE: #{result.full_extract_pending.size} changed file(s) only take effect with a full extraction:"
+      result.full_extract_pending.each { |f| puts "  - #{f}" }
+      puts 'Run woods:extract when convenient (woods:extract_framework for Gemfile.lock changes).'
     end
   end
 

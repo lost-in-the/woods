@@ -106,6 +106,21 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    context 'when WOODS_DIR is set but empty (unfilled config placeholder)' do
+      it 'falls through to the strict Dir.pwd path instead of watching ""' do
+        with_env('WOODS_DIR' => '') do
+          # Gem root has no manifest.json, so the strict fallback exits —
+          # matching the bash wrapper's -z check rather than booting a
+          # server that watches a cwd-relative "manifest.json" forever.
+          unless File.exist?(File.join(Dir.pwd, 'manifest.json'))
+            expect do
+              expect { described_class.resolve_index_dir([]) }.to raise_error(SystemExit)
+            end.to output(/No manifest\.json/).to_stderr
+          end
+        end
+      end
+    end
+
     context 'when argv is empty and WOODS_DIR is unset (Dir.pwd fallback)' do
       around do |example|
         old = ENV.delete('WOODS_DIR')

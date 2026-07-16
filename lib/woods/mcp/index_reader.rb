@@ -60,6 +60,14 @@ module Woods
         @unit_cache = {}
         @unit_cache_order = []
         @identifier_map = nil
+        # Serializes reload/refresh against each other — the HTTP transport
+        # dispatches tool calls from multiple threads, and two overlapping
+        # reloads (or a refresh racing the explicit reload tool) would
+        # interleave cache reassignment. Plain readers stay lock-free:
+        # ivar reassignment is atomic under the GVL, so a concurrent reader
+        # sees the old caches or the new ones, never torn state — at worst
+        # it serves the previous index for that one call.
+        @reload_mutex = Mutex.new
         @manifest_fingerprint = manifest_fingerprint
       end
 
@@ -77,9 +85,14 @@ module Woods
       #
       # @return [void]
       def refresh_if_stale!
+        # Cheap unsynchronized check first — the common no-change case must
+        # not contend. Re-checked under the lock so concurrent detectors of
+        # the same change reload once, not once each.
         return if manifest_fingerprint == @manifest_fingerprint
 
-        reload!
+        @reload_mutex.synchronize do
+          reset_caches! unless manifest_fingerprint == @manifest_fingerprint
+        end
       end
 
       # Pre-populate cached state so the first MCP tool call doesn't pay
@@ -116,17 +129,7 @@ module Woods
       #
       # @return [void]
       def reload!
-        @unit_cache = {}
-        @unit_cache_order = []
-        @identifier_map = nil
-        @index_cache = {}
-        @manifest = nil
-        @summary = nil
-        @dependency_graph = nil
-        @graph_analysis = nil
-        @raw_graph_data = nil
-        @normalized_graph_edges = nil
-        @manifest_fingerprint = manifest_fingerprint
+        @reload_mutex.synchronize { reset_caches! }
       end
 
       # @return [Hash] Parsed manifest.json
@@ -550,6 +553,21 @@ module Woods
         JSON.parse(path.read)
       end
 
+      # The actual cache wipe — callers hold @reload_mutex.
+      def reset_caches!
+        @unit_cache = {}
+        @unit_cache_order = []
+        @identifier_map = nil
+        @index_cache = {}
+        @manifest = nil
+        @summary = nil
+        @dependency_graph = nil
+        @graph_analysis = nil
+        @raw_graph_data = nil
+        @normalized_graph_edges = nil
+        @manifest_fingerprint = manifest_fingerprint
+      end
+
       # Identity of the on-disk manifest for staleness checks — one stat call.
       # nil when no manifest exists (awaiting index), so absence→presence and
       # presence→absence both register as changes. The inode is included so
@@ -561,7 +579,10 @@ module Woods
       def manifest_fingerprint
         stat = @index_dir.join('manifest.json').stat
         [stat.mtime.to_f, stat.size, stat.ino]
-      rescue Errno::ENOENT, Errno::EACCES
+      rescue SystemCallError
+        # ENOENT (no manifest yet), EACCES, and ENOTDIR (the index path is a
+        # file — e.g. WOODS_DIR pointing at manifest.json itself) all mean
+        # the same thing to the reader: no readable index at this path.
         nil
       end
 

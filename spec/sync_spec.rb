@@ -137,7 +137,7 @@ RSpec.describe Woods::Sync do
   describe 'incremental sync' do
     before do
       git_responses['rev-parse HEAD'] = "ccc333\n"
-      git_responses['-c core.quotepath=false diff --name-only aaa111 ccc333'] =
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =
         "app/models/post.rb\napp/services/grow_service.rb\nREADME.md\n"
       write_index!
       write_cursor!('aaa111')
@@ -165,7 +165,8 @@ RSpec.describe Woods::Sync do
   describe 'diff with only irrelevant changes' do
     it 'advances the cursor without extracting' do
       git_responses['rev-parse HEAD'] = "ccc333\n"
-      git_responses['-c core.quotepath=false diff --name-only aaa111 ccc333'] = "README.md\ndocs/guide.md\n"
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =
+        "README.md\ndocs/guide.md\n"
       write_index!
       write_cursor!('aaa111')
 
@@ -180,7 +181,7 @@ RSpec.describe Woods::Sync do
   describe 'unresolvable diff (unknown cursor SHA — force push, shallow clone, gc)' do
     it 'falls back to a full extraction and advances the cursor' do
       git_responses['rev-parse HEAD'] = "ccc333\n"
-      git_responses['-c core.quotepath=false diff --name-only ddd444 ccc333'] = nil
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only ddd444 ccc333'] = nil
       write_index!
       write_cursor!('ddd444')
 
@@ -196,7 +197,8 @@ RSpec.describe Woods::Sync do
   describe 'deleted files' do
     it 'passes deleted paths through to extract_changed (B-065 removes their units)' do
       git_responses['rev-parse HEAD'] = "ccc333\n"
-      git_responses['-c core.quotepath=false diff --name-only aaa111 ccc333'] = "app/models/felled.rb\n"
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =
+        "app/models/felled.rb\n"
       allow(extractor).to receive(:removed_unit_ids).and_return(%w[Felled])
       write_index!
       write_cursor!('aaa111')
@@ -205,6 +207,36 @@ RSpec.describe Woods::Sync do
 
       expect(extractor).to have_received(:extract_changed).with(%w[app/models/felled.rb])
       expect(result.removed_units).to eq(%w[Felled])
+    end
+  end
+
+  describe 'full-extraction-only changes (schema / routes / Gemfile.lock)' do
+    it 'reports them via full_extract_pending instead of feeding them to extract_changed' do
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =
+        "db/schema.rb\nconfig/routes.rb\nGemfile.lock\napp/models/post.rb\n"
+      write_index!
+      write_cursor!('aaa111')
+
+      result = sync.run
+
+      expect(extractor).to have_received(:extract_changed).with(%w[app/models/post.rb])
+      expect(result.full_extract_pending).to eq(%w[db/schema.rb config/routes.rb Gemfile.lock])
+    end
+
+    it 'advances the cursor without extracting when only full-extraction files changed' do
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =
+        "config/routes.rb\n"
+      write_index!
+      write_cursor!('aaa111')
+
+      result = sync.run
+
+      expect(extractor).not_to have_received(:extract_changed)
+      expect(result.mode).to eq(:up_to_date)
+      expect(result.full_extract_pending).to eq(%w[config/routes.rb])
+      expect(cursor_on_disk).to eq('ccc333')
     end
   end
 
@@ -311,6 +343,73 @@ RSpec.describe Woods::Sync do
 
       result = real_sync.run
       expect(result.changed_files).to eq(%w[app/models/café.rb])
+    end
+
+    it 'reports BOTH sides of a rename so the old unit gets removed (--no-renames)' do
+      # A file large enough that `git mv` + a one-line edit stays above the
+      # ~50% similarity threshold — the case where rename detection collapses
+      # --name-only output to just the new path and the delete half vanishes.
+      body = "class Invoice\n#{(1..40).map { |i| "  def line_#{i} = #{i}" }.join("\n")}\nend\n"
+      File.write(File.join(tmpdir, 'app/models/invoice.rb'), body)
+      commit_all!('add invoice')
+      real_sync.run
+
+      FileUtils.mv(File.join(tmpdir, 'app/models/invoice.rb'),
+                   File.join(tmpdir, 'app/models/receipt.rb'))
+      File.write(File.join(tmpdir, 'app/models/receipt.rb'),
+                 body.sub('class Invoice', 'class Receipt'))
+      commit_all!('rename invoice to receipt')
+
+      result = real_sync.run
+      expect(result.changed_files).to contain_exactly(
+        'app/models/invoice.rb', 'app/models/receipt.rb'
+      )
+    end
+  end
+
+  # ── monorepo layout: Rails app in a repo subdirectory ─────────────────
+  #
+  # Without --relative, `git -C <rails-root> diff --name-only` emits
+  # repo-root-relative paths (backend/app/models/…) that never match the
+  # Rails.root-anchored RELEVANT_PATTERNS — every sync silently no-opped
+  # as up-to-date.
+  describe 'against a real git repository (monorepo layout)' do
+    let(:repo_root) { tmpdir }
+    let(:rails_root) { Pathname.new(File.join(tmpdir, 'backend')) }
+    let(:mono_output_dir) { File.join(rails_root, 'tmp/woods') }
+    let(:mono_sync) { described_class.new(output_dir: mono_output_dir, root: rails_root, extractor: extractor) }
+
+    def repo_git!(*args)
+      out, err, status = Open3.capture3('git', '-C', repo_root, *args)
+      raise "git #{args.join(' ')} failed: #{err}" unless status.success?
+
+      out.chomp
+    end
+
+    before do
+      require 'open3'
+      repo_git!('init', '-q')
+      FileUtils.mkdir_p(File.join(rails_root, 'app/models'))
+      File.write(File.join(rails_root, 'app/models/post.rb'), "class Post; end\n")
+      repo_git!('add', '-A')
+      repo_git!('-c', 'user.name=woods', '-c', 'user.email=woods@example.com',
+                'commit', '-m', 'initial', '--no-gpg-sign')
+      FileUtils.mkdir_p(mono_output_dir)
+      File.write(File.join(mono_output_dir, 'manifest.json'), '{"total_units": 1, "counts": {"models": 1}}')
+    end
+
+    it 'emits Rails.root-relative paths so relevance filtering works (--relative)' do
+      mono_sync.run # first run: full, writes cursor
+
+      File.write(File.join(rails_root, 'app/models/comment.rb'), "class Comment; end\n")
+      repo_git!('add', '-A')
+      repo_git!('-c', 'user.name=woods', '-c', 'user.email=woods@example.com',
+                'commit', '-m', 'add comment', '--no-gpg-sign')
+
+      result = mono_sync.run
+      expect(result.mode).to eq(:incremental)
+      expect(result.changed_files).to eq(%w[app/models/comment.rb])
+      expect(extractor).to have_received(:extract_changed).with(%w[app/models/comment.rb])
     end
   end
 end

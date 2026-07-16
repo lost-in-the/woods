@@ -688,12 +688,12 @@ module Woods
 
         type_dir = @output_dir.join(type.to_s)
         annotated.each do |unit|
-          File.write(
+          AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
-        File.write(
+        AtomicFile.write(
           type_dir.join('_index.json'),
           json_serialize(type_index_entries(units))
         )
@@ -885,14 +885,14 @@ module Woods
         FileUtils.mkdir_p(type_dir)
 
         units.each do |unit|
-          File.write(
+          AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
 
         # Also write a type index for fast lookups
-        File.write(
+        AtomicFile.write(
           type_dir.join('_index.json'),
           json_serialize(type_index_entries(units))
         )
@@ -956,7 +956,7 @@ module Woods
       graph_data = @dependency_graph.to_h
       graph_data[:pagerank] = @dependency_graph.pagerank
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('dependency_graph.json'),
         json_serialize(graph_data)
       )
@@ -972,7 +972,7 @@ module Woods
         )
       )
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('graph_analysis.json'),
         json_serialize(enriched)
       )
@@ -1167,7 +1167,7 @@ module Woods
 
       summary << ''
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('SUMMARY.md'),
         summary.join("\n")
       )
@@ -1194,7 +1194,7 @@ module Woods
         }
       end
 
-      File.write(
+      AtomicFile.write(
         type_dir.join('_index.json'),
         json_serialize(index)
       )
@@ -1346,7 +1346,7 @@ module Woods
 
       type_dir = @output_dir.join(extractor_key.to_s)
       FileUtils.mkdir_p(type_dir)
-      File.write(
+      AtomicFile.write(
         type_dir.join(collision_safe_filename(unit.identifier)),
         json_serialize(unit.to_h)
       )

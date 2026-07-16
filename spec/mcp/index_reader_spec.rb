@@ -34,6 +34,21 @@ RSpec.describe Woods::MCP::IndexReader do
     it 'tolerates a non-existent directory with allow_missing: true' do
       expect { described_class.new('/nonexistent/path', allow_missing: true) }.not_to raise_error
     end
+
+    it 'tolerates a FILE as the index path with allow_missing: true (ENOTDIR)' do
+      Dir.mktmpdir('woods_reader_enotdir') do |dir|
+        file = File.join(dir, 'manifest.json')
+        File.write(file, '{}')
+
+        # e.g. WOODS_DIR pointing at the manifest itself instead of its dir —
+        # stat(<file>/manifest.json) raises ENOTDIR, which must read as
+        # "no index here", not crash the awaiting-index boot.
+        reader = nil
+        expect { reader = described_class.new(file, allow_missing: true) }.not_to raise_error
+        expect(reader.index_present?).to be false
+        expect { reader.refresh_if_stale! }.not_to raise_error
+      end
+    end
   end
 
   describe '#index_present?' do

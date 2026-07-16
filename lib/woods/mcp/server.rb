@@ -1673,6 +1673,19 @@ module Woods
         def register_resource_handler(server, reader)
           server.resources_read_handler do |params|
             uri = params[:uri]
+            # Awaiting-index mode: without this guard a resource read would
+            # raise ENOENT out of the handler and surface as an opaque
+            # JSON-RPC internal error, while tools/call answers with
+            # guidance. Mirror the tools' no_index contract.
+            unless reader.index_present?
+              next [{
+                uri: uri, mimeType: 'text/plain',
+                text: 'No Woods index found — run `bundle exec rake woods:extract` ' \
+                      '(or `woods:sync`) in the Rails app first. Resources become ' \
+                      'available automatically once the index is written.'
+              }]
+            end
+
             case uri
             when 'codebase://manifest'
               [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.manifest) }]

@@ -38,6 +38,11 @@ module Woods
       # @return [String] Index directory path (may not contain an index yet)
       def self.resolve_index_dir(argv)
         explicit = argv[0] || ENV.fetch('WOODS_DIR', nil)
+        # A set-but-empty value (unfilled editor-config placeholder) is not an
+        # explicit directory — treating it as one would boot a server watching
+        # cwd-relative "manifest.json" forever. Empty falls through to the
+        # strict Dir.pwd path, like the bash wrapper's -z check.
+        explicit = nil if explicit && explicit.empty?
         dir = explicit || Dir.pwd
         strict = ENV['WOODS_REQUIRE_INDEX'] == '1' || explicit.nil?
 

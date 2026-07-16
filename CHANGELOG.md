@@ -32,7 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment running the sync — deliberately not `manifest.git_sha`, which is
   `"unknown"` when extraction runs in a container that can't resolve a linked
   worktree's gitdir (#137). The changed-file relevance patterns are now shared between
-  `woods:sync` and `woods:incremental` (`Woods::Sync::RELEVANT_PATTERNS`).
+  `woods:sync` and `woods:incremental` (`Woods::Sync::RELEVANT_PATTERNS`). The diff
+  runs with `--no-renames` (so the delete half of a rename still removes its unit),
+  `--relative` (Rails.root-relative paths in monorepo layouts), and
+  `core.quotepath=false` (non-ASCII paths verbatim) — `woods:incremental`'s git
+  branches use the same flags. Changes to `db/schema.rb`, `config/routes.rb`, or
+  `Gemfile.lock` — whose units only refresh on a full extraction — are reported
+  honestly (`Result#full_extract_pending` + a rake `NOTE`) instead of producing
+  misleading unhandled-file warnings.
 
 ### Fixed
 
