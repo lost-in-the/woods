@@ -552,12 +552,15 @@ module Woods
 
       # Identity of the on-disk manifest for staleness checks — one stat call.
       # nil when no manifest exists (awaiting index), so absence→presence and
-      # presence→absence both register as changes.
+      # presence→absence both register as changes. The inode is included so
+      # an atomic temp+rename rewrite (how the extractor writes the manifest)
+      # registers even on filesystems with coarse mtime granularity and an
+      # identical byte size.
       #
-      # @return [Array(Float, Integer), nil] [mtime, size], or nil
+      # @return [Array(Float, Integer, Integer), nil] [mtime, size, ino], or nil
       def manifest_fingerprint
         stat = @index_dir.join('manifest.json').stat
-        [stat.mtime.to_f, stat.size]
+        [stat.mtime.to_f, stat.size, stat.ino]
       rescue Errno::ENOENT, Errno::EACCES
         nil
       end

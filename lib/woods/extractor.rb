@@ -7,6 +7,7 @@ require 'open3'
 require 'pathname'
 require 'set'
 
+require_relative 'atomic_file'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
@@ -1016,7 +1017,10 @@ module Woods
         schema_sha: schema_sha
       }
 
-      File.write(
+      # Atomic (temp + fsync + rename): a live Index Server stats and
+      # re-parses this exact file on every tool call (IndexAutoRefresh) —
+      # a plain File.write could hand a concurrent reader a torn manifest.
+      AtomicFile.write(
         @output_dir.join('manifest.json'),
         json_serialize(manifest)
       )

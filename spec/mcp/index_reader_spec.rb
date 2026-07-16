@@ -103,6 +103,24 @@ RSpec.describe Woods::MCP::IndexReader do
       fresh = described_class.new('/nonexistent/path', allow_missing: true)
       expect { fresh.refresh_if_stale! }.not_to raise_error
     end
+
+    it 'detects an atomic rename rewrite even with identical mtime and size' do
+      require 'woods/atomic_file'
+      mtime = Time.now - 60
+      write_manifest(total_units: 1, mtime: mtime)
+      fresh = described_class.new(@dir)
+      cached = fresh.manifest
+
+      # The extractor writes the manifest via temp+rename (new inode). Force
+      # mtime and byte size to match the original so only the inode differs —
+      # the coarse-mtime-filesystem worst case.
+      path = File.join(@dir, 'manifest.json')
+      Woods::AtomicFile.write(path, File.read(path))
+      FileUtils.touch(path, mtime: mtime)
+
+      fresh.refresh_if_stale!
+      expect(fresh.manifest).not_to equal(cached)
+    end
   end
 
   describe '#warmup! without an index' do

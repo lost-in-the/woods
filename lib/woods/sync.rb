@@ -36,32 +36,27 @@ module Woods
     # alongside the index it describes.
     CURSOR_FILENAME = '.sync_head'
 
+    # Extraction-relevant directories (matched as `^<dir>/`). Workers are
+    # Sidekiq; blueprinters are serializers; use_cases/interactors/
+    # operations/commands are the service-discovery roots.
+    RELEVANT_DIRS = %w[
+      app/models app/controllers app/services app/components
+      app/views/components app/interactors app/operations app/commands
+      app/use_cases app/jobs app/workers app/mailers app/graphql
+      app/serializers app/decorators app/blueprinters db/migrate
+    ].freeze
+
     # Changed-file relevance filter shared with `rake woods:incremental` —
     # paths outside these patterns can't produce or affect extracted units,
-    # so syncing them would only generate unhandled-file warnings.
-    RELEVANT_PATTERNS = [
-      %r{^app/models/},
-      %r{^app/controllers/},
-      %r{^app/services/},
-      %r{^app/components/},
-      %r{^app/views/components/},
-      %r{^app/views/.*\.rb$}, # Phlex views
-      %r{^app/interactors/},
-      %r{^app/operations/},
-      %r{^app/commands/},
-      %r{^app/use_cases/},
-      %r{^app/jobs/},
-      %r{^app/workers/}, # Sidekiq workers
-      %r{^app/mailers/},
-      %r{^app/graphql/}, # GraphQL types/mutations/resolvers
-      %r{^app/serializers/},
-      %r{^app/decorators/},
-      %r{^app/blueprinters/},
-      %r{^db/migrate/},
-      %r{^db/schema\.rb$}, # Schema changes affect model metadata
+    # so syncing them would only generate unhandled-file warnings. Beyond
+    # the directory roots: Phlex views, the schema (model metadata), the
+    # routes file, and Gemfile.lock (framework re-index).
+    RELEVANT_PATTERNS = (RELEVANT_DIRS.map { |dir| %r{^#{Regexp.escape(dir)}/} } + [
+      %r{^app/views/.*\.rb$},
+      %r{^db/schema\.rb$},
       %r{^config/routes\.rb$},
-      /^Gemfile\.lock$/ # Dependency changes trigger framework re-index
-    ].freeze
+      /^Gemfile\.lock$/
+    ]).freeze
 
     # Outcome of a {#run}.
     #
@@ -144,19 +139,27 @@ module Woods
     def full_extract(reason:, advance_to:)
       extractor.extract_all
       write_cursor(advance_to) if advance_to
-      Result.new(mode: :full, reason: reason, cursor: advance_to,
-                 changed_files: [], affected: [], removed_units: [], unhandled_files: [])
+      result(mode: :full, reason: reason, cursor: advance_to)
     end
 
     def up_to_date(head)
-      Result.new(mode: :up_to_date, cursor: head, changed_files: [],
-                 affected: [], removed_units: [], unhandled_files: [])
+      result(mode: :up_to_date, cursor: head)
+    end
+
+    # Result with empty-collection defaults for the no-work fields.
+    def result(**fields)
+      Result.new(changed_files: [], affected: [], removed_units: [], unhandled_files: [], **fields)
     end
 
     # @return [Array<String>, nil] Changed paths, or nil when the diff can't
     #   be resolved (unknown cursor SHA — force push, shallow clone, gc)
+    #
+    # `-c core.quotepath=false` makes git emit non-ASCII paths verbatim —
+    # under the default quotepath a path like app/models/café.rb comes back
+    # as `"app/models/caf\303\251.rb"` (quoted, octal-escaped), which would
+    # never match the file map or the filesystem.
     def changed_files_between(cursor, head)
-      output = run_git('diff', '--name-only', cursor, head)
+      output = run_git('-c', 'core.quotepath=false', 'diff', '--name-only', cursor, head)
       return nil unless output
 
       output.lines.map(&:strip).reject(&:empty?)
@@ -183,14 +186,34 @@ module Woods
 
     # Run git against the repository root; nil on any failure. Open3 (not
     # backticks) per the shell-injection convention, and `-C @root` so the
-    # result is cwd-independent (mirrors GitProvenance).
+    # result is cwd-independent (mirrors GitProvenance). Output is normalized
+    # at this boundary for the injected test double too, so a faithful fake
+    # (returning "sha\n" like the real subprocess) and real git behave
+    # identically.
     def run_git(*args)
-      return @git.call(*args) if @git
-
-      output, _err, status = Open3.capture3('git', '-C', @root.to_s, *args)
-      status.success? ? output : nil
+      output =
+        if @git
+          @git.call(*args)
+        else
+          stdout, _err, status = Open3.capture3('git', '-C', @root.to_s, *args)
+          status.success? ? stdout : nil
+        end
+      normalize_git_output(output)
     rescue Errno::ENOENT, Errno::EACCES
       nil
+    end
+
+    # Reconcile raw subprocess stdout with what callers assume:
+    # - chomp git's trailing newline — a newline-bearing HEAD sha once
+    #   defeated the up-to-date check and corrupted the diff argv, so every
+    #   sync after the first full-extracted as :diff_failed;
+    # - retag as UTF-8 and scrub — under a POSIX/C locale stdout arrives
+    #   tagged US-ASCII, and a UTF-8 path raises Encoding::CompatibilityError
+    #   in String#strip downstream (dup: fakes may hand us frozen literals).
+    def normalize_git_output(output)
+      return nil if output.nil?
+
+      output.dup.force_encoding(Encoding::UTF_8).scrub.chomp
     end
   end
 end

@@ -33,14 +33,23 @@ RSpec.describe Woods::Sync do
   end
 
   # Injectable git: receives the argv after `git -C <root>`, returns stdout
-  # (String) on success or nil on failure — same contract as Sync#run_git.
+  # (String) on success or nil on failure — same contract as the real
+  # subprocess path. FAITHFULNESS MATTERS: real git appends a trailing
+  # newline to stdout, so every fake response here must carry it too —
+  # a pre-stripped fake once hid a newline-normalization bug that made
+  # every sync after the first full-extract (see the run_git comment).
   let(:git_responses) { {} }
   let(:git) do
     lambda do |*args|
       key = args.join(' ')
       raise "unexpected git call: #{key}" unless git_responses.key?(key)
 
-      git_responses[key]
+      response = git_responses[key]
+      if response && !response.end_with?("\n")
+        raise "unfaithful git fake for `#{key}`: real git stdout ends with a newline — " \
+              'append "\n" to the fake response'
+      end
+      response
     end
   end
 
@@ -85,7 +94,7 @@ RSpec.describe Woods::Sync do
 
   describe 'missing index (cursor present but no manifest)' do
     it 'falls back to a full extraction and advances the cursor' do
-      git_responses['rev-parse HEAD'] = 'bbb222'
+      git_responses['rev-parse HEAD'] = "bbb222\n"
       write_cursor!('aaa111')
 
       result = sync.run
@@ -113,7 +122,7 @@ RSpec.describe Woods::Sync do
 
   describe 'cursor already at HEAD' do
     it 'does nothing' do
-      git_responses['rev-parse HEAD'] = 'aaa111'
+      git_responses['rev-parse HEAD'] = "aaa111\n"
       write_index!
       write_cursor!('aaa111')
 
@@ -127,8 +136,8 @@ RSpec.describe Woods::Sync do
 
   describe 'incremental sync' do
     before do
-      git_responses['rev-parse HEAD'] = 'ccc333'
-      git_responses['diff --name-only aaa111 ccc333'] =
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --name-only aaa111 ccc333'] =
         "app/models/post.rb\napp/services/grow_service.rb\nREADME.md\n"
       write_index!
       write_cursor!('aaa111')
@@ -155,8 +164,8 @@ RSpec.describe Woods::Sync do
 
   describe 'diff with only irrelevant changes' do
     it 'advances the cursor without extracting' do
-      git_responses['rev-parse HEAD'] = 'ccc333'
-      git_responses['diff --name-only aaa111 ccc333'] = "README.md\ndocs/guide.md\n"
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --name-only aaa111 ccc333'] = "README.md\ndocs/guide.md\n"
       write_index!
       write_cursor!('aaa111')
 
@@ -170,8 +179,8 @@ RSpec.describe Woods::Sync do
 
   describe 'unresolvable diff (unknown cursor SHA — force push, shallow clone, gc)' do
     it 'falls back to a full extraction and advances the cursor' do
-      git_responses['rev-parse HEAD'] = 'ccc333'
-      git_responses['diff --name-only ddd444 ccc333'] = nil
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --name-only ddd444 ccc333'] = nil
       write_index!
       write_cursor!('ddd444')
 
@@ -186,8 +195,8 @@ RSpec.describe Woods::Sync do
 
   describe 'deleted files' do
     it 'passes deleted paths through to extract_changed (B-065 removes their units)' do
-      git_responses['rev-parse HEAD'] = 'ccc333'
-      git_responses['diff --name-only aaa111 ccc333'] = "app/models/felled.rb\n"
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --name-only aaa111 ccc333'] = "app/models/felled.rb\n"
       allow(extractor).to receive(:removed_unit_ids).and_return(%w[Felled])
       write_index!
       write_cursor!('aaa111')
@@ -196,6 +205,112 @@ RSpec.describe Woods::Sync do
 
       expect(extractor).to have_received(:extract_changed).with(%w[app/models/felled.rb])
       expect(result.removed_units).to eq(%w[Felled])
+    end
+  end
+
+  describe 'cursor file round-trip' do
+    it 'is byte-identical across consecutive runs (no accumulating newlines)' do
+      git_responses['rev-parse HEAD'] = "aaa111\n"
+      write_index!
+
+      sync.run # first run writes the cursor
+      cursor_path = File.join(output_dir, described_class::CURSOR_FILENAME)
+      first_bytes = File.binread(cursor_path)
+      expect(first_bytes).to eq("aaa111\n")
+
+      result = sync.run # cursor now at HEAD — must be a no-op
+      expect(result.mode).to eq(:up_to_date)
+      expect(File.binread(cursor_path)).to eq(first_bytes)
+    end
+  end
+
+  # ── against a real git repository ─────────────────────────────────────
+  #
+  # The fake-git specs above stub the subprocess; this block exercises the
+  # REAL Open3 path against a throwaway repo, pinning the actual git
+  # contract (trailing-newline stdout, diff argv resolution, quotepath).
+  # The newline bug this guards against: run_git returned raw stdout, so
+  # HEAD carried "\n", cursor==head never matched, and every sync after the
+  # first full-extracted as :diff_failed.
+  describe 'against a real git repository' do
+    def real_git!(*args)
+      out, err, status = Open3.capture3('git', '-C', tmpdir, *args)
+      raise "git #{args.join(' ')} failed: #{err}" unless status.success?
+
+      out.chomp
+    end
+
+    def commit_all!(message)
+      real_git!('add', '-A')
+      real_git!('-c', 'user.name=woods', '-c', 'user.email=woods@example.com',
+                'commit', '-m', message, '--no-gpg-sign')
+    end
+
+    let(:real_sync) { described_class.new(output_dir: output_dir, root: root, extractor: extractor) }
+
+    before do
+      require 'open3'
+      real_git!('init', '-q')
+      FileUtils.mkdir_p(File.join(tmpdir, 'app/models'))
+      File.write(File.join(tmpdir, 'app/models/post.rb'), "class Post; end\n")
+      commit_all!('initial')
+      write_index!
+    end
+
+    it 'is up to date on the run after the first — the cursor matches real HEAD' do
+      first = real_sync.run
+      expect(first.mode).to eq(:full)
+      expect(first.cursor).to eq(real_git!('rev-parse', 'HEAD'))
+
+      second = real_sync.run
+      expect(second.mode).to eq(:up_to_date)
+      expect(extractor).to have_received(:extract_all).once
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'keeps the cursor file byte-identical across runs' do
+      real_sync.run
+      cursor_path = File.join(output_dir, described_class::CURSOR_FILENAME)
+      first_bytes = File.binread(cursor_path)
+      expect(first_bytes).to eq("#{real_git!('rev-parse', 'HEAD')}\n")
+
+      real_sync.run
+      expect(File.binread(cursor_path)).to eq(first_bytes)
+    end
+
+    it 'extracts exactly the committed change on the next run, then settles' do
+      real_sync.run
+
+      File.write(File.join(tmpdir, 'app/models/comment.rb'), "class Comment; end\n")
+      commit_all!('add comment')
+
+      result = real_sync.run
+      expect(result.mode).to eq(:incremental)
+      expect(result.changed_files).to eq(%w[app/models/comment.rb])
+      expect(extractor).to have_received(:extract_changed).with(%w[app/models/comment.rb])
+
+      expect(real_sync.run.mode).to eq(:up_to_date)
+    end
+
+    it 'reports deleted files in the diff so their units get removed' do
+      real_sync.run
+
+      FileUtils.rm(File.join(tmpdir, 'app/models/post.rb'))
+      commit_all!('fell post')
+
+      result = real_sync.run
+      expect(result.mode).to eq(:incremental)
+      expect(result.changed_files).to eq(%w[app/models/post.rb])
+    end
+
+    it 'emits non-ASCII paths verbatim (core.quotepath disabled)' do
+      real_sync.run
+
+      File.write(File.join(tmpdir, 'app/models/café.rb'), "class Café; end\n")
+      commit_all!('add café')
+
+      result = real_sync.run
+      expect(result.changed_files).to eq(%w[app/models/café.rb])
     end
   end
 end
