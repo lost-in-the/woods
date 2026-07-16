@@ -116,6 +116,13 @@ namespace :woods do
     puts
     puts "Re-extracted #{affected.size} affected units."
 
+    removed = extractor.removed_unit_ids
+    if removed.any?
+      puts
+      puts "Removed #{removed.size} unit(s) whose source files were deleted:"
+      removed.each { |id| puts "  - #{id}" }
+    end
+
     unhandled = extractor.unhandled_changed_files
     if unhandled.any?
       puts

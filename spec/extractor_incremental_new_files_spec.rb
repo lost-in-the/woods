@@ -216,6 +216,98 @@ RSpec.describe Woods::Extractor, 'incremental new-file extraction' do
     end
   end
 
+  # ── extract_changed with deleted files (B-065) ──────────────────────
+  #
+  # A changed file that is tracked in the graph but no longer exists on
+  # disk means the unit's source was deleted (or renamed away). It used to
+  # survive as a ghost — re_extract_unit returned early with no cleanup,
+  # the type-index rebuild resurrected the stale JSON from disk, and the
+  # run still counted the unit as re-extracted.
+  describe '#extract_changed with deleted files' do
+    before do
+      # write_manifest needs Rails.version and Time.current; the time ext
+      # require + stub mirrors extractor_spec's #write_manifest setup (the
+      # real Time.current needs a loaded Time.zone).
+      require 'active_support/core_ext/time'
+      allow(Time).to receive(:current).and_return(Time.now)
+      allow(Rails).to receive(:version).and_return('7.1.0')
+      allow(extractor).to receive(:safe_eager_load!)
+    end
+
+    # Seed the index the way a prior full extraction would have: unit JSON
+    # on disk, type index entry, and a persisted graph tracking the file.
+    def seed_unit(identifier, path, type: :model, extractor_key: :models)
+      unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: path)
+      extractor.send(:persist_incremental_unit, unit, extractor_key)
+      extractor.send(:regenerate_type_index, extractor_key)
+      extractor.send(:write_dependency_graph)
+    end
+
+    def unit_files(extractor_key)
+      Dir[File.join(output_dir, extractor_key.to_s, '*.json')]
+        .reject { |f| File.basename(f) == '_index.json' }
+    end
+
+    it 'removes the unit JSON, index entry, graph node, and file_map entry' do
+      path = touch('app/models/felled.rb')
+      seed_unit('Felled', path)
+      FileUtils.rm(path)
+
+      affected = extractor.extract_changed([path])
+
+      expect(affected).to be_empty
+      expect(extractor.removed_unit_ids).to eq(['Felled'])
+      expect(unit_files(:models)).to be_empty
+
+      index = JSON.parse(File.read(File.join(output_dir, 'models', '_index.json')))
+      expect(index).to be_empty
+
+      graph = Woods::DependencyGraph.from_h(
+        JSON.parse(File.read(File.join(output_dir, 'dependency_graph.json')))
+      )
+      expect(graph.node_exists?('Felled')).to be false
+      expect(graph.tracks_file?(path)).to be false
+    end
+
+    it 'drops the removed unit from the manifest counts' do
+      path = touch('app/models/felled.rb')
+      seed_unit('Felled', path)
+      FileUtils.rm(path)
+
+      extractor.extract_changed([path])
+
+      manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+      expect(manifest['total_units']).to eq(0)
+    end
+
+    it 'removes co-located units that share the deleted file' do
+      path = touch('app/models/grove.rb')
+      unit_a = Woods::ExtractedUnit.new(type: :model, identifier: 'Grove', file_path: path)
+      unit_b = Woods::ExtractedUnit.new(type: :model, identifier: 'Grove::Clearing', file_path: path)
+      extractor.send(:persist_incremental_unit, unit_a, :models)
+      extractor.send(:persist_incremental_unit, unit_b, :models)
+      extractor.send(:regenerate_type_index, :models)
+      extractor.send(:write_dependency_graph)
+      FileUtils.rm(path)
+
+      extractor.extract_changed([path])
+
+      expect(extractor.removed_unit_ids).to contain_exactly('Grove', 'Grove::Clearing')
+      expect(unit_files(:models)).to be_empty
+    end
+
+    it 'does not treat existing or untracked files as deletions' do
+      kept = touch('app/models/kept.rb')
+      seed_unit('Kept', kept)
+      never_indexed = File.join(tmpdir, 'app/models/never_indexed.rb') # never created
+
+      extractor.extract_changed([kept, never_indexed])
+
+      expect(extractor.removed_unit_ids).to be_empty
+      expect(unit_files(:models).size).to eq(1)
+    end
+  end
+
   # ── DependencyGraph#tracks_file? ─────────────────────────────────────
 
   describe 'DependencyGraph#tracks_file?' do

@@ -154,6 +154,46 @@ RSpec.describe Woods::Extractor do
       expect { extractor.send(:eager_load_lazy_roots) }.not_to raise_error
     end
 
+    it 'records load-failed files in lazy_load_skipped_files for the summary' do
+      views_dir = File.join(tmpdir, 'app', 'views')
+      broken = component_file(views_dir, 'a_broken.rb')
+      loaded = component_file(views_dir, 'b_leaf_component.rb')
+
+      allow(loader).to receive(:cpath_expected_at).with(broken).and_return('DoesNotExistAnywhere')
+      stub_const('BLeafComponent', Class.new)
+      allow(loader).to receive(:cpath_expected_at).with(loaded).and_return('BLeafComponent')
+
+      extractor.send(:eager_load_lazy_roots)
+
+      expect(extractor.lazy_load_skipped_files).to eq([broken])
+    end
+
+    it 'does not count unmanaged files (Zeitwerk errors) as load-skipped' do
+      views_dir = File.join(tmpdir, 'app', 'views')
+      unmanaged = component_file(views_dir, 'stray.rb')
+
+      allow(loader).to receive(:cpath_expected_at).with(unmanaged)
+                                                  .and_raise(StandardError.new('not managed by this loader'))
+
+      extractor.send(:eager_load_lazy_roots)
+
+      expect(extractor.lazy_load_skipped_files).to be_empty
+    end
+
+    it 'resets lazy_load_skipped_files on each pass' do
+      views_dir = File.join(tmpdir, 'app', 'views')
+      broken = component_file(views_dir, 'broken.rb')
+      allow(loader).to receive(:cpath_expected_at).with(broken).and_return('DoesNotExistAnywhere')
+
+      extractor.send(:eager_load_lazy_roots)
+      expect(extractor.lazy_load_skipped_files).to eq([broken])
+
+      FileUtils.rm(broken)
+      stub_const('Fixed', Class.new)
+      extractor.send(:eager_load_lazy_roots)
+      expect(extractor.lazy_load_skipped_files).to be_empty
+    end
+
     it 'falls back to the path convention when the loader lacks cpath_expected_at (classic mode)' do
       component_file(File.join(tmpdir, 'app', 'views'), 'leaf_component.rb')
       allow(loader).to receive(:respond_to?).with(:cpath_expected_at).and_return(false)

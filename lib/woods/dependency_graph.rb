@@ -93,6 +93,23 @@ module Woods
       @type_index[old_node[:type]]&.delete(identifier)
     end
 
+    # Fully remove a unit from the graph: its node, its forward edges, and
+    # all registration side effects (reverse indexes, file-map entry, type
+    # index) via {#unregister}. Forward edges other units hold toward the
+    # removed identifier are left in place — they describe those units'
+    # source and are refreshed when their owners re-register.
+    #
+    # @param identifier [String] Unit identifier to remove (no-op if absent)
+    # @return [void]
+    def remove(identifier)
+      return unless @nodes.key?(identifier)
+
+      @to_h = nil
+      unregister(identifier)
+      @nodes.delete(identifier)
+      @edges.delete(identifier)
+    end
+
     # Find all units affected by changes to given files
     # Uses BFS to find transitive dependents
     #

@@ -248,12 +248,30 @@ module Woods
     # @return [Array<String>] Absolute file paths
     attr_reader :unhandled_changed_files
 
+    # Units removed by the last {#extract_changed} run because their source
+    # file was deleted (B-065). Without removal, deletions — and the delete
+    # half of renames — left ghost units in the index until the next full
+    # extraction's stale sweep.
+    #
+    # @return [Array<String>] Removed unit identifiers
+    attr_reader :removed_unit_ids
+
+    # Files under lazy eager-load roots (app/views + configured paths) that
+    # failed to load during the last eager-load pass and were skipped. Their
+    # classes never materialize, so they are invisible to descendants-based
+    # extraction — a self-reported coverage gap rather than a silent one.
+    #
+    # @return [Array<String>] Absolute file paths
+    attr_reader :lazy_load_skipped_files
+
     def initialize(output_dir: nil)
       @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/woods'))
       @dependency_graph = DependencyGraph.new
       @results = {}
       @extractors = {}
       @unhandled_changed_files = []
+      @removed_unit_ids = []
+      @lazy_load_skipped_files = []
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -356,13 +374,22 @@ module Woods
       # them, so they get their own extraction pass below.
       affected_ids = @dependency_graph.affected_by(absolute_files)
       new_files = absolute_files.reject { |f| @dependency_graph.tracks_file?(f) }
+      deleted_files = absolute_files.select do |f|
+        @dependency_graph.tracks_file?(f) && !File.exist?(f)
+      end
       Rails.logger.info(
         "[Woods] #{changed_files.size} changed files affect #{affected_ids.size} units " \
-        "(#{new_files.size} not yet indexed)"
+        "(#{new_files.size} not yet indexed, #{deleted_files.size} deleted)"
       )
 
-      # Re-extract affected units
+      # Remove units whose source file was deleted — BEFORE re-extraction,
+      # but AFTER affected_by, so the deleted unit's dependents (found via
+      # its reverse edges) still get re-extracted below.
       affected_types = Set.new
+      @removed_unit_ids = remove_deleted_file_units(deleted_files, affected_types: affected_types)
+      affected_ids -= @removed_unit_ids
+
+      # Re-extract affected units
       affected_ids.each do |unit_id|
         re_extract_unit(unit_id, affected_types: affected_types)
       end
@@ -421,6 +448,7 @@ module Woods
     # skipped — extraction proceeds with whatever loaded.
     def eager_load_lazy_roots
       loader = Rails.autoloaders.main
+      @lazy_load_skipped_files = []
 
       configured = Array(Woods.configuration&.extraction_eager_load_paths).map(&:to_s)
       (LAZY_EAGER_LOAD_DIRS + configured).uniq.each do |dir|
@@ -450,6 +478,7 @@ module Woods
       Dir.glob(dir.join('**/*.rb').to_s).each do |file|
         expected_cpath_for(file, dir, loader)&.constantize
       rescue NameError, LoadError => e
+        @lazy_load_skipped_files << file
         Rails.logger.warn "[Woods] Skipped #{file}: #{e.message}"
       rescue StandardError => e
         # Zeitwerk::Error — the file isn't managed by the main loader
@@ -1223,6 +1252,15 @@ module Woods
       Rails.logger.info "[Woods]   Output: #{@output_dir}"
       Rails.logger.info '[Woods] ═══════════════════════════════════════════'
 
+      unless @lazy_load_skipped_files.empty?
+        Rails.logger.warn '[Woods] ───────────────────────────────────────────'
+        Rails.logger.warn(
+          "[Woods]   #{@lazy_load_skipped_files.size} file(s) failed to load during " \
+          'lazy eager-load and are NOT indexed:'
+        )
+        @lazy_load_skipped_files.each { |f| Rails.logger.warn "[Woods]     #{f}" }
+      end
+
       all_warnings = @extractors.flat_map do |_type, ext|
         ext.respond_to?(:warnings) ? ext.warnings : []
       end
@@ -1308,6 +1346,52 @@ module Woods
         type_dir.join(collision_safe_filename(unit.identifier)),
         json_serialize(unit.to_h)
       )
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Incremental Removal of Deleted Files
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Remove every unit registered against a source file that no longer
+    # exists (B-065): delete its per-unit JSON, drop it from the dependency
+    # graph (node, file-map, reverse indexes), and queue its type for index
+    # regeneration. Scans graph nodes rather than the file_map alone — the
+    # file_map holds one identifier per path, and co-located units (several
+    # classes extracted from one file) must not survive as ghosts.
+    #
+    # @param deleted_files [Array<String>] Absolute paths that were changed
+    #   but no longer exist on disk
+    # @param affected_types [Set, nil] Accumulator for touched extractor keys
+    # @return [Array<String>] Identifiers of removed units
+    def remove_deleted_file_units(deleted_files, affected_types: nil)
+      return [] if deleted_files.empty?
+
+      deleted = deleted_files.to_set
+      doomed = @dependency_graph.to_h[:nodes].filter_map do |unit_id, node|
+        [unit_id, node] if deleted.include?(node[:file_path])
+      end
+
+      doomed.map do |unit_id, node|
+        extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]&.to_sym]
+        delete_unit_file(unit_id, extractor_key)
+        @dependency_graph.remove(unit_id)
+        affected_types&.add(extractor_key) if extractor_key
+
+        Rails.logger.info "[Woods] Removed #{unit_id} — source file deleted: #{node[:file_path]}"
+        unit_id
+      end
+    end
+
+    # Delete a removed unit's persisted JSON so the type-index rebuild
+    # (which globs the type dir) drops it rather than resurrecting it.
+    #
+    # @param unit_id [String] Unit identifier
+    # @param extractor_key [Symbol, nil] Plural EXTRACTORS key (output subdirectory)
+    # @return [void]
+    def delete_unit_file(unit_id, extractor_key)
+      return unless extractor_key
+
+      FileUtils.rm_f(@output_dir.join(extractor_key.to_s, collision_safe_filename(unit_id)))
     end
 
     # ──────────────────────────────────────────────────────────────────────

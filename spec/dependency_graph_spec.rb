@@ -107,6 +107,56 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe '#remove' do
+    it 'removes the node, its edges, its file_map entry, and its type-index entry' do
+      graph.register(make_unit(
+                       type: :model, identifier: 'User', file_path: 'app/models/user.rb',
+                       dependencies: [{ type: :model, target: 'Account' }]
+                     ))
+
+      graph.remove('User')
+
+      expect(graph.node_exists?('User')).to be false
+      expect(graph.tracks_file?('app/models/user.rb')).to be false
+      expect(graph.units_of_type(:model)).not_to include('User')
+      expect(graph.dependencies_of('User')).to be_empty
+      expect(graph.dependents_of('Account')).not_to include('User')
+    end
+
+    it 'stops affected_by from returning the removed unit' do
+      graph.register(make_unit(type: :model, identifier: 'User', file_path: 'app/models/user.rb'))
+      graph.remove('User')
+
+      expect(graph.affected_by(['app/models/user.rb'])).to be_empty
+    end
+
+    it 'keeps other units\' forward edges toward the removed identifier' do
+      graph.register(make_unit(type: :model, identifier: 'User', file_path: 'app/models/user.rb'))
+      graph.register(make_unit(
+                       type: :service, identifier: 'UserService',
+                       file_path: 'app/services/user_service.rb',
+                       dependencies: [{ type: :model, target: 'User' }]
+                     ))
+
+      graph.remove('User')
+
+      expect(graph.dependencies_of('UserService')).to include('User')
+    end
+
+    it 'is a no-op for identifiers that were never registered' do
+      expect { graph.remove('Ghost') }.not_to raise_error
+    end
+
+    it 'survives a serialization round-trip' do
+      graph.register(make_unit(type: :model, identifier: 'User', file_path: 'app/models/user.rb'))
+      graph.remove('User')
+
+      loaded = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+      expect(loaded.node_exists?('User')).to be false
+      expect(loaded.tracks_file?('app/models/user.rb')).to be false
+    end
+  end
+
   describe '#affected_by' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User', file_path: 'app/models/user.rb'))

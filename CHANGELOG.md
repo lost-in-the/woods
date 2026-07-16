@@ -33,6 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files per type dir — skipping `rails_source` (co-owned by `woods:extract_framework`)
   and any type that extracted zero units this run, so a transient extractor failure
   can't wipe a good directory.
+- **`woods:incremental` removes units whose source file was deleted** (B-065). A
+  deleted (or renamed-away) file left a ghost unit in the index, graph, and manifest
+  counts until the next full extraction — while the run logged it as re-extracted, so
+  per-merge CI pipelines couldn't even detect the drift. Deleted-but-tracked files now
+  drop every unit registered against them (including co-located units sharing one
+  file): the unit JSON is deleted, the graph node unregistered via the new
+  `DependencyGraph#remove`, and the type index regenerated — while the deleted unit's
+  dependents still get re-extracted. Removals are reported separately from
+  re-extractions (`Extractor#removed_unit_ids` + a `Removed N unit(s)` rake block)
+  instead of being silently counted as successes.
+- **Extraction summary reports files skipped during lazy eager-load.** A component
+  file that raises at load time is skip-warned inline and stays unindexed; the
+  extraction summary now ends with a `N file(s) failed to load … NOT indexed` block
+  (`Extractor#lazy_load_skipped_files`), so coverage gaps are self-reporting instead
+  of scrolling away with the boot log.
 
 ### Added
 

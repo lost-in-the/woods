@@ -704,9 +704,9 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": ["lib/woods/extractor.rb"],
-    "description": "Discovered while fixing B-062: when CHANGED_FILES includes a deleted file that IS in the file_map, affected_by finds its unit but re_extract_unit returns early (File.exist? fails), leaving the deleted class's unit in the index, graph, and counts until the next full extraction. Incremental should unregister the unit, delete its JSON, and refresh the type index (mind multi-unit files where file_map holds only the last registrant). Acceptance: full extract, delete a model file, run incremental with the deleted path, unit is gone from _index.json/graph/manifest and woods:validate stays clean.",
-    "status": "ready",
+    "files": ["lib/woods/extractor.rb", "lib/woods/dependency_graph.rb", "lib/tasks/woods.rake"],
+    "description": "Discovered while fixing B-062 and confirmed by the 1.6.0 field report: when CHANGED_FILES includes a deleted file that IS in the file_map, affected_by finds its unit but re_extract_unit returned early (File.exist? fails), leaving the deleted class's unit in the index, graph, and counts until the next full extraction — and the run still logged 'Re-extracted 1 affected units'. Renames were the sharp edge: the new path was extracted (B-062) while the old unit lingered, so consumers saw the same class twice. Fixed: extract_changed runs remove_deleted_file_units before re-extraction (after affected_by, so the deleted unit's dependents still refresh) — it deletes each unit's JSON, removes it from the graph via the new DependencyGraph#remove (node, edges, file_map, type/reverse indexes), queues its type for index regeneration, and excludes it from the re-extracted count; co-located units sharing the deleted file are found by scanning nodes, not just the single-entry file_map. Removals are reported via Extractor#removed_unit_ids and a dedicated rake output block. Regression specs in extractor_incremental_new_files_spec (extract_changed end-to-end: JSON gone, _index.json/manifest/graph clean, co-located units, no false deletions) and dependency_graph_spec (#remove).",
+    "status": "resolved",
     "depends_on": []
   }
 ]
