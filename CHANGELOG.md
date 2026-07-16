@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Model callback extraction works for the first time.** `extract_callbacks`
+  queried per-type chains (`_before_save_callbacks`) that don't exist on any Rails
+  version; the rescue swallowed the NoMethodError, so every model extracted
+  `callbacks: []`. It now reads the real per-event chains (`_save_callbacks`, ...)
+  and derives the type from each entry's kind — the same contract `callback_count`
+  already used.
+- **The Qdrant adapter works against a real Qdrant server.** It sent raw unit
+  identifiers as point IDs, but Qdrant only accepts unsigned integers or UUIDs —
+  every upsert returned 400 (specs stubbed Net::HTTP and never noticed). Point IDs
+  are now deterministic UUIDs derived from the identifier; the identifier
+  round-trips through the payload (`_woods_identifier`) and search results map back.
+- **RRF scores are normalized before the weighted signal blend.** Raw RRF sums
+  (~1/61 scale) were fed into a 0–1 blend where recency/importance/type-match each
+  score up to 1.0 — a 0.40-weighted semantic signal contributed at most ~0.02, so
+  metadata swamped relevance on every multi-source query. The top fused candidate
+  now scores 1.0.
+- **`RakeTaskExtractor` extracts kwarg-form tasks** (`task daily: :environment` —
+  what `rails g task` generates); every existing branch required the `task :name`
+  leading-colon form, so the most common real-world style extracted zero tasks.
+  `%i[...]`/`%w[...]` dependency arrays are parsed too.
+- **`extract_class_name` keeps the namespace for `module X / class Y` files.** The
+  first-class-line regex returned a bare `Processor` for
+  `module Billing / class Processor`, colliding identifiers across namespaces.
+- **Ollama `num_ctx` resolves tagged model names.** The registry lookup was an
+  exact match, so `mxbai-embed-large:latest` fell back to a 2048-token budget on a
+  512-context model and Ollama silently truncated every long chunk.
+- **The MCP `reload` tool re-applies vector metadata.** The boot path back-fills
+  per-vector metadata after WVF1 hydration (the dump format doesn't carry it); the
+  reload path didn't, so type-filtered `codebase_retrieve` returned zero results
+  after every `reload` until a restart.
+
 ### Added
 
 - **The Index Server auto-reloads when the index changes on disk.** Every tools/call

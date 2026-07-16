@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'ipaddr'
 require 'net/http'
 require 'json'
@@ -201,14 +202,22 @@ module Woods
         # @param vector [Array<Float>] The embedding vector
         # @param metadata [Hash] Optional payload metadata
         # @see Interface#store
+        # Payload key carrying the original Woods unit identifier. Qdrant
+        # only accepts unsigned integers or UUIDs as point IDs — sending raw
+        # identifiers ("Api::V1::UsersController") made every upsert 400 on
+        # a real server (specs stub Net::HTTP, so they never noticed). The
+        # point ID is a deterministic UUID derived from the identifier and
+        # the identifier itself round-trips through the payload.
+        WOODS_ID_KEY = '_woods_identifier'
+
         def store(id, vector, metadata = {})
           validate_dimensions!(vector) if @dimensions
           body = {
             points: [
               {
-                id: id,
+                id: point_id_for(id),
                 vector: vector,
-                payload: metadata
+                payload: (metadata || {}).merge(WOODS_ID_KEY => id.to_s)
               }
             ]
           }
@@ -237,7 +246,11 @@ module Woods
 
           body = {
             points: entries.map do |entry|
-              { id: entry[:id], vector: entry[:vector], payload: entry[:metadata] || {} }
+              {
+                id: point_id_for(entry[:id]),
+                vector: entry[:vector],
+                payload: (entry[:metadata] || {}).merge(WOODS_ID_KEY => entry[:id].to_s)
+              }
             end
           }
           request(:put, "/collections/#{@collection}/points", body)
@@ -262,17 +275,21 @@ module Woods
           results = response['result'] || []
 
           results.map do |hit|
+            payload = hit['payload'] || {}
             SearchResult.new(
-              id: hit['id'],
+              # Map the UUID point back to the Woods identifier the rest of
+              # the pipeline keys on (falls back to the raw point id for
+              # collections written before WOODS_ID_KEY existed).
+              id: payload[WOODS_ID_KEY] || hit['id'],
               score: hit['score'],
-              metadata: hit['payload']
+              metadata: payload
             )
           end
         end
 
         # @see Interface#delete
         def delete(id)
-          body = { points: [id] }
+          body = { points: [point_id_for(id)] }
           request(:post, "/collections/#{@collection}/points/delete", body)
         end
 
@@ -289,6 +306,23 @@ module Woods
         end
 
         private
+
+        # Deterministic UUID for a Woods identifier — Qdrant's point-ID
+        # grammar accepts only unsigned integers or UUIDs. SHA-256 of the
+        # identifier, formatted 8-4-4-4-12 with the version nibble forced to
+        # 5 and the variant to RFC 4122, so the same unit always maps to the
+        # same point (upserts overwrite instead of duplicating).
+        #
+        # @param id [String, #to_s] Woods unit identifier
+        # @return [String] UUID-formatted point ID
+        def point_id_for(id)
+          hex = Digest::SHA256.hexdigest(id.to_s)
+          format(
+            '%<a>s-%<b>s-5%<c>s-%<d>s%<e>s-%<f>s',
+            a: hex[0, 8], b: hex[8, 4], c: hex[13, 3],
+            d: %w[8 9 a b][hex[16].to_i(16) % 4], e: hex[17, 3], f: hex[20, 12]
+          )
+        end
 
         # Cap interpolated response bodies so misconfigured Qdrant responses
         # (e.g. proxied HTML error pages) don't unbounded-leak into logs or

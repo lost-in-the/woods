@@ -368,6 +368,14 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
       end
     end
 
+    it 'resolves tagged model names against the untagged registry keys' do
+      # Ollama model names commonly carry tags; an exact-match lookup fell
+      # back to 2048 — over-budgeting a 512-context model, so Ollama
+      # silently truncated the tail of every long chunk.
+      expect(described_class.new(model: 'mxbai-embed-large:latest').max_input_tokens).to eq(512)
+      expect(described_class.new(model: 'bge-m3:v1').max_input_tokens).to eq(8192)
+    end
+
     it 'includes the registry num_ctx in batch requests' do
       allow(http_double).to receive(:request).and_return(batch_success_response)
       described_class.new(model: 'bge-m3').embed_batch(%w[a b])

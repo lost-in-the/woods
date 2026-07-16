@@ -205,14 +205,31 @@ module Woods
         # Simple task: task :name
         return [::Regexp.last_match(1), [], []] if line.match(/\Atask\s+:(\w+)/)
 
+        # Modern kwarg form — what `rails g task` generates and by far the
+        # most common style in real apps: `task daily: :environment`,
+        # `task import: %i[environment load_config]`. Every branch above
+        # requires a leading colon (`task :name`), so this form previously
+        # extracted zero tasks.
+        if line.match(/\Atask\s+(\w+):\s*(.+?)(?:\s+do\b|\s*$)/)
+          name = ::Regexp.last_match(1)
+          deps = parse_dependency_list(::Regexp.last_match(2))
+          return [name, deps, []]
+        end
+
         nil
       end
 
-      # Parse a dependency list from a hash-rocket right-hand side.
+      # Parse a dependency list from a hash-rocket or kwarg right-hand side.
       #
-      # @param dep_str [String] e.g. ":environment" or "[:dep1, :dep2]"
+      # @param dep_str [String] e.g. ":environment", "[:dep1, :dep2]",
+      #   or "%i[environment load_config]" (percent literals carry no
+      #   colons, so the symbol scan alone returned [] for them)
       # @return [Array<String>]
       def parse_dependency_list(dep_str)
+        if (percent = dep_str.match(/%[iw]\[([^\]]*)\]/))
+          return percent[1].split
+        end
+
         dep_str.scan(/:(\w+)/).flatten
       end
 

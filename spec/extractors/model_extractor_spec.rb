@@ -68,6 +68,64 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  # ── extract_callbacks ─────────────────────────────────────────────
+
+  describe '#extract_callbacks' do
+    # Faithful to ActiveSupport::Callbacks: ONE chain per EVENT
+    # (`_save_callbacks`), with the before/after/around kind on each entry —
+    # `_before_save_callbacks` does not exist on any Rails version. The old
+    # per-type lookup raised into its rescue for every type, so every model
+    # extracted callbacks: [] while the suite's per-type stubs stayed green.
+    let(:callback_entry_class) do
+      Class.new do
+        attr_reader :kind, :filter
+
+        def initialize(kind, filter)
+          @kind = kind
+          @filter = filter
+        end
+
+        def instance_variable_get(_name) = nil
+      end
+    end
+
+    it 'reads per-event chains and derives the type from the entry kind' do
+      model = double('Model')
+      save_chain = [
+        callback_entry_class.new(:before, :normalize_title),
+        callback_entry_class.new(:after, :reindex)
+      ]
+      commit_chain = [callback_entry_class.new(:after, :notify)]
+      Woods::Extractors::ModelExtractor::CALLBACK_EVENTS.each do |event|
+        allow(model).to receive(:"_#{event}_callbacks").and_return([])
+      end
+      allow(model).to receive(:_save_callbacks).and_return(save_chain)
+      allow(model).to receive(:_commit_callbacks).and_return(commit_chain)
+
+      callbacks = extractor.send(:extract_callbacks, model)
+
+      expect(callbacks.map { |c| c[:type] }).to contain_exactly(
+        :before_save, :after_save, :after_commit
+      )
+      expect(callbacks.map { |c| c[:filter] }).to contain_exactly(
+        'normalize_title', 'reindex', 'notify'
+      )
+    end
+
+    it 'treats a chain that raises as empty without crashing the rest' do
+      model = double('Model')
+      Woods::Extractors::ModelExtractor::CALLBACK_EVENTS.each do |event|
+        allow(model).to receive(:"_#{event}_callbacks").and_return([])
+      end
+      allow(model).to receive(:_touch_callbacks).and_raise(NoMethodError)
+      allow(model).to receive(:_save_callbacks)
+        .and_return([callback_entry_class.new(:before, :x)])
+
+      callbacks = extractor.send(:extract_callbacks, model)
+      expect(callbacks.map { |c| c[:type] }).to eq([:before_save])
+    end
+  end
+
   # ── implicit_belongs_to_validator? ────────────────────────────────
 
   describe '#implicit_belongs_to_validator?' do

@@ -94,9 +94,31 @@ module Woods
       #   (e.g., "policies", "validators", "(?:services|interactors|operations|commands|use_cases)")
       # @return [String] The class name
       def extract_class_name(file_path, source, dir_prefix)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
+        if (name = namespaced_class_name(source))
+          return name
+        end
 
         file_path.sub("#{Rails.root}/", '').sub(%r{^app/#{dir_prefix}/}, '').sub('.rb', '').camelize
+      end
+
+      # Fully-qualified name of the first class in +source+, prefixed with
+      # the `module` nesting above it. The old first-class-line regex
+      # returned a bare "Processor" for `module Billing / class Processor`,
+      # colliding identifiers across namespaces (and shadowing the correct
+      # path-derived fallback).
+      #
+      # @param source [String] Ruby source code
+      # @return [String, nil] e.g. "Billing::Processor", or nil without a class
+      def namespaced_class_name(source)
+        modules = []
+        source.each_line do |line|
+          if (m = line.match(/^\s*module\s+([\w:]+)\s*$/))
+            modules << m[1]
+          elsif (m = line.match(/^\s*class\s+([\w:]+)/))
+            return (modules + [m[1]]).join('::')
+          end
+        end
+        nil
       end
 
       # Extract the parent class name from a class definition.

@@ -36,6 +36,15 @@ module Woods
         (?:after|before)_(?:add|remove)_for_         # collection callbacks
       )/x
 
+      # Callback EVENTS whose chains AR/AM actually define. ActiveSupport
+      # stores ONE chain per event (`_save_callbacks`, `_commit_callbacks`,
+      # ...) with the before/after/around KIND on each entry (cb.kind) —
+      # there is no `_before_save_callbacks` on any Rails version.
+      CALLBACK_EVENTS = %i[
+        validation save create update destroy commit rollback
+        initialize find touch
+      ].freeze
+
       # Warnings collected during extraction (skipped associations, failed models)
       attr_reader :warnings
 
@@ -508,23 +517,16 @@ module Woods
       end
 
       # Extract all callbacks with their full chain
+      # Reads the per-event chains (see CALLBACK_EVENTS). The old per-type
+      # lookup (`_before_save_callbacks`) raised NoMethodError for every
+      # type, the rescue swallowed it, and every model extracted
+      # `callbacks: []` (mirrors callback_count, which already reads the
+      # per-event chains).
       def extract_callbacks(model)
-        callback_types = %i[
-          before_validation after_validation
-          before_save after_save around_save
-          before_create after_create around_create
-          before_update after_update around_update
-          before_destroy after_destroy around_destroy
-          after_commit after_rollback
-          after_initialize after_find
-          after_touch
-        ]
-
-        callback_types.flat_map do |type|
-          callbacks = model.send("_#{type}_callbacks")
-          callbacks.map do |cb|
+        CALLBACK_EVENTS.flat_map do |event|
+          model.send("_#{event}_callbacks").map do |cb|
             {
-              type: type,
+              type: :"#{cb.kind}_#{event}", # before_save, after_commit, ...
               filter: cb.filter.to_s,
               kind: cb.kind, # :before, :after, :around
               conditions: format_callback_conditions(cb)
@@ -534,8 +536,8 @@ module Woods
           # Widen beyond NoMethodError per CLAUDE.md — callback-chain
           # introspection can raise a variety of errors across Rails
           # versions (NameError, TypeError, LoadError for missing
-          # concerns), and silently swallowing only NoMethodError left
-          # the rest to crash extraction.
+          # concerns), and a missing chain (e.g. no touch callbacks
+          # defined on old versions) must not crash extraction.
           []
         end.compact
       end

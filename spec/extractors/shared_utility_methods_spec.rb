@@ -16,6 +16,41 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
 
   subject(:utility) { test_class.new }
 
+  # ── #extract_class_name ───────────────────────────────────────
+
+  describe '#extract_class_name' do
+    before do
+      stub_const('Rails', double('Rails', root: Pathname.new('/app')))
+    end
+
+    it 'returns the bare class name for un-nested classes' do
+      source = "class Processor\nend\n"
+      expect(utility.extract_class_name('/app/app/services/processor.rb', source, 'services'))
+        .to eq('Processor')
+    end
+
+    it 'prefixes module nesting — module X / class Y used to collide as bare Y' do
+      source = "module Billing\n  class Processor\n  end\nend\n"
+      expect(utility.extract_class_name('/app/app/services/billing/processor.rb', source, 'services'))
+        .to eq('Billing::Processor')
+    end
+
+    it 'handles compact-style names and multi-level nesting' do
+      source = "module Api\n  module V1\n    class UsersController < ApplicationController\n"
+      expect(utility.extract_class_name('/app/app/services/api/v1/users_controller.rb', source, 'services'))
+        .to eq('Api::V1::UsersController')
+
+      compact = "module Api\n  class V1::Processor\n"
+      expect(utility.extract_class_name('/app/app/services/api/v1/processor.rb', compact, 'services'))
+        .to eq('Api::V1::Processor')
+    end
+
+    it 'falls back to the path-derived name when no class line exists' do
+      expect(utility.extract_class_name('/app/app/services/billing/refund.rb', '# empty', 'services'))
+        .to eq('Billing::Refund')
+    end
+  end
+
   # ── #find_files_in_directories ────────────────────────────────
 
   describe '#find_files_in_directories' do

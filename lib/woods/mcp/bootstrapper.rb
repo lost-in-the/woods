@@ -205,6 +205,15 @@ module Woods
         metadata_count = refill_in_memory_metadata_store(retriever, config, resolved, artifact)
         graph_count = refill_in_memory_graph_store(retriever, config, artifact)
 
+        # Same back-fill the boot path does in build_retriever_from_config:
+        # WVF1 dumps carry no per-vector metadata, so without this a
+        # type-filtered codebase_retrieve returns zero results after every
+        # `reload` tool call — the boot path was covered, the reload path
+        # wasn't.
+        if retriever.respond_to?(:vector_store) && retriever.respond_to?(:metadata_store)
+          populate_vector_metadata(retriever.vector_store, retriever.metadata_store)
+        end
+
         # Context-cache entries from the previous embed run no longer agree
         # with the refreshed stores. Drop them so the next codebase_retrieve
         # call goes through the full pipeline with the new data. Embedding

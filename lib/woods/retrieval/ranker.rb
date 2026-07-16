@@ -114,11 +114,17 @@ module Woods
         # observability/debug tools read `.source` on an RRF result).
         original_by_id = {}
         candidates.each { |c| original_by_id[c.identifier] = c }
+        # Normalize to 0-1 (top fused candidate = 1.0). Raw RRF sums live on
+        # a ~1/(k+1) scale (~0.016 for k=60) while every other signal in the
+        # weighted blend (recency, importance, type_match) is 0-1 — fed raw,
+        # a 0.40-weighted semantic signal contributed at most ~0.02 and the
+        # metadata signals swamped relevance on every multi-source query.
+        max_score = rrf_scores.values.max
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(
             identifier: identifier,
-            score: score,
+            score: max_score&.positive? ? score / max_score : score,
             source: original&.source || :rrf,
             metadata: metadata_map[identifier]
           )

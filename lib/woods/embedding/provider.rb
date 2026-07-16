@@ -124,7 +124,13 @@ module Woods
                        read_timeout: DEFAULT_READ_TIMEOUT)
           @model = model
           @host = host
-          @num_ctx = num_ctx || MODEL_CONTEXT_LENGTHS.fetch(model, FALLBACK_NUM_CTX)
+          # Registry keys are untagged; Ollama model names commonly carry a
+          # tag ("mxbai-embed-large:latest", "nomic-embed-text:v1.5"). An
+          # exact-match lookup silently fell back to 2048 — budgeting 2048
+          # tokens for a 512-context model means Ollama truncates the tail
+          # of every long chunk without any signal.
+          @num_ctx = num_ctx ||
+                     MODEL_CONTEXT_LENGTHS.fetch(model.to_s.split(':').first, FALLBACK_NUM_CTX)
           @read_timeout = read_timeout
           @uri = URI("#{host}/api/embed")
         end

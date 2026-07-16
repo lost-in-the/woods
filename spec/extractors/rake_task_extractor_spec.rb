@@ -36,6 +36,25 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(units.first.type).to eq(:rake_task)
     end
 
+    it 'extracts kwarg-form tasks (what `rails g task` generates)' do
+      create_file('lib/tasks/daily.rake', <<~RAKE)
+        task daily: :environment do
+          puts "running"
+        end
+
+        task import: %i[environment load_config] do
+          puts "importing"
+        end
+      RAKE
+
+      units = described_class.new.extract_all
+      names = units.map(&:identifier)
+      expect(names).to include('daily', 'import')
+
+      import = units.find { |u| u.identifier == 'import' }
+      expect(import.metadata[:task_dependencies]).to eq(%w[environment load_config])
+    end
+
     it 'discovers .rake files in subdirectories' do
       create_file('lib/tasks/admin/reports.rake', <<~RAKE)
         namespace :admin do

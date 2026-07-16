@@ -47,6 +47,26 @@ RSpec.describe Woods::Retrieval::Ranker do
 
   # ── #rank ────────────────────────────────────────────────────────────
 
+  describe 'RRF score normalization' do
+    it 'scales fused scores to 0-1 so 0-1 metadata signals cannot swamp relevance' do
+      # Raw RRF sums live on a ~1/(k+1) scale (~0.016 for k=60); fed
+      # unnormalized into the weighted blend, a 0.40-weighted semantic
+      # signal contributed at most ~0.02 against 0-1 recency/importance.
+      candidates = [
+        candidate(identifier: 'A', score: 0.9, source: :vector),
+        candidate(identifier: 'A', score: 0.8, source: :keyword),
+        candidate(identifier: 'B', score: 0.5, source: :vector)
+      ]
+
+      fused = ranker.send(:apply_rrf, candidates)
+
+      expect(fused.first.identifier).to eq('A')
+      expect(fused.first.score).to eq(1.0)
+      expect(fused.last.score).to be > 0.0
+      expect(fused.last.score).to be < 1.0
+    end
+  end
+
   describe '#rank' do
     it 'returns empty array for empty candidates' do
       result = ranker.rank([], classification: classification)

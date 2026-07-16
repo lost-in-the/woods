@@ -64,10 +64,29 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(req.path).to eq('/collections/test_collection/points')
         body = JSON.parse(req.body)
         point = body['points'].first
-        expect(point['id']).to eq('doc1')
+        # Real Qdrant only accepts unsigned-int or UUID point IDs — the raw
+        # identifier goes in the payload and the ID is a deterministic UUID.
+        expect(point['id']).to match(/\A\h{8}-\h{4}-5\h{3}-[89ab]\h{3}-\h{12}\z/)
         expect(point['vector']).to eq([0.1, 0.2, 0.3])
-        expect(point['payload']).to eq({ 'type' => 'model' })
+        expect(point['payload']).to eq({ 'type' => 'model', '_woods_identifier' => 'doc1' })
       end
+    end
+
+    it 'derives the same point ID for the same identifier (upserts overwrite)' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      ids = []
+      allow(http).to receive(:request) do |req|
+        ids << JSON.parse(req.body)['points'].first['id'] if req.is_a?(Net::HTTP::Put)
+        response
+      end
+
+      store.store('doc1', [0.1, 0.2, 0.3], {})
+      store.store('doc1', [0.4, 0.5, 0.6], {})
+
+      expect(ids.uniq.size).to eq(1)
     end
 
     it 'raises on API error' do
@@ -97,8 +116,9 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(req.path).to eq('/collections/test_collection/points')
         body = JSON.parse(req.body)
         expect(body['points'].size).to eq(2)
-        expect(body['points'][0]['id']).to eq('doc1')
-        expect(body['points'][1]['id']).to eq('doc2')
+        expect(body['points'][0]['id']).to match(/\A\h{8}-\h{4}-5\h{3}-[89ab]\h{3}-\h{12}\z/)
+        expect(body['points'][0]['payload']['_woods_identifier']).to eq('doc1')
+        expect(body['points'][1]['payload']['_woods_identifier']).to eq('doc2')
       end
     end
 
@@ -110,7 +130,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(http).not_to have_received(:request)
     end
 
-    it 'defaults metadata to empty hash when not provided' do
+    it 'defaults metadata to just the identifier key when not provided' do
       response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       allow(http).to receive(:request).and_return(response)
@@ -121,7 +141,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         body = JSON.parse(req.body)
-        expect(body['points'][0]['payload']).to eq({})
+        expect(body['points'][0]['payload']).to eq({ '_woods_identifier' => 'doc1' })
       end
     end
   end
@@ -210,7 +230,8 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(req).to be_a(Net::HTTP::Post)
         expect(req.path).to eq('/collections/test_collection/points/delete')
         body = JSON.parse(req.body)
-        expect(body['points']).to eq(['doc1'])
+        # Deletes address the same deterministic UUID the upsert used.
+        expect(body['points'].first).to match(/\A\h{8}-\h{4}-5\h{3}-[89ab]\h{3}-\h{12}\z/)
       end
     end
   end
