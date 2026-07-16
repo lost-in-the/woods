@@ -224,6 +224,20 @@ RSpec.describe Woods::Sync do
       expect(result.full_extract_pending).to eq(%w[db/schema.rb config/routes.rb Gemfile.lock])
     end
 
+    it 'covers db/structure.sql for schema_format = :sql apps' do
+      git_responses['rev-parse HEAD'] = "ccc333\n"
+      git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =
+        "db/structure.sql\n"
+      write_index!
+      write_cursor!('aaa111')
+
+      result = sync.run
+
+      expect(extractor).not_to have_received(:extract_changed)
+      expect(result.full_extract_pending).to eq(%w[db/structure.sql])
+      expect(cursor_on_disk).to eq('ccc333')
+    end
+
     it 'advances the cursor without extracting when only full-extraction files changed' do
       git_responses['rev-parse HEAD'] = "ccc333\n"
       git_responses['-c core.quotepath=false diff --no-renames --relative --name-only aaa111 ccc333'] =

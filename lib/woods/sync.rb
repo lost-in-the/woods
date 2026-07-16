@@ -54,6 +54,7 @@ module Woods
     # them via Result#full_extract_pending instead.
     FULL_EXTRACT_ONLY_PATTERNS = [
       %r{^db/schema\.rb$},
+      %r{^db/structure\.sql$}, # schema_format = :sql apps keep the schema here
       %r{^config/routes\.rb$},
       /^Gemfile\.lock$/
     ].freeze
