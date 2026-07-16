@@ -65,6 +65,12 @@ module Woods
           file_path: source_file_for(component)
         )
 
+        # Skip components with no resolvable source file (framework/internal
+        # or dynamically defined classes) — a unit with a null file_path
+        # breaks index consumers and can't carry source anyway. Mirrors
+        # ViewComponentExtractor.
+        return nil unless unit.file_path
+
         unit.namespace = extract_namespace(component)
         unit.source_code = read_source(unit.file_path)
         unit.metadata = extract_metadata(component, unit.source_code)

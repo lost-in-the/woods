@@ -52,4 +52,21 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       end
     end
   end
+
+  describe '#extract_component' do
+    it 'skips components with no resolvable source file (never emits file_path: null)' do
+      phlex_base = Class.new
+      ghost = Class.new(phlex_base)
+      ghost.define_singleton_method(:name) { 'GhostComponent' }
+      phlex_base.define_singleton_method(:descendants) { [ghost] }
+      stub_const('Phlex::HTML', phlex_base)
+
+      extractor = described_class.new
+
+      # No convention path exists (File.exist? is stubbed false) and the
+      # anonymous class has no app source location — the unit must be
+      # skipped rather than indexed with a null file_path.
+      expect(extractor.extract_all).to eq([])
+    end
+  end
 end

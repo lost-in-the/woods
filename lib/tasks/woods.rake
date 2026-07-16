@@ -115,6 +115,14 @@ namespace :woods do
 
     puts
     puts "Re-extracted #{affected.size} affected units."
+
+    unhandled = extractor.unhandled_changed_files
+    if unhandled.any?
+      puts
+      puts "WARNING: #{unhandled.size} changed file(s) could not be mapped to any unit:"
+      unhandled.each { |f| puts "  - #{f}" }
+      puts 'These are not covered by incremental extraction — run woods:extract to index them.'
+    end
   end
 
   desc 'Tend the garden — incremental extraction (alias for incremental)'

@@ -660,5 +660,53 @@
     "description": "HTTP transport concurrent-handler unsynchronized IndexReader cache + lazy pipeline mutex init; Notion/Unblocked POST retry on read-timeout duplicates; Retry-After to_f zeros HTTP-date form; CircuitBreaker half-open unlimited probes + reset on overlap; bootstrapper/reload string-keyed vector metadata vs symbol-keyed search filters. Tracked in GH #150. PARTIAL (PR #151): FIXED the pipeline-lock mutex race (eager init), Retry-After (shared Woods::RetryAfter helper, both clients), and CircuitBreaker (single half-open probe + success_threshold). REMAINING: IndexReader cache guard, POST-retry idempotency, bootstrap/reload key-form normalization.",
     "status": "in-progress",
     "depends_on": []
+  },
+  {
+    "id": "B-062",
+    "slug": "incremental-new-files",
+    "title": "woods:incremental never adds new units — unmapped changed files dropped silently",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/extractor.rb", "lib/woods/dependency_graph.rb", "lib/tasks/woods.rake"],
+    "description": "extract_changed resolved changed files only through the persisted graph's file_map, so a brand-new file (no file_map entry) mapped to zero units and vanished with exit 0 — every file added between full extracts was invisible to progressive-cataloging CI pipelines (1.6.0 field report, finding 1). Fixed: new files are classified by path (NEW_FILE_TYPE_PATTERNS), extracted as fresh units (class-based types resolve via Zeitwerk cpath_expected_at with a conventional fallback), registered, persisted, and counted; files that exist but map to no unit are reported via Extractor#unhandled_changed_files and a rake WARNING instead of being dropped. End-to-end covered in the booted-app spec.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-063",
+    "slug": "lazy-component-roots",
+    "title": "Full extraction misses Phlex components not constantized at boot (app/views is never eager-loaded)",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/extractor.rb", "lib/woods.rb", "lib/woods/extractors/phlex_extractor.rb"],
+    "description": "Descendants-based component extraction only saw classes constantized as a boot side effect: app/views is excluded from Rails eager loading, so phlex-rails components referenced only during rendering never loaded and got no unit (1.6.0 field report, finding 2). Fixed: after safe_eager_load!, the extractor constantizes every .rb under app/views plus config.extraction_eager_load_paths via the loader's cpath_expected_at (Zeitwerk's eager_load_dir is unusable here — it no-ops for do_not_eager_load dirs and for already-eager-loaded loaders; classic mode falls back to path-convention camelize). Also guards PhlexExtractor against emitting units with a null file_path (mirrors ViewComponentExtractor).",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-064",
+    "slug": "stale-unit-file-sweep",
+    "title": "Full extraction never sweeps stale unit files — woods:validate count drift + stale-unit resurrection",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/extractor.rb"],
+    "description": "The output dir is never wiped between full extractions, so per-unit JSON for deleted/renamed classes lingered forever: woods:validate reported stable expected-vs-found off-by-N warnings, and the incremental path's regenerate_type_index (a disk glob) resurrected the stale units into _index.json (1.6.0 field report, finding 3). Fixed: write_results sweeps unexpected *.json from each type dir after writing (skipping _index.json, rails_source — co-owned by woods:extract_framework — and any type that produced zero units this run, so a transient extractor failure can't wipe a good directory).",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-065",
+    "slug": "incremental-deleted-files",
+    "title": "Incremental extraction leaves stale units when a changed file was deleted",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/extractor.rb"],
+    "description": "Discovered while fixing B-062: when CHANGED_FILES includes a deleted file that IS in the file_map, affected_by finds its unit but re_extract_unit returns early (File.exist? fails), leaving the deleted class's unit in the index, graph, and counts until the next full extraction. Incremental should unregister the unit, delete its JSON, and refresh the type index (mind multi-unit files where file_map holds only the last registrant). Acceptance: full extract, delete a model file, run incremental with the deleted path, unit is gone from _index.json/graph/manifest and woods:validate stays clean.",
+    "status": "ready",
+    "depends_on": []
   }
 ]

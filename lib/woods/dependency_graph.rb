@@ -122,6 +122,18 @@ module Woods
       affected.to_a
     end
 
+    # Check whether any registered unit claims the given file path.
+    #
+    # Paths are compared exactly as stored at registration time — the
+    # persisted file_map holds absolute paths (full extraction registers
+    # units before Phase 4.5 path normalization).
+    #
+    # @param file_path [String] Absolute file path
+    # @return [Boolean] true if a unit is registered for this file
+    def tracks_file?(file_path)
+      @file_map.key?(file_path)
+    end
+
     # Check if a node exists in the graph by exact identifier.
     #
     # @param identifier [String] Unit identifier to check

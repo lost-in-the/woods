@@ -42,6 +42,10 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = dummy_root
       WoodsDummyApplication.config.secret_key_base = 'woods-dummy-secret'
+      # Autoloadable but NOT eager-loaded — mirrors phlex-rails, which
+      # autoloads components from app/views while Rails keeps app/views out
+      # of eager loading. Exercises the extractor's lazy-root eager load.
+      WoodsDummyApplication.config.autoload_paths += [File.join(dummy_root, 'app/views')]
       WoodsDummyApplication.initialize!
     end
 
@@ -137,6 +141,82 @@ RSpec.describe 'Booted-app extraction', :booted_app do
   it 'records git provenance (resolved or "unknown"), never crashing on a non-repo dummy' do
     expect(manifest).to have_key('git_branch')
     expect(manifest).to have_key('git_sha')
+  end
+
+  it 'extracts Phlex-style components under app/views that are never referenced at boot' do
+    # LeafComponent lives in an autoload-only root (app/views) and nothing
+    # constantizes it during boot — descendants-based extraction only sees
+    # it because the extractor eager loads lazy roots itself.
+    expect(index_for(:components).map { |u| u['identifier'] }).to include('LeafComponent')
+  end
+
+  it 'emits no component unit with a null file_path' do
+    expect(units_in(:components).select { |u| u['file_path'].nil? }).to be_empty
+  end
+
+  # Incremental extraction of a file added after the full extraction — the
+  # brand-new file has no file_map entry, so it must be extracted as a fresh
+  # unit rather than silently dropped. Runs against a copy of the output dir
+  # so the full-extraction assertions above stay untouched (random ordering).
+  describe 'incremental extraction of brand-new files' do
+    before(:all) do
+      @incr_output_dir = Dir.mktmpdir('woods_booted_incremental')
+      FileUtils.cp_r(File.join(@output_dir, '.'), @incr_output_dir)
+
+      @new_model_path = File.join(WoodsDummyApplication.config.root, 'app/models/sprout.rb')
+      File.write(@new_model_path, <<~RUBY)
+        class Sprout < ApplicationRecord
+          self.table_name = 'posts'
+        end
+      RUBY
+      # Zeitwerk indexed app/models at boot; a file added afterwards is only
+      # discoverable once loaded — in a real host the new code is loaded at
+      # boot before woods:incremental runs.
+      load @new_model_path
+
+      # An existing file no unit maps to — must be *reported*, not dropped.
+      @structure_path = File.join(WoodsDummyApplication.config.root, 'db/structure.sql')
+      FileUtils.mkdir_p(File.dirname(@structure_path))
+      File.write(@structure_path, '-- regenerated schema dump')
+
+      @incremental_extractor = Woods::Extractor.new(output_dir: @incr_output_dir)
+      @incremental_affected = @incremental_extractor.extract_changed(
+        ['app/models/sprout.rb', 'db/structure.sql']
+      )
+    end
+
+    after(:all) do
+      FileUtils.rm_f(@new_model_path) if @new_model_path
+      FileUtils.rm_f(@structure_path) if @structure_path
+      Object.send(:remove_const, :Sprout) if defined?(Sprout)
+      FileUtils.rm_rf(@incr_output_dir) if @incr_output_dir
+    end
+
+    def incr_index_for(type)
+      path = File.join(@incr_output_dir, type.to_s, '_index.json')
+      File.exist?(path) ? JSON.parse(File.read(path)) : []
+    end
+
+    it 'extracts the new file as a fresh unit and reports it as affected' do
+      expect(@incremental_affected).to include('Sprout')
+      expect(incr_index_for(:models).map { |u| u['identifier'] }).to include('Sprout')
+    end
+
+    it 'raises the manifest unit count to include the new unit' do
+      before_manifest = JSON.parse(File.read(File.join(@output_dir, 'manifest.json')))
+      after_manifest = JSON.parse(File.read(File.join(@incr_output_dir, 'manifest.json')))
+      expect(after_manifest['total_units']).to be > before_manifest['total_units']
+    end
+
+    it 'registers the new unit in the persisted dependency graph' do
+      graph = JSON.parse(File.read(File.join(@incr_output_dir, 'dependency_graph.json')))
+      expect(graph['nodes']).to have_key('Sprout')
+    end
+
+    it 'reports files it cannot map to any unit instead of dropping them silently' do
+      expect(@incremental_extractor.unhandled_changed_files.map { |f| File.basename(f) })
+        .to include('structure.sql')
+    end
   end
 
   # End-to-end Obsidian export (B-056) against the *real* extraction output above

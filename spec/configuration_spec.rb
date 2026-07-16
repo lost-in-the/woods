@@ -36,6 +36,10 @@ RSpec.describe Woods::Configuration do
       expect(config.gem_configs).to eq({})
     end
 
+    it 'sets extraction_eager_load_paths to an empty array' do
+      expect(config.extraction_eager_load_paths).to eq([])
+    end
+
     it 'sets context_format to :markdown' do
       expect(config.context_format).to eq(:markdown)
     end

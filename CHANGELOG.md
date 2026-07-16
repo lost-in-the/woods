@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`woods:incremental` now extracts brand-new files as fresh units** (B-062). Changed
+  files with no `file_map` entry (anything added since the last full extraction) used to
+  map to zero units and vanish with exit 0 — invisible to per-merge CI pipelines. New
+  files are now classified by path and extracted as new units (class-based types resolve
+  their constant via Zeitwerk's `cpath_expected_at`, with a naming-convention fallback);
+  files that exist but map to no unit type are surfaced via
+  `Extractor#unhandled_changed_files` and a `WARNING` block in the rake output instead of
+  being dropped silently.
+- **Full extraction now sees Phlex components that aren't loaded at boot** (B-063).
+  Rails never eager-loads `app/views`, so phlex-rails components referenced only during
+  rendering were invisible to descendants-based extraction. After `eager_load!`, the
+  extractor now constantizes every `.rb` under `app/views` — plus any directories in the
+  new `config.extraction_eager_load_paths` — through the autoloader. (Zeitwerk's
+  `eager_load_dir` can't do this: it silently no-ops for `do_not_eager_load` directories
+  and for already-eager-loaded loaders.) `PhlexExtractor` also no longer emits units with
+  a `null` `file_path` when a component's source can't be resolved (mirrors
+  `ViewComponentExtractor`).
+- **Full extraction sweeps stale per-unit JSON files** (B-064). Unit files for classes
+  deleted or renamed since the previous run lingered forever, producing stable
+  `woods:validate` expected-vs-found count drift and letting the incremental path's
+  index regeneration resurrect dead units. `write_results` now deletes unexpected unit
+  files per type dir — skipping `rails_source` (co-owned by `woods:extract_framework`)
+  and any type that extracted zero units this run, so a transient extractor failure
+  can't wipe a good directory.
+
+### Added
+
+- `config.extraction_eager_load_paths` — extra autoload roots (relative to `Rails.root`
+  or absolute) to force-load before extraction, for component/class roots that the host
+  app autoloads but never eager-loads.
+
 ## [1.6.0] - 2026-07-16
 
 ### Added

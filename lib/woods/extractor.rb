@@ -203,13 +203,57 @@ module Woods
     # GraphQL types all use the same extractor method.
     GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
 
+    # Ordered path patterns (matched against Rails.root-relative paths)
+    # mapping brand-new changed files — files with no file_map entry yet —
+    # to the unit type to extract them as. First match wins, so concern
+    # subdirectories must precede their parent model/controller patterns.
+    NEW_FILE_TYPE_PATTERNS = [
+      [%r{\Aapp/(?:models|controllers)/concerns/.+\.rb\z}, :concern],
+      [%r{\Aapp/models/.+\.rb\z}, :model],
+      [%r{\Aapp/controllers/.+\.rb\z}, :controller],
+      [%r{\Aapp/(?:services|interactors|operations|commands|use_cases)/.+\.rb\z}, :service],
+      [%r{\Aapp/(?:components|views)/.+\.rb\z}, :component],
+      [%r{\Aapp/(?:jobs|workers)/.+\.rb\z}, :job],
+      [%r{\Aapp/mailers/.+\.rb\z}, :mailer],
+      [%r{\Aapp/graphql/.+\.rb\z}, :graphql_type],
+      [%r{\Aapp/(?:serializers|blueprinters)/.+\.rb\z}, :serializer],
+      [%r{\Aapp/(?:decorators|presenters|form_objects)/.+\.rb\z}, :decorator],
+      [%r{\Aapp/policies/.+\.rb\z}, :policy],
+      [%r{\Aapp/validators/.+\.rb\z}, :validator],
+      [%r{\Aapp/channels/.+\.rb\z}, :action_cable_channel],
+      [%r{\Aapp/views/.+\.(?:erb|haml|slim)\z}, :view_template],
+      [%r{\Adb/migrate/.+\.rb\z}, :migration],
+      [%r{\A(?:spec|test)/.+\.rb\z}, :test_mapping],
+      [%r{\Alib/.+\.rb\z}, :lib]
+    ].freeze
+
+    # Autoload roots that Rails excludes from eager loading by default but
+    # that can hold extractable classes. app/views is never eager-loaded,
+    # yet phlex-rails autoloads components from it — a component that is
+    # not constantized during boot (e.g. only referenced while rendering)
+    # would be invisible to descendants-based extractors without this.
+    LAZY_EAGER_LOAD_DIRS = %w[app/views].freeze
+
+    # Types whose output directory is co-owned by another writer: the
+    # woods:extract_framework task writes rails_source units with its own
+    # filename scheme, so the stale-file sweep must leave them alone.
+    SWEEP_EXEMPT_TYPES = %i[rails_source].freeze
+
     attr_reader :output_dir, :dependency_graph
+
+    # Changed files from the last {#extract_changed} run that exist on disk
+    # but could not be mapped to any unit (no file_map entry and no
+    # extractable type) — they need a full extraction to be indexed.
+    #
+    # @return [Array<String>] Absolute file paths
+    attr_reader :unhandled_changed_files
 
     def initialize(output_dir: nil)
       @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/woods'))
       @dependency_graph = DependencyGraph.new
       @results = {}
       @extractors = {}
+      @unhandled_changed_files = []
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -307,15 +351,24 @@ module Woods
         Pathname.new(f).absolute? ? f : Rails.root.join(f).to_s
       end
 
-      # Compute affected units
+      # Compute affected units. Files with no file_map entry are brand-new
+      # (added since the last full extraction) — affected_by cannot see
+      # them, so they get their own extraction pass below.
       affected_ids = @dependency_graph.affected_by(absolute_files)
-      Rails.logger.info "[Woods] #{changed_files.size} changed files affect #{affected_ids.size} units"
+      new_files = absolute_files.reject { |f| @dependency_graph.tracks_file?(f) }
+      Rails.logger.info(
+        "[Woods] #{changed_files.size} changed files affect #{affected_ids.size} units " \
+        "(#{new_files.size} not yet indexed)"
+      )
 
       # Re-extract affected units
       affected_types = Set.new
       affected_ids.each do |unit_id|
         re_extract_unit(unit_id, affected_types: affected_types)
       end
+
+      # Extract brand-new files as fresh units
+      affected_ids += extract_new_files(new_files, affected_types: affected_types)
 
       # Regenerate type indexes for affected types
       affected_types.each do |type_key|
@@ -350,11 +403,74 @@ module Woods
     # so graphql/ before models/ means models never load. The fallback
     # loads only the directories we actually need for extraction.
     def safe_eager_load!
-      Rails.application.eager_load!
-    rescue NameError => e
-      Rails.logger.warn "[Woods] eager_load! hit NameError: #{e.message}"
-      Rails.logger.warn '[Woods] Falling back to per-directory eager loading'
-      eager_load_extraction_directories
+      begin
+        Rails.application.eager_load!
+      rescue NameError => e
+        Rails.logger.warn "[Woods] eager_load! hit NameError: #{e.message}"
+        Rails.logger.warn '[Woods] Falling back to per-directory eager loading'
+        eager_load_extraction_directories
+      end
+
+      eager_load_lazy_roots
+    end
+
+    # Eager load autoloadable roots that eager_load! skips: app/views
+    # (see LAZY_EAGER_LOAD_DIRS) plus any host-configured
+    # extraction_eager_load_paths. Files that aren't managed by the main
+    # autoloader (e.g. a plain-ERB app/views) or that fail to load are
+    # skipped — extraction proceeds with whatever loaded.
+    def eager_load_lazy_roots
+      loader = Rails.autoloaders.main
+
+      configured = Array(Woods.configuration&.extraction_eager_load_paths).map(&:to_s)
+      (LAZY_EAGER_LOAD_DIRS + configured).uniq.each do |dir|
+        path = Pathname.new(dir)
+        path = Rails.root.join(dir) unless path.absolute?
+        next unless path.directory?
+
+        constantize_ruby_files_under(path, loader)
+      end
+    end
+
+    # Load every Ruby file under +dir+ by constantizing the constant the
+    # file is expected to define — Zeitwerk resolves the autoload, so the
+    # class materializes for descendants-based extraction.
+    #
+    # Zeitwerk's eager_load_dir can NOT be used here — it silently no-ops
+    # in both situations this method exists for: directories marked
+    # do_not_eager_load (Rails marks every autoload-only path this way,
+    # which is exactly what app/views is), and loaders that already
+    # finished a full eager load (extraction runs right after eager_load!).
+    #
+    # @param dir [Pathname] Directory to load
+    # @param loader [Zeitwerk::Loader, nil] The main autoloader (nil under
+    #   classic autoloading, where constantize still resolves via const_missing)
+    # @return [void]
+    def constantize_ruby_files_under(dir, loader)
+      Dir.glob(dir.join('**/*.rb').to_s).each do |file|
+        expected_cpath_for(file, dir, loader)&.constantize
+      rescue NameError, LoadError => e
+        Rails.logger.warn "[Woods] Skipped #{file}: #{e.message}"
+      rescue StandardError => e
+        # Zeitwerk::Error — the file isn't managed by the main loader
+        # (e.g. a stray .rb under a plain-ERB app/views). Not extractable.
+        Rails.logger.debug { "[Woods] Skipped #{file}: #{e.class}: #{e.message}" }
+      end
+    end
+
+    # Constant path a file is expected to define: Zeitwerk's own mapping
+    # when available, else the plain convention (path relative to the
+    # autoload root, camelized) — which is also how classic-mode
+    # autoloading resolves it.
+    #
+    # @param file [String] Absolute path of a .rb file under +dir+
+    # @param dir [Pathname] The autoload root being loaded
+    # @param loader [Zeitwerk::Loader, nil]
+    # @return [String, nil]
+    def expected_cpath_for(file, dir, loader)
+      return loader.cpath_expected_at(file) if loader.respond_to?(:cpath_expected_at)
+
+      file.delete_prefix("#{dir}/").delete_suffix('.rb').camelize
     end
 
     # Load classes from each extraction-relevant app/ subdirectory individually.
@@ -736,6 +852,7 @@ module Woods
     def write_results
       @results.each do |type, units|
         type_dir = @output_dir.join(type.to_s)
+        FileUtils.mkdir_p(type_dir)
 
         units.each do |unit|
           File.write(
@@ -749,7 +866,41 @@ module Woods
           type_dir.join('_index.json'),
           json_serialize(type_index_entries(units))
         )
+
+        sweep_stale_unit_files(type, type_dir, units)
       end
+    end
+
+    # Delete per-unit JSON files left over from previous runs whose units no
+    # longer exist (deleted or renamed app classes). The output dir is never
+    # wiped between full extractions, so without this sweep woods:validate
+    # reports expected-vs-found count drift forever, and the incremental
+    # path's {#regenerate_type_index} (a disk glob) resurrects the stale
+    # units into _index.json.
+    #
+    # Skipped when this run produced zero units of the type — a transient
+    # extractor failure (extract_all_concurrent rescues to []) must not
+    # wipe a previously good type directory.
+    #
+    # @param type [Symbol] Result type (plural EXTRACTORS key)
+    # @param type_dir [Pathname] The type's output directory
+    # @param units [Array<ExtractedUnit>] Units written this run
+    # @return [void]
+    def sweep_stale_unit_files(type, type_dir, units)
+      return if SWEEP_EXEMPT_TYPES.include?(type) || units.empty?
+
+      expected = units.to_set { |u| collision_safe_filename(u.identifier) }
+      swept = 0
+
+      Dir[type_dir.join('*.json').to_s].each do |file|
+        basename = File.basename(file)
+        next if basename == '_index.json' || expected.include?(basename)
+
+        File.delete(file)
+        swept += 1
+      end
+
+      Rails.logger.info "[Woods] Swept #{swept} stale #{type} unit file(s)" if swept.positive?
     end
 
     # Build the `_index.json` entry list for a set of in-memory units.
@@ -1127,29 +1278,179 @@ module Woods
 
       return unless unit
 
-      # Update dependency graph. Register BEFORE normalizing the path —
-      # the graph's file_map stores absolute paths (affected_by matches
-      # changed files against them), exactly as full extraction registers
-      # in Phase 1 and only normalizes in Phase 4.5.
-      @dependency_graph.register(unit)
+      persist_incremental_unit(unit, extractor_key)
 
       # Track which type was affected
       affected_types&.add(extractor_key)
 
-      # Unit JSON carries Rails.root-relative paths (full extraction's
-      # Phase 4.5); writing the raw absolute source_location here would
-      # leak container-absolute paths into the index after incremental runs.
+      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
+    end
+
+    # Register an incrementally (re-)extracted unit in the graph and write
+    # its JSON. Registration happens BEFORE normalizing the path — the
+    # graph's file_map stores absolute paths (affected_by matches changed
+    # files against them), exactly as full extraction registers in Phase 1
+    # and only normalizes in Phase 4.5. Unit JSON carries Rails.root-relative
+    # paths; writing the raw absolute source_location would leak
+    # container-absolute paths into the index after incremental runs.
+    #
+    # @param unit [ExtractedUnit] The freshly extracted unit
+    # @param extractor_key [Symbol] Plural EXTRACTORS key (output subdirectory)
+    # @return [void]
+    def persist_incremental_unit(unit, extractor_key)
+      @dependency_graph.register(unit)
+
       unit.file_path = normalize_file_path(unit.file_path)
 
-      # Write updated unit
       type_dir = @output_dir.join(extractor_key.to_s)
-
+      FileUtils.mkdir_p(type_dir)
       File.write(
         type_dir.join(collision_safe_filename(unit.identifier)),
         json_serialize(unit.to_h)
       )
+    end
 
-      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
+    # ──────────────────────────────────────────────────────────────────────
+    # Incremental Extraction of New Files
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Extract changed files that have no unit in the graph yet (brand-new
+    # files added since the last full extraction). Deleted files are skipped
+    # (nothing to extract, no unit to update); files that exist but can't be
+    # mapped to any unit are recorded in {#unhandled_changed_files} so
+    # callers can surface the coverage gap instead of dropping it silently.
+    #
+    # @param new_files [Array<String>] Absolute paths with no file_map entry
+    # @param affected_types [Set, nil] Accumulator for touched extractor keys
+    # @return [Array<String>] Identifiers of newly extracted units
+    def extract_new_files(new_files, affected_types: nil)
+      @unhandled_changed_files = []
+      extracted = []
+
+      new_files.each do |file_path|
+        next unless File.file?(file_path)
+        next if @dependency_graph.tracks_file?(file_path)
+
+        unit = extract_new_file(file_path, affected_types: affected_types)
+        if unit
+          extracted << unit.identifier
+        else
+          @unhandled_changed_files << file_path
+        end
+      end
+
+      unless @unhandled_changed_files.empty?
+        Rails.logger.warn(
+          "[Woods] #{@unhandled_changed_files.size} changed file(s) could not be mapped to any unit " \
+          '— run a full extraction (woods:extract) to index them:'
+        )
+        @unhandled_changed_files.each { |f| Rails.logger.warn "[Woods]   #{f}" }
+      end
+
+      extracted
+    end
+
+    # Extract a single brand-new file as a fresh unit. The unit type is
+    # inferred from the file's path (NEW_FILE_TYPE_PATTERNS); class-based
+    # extractors resolve the class via Zeitwerk's expected constant path
+    # (with a conventional camelize fallback).
+    #
+    # @param file_path [String] Absolute path to the new file
+    # @param affected_types [Set, nil] Accumulator for touched extractor keys
+    # @return [ExtractedUnit, nil] The extracted unit, or nil when the file
+    #   couldn't be mapped to a unit
+    def extract_new_file(file_path, affected_types: nil)
+      type = detect_new_file_type(file_path)
+      return nil unless type
+
+      klass = constant_for_new_file(file_path) if CLASS_BASED.key?(type)
+      return nil if CLASS_BASED.key?(type) && klass.nil?
+
+      # A new file under a component root may be a ViewComponent rather
+      # than a Phlex component — route it to the matching extractor.
+      type = :view_component if type == :component && view_component_descendant?(klass)
+
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
+      extractor = EXTRACTORS[extractor_key]&.new
+      return nil unless extractor
+
+      unit = if (method = CLASS_BASED[type])
+               extractor.public_send(method, klass)
+             elsif (method = FILE_BASED[type])
+               extractor.public_send(method, file_path)
+             elsif GRAPHQL_TYPES.include?(type)
+               extractor.extract_graphql_file(file_path)
+             end
+      return nil unless unit
+
+      persist_incremental_unit(unit, extractor_key)
+      affected_types&.add(extractor_key)
+
+      Rails.logger.info "[Woods] Extracted new unit #{unit.identifier} from #{file_path}"
+      unit
+    rescue StandardError => e
+      Rails.logger.error "[Woods] Failed to extract new file #{file_path}: #{e.message}"
+      nil
+    end
+
+    # Infer the unit type for a file that isn't in the graph yet.
+    #
+    # @param file_path [String] Absolute file path
+    # @return [Symbol, nil] Unit type, or nil when no pattern matches
+    def detect_new_file_type(file_path)
+      relative = normalize_file_path(file_path)
+      # Paths outside Rails.root come back unchanged (still absolute) and
+      # can't match the root-relative patterns.
+      return nil if relative.nil? || Pathname.new(relative).absolute?
+
+      match = NEW_FILE_TYPE_PATTERNS.find { |(pattern, _type)| relative.match?(pattern) }
+      match && match[1]
+    end
+
+    # Resolve the class a brand-new file is expected to define, preferring
+    # Zeitwerk's own path→constant mapping over naming conventions.
+    #
+    # @param file_path [String] Absolute file path
+    # @return [Class, Module, nil] The loaded constant, or nil
+    def constant_for_new_file(file_path)
+      name = zeitwerk_cpath_for(file_path) || conventional_cpath_for(file_path)
+      return nil unless name
+
+      begin
+        name.constantize
+      rescue NameError, LoadError
+        nil
+      end
+    end
+
+    # @param file_path [String] Absolute file path
+    # @return [String, nil] Zeitwerk's expected constant path, or nil when
+    #   unsupported (Zeitwerk < 2.6.1) or the file isn't managed by the loader
+    def zeitwerk_cpath_for(file_path)
+      loader = Rails.autoloaders.main
+      return nil unless loader.respond_to?(:cpath_expected_at)
+
+      loader.cpath_expected_at(file_path)
+    rescue StandardError
+      nil
+    end
+
+    # Conventional path→constant fallback: strip the app/<subdir>/ prefix
+    # and camelize (app/models/library/book.rb → Library::Book).
+    #
+    # @param file_path [String] Absolute file path
+    # @return [String, nil]
+    def conventional_cpath_for(file_path)
+      relative = normalize_file_path(file_path)
+      return nil unless relative&.start_with?('app/')
+
+      relative.sub(%r{\Aapp/[^/]+/}, '').delete_suffix('.rb').camelize
+    end
+
+    # @param klass [Class, Module, nil]
+    # @return [Boolean] true when the class is a ViewComponent subclass
+    def view_component_descendant?(klass)
+      defined?(ViewComponent::Base) && klass.is_a?(Class) && klass < ViewComponent::Base
     end
   end
 end

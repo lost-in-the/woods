@@ -124,6 +124,7 @@ module Woods
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
+                  :extraction_eager_load_paths,
                   :session_tracer_enabled, :session_tracer_allow_production,
                   :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_path, :console_mcp_token,
@@ -154,6 +155,11 @@ module Woods
       @concurrent_extraction = false
       @precompute_flows = false
       @extract_navigation_edges = true
+      # Extra autoload roots to eager load before extraction, relative to
+      # Rails.root (absolute paths also accepted). For classes that are
+      # autoloadable but not eager-loaded by the host (e.g. Phlex components
+      # under a custom root) — app/views is always attempted by default.
+      @extraction_eager_load_paths = []
       @enable_snapshots = false
       @context_format = :markdown
       @session_tracer_enabled = false

@@ -30,6 +30,7 @@ RSpec.describe Woods::Extractor do
 
     before do
       allow(Rails).to receive(:application).and_return(app_double)
+      allow(extractor).to receive(:eager_load_lazy_roots)
     end
 
     it 'calls eager_load! successfully when no error' do
@@ -50,6 +51,119 @@ RSpec.describe Woods::Extractor do
       expect(app_double).to receive(:eager_load!).and_raise(RuntimeError.new('something else'))
 
       expect { extractor.send(:safe_eager_load!) }.to raise_error(RuntimeError, 'something else')
+    end
+
+    it 'eager loads lazy roots after a successful eager_load!' do
+      allow(app_double).to receive(:eager_load!)
+      expect(extractor).to receive(:eager_load_lazy_roots)
+
+      extractor.send(:safe_eager_load!)
+    end
+
+    it 'eager loads lazy roots even after the NameError fallback' do
+      allow(app_double).to receive(:eager_load!).and_raise(NameError.new('uninitialized constant GraphQL'))
+      allow(extractor).to receive(:eager_load_extraction_directories)
+      expect(extractor).to receive(:eager_load_lazy_roots)
+
+      extractor.send(:safe_eager_load!)
+    end
+  end
+
+  # ── eager_load_lazy_roots ────────────────────────────────────────────
+
+  describe '#eager_load_lazy_roots' do
+    let(:loader) { double('Zeitwerk::Loader') }
+    let(:autoloaders) { double('Autoloaders', main: loader) }
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      allow(Rails).to receive(:autoloaders).and_return(autoloaders)
+      allow(loader).to receive(:respond_to?).with(:cpath_expected_at).and_return(true)
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
+    def component_file(dir, name)
+      FileUtils.mkdir_p(dir)
+      path = File.join(dir, name)
+      File.write(path, '# component')
+      path
+    end
+
+    it 'constantizes the Zeitwerk-expected constant for each .rb file under app/views' do
+      views_dir = File.join(tmpdir, 'app', 'views')
+      file = component_file(views_dir, 'leaf_component.rb')
+
+      stub_const('LeafComponent', Class.new)
+      expect(loader).to receive(:cpath_expected_at).with(file).and_return('LeafComponent')
+
+      extractor.send(:eager_load_lazy_roots)
+    end
+
+    it 'skips app/views when the directory does not exist' do
+      expect(loader).not_to receive(:cpath_expected_at)
+
+      extractor.send(:eager_load_lazy_roots)
+    end
+
+    it 'includes host-configured extraction_eager_load_paths (relative to Rails.root)' do
+      custom_dir = File.join(tmpdir, 'app', 'view_objects')
+      file = component_file(custom_dir, 'card.rb')
+      Woods.configuration.extraction_eager_load_paths = ['app/view_objects']
+
+      stub_const('Card', Class.new)
+      expect(loader).to receive(:cpath_expected_at).with(file).and_return('Card')
+
+      extractor.send(:eager_load_lazy_roots)
+    end
+
+    it 'accepts absolute configured paths' do
+      custom_dir = File.join(tmpdir, 'engines', 'shop', 'app', 'views')
+      file = component_file(custom_dir, 'card.rb')
+      Woods.configuration.extraction_eager_load_paths = [custom_dir]
+
+      stub_const('Card', Class.new)
+      expect(loader).to receive(:cpath_expected_at).with(file).and_return('Card')
+
+      extractor.send(:eager_load_lazy_roots)
+    end
+
+    it 'rescues per-file loader errors and continues (unmanaged files must not abort the pass)' do
+      views_dir = File.join(tmpdir, 'app', 'views')
+      unmanaged = component_file(views_dir, 'a_unmanaged.rb')
+      managed = component_file(views_dir, 'b_leaf_component.rb')
+
+      allow(loader).to receive(:cpath_expected_at).with(unmanaged)
+                                                  .and_raise(StandardError.new('not managed by this loader'))
+      stub_const('BLeafComponent', Class.new)
+      expect(loader).to receive(:cpath_expected_at).with(managed).and_return('BLeafComponent')
+
+      expect { extractor.send(:eager_load_lazy_roots) }.not_to raise_error
+    end
+
+    it 'rescues NameError from a broken file and continues' do
+      views_dir = File.join(tmpdir, 'app', 'views')
+      broken = component_file(views_dir, 'broken.rb')
+
+      allow(loader).to receive(:cpath_expected_at).with(broken).and_return('DoesNotExistAnywhere')
+
+      expect { extractor.send(:eager_load_lazy_roots) }.not_to raise_error
+    end
+
+    it 'falls back to the path convention when the loader lacks cpath_expected_at (classic mode)' do
+      component_file(File.join(tmpdir, 'app', 'views'), 'leaf_component.rb')
+      allow(loader).to receive(:respond_to?).with(:cpath_expected_at).and_return(false)
+      expect(loader).not_to receive(:cpath_expected_at)
+
+      # 'leaf_component.rb' relative to app/views camelizes to LeafComponent;
+      # the constantize resolving (here via stub) stands in for classic
+      # autoloading's const_missing resolution.
+      stub_const('LeafComponent', Class.new)
+      expect { extractor.send(:eager_load_lazy_roots) }.not_to raise_error
     end
   end
 
@@ -321,6 +435,82 @@ RSpec.describe Woods::Extractor do
       expect(extractor).to receive(:precompute_flows).ordered
 
       extractor.extract_all
+    end
+  end
+
+  # ── write_results — stale unit file sweep ──────────────────────────
+
+  describe '#write_results stale sweep' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor)  { described_class.new(output_dir: output_dir) }
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after do
+      Woods.configuration = @original_config
+    end
+
+    def stale_file(type, name)
+      dir = File.join(output_dir, type.to_s)
+      FileUtils.mkdir_p(dir)
+      path = File.join(dir, name)
+      File.write(path, JSON.generate(identifier: 'Stale', chunks: []))
+      path
+    end
+
+    def make_unit(type:, identifier:)
+      Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: "app/#{type}s/x.rb")
+    end
+
+    it 'deletes unit files from previous runs that no longer correspond to a unit' do
+      stale = stale_file(:models, 'Deleted_abcd1234.json')
+      extractor.instance_variable_set(:@results, { models: [make_unit(type: :model, identifier: 'User')] })
+
+      extractor.send(:write_results)
+
+      expect(File.exist?(stale)).to be false
+      index = JSON.parse(File.read(File.join(output_dir, 'models', '_index.json')))
+      expect(index.map { |e| e['identifier'] }).to eq(['User'])
+      # Exactly one unit file + _index.json remain — validate's file count
+      # now matches the manifest count.
+      files = Dir[File.join(output_dir, 'models', '*.json')].map { |f| File.basename(f) }
+      expect(files.size).to eq(2)
+    end
+
+    it 'keeps current unit files and _index.json' do
+      unit = make_unit(type: :model, identifier: 'User')
+      extractor.instance_variable_set(:@results, { models: [unit] })
+      extractor.send(:write_results)
+
+      # Re-run with the same unit — nothing should be swept
+      extractor.send(:write_results)
+      current = extractor.send(:collision_safe_filename, 'User')
+      expect(File.exist?(File.join(output_dir, 'models', current))).to be true
+      expect(File.exist?(File.join(output_dir, 'models', '_index.json'))).to be true
+    end
+
+    it 'does not sweep a type that produced zero units this run (transient extractor failure)' do
+      stale = stale_file(:models, 'Survivor_abcd1234.json')
+      extractor.instance_variable_set(:@results, { models: [] })
+
+      extractor.send(:write_results)
+
+      expect(File.exist?(stale)).to be true
+    end
+
+    it 'does not sweep rails_source (co-owned by woods:extract_framework)' do
+      stale = stale_file(:rails_source, 'rails__active_record.json')
+      extractor.instance_variable_set(
+        :@results, { rails_source: [make_unit(type: :rails_source, identifier: 'rails/active_model')] }
+      )
+
+      extractor.send(:write_results)
+
+      expect(File.exist?(stale)).to be true
     end
   end
 
