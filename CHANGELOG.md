@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-07-22
+
+### Fixed
+
+- **Incremental extraction crash on multi-unit files.** `woods:incremental` raised
+  `NoMethodError: undefined method 'identifier' for an instance of Array` when re-extracting a
+  unit whose extractor returns several units from one file (a `.rake` file defining multiple
+  tasks; i18n, migration, and lib files are shaped the same way). `Extractor#re_extract_unit`
+  now normalizes the extractor result to an array and registers and writes each unit, matching
+  how full extraction already handles per-type results. Full extraction was unaffected.
+
 ## [1.6.0] - 2026-07-16
 
 ### Added

@@ -1127,27 +1127,36 @@ module Woods
 
       return unless unit
 
-      # Update dependency graph. Register BEFORE normalizing the path —
-      # the graph's file_map stores absolute paths (affected_by matches
-      # changed files against them), exactly as full extraction registers
-      # in Phase 1 and only normalizes in Phase 4.5.
-      @dependency_graph.register(unit)
+      # File-based extractors can return several units from one file (a .rake
+      # file defining multiple tasks, etc.); class-based extractors return one.
+      # Normalize to an array so every unit is registered and written — passing
+      # an Array straight to DependencyGraph#register crashes on unit.identifier.
+      units = unit.is_a?(Array) ? unit : [unit]
+      return if units.empty?
 
       # Track which type was affected
       affected_types&.add(extractor_key)
 
-      # Unit JSON carries Rails.root-relative paths (full extraction's
-      # Phase 4.5); writing the raw absolute source_location here would
-      # leak container-absolute paths into the index after incremental runs.
-      unit.file_path = normalize_file_path(unit.file_path)
-
-      # Write updated unit
       type_dir = @output_dir.join(extractor_key.to_s)
 
-      File.write(
-        type_dir.join(collision_safe_filename(unit.identifier)),
-        json_serialize(unit.to_h)
-      )
+      units.each do |extracted|
+        # Update dependency graph. Register BEFORE normalizing the path —
+        # the graph's file_map stores absolute paths (affected_by matches
+        # changed files against them), exactly as full extraction registers
+        # in Phase 1 and only normalizes in Phase 4.5.
+        @dependency_graph.register(extracted)
+
+        # Unit JSON carries Rails.root-relative paths (full extraction's
+        # Phase 4.5); writing the raw absolute source_location here would
+        # leak container-absolute paths into the index after incremental runs.
+        extracted.file_path = normalize_file_path(extracted.file_path)
+
+        # Write updated unit
+        File.write(
+          type_dir.join(collision_safe_filename(extracted.identifier)),
+          json_serialize(extracted.to_h)
+        )
+      end
 
       Rails.logger.info "[Woods] Re-extracted #{unit_id}"
     end
