@@ -615,6 +615,40 @@ RSpec.describe Woods::Extractor do
       # The important thing is no error from the format check itself
       expect { extractor.send(:re_extract_unit, 'User') }.not_to raise_error
     end
+
+    it 'registers and writes every unit when a file-based extractor returns multiple units' do
+      # A single .rake file defines multiple tasks, so extract_rake_file returns
+      # an Array of units. re_extract_unit must fan out over them, not pass the
+      # Array straight to DependencyGraph#register.
+      require 'woods' # defines Woods.configuration (json_serialize reads pretty_json)
+      Woods.configuration ||= Woods::Configuration.new
+
+      rake_path = File.join(tmpdir, 'things.rake')
+      FileUtils.touch(rake_path)
+      # The type dir exists in real usage (created by the initial full extraction).
+      rake_dir = File.join(tmpdir, 'output', 'rake_tasks')
+      FileUtils.mkdir_p(rake_dir)
+
+      node = { type: 'rake_task', file_path: rake_path }
+      graph = extractor.instance_variable_get(:@dependency_graph)
+      allow(graph).to receive(:to_h).and_return({ nodes: { 'things:one' => node } })
+      allow(graph).to receive(:register).and_call_original
+
+      unit_one = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:one', file_path: rake_path)
+      unit_two = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:two', file_path: rake_path)
+
+      rake_extractor = instance_double(Woods::Extractors::RakeTaskExtractor)
+      allow(Woods::Extractors::RakeTaskExtractor).to receive(:new).and_return(rake_extractor)
+      allow(rake_extractor).to receive(:extract_rake_file).with(rake_path).and_return([unit_one, unit_two])
+
+      expect { extractor.send(:re_extract_unit, 'things:one') }.not_to raise_error
+
+      expect(graph).to have_received(:register).with(unit_one)
+      expect(graph).to have_received(:register).with(unit_two)
+
+      expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:one')))).to be(true)
+      expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:two')))).to be(true)
+    end
   end
 
   # ── deduplicate_results ──────────────────────────────────────────────
