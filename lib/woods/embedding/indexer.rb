@@ -75,7 +75,7 @@ module Woods
         Dir.glob(File.join(@output_dir, '**', '*.json')).filter_map do |path|
           next if File.basename(path) == 'checkpoint.json'
 
-          data = JSON.parse(File.read(path))
+          data = JSON.parse(File.read(path, encoding: 'UTF-8'))
           # Extraction output also contains index listings (_index.json arrays) and
           # summary files (manifest.json, dependency_graph.json, graph_analysis.json)
           # that live alongside per-unit JSON. Filter to the unit shape.
@@ -257,7 +257,7 @@ module Woods
         path = File.join(@output_dir, 'checkpoint.json')
         return {} unless File.exist?(path)
 
-        JSON.parse(File.read(path))
+        JSON.parse(File.read(path, encoding: 'UTF-8'))
       rescue JSON::ParserError
         {}
       end

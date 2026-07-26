@@ -40,6 +40,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [NOTION_INTEGRATION.md](NOTION_INTEGRATION.md) | Sync codebase data to Notion databases (Data Models + Columns schemas) |
 | [UNBLOCKED_INTEGRATION.md](UNBLOCKED_INTEGRATION.md) | Sync extraction data to an Unblocked collection — incremental sync, CI setup, API quirks |
 | [OBSIDIAN_INTEGRATION.md](OBSIDIAN_INTEGRATION.md) | Export to a self-contained Obsidian vault — graph view, Bases, agent sidecar, safe re-runs |
+| [EXPLORER.md](EXPLORER.md) | Interactive HTML explorer — screen catalog, request traces (text/Mermaid trees), impact + destroy-cascade analysis, routes audit, graph/ERD/table atlas, `data.json` agent payload |
 | [PG_QUERY_SPIKE.md](PG_QUERY_SPIKE.md) | Design doc — evaluation of optional `pg_query` AST identifier extraction for the Console MCP SQL scanner |
 | [self-analysis/](self-analysis/) | Woods analyzed by itself — extraction output, quality audit |
 

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Woods Explorer</title>
+<style>/*__WOODS_STYLE__*/</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">🌲</span>
+      <span class="brand-name">Woods Explorer</span>
+      <span class="brand-meta" id="app-meta"></span>
+    </div>
+    <div class="searchbox">
+      <input id="search" type="search" placeholder="Search units…  ( / )" autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="search-results"
+             aria-label="Search units" />
+      <ul id="search-results" role="listbox" aria-label="Search results" hidden></ul>
+    </div>
+    <nav class="tabs" aria-label="Views">
+      <button class="tab" data-view="home">Home</button>
+      <button class="tab" data-view="trace">Trace</button>
+      <button class="tab" data-view="impact">Impact</button>
+      <button class="tab" data-view="routes">Routes</button>
+      <button class="tab" data-view="atlas">Atlas</button>
+    </nav>
+    <div class="top-actions">
+      <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle color theme">◐</button>
+      <button id="help-btn" class="icon-btn" title="Keyboard shortcuts (?)" aria-label="Help and keyboard shortcuts">?</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside id="sidebar" aria-label="Filters and legend">
+      <section class="side-section" id="legend-section">
+        <h2>Families <button id="legend-reset" class="reset-link" hidden>show all</button></h2>
+        <div id="legend" role="group" aria-label="Filter by unit family"></div>
+      </section>
+      <section class="side-section" id="via-section">
+        <h2>Relationships <button id="via-reset" class="reset-link" hidden>show all</button></h2>
+        <div id="via-filter" role="group" aria-label="Filter by relationship kind"></div>
+      </section>
+      <section class="side-section" id="graph-options">
+        <h2>Display</h2>
+        <label class="opt"><input type="checkbox" id="opt-labels" checked> Node labels</label>
+        <label class="opt"><input type="checkbox" id="opt-orphans" checked> Unconnected units</label>
+        <label class="opt" id="opt-cap-row" hidden><input type="checkbox" id="opt-cap"> <span id="opt-cap-text">Top units only</span></label>
+        <div class="opt path-launch">
+          <button id="path-mode-btn" class="btn">Find a path…</button>
+        </div>
+      </section>
+      <section class="side-section" id="focus-section" hidden>
+        <h2>Focus</h2>
+        <div id="focus-info"></div>
+        <label class="opt">Depth
+          <input type="range" id="focus-depth" min="1" max="4" value="1" aria-label="Neighborhood depth">
+          <span id="focus-depth-value">1</span>
+        </label>
+        <button id="focus-clear" class="btn">Show everything</button>
+      </section>
+    </aside>
+
+    <main id="stage" aria-label="Explorer canvas">
+      <nav id="atlas-tabs" class="atlas-tabs" aria-label="Atlas views" hidden>
+        <button class="tab" data-view="overview">Overview</button>
+        <button class="tab" data-view="graph">Graph</button>
+        <button class="tab" data-view="erd">ERD</button>
+        <button class="tab" data-view="table">Table</button>
+      </nav>
+      <div id="path-bar" class="path-bar" hidden>
+        <span class="path-label">Path</span>
+        <input id="path-from" type="text" placeholder="From…" autocomplete="off" aria-label="Path start unit">
+        <span aria-hidden="true">→</span>
+        <input id="path-to" type="text" placeholder="To…" autocomplete="off" aria-label="Path end unit">
+        <button id="path-go" class="btn btn-primary">Trace</button>
+        <button id="path-close" class="icon-btn" aria-label="Close path finder">✕</button>
+        <span id="path-result" role="status"></span>
+      </div>
+      <div id="canvas-wrap">
+        <canvas id="canvas" tabindex="0" role="application"
+                aria-label="Dependency graph. Arrow keys move between nodes, Enter opens details, Escape clears selection."></canvas>
+        <div id="canvas-banner" class="canvas-banner" role="status" hidden></div>
+        <div id="canvas-toolbar">
+          <button class="icon-btn" id="zoom-in" aria-label="Zoom in">+</button>
+          <button class="icon-btn" id="zoom-out" aria-label="Zoom out">−</button>
+          <button class="icon-btn" id="zoom-fit" aria-label="Fit graph to view">⤢</button>
+        </div>
+        <div id="empty-note" class="empty-note" hidden></div>
+      </div>
+      <div id="overview" class="doc-view" hidden></div>
+      <div id="table-view" class="doc-view" hidden></div>
+      <div id="home" class="doc-view" hidden></div>
+      <div id="trace-view" class="doc-view" hidden></div>
+      <div id="impact-view" class="doc-view" hidden></div>
+      <div id="routes-view" class="doc-view" hidden></div>
+      <div id="review-view" class="doc-view" hidden></div>
+    </main>
+
+    <aside id="detail" aria-label="Unit details" hidden>
+      <div id="detail-body"></div>
+    </aside>
+  </div>
+
+  <footer class="statusbar">
+    <span id="status-counts"></span>
+    <span id="status-hint">Click a node to inspect it. Press ? for shortcuts.</span>
+    <span id="live-region" role="status" aria-live="polite" class="visually-hidden"></span>
+  </footer>
+
+  <dialog id="help">
+    <h2>Woods Explorer</h2>
+    <p>What this Rails application does, generated from a Woods extraction.
+    <strong>Home</strong> lists every screen; <strong>Trace</strong> shows what one
+    request does, step by step; <strong>Impact</strong> maps a unit's blast radius;
+    <strong>Routes</strong> audits every endpoint; <strong>Atlas</strong> holds the
+    dependency graph, ERD, table, and overview.</p>
+    <table class="help-keys">
+      <tbody>
+        <tr><td><kbd>/</kbd></td><td>Search</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>5</kbd></td><td>Switch view (Home, Trace, Impact, Routes, Atlas)</td></tr>
+        <tr><td><kbd>←→↑↓</kbd></td><td>Move between nodes (canvas focused)</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Open selected unit's details</td></tr>
+        <tr><td><kbd>f</kbd></td><td>Focus neighborhood of selected node</td></tr>
+        <tr><td><kbd>p</kbd></td><td>Path finder</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Clear selection / close panels</td></tr>
+        <tr><td><kbd>?</kbd></td><td>This help</td></tr>
+      </tbody>
+    </table>
+    <p class="help-note">Prefer lists? The <strong>Table</strong> view carries
+    every unit and every fact reachable in the graph — nothing is gated behind
+    hovering. The <code>data.json</code> next to this file holds the full
+    machine-readable payload.</p>
+    <form method="dialog"><button class="btn btn-primary">Close</button></form>
+  </dialog>
+</div>
+<script id="woods-data" type="application/json">__WOODS_DATA__</script>
+<!--__WOODS_FLOWS__-->
+<script>/*__WOODS_APP__*/</script>
+</body>
+</html>

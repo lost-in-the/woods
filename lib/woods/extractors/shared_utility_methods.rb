@@ -290,6 +290,39 @@ module Woods
 
         params
       end
+
+      # Stable display name for a callback/filter entry.
+      #
+      # Symbols and strings pass through; procs get a source-anchored label
+      # when defined under the app root and nil otherwise. Never serialize a
+      # Proc directly — Proc#to_s embeds the object address, which changes on
+      # every boot and breaks byte-identical re-extraction of unchanged code.
+      #
+      # @param filter [Symbol, String, Proc, Object]
+      # @return [String, nil] nil means "skip this entry"
+      def stable_filter_name(filter)
+        case filter
+        when Symbol, String then filter.to_s
+        when Proc then inline_proc_label(filter)
+        end
+      end
+
+      # @param proc_filter [Proc]
+      # @return [String, nil] "(inline app/models/post.rb:12)" for app-defined
+      #   procs; nil for procs defined in gems/framework (their bodies aren't
+      #   in the app source, so nothing downstream can analyze them) or when
+      #   the source location can't be resolved
+      def inline_proc_label(proc_filter)
+        path, line = proc_filter.source_location
+        return nil unless path
+
+        root = "#{Rails.root}/"
+        return nil unless path.start_with?(root)
+
+        "(inline #{path.delete_prefix(root)}:#{line})"
+      rescue StandardError
+        nil
+      end
     end
   end
 end

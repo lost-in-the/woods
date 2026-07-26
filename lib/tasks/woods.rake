@@ -16,6 +16,11 @@
 #   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
 
 namespace :woods do
+  # Shared boolean ENV parser for task blocks (closures over this namespace
+  # block). Truthy set, so FLAG=false / FLAG=0 disables rather than silently
+  # enabling.
+  env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
+
   desc 'Full extraction of codebase for indexing'
   task extract: :environment do
     require 'woods/extractor'
@@ -164,7 +169,7 @@ namespace :woods do
       exit 1
     end
 
-    manifest = JSON.parse(File.read(manifest_path))
+    manifest = JSON.parse(File.read(manifest_path, encoding: 'UTF-8'))
 
     puts 'Validating index...'
     puts "  Extracted at: #{manifest['extracted_at']}"
@@ -191,7 +196,7 @@ namespace :woods do
         next if file.end_with?('_index.json')
 
         begin
-          data = JSON.parse(File.read(file))
+          data = JSON.parse(File.read(file, encoding: 'UTF-8'))
           errors << "#{file}: missing identifier" unless data['identifier']
           errors << "#{file}: missing source_code" unless data['source_code']
         rescue JSON::ParserError => e
@@ -204,7 +209,7 @@ namespace :woods do
     graph_path = output_dir.join('dependency_graph.json')
     if graph_path.exist?
       begin
-        JSON.parse(File.read(graph_path))
+        JSON.parse(File.read(graph_path, encoding: 'UTF-8'))
       rescue JSON::ParserError
         errors << 'dependency_graph.json: invalid JSON'
       end
@@ -246,7 +251,7 @@ namespace :woods do
     end
 
     manifest_path = output_dir.join('manifest.json')
-    manifest = manifest_path.exist? ? JSON.parse(File.read(manifest_path)) : {}
+    manifest = manifest_path.exist? ? JSON.parse(File.read(manifest_path, encoding: 'UTF-8')) : {}
 
     puts 'Woods Index Statistics'
     puts '=' * 50
@@ -276,7 +281,7 @@ namespace :woods do
       index_path = type_dir.join('_index.json')
       type_chunks = 0
       if index_path.exist?
-        index = JSON.parse(File.read(index_path))
+        index = JSON.parse(File.read(index_path, encoding: 'UTF-8'))
         type_chunks = index.sum { |u| u['chunk_count'] || 0 }
         total_chunks += type_chunks
       end
@@ -291,7 +296,7 @@ namespace :woods do
     # Dependency graph stats
     graph_path = output_dir.join('dependency_graph.json')
     if graph_path.exist?
-      graph = JSON.parse(File.read(graph_path))
+      graph = JSON.parse(File.read(graph_path, encoding: 'UTF-8'))
       stats = graph['stats'] || {}
       puts 'Dependency Graph'
       puts '-' * 50
@@ -498,7 +503,7 @@ namespace :woods do
       exit 1
     end
 
-    graph_data = JSON.parse(File.read(graph_path))
+    graph_data = JSON.parse(File.read(graph_path, encoding: 'UTF-8'))
     graph = Woods::DependencyGraph.from_h(graph_data)
 
     max_depth = ENV.fetch('MAX_DEPTH', 5).to_i
@@ -606,8 +611,6 @@ namespace :woods do
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
-    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
     force_full = env_flag.call('UNBLOCKED_FORCE_FULL_SYNC')
     force_purge = env_flag.call('UNBLOCKED_FORCE_PURGE')
 
@@ -659,8 +662,6 @@ namespace :woods do
     config = Woods.configuration
     output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
     vault_path = ENV.fetch('WOODS_OBSIDIAN_VAULT', File.join(output_dir.to_s, 'obsidian_vault'))
-    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
-    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
 
     puts 'Exporting extraction data to an Obsidian vault...'
     puts "  Output dir: #{output_dir}"
@@ -699,6 +700,47 @@ namespace :woods do
 
   desc 'Render the codebase as an Obsidian vault (alias for obsidian)'
   task vault: :obsidian
+
+  desc 'Generate the interactive HTML data explorer from extraction output'
+  task explore: :environment do
+    require 'woods/explorer/site_builder'
+
+    config = Woods.configuration
+    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+    explorer_dir = ENV.fetch('WOODS_EXPLORER_OUTPUT', File.join(output_dir.to_s, 'explorer'))
+
+    puts 'Building the Woods Explorer...'
+    puts "  Index dir: #{output_dir}"
+    puts "  Explorer:  #{explorer_dir}"
+    puts
+
+    begin
+      builder = Woods::Explorer::SiteBuilder.new(
+        index_dir: output_dir,
+        output_dir: explorer_dir,
+        include_framework: env_flag.call('WOODS_EXPLORER_INCLUDE_FRAMEWORK'),
+        force: env_flag.call('WOODS_EXPLORER_FORCE'),
+        labels_path: ENV.fetch('WOODS_EXPLORER_LABELS', nil)
+      )
+      stats = builder.export_all
+    rescue Woods::Explorer::ExportError => e
+      puts "ERROR: #{e.message}"
+      exit 1
+    end
+
+    puts 'Explorer complete!'
+    puts "  Nodes:   #{stats[:nodes]}"
+    puts "  Edges:   #{stats[:edges]}"
+    puts "  Screens: #{stats[:screens]}"
+    puts "  Flows:   #{stats[:flows]}"
+    puts "  Skipped units: #{stats[:skipped_units]}, skipped edges: #{stats[:skipped_edges]}"
+    puts
+    puts "Open #{File.join(explorer_dir, 'index.html')} in a browser,"
+    puts "or serve it: ruby -run -e httpd #{explorer_dir} -p 8000"
+  end
+
+  desc 'Wander the woods — interactive codebase explorer (alias for explore)'
+  task wander: :explore
 
   desc 'Generate a random bearer token for woods-mcp-http (WOODS_MCP_HTTP_TOKEN)'
   task :generate_token do

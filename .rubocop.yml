@@ -29,6 +29,7 @@ Metrics/BlockLength:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
   AllowedMethods:
     - 'refine'
 
@@ -47,6 +48,7 @@ Metrics/ModuleLength:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/ClassLength:
   Exclude:
@@ -64,6 +66,7 @@ Metrics/ClassLength:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/MethodLength:
   Max: 20
@@ -81,6 +84,7 @@ Metrics/MethodLength:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/AbcSize:
   Max: 25
@@ -99,6 +103,7 @@ Metrics/AbcSize:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/CyclomaticComplexity:
   Exclude:
@@ -115,6 +120,7 @@ Metrics/CyclomaticComplexity:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/PerceivedComplexity:
   Exclude:
@@ -131,6 +137,7 @@ Metrics/PerceivedComplexity:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/BlockNesting:
   Exclude:
@@ -147,6 +154,7 @@ Metrics/BlockNesting:
     - 'lib/woods/graph_analyzer.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 Metrics/ParameterLists:
   Exclude:
@@ -165,6 +173,7 @@ Metrics/ParameterLists:
     - 'lib/woods/retriever.rb'
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
+    - 'lib/woods/explorer/**/*'
 
 # MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars
 Layout/LineLength:

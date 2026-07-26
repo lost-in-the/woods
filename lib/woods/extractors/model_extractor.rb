@@ -36,6 +36,24 @@ module Woods
         (?:after|before)_(?:add|remove)_for_         # collection callbacks
       )/x
 
+      # Events whose ActiveSupport callback chains exist on ActiveRecord
+      # models (`_save_callbacks`, `_commit_callbacks`, ...). There is no
+      # per-kind chain like `_before_save_callbacks` on any Rails version —
+      # each chain entry carries its own kind (:before/:after/:around), and
+      # the public callback name is kind + event (e.g. before_save). The one
+      # oddity is `before_commit`: Rails registers it as its own EVENT
+      # (`define_callbacks :commit, :rollback, :before_commit`), so its
+      # public name is the event itself, not kind + event.
+      CALLBACK_EVENTS = %i[
+        validation save create update destroy
+        commit rollback before_commit initialize find touch
+      ].freeze
+
+      # Method owners whose callbacks are framework machinery, not app
+      # behavior (Dirty#normalize_changed_in_place_attributes,
+      # AutosaveAssociation#around_save_collection_association, ...).
+      FRAMEWORK_CALLBACK_OWNER = /\A(?:ActiveRecord|ActiveModel|ActiveSupport|ActiveStorage|ActionText)(?:::|\z)/
+
       # Warnings collected during extraction (skipped associations, failed models)
       attr_reader :warnings
 
@@ -316,6 +334,7 @@ module Woods
 
       # Extract comprehensive metadata for retrieval and filtering
       def extract_metadata(model, source = nil)
+        callbacks = extract_callbacks(model)
         {
           # Core identifiers
           table_name: model.table_name,
@@ -324,7 +343,7 @@ module Woods
           # Relationships and behaviors
           associations: extract_associations(model),
           validations: extract_validations(model),
-          callbacks: extract_callbacks(model),
+          callbacks: callbacks,
           scopes: extract_scopes(model, source),
           enums: extract_enums(model),
           inlined_concerns: extract_included_modules(model)
@@ -343,7 +362,9 @@ module Woods
 
           # Metrics for retrieval ranking
           loc: count_loc(model, source),
-          callback_count: callback_count(model),
+          # Same filtered list as :callbacks — a raw chain count would
+          # contradict the list (autosave internals, framework machinery)
+          callback_count: callbacks.size,
           association_count: model.reflect_on_all_associations.size,
           validation_count: model._validators.values.flatten.size,
 
@@ -507,29 +528,11 @@ module Woods
         end
       end
 
-      # Extract all callbacks with their full chain
+      # Extract all app-defined callbacks with their full chain
       def extract_callbacks(model)
-        callback_types = %i[
-          before_validation after_validation
-          before_save after_save around_save
-          before_create after_create around_create
-          before_update after_update around_update
-          before_destroy after_destroy around_destroy
-          after_commit after_rollback
-          after_initialize after_find
-          after_touch
-        ]
-
-        callback_types.flat_map do |type|
-          callbacks = model.send("_#{type}_callbacks")
-          callbacks.map do |cb|
-            {
-              type: type,
-              filter: cb.filter.to_s,
-              kind: cb.kind, # :before, :after, :around
-              conditions: format_callback_conditions(cb)
-            }
-          end
+        CALLBACK_EVENTS.flat_map do |event|
+          chain = model.send("_#{event}_callbacks")
+          chain.filter_map { |cb| callback_entry(model, cb, event) }
         rescue StandardError
           # Widen beyond NoMethodError per CLAUDE.md — callback-chain
           # introspection can raise a variety of errors across Rails
@@ -537,7 +540,62 @@ module Woods
           # concerns), and silently swallowing only NoMethodError left
           # the rest to crash extraction.
           []
-        end.compact
+        end
+      end
+
+      # @param model [Class]
+      # @param callback [ActiveSupport::Callbacks::Callback] a chain entry
+      # @param event [Symbol] the chain's event (:save, :commit, ...)
+      # @return [Hash, nil] nil for AR-generated internals
+      #   (autosave_associated_records_for_*, _run_*), callbacks owned by
+      #   framework modules rather than the app, and proc filters defined
+      #   outside the app (gem-installed). App-defined inline procs are kept
+      #   with a stable source-anchored label.
+      def callback_entry(model, callback, event)
+        name = callback_filter_name(model, callback.filter)
+        return nil unless name
+
+        {
+          type: callback_type(callback.kind, event),
+          filter: name,
+          kind: callback.kind, # :before, :after, :around
+          conditions: format_callback_conditions(callback)
+        }
+      end
+
+      # @return [Symbol] public callback name — kind + event, except the
+      #   before_commit event which already carries its kind
+      def callback_type(kind, event)
+        event == :before_commit ? :before_commit : :"#{kind}_#{event}"
+      end
+
+      # Resolves a chain entry's filter to a stable display name, or nil to
+      # skip it. Named filters are kept unless AR-internal or framework-owned;
+      # procs go through SharedUtilityMethods#stable_filter_name (app-defined
+      # inline procs get a source-anchored label, gem procs are dropped).
+      #
+      # @return [String, nil]
+      def callback_filter_name(model, filter)
+        name = stable_filter_name(filter)
+        return nil unless name
+
+        if filter.is_a?(Symbol) || filter.is_a?(String)
+          return nil if AR_INTERNAL_METHOD_PATTERN.match?(name)
+          return nil if framework_callback?(model, filter)
+        end
+
+        name
+      end
+
+      # True when the callback method is defined by Rails itself. Runtime
+      # introspection (Method#owner) beats a name blocklist — the internal
+      # names differ across Rails versions, the owners don't. Unresolvable
+      # filters are treated as app callbacks rather than dropped.
+      def framework_callback?(model, filter)
+        owner = model.instance_method(filter.to_sym).owner
+        FRAMEWORK_CALLBACK_OWNER.match?(owner.name.to_s)
+      rescue NameError, TypeError
+        false
       end
 
       # Extract scopes with their source if available.
@@ -985,17 +1043,6 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
       # Helper methods
       # ──────────────────────────────────────────────────────────────────────
-
-      def callback_count(model)
-        %i[validation save create update destroy commit rollback].sum do |type|
-          # CallbackChain includes Enumerable but defines no #size on any
-          # supported Rails version — #size raises and the rescue would
-          # zero the count. #count is the only correct API here.
-          model.send("_#{type}_callbacks").count
-        rescue StandardError
-          0
-        end
-      end
 
       def count_loc(model, source = nil)
         if source

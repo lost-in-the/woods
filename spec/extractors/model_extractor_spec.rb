@@ -28,43 +28,114 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
-  # ── callback_count ────────────────────────────────────────────────
+  # ── extract_callbacks ─────────────────────────────────────────────
 
-  describe '#callback_count' do
-    # Mirrors ActiveSupport::Callbacks::CallbackChain: it includes
-    # Enumerable (so #count works) but defines NO #size. Stubbing with a
-    # plain Array here would mask a regression to #size — Arrays have both.
-    let(:chain_class) do
-      Class.new do
-        include Enumerable
+  describe '#extract_callbacks' do
+    # Chain entries mirror ActiveSupport::Callbacks::Callback: they expose
+    # #filter and #kind; conditions live in @if/@unless ivars (absent here).
+    let(:entry_class) { Struct.new(:filter, :kind) } # rubocop:disable Lint/StructNewOverride -- mirrors Callback#filter
 
-        def initialize(callbacks)
-          @callbacks = callbacks
-        end
-
-        def each(&block)
-          @callbacks.each(&block)
-        end
+    # Models whose callback methods can't be resolved count as app-owned;
+    # doubles have no real instance methods, so stub the lookup to raise.
+    def stub_empty_chains(model)
+      described_class::CALLBACK_EVENTS.each do |event|
+        allow(model).to receive(:"_#{event}_callbacks").and_return([])
       end
+      allow(model).to receive(:instance_method).and_raise(NameError)
     end
 
-    it 'sums callbacks across chains using an API CallbackChain actually has' do
+    # Regression for the per-kind chain bug: Rails only defines per-EVENT
+    # chains (_save_callbacks), never _before_save_callbacks — the old code
+    # queried the latter, always raised, and always returned []. A strict
+    # double raises on any un-stubbed per-kind send, so this fails loudly
+    # if the wrong chain names come back.
+    it 'reads per-event chains and derives the public kind_event name' do
       model = double('Model')
-      %i[validation save create update destroy commit rollback].each do |type|
-        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new(%i[a b]))
-      end
+      stub_empty_chains(model)
+      allow(model).to receive(:_save_callbacks)
+        .and_return([entry_class.new(:normalize_title, :before), entry_class.new(:schedule_publish, :after)])
+      allow(model).to receive(:_commit_callbacks)
+        .and_return([entry_class.new(:broadcast, :after)])
 
-      expect(extractor.send(:callback_count, model)).to eq(14)
+      result = extractor.send(:extract_callbacks, model)
+
+      expect(result).to contain_exactly(
+        a_hash_including(type: :before_save, filter: 'normalize_title', kind: :before),
+        a_hash_including(type: :after_save, filter: 'schedule_publish', kind: :after),
+        a_hash_including(type: :after_commit, filter: 'broadcast', kind: :after)
+      )
     end
 
-    it 'counts a chain type as zero when reading it raises' do
+    it 'skips gem-defined proc filters and AR-internal machinery' do
       model = double('Model')
-      %i[validation save create update destroy commit rollback].each do |type|
-        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new([:a]))
-      end
+      stub_empty_chains(model)
+      stub_const('Rails', double(root: '/elsewhere'))
+      allow(model).to receive(:_save_callbacks).and_return(
+        [entry_class.new(proc { true }, :before),
+         entry_class.new(:autosave_associated_records_for_comments, :after),
+         entry_class.new(:_run_validate_callbacks, :before),
+         entry_class.new(:real_callback, :before)]
+      )
+
+      result = extractor.send(:extract_callbacks, model)
+
+      expect(result).to contain_exactly(a_hash_including(filter: 'real_callback'))
+    end
+
+    it 'treats a chain that raises as empty without losing the others' do
+      model = double('Model')
+      stub_empty_chains(model)
       allow(model).to receive(:_commit_callbacks).and_raise(NoMethodError)
+      allow(model).to receive(:_save_callbacks).and_return([entry_class.new(:touch_cache, :before)])
 
-      expect(extractor.send(:callback_count, model)).to eq(6)
+      result = extractor.send(:extract_callbacks, model)
+
+      expect(result).to contain_exactly(a_hash_including(type: :before_save, filter: 'touch_cache'))
+    end
+
+    it 'names before_commit callbacks by their event (not kind + event)' do
+      model = double('Model')
+      stub_empty_chains(model)
+      allow(model).to receive(:_before_commit_callbacks)
+        .and_return([entry_class.new(:flush_transactional_cache, :before)])
+
+      result = extractor.send(:extract_callbacks, model)
+
+      expect(result).to contain_exactly(
+        a_hash_including(type: :before_commit, filter: 'flush_transactional_cache', kind: :before)
+      )
+    end
+
+    it 'labels app-defined inline procs by source location instead of dropping them' do
+      model = double('Model')
+      stub_empty_chains(model)
+      inline = proc { true }
+      allow(model).to receive(:_save_callbacks).and_return([entry_class.new(inline, :before)])
+      stub_const('Rails', double(root: File.expand_path('../..', __dir__)))
+
+      result = extractor.send(:extract_callbacks, model)
+
+      expect(result).to contain_exactly(
+        a_hash_including(type: :before_save,
+                         filter: %r{\A\(inline spec/extractors/model_extractor_spec\.rb:\d+\)\z})
+      )
+    end
+
+    it 'skips callbacks whose method is owned by a framework module' do
+      model = double('Model')
+      stub_empty_chains(model)
+      allow(model).to receive(:_save_callbacks).and_return(
+        [entry_class.new(:around_save_collection_association, :around),
+         entry_class.new(:app_defined, :before)]
+      )
+      framework_owner = double('UnboundMethod', owner: double('Module', name: 'ActiveRecord::AutosaveAssociation'))
+      app_owner = double('UnboundMethod', owner: double('Module', name: 'Post'))
+      allow(model).to receive(:instance_method).with(:around_save_collection_association).and_return(framework_owner)
+      allow(model).to receive(:instance_method).with(:app_defined).and_return(app_owner)
+
+      result = extractor.send(:extract_callbacks, model)
+
+      expect(result).to contain_exactly(a_hash_including(filter: 'app_defined'))
     end
   end
 

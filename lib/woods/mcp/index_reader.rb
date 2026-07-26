@@ -117,7 +117,9 @@ module Woods
       def summary
         @summary ||= begin
           path = @index_dir.join('SUMMARY.md')
-          path.file? ? path.read : nil
+          # scrub: SUMMARY.md may be hand-edited by hosts — keep the resource
+          # servable even if it contains invalid UTF-8 bytes.
+          path.file? ? path.read(encoding: 'UTF-8').scrub : nil
         end
       end
 
@@ -481,7 +483,7 @@ module Woods
         @index_cache ||= {}
         @index_cache[dir] ||= begin
           path = @index_dir.join(dir, '_index.json')
-          path.file? ? JSON.parse(path.read) : []
+          path.file? ? JSON.parse(path.read(encoding: 'UTF-8')) : []
         end
       end
 
@@ -499,7 +501,7 @@ module Woods
         path = @index_dir.join(type_dir, filename)
         return nil unless path.file?
 
-        data = JSON.parse(path.read)
+        data = JSON.parse(path.read(encoding: 'UTF-8'))
 
         # Evict oldest if at capacity
         if @unit_cache.size >= MAX_UNIT_CACHE
@@ -512,10 +514,12 @@ module Woods
         data
       end
 
-      # Parse a JSON file relative to the index directory.
+      # Parse a JSON file relative to the index directory. Extraction output
+      # is always UTF-8; read it explicitly so a non-UTF-8 locale (e.g. a
+      # container without LANG set) can't poison JSON parsing.
       def parse_json(filename)
         path = @index_dir.join(filename)
-        JSON.parse(path.read)
+        JSON.parse(path.read(encoding: 'UTF-8'))
       end
 
       # BFS traversal in either direction.

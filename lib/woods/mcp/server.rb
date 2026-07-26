@@ -281,7 +281,7 @@ module Woods
           path = File.join(index_dir, 'flows', filename)
           return nil unless File.exist?(path)
 
-          Woods::FlowDocument.from_h(JSON.parse(File.read(path)))
+          Woods::FlowDocument.from_h(JSON.parse(File.read(path, encoding: 'UTF-8')))
         rescue JSON::ParserError, Errno::ENOENT
           nil
         end

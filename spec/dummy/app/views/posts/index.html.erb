@@ -1,0 +1,7 @@
+<h1>Posts</h1>
+
+<%= link_to 'New post', new_post_path %>
+
+<div class="posts">
+  <%= render partial: 'posts/post', collection: @posts %>
+</div>

@@ -1,0 +1,4 @@
+<div class="comment">
+  <p><%= comment.excerpt %></p>
+  <p><%= link_to 'Commenter', user_path(comment.user_id) if comment.user_id %></p>
+</div>
