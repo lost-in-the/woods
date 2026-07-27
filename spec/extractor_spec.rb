@@ -1459,4 +1459,33 @@ RSpec.describe Woods::Extractor do
       expect(Woods::AtomicFile.read(target)).to include('Widget')
     end
   end
+
+  # #167 — GraphQL is the one class-based entry whose discovery set is not
+  # authoritative for its unit type, because the type is produced by the union
+  # of runtime introspection and a static file pass. Reading absence from the
+  # runtime set as deletion would wipe every GraphQL unit in the index whenever
+  # graphql-ruby is not loaded, and would delete file-defined types not attached
+  # to the schema even when it is.
+  #
+  # This is a guard on the wiring, not a behavioural test of a live reconcile —
+  # the behaviour needs graphql-ruby installed to observe, which is #167's
+  # remaining unvalidated surface.
+  describe 'CLASS_BASED_DISCOVERY removal opt-out' do
+    it 'opts GraphQL out of removal reconciliation' do
+      expect(described_class::CLASS_BASED_DISCOVERY[:graphql][:reconcile_removals]).to be false
+    end
+
+    it 'leaves every other entry subject to removal' do
+      others = described_class::CLASS_BASED_DISCOVERY.except(:graphql)
+
+      expect(others.values.map { |spec| spec[:reconcile_removals] }).to all(be_nil)
+    end
+
+    it 'routes GraphQL additions at the runtime-introspection extractor' do
+      spec = described_class::CLASS_BASED_DISCOVERY[:graphql]
+
+      expect(spec[:type]).to eq(:graphql_type)
+      expect(spec[:method]).to eq(:extract_from_runtime_type)
+    end
+  end
 end

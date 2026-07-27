@@ -997,4 +997,53 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(kind).to eq(:object)
     end
   end
+
+  # #167 — a runtime-defined type has no source file, so no changed path can
+  # dispatch to it. Exposing the runtime set lets the incremental path add them.
+  describe '#discoverable_classes' do
+    it 'is empty when graphql-ruby is not loaded' do
+      hide_const('GraphQL::Schema')
+      FileUtils.mkdir_p(File.join(tmp_dir, 'app/graphql'))
+
+      expect(described_class.new.discoverable_classes).to eq([])
+    end
+
+    # Real singleton methods rather than stubs: `verify_partial_doubles` is on,
+    # and a bare Class.new implements neither `types` nor `descendants`.
+    def stub_schema_with(types)
+      schema = Class.new do
+        class << self
+          attr_accessor :type_map
+        end
+        def self.types = type_map
+      end
+      schema.type_map = types
+      stub_const('AppSchema', schema)
+      stub_const('GraphQL::Schema', Class.new { def self.descendants = @descendants || [] })
+      GraphQL::Schema.instance_variable_set(:@descendants, [schema])
+      schema
+    end
+
+    it 'returns the schema type classes when the runtime is available' do
+      user_type = Class.new
+      stub_const('Types::UserType', user_type)
+      stub_schema_with({ 'User' => user_type })
+
+      expect(described_class.new.discoverable_classes).to eq([user_type])
+    end
+
+    it 'rejects anonymous type classes' do
+      stub_schema_with({ 'Anon' => Class.new })
+
+      expect(described_class.new.discoverable_classes).to eq([])
+    end
+
+    it 'skips graphql-ruby introspection types' do
+      user_type = Class.new
+      stub_const('Types::UserType', user_type)
+      stub_schema_with({ '__Schema' => Class.new, 'User' => user_type })
+
+      expect(described_class.new.discoverable_classes).to eq([user_type])
+    end
+  end
 end

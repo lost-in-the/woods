@@ -43,6 +43,26 @@ module Woods
         @runtime_types = load_runtime_types
       end
 
+      # The type classes runtime introspection can reach.
+      #
+      # Shared with the incremental path's class reconciliation (#167), which
+      # uses it for **additions only**. A runtime-defined type — built by a
+      # schema builder or a DSL rather than a literal `class ... <
+      # Types::BaseObject` — has no source file, so no changed path ever
+      # dispatches to it and `extract_graphql_file` cannot reproduce it. Only a
+      # full extraction emitted such units, which meant an incremental run
+      # could never create them and an index built incrementally from empty
+      # never had them at all.
+      #
+      # Empty when graphql-ruby is not loaded or the app has no schema, which is
+      # why the reconciliation must not read absence here as deletion — see
+      # `reconcile_removals: false` in {Extractor::CLASS_BASED_DISCOVERY}.
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
+        @runtime_types.values.reject { |type_class| type_class.name.nil? }
+      end
+
       # Extract all GraphQL types, mutations, queries, and resolvers
       #
       # Returns an empty array when the app has neither an `app/graphql`

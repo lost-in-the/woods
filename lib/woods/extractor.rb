@@ -225,6 +225,21 @@ module Woods
     # extraction is found without having to guess a constant name from a
     # path (#164, gap 1).
     #
+    # `reconcile_removals: false` opts an entry out of the removal half. Only
+    # GraphQL sets it, and the reason is that its unit type is produced by two
+    # independent discovery mechanisms whose union is the truth: runtime schema
+    # introspection *and* a static file pass over `app/graphql`. Every other
+    # entry here owns its type outright, which is what makes
+    # "in the graph but not in `discoverable_classes`" mean "deleted".
+    #
+    # For GraphQL that inference is wrong twice over. Without graphql-ruby
+    # loaded the runtime set is empty, so removal would delete every GraphQL
+    # unit in the index; with it loaded, a type defined in a file but not
+    # attached to the schema is legitimately absent from the type map, so
+    # removal would delete units a full extraction still emits. Additions are
+    # safe in both worlds — they are exactly the runtime-only types no changed
+    # path can dispatch to, which is the #167 divergence.
+    #
     # @return [Hash{Symbol => Hash}] extractor key => { type:, method: }
     CLASS_BASED_DISCOVERY = {
       models: { type: :model, method: :extract_model },
@@ -232,7 +247,11 @@ module Woods
       mailers: { type: :mailer, method: :extract_mailer },
       components: { type: :component, method: :extract_component },
       view_components: { type: :view_component, method: :extract_component },
-      action_cable_channels: { type: :action_cable_channel, method: :extract_channel }
+      action_cable_channels: { type: :action_cable_channel, method: :extract_channel },
+      # Additions only — see `reconcile_removals: false`. GraphQL is the one
+      # entry whose discovery set is not authoritative for its unit type
+      # (#167).
+      graphql: { type: :graphql_type, method: :extract_from_runtime_type, reconcile_removals: false }
     }.freeze
 
     # Extractors with no per-file entry point: they scan the whole app (or
@@ -1561,6 +1580,8 @@ module Woods
         known = @dependency_graph.units_of_type(spec[:type]).to_set
 
         touched.merge(add_discovered_classes(key, spec, discovered, known, excluded, affected_types))
+        next if spec[:reconcile_removals] == false
+
         touched.merge(remove_stale_classes(spec, discovered, known, affected_types))
       end
 
