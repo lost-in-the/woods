@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`woods:embed_incremental` no longer discards the vectors it embeds** (B-059, #148). On the
+  `:local` and `:shared_filesystem` presets the vector store is in-memory and the dump under
+  `dumps/` is the *only* durable copy — but `Indexer#index_incremental` never called
+  `persist_snapshot`, while `process_units` advanced `checkpoint.json` regardless. Each
+  incremental run therefore embedded changed units into a store that died with the process,
+  wrote nothing to `dumps/`, and left a checkpoint claiming the work was done, so no later
+  incremental run would ever produce those vectors again: unrecoverable without a full
+  re-embed, and silent — stats reported `processed: 1`. An incremental run now hydrates the
+  store from `dumps/latest` before embedding and dumps afterwards, so the dump it writes is
+  cumulative. The invariant now enforced is that **`checkpoint.json` never advances over a
+  unit whose vector was not durably stored**: on the dump-backed path the checkpoint is
+  written only after the dump is on disk and the `latest` pointer is flipped (the interval
+  checkpoints are suppressed there — a dump is a whole-store snapshot, so there is no partial
+  durability for them to record), and a checkpoint hit is honoured only when the hydrated
+  artifact actually holds a vector for that unit. A checkpoint that ran ahead of its dump —
+  an older gem with this bug, an interrupted promote, a store swap — self-heals into a
+  re-embed and says so on stderr. A dump that cannot be read (corrupt file, dimension
+  mismatch after a model switch) warns and falls back to re-embedding everything, which is
+  the documented remedy for both. Durable backends (pgvector, Qdrant) are unaffected: their
+  `store_batch` *is* the durable write, so they keep the interval checkpoints and never
+  hydrate.
+
 - **Woods' own JSON artifacts are read as UTF-8, not as the process locale** (#164 review,
   round 4). `AtomicFile.write` uses `binmode` so bytes land verbatim, but a plain `File.read`
   tags the result with the default *external* encoding — US-ASCII in a container with no

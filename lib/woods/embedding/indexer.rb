@@ -14,10 +14,16 @@ module Woods
     # modes with checkpoint-based resumability.
     #
     # When the vector store is an in-memory adapter (responds to +#each_entry+
-    # and +#bulk_load+) and +output_dir+ is set, a successful {#index_all} run
-    # also persists the stores to disk via the Snapshotter pair and atomically
-    # flips the +dumps/latest+ pointer. Persistent backends (pgvector, Qdrant)
-    # see zero behaviour change — no Snapshotter is invoked.
+    # and +#bulk_load+) and +output_dir+ is set, a successful run — full or
+    # incremental — persists the stores to disk via the Snapshotter pair and
+    # atomically flips the +dumps/latest+ pointer. An incremental run hydrates
+    # the store from the previous dump first, so the dump it writes is
+    # cumulative. Persistent backends (pgvector, Qdrant) see zero behaviour
+    # change — no Snapshotter is invoked.
+    #
+    # For that in-memory path the dump is the *only* durable copy of a vector,
+    # which is why +checkpoint.json+ is written last, after the dump is
+    # promoted. See the invariant note on {#process_units}.
     class Indexer # rubocop:disable Metrics/ClassLength
       # @param chunker [Chunking::SemanticChunker, nil] Splits oversize units
       #   into semantically coherent chunks before embedding. +nil+ disables
@@ -47,6 +53,8 @@ module Woods
         @metadata_store = metadata_store
         @resolved_config = resolved_config
         @dump_retention_count = dump_retention_count
+        @persisted_ids = {}
+        @checkpoint_misses = 0
       end
 
       # Index all extracted units (full mode). Returns stats hash.
@@ -58,12 +66,16 @@ module Woods
       #
       # @return [Hash] Stats with :processed, :skipped, :errors counts
       def index_all
-        stats = process_units(load_units, incremental: false)
-        persist_snapshot if persistable?
-        stats
+        process_units(load_units, incremental: false)
       end
 
       # Index only changed units (incremental mode). Returns stats hash.
+      #
+      # When the vector store is an in-memory adapter the run first hydrates it
+      # from +dumps/latest+, so the dump written at the end of the run carries
+      # both the previously embedded vectors and this run's new ones. See
+      # {#process_units} for the invariant this upholds.
+      #
       # @return [Hash] Stats with :processed, :skipped, :errors counts
       def index_incremental
         process_units(load_units, incremental: true)
@@ -85,32 +97,81 @@ module Woods
         end
       end
 
+      # The invariant: **checkpoint.json never advances over a unit whose
+      # vector was not durably stored.** Two things uphold it here.
+      #
+      # 1. Ordering. For a store whose only durable copy is the dump
+      #    (+persistable?+), the checkpoint is written *after*
+      #    {#persist_snapshot} has written +dumps/<ts>/+ and flipped the
+      #    +latest+ pointer — and only then. A raise anywhere before that
+      #    (provider error, ENOSPC, interrupted dump) leaves the checkpoint
+      #    exactly where the previous run left it, so the next run re-embeds
+      #    this run's work. The interval checkpoints are suppressed on that
+      #    path for the same reason: a dump is a whole-store snapshot, so
+      #    there is no partial durability for them to record, and recording
+      #    it anyway is the #148 data loss in miniature. Durable backends
+      #    (pgvector, Qdrant) keep the interval saves — for them each
+      #    +store_batch+ *is* the durable write, so a mid-run crash really
+      #    has persisted those batches.
+      #
+      # 2. Trust, verified. {#checkpoint_satisfied?} honours a checkpoint hit
+      #    only when the durable artifact actually holds a vector for that
+      #    unit. A checkpoint that ran ahead of its dump — an older gem with
+      #    this bug, an interrupted promote, a store swap — self-heals into a
+      #    re-embed instead of stranding the unit forever.
       def process_units(units, incremental:)
+        prepare_run(incremental: incremental)
         checkpoint = incremental ? load_checkpoint : {}
         stats = { processed: 0, skipped: 0, errors: 0 }
-        batch_count = 0
 
-        units.each_slice(@batch_size) do |batch|
-          process_batch(batch, checkpoint, stats, incremental: incremental)
-          batch_count += 1
-          save_checkpoint(checkpoint) if (batch_count % @checkpoint_interval).zero?
-        end
+        embed_batches(units, checkpoint, stats, incremental: incremental)
 
-        # Always save final checkpoint
+        report_checkpoint_misses
+        persist_snapshot if persistable?
         save_checkpoint(checkpoint)
 
         stats
       end
 
+      # Per-run state. An Indexer instance may be reused across runs, and
+      # neither the hydrated id index nor the miss counter may leak between
+      # them.
+      def prepare_run(incremental:)
+        @persisted_ids = {}
+        @checkpoint_misses = 0
+        hydrate_persisted_vectors if incremental && persistable?
+      end
+
+      def embed_batches(units, checkpoint, stats, incremental:)
+        batch_count = 0
+        units.each_slice(@batch_size) do |batch|
+          process_batch(batch, checkpoint, stats, incremental: incremental)
+          batch_count += 1
+          save_checkpoint(checkpoint) if interval_checkpoints? && (batch_count % @checkpoint_interval).zero?
+        end
+      end
+
+      # Never let a disagreement between checkpoint.json and the dump pass
+      # silently — the re-embed is the safe outcome, but an operator seeing
+      # unexpected embedding cost deserves to know why.
+      def report_checkpoint_misses
+        return if @checkpoint_misses.zero?
+
+        warn "[woods] re-embedding #{@checkpoint_misses} unit(s) that checkpoint.json " \
+             'marked as done but the latest dump does not contain — the checkpoint had ' \
+             'advanced past the durable artifact.'
+      end
+
+      # Interval checkpoints only make sense when each batch's +store_batch+
+      # was itself durable. See the invariant note on {#process_units}.
+      def interval_checkpoints?
+        !persistable?
+      end
+
       def process_batch(batch, checkpoint, stats, incremental:)
         to_embed = batch.each_with_object([]) do |unit_data, items|
           persist_unit_metadata(unit_data)
-          # Incremental skip uses `source_hash`, which the extractor derives
-          # from the unit's *source_code string only* (see ExtractedUnit#to_h
-          # and Extractor#dump_units). It is NOT a hash of the serialized
-          # unit_data JSON — so key ordering or whitespace in the _index.json
-          # does not invalidate checkpoints across Ruby-minor upgrades.
-          if incremental && checkpoint[unit_data['identifier']] == unit_data['source_hash']
+          if incremental && checkpoint_satisfied?(unit_data, checkpoint)
             stats[:skipped] += 1
             next
           end
@@ -118,6 +179,27 @@ module Woods
         end
 
         embed_and_store(to_embed, checkpoint, stats)
+      end
+
+      # May this unit's embedding be skipped?
+      #
+      # Incremental skip uses `source_hash`, which the extractor derives
+      # from the unit's *source_code string only* (see ExtractedUnit#to_h
+      # and Extractor#dump_units). It is NOT a hash of the serialized
+      # unit_data JSON — so key ordering or whitespace in the _index.json
+      # does not invalidate checkpoints across Ruby-minor upgrades.
+      #
+      # A matching hash is necessary but not sufficient: on the dump-backed
+      # path the vector must also be present in what we hydrated, or the
+      # checkpoint is describing a vector nothing holds.
+      def checkpoint_satisfied?(unit_data, checkpoint)
+        return false unless checkpoint[unit_data['identifier']] == unit_data['source_hash']
+        return true unless persistable?
+
+        return true if @persisted_ids.key?(unit_data['identifier'])
+
+        @checkpoint_misses += 1
+        false
       end
 
       # Persist a unit's metadata under its base identifier so retrieval can
@@ -246,11 +328,85 @@ module Woods
         end
 
         @vector_store.store_batch(entries)
+        prune_superseded_vectors(items)
 
         items.each do |item|
           checkpoint[item[:identifier]] = item[:source_hash]
           stats[:processed] += 1
         end
+      end
+
+      # Suffix {#collect_embed_items} appends when a unit is split across
+      # several vectors. Mirrors the pattern in {Retriever},
+      # {Retrieval::ContextAssembler} and {MCP::Bootstrapper}.
+      CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
+      private_constant :CHUNK_SUFFIX_PATTERN
+
+      # Hydrate the in-memory vector store from +dumps/latest+ so the dump
+      # this run writes is the previous dump *plus* this run's changes.
+      #
+      # Hydration is lossless with respect to what the artifact can hold: the
+      # WVF1 format stores id + float blob only, so the empty per-entry
+      # metadata a load produces is exactly what a dump round-trips to either
+      # way (woods-mcp back-fills it from metadata.msgpack at boot — see
+      # MCP::Bootstrapper.populate_vector_metadata).
+      #
+      # A failure to read the dump (corrupt file, dimension mismatch after a
+      # model switch) is not fatal: an empty +@persisted_ids+ means no
+      # checkpoint hit can be honoured, so every unit is re-embedded and the
+      # dump this run writes is complete. That is a full re-embed's cost, which
+      # is the documented remedy for both of those conditions anyway — so warn
+      # and carry on rather than stranding the host with no way forward.
+      def hydrate_persisted_vectors
+        require_relative '../index_artifact'
+        require_relative '../storage/snapshotter'
+
+        loaded = Storage::Snapshotter::Vector.load_or_empty(
+          IndexArtifact.new(@output_dir), resolved_config: @resolved_config
+        )
+        entries = loaded.each_entry.map { |id, vector, metadata| { id: id, vector: vector, metadata: metadata || {} } }
+        @vector_store.clear! if @vector_store.respond_to?(:clear!)
+        @vector_store.bulk_load(entries)
+        @persisted_ids = index_ids_by_identifier(entries)
+      rescue StandardError => e
+        warn "[woods] could not hydrate vectors from the latest dump (#{e.class}: #{e.message}); " \
+             're-embedding every unit so the dump this run writes is complete.'
+        @vector_store.clear! if @vector_store.respond_to?(:clear!)
+        @persisted_ids = {}
+      end
+
+      # base identifier => the vector ids the dump holds for it.
+      def index_ids_by_identifier(entries)
+        entries.each_with_object({}) do |entry, index|
+          identifier = entry[:id].to_s.sub(CHUNK_SUFFIX_PATTERN, '')
+          (index[identifier] ||= []) << entry[:id]
+        end
+      end
+
+      # Drop vector ids the previous dump held for a re-embedded identifier
+      # that this run did not rewrite. A unit that used to split into five
+      # chunks and now splits into three would otherwise leave +#chunk_3+ and
+      # +#chunk_4+ in the hydrated store, and the dump would serve chunks
+      # whose source no longer exists.
+      #
+      # Scoped to the hydrated ids on purpose: a durable backend's own
+      # staleness is its own write path's business, and this method must not
+      # start issuing deletes against pgvector or Qdrant.
+      def prune_superseded_vectors(items)
+        return if @persisted_ids.empty?
+        return unless @vector_store.respond_to?(:delete)
+
+        items.group_by { |item| item[:identifier] }.each do |identifier, group|
+          prune_identifier(identifier, group.map { |item| item[:id] })
+        end
+      end
+
+      def prune_identifier(identifier, fresh_ids)
+        previous = @persisted_ids[identifier]
+        return unless previous
+
+        (previous - fresh_ids).each { |id| @vector_store.delete(id) }
+        @persisted_ids[identifier] = fresh_ids
       end
 
       def load_checkpoint
@@ -282,7 +438,7 @@ module Woods
         require_relative '../storage/snapshotter'
 
         artifact = IndexArtifact.new(@output_dir)
-        dump_dir = artifact.new_dump_dir
+        dump_dir = unique_dump_dir(artifact)
 
         Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir)
 
@@ -295,6 +451,35 @@ module Woods
         artifact.promote(dump_dir)
 
         prune_old_dumps(artifact)
+      end
+
+      # Seconds of timestamp to walk forward looking for a free dump directory
+      # name before giving up and letting Errno::EEXIST out.
+      DUMP_DIR_ATTEMPTS = 60
+      private_constant :DUMP_DIR_ATTEMPTS
+
+      # Mint a dump directory, stepping the timestamp forward on a collision.
+      #
+      # Dump directory names have one-second resolution and {IndexArtifact}
+      # deliberately refuses to reuse one (an explicit +now:+ collision is a
+      # caller error). Now that *every* run dumps — and incremental runs carry
+      # no cooldown, unlike the full runs PipelineGuard rate-limits — two runs
+      # inside one second is reachable on a small index. Walking the name
+      # forward keeps chronological and lexicographic order in agreement
+      # (…28Z < …29Z), which is what prune_old_dumps sorts on, and beats
+      # discarding embedding work that has already been done and paid for.
+      def unique_dump_dir(artifact)
+        now = Time.now.utc
+        attempts = 0
+        begin
+          artifact.new_dump_dir(now: now)
+        rescue Errno::EEXIST
+          attempts += 1
+          raise if attempts >= DUMP_DIR_ATTEMPTS
+
+          now += 1
+          retry
+        end
       end
 
       # Remove old dump directories beyond the retention window.
