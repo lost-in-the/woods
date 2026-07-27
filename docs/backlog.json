@@ -696,5 +696,17 @@
     "description": "Follow-on work from #164 now that phase 0 (incremental correctness + differential harness) has landed. Phase 1: a public API to re-run a single whole-app extractor against a booted app (WHOLE_APP_EXTRACTORS already does this internally). Phase 2: a resident file-watching daemon (woods:watch) — placement decision, restart triggers, storm handling, degraded status. Phase 3: a generation token IndexReader checks per request, plus working-tree staleness in woods_status. Phase 4: multi-worktree operation with per-daemon idle TTL. Each phase needs measurements against the success criteria in #164. RESOLVED: all four phases landed on claude/woods-issue-164-uu6tc0 (PR #165). Phase 1 = Extractor#refresh + woods:refresh + ReloadPolicy; phase 2 = Woods::Watch daemon + woods:watch; phase 3 = Woods::Generation + IndexReader self-refresh + woods_status freshness fields; phase 4 = PipelineLock write serialization, daemon deference for hook syncs, idle TTL, six-worktree spec. Outstanding and documented in docs/WATCH_DAEMON.md rather than tracked here: large-host-app latency, bind-mount event latency, and per-daemon memory at six-worktree scale — all three need a real host app.",
     "status": "resolved",
     "depends_on": []
+  },
+  {
+    "id": "B-065",
+    "slug": "graph-absolute-paths",
+    "title": "Dependency graph persists absolute file paths, so the index is not portable off the machine that built it",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/dependency_graph.rb", "lib/woods/extractor.rb", "lib/woods/change_set.rb", "lib/woods/mcp/index_reader.rb"],
+    "description": "dependency_graph.json stores absolute paths (file_map keys and nodes[].file_path) while every per-unit JSON stores relative ones. Ordering, not intent: extract_all rebuilds the graph at phase 1.6 and normalize_file_paths runs at phase 4.5, so registration captures the absolute string and the later reassignment of unit.file_path never reaches the copies in @nodes/@file_map. register_and_write has the same order, so full and incremental agree — this is not an equivalence bug and the #164 harness is right not to flag it. It matters for the documented Docker deployment (extraction inside the container, Index Server on the host reading the volume mount): the graph carries /app/... paths, so affected_by, identifiers_for_path and the prune sweep match nothing host-side, and a host-run woods:incremental computes an empty blast radius silently. A moved or renamed checkout has the same effect. Fix: normalize before registration and relativize at the lookup boundary. Needs a from_h migration for absolute-keyed graphs already on disk — same shape as normalize_edges and normalize_file_map, which handle pre-#164 formats without a rebuild. Surfaced by the #164 review (finding 17); deferred from PR #165 as too large for it. Tracked in GH #166.",
+    "status": "ready",
+    "depends_on": []
   }
 ]

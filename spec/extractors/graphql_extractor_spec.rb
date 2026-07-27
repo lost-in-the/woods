@@ -29,26 +29,65 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
     stub_const('GraphQL::Schema::Interface', Module.new)
   end
 
-  # ── graphql_available? ────────────────────────────────────────────────
+  # ── graphql_source_present? ───────────────────────────────────────────
 
-  describe '#graphql_available?' do
-    it 'returns false when GraphQL::Schema is not defined' do
-      hide_const('GraphQL::Schema')
-
+  describe '#graphql_source_present?' do
+    it 'returns false when there is no graphql directory and no schema class' do
       extractor = described_class.new
-      expect(extractor.send(:graphql_available?)).to be false
+      expect(extractor.send(:graphql_source_present?)).to be false
     end
 
-    it 'returns false when no graphql directory and no schema class' do
-      extractor = described_class.new
-      expect(extractor.send(:graphql_available?)).to be false
-    end
-
-    it 'returns true when graphql directory exists' do
+    it 'returns true when the graphql directory exists' do
       FileUtils.mkdir_p(File.join(tmp_dir, 'app/graphql'))
 
       extractor = described_class.new
-      expect(extractor.send(:graphql_available?)).to be true
+      expect(extractor.send(:graphql_source_present?)).to be true
+    end
+
+    # The gem enriches units; it does not decide whether they exist. Gating
+    # discovery on it produced a real full-vs-incremental divergence — see the
+    # extraction examples below.
+    it 'ignores whether graphql-ruby is loaded' do
+      FileUtils.mkdir_p(File.join(tmp_dir, 'app/graphql'))
+      hide_const('GraphQL::Schema')
+
+      extractor = described_class.new
+      expect(extractor.send(:graphql_source_present?)).to be true
+    end
+  end
+
+  # ── full/incremental equivalence without the gem ──────────────────────
+
+  # The divergence this closes: `PathDispatcher` routes `app/graphql/**` at
+  # `extract_graphql_file`, which is pure static analysis and never had a
+  # runtime gate, while `extract_all` refused to run at all unless
+  # `GraphQL::Schema` was defined. An app whose GraphQL gem was not loaded at
+  # extraction time therefore got its types indexed by an incremental run and
+  # dropped by a full one — the exact class of bug #164 exists to prevent, in
+  # the one corner the differential harness does not template.
+  describe 'with graphql-ruby not loaded' do
+    let(:type_path) { File.join(tmp_dir, 'app/graphql/types/user_type.rb') }
+
+    before do
+      hide_const('GraphQL::Schema')
+      FileUtils.mkdir_p(File.dirname(type_path))
+      File.write(type_path, <<~SRC)
+        module Types
+          class UserType < Types::BaseObject
+            field :id, ID, null: false
+          end
+        end
+      SRC
+    end
+
+    it 'extracts the same units per file and in a full run' do
+      extractor = described_class.new
+
+      full = extractor.extract_all.map(&:identifier)
+      per_file = [extractor.extract_graphql_file(type_path)].compact.map(&:identifier)
+
+      expect(full).to eq(['Types::UserType'])
+      expect(per_file).to eq(full)
     end
   end
 

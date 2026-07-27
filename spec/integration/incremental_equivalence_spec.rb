@@ -65,7 +65,14 @@ ARTIFACT_TEMPLATES = [
   ->(i) { "spec/factories/fac_#{i}.rb" },             # whole-app: factories
   ->(i) { "db/migrate/2024010100000#{i}_mig_#{i}.rb" },
   ->(i) { "db/views/vw_#{i}_v01.sql" },               # whole-app: latest-version-wins
-  ->(i) { "db/views/vw_#{i}_v02.sql" }
+  ->(i) { "db/views/vw_#{i}_v02.sql" },
+  # GraphQL: the one divergence class confirmed at scale in review. Its
+  # PathDispatcher rule reaches `extract_graphql_file`, which is pure static
+  # analysis — so these templates need no graphql-ruby installed, and the
+  # extractor's full pass is deliberately ungated for the same reason.
+  ->(i) { "app/graphql/types/gqt_#{i}_type.rb" },
+  ->(i) { "app/graphql/mutations/gqm_#{i}.rb" },
+  ->(i) { "app/graphql/resolvers/gqr_#{i}.rb" }
 ].freeze
 
 RSpec.describe 'Incremental extraction equivalence', :booted_app do
@@ -540,12 +547,30 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     when %r{\Adb/migrate/} then migration_source(base, nonce)
     when %r{\Aspec/factories/} then factory_source(base, nonce)
     when %r{\Aconfig/initializers/} then "# initializer #{nonce}\nRails.application.config.x.#{base} = #{nonce}\n"
+    when %r{\Aapp/graphql/} then graphql_source(relative, base, nonce)
     when %r{concerns/} then "module #{camelize(base)}\n  extend ActiveSupport::Concern\n  # #{nonce}\nend\n"
     when /_spec\.rb\z/ then "RSpec.describe Post do\n  it 'x#{nonce}' do\n    expect(Post).to be_a(Class)\n  end\nend\n"
     else "class #{camelize(base)}\n  VERSION = #{nonce}\n  def call\n    Post.count\n  end\nend\n"
     end
   end
   # rubocop:enable Metrics/CyclomaticComplexity
+
+  # Written to match `graphql_class?`'s patterns, which are what the extractor
+  # actually keys on — a base-class suffix, not the presence of the gem.
+  def graphql_source(relative, base, nonce)
+    name = camelize(base)
+    case relative
+    when %r{/mutations/}
+      "module Mutations\n  class #{name} < Mutations::BaseMutation\n    field :ok, Boolean, null: false\n    " \
+      "def resolve\n      { ok: #{nonce}.positive? }\n    end\n  end\nend\n"
+    when %r{/resolvers/}
+      "module Resolvers\n  class #{name} < Resolvers::BaseResolver\n    type [Types::PostType], null: false\n    " \
+      "def resolve\n      Post.limit(#{nonce})\n    end\n  end\nend\n"
+    else
+      "module Types\n  class #{name} < Types::BaseObject\n    field :id, ID, null: false\n    " \
+      "field :n#{nonce}, Integer, null: true\n  end\nend\n"
+    end
+  end
 
   def factory_source(base, nonce)
     "FactoryBot.define do\n  factory :#{base} do\n    title { 'x#{nonce}' }\n  end\nend\n"
