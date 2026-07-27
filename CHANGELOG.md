@@ -40,6 +40,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`rake woods:watch` — a resident extraction daemon** (#164, phase 2). Watches the app and
+  keeps the index current as files change, instead of as-fresh-as-the-last-explicit-run. One
+  cycle is watch → debounce → classify → reload if needed → extract → publish. Freshness was
+  pull-based because every sync from a cold process pays a full Rails boot; a process that
+  stays booted removes that tax without giving up runtime-true extraction. Development only —
+  it adds no network listener. See `docs/WATCH_DAEMON.md`.
+  - **Restart triggers, Spring-style.** A change to `Gemfile.lock`, `config/**`, or the schema
+    stops the daemon with a degraded status and exit `75` for a supervisor, because Rails'
+    reloader re-runs none of it.
+  - **Failure posture.** A failed reload (the mid-edit syntax error) publishes a degraded
+    status naming the reason and leaves the index intact at its last good generation. The
+    daemon never crash-loops, never publishes a partial write, and never advances the
+    generation over work that didn't land.
+  - **Storm handling.** Above a changed-file threshold (default 50) a branch switch falls back
+    to one full extraction rather than N incremental steps.
+  - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
+    scan otherwise — which is also the right choice inside a container, where native FS events
+    don't cross bind mounts reliably.
+- **`Woods::Generation`** — a monotonic marker for "which version of the index is on disk",
+  written atomically as the last step of a successful run. Readers get a cheap staleness check
+  without stat-ing the whole index.
 - **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
   named extractors wholesale against an already-booted app, replacing every unit of the types
   they own. The unit types with no per-file entry point — routes, middleware, engines,

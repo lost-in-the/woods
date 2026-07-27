@@ -98,6 +98,44 @@ namespace :woods do
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
 
+  desc 'Watch the app and keep the index current (resident daemon)'
+  task watch: :environment do
+    require 'woods/watch/daemon'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+
+    daemon = Woods::Watch::Daemon.new(
+      output_dir: output_dir,
+      root: Rails.root,
+      debounce: Float(ENV.fetch('WOODS_WATCH_DEBOUNCE', Woods::Watch::Daemon::DEFAULT_DEBOUNCE)),
+      full_extraction_threshold: Integer(
+        ENV.fetch('WOODS_WATCH_FULL_THRESHOLD', Woods::Watch::Daemon::DEFAULT_FULL_EXTRACTION_THRESHOLD)
+      ),
+      logger: Rails.logger
+    )
+
+    %w[INT TERM].each { |sig| Signal.trap(sig) { daemon.stop } }
+
+    puts "Watching #{Rails.root} — index at #{output_dir}"
+    puts 'Ctrl-C to stop.'
+    puts
+
+    reason = daemon.run
+
+    if reason == :restart_required
+      # Boot-captured state changed; Rails cannot reload it. Exit non-zero so
+      # a supervisor (foreman, systemd, `docker compose` restart policy)
+      # brings the process back with the new configuration.
+      warn 'Restart required — boot-captured configuration changed. Exiting for a supervisor to restart.'
+      exit 75 # EX_TEMPFAIL
+    end
+
+    puts 'Watcher stopped.'
+  end
+
+  desc 'Keep watch over the woods — resident index daemon (alias for watch)'
+  task guard: :watch
+
   desc 'Re-run named extractors wholesale, e.g. woods:refresh[routes,middleware]'
   task :refresh, [:extractor] => :environment do |_task, args|
     require 'woods/extractor'
