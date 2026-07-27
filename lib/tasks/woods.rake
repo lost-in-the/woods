@@ -16,6 +16,60 @@
 #   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
 
 namespace :woods do
+  # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
+  #
+  # Worktrees are disjoint by construction (each has its own Rails.root and
+  # its own output dir), so these only ever mediate writers against the *same*
+  # index: a manual rake run, a hook-triggered sync, and the watch daemon.
+
+  # Run a block holding the extraction lock, waiting briefly for another
+  # writer to finish.
+  #
+  # Proceeding without the lock after the wait is deliberate: a daemon cycle
+  # is milliseconds, so a wait this long means something unusual, and hanging
+  # a CI job or a developer's terminal indefinitely is worse than two writers
+  # overlapping — which the index survives, since every write is atomic and
+  # the generation is bumped last.
+  def woods_with_extraction_lock(output_dir, wait: 30)
+    require 'woods/coordination/pipeline_lock'
+    require 'woods/watch/daemon'
+
+    lock = Woods::Coordination::PipelineLock.new(
+      lock_dir: output_dir.to_s,
+      name: Woods::Watch::Daemon::LOCK_NAME,
+      stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
+    )
+
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
+    acquired = lock.acquire
+    until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.25
+      acquired = lock.acquire
+    end
+
+    puts 'Warning: another writer still holds the extraction lock — proceeding anyway.' unless acquired
+
+    begin
+      yield
+    ensure
+      lock.release if acquired
+    end
+  end
+
+  # Is a watch daemon already maintaining this index?
+  #
+  # A session-start or worktree hook that fires `woods:incremental` on a tree
+  # a daemon is already watching is pure duplicated work — and it contends for
+  # the lock the daemon needs. Set WOODS_IGNORE_WATCH=1 to run anyway.
+  def woods_daemon_running?(output_dir)
+    return false if ENV['WOODS_IGNORE_WATCH'] == '1'
+
+    require 'woods/watch/status'
+    Woods::Watch::Status.new(output_dir: output_dir).alive?
+  rescue StandardError
+    false
+  end
+
   desc 'Full extraction of codebase for indexing'
   task extract: :environment do
     require 'woods/extractor'
@@ -27,7 +81,7 @@ namespace :woods do
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    results = extractor.extract_all
+    results = woods_with_extraction_lock(output_dir) { extractor.extract_all }
 
     puts
     puts 'Extraction complete!'
@@ -84,12 +138,18 @@ namespace :woods do
       exit 0
     end
 
+    if woods_daemon_running?(output_dir)
+      puts 'A watch daemon is maintaining this index — skipping (it has already seen these changes).'
+      puts 'Set WOODS_IGNORE_WATCH=1 to extract anyway.'
+      exit 0
+    end
+
     puts "Incremental extraction for #{changed_files.size} changed files..."
     changed_files.each { |f| puts "  - #{f}" }
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    affected = extractor.extract_changed(changed_files)
+    affected = woods_with_extraction_lock(output_dir) { extractor.extract_changed(changed_files) }
 
     puts
     puts "Re-extracted #{affected.size} affected units."
@@ -135,6 +195,19 @@ namespace :woods do
 
   desc 'Keep watch over the woods — resident index daemon (alias for watch)'
   task guard: :watch
+
+  desc 'Report whether a watch daemon is maintaining this index (exit 0 if alive)'
+  task watch_status: :environment do
+    require 'woods/watch/status'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    status = Woods::Watch::Status.new(output_dir: output_dir)
+
+    puts JSON.pretty_generate(status.read)
+    # Exit status is the point: a worktree hook can `rake woods:watch_status ||
+    # start_daemon` without parsing anything.
+    exit(status.alive? ? 0 : 1)
+  end
 
   desc 'Re-run named extractors wholesale, e.g. woods:refresh[routes,middleware]'
   task :refresh, [:extractor] => :environment do |_task, args|

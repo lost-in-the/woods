@@ -80,6 +80,10 @@ jobs:
       - name: Run watch daemon integration
         run: bundle exec rspec spec/integration/watch_daemon_spec.rb
 
+      # Six worktrees, disjoint indexes, concurrent readers (#164 phase 4).
+      - name: Run multi-worktree integration
+        run: bundle exec rspec spec/integration/multi_worktree_spec.rb
+
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with
   # the real cause buried after the test output.

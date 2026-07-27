@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 require_relative '../change_set'
+require_relative '../coordination/pipeline_lock'
 require_relative '../generation'
 require_relative '../reload_policy'
 require_relative 'status'
 require_relative 'watcher'
+require 'set'
 
 module Woods
   module Watch
@@ -79,6 +81,17 @@ module Woods
       # than iterating.
       DEFAULT_FULL_EXTRACTION_THRESHOLD = 50
 
+      # Name of the file lock that serializes writers within one worktree.
+      # Worktrees are disjoint by construction — each has its own Rails.root
+      # and its own output dir — so this only ever contends with another
+      # writer against the *same* index: a manual `woods:extract`, or a hook
+      # sync that fired anyway.
+      LOCK_NAME = 'extraction'
+
+      # A daemon cycle is milliseconds; a manual full extraction is seconds to
+      # minutes. This bounds how long a crashed writer can block the daemon.
+      LOCK_STALE_TIMEOUT = 600
+
       # @return [Woods::Generation]
       attr_reader :generation
 
@@ -101,7 +114,7 @@ module Woods
       def initialize(output_dir:, root: nil, extractor_factory: nil, reloader: nil, watcher: nil,
                      policy: ReloadPolicy.new, debounce: DEFAULT_DEBOUNCE,
                      full_extraction_threshold: DEFAULT_FULL_EXTRACTION_THRESHOLD,
-                     idle_timeout: nil, logger: nil)
+                     idle_timeout: nil, lock: nil, logger: nil)
         @output_dir = output_dir.to_s
         @root = (root || (defined?(Rails) ? Rails.root : Dir.pwd)).to_s
         @extractor_factory = extractor_factory || -> { Woods::Extractor.new(output_dir: @output_dir) }
@@ -114,6 +127,10 @@ module Woods
         @logger = logger || default_logger
         @generation = Generation.new(output_dir: @output_dir)
         @status = Status.new(output_dir: @output_dir)
+        @lock = lock || Coordination::PipelineLock.new(
+          lock_dir: @output_dir, name: LOCK_NAME, stale_timeout: LOCK_STALE_TIMEOUT
+        )
+        @pending = Set.new
         @stop_reason = nil
       end
       # rubocop:enable Metrics/ParameterLists
@@ -126,6 +143,7 @@ module Woods
         watcher = @watcher || build_watcher
         publish_status(:running, reason: nil)
         @last_event_at = monotonic_now
+        idle_monitor = start_idle_monitor(watcher)
 
         watcher.start do |paths|
           @last_event_at = monotonic_now
@@ -136,6 +154,7 @@ module Woods
 
         @stop_reason || :stopped
       ensure
+        idle_monitor&.kill
         publish_status(:stopped, reason: @stop_reason&.to_s)
       end
 
@@ -177,10 +196,41 @@ module Woods
         sleep(@debounce) if @debounce.to_f.positive?
       end
 
-      # Hook for backends that buffer; the default watchers deliver a complete
-      # batch per callback.
+      # Fold in anything a previous cycle could not process.
+      #
+      # A cycle skipped for lock contention must not lose its paths — the
+      # files really did change, and no later event will mention them again.
+      # They ride along with the next batch instead.
       def paths_since(paths)
-        paths
+        return paths if @pending.empty?
+
+        carried = @pending.to_a
+        @pending = Set.new
+        (carried + Array(paths)).uniq
+      end
+
+      # Stop the daemon after `idle_timeout` seconds without a file event.
+      #
+      # N worktrees means N booted apps, and most of them are dormant most of
+      # the time. A slot nobody is working in should not hold ~65 MB waiting
+      # to be needed; a worktree hook or session start revives it. Off by
+      # default — a single-worktree host wants the daemon to stay up.
+      #
+      # @return [Thread, nil]
+      def start_idle_monitor(watcher)
+        return nil unless @idle_timeout.to_f.positive?
+
+        Thread.new do
+          loop do
+            sleep([@idle_timeout / 4.0, 1.0].max)
+            next if monotonic_now - @last_event_at < @idle_timeout
+
+            @logger.info("[Woods] watch: idle for #{@idle_timeout}s — exiting")
+            @stop_reason = :idle
+            watcher.stop
+            break
+          end
+        end
       end
 
       def attempt_reload
@@ -206,6 +256,28 @@ module Woods
 
       def extract(change_set)
         started = monotonic_now
+        return contended(change_set, started) unless @lock.acquire
+
+        begin
+          run_extraction(change_set, started)
+        ensure
+          @lock.release
+        end
+      end
+
+      # Another writer holds the extraction lock — a manual `woods:extract`,
+      # or a hook sync that fired anyway. Yield rather than race: the manual
+      # run is doing the same job, and the daemon's paths are carried into the
+      # next cycle so nothing is lost.
+      def contended(change_set, started)
+        @pending.merge(change_set.absolute_paths)
+        reason = 'another writer holds the extraction lock — retrying on the next event'
+        @logger.info("[Woods] watch: #{reason}")
+        outcome(:contended, :degraded, reason: reason, count: change_set.size,
+                                       duration_ms: elapsed_ms(started))
+      end
+
+      def run_extraction(change_set, started)
         full = change_set.size > @full_extraction_threshold
         log_storm(change_set) if full
 
@@ -223,6 +295,9 @@ module Woods
         # was and the index keeps serving its last good state.
         reason = "extraction failed: #{e.class}: #{e.message}"
         @logger.error("[Woods] watch: #{reason}")
+        # The paths really did change; a later event will not mention them
+        # again, so carry them forward and try once the cause clears.
+        @pending.merge(change_set.absolute_paths)
         outcome(:extract, :degraded, reason: reason, count: change_set.size,
                                      duration_ms: elapsed_ms(started))
       end

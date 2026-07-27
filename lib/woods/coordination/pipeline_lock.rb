@@ -4,6 +4,11 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 
+# Woods::Error is defined in the entry point; required here so this file can
+# be loaded directly (the watch daemon reaches for it without loading the
+# whole gem first).
+require 'woods'
+
 module Woods
   module Coordination
     class LockError < Woods::Error; end

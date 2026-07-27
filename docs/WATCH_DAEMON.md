@@ -266,6 +266,82 @@ The reader-side generation check is the robust answer, and it is the one
 implemented. Revisit if the gem grows the server-side API and a client we care
 about acts on it.
 
+## Multiple worktrees
+
+The topology to design for: a worktree manager provisions a canonical checkout
+plus N agent slots (commonly ~5), each an independent `Rails.root` with its own
+container stack and its own `tmp/woods`, while several sessions run
+concurrently — sometimes sharing a worktree.
+
+### Disjointness is structural
+
+Per-worktree output directories mean daemons never contend *across* worktrees.
+There is deliberately **no** shared cross-worktree index and **no** daemon
+multiplexing several worktrees from one process: the single-active-project
+failure mode of stateful multiplexed servers is well documented in adjacent
+tools, and disjoint-by-construction is what makes this design safe.
+
+### Within one worktree, writers serialize
+
+Three writers can want the same index: the daemon, a manual `woods:extract`,
+and a hook-triggered `woods:incremental`. They share the existing file-based
+`PipelineLock`, and the policy is:
+
+| Situation | Behaviour |
+|---|---|
+| Daemon cycle while another writer holds the lock | Daemon yields, publishes a `contended` degraded status, and **carries its paths into the next cycle** so nothing is lost |
+| Manual `woods:extract` / `woods:incremental` | Waits up to 30 s for the lock, then proceeds with a warning — a daemon cycle is milliseconds, so a longer wait means something unusual, and hanging a terminal or a CI job is worse than an overlap the index survives |
+| Hook sync on a tree a daemon is already watching | Skips entirely: the daemon has already seen those changes. `WOODS_IGNORE_WATCH=1` overrides |
+
+A hook can check cheaply:
+
+```bash
+bundle exec rake woods:watch_status || start_the_daemon   # exit 0 = alive
+```
+
+Liveness needs three things to agree, each ruling out a different way the
+status file lies: a state a live daemon writes, a pid that still exists (a
+`kill -9` leaves the file behind), and a recent timestamp (a machine that lost
+power leaves a `running` record whose pid some unrelated process now owns).
+
+### Reader multiplicity is free
+
+Several sessions in one worktree each spawn their own stdio `woods-mcp`. With
+the generation check they converge on fresh data with no coordination and no
+shared server — which is the property worth protecting, since a persisted
+index served by many cheap readers is exactly what Woods has that a
+per-process language-server index does not.
+
+### Idle TTL
+
+N resident daemons is N booted apps, and most slots are dormant most of the
+time. `idle_timeout` (off by default) stops a daemon after that many seconds
+without a file event, so a slot nobody is working in stops holding ~65 MB. A
+worktree hook or session start revives it.
+
+```ruby
+Woods::Watch::Daemon.new(output_dir: …, idle_timeout: 900).run   # 15 minutes
+```
+
+Off by default because a single-worktree host wants the daemon to stay up.
+
+### What is verified, and what isn't
+
+| Property | Where |
+|---|---|
+| Concurrent cycles serialize; no deadlock; no orphaned lock, even when extraction raises | `spec/watch/multi_instance_spec.rb` |
+| Contended cycle carries its paths forward | same |
+| Idle TTL exits and records why | same |
+| Six real worktrees stay disjoint, validate-green, independently versioned | `spec/integration/multi_worktree_spec.rb` |
+| Many concurrent readers per worktree converge without coordination | same |
+
+**Not covered:** `Rails.root` is a process singleton, so six *concurrently
+extracting* booted apps cannot exist in one Ruby process — that shape needs six
+processes and is not in CI. Per-daemon memory at that scale is likewise
+extrapolated from the single-app measurement above rather than measured. Both
+are part of the same outstanding validation as the large-host-app latency
+numbers.
+
 ## Embedding it
 
 ```ruby

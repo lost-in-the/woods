@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'fileutils'
+require 'time'
 
 require_relative '../atomic_file'
 
@@ -27,6 +29,11 @@ module Woods
       FILENAME = 'watch_status.json'
 
       STATES = %i[running degraded stopped].freeze
+
+      # A status record older than this is not believed, however healthy it
+      # claims to be. Generous relative to a debounce window, because an idle
+      # daemon only rewrites its status when something happens.
+      STALE_AFTER = 900 # 15 minutes
 
       # @param output_dir [String, Pathname] index directory
       # @param clock [#call] returns the ISO8601 stamp for a write
@@ -71,12 +78,57 @@ module Woods
         { 'state' => 'stopped', 'reason' => "unreadable status file: #{e.message}" }
       end
 
+      # Is a daemon currently maintaining this index?
+      #
+      # Three things have to hold, and each rules out a different way the
+      # status file lies: the state has to be one a live daemon writes, the
+      # recorded pid has to still exist (a `kill -9` leaves the file behind),
+      # and the record has to be recent (a machine that lost power leaves a
+      # `running` record with a pid some unrelated process now owns).
+      #
+      # Callers use this to decide whether to do the work themselves — a
+      # session-start hook that would otherwise run `woods:incremental` can
+      # skip it when a daemon is already on the job.
+      #
+      # @param max_age [Numeric] seconds after which a record is disbelieved
+      # @return [Boolean]
+      def alive?(max_age: STALE_AFTER)
+        record = read
+        return false unless %w[running degraded].include?(record['state'])
+        return false unless process_alive?(record['pid'])
+
+        recent?(record['updated_at'], max_age)
+      end
+
       # Remove the status file. Used on a clean shutdown by callers that would
       # rather leave no record than a stale "running" one.
       #
       # @return [void]
       def clear
         FileUtils.rm_f(@path)
+      end
+
+      private
+
+      # Signal 0 asks "could I signal this process?" without sending anything.
+      # EPERM means it exists but belongs to someone else — still alive.
+      def process_alive?(pid)
+        return false unless pid.is_a?(Integer) && pid.positive?
+
+        Process.kill(0, pid)
+        true
+      rescue Errno::ESRCH
+        false
+      rescue Errno::EPERM
+        true
+      end
+
+      def recent?(iso8601, max_age)
+        return false if iso8601.nil?
+
+        Time.now - Time.parse(iso8601) <= max_age
+      rescue ArgumentError, TypeError
+        false
       end
     end
   end

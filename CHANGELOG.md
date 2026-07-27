@@ -58,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
     scan otherwise — which is also the right choice inside a container, where native FS events
     don't cross bind mounts reliably.
+- **Multi-instance operation across worktrees** (#164, phase 4). Worktrees stay disjoint by
+  construction (own `Rails.root`, own `tmp/woods`), so the work is within one worktree: the
+  daemon, a manual `woods:extract`, and a hook-triggered `woods:incremental` now share the
+  existing `PipelineLock`. The daemon yields to another writer and carries its paths into the
+  next cycle rather than losing them; manual runs wait up to 30 s and then proceed with a
+  warning rather than hanging a terminal; and `woods:incremental` skips entirely when a live
+  daemon is already watching the tree (`WOODS_IGNORE_WATCH=1` overrides). New
+  `rake woods:watch_status` exits 0 when a daemon is alive, so a worktree hook can revive one
+  without parsing anything. `Woods::Watch::Daemon`'s `idle_timeout` (off by default) stops a
+  daemon in a dormant slot so it stops holding a booted app's memory.
 - **An MCP freshness contract** (#164, phase 3). `woods_status` now reports the index
   `generation` (number, when it moved, what moved it), whether the **working tree** is dirty
   plus a fingerprint of it, and the watch daemon's state (`running` / `degraded` + reason /
