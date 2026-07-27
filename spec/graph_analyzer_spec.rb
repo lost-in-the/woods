@@ -287,4 +287,48 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(counts).to eq(counts.sort.reverse)
     end
   end
+
+  # The claim CLAUDE.md and docs/INCREMENTAL_EXTRACTION.md both make: two
+  # extractions of the same tree publish the same analysis. It has to be tested
+  # here, not in the differential harness — the harness compares a full run
+  # against an incremental one, and until this was written its oracle sorted
+  # both sides before comparing, so registration-order dependence was invisible
+  # to the only test that could have seen it.
+  #
+  # Registration order is exactly what differs between the two paths in
+  # practice: a full run interleaves by extractor, an incremental one appends
+  # whatever it just touched.
+  describe 'determinism across registration order' do
+    let(:units) do
+      [
+        { type: :model, identifier: 'User' },
+        { type: :model, identifier: 'Order', dependencies: [{ type: :model, target: 'User' }] },
+        { type: :model, identifier: 'Invoice', dependencies: [{ type: :model, target: 'Order' }] },
+        { type: :service, identifier: 'Loop::A', dependencies: [{ type: :service, target: 'Loop::B' }] },
+        { type: :service, identifier: 'Loop::B', dependencies: [{ type: :service, target: 'Loop::A' }] },
+        { type: :service, identifier: 'Detached' },
+        { type: :controller, identifier: 'OrdersController', dependencies: [{ type: :model, target: 'Order' }] }
+      ]
+    end
+
+    def analysis_for(units)
+      built = Woods::DependencyGraph.new
+      units.each { |attrs| built.register(make_unit(**attrs)) }
+      described_class.new(built).analyze
+    end
+
+    it 'produces byte-identical analysis whatever order units were registered in' do
+      forward = analysis_for(units)
+
+      units.each_index do |offset|
+        rotated = units.rotate(offset)
+        expect(analysis_for(rotated)).to(
+          eq(forward),
+          "registering from index #{offset} changed the analysis — it is not a pure function of graph content"
+        )
+      end
+
+      expect(analysis_for(units.reverse)).to eq(forward)
+    end
+  end
 end

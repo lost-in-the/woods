@@ -34,12 +34,17 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of channel units
       def extract_all
+        discoverable_classes.filter_map { |klass| extract_channel(klass) }
+      end
+
+      # The channel classes this extractor would extract from the running app.
+      # Shared with the incremental path's class reconciliation (#164).
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
         return [] unless action_cable_available?
 
-        channels = channel_descendants
-        return [] if channels.empty?
-
-        channels.filter_map { |klass| extract_channel(klass) }
+        channel_descendants
       end
 
       # Extract a single channel class into an ExtractedUnit.

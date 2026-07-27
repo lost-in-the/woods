@@ -7,6 +7,8 @@ require 'json'
 require 'pathname'
 require 'set'
 
+require_relative '../generation'
+
 module Woods
   module MCP
     # Reads extraction output from disk for the MCP server.
@@ -42,8 +44,11 @@ module Woods
       MAX_UNIT_CACHE = 50
 
       # @param index_dir [String] Path to extraction output directory
+      # @param auto_refresh [Boolean] re-read the index when its published
+      #   generation moves. On by default; specs that assert caching behaviour
+      #   turn it off.
       # @raise [ArgumentError] if directory doesn't exist or has no manifest.json
-      def initialize(index_dir)
+      def initialize(index_dir, auto_refresh: true)
         @index_dir = Pathname.new(index_dir)
         raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
         raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
@@ -51,6 +56,92 @@ module Woods
         @unit_cache = {}
         @unit_cache_order = []
         @identifier_map = nil
+        @auto_refresh = auto_refresh
+        @pin_depth = 0
+        @freshness_mutex = Mutex.new
+        @generation = Woods::Generation.new(output_dir: @index_dir)
+        @loaded_generation = nil
+        @loaded_token = nil
+        @generation_signature = nil
+      end
+
+      # The generation this reader's caches were populated from.
+      #
+      # @return [Integer, nil] nil until something has been read
+      attr_reader :loaded_generation
+
+      # Drop caches if the index has been rewritten since they were populated.
+      #
+      # This is what makes the MCP `reload` tool an optimization rather than a
+      # correctness requirement. A long-lived server used to hold whatever it
+      # read at boot until someone thought to call `reload` — so an agent
+      # working alongside a running extraction got answers describing the tree
+      # as of the last time the server happened to start.
+      #
+      # Called at the top of every public read. The cost is one `File.stat` of
+      # a ~100-byte file; the file is only parsed when its mtime or size moved,
+      # and the caches are only dropped when the generation number actually
+      # advanced. An index with no generation file (written before generations
+      # existed, or by a third party) never refreshes — same behaviour as
+      # before.
+      #
+      # The check-and-reload is a mutex-guarded critical section. The stdio
+      # transport serializes tool calls, but `woods-mcp-http` runs handlers on
+      # its Rack server's request threads — and unguarded, two concurrent reads
+      # race the signature bookkeeping: duplicate `reload!`s, or one request's
+      # freshly populated caches dropped mid-sequence by the other's refresh.
+      #
+      # @return [Integer, nil] the generation now loaded, or nil when the
+      #   caches were already current
+      def ensure_fresh!
+        return nil unless @auto_refresh
+
+        @freshness_mutex.synchronize { refresh_if_stale }
+      end
+
+      # Suppress cache invalidation for the duration of a block.
+      #
+      # {#ensure_fresh!} runs per read, which bounds staleness but does not
+      # make a *sequence* of reads consistent: a caller that reads the manifest
+      # and then a unit can straddle two generations if a write lands between
+      # them. Both halves describe a real state of the tree, but not the same
+      # one.
+      #
+      # Wrapping a multi-read operation checks freshness once, up front, and
+      # then holds it — so nothing already cached is dropped and re-read at a
+      # newer generation partway through.
+      #
+      # **What this does not do:** an artifact that has never been read is
+      # still loaded from whatever is on disk when the block reaches it.
+      # Guaranteeing more would mean materializing the whole index on entry,
+      # which is what {#warmup!} costs, per request. Closing that last gap
+      # properly needs the payload behind an atomic pointer — see
+      # docs/WATCH_DAEMON.md.
+      #
+      # Pins are *refcounted*, not a boolean. Under a threaded transport two
+      # requests can hold pins at once, and with a boolean the first to finish
+      # unpinned the reader while the second still relied on it — its remaining
+      # reads could then be invalidated mid-sequence, the exact tear this
+      # method exists to prevent. Freshness is checked only when the depth goes
+      # 0 → 1; nested and overlapping pins ride the generation already held,
+      # and invalidation resumes when the last pin releases.
+      #
+      # @example
+      #   reader.with_pinned_generation { [reader.manifest, reader.find_unit("Post")] }
+      #
+      # @yield the block to run against a single generation
+      # @return [Object] the block's value
+      def with_pinned_generation
+        @freshness_mutex.synchronize do
+          refresh_if_stale if @auto_refresh && @pin_depth.zero?
+          @pin_depth += 1
+        end
+
+        begin
+          yield
+        ensure
+          @freshness_mutex.synchronize { @pin_depth -= 1 }
+        end
       end
 
       # Pre-populate cached state so the first MCP tool call doesn't pay
@@ -66,19 +157,7 @@ module Woods
       #
       # @return [Hash] Per-step outcome: `{step => true | Exception}`
       def warmup!
-        steps = {
-          manifest: -> { manifest },
-          summary: -> { summary },
-          dependency_graph: -> { dependency_graph },
-          graph_analysis: -> { graph_analysis },
-          identifier_map: -> { identifier_map }
-        }
-        steps.each_with_object({}) do |(step, runner), result|
-          runner.call
-          result[step] = true
-        rescue StandardError => e
-          result[step] = e
-        end
+        with_pinned_generation { warmup_steps }
       end
 
       # Clear all cached state so the next access re-reads from disk.
@@ -99,6 +178,7 @@ module Woods
 
       # @return [Hash] Parsed manifest.json
       def manifest
+        ensure_fresh!
         @manifest ||= parse_json('manifest.json')
       end
 
@@ -115,6 +195,7 @@ module Woods
 
       # @return [String, nil] SUMMARY.md content, or nil if not present
       def summary
+        ensure_fresh!
         @summary ||= begin
           path = @index_dir.join('SUMMARY.md')
           path.file? ? path.read : nil
@@ -123,6 +204,7 @@ module Woods
 
       # @return [Woods::DependencyGraph] Graph loaded from disk
       def dependency_graph
+        ensure_fresh!
         @dependency_graph ||= begin
           data = parse_json('dependency_graph.json')
           Woods::DependencyGraph.from_h(data)
@@ -131,6 +213,7 @@ module Woods
 
       # @return [Hash] Parsed graph_analysis.json
       def graph_analysis
+        ensure_fresh!
         @graph_analysis ||= parse_json('graph_analysis.json')
       end
 
@@ -139,6 +222,7 @@ module Woods
       # @param identifier [String] Unit identifier (e.g. "Post", "Api::V1::HealthController")
       # @return [Hash, nil] Full unit data or nil if not found
       def find_unit(identifier)
+        ensure_fresh!
         location = identifier_map[identifier]
         return nil unless location
 
@@ -150,6 +234,7 @@ module Woods
       # @param type [String, nil] Singular type name (e.g. "model", "controller")
       # @return [Array<Hash>] Index entries for matching units
       def list_units(type: nil)
+        ensure_fresh!
         dirs = if type
                  dir = TYPE_TO_DIR[type]
                  dir ? [dir] : []
@@ -194,6 +279,20 @@ module Woods
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
       # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
       def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
+        # Pinned, not merely checked-once. This walks the identifier map and
+        # then loads units for the hits; each nested `find_unit` re-checks
+        # freshness, so a publish landing mid-walk rebuilt the caches while the
+        # result list still held identifiers from the previous generation — one
+        # response describing two indexes.
+        with_pinned_generation do
+          search_within_pin(query, types: types, fields: fields, limit: limit,
+                                   exact_prefix: exact_prefix, exact_suffix: exact_suffix)
+        end
+      end
+
+      # @api private
+      def search_within_pin(query = nil, types: nil, fields: %w[identifier], limit: 20,
+                            exact_prefix: nil, exact_suffix: nil)
         prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
         suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
         if query.blank? && !prefix && !suffix
@@ -330,6 +429,11 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
+        with_pinned_generation { framework_sources_within_pin(keyword, limit: limit) }
+      end
+
+      # @api private
+      def framework_sources_within_pin(keyword, limit: 20)
         # Multi-word keywords ("ActiveRecord callbacks") are split on
         # whitespace and ANDed. Single-word queries behave as before.
         tokens = keyword.to_s.strip.split(/\s+/)
@@ -375,6 +479,11 @@ module Woods
       # @param types [Array<String>, nil] Filter to these singular type names
       # @return [Array<Hash>] Units sorted by last_modified descending
       def recent_changes(limit: 10, types: nil)
+        with_pinned_generation { recent_changes_within_pin(limit: limit, types: types) }
+      end
+
+      # @api private
+      def recent_changes_within_pin(limit: 10, types: nil)
         dirs = if types
                  types.filter_map { |t| TYPE_TO_DIR[t] }
                else
@@ -411,10 +520,72 @@ module Woods
 
       # @return [Hash] Raw dependency graph data from JSON
       def raw_graph_data
+        ensure_fresh!
         @raw_graph_data ||= parse_json('dependency_graph.json')
       end
 
       private
+
+      # The body of {#ensure_fresh!}. Callers must hold `@freshness_mutex`; it
+      # is split out so {#with_pinned_generation} can run it inside the same
+      # critical section that increments the pin depth.
+      #
+      # @return [Integer, nil] the generation now loaded, or nil when the
+      #   caches were already current
+      def refresh_if_stale
+        return nil if @pin_depth.positive?
+
+        signature = generation_signature
+        return nil if signature.nil? || signature == @generation_signature
+
+        @generation_signature = signature
+        marker = @generation.current
+        return nil if marker.number.zero? || same_generation?(marker)
+
+        reload!
+        @loaded_token = marker.token
+        @loaded_generation = marker.number
+      end
+
+      # Compare the *token*, not the number.
+      #
+      # `bump!` is a read-modify-write, so two writers that overlap can both
+      # publish the same number — which the design permits, since a manual rake
+      # run proceeds after waiting for the lock. A reader already loaded at N+1
+      # would then see `published == loaded`, conclude it was current, and hold
+      # caches describing the *other* writer's N+1 indefinitely: a stale index
+      # that believes it is fresh, which is the one failure generations exist to
+      # prevent.
+      #
+      # The token is a fresh random value per publish, so it distinguishes two
+      # collapsed bumps that the counter cannot. Falls back to the number for
+      # generation files written before tokens existed.
+      def same_generation?(marker)
+        return @loaded_generation == marker.number if marker.token.nil?
+
+        @loaded_token == marker.token
+      end
+
+      # Touch every lazy accessor, recording rather than raising per-step
+      # failures so a missing optional artefact (graph_analysis.json on an index
+      # written before it existed) never blocks the rest.
+      #
+      # @return [Hash] `{step => true | Exception}`
+      def warmup_steps
+        steps = {
+          manifest: -> { manifest },
+          summary: -> { summary },
+          dependency_graph: -> { dependency_graph },
+          graph_analysis: -> { graph_analysis },
+          identifier_map: -> { identifier_map }
+        }
+        steps.each_with_object({}) do |(step, runner), result|
+          runner.call
+          result[step] = true
+        rescue StandardError => e
+          result[step] = e
+        end
+      end
 
       # Compile a case-insensitive regex from a query string.
       #
@@ -428,6 +599,30 @@ module Woods
         Regexp.new(query, Regexp::IGNORECASE)
       rescue RegexpError
         Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+      end
+
+      # A cheap stand-in for "has the generation file been rewritten?", so the
+      # common case costs one `File.stat` of a ~100-byte file instead of a parse.
+      #
+      # The inode is load-bearing, not belt-and-braces. `[mtime, size]` alone
+      # misses a bump whenever two writes land in the same mtime tick with the
+      # same payload length — and equal length is the daemon's *steady state*:
+      # reason `"incremental"` every cycle, fixed-width number and timestamp.
+      # Coarse mtime granularity is not exotic either; it includes the
+      # volume-mounted Docker deployment the Index Server is documented for. The
+      # reader would then serve a stale index indefinitely, which is the exact
+      # silent staleness generations exist to end.
+      #
+      # {AtomicFile} renames a fresh Tempfile over the target on every write, so
+      # a new inode is guaranteed per publish and this costs nothing extra.
+      #
+      # @return [Array, nil] opaque signature, or nil when there is no
+      #   generation file
+      def generation_signature
+        stat = File.stat(@generation.path)
+        [stat.mtime.to_f, stat.size, stat.ino]
+      rescue SystemCallError
+        nil
       end
 
       # Case-insensitive literal prefix/suffix check on an identifier.

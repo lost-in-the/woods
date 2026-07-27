@@ -45,12 +45,24 @@ module Woods
 
       # Extract all GraphQL types, mutations, queries, and resolvers
       #
-      # Returns an empty array if graphql-ruby is not installed or
-      # no GraphQL files are found.
+      # Returns an empty array when the app has neither an `app/graphql`
+      # directory nor a loadable schema class.
+      #
+      # Deliberately **not** gated on graphql-ruby being loaded. The file pass
+      # is static — a regex over source plus a `safe_constantize` that is
+      # allowed to fail — so it works perfectly well without the gem, and
+      # `app/graphql/*.rb` is real source an agent wants indexed either way.
+      # Gating it produced a genuine full-vs-incremental divergence: the
+      # `PathDispatcher` rule routes those paths at `extract_graphql_file`,
+      # which never had the gate, so an app whose GraphQL gem was not loaded at
+      # extraction time got its types indexed incrementally and dropped by a
+      # full run. Runtime introspection stays optional and additive — it makes
+      # the units richer when the gem is there, it does not decide whether they
+      # exist.
       #
       # @return [Array<ExtractedUnit>] List of GraphQL units
       def extract_all
-        return [] unless graphql_available?
+        return [] unless graphql_source_present?
 
         units = []
         seen_identifiers = Set.new
@@ -121,14 +133,26 @@ module Woods
       # Schema and Runtime Discovery
       # ──────────────────────────────────────────────────────────────────────
 
-      # Check if graphql-ruby is available at runtime
+      # Does this app have GraphQL source to extract?
+      #
+      # Note what this does *not* ask: whether graphql-ruby is loaded. See
+      # {#extract_all} — the gem enriches the units, it does not gate them.
       #
       # @return [Boolean]
-      def graphql_available?
-        return false unless defined?(GraphQL::Schema)
-        return false unless @graphql_dir&.directory? || @schema_class
+      def graphql_source_present?
+        return true if @graphql_dir&.directory?
 
-        true
+        !@schema_class.nil?
+      end
+
+      # Is graphql-ruby loaded in this process?
+      #
+      # Only the runtime-introspection pass needs this; nothing about file
+      # discovery does.
+      #
+      # @return [Boolean]
+      def graphql_runtime_available?
+        defined?(GraphQL::Schema) ? true : false
       end
 
       # Find the application's schema class (descendant of GraphQL::Schema)

@@ -4,6 +4,11 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 
+# Woods::Error is defined in the entry point; required here so this file can
+# be loaded directly (the watch daemon reaches for it without loading the
+# whole gem first).
+require 'woods'
+
 module Woods
   module Coordination
     class LockError < Woods::Error; end
@@ -113,6 +118,31 @@ module Woods
       # @return [Boolean]
       def locked?
         @held && File.exist?(@lock_path)
+      end
+
+      # Refresh the held lock's mtime so a long but healthy run is not mistaken
+      # for a crashed one.
+      #
+      # Staleness is measured from mtime, and nothing was updating it while the
+      # lock was held. A full extraction on a large host app can exceed
+      # `stale_timeout`, at which point any contender retires the lock of a run
+      # that is still going — producing exactly the two-writer clobber the lock
+      # exists to prevent. A holder that outlives the window must therefore say
+      # so periodically.
+      #
+      # No-op unless this instance holds the lock, so a caller can heartbeat
+      # unconditionally.
+      #
+      # @return [Boolean] true when the mtime was refreshed
+      def touch
+        return false unless locked?
+
+        FileUtils.touch(@lock_path)
+        true
+      rescue SystemCallError
+        # The lock vanished (retired by a contender, or the dir went away).
+        # Nothing useful to do here; the next acquire/release resolves it.
+        false
       end
 
       private

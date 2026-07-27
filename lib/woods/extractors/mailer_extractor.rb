@@ -35,9 +35,17 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of mailer units
       def extract_all
-        @mailer_base.descendants.map do |mailer|
+        discoverable_classes.map do |mailer|
           extract_mailer(mailer)
         end.compact
+      end
+
+      # The mailer classes this extractor would extract from the running app.
+      # Shared with the incremental path's class reconciliation (#164).
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
+        @mailer_base.descendants
       end
 
       # Extract a single mailer

@@ -45,11 +45,19 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of component units
       def extract_all
-        return [] unless @component_base
-
-        @component_base.descendants.map do |component|
+        discoverable_classes.map do |component|
           extract_component(component)
         end.compact
+      end
+
+      # The component classes this extractor would extract from the running
+      # app. Shared with the incremental path's class reconciliation (#164).
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
+        return [] unless @component_base
+
+        @component_base.descendants
       end
 
       # Extract a single component

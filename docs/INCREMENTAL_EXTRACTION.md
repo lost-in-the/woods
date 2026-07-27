@@ -1,0 +1,311 @@
+# Incremental Extraction
+
+`woods:incremental` re-indexes only what changed. This page states the
+correctness contract it is held to, the inventory of which path class triggers
+which work, how to run the differential harness that enforces the contract, and
+what is still out of scope.
+
+Background: [#164](https://github.com/lost-in-the/woods/issues/164).
+
+## The contract
+
+> After any sequence of file create / modify / delete / rename operations, an
+> index maintained purely by `extract_changed` is **indistinguishable from a
+> cold `extract_all` of the same tree**.
+
+Indistinguishable means: the same unit identifiers, the same per-unit JSON
+content, the same `_index.json` per type, the same graph nodes / edges /
+reverse edges / file map / type index / stats, PageRank recomputed, and the
+same manifest counts and `graph_analysis.json`.
+
+Three differences are tolerated, and nothing else:
+
+| Tolerated | Why |
+|---|---|
+| Wall-clock stamps (`extracted_at`, `generated_at`, and the digest over it) | A unit an incremental run correctly left alone keeps an older stamp. |
+| Ordering inside a unit's `dependents` | Full extraction appends in extractor order, incremental in graph order. Same multiset. |
+| PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
+
+`graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
+longer is: the analyzer is order-independent and the oracle compares the file
+exactly. Tolerating the ordering there meant the harness — the only test that
+compares a full run against an incremental one — could not see the very
+dependence the analyzer's determinism work existed to remove.
+
+This matters most for **incremental CI chains** — restore the previous graph,
+run `woods:incremental` per merge. There, a unit that goes missing propagates
+forward run over run instead of being erased by the next full rebuild.
+
+## What a run does, in order
+
+`Extractor#extract_changed` is order-sensitive; each step exists because of the
+step before it.
+
+1. **Blast radius** from the *pre-change* graph, so dependents of a file that
+   just disappeared still get re-extracted.
+2. **Reconcile changed paths.** Every changed path that still exists is handed
+   to the file-based extractors that claim it (`PathDispatcher`), and units the
+   path no longer produces are dropped. This is what indexes a file the index
+   has never seen, and what lets a task removed from a multi-task `.rake` file
+   actually go away.
+3. **Re-extract the rest of the blast radius** — units whose own file did not
+   change but which depend on something that did.
+4. **Reconcile class-based types** against each extractor's
+   `#discoverable_classes` — classes added since the last extraction, and
+   classes the graph still holds that the set no longer contains. Exact by
+   construction: it is the same discovery code a full extraction uses, so
+   there is no path-to-constant guessing.
+5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
+   unit type wholesale.
+6. **Prune vanished units** last, so anything steps 2–5 resurrected against a
+   deleted file is swept in the same run rather than surviving as a ghost.
+
+Then the second pass: `dependents` and `metadata.git` are refreshed on every
+touched unit (the incremental equivalents of full extraction's phases 2 and 4),
+type indexes are regenerated, and the graph, `graph_analysis.json` and the
+manifest are written.
+
+A run that changed nothing **does not rewrite the manifest**. The manifest
+timestamp drives `woods_status.staleness_seconds`, and touching it after a no-op
+would report the index as freshly synced when nothing was re-read.
+
+## Dispatch inventory
+
+### Per-file
+
+Routed by `PathDispatcher.file_rules`. Rules reference each extractor's own
+`*_DIRECTORIES` constant, so adding a directory there flows through
+automatically.
+
+| Path class | Extractor |
+|---|---|
+| `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases` | services |
+| `app/jobs`, `app/workers`, `app/sidekiq` | jobs |
+| `app/serializers`, `app/blueprinters`, `app/decorators` | serializers |
+| `app/decorators`, `app/presenters`, `app/form_objects` | decorators |
+| `app/managers` / `app/policies` / `app/validators` | managers / policies + pundit_policies / validators |
+| `app/**/concerns/**/*.rb` | concerns |
+| `app/models/**/*.rb` (outside `concerns/`) | poros, caching |
+| `app/controllers/**/*.rb` | caching |
+| `app/views/**/*.erb` | view_templates, caching |
+| `config/locales/**/*.yml` | i18n |
+| `config/initializers`, `config/environments` | configurations |
+| `db/migrate/*.rb` (top level only) | migrations |
+| `lib/tasks/**/*.rake` | rake_tasks |
+| `lib/**/*.rb` (outside `tasks/`, `generators/`) | libs |
+| `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings |
+
+A path can match several rules — `app/policies` is claimed by both
+`PolicyExtractor` and `PunditExtractor`, `app/decorators` by both the
+serializer and decorator extractors — and all matching rules run.
+
+### Wholesale re-runs
+
+`PathDispatcher.whole_app_rules` → `Extractor::WHOLE_APP_EXTRACTORS`. These
+extractors have no per-file entry point: they introspect the runtime or scan a
+whole directory in one pass. In an already-booted process re-running them is
+cheap, which is what makes wholesale replacement the right shape.
+
+| Trigger | Re-runs |
+|---|---|
+| `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
+| `Gemfile.lock` | engines, middleware |
+| `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware |
+| `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb` | scheduled_jobs |
+| `app/models/**/*.rb` | state_machines |
+| `app/**/*.rb` | events |
+| `spec/factories/**`, `test/factories/**` | factories |
+| `db/views/**/*.sql` | database_views |
+
+Two of these deserve a note:
+
+- **Routes cascade.** `ROUTE_CONSUMER_EXTRACTORS` embed the route table —
+  controllers write each action's routes into unit metadata and into the action
+  chunks, and everything using `RouteHelperResolver` resolves navigation edges
+  against it. The graph cannot express this, because a route unit depends *on*
+  its controller, not the other way round, so walking dependents from
+  `config/routes.rb` never reaches them.
+- **Database views are wholesale, not per file.** Scenic keeps only the highest
+  `_vNN` of each view, so pointing the per-file method at
+  `db/views/foo_v01.sql` would index a version a full extraction drops.
+
+### Class-based types
+
+Models, controllers, mailers, components, view components and channels are
+**not** dispatched by path. They are reconciled against
+`#discoverable_classes` on their own extractor, in **both** directions:
+additions are that set minus the graph, removals are the graph minus that set.
+
+For all six, `extract_all` is literally `discoverable_classes.map { … }.compact`,
+so absence from the set is exactly "a full extraction would not produce this" —
+the equivalence the incremental path is held to.
+
+Removal is gated on the eager load having **completed**, and that gate carries
+the whole safety argument:
+
+- **A partial eager load.** The documented `NameError` fallback loads only
+  `EXTRACTION_DIRECTORIES`, so descendants are known-incomplete and the
+  difference would be most of the app. Deleting by the type is far worse than a
+  stale unit, so a partial load removes nothing.
+- **A constant outliving its file.** A resident daemon that has not reloaded
+  still holds a deleted class as a descendant, so it is *in* the set and not
+  stale — correct for that process. The subsequent reload is what makes it
+  removable.
+
+Without this, a class deleted from a file that still exists was never removed
+at all: path-keyed deletion sees no missing path, and a class-based unit
+records a *convention* path from its constant name, so a second model in one
+`.rb` was never attributed to the file it actually lived in. The unit outlived
+every subsequent incremental run.
+
+The booted harness cannot cover that case. Zeitwerk unloads only the constant a
+file is *expected* to define, so a class defined there as a side effect survives
+the reload, stays in `descendants`, and the in-process full extraction the
+oracle compares against emits it too — both sides agree, wrongly. The coverage
+is in `spec/extractor_spec.rb`, driving the reconciler with a shrinking
+discovery set.
+
+### Deletion
+
+- Paths named in the change set that no longer exist are **authoritative** for
+  any unit type. This covers deleted models and the old side of a rename.
+- A **sweep** over registered paths catches callers whose change set is
+  incomplete (a git diff that omits deletions, a missed unlink, a branch
+  switch). Being a heuristic, it is bounded twice:
+  - **To paths a file rule claims.** Some units name a *nominal* path rather
+    than a source file — `BehavioralProfile` names `config/application.rb`,
+    which no rule claims.
+  - **Away from class-based units entirely.** A class-based unit records a
+    convention path when its source location can't be resolved, and that path
+    need not exist. On Rails < 7.1, `ActiveRecord::SchemaMigration` and
+    `ActiveRecord::InternalMetadata` are real `ActiveRecord::Base` descendants
+    whose convention path (`app/models/active_record/schema_migration.rb`) no
+    application has — and *is* claimed by the PORO rule, so the first bound
+    doesn't cover it.
+
+  Sweeping either would delete units a full extraction still produces.
+- Only paths under `Rails.root` are considered either way: framework units point
+  at gem paths, and an index restored from a CI artifact can carry paths
+  produced under a different root.
+
+## Refreshing one extractor on demand
+
+`Extractor#refresh` re-runs named extractors wholesale against an
+already-booted app. Incremental runs reach the whole-app extractors by trigger
+path; this reaches them by name, for a caller that already knows what went
+stale.
+
+```ruby
+# After editing config/routes.rb, or from a resident process that just reloaded
+Woods::Extractor.new(output_dir: "tmp/woods").refresh(:routes)
+# => { types: [:routes, :controllers, :mailers, ...], touched: [...], unknown: [] }
+```
+
+```bash
+bundle exec rake "woods:refresh[routes]"
+bundle exec rake "woods:refresh[state_machines,factories]"
+bundle exec rake woods:refresh          # lists the valid keys
+```
+
+Any extractor key works, not only the whole-app ones — `refresh(:models)` is a
+legitimate way to re-derive every model after a schema change. A routes refresh
+cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above. Like an
+incremental run, `refresh` rewrites the graph, `graph_analysis.json`, the
+affected type indexes and the manifest, so the result is durable.
+
+## What a change actually requires: reload, restart, or neither
+
+`Woods::ReloadPolicy` answers the question a resident process has to ask before
+re-extracting: extraction reads the *runtime*, so "the file changed" is not the
+same question as "what has to happen before re-reading it is worth anything".
+
+| Action | Path classes | Why |
+|---|---|---|
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files | Woods reads bytes. No constant involved. |
+| `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
+| `:restart` | `Gemfile`, `Gemfile.lock`, `config/application.rb`, `config/boot.rb`, `config/environment.rb`, `config/initializers/**`, `config/environments/**`, `config/database.yml`, credentials, `db/schema.rb`, `db/structure.sql` | Captured at boot. Rails' reloader re-runs none of it. |
+| `:ignore` | everything else | Not extraction input. |
+
+The `:restart` set is drawn generously on purpose. Rails' reloader replaces
+autoloaded constants and nothing else — it does not re-run initializers,
+re-resolve `Rails.application.config`, or rebuild the schema cache, all of
+which Woods captures (`BehavioralProfile`, `MiddlewareExtractor`, model column
+data). `rails/spring`'s staleness bugs came from under-scoping exactly this
+set.
+
+Two version-sensitive behaviours sit *behind* the classification rather than in
+it, and belong to whoever implements the reload step:
+
+- `ActiveSupport::DescendantsTracker` internals changed across Rails 6.0–8.x, so
+  a reload can leave stale entries in a descendants set. Discovery-based
+  extraction must re-read descendants *after* the reload completes, never
+  across it.
+- A schema change needs `reset_column_information` plus schema-cache
+  invalidation to become visible. It is classified `:restart` rather than
+  `:reload` because getting that right in-process is subtle and schema changes
+  are rare.
+
+`Watch::Daemon` consumes the policy on every cycle: `classify_all` decides what
+the batch demands, and `paths_requiring(:restart)` names the offending paths in
+the restart message a supervisor sees. See `docs/WATCH_DAEMON.md`.
+
+## Running the differential harness
+
+`spec/integration/incremental_equivalence_spec.rb` is the oracle. It boots the
+`spec/dummy` app against a tmpdir copy, applies randomized
+create/modify/delete/rename sequences, and compares the maintained index to a
+cold full extraction at every step. It runs in CI on every Rails-matrix row.
+
+```bash
+# CI defaults: 60 operations x 3 seeds
+WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
+  bundle exec rspec spec/integration/incremental_equivalence_spec.rb
+
+# Soak run
+WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
+  WOODS_DIFF_OPS=1000 WOODS_DIFF_SEEDS=1,2,3,4,5 \
+  bundle exec rspec spec/integration/incremental_equivalence_spec.rb -e randomized
+
+# When a truncated delta isn't enough to see what moved
+WOODS_DIFF_BRIEF=4000 ...
+```
+
+Seeds are fixed, so a failure reproduces. `spec/support/index_comparison.rb`
+owns the definition of "the two indexes agree" and documents every exclusion.
+
+**Run it before and after any change to the incremental path.**
+
+## Limits and open work
+
+- **Class-based deletion needs a reload.** The harness compares two extractions
+  in the *same booted process*, which isolates incremental maintenance from
+  Rails reloading. Deleting a model file leaves the constant loaded, so a
+  full extraction in that process still emits it. Reload semantics are phase 2
+  of #164.
+- **Identifier collisions.** The graph keys nodes on the bare identifier, so two
+  units of different types sharing one collapse onto a single node (backlog
+  B-062), and two files defining the same constant tie-break differently in
+  full vs incremental extraction (B-063). Both pre-date this work; the harness
+  side-steps them by giving each generated artifact family its own name prefix.
+- **Class-based units are never swept.** A unit discovered from runtime
+  descendants records a *convention* path when its source location can't be
+  resolved, and that path need not exist — on Rails < 7.1,
+  `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
+  real `ActiveRecord::Base` descendants whose file path
+  (`app/models/active_record/schema_migration.rb`) no application has.
+  Deleting a class-based unit therefore requires either the caller naming the
+  path or the discovery-set reconciliation above; the sweep never infers it.
+- **Git metadata for untouched units.** An incremental run refreshes
+  `metadata.git` on the units it wrote. A unit nothing touched keeps the git
+  metadata from the last run that did, which goes stale as commits land on
+  other files.
+- **Snapshots stay full-extraction-only.** They hash the full unit set, and an
+  incremental run only holds changed units in memory.
+- **A divergence floor is still worth keeping.** Incremental correctness is a
+  ratchet, not a proof: schedule a periodic full extraction and gate on
+  `woods:validate` so any undiscovered drift has a bounded lifetime.
+- **Phases 1–4** of #164 — a public single-extractor re-run API
+  (`Extractor#refresh`), the resident `woods:watch` daemon, an MCP freshness
+  contract, and multi-worktree operation — all landed alongside this work
+  (B-064, resolved). `docs/WATCH_DAEMON.md` covers them, including the parts
+  that remain unmeasured.

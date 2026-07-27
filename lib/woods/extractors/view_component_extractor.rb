@@ -38,11 +38,28 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of view component units
       def extract_all
-        return [] unless @component_base
-
-        @component_base.descendants.map do |component|
+        discoverable_classes.map do |component|
           extract_component(component)
         end.compact
+      end
+
+      # The component classes this extractor would extract from the running
+      # app. Shared with the incremental path's class reconciliation (#164).
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
+        return [] unless @component_base
+
+        # Previews are filtered here rather than only in {#extract_component},
+        # because this set is also the incremental path's reconciliation input.
+        # A preview class is never in the graph — `extract_component` rejects it
+        # — so leaving it in made every incremental run recompute the same
+        # "addition", extract it, get nil, and dirty the dependents pass for
+        # nothing. Anonymous classes go too: `extract_component` rejects a nil
+        # name for the same reason.
+        @component_base.descendants.reject do |component|
+          component.name.nil? || preview_class?(component)
+        end
       end
 
       # Extract a single ViewComponent component

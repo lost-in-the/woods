@@ -1,12 +1,16 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'logger'
 require 'mcp'
 require 'open3'
 require 'time'
 require 'set'
+require_relative '../atomic_file'
+require_relative '../generation'
 require_relative '../tasks'
+require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
@@ -675,8 +679,15 @@ module Woods
                          'externally — their counts in the response reflect the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            reader.reload!
-            manifest = reader.manifest
+            # Through the pin, not around it. A bare `reload!` under the
+            # threaded HTTP transport drops the caches of a concurrent pinned
+            # sequence mid-flight — the exact tear refcounted pins exist to
+            # prevent. Pinning here also makes the manifest read below describe
+            # the generation this reload just loaded.
+            manifest = reader.with_pinned_generation do
+              reader.reload!
+              reader.manifest
+            end
             payload = {
               reloaded: true,
               extracted_at: manifest['extracted_at'],
@@ -1459,6 +1470,20 @@ module Woods
         # status claiming +embedding_model: "text-embedding-3-small"+ next to
         # +embedding_provider: "ollama"+ and reasonably distrust every field.
         def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
+          # Pin the generation across the whole payload. Without this the
+          # manifest can be read at generation N and `generation_fields` then
+          # report N+1 — a status report that describes counts from one index
+          # while announcing the number of another, which is precisely the
+          # confusion this tool exists to resolve.
+          return build_status_payload(reader, retriever, index_dir, bootstrap_state) unless
+            reader.respond_to?(:with_pinned_generation)
+
+          reader.with_pinned_generation do
+            build_status_payload(reader, retriever, index_dir, bootstrap_state)
+          end
+        end
+
+        def build_status_payload(reader, retriever, index_dir, bootstrap_state)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
           staleness = staleness_seconds(extracted_at)
@@ -1476,7 +1501,8 @@ module Woods
               index_dir: index_dir.to_s,
               update: Woods::UpdateCheck.status_hash
             },
-            index: index_section(manifest, extracted_at, staleness, index_dir),
+            index: index_section(manifest, extracted_at, staleness, index_dir, reader),
+            watch: watch_section(index_dir),
             retriever: {
               configured: !retriever.nil?,
               class: retriever&.class&.name
@@ -1505,7 +1531,7 @@ module Woods
         # diff directly. This is an observability signal, not a hard gate —
         # hard-refusing responses would be much more disruptive than a loudly-
         # visible staleness flag that agents can branch on.
-        def index_section(manifest, extracted_at, staleness, index_dir)
+        def index_section(manifest, extracted_at, staleness, index_dir, reader = nil)
           base = {
             extracted_at: extracted_at,
             staleness_seconds: staleness,
@@ -1519,6 +1545,9 @@ module Woods
             schema_sha: manifest && manifest['schema_sha']
           }
 
+          base.merge!(generation_fields(index_dir, reader))
+          base.merge!(working_tree_fields(index_dir))
+
           manifest_sha = manifest && manifest['git_sha']
           head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
           return base unless head_sha
@@ -1528,20 +1557,156 @@ module Woods
           base
         end
 
+        # The generation the index is published at.
+        #
+        # Every extraction mode that writes the *unit* index bumps this as its
+        # last write, so it answers "has the index moved?" without comparing
+        # timestamps — which `staleness_seconds` can't, since it measures
+        # wall-clock age rather than whether anything changed.
+        #
+        # One carve-out: `woods:extract_framework` writes only `rails_source/`
+        # and does not bump, so a framework re-extraction leaves this number
+        # where it was. That is deliberate — framework sources are pinned by the
+        # `Gemfile.lock`, reported separately above, and treating them as an
+        # index generation would invalidate every reader's cache for data that
+        # changes when dependencies do, not when the app does.
+        #
+        # @return [Hash]
+        def generation_fields(index_dir, reader = nil)
+          return {} unless index_dir
+
+          marker = Woods::Generation.new(output_dir: index_dir).current
+          return { generation: nil } if marker.number.zero?
+
+          fields = { generation: marker.number,
+                     generation_updated_at: marker.updated_at,
+                     generation_reason: marker.reason }
+          fields.merge(served_generation_fields(marker, reader))
+        rescue StandardError
+          {}
+        end
+
+        # What the *reader* is actually serving, which is not always what is
+        # published.
+        #
+        # `build_status` pins the reader so the manifest and counts above come
+        # from one generation, but this method reads `generation.json` from
+        # disk — so a publish landing mid-call would otherwise report a
+        # generation number beside counts from the previous one, the exact
+        # mismatch the pin is there to remove. When they differ, say so instead
+        # of quietly picking one.
+        def served_generation_fields(marker, reader)
+          return {} unless reader.respond_to?(:loaded_generation)
+
+          served = reader.loaded_generation
+          return {} if served.nil? || served == marker.number
+
+          { served_generation: served, generation_lag: marker.number - served }
+        rescue StandardError
+          {}
+        end
+
+        # Whether the working tree has uncommitted changes, and a fingerprint
+        # of them.
+        #
+        # `git_sha_matches_head` only sees *committed* HEAD, so an agent
+        # working through forty uncommitted edits could be told the index
+        # matches HEAD while every answer described the tree before those
+        # edits. `working_tree_dirty` is the fix for that.
+        #
+        # The fingerprint is a digest of `git status --porcelain` *as of this
+        # call*. Nothing records the digest the index was built at, so it does
+        # not answer "is this the same dirty state the index describes" — it
+        # gives a caller a stable identity for the current dirty state, so two
+        # of its own calls can be compared to detect the tree moving underneath
+        # it. Pair it with `generation` to tell "tree changed, index followed"
+        # from "tree changed, index has not caught up".
+        #
+        # @return [Hash]
+        def working_tree_fields(index_dir)
+          porcelain = resolve_working_tree_status(index_dir)
+          return {} if porcelain.nil?
+
+          { working_tree_dirty: !porcelain.empty?,
+            working_tree_fingerprint: Digest::SHA256.hexdigest(porcelain)[0, 16] }
+        end
+
+        # `git status --porcelain` for the repo containing +index_dir+, or nil
+        # when that can't be answered.
+        #
+        # capture3, not capture2e: stderr still must not reach the stdio
+        # transport, but folding it into stdout makes any warning git emits on a
+        # successful run — a stale index.lock notice, a detached-HEAD advisory,
+        # `core.fsmonitor` chatter — part of the "porcelain" output. A clean tree
+        # then reports dirty, and the fingerprint changes with the warning rather
+        # than with the code.
+        def resolve_working_tree_status(index_dir)
+          return nil unless index_dir
+
+          dir = index_dir.to_s
+          return nil unless File.directory?(dir)
+
+          output, _stderr, status = Open3.capture3('git', '-C', dir, 'status', '--porcelain')
+          status.success? ? output : nil
+        rescue StandardError
+          nil
+        end
+
+        # The watch daemon's state, so an agent can branch on whether anything
+        # is keeping this index current.
+        #
+        # Three states matter and they are not interchangeable: `running`
+        # (current, or current within a debounce window), `degraded` (alive but
+        # unable to update — the reason says why, and the index is frozen at a
+        # known generation), and `stopped`/`absent` (nothing is maintaining
+        # this index; fall back to whatever the last explicit run left).
+        #
+        # @return [Hash]
+        def watch_section(index_dir)
+          return { state: 'absent' } unless index_dir
+
+          path = File.join(index_dir.to_s, Woods::Watch::Status::FILENAME)
+          return { state: 'absent' } unless File.exist?(path)
+
+          # AtomicFile.read: the daemon's reasons contain em dashes, and a
+          # US-ASCII default external encoding turns a plain File.read of them
+          # into an Encoding::InvalidByteSequenceError — raising out of
+          # woods_status entirely rather than degrading it.
+          record = JSON.parse(Woods::AtomicFile.read(path))
+          # `state` is whatever the daemon last wrote, and a `kill -9`'d daemon
+          # leaves `running` behind forever. `alive?` adds the two checks that
+          # catch that — the pid still exists and the record is recent — so the
+          # payload can distinguish "maintaining this index" from "claimed to be,
+          # once". Reported as a separate field rather than by overwriting
+          # `state`, because the recorded state and the liveness verdict answer
+          # different questions and an operator wants both.
+          status = Woods::Watch::Status.new(output_dir: index_dir)
+          { state: record['state'], reason: record['reason'], generation: record['generation'],
+            pid: record['pid'], updated_at: record['updated_at'],
+            alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
+            last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
+        rescue StandardError
+          { state: 'absent' }
+        end
+
         # Resolve the current HEAD SHA for the git repo containing +index_dir+.
         # Returns nil when git is unavailable or +index_dir+ is not in a repo —
         # callers treat nil as "can't compare" rather than "mismatch".
         #
-        # Uses +capture2e+ so git's "fatal: not a git repository" stderr banner
-        # does not leak through the MCP stdio transport. MCP clients that parse
-        # stderr for protocol framing can't tolerate stray lines.
+        # capture3 keeps git's stderr out of the MCP stdio transport — clients
+        # that parse stderr for protocol framing can't tolerate stray lines —
+        # *and* out of the SHA. capture2e folded them together, so a warning on
+        # an otherwise successful `rev-parse` (a stale `index.lock` notice, a
+        # `core.fsmonitor` complaint) was concatenated into the value this
+        # method returns and compared against the manifest as if it were a SHA.
+        # Same hazard as {#resolve_working_tree_status}, one probe over.
         def resolve_head_sha(index_dir)
           return nil unless index_dir
 
           dir = index_dir.to_s
           return nil unless File.directory?(dir)
 
-          output, status = Open3.capture2e('git', '-C', dir, 'rev-parse', 'HEAD')
+          output, _stderr, status = Open3.capture3('git', '-C', dir, 'rev-parse', 'HEAD')
           status.success? ? output.strip : nil
         rescue Errno::ENOENT, Errno::EACCES
           # git not installed or not executable on this host — equivalent to

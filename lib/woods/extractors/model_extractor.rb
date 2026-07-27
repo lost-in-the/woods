@@ -48,12 +48,22 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of model units
       def extract_all
+        discoverable_classes.map { |model| extract_model(model) }.compact
+      end
+
+      # The model classes this extractor would extract from the running app.
+      #
+      # Shared with the incremental path, which reconciles this set against
+      # the identifiers already in the dependency graph to spot classes added
+      # since the last extraction (#164). Keeping discovery in one method is
+      # what makes that reconciliation exact rather than a re-guess.
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
         ActiveRecord::Base.descendants
                           .reject(&:abstract_class?)
                           .reject { |m| m.name.nil? } # Skip anonymous classes
                           .reject { |m| habtm_join_model?(m) }
-                          .map { |model| extract_model(model) }
-                          .compact
       end
 
       # Extract a single model

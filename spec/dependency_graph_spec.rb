@@ -488,5 +488,134 @@ RSpec.describe Woods::DependencyGraph do
       edges = restored.instance_variable_get(:@edges)
       expect(edges['Order']).to eq([{ target: 'User', via: nil }])
     end
+
+    it 'widens a single-valued file_map from a pre-migration graph (#164 gap 3)' do
+      restored = described_class.from_h(
+        'nodes' => { 'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb' } },
+        'file_map' => { 'app/models/user.rb' => 'User' }
+      )
+
+      expect(restored.identifiers_for_path('app/models/user.rb')).to eq(['User'])
+    end
+
+    it 'round-trips a multi-valued file_map through JSON' do
+      graph.register(make_unit(type: :rake_task, identifier: 'db:seed', file_path: '/app/lib/tasks/db.rake'))
+      graph.register(make_unit(type: :rake_task, identifier: 'db:reset', file_path: '/app/lib/tasks/db.rake'))
+
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(restored.identifiers_for_path('/app/lib/tasks/db.rake')).to contain_exactly('db:seed', 'db:reset')
+    end
+  end
+
+  # A single file can define several units — a .rake file with several tasks,
+  # an i18n YAML, a lib file with several classes. Before #164 the file map
+  # kept only the last-registered identifier per path, so anything reached
+  # *from* a path was lossy and units could ghost.
+  describe 'multi-unit files' do
+    before do
+      graph.register(make_unit(type: :rake_task, identifier: 'db:seed', file_path: '/app/lib/tasks/db.rake'))
+      graph.register(make_unit(type: :rake_task, identifier: 'db:reset', file_path: '/app/lib/tasks/db.rake'))
+    end
+
+    it 'keeps every identifier defined by one path' do
+      expect(graph.identifiers_for_path('/app/lib/tasks/db.rake')).to contain_exactly('db:seed', 'db:reset')
+    end
+
+    it 'marks every unit in the file as affected by a change to it' do
+      expect(graph.affected_by(['/app/lib/tasks/db.rake'])).to contain_exactly('db:seed', 'db:reset')
+    end
+
+    it 'drops only the removed identifier from the path' do
+      graph.remove('db:seed')
+
+      expect(graph.identifiers_for_path('/app/lib/tasks/db.rake')).to eq(['db:reset'])
+    end
+
+    it 'forgets the path once its last unit is removed' do
+      graph.remove('db:seed')
+      graph.remove('db:reset')
+
+      expect(graph.registered_paths).not_to include('/app/lib/tasks/db.rake')
+    end
+  end
+
+  describe '#remove' do
+    before do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(
+        make_unit(type: :service, identifier: 'Signup', dependencies: [{ target: 'User', via: :code_reference }])
+      )
+    end
+
+    it 'returns the removed node the first time and nil after' do
+      expect(graph.remove('Signup')).to include(type: :service)
+      expect(graph.remove('Signup')).to be_nil
+    end
+
+    it 'drops the node, its edges, and its type-index entry' do
+      graph.remove('Signup')
+
+      expect(graph.node_exists?('Signup')).to be(false)
+      expect(graph.dependencies_of('Signup')).to be_empty
+      expect(graph.units_of_type(:service)).to be_empty
+    end
+
+    it 'drops the type bucket entirely rather than leaving it empty' do
+      graph.remove('Signup')
+
+      expect(graph.to_h[:type_index]).not_to have_key(:service)
+      expect(graph.to_h[:stats][:types]).not_to have_key(:service)
+    end
+
+    it 'withdraws the removed unit from its targets reverse edges' do
+      graph.remove('Signup')
+
+      expect(graph.dependents_of('User')).to be_empty
+      expect(graph.dependents_of('User', via: :code_reference)).to be_empty
+    end
+
+    it 'leaves reverse edges pointing at the removed unit alone' do
+      # Signup still declares an edge to User, so a full extraction would
+      # record that reverse entry too — a dependency target need not be a
+      # registered node.
+      graph.remove('User')
+
+      expect(graph.dependents_of('User')).to eq(['Signup'])
+    end
+
+    it 'invalidates the memoized serialization' do
+      graph.to_h
+      graph.remove('Signup')
+
+      expect(graph.to_h[:nodes]).not_to have_key('Signup')
+    end
+  end
+
+  describe '#dependents_detail' do
+    it 'reports the dependent type alongside the identifier' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(
+        make_unit(type: :service, identifier: 'Signup', dependencies: [{ target: 'User', via: :code_reference }])
+      )
+
+      expect(graph.dependents_detail('User')).to eq([{ type: :service, identifier: 'Signup' }])
+    end
+
+    it 'preserves multiplicity when one unit references a target twice' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(
+        make_unit(
+          type: :model, identifier: 'Order',
+          dependencies: [{ target: 'User', via: :belongs_to }, { target: 'User', via: :code_reference }]
+        )
+      )
+
+      expect(graph.dependents_detail('User').size).to eq(2)
+    end
+
+    it 'ignores dependents that are not registered nodes' do
+      expect(graph.dependents_detail('Nobody')).to be_empty
+    end
   end
 end

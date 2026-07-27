@@ -16,6 +16,93 @@
 #   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
 
 namespace :woods do
+  # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
+  #
+  # Worktrees are disjoint by construction (each has its own Rails.root and
+  # its own output dir), so these only ever mediate writers against the *same*
+  # index: a manual rake run, a hook-triggered sync, and the watch daemon.
+
+  # Run a block holding the extraction lock, waiting for another writer to
+  # finish.
+  #
+  # This used to proceed *without* the lock after 30s, on the reasoning that a
+  # daemon cycle is milliseconds so a longer wait meant something unusual. That
+  # reasoning was wrong in the case that matters: a cycle includes a
+  # storm-triggered `extract_all`, which on a large host app runs for minutes.
+  # Proceeding then means two writers load `dependency_graph.json`, mutate
+  # divergent copies, and the last one silently discards the other's work — then
+  # bumps the generation, marking the clobbered graph fresh. Per-file atomic
+  # writes do not help, because the file *set* is not atomic.
+  #
+  # So the wait is now generous and the failure explicit. `WOODS_LOCK_WAIT`
+  # overrides it; exceeding it exits non-zero rather than corrupting the index,
+  # which is the outcome a CI job or a developer can actually act on.
+  def woods_with_extraction_lock(output_dir, wait: nil)
+    # Requires first. The default wait reads a constant from the daemon, so
+    # resolving it above these lines NameError'd every write task — the same
+    # load-order bug as the missing require in `woods:watch`, reintroduced one
+    # method over by the fix for it.
+    require 'woods/coordination/pipeline_lock'
+    require 'woods/watch/daemon'
+
+    wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
+
+    lock = Woods::Coordination::PipelineLock.new(
+      lock_dir: output_dir.to_s,
+      name: Woods::Watch::Daemon::LOCK_NAME,
+      stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
+    )
+
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
+    acquired = lock.acquire
+    until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.25
+      acquired = lock.acquire
+    end
+
+    woods_abort_on_lock_timeout(wait) unless acquired
+
+    begin
+      yield
+    ensure
+      lock.release
+    end
+  end
+
+  def woods_abort_on_lock_timeout(wait)
+    warn "ERROR: another writer has held the extraction lock for #{wait.round}s."
+    warn 'Refusing to write: two concurrent writers rewrite the dependency graph from divergent'
+    warn 'copies, and the loser\'s work is discarded under a generation that says "fresh".'
+    warn 'Set WOODS_LOCK_WAIT to wait longer, or stop the other writer.'
+    exit 1
+  end
+
+  # Is a watch daemon already maintaining this index?
+  #
+  # A session-start or worktree hook that fires `woods:incremental` on a tree
+  # a daemon is already watching is pure duplicated work — and it contends for
+  # the lock the daemon needs. Set WOODS_IGNORE_WATCH=1 to run anyway.
+  #
+  # Liveness alone is not coverage, and the difference matters. A `:running`
+  # daemon reconciles everything modified since the index's last successful
+  # publish when it starts (Daemon#catch_up), so changes that predate it are
+  # covered whether or not it witnessed them — that is what makes standing down
+  # safe. A `:degraded` daemon is alive but *cannot* currently update, so
+  # standing down for it would report success over work nothing is doing.
+  #
+  # @return [Symbol] `:none`, `:running`, or `:degraded`
+  def woods_daemon_coverage(output_dir)
+    return :none if ENV['WOODS_IGNORE_WATCH'] == '1'
+
+    require 'woods/watch/status'
+    status = Woods::Watch::Status.new(output_dir: output_dir)
+    return :none unless status.alive?
+
+    status.read['state'] == 'degraded' ? :degraded : :running
+  rescue StandardError
+    :none
+  end
+
   desc 'Full extraction of codebase for indexing'
   task extract: :environment do
     require 'woods/extractor'
@@ -27,7 +114,7 @@ namespace :woods do
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    results = extractor.extract_all
+    results = woods_with_extraction_lock(output_dir) { extractor.extract_all }
 
     puts
     puts 'Extraction complete!'
@@ -72,38 +159,28 @@ namespace :woods do
                       output.lines.map(&:strip)
                     end
 
-    # Filter to relevant files
-    relevant_patterns = [
-      %r{^app/models/},
-      %r{^app/controllers/},
-      %r{^app/services/},
-      %r{^app/components/},
-      %r{^app/views/components/},
-      %r{^app/views/.*\.rb$},  # Phlex views
-      %r{^app/interactors/},
-      %r{^app/operations/},
-      %r{^app/commands/},
-      %r{^app/use_cases/},
-      %r{^app/jobs/},
-      %r{^app/workers/},       # Sidekiq workers
-      %r{^app/mailers/},
-      %r{^app/graphql/}, # GraphQL types/mutations/resolvers
-      %r{^app/serializers/},
-      %r{^app/decorators/},
-      %r{^app/blueprinters/},
-      %r{^db/migrate/},
-      %r{^db/schema\.rb$}, # Schema changes affect model metadata
-      %r{^config/routes\.rb$},
-      /^Gemfile\.lock$/ # Dependency changes trigger framework re-index
-    ]
-
-    changed_files = changed_files.select do |f|
-      relevant_patterns.any? { |p| f.match?(p) }
-    end
+    # Filter to paths that imply extraction work. The rule set lives in
+    # PathDispatcher alongside the dispatch itself — a second hand-maintained
+    # pattern list here would drift, and a path this filter drops never
+    # reaches the index however good the dispatch behind it is (#164).
+    dispatcher = Woods::PathDispatcher.new
+    changed_files = changed_files.reject(&:empty?).select { |f| dispatcher.relevant?(f) }
 
     if changed_files.empty?
       puts 'No relevant files changed. Skipping extraction.'
       exit 0
+    end
+
+    case woods_daemon_coverage(output_dir)
+    when :running
+      puts 'A watch daemon is maintaining this index — skipping.'
+      puts 'It reconciles anything changed since the last publish when it starts, so these are covered.'
+      puts 'Set WOODS_IGNORE_WATCH=1 to extract anyway.'
+      exit 0
+    when :degraded
+      # Alive but unable to update. Standing down here would exit 0 over work
+      # nothing is actually doing.
+      puts 'Warning: a watch daemon is alive but degraded — extracting anyway rather than assuming coverage.'
     end
 
     puts "Incremental extraction for #{changed_files.size} changed files..."
@@ -111,7 +188,7 @@ namespace :woods do
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    affected = extractor.extract_changed(changed_files)
+    affected = woods_with_extraction_lock(output_dir) { extractor.extract_changed(changed_files) }
 
     puts
     puts "Re-extracted #{affected.size} affected units."
@@ -119,6 +196,126 @@ namespace :woods do
 
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
+
+  desc 'Watch the app and keep the index current (resident daemon)'
+  task watch: :environment do
+    # Both, and the extractor is not optional. The daemon's default
+    # extractor_factory names Woods::Extractor lazily, so omitting this require
+    # loaded and started cleanly and then NameError'd on the first real cycle —
+    # which the failure posture turns into a permanently degraded daemon rather
+    # than a crash. Every spec pre-requires the extractor in its own setup, so
+    # the suite stayed green over a broken entry point.
+    require 'woods/extractor'
+    require 'woods/watch/daemon'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+
+    daemon = Woods::Watch::Daemon.new(
+      output_dir: output_dir,
+      root: Rails.root,
+      debounce: Float(ENV.fetch('WOODS_WATCH_DEBOUNCE', Woods::Watch::Daemon::DEFAULT_DEBOUNCE)),
+      full_extraction_threshold: Integer(
+        ENV.fetch('WOODS_WATCH_FULL_THRESHOLD', Woods::Watch::Daemon::DEFAULT_FULL_EXTRACTION_THRESHOLD)
+      ),
+      # The documented fix for a container watching a bind mount, where native
+      # FS events do not propagate and the daemon would sit silent. Nothing
+      # exposed it before, which made the advice unfollowable.
+      force_polling: ENV['WOODS_WATCH_POLL'] == '1', # container autodetect also applies; see Watcher.containerized?
+      idle_timeout: ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT', nil) && Float(ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT')),
+      catch_up: ENV['WOODS_WATCH_CATCH_UP'] != '0',
+      logger: Rails.logger
+    )
+
+    # The trap sets a flag and nothing else. `daemon.stop` reaches
+    # `Listen::Listener#stop`, which drives a state machine behind mutexes —
+    # and taking a mutex in trap context raises ThreadError on some Ruby
+    # versions, turning Ctrl-C into a crash instead of a clean shutdown. A tiny
+    # supervisor thread does the real work outside trap context.
+    stop_requested = Queue.new
+    %w[INT TERM].each { |sig| Signal.trap(sig) { stop_requested.push(sig) } }
+    Thread.new do
+      stop_requested.pop
+      daemon.stop
+    end
+
+    puts "Watching #{Rails.root} — index at #{output_dir}"
+    puts 'Ctrl-C to stop.'
+    puts
+
+    reason = daemon.run
+
+    if reason == :restart_required
+      # Boot-captured state changed; Rails cannot reload it. Exit non-zero so
+      # a supervisor (foreman, systemd, `docker compose` restart policy)
+      # brings the process back with the new configuration.
+      warn 'Restart required — boot-captured configuration changed. Exiting for a supervisor to restart.'
+      exit 75 # EX_TEMPFAIL
+    end
+
+    puts 'Watcher stopped.'
+  end
+
+  desc 'Keep watch over the woods — resident index daemon (alias for watch)'
+  task guard: :watch
+
+  desc 'Report whether a watch daemon is maintaining this index (exit 0 if alive)'
+  # Deliberately not `=> :environment`. This reads one small JSON file, and the
+  # whole point is that a worktree hook can call it before deciding whether to
+  # do real work — paying a full Rails boot to find out would cost more than the
+  # sync it is trying to avoid. WOODS_OUTPUT covers the non-default layout;
+  # otherwise the conventional path is derived without booting.
+  task :watch_status do
+    require 'woods/watch/status'
+    require 'json'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT') { File.join(Dir.pwd, 'tmp/woods') }
+    status = Woods::Watch::Status.new(output_dir: output_dir)
+
+    puts JSON.pretty_generate(status.read)
+    # Exit status is the point: a worktree hook can `rake woods:watch_status ||
+    # start_daemon` without parsing anything.
+    exit(status.alive? ? 0 : 1)
+  end
+
+  desc 'Re-run named extractors wholesale, e.g. woods:refresh[routes,middleware]'
+  task :refresh, [:extractor] => :environment do |_task, args|
+    require 'woods/extractor'
+
+    keys = [args[:extractor], *args.extras].compact.map(&:strip).reject(&:empty?)
+
+    if keys.empty?
+      puts 'Usage: rake "woods:refresh[routes]"  (comma-separate for several)'
+      puts
+      puts 'Whole-app extractors — no per-file entry point, so these are the'
+      puts 'ones a targeted refresh is normally for:'
+      puts "  #{Woods::Extractor::WHOLE_APP_EXTRACTORS.keys.sort.join(', ')}"
+      puts
+      puts 'Any extractor key is accepted:'
+      puts "  #{Woods::Extractor::EXTRACTORS.keys.sort.join(', ')}"
+      exit 1
+    end
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    extractor = Woods::Extractor.new(output_dir: output_dir)
+
+    # A refresh is a fourth writer against this index, and it rewrites the whole
+    # dependency graph. Two writers loading the persisted graph, mutating
+    # divergent copies and writing back means the last one silently discards the
+    # other's work — and then bumps the generation, telling readers the
+    # clobbered state is fresh. Atomic writes do not help: each write is
+    # individually intact, the *set* is not. So it serializes like the others.
+    begin
+      result = woods_with_extraction_lock(output_dir) { extractor.refresh(*keys) }
+    rescue ArgumentError => e
+      puts "ERROR: #{e.message}"
+      puts "Known extractors: #{Woods::Extractor::EXTRACTORS.keys.sort.join(', ')}"
+      exit 1
+    end
+
+    puts "Refreshed: #{result[:types].join(', ')}"
+    puts "Warning: ignored unknown extractor(s): #{result[:unknown].join(', ')}" if result[:unknown].any?
+    puts "#{result[:touched].size} unit(s) written or removed."
+  end
 
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'
   task extract_framework: :environment do

@@ -49,7 +49,7 @@ module Woods
 
           dependents = @graph.dependents_of(identifier)
           result << identifier if dependents.empty?
-        end
+        end.sort
       end
     end
 
@@ -65,7 +65,7 @@ module Woods
         nodes.each_with_object([]) do |(identifier, _meta), result|
           dependencies = @graph.dependencies_of(identifier)
           result << identifier if dependencies.empty?
-        end
+        end.sort
       end
     end
 
@@ -86,10 +86,21 @@ module Woods
           identifier: identifier,
           type: meta[:type],
           dependent_count: dependents.size,
-          dependents: dependents
+          # Sorted for the same reason the outer list tie-breaks on identifier:
+          # `dependents_of` returns graph-registration order, so an incremental
+          # run that appended a dependent would publish a different hub entry
+          # for an identical graph.
+          dependents: dependents.sort
         }
       end
-      identifiers_with_dependents.max_by(limit) { |h| h[:dependent_count] }
+      # Tie-break on identifier. Without it, which of the (often many) nodes
+      # sharing a dependent count land inside the top-N depends on graph
+      # insertion order, so two extractions of the same tree could publish
+      # different hub lists (#164) — incremental runs append new nodes at the
+      # end where a full extraction interleaves them by extractor.
+      identifiers_with_dependents
+        .sort_by { |h| [-h[:dependent_count], h[:identifier].to_s] }
+        .first(limit)
     end
 
     # Detect circular dependency chains in the graph.
@@ -123,7 +134,11 @@ module Woods
       nodes = graph_nodes
       return [] if nodes.size < 3
 
-      node_ids = nodes.keys
+      # Sorted, not insertion-ordered: the seeded sample indexes into this
+      # list, so leaving it in graph order would make the sampled pairs (and
+      # therefore the bridge scores) depend on the order units happened to be
+      # registered in rather than on the graph's content (#164).
+      node_ids = nodes.keys.sort
       scores = Hash.new(0)
 
       # Sample random pairs of nodes for shortest-path computation.
@@ -444,7 +459,7 @@ module Woods
       found_cycles = []
       seen_cycle_signatures = Set.new
 
-      nodes.each_key do |start_node|
+      nodes.keys.sort.each do |start_node|
         next unless color[start_node] == white
 
         # Iterative DFS using an explicit stack.
@@ -470,6 +485,9 @@ module Woods
           path.push(node)
           stack.push([node, :exit])
 
+          # Not sorted, deliberately: this list is the unit's own declared
+          # dependency order, which is identical in a full and an incremental
+          # run, so sorting it would change nothing any test can observe.
           neighbors = @graph.dependencies_of(node)
           neighbors.each do |neighbor|
             case color[neighbor]
@@ -492,6 +510,8 @@ module Woods
         end
       end
 
+      # Deterministic without a final sort: the DFS starts from a sorted
+      # node list, so cycles are discovered in the same order every run.
       found_cycles
     end
 

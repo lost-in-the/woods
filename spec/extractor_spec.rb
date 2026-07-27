@@ -593,7 +593,7 @@ RSpec.describe Woods::Extractor do
       FileUtils.touch(File.join(tmpdir, 'user.rb'))
 
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:to_h).and_return({ nodes: { '../malicious/path' => node } })
+      allow(graph).to receive(:node).with('../malicious/path').and_return(node)
 
       # constantize must NOT be called for an invalid identifier
       expect_any_instance_of(String).not_to receive(:constantize)
@@ -606,7 +606,7 @@ RSpec.describe Woods::Extractor do
       FileUtils.touch(File.join(tmpdir, 'user.rb'))
 
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:to_h).and_return({ nodes: { 'User' => node } })
+      allow(graph).to receive(:node).with('User').and_return(node)
 
       extractor_double = double('ModelExtractor')
       allow(Woods::Extractors::ModelExtractor).to receive(:new).and_return(extractor_double)
@@ -631,7 +631,7 @@ RSpec.describe Woods::Extractor do
 
       node = { type: 'rake_task', file_path: rake_path }
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:to_h).and_return({ nodes: { 'things:one' => node } })
+      allow(graph).to receive(:node).with('things:one').and_return(node)
       allow(graph).to receive(:register).and_call_original
 
       unit_one = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:one', file_path: rake_path)
@@ -648,6 +648,302 @@ RSpec.describe Woods::Extractor do
 
       expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:one')))).to be(true)
       expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:two')))).to be(true)
+    end
+  end
+
+  # ── refresh ──────────────────────────────────────────────────────────
+
+  describe '#refresh' do
+    before do
+      require 'woods'
+      # Time.current and Rails.version are reached through write_manifest;
+      # see the #write_manifest context for why the require + stub are needed.
+      require 'active_support/core_ext/time'
+      allow(Time).to receive(:current).and_return(Time.now)
+      allow(Rails).to receive(:version).and_return('8.0.0')
+      allow(Rails).to receive(:application).and_return(double('Application', eager_load!: nil))
+      allow(Woods::ModelNameCache).to receive(:reset!)
+      FileUtils.mkdir_p(File.join(tmpdir, 'output'))
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    # Stub the named extractors, plus the route consumers a routes refresh
+    # cascades to — those instantiate against a live route table, which this
+    # unit-level context has no business booting.
+    def stub_extractor(key, units)
+      cascaded = described_class::ROUTE_CONSUMER_EXTRACTORS.to_h do |consumer|
+        [consumer, double(new: double("#{consumer}Extractor", extract_all: []))]
+      end
+      stubbed = cascaded.merge(key => double(new: double("#{key}Extractor", extract_all: units)))
+
+      stub_const('Woods::Extractor::EXTRACTORS', described_class::EXTRACTORS.merge(stubbed))
+    end
+
+    def unit(type:, identifier:)
+      Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: nil)
+    end
+
+    it 'runs the named extractor and reports what it touched' do
+      stub_extractor(:routes, [unit(type: :route, identifier: 'GET /posts')])
+
+      result = extractor.refresh(:routes)
+
+      expect(result[:types]).to include(:routes)
+      expect(result[:touched]).to include('GET /posts')
+    end
+
+    it 'accepts strings as well as symbols' do
+      stub_extractor(:middleware, [unit(type: :middleware, identifier: 'MiddlewareStack')])
+
+      expect(extractor.refresh('middleware')[:types]).to eq([:middleware])
+    end
+
+    it 'replaces the type wholesale, dropping units the fresh run no longer produces' do
+      graph = extractor.dependency_graph
+      graph.register(unit(type: :route, identifier: 'GET /gone'))
+      stub_extractor(:routes, [unit(type: :route, identifier: 'GET /posts')])
+
+      result = extractor.refresh(:routes)
+
+      expect(result[:touched]).to include('GET /gone')
+      expect(graph.node_exists?('GET /gone')).to be(false)
+      expect(graph.node_exists?('GET /posts')).to be(true)
+    end
+
+    # Controllers and friends embed the route table, so refreshing routes
+    # without them would leave their metadata describing the old route set.
+    it 'cascades a routes refresh to the extractors that embed the route table' do
+      stub_extractor(:routes, [])
+
+      expect(extractor.refresh(:routes)[:types]).to include(*described_class::ROUTE_CONSUMER_EXTRACTORS)
+    end
+
+    it 'reports unknown keys instead of failing when at least one is known' do
+      stub_extractor(:routes, [])
+
+      result = extractor.refresh(:routes, :not_an_extractor)
+
+      expect(result[:unknown]).to eq([:not_an_extractor])
+      expect(result[:types]).to include(:routes)
+    end
+
+    it 'raises when no key is recognized' do
+      expect { extractor.refresh(:nonsense) }.to raise_error(ArgumentError, /No known extractor/)
+    end
+
+    it 'writes the dependency graph so the refresh is durable' do
+      stub_extractor(:routes, [unit(type: :route, identifier: 'GET /posts')])
+
+      extractor.refresh(:routes)
+
+      graph = JSON.parse(File.read(File.join(tmpdir, 'output', 'dependency_graph.json')))
+      expect(graph['nodes']).to have_key('GET /posts')
+    end
+  end
+
+  # ── estimated_tokens_from ────────────────────────────────────────────
+
+  # A full extraction indexes a unit's token estimate from the in-memory
+  # object; an incremental run recomputes it by reading the written file
+  # back. The two must agree, or the same unit's `_index.json` entry changes
+  # depending on which path last touched it.
+  describe '#estimated_tokens_from' do
+    def round_trip_estimate(unit)
+      extractor.send(:estimated_tokens_from, JSON.parse(JSON.generate(unit.to_h)))
+    end
+
+    it 'matches ExtractedUnit#estimated_tokens for plain metadata' do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.source_code = "class User < ApplicationRecord\nend\n"
+      unit.metadata = { table_name: 'users', column_count: 3 }
+
+      expect(round_trip_estimate(unit)).to eq(unit.estimated_tokens)
+    end
+
+    # ActiveSupport's Hash#to_json HTML-escapes `>` to `>`, six
+    # characters where JSON.generate — which writes the file — emits one.
+    # Any model with a lambda scope in its metadata tripped this.
+    it 'matches for metadata containing characters ActiveSupport HTML-escapes' do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: 'app/models/post.rb')
+      unit.source_code = "class Post < ApplicationRecord\nend\n"
+      unit.metadata = {
+        scopes: [{ name: 'recent', source: '  scope :recent, -> { order(created_at: :desc) }' }],
+        note: 'a < b && b > c'
+      }
+
+      expect(round_trip_estimate(unit)).to eq(unit.estimated_tokens)
+    end
+
+    # A booted Rails app turns HTML-entity escaping on (the ActiveSupport
+    # railtie sets it); the bare unit suite doesn't load that railtie, so the
+    # condition is established here rather than assumed.
+    it 'measures the serialization that is written, not ActiveSupport\'s' do
+      require 'active_support/json'
+      previous = ActiveSupport::JSON::Encoding.escape_html_entities_in_json
+      ActiveSupport::JSON::Encoding.escape_html_entities_in_json = true
+
+      metadata = { source: '-> { x }' }
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Scoped', file_path: 'app/models/scoped.rb')
+      unit.metadata = metadata
+
+      # Guard the premise: if the two serializers ever stop disagreeing, this
+      # example is no longer testing anything.
+      expect(metadata.to_json.length).to be > JSON.generate(metadata).length
+      expect(unit.estimated_tokens).to eq(Woods::TokenUtils.estimate_tokens(JSON.generate(metadata)))
+      expect(round_trip_estimate(unit)).to eq(unit.estimated_tokens)
+    ensure
+      ActiveSupport::JSON::Encoding.escape_html_entities_in_json = previous
+    end
+  end
+
+  # ── prune_vanished_units ─────────────────────────────────────────────
+
+  describe '#prune_vanished_units' do
+    def register(type:, identifier:, relative_path:)
+      unit = Woods::ExtractedUnit.new(
+        type: type, identifier: identifier, file_path: File.join(tmpdir, relative_path)
+      )
+      extractor.dependency_graph.register(unit)
+      unit
+    end
+
+    def prune(changed_paths)
+      change_set = Woods::ChangeSet.new(paths: changed_paths, root: rails_root)
+      extractor.send(:prune_vanished_units, change_set, Set.new)
+    end
+
+    # On Rails < 7.1, ActiveRecord::SchemaMigration and
+    # ActiveRecord::InternalMetadata are real ActiveRecord::Base descendants,
+    # so a full extraction emits them with the *convention* path
+    # app/models/active_record/schema_migration.rb — a file no application
+    # has. That path is claimed by the PORO file rule, so the sweep's
+    # file-rule bound doesn't exclude it; pruning it would delete a unit
+    # every full extraction still produces.
+    it 'leaves a class-based unit whose convention path never existed alone' do
+      register(type: :model, identifier: 'ActiveRecord::SchemaMigration',
+               relative_path: 'app/models/active_record/schema_migration.rb')
+
+      expect(prune(['app/services/unrelated.rb'])).to be_empty
+      expect(extractor.dependency_graph.node_exists?('ActiveRecord::SchemaMigration')).to be(true)
+    end
+
+    it 'still removes a class-based unit when the caller names its path' do
+      register(type: :model, identifier: 'Ghost', relative_path: 'app/models/ghost.rb')
+
+      expect(prune(['app/models/ghost.rb'])).to contain_exactly('Ghost')
+      expect(extractor.dependency_graph.node_exists?('Ghost')).to be(false)
+    end
+
+    it 'sweeps a file-based unit the caller forgot to mention' do
+      register(type: :service, identifier: 'GoneService', relative_path: 'app/services/gone_service.rb')
+
+      expect(prune(['app/services/other.rb'])).to contain_exactly('GoneService')
+    end
+
+    it 'leaves units whose nominal path no file rule claims alone' do
+      # BehavioralProfile names config/application.rb, which the dummy tmpdir
+      # has no file for and no dispatch rule claims.
+      register(type: :configuration, identifier: 'BehavioralProfile', relative_path: 'config/application.rb')
+
+      expect(prune(['app/services/unrelated.rb'])).to be_empty
+    end
+
+    it 'leaves paths outside Rails.root alone' do
+      unit = Woods::ExtractedUnit.new(
+        type: :rails_source, identifier: 'rails/activerecord/lib/active_record/base.rb',
+        file_path: '/gems/activerecord/lib/active_record/base.rb'
+      )
+      extractor.dependency_graph.register(unit)
+
+      expect(prune([])).to be_empty
+    end
+  end
+
+  # ── reconcile_class_based_types — removals ───────────────────────────
+
+  # The hole this closes: {#prune_vanished_units} keys on the source file being
+  # gone, so a class deleted from a file that still exists is invisible to it —
+  # and class-based units register a *convention* path from the constant name,
+  # so a second model in one `.rb` was never attributed to that file anyway.
+  # Two models in one file, one deleted, and nothing in the run removes it: it
+  # outlives every subsequent incremental. A permanent divergence from a full
+  # extraction, not a transient one.
+  #
+  # Driven here rather than in the booted harness because the harness cannot
+  # see it: Zeitwerk unloads only the constant a file is *expected* to define,
+  # so a second class defined as a side effect survives the reload, stays in
+  # `descendants`, and the in-process full extraction the oracle compares
+  # against emits it too. Both sides agree, wrongly.
+  describe '#reconcile_class_based_types removals' do
+    let(:live_class) { double('Model', name: 'Post') }
+    let(:fake_models) { double('ModelExtractor') }
+
+    def register(type:, identifier:)
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: type, identifier: identifier,
+                                 file_path: File.join(tmpdir, "app/models/#{identifier.downcase}.rb"))
+      )
+    end
+
+    before do
+      stub_const('Woods::Extractor::CLASS_BASED_DISCOVERY',
+                 { models: { type: :model, method: :extract_model } })
+      # extractor_for memoizes into this hash, so seeding it injects the double
+      # without stubbing the lookup itself.
+      extractor.instance_variable_set(:@incremental_extractors, { models: fake_models })
+      allow(fake_models).to receive(:discoverable_classes).and_return([live_class])
+      register(type: :model, identifier: 'Post')
+      register(type: :model, identifier: 'Sidecar')
+    end
+
+    def reconcile
+      extractor.send(:reconcile_class_based_types, Set.new)
+    end
+
+    context 'when the eager load was complete' do
+      before { extractor.instance_variable_set(:@eager_load_complete, true) }
+
+      it 'removes a unit whose class the discovery set no longer holds' do
+        expect(reconcile).to contain_exactly('Sidecar')
+        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(false)
+        expect(extractor.dependency_graph.node_exists?('Post')).to be(true)
+      end
+
+      it 'is idempotent — a second pass finds nothing left to do' do
+        reconcile
+
+        expect(reconcile).to be_empty
+      end
+
+      # The graph keys nodes on the bare identifier (B-062), so a factory named
+      # `Sidecar` can overwrite the model node while the model type index still
+      # lists it. Removing it as a stale model would delete the factory.
+      it 'leaves an identifier whose node another type has taken over' do
+        register(type: :factory, identifier: 'Sidecar')
+
+        expect(reconcile).to be_empty
+        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
+      end
+    end
+
+    # The documented NameError fallback loads only EXTRACTION_DIRECTORIES, so
+    # descendants are known-partial and the difference would be most of the
+    # app. A stale unit is a far better failure than deleting a type wholesale.
+    context 'when the eager load fell back to per-directory loading' do
+      before { extractor.instance_variable_set(:@eager_load_complete, false) }
+
+      it 'removes nothing' do
+        expect(reconcile).to be_empty
+        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
+      end
+    end
+
+    it 'removes nothing before an eager load has been attempted at all' do
+      expect(reconcile).to be_empty
+      expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
     end
   end
 
@@ -1101,6 +1397,66 @@ RSpec.describe Woods::Extractor do
       expect(logger).not_to receive(:warn)
 
       extractor.send(:log_summary)
+    end
+  end
+
+  # A routes change replaces every route-consuming type wholesale, and almost
+  # all of those units re-serialize to the bytes already on disk. Skipping the
+  # write must not skip the bookkeeping equivalence depends on.
+  describe '#write_unit_file' do
+    let(:write_tmpdir) { Dir.mktmpdir('woods_write_skip') }
+    let(:output_dir) { File.join(write_tmpdir, 'output') }
+    let(:extractor) { described_class.new(output_dir: output_dir) }
+
+    # `json_serialize` reads `Woods.configuration.pretty_json`, so these
+    # examples must establish a configuration rather than inherit whatever an
+    # earlier example left behind — under a random seed they can run first.
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+    end
+
+    after do
+      Woods.configuration = @original_config
+      FileUtils.rm_rf(write_tmpdir)
+    end
+    let(:unit) do
+      Woods::ExtractedUnit.new(
+        type: :model, identifier: 'Widget', file_path: 'app/models/widget.rb'
+      ).tap { |u| u.source_code = 'class Widget; end' }
+    end
+    let(:target) { Pathname.new(File.join(output_dir, 'widget.json')) }
+
+    it 'writes when the file does not exist' do
+      extractor.send(:write_unit_file, target, unit)
+
+      expect(target).to exist
+    end
+
+    it 'does not rewrite when the bytes are unchanged' do
+      extractor.send(:write_unit_file, target, unit)
+      expect(Woods::AtomicFile).not_to receive(:write)
+
+      extractor.send(:write_unit_file, target, unit)
+    end
+
+    it 'rewrites when the content changed' do
+      extractor.send(:write_unit_file, target, unit)
+      unit.source_code = 'class Widget; def call; end; end'
+
+      extractor.send(:write_unit_file, target, unit)
+
+      expect(Woods::AtomicFile.read(target)).to include('def call')
+    end
+
+    it 'rewrites when the file on disk is corrupt' do
+      File.binwrite(target, 'not json at all')
+
+      extractor.send(:write_unit_file, target, unit)
+
+      expect(Woods::AtomicFile.read(target)).to include('Widget')
     end
   end
 end

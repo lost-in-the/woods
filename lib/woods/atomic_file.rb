@@ -39,5 +39,27 @@ module Woods
       tmp&.unlink
       raise
     end
+
+    # Read a file Woods wrote, as UTF-8.
+    #
+    # The counterpart to {.write}, and not a nicety. {.write} goes through
+    # `binmode` so the content's bytes land verbatim — but a plain `File.read`
+    # tags what comes back with the process's *default external encoding*, and
+    # a container with no locale set (`LANG=C`, the default in a plain Docker
+    # image — precisely where the watch daemon is documented to run) makes that
+    # US-ASCII. Any byte above 0x7F then raises
+    # `Encoding::InvalidByteSequenceError` on the first `JSON.parse`.
+    #
+    # That is not hypothetical for Woods' own artifacts: the daemon writes
+    # status reasons containing em dashes, so one ordinary lock contention
+    # under `LANG=C` used to break `woods:watch_status`, the hook sync's
+    # daemon-deference check and the `woods_status` tool until something
+    # rewrote the file with an ASCII-only reason.
+    #
+    # @param path [String, Pathname] file to read
+    # @return [String] UTF-8 content
+    def read(path)
+      File.read(path.to_s, encoding: Encoding::UTF_8)
+    end
   end
 end
