@@ -7,6 +7,7 @@ require 'mcp'
 require 'open3'
 require 'time'
 require 'set'
+require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../tasks'
 require_relative '../watch/status'
@@ -1667,7 +1668,11 @@ module Woods
           path = File.join(index_dir.to_s, Woods::Watch::Status::FILENAME)
           return { state: 'absent' } unless File.exist?(path)
 
-          record = JSON.parse(File.read(path))
+          # AtomicFile.read: the daemon's reasons contain em dashes, and a
+          # US-ASCII default external encoding turns a plain File.read of them
+          # into an Encoding::InvalidByteSequenceError — raising out of
+          # woods_status entirely rather than degrading it.
+          record = JSON.parse(Woods::AtomicFile.read(path))
           # `state` is whatever the daemon last wrote, and a `kill -9`'d daemon
           # leaves `running` behind forever. `alive?` adds the two checks that
           # catch that — the pid still exists and the record is recent — so the

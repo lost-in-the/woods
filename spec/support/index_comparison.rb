@@ -10,7 +10,7 @@ require 'json'
 # so the harness spec can stay about *operations*, and so the definition is
 # stated once, in one place, with its exclusions justified.
 #
-# Four kinds of difference are deliberately tolerated, and nothing else:
+# Three kinds of difference are deliberately tolerated, and nothing else:
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
 #    `generated_at` plus the digest that covers it in `graph_analysis.json`.
@@ -18,11 +18,7 @@ require 'json'
 # 2. **Ordering inside `dependents`** — a full extraction appends in
 #    extractor-iteration order, an incremental one in graph order. Both are
 #    the same multiset.
-# 3. **Ordering inside `graph_analysis.json` lists** — orphans, hubs, cycles
-#    and bridges are emitted in graph-registration order, and an incremental
-#    run appends a new node where a full run would interleave it. Membership
-#    is what those lists mean.
-# 4. **PageRank beyond {PAGERANK_PRECISION} decimal places** — an iterative
+# 3. **PageRank beyond {PAGERANK_PRECISION} decimal places** — an iterative
 #    float computation, accumulated in whatever order each run registered
 #    nodes. Scores are compared as *values*, not just keys; only the last bits
 #    are forgiven.
@@ -112,14 +108,27 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
 
   # ── Snapshots ────────────────────────────────────────────────────────────
 
-  # All per-unit JSON in an index, keyed "type/identifier".
+  # All per-unit JSON in an index, keyed by its path on disk — "type/basename".
+  #
+  # Keyed on the *filename*, not on the identifier inside the file. Keying on
+  # content made two real divergences invisible: a leftover file whose
+  # identifier a newly-written file also carries collapsed onto one entry with
+  # last-write-wins, so a stale unit read as no difference at all; and a run
+  # that wrote the right content under the wrong name compared equal while the
+  # directories plainly were not. `collision_safe_filename` is a pure function
+  # of the identifier, so both sides agree on the name whenever they agree on
+  # the unit — which makes this strictly stronger with nothing legitimate lost.
+  #
+  # The identifier is still compared: it is a field inside the document, so a
+  # name/content mismatch now shows up as a field difference rather than
+  # vanishing.
   def unit_snapshot(dir)
     Dir[File.join(dir, '*', '*.json')].each_with_object({}) do |path, snapshot|
       next if File.basename(path) == '_index.json'
 
       data = JSON.parse(File.read(path)).except(*VOLATILE_UNIT_KEYS)
       data['dependents'] = (data['dependents'] || []).sort_by(&:to_a)
-      snapshot["#{File.basename(File.dirname(path))}/#{data['identifier']}"] = data
+      snapshot["#{File.basename(File.dirname(path))}/#{File.basename(path)}"] = data
     end
   end
 
@@ -168,8 +177,16 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     (section || {}).transform_values(&block)
   end
 
+  # Compared **exactly**, ordering included.
+  #
+  # This used to `deep_sort` both sides, which quietly made the oracle unable
+  # to check the thing the analyzer's determinism work was for: if orphans came
+  # back in registration order, sorting both sides hid it, and the claim that
+  # two extractions of one tree publish identical analysis went unverified by
+  # the only test that could verify it. Sorting here and asserting determinism
+  # there cannot both be load-bearing.
   def analysis_snapshot(dir)
-    deep_sort(read_json(dir, 'graph_analysis.json')&.except(*VOLATILE_ANALYSIS_KEYS))
+    read_json(dir, 'graph_analysis.json')&.except(*VOLATILE_ANALYSIS_KEYS)
   end
 
   # ── Utilities ────────────────────────────────────────────────────────────

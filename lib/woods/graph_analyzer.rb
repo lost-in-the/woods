@@ -49,7 +49,7 @@ module Woods
 
           dependents = @graph.dependents_of(identifier)
           result << identifier if dependents.empty?
-        end
+        end.sort
       end
     end
 
@@ -65,7 +65,7 @@ module Woods
         nodes.each_with_object([]) do |(identifier, _meta), result|
           dependencies = @graph.dependencies_of(identifier)
           result << identifier if dependencies.empty?
-        end
+        end.sort
       end
     end
 
@@ -86,7 +86,11 @@ module Woods
           identifier: identifier,
           type: meta[:type],
           dependent_count: dependents.size,
-          dependents: dependents
+          # Sorted for the same reason the outer list tie-breaks on identifier:
+          # `dependents_of` returns graph-registration order, so an incremental
+          # run that appended a dependent would publish a different hub entry
+          # for an identical graph.
+          dependents: dependents.sort
         }
       end
       # Tie-break on identifier. Without it, which of the (often many) nodes
@@ -455,7 +459,7 @@ module Woods
       found_cycles = []
       seen_cycle_signatures = Set.new
 
-      nodes.each_key do |start_node|
+      nodes.keys.sort.each do |start_node|
         next unless color[start_node] == white
 
         # Iterative DFS using an explicit stack.
@@ -481,6 +485,9 @@ module Woods
           path.push(node)
           stack.push([node, :exit])
 
+          # Not sorted, deliberately: this list is the unit's own declared
+          # dependency order, which is identical in a full and an incremental
+          # run, so sorting it would change nothing any test can observe.
           neighbors = @graph.dependencies_of(node)
           neighbors.each do |neighbor|
             case color[neighbor]
@@ -503,6 +510,8 @@ module Woods
         end
       end
 
+      # Deterministic without a final sort: the DFS starts from a sorted
+      # node list, so cycles are discovered in the same order every run.
       found_cycles
     end
 

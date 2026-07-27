@@ -48,7 +48,11 @@ RSpec.describe Woods::Watch::Daemon do
   end
 
   def status
-    JSON.parse(File.read(File.join(output_dir, Woods::Watch::Status::FILENAME)))
+    # AtomicFile.read, not File.read: this suite runs with a US-ASCII default
+    # external encoding, and the daemon writes status reasons containing em
+    # dashes. Reading them the naive way is the bug this helper would otherwise
+    # reproduce rather than test around.
+    JSON.parse(Woods::AtomicFile.read(File.join(output_dir, Woods::Watch::Status::FILENAME)))
   end
 
   def write_graph_with_paths(paths)
@@ -219,6 +223,55 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(status).to include('state' => 'running', 'last_action' => 'incremental')
       expect(status['generation']).to eq(daemon.generation.current.number)
+    end
+  end
+
+  # `Extractor#publish_generation` rescues its own failures so a good index is
+  # not thrown away over an unwritable marker. That is right, but the marker is
+  # the freshness contract: without it every reader keeps serving the previous
+  # index while the daemon reports `running`, and the next incremental may be a
+  # no-op that bumps nothing either. Not raising was right; not noticing was
+  # not.
+  describe 'an extraction that writes units without publishing a generation' do
+    let(:silent_extractor) do
+      instance_spy('Woods::Extractor').tap do |double|
+        allow(double).to receive(:extract_changed).and_return(['Thing'])
+        allow(double).to receive(:extract_all).and_return({})
+      end
+    end
+
+    it 'reports degraded rather than running' do
+      result = build(extractor_factory: -> { silent_extractor }).process([touch('app/models/user.rb')])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('generation did not advance')
+      expect(status['state']).to eq('degraded')
+    end
+
+    it 'carries the paths forward so a later cycle republishes them' do
+      daemon = build(extractor_factory: -> { silent_extractor })
+      path = touch('app/models/user.rb')
+      daemon.process([path])
+
+      # The next cycle bumps normally; the carried path rides along with it.
+      allow(silent_extractor).to receive(:extract_changed) do |paths|
+        publish_generation('incremental')
+        paths
+      end
+      result = daemon.process([])
+
+      expect(result[:state]).to eq(:running)
+      expect(result[:touched]).to include(File.join(root, path))
+    end
+
+    # A no-op incremental deliberately does not bump. Reading that as a broken
+    # publish would degrade the daemon on every ignorable batch.
+    it 'stays running when the extractor wrote nothing at all' do
+      allow(silent_extractor).to receive(:extract_changed).and_return([])
+
+      result = build(extractor_factory: -> { silent_extractor }).process([touch('app/models/user.rb')])
+
+      expect(result[:state]).to eq(:running)
     end
   end
 

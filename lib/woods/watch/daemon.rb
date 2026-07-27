@@ -366,7 +366,7 @@ module Woods
       def restore_pending
         return [] unless File.exist?(pending_path)
 
-        paths = JSON.parse(File.read(pending_path))
+        paths = JSON.parse(AtomicFile.read(pending_path))
         return [] unless paths.is_a?(Array) && paths.any?
 
         @logger.info("[Woods] watch: #{paths.size} path(s) carried over from the previous run")
@@ -418,7 +418,7 @@ module Woods
 
       def persisted_registered_paths
         graph = File.join(@output_dir, 'dependency_graph.json')
-        file_map = JSON.parse(File.read(graph))['file_map']
+        file_map = JSON.parse(AtomicFile.read(graph))['file_map']
         file_map.is_a?(Hash) ? file_map.keys : []
       rescue SystemCallError, JSON::ParserError
         []
@@ -613,6 +613,7 @@ module Woods
         full = actionable > @full_extraction_threshold
         log_storm(actionable) if full
 
+        before = @generation.current.number
         extractor = @extractor_factory.call
         touched = if full
                     extractor.extract_all
@@ -621,7 +622,10 @@ module Woods
                     extractor.extract_changed(change_set.absolute_paths)
                   end
 
-        publish(full ? :full : :incremental, change_set, touched, started)
+        action = full ? :full : :incremental
+        return unpublished(action, change_set, started) if wrote_without_publishing?(touched, before)
+
+        publish(action, change_set, touched, started)
       rescue ScriptError, StandardError => e
         # Extraction failed, so nothing landed — the generation stays where it
         # was and the index keeps serving its last good state.
@@ -636,6 +640,35 @@ module Woods
 
       def actionable_count(change_set)
         change_set.relative_paths.count { |path| @policy.classify(path) != :ignore }
+      end
+
+      # Did the extractor write units without the generation moving?
+      #
+      # `Extractor#publish_generation` rescues its own failures on purpose — an
+      # index that landed correctly should not be thrown away because the
+      # marker could not be written. But the generation *is* the freshness
+      # contract: readers self-refresh on it, `woods_status` reports it, and a
+      # cycle that silently fails to bump leaves every reader serving the
+      # previous index while the daemon says `running`. Not raising was right;
+      # not noticing was not.
+      #
+      # A no-op incremental deliberately does not bump, so this only fires when
+      # units were actually written.
+      def wrote_without_publishing?(touched, before)
+        return false if touched != :all && Array(touched).empty?
+
+        @generation.current.number == before
+      end
+
+      # The units are on disk and correct; only the marker that advertises them
+      # is missing. Degraded rather than failed, and the paths ride forward so
+      # the next successful cycle republishes them.
+      def unpublished(action, change_set, started)
+        carry_forward(change_set)
+        reason = 'index written but the generation did not advance — readers will not see it'
+        @logger.error("[Woods] watch: #{reason}")
+        outcome(action, :degraded, reason: reason, count: change_set.size,
+                                   duration_ms: elapsed_ms(started))
       end
 
       def publish(action, change_set, touched, started)

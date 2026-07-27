@@ -570,10 +570,15 @@ module Woods
     def publish_generation(reason)
       Generation.new(output_dir: @output_dir).bump!(reason: reason)
     rescue StandardError => e
-      # A failed generation bump must not fail the extraction that produced a
-      # perfectly good index — readers just keep their current view until the
-      # next run.
-      Rails.logger.warn "[Woods] Could not publish generation: #{e.message}"
+      # A failed bump must not fail the extraction that produced a perfectly
+      # good index. But "readers keep their current view until the next run" is
+      # too comfortable a way to put it: the generation *is* the freshness
+      # contract, so readers keep serving the old index for as long as the
+      # cause persists, and the next incremental may be a no-op that bumps
+      # nothing either. Error, not warn — and `Watch::Daemon` cross-checks that
+      # the number actually moved so the daemon reports degraded rather than
+      # running.
+      Rails.logger.error "[Woods] Could not publish generation: #{e.message}"
     end
 
     # Recompute graph_analysis.json after an incremental graph write.

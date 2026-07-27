@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Woods' own JSON artifacts are read as UTF-8, not as the process locale** (#164 review,
+  round 4). `AtomicFile.write` uses `binmode` so bytes land verbatim, but a plain `File.read`
+  tags the result with the default *external* encoding — US-ASCII in a container with no
+  locale set, which is a plain Docker image and exactly where the watch daemon is documented
+  to run. The daemon writes status reasons containing em dashes, so one ordinary lock
+  contention under `LANG=C` raised `Encoding::InvalidByteSequenceError` out of
+  `Watch::Status#read` (which rescued `JSON::ParserError` and `SystemCallError`, neither of
+  which that is), taking `woods:watch_status`, the hook sync's daemon-deference check and the
+  `woods_status` tool down with it until something rewrote the file with an ASCII-only reason.
+  New `AtomicFile.read` is the counterpart to `.write`; `Status`, `Generation`, the daemon's
+  pending/graph reads and `woods_status` all go through it, and `Status#read` now also rescues
+  `EncodingError`.
+- **A cycle that writes an index without publishing a generation now reports degraded**
+  (#164 review, round 4). `Extractor#publish_generation` rescues its own failures so a good
+  index is not discarded over an unwritable marker — right, but the marker *is* the freshness
+  contract, so readers kept serving the previous index while the daemon reported `running`,
+  and the next incremental could be a no-op that bumped nothing either. The daemon now
+  cross-checks that the number moved when units were written, carries the paths forward, and
+  logs at error rather than warn.
+- **`graph_analysis.json` no longer depends on registration order** (#164 review, round 4).
+  `orphans` and `dead_ends` were emitted in graph-registration order and `cycles` started its
+  DFS from the same, so a full and an incremental extraction of one tree published different
+  analysis — the opposite of what the docs claimed. The differential harness could not see it:
+  its oracle `deep_sort`ed both sides of that file before comparing. Sorting there and
+  asserting determinism here cannot both be load-bearing; the analyzer is now genuinely
+  order-independent and the oracle compares the file exactly. Guarded by a registration-order
+  rotation in `spec/graph_analyzer_spec.rb`.
+- **The harness oracle keys units by filename, not by their own contents** (#164 review,
+  round 4). `unit_snapshot` keyed on the identifier *inside* each document, so a stale file
+  whose identifier a newly-written file also carried collapsed onto one entry with
+  last-write-wins — a leftover unit read as no difference at all — and content written under
+  the wrong name compared equal while the directories plainly were not.
 - **A class removed from a file that still exists is now pruned** (#164 review, round 4).
   Deletion keyed on the source file being gone, which cannot see this: two models in one `.rb`
   with one deleted leaves no missing path, and class-based units register a *convention* path

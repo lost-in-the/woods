@@ -87,6 +87,7 @@ partial write:
 |---|---|
 | Reload raises (`SyntaxError`, `NameError`) | Degraded status naming the reason; index intact at generation N; retried on the next event |
 | Extraction raises | Degraded status; generation not advanced |
+| Index written but the generation bump failed | Degraded status; paths carried forward. The extractor deliberately does not fail an otherwise-good extraction over an unwritable marker — but the marker *is* what readers refresh on, so the daemon cross-checks that the number moved rather than reporting `running` over an index nothing can see |
 | Boot-captured config changed | Degraded status; daemon exits `75` |
 | Watcher dies | Degraded status; daemon exits |
 

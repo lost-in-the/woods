@@ -75,8 +75,8 @@ module Woods
       def read
         return { 'state' => 'stopped', 'reason' => 'no daemon has run' } unless File.exist?(@path)
 
-        JSON.parse(File.read(@path))
-      rescue JSON::ParserError, SystemCallError => e
+        JSON.parse(AtomicFile.read(@path))
+      rescue JSON::ParserError, SystemCallError, EncodingError => e
         { 'state' => 'stopped', 'reason' => "unreadable status file: #{e.message}" }
       end
 

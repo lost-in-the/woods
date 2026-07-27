@@ -352,7 +352,7 @@ end
       expect(broken.generation.current.number).to eq(before_generation)
       expect(unit_snapshot(@index_dir)).to eq(before_units)
 
-      status = JSON.parse(File.read(File.join(@index_dir, Woods::Watch::Status::FILENAME)))
+      status = JSON.parse(Woods::AtomicFile.read(File.join(@index_dir, Woods::Watch::Status::FILENAME)))
       expect(status['state']).to eq('degraded')
       expect(status['reason']).to include('SyntaxError')
     end

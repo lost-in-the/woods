@@ -24,7 +24,13 @@ Three differences are tolerated, and nothing else:
 |---|---|
 | Wall-clock stamps (`extracted_at`, `generated_at`, and the digest over it) | A unit an incremental run correctly left alone keeps an older stamp. |
 | Ordering inside a unit's `dependents` | Full extraction appends in extractor order, incremental in graph order. Same multiset. |
-| Ordering inside `graph_analysis.json` lists | Emitted in graph-registration order; membership is what those lists mean. |
+| PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
+
+`graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
+longer is: the analyzer is order-independent and the oracle compares the file
+exactly. Tolerating the ordering there meant the harness — the only test that
+compares a full run against an incremental one — could not see the very
+dependence the analyzer's determinism work existed to remove.
 
 This matters most for **incremental CI chains** — restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates

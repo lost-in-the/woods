@@ -77,7 +77,7 @@ module Woods
     def current
       return UNPUBLISHED unless File.exist?(@path)
 
-      data = JSON.parse(File.read(@path))
+      data = JSON.parse(AtomicFile.read(@path))
       Marker.new(
         number: data['number'].to_i,
         token: data['token'],
