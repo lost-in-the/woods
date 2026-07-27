@@ -620,9 +620,9 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "storage",
-    "files": ["lib/woods/storage/qdrant.rb", "lib/woods/embedding/indexer.rb"],
-    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passes Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path is non-functional. Fix: UUIDv5 point id + identifier in payload + reverse-map in search/delete. Needs live-Qdrant validation. Tracked in GH #147.",
-    "status": "ready",
+    "files": ["lib/woods/storage/qdrant.rb", "lib/woods/util/uuid5.rb"],
+    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passed Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path was non-functional. Fixed: point ids are now UUIDv5 over a pinned namespace (Qdrant::POINT_ID_NAMESPACE), the identifier rides in the payload under `woods_identifier`, and search reverse-maps while delete translates through the same Qdrant.point_id so it can't compute a different id than the upsert did. Translation is confined to the adapter — pgvector and the in-memory store are untouched, and the Indexer needed no change. UUIDv5 is implemented in Woods::Util::UUID5 and unit-tested against the published DNS-namespace vectors for python.org and www.example.com. STILL UNVALIDATED AGAINST A LIVE QDRANT: that a real server accepts these upserts, that a re-embed of an unchanged unit replaces rather than duplicates, and that delete actually removes the point. All current coverage is against a mocked Net::HTTP. Tracked in GH #147.",
+    "status": "resolved",
     "depends_on": []
   },
   {

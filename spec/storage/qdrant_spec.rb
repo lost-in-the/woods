@@ -64,9 +64,9 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(req.path).to eq('/collections/test_collection/points')
         body = JSON.parse(req.body)
         point = body['points'].first
-        expect(point['id']).to eq('doc1')
+        expect(point['id']).to eq(described_class.point_id('doc1'))
         expect(point['vector']).to eq([0.1, 0.2, 0.3])
-        expect(point['payload']).to eq({ 'type' => 'model' })
+        expect(point['payload']).to eq({ 'type' => 'model', 'woods_identifier' => 'doc1' })
       end
     end
 
@@ -97,8 +97,8 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(req.path).to eq('/collections/test_collection/points')
         body = JSON.parse(req.body)
         expect(body['points'].size).to eq(2)
-        expect(body['points'][0]['id']).to eq('doc1')
-        expect(body['points'][1]['id']).to eq('doc2')
+        expect(body['points'][0]['id']).to eq(described_class.point_id('doc1'))
+        expect(body['points'][1]['id']).to eq(described_class.point_id('doc2'))
       end
     end
 
@@ -121,7 +121,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         body = JSON.parse(req.body)
-        expect(body['points'][0]['payload']).to eq({})
+        expect(body['points'][0]['payload']).to eq({ 'woods_identifier' => 'doc1' })
       end
     end
   end
@@ -130,8 +130,10 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     let(:search_response_body) do
       {
         result: [
-          { id: 'doc1', score: 0.95, payload: { type: 'model' } },
-          { id: 'doc2', score: 0.80, payload: { type: 'service' } }
+          { id: described_class.point_id('doc1'), score: 0.95,
+            payload: { type: 'model', woods_identifier: 'doc1' } },
+          { id: described_class.point_id('doc2'), score: 0.80,
+            payload: { type: 'service', woods_identifier: 'doc2' } }
         ]
       }.to_json
     end
@@ -154,7 +156,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(results.first.id).to eq('doc1')
       expect(results.first.score).to eq(0.95)
-      expect(results.first.metadata).to eq({ 'type' => 'model' })
+      expect(results.first.metadata).to eq({ 'type' => 'model', 'woods_identifier' => 'doc1' })
     end
 
     it 'sends the correct limit' do
@@ -199,7 +201,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
   end
 
   describe '#delete' do
-    it 'sends a POST request to delete a point by ID' do
+    it 'sends a POST request to delete a point by its UUID point ID' do
       response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       allow(http).to receive(:request).and_return(response)
@@ -210,8 +212,28 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         expect(req).to be_a(Net::HTTP::Post)
         expect(req.path).to eq('/collections/test_collection/points/delete')
         body = JSON.parse(req.body)
-        expect(body['points']).to eq(['doc1'])
+        expect(body['points']).to eq([described_class.point_id('doc1')])
       end
+    end
+
+    # The whole reason delete goes through the same translation as upsert:
+    # a delete that computes a different id silently retains the vector.
+    it 'deletes the exact point ID that #store wrote (#147)' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      store.store('Api::V1::UsersController', [0.1, 0.2, 0.3], {})
+      store.delete('Api::V1::UsersController')
+
+      stored_id, deleted_ids = nil
+      expect(http).to have_received(:request).twice do |req|
+        body = JSON.parse(req.body)
+        stored_id = body['points'].first['id'] if req.is_a?(Net::HTTP::Put)
+        deleted_ids = body['points'] if req.is_a?(Net::HTTP::Post)
+      end
+
+      expect(deleted_ids).to eq([stored_id])
     end
   end
 
@@ -285,6 +307,120 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       allow(http).to receive(:started?).and_return(true, false, true)
 
       expect { store.count }.to raise_error(Errno::ECONNRESET)
+    end
+  end
+
+  # Qdrant accepts only an unsigned integer or a UUID as a point id. Woods
+  # identifiers are neither, so the adapter maps them to a deterministic
+  # UUIDv5 and carries the identifier in the payload. See #147 / B-058.
+  describe '.point_id' do
+    it 'maps a Woods identifier to a canonical UUID' do
+      expect(described_class.point_id('User'))
+        .to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+    end
+
+    it 'maps a namespaced identifier to a canonical UUID' do
+      expect(described_class.point_id('Api::V1::UsersController'))
+        .to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+    end
+
+    it 'maps a chunk-suffixed embed id to a canonical UUID' do
+      expect(described_class.point_id('User#chunk_0'))
+        .to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+    end
+
+    # Stability is the correctness property: a re-embed of an unchanged
+    # unit must land on the same point so the upsert replaces rather than
+    # duplicates. Pinned against the literal, not against a second call —
+    # a self-comparison would pass even if the namespace drifted.
+    it 'is stable for a given identifier' do
+      expect(described_class.point_id('User')).to eq('0c41a4f5-8239-564d-bbe1-50aee008ba5c')
+    end
+
+    it 'derives the id from the pinned namespace and the identifier' do
+      expect(described_class.point_id('User')).to eq(
+        Woods::Util::UUID5.generate(described_class::POINT_ID_NAMESPACE, 'User')
+      )
+    end
+
+    it 'distinguishes a unit from its own chunks' do
+      expect(described_class.point_id('User')).not_to eq(described_class.point_id('User#chunk_0'))
+    end
+
+    it 'distinguishes sibling chunks' do
+      expect(described_class.point_id('User#chunk_0')).not_to eq(described_class.point_id('User#chunk_1'))
+    end
+
+    it 'passes an integer point ID through untouched' do
+      expect(described_class.point_id(42)).to eq(42)
+    end
+
+    it 'passes an already-canonical UUID through untouched' do
+      uuid = '886313e1-3b8a-5372-9b90-0c9aee199e5d'
+
+      expect(described_class.point_id(uuid)).to eq(uuid)
+    end
+  end
+
+  describe 'search reverse mapping' do
+    def stub_search(result)
+      response = instance_double(Net::HTTPSuccess, code: '200', body: { result: result }.to_json)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+    end
+
+    it 'returns the Woods identifier rather than the UUID point ID' do
+      stub_search([{ id: described_class.point_id('User'), score: 0.9,
+                     payload: { woods_identifier: 'User' } }])
+
+      expect(store.search([0.1, 0.2, 0.3]).first.id).to eq('User')
+    end
+
+    it 'restores a chunk-suffixed embed id, matching pgvector' do
+      stub_search([{ id: described_class.point_id('User#chunk_2'), score: 0.9,
+                     payload: { woods_identifier: 'User#chunk_2' } }])
+
+      expect(store.search([0.1, 0.2, 0.3]).first.id).to eq('User#chunk_2')
+    end
+
+    it 'round-trips every identifier a store call would have written' do
+      identifiers = ['User', 'Api::V1::UsersController', 'User#chunk_0', 'app/views/x.html.erb']
+      stub_search(identifiers.map do |id|
+        { id: described_class.point_id(id), score: 0.5, payload: { woods_identifier: id } }
+      end)
+
+      expect(store.search([0.1, 0.2, 0.3], limit: 10).map(&:id)).to eq(identifiers)
+    end
+
+    it 'falls back to the raw point ID when the payload carries no mapping' do
+      stub_search([{ id: 'legacy-id', score: 0.9, payload: { type: 'model' } }])
+
+      expect(store.search([0.1, 0.2, 0.3]).first.id).to eq('legacy-id')
+    end
+
+    it 'tolerates a hit with no payload at all' do
+      stub_search([{ id: 7, score: 0.9 }])
+
+      results = store.search([0.1, 0.2, 0.3])
+
+      expect(results.first.id).to eq(7)
+      expect(results.first.metadata).to eq({})
+    end
+
+    it 'does not clobber the base identifier the Indexer writes to the payload' do
+      # The Indexer's metadata carries `identifier` = the *base* unit id,
+      # while the point id derives from the chunk-suffixed embed id.
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"status":"completed"}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      store.store('User#chunk_1', [0.1, 0.2, 0.3], { type: 'model', identifier: 'User' })
+
+      expect(http).to have_received(:request) do |req|
+        payload = JSON.parse(req.body)['points'].first['payload']
+        expect(payload['identifier']).to eq('User')
+        expect(payload['woods_identifier']).to eq('User#chunk_1')
+      end
     end
   end
 

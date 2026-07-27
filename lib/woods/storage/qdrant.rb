@@ -7,6 +7,7 @@ require 'socket'
 require 'uri'
 require_relative 'vector_store'
 require_relative '../util/host_guard'
+require_relative '../util/uuid5'
 
 module Woods
   module Storage
@@ -66,6 +67,36 @@ module Woods
 
         # Hostnames that always map to loopback regardless of DNS.
         PRIVATE_HOSTNAMES = %w[localhost localhost. ip6-localhost ip6-loopback].freeze
+
+        # Fixed UUIDv5 namespace for Woods → Qdrant point ids.
+        #
+        # Qdrant only accepts an unsigned integer or a UUID as a point id;
+        # a Woods identifier ("User", "Api::V1::UsersController",
+        # "User#chunk_0") is neither, and sending one back is a 400 on
+        # every upsert. Point ids are therefore UUIDv5 values derived from
+        # the identifier, with the identifier itself carried in the payload
+        # under {IDENTIFIER_KEY} so search and delete can round-trip.
+        #
+        # Derived once as
+        #   Util::UUID5.generate(Util::UUID5::NAMESPACE_DNS, 'woods.qdrant.point-id')
+        # and pinned as a literal here. `spec/util/uuid5_spec.rb` asserts
+        # the literal still equals that derivation.
+        #
+        # **This value must never change.** The whole point of a v5 id is
+        # that re-embedding an unchanged unit lands on the same point and
+        # *replaces* it. A new namespace makes every existing point
+        # unreachable — orphaned vectors that no delete can name and a
+        # silently doubled collection.
+        POINT_ID_NAMESPACE = '7eb8ae2b-670b-55ee-a474-36bd1a8dc6b4'
+
+        # Payload key holding the original Woods identifier for a point.
+        #
+        # Deliberately NOT `identifier`: the embedding Indexer already
+        # writes an `identifier` key holding the unit's *base* identifier,
+        # while a point id is derived from the possibly chunk-suffixed
+        # embed id ("User#chunk_0"). Reusing the key would clobber one
+        # with the other.
+        IDENTIFIER_KEY = 'woods_identifier'
 
         # @param url [String] Qdrant server URL
         # @param collection [String] Collection name
@@ -195,7 +226,27 @@ module Woods
           request(:put, "/collections/#{@collection}", body)
         end
 
+        # Deterministic Qdrant point id for a Woods identifier.
+        #
+        # Integers and canonical UUIDs pass through untouched — those are
+        # already native Qdrant point ids, so a caller holding one (from a
+        # raw scroll, say) can address the point directly. Everything else
+        # is a Woods identifier and becomes its UUIDv5.
+        #
+        # @param identifier [String, Integer]
+        # @return [String, Integer]
+        def self.point_id(identifier)
+          return identifier if identifier.is_a?(Integer)
+          return identifier if Util::UUID5.uuid?(identifier)
+
+          Util::UUID5.generate(POINT_ID_NAMESPACE, identifier)
+        end
+
         # Store or update a vector with metadata payload.
+        #
+        # The point id sent to Qdrant is {.point_id}(id), not +id+ itself;
+        # the original identifier travels in the payload under
+        # {IDENTIFIER_KEY} so {#search} can map results back.
         #
         # @param id [String] Unique identifier
         # @param vector [Array<Float>] The embedding vector
@@ -203,15 +254,7 @@ module Woods
         # @see Interface#store
         def store(id, vector, metadata = {})
           validate_dimensions!(vector) if @dimensions
-          body = {
-            points: [
-              {
-                id: id,
-                vector: vector,
-                payload: metadata
-              }
-            ]
-          }
+          body = { points: [build_point(id, vector, metadata)] }
           request(:put, "/collections/#{@collection}/points", body)
         end
 
@@ -236,9 +279,7 @@ module Woods
           end
 
           body = {
-            points: entries.map do |entry|
-              { id: entry[:id], vector: entry[:vector], payload: entry[:metadata] || {} }
-            end
+            points: entries.map { |entry| build_point(entry[:id], entry[:vector], entry[:metadata] || {}) }
           }
           request(:put, "/collections/#{@collection}/points", body)
         end
@@ -248,7 +289,9 @@ module Woods
         # @param query_vector [Array<Float>] The query embedding
         # @param limit [Integer] Maximum results to return
         # @param filters [Hash] Metadata key-value filters
-        # @return [Array<SearchResult>] Results sorted by descending similarity
+        # @return [Array<SearchResult>] Results sorted by descending similarity,
+        #   with +id+ carrying the Woods identifier (not the UUID point id)
+        #   so the adapter is interchangeable with pgvector downstream.
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {})
           body = {
@@ -262,17 +305,30 @@ module Woods
           results = response['result'] || []
 
           results.map do |hit|
+            payload = hit['payload'] || {}
             SearchResult.new(
-              id: hit['id'],
+              # Reverse-map the UUID point id back to the Woods identifier.
+              # Falls back to the raw point id for points written by
+              # something other than this adapter (or before the UUID
+              # mapping existed) — a hit with no reverse mapping is still
+              # more useful than nil.
+              id: payload[IDENTIFIER_KEY] || hit['id'],
               score: hit['score'],
-              metadata: hit['payload']
+              metadata: payload
             )
           end
         end
 
+        # Delete a single point by Woods identifier.
+        #
+        # Translates through {.point_id}, so it necessarily computes the
+        # same id {#store}/{#store_batch} wrote. Deleting by the raw Woods
+        # string would 400 (or, worse, succeed against nothing) and leave
+        # the vector live — silent data retention.
+        #
         # @see Interface#delete
         def delete(id)
-          body = { points: [id] }
+          body = { points: [self.class.point_id(id)] }
           request(:post, "/collections/#{@collection}/points/delete", body)
         end
 
@@ -289,6 +345,25 @@ module Woods
         end
 
         private
+
+        # Build one Qdrant point: UUIDv5 id, vector, and a payload carrying
+        # the original Woods identifier alongside the caller's metadata.
+        #
+        # The identifier is merged in rather than replacing the payload, and
+        # written last so a metadata hash that already carries the key can't
+        # break the reverse mapping. Symbol and string metadata keys both
+        # serialize to JSON strings, so the string key here is what Qdrant
+        # stores either way.
+        #
+        # @param id [String, Integer] Woods identifier (or native point id)
+        # @param vector [Array<Float>]
+        # @param metadata [Hash]
+        # @return [Hash]
+        def build_point(id, vector, metadata)
+          { id: self.class.point_id(id),
+            vector: vector,
+            payload: (metadata || {}).merge(IDENTIFIER_KEY => id) }
+        end
 
         # Cap interpolated response bodies so misconfigured Qdrant responses
         # (e.g. proxied HTML error pages) don't unbounded-leak into logs or
