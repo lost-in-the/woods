@@ -706,7 +706,7 @@
     "layer": "extraction",
     "files": ["lib/woods/dependency_graph.rb", "lib/woods/extractor.rb", "lib/woods/change_set.rb", "lib/woods/mcp/index_reader.rb"],
     "description": "dependency_graph.json stores absolute paths (file_map keys and nodes[].file_path) while every per-unit JSON stores relative ones. Ordering, not intent: extract_all rebuilds the graph at phase 1.6 and normalize_file_paths runs at phase 4.5, so registration captures the absolute string and the later reassignment of unit.file_path never reaches the copies in @nodes/@file_map. register_and_write has the same order, so full and incremental agree — this is not an equivalence bug and the #164 harness is right not to flag it. It matters for the documented Docker deployment (extraction inside the container, Index Server on the host reading the volume mount): the graph carries /app/... paths, so affected_by, identifiers_for_path and the prune sweep match nothing host-side, and a host-run woods:incremental computes an empty blast radius silently. A moved or renamed checkout has the same effect. Fix: normalize before registration and relativize at the lookup boundary. Needs a from_h migration for absolute-keyed graphs already on disk — same shape as normalize_edges and normalize_file_map, which handle pre-#164 formats without a rebuild. Surfaced by the #164 review (finding 17); deferred from PR #165 as too large for it. Tracked in GH #166.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

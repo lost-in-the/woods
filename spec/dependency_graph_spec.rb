@@ -618,4 +618,103 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.dependents_detail('Nobody')).to be_empty
     end
   end
+
+  # #166 — the index has to be readable off the machine that wrote it. Extraction
+  # in a container writes /app/...; a host reading the volume mount sees a
+  # different absolute prefix, so absolute paths in the artifact made the graph's
+  # path index resolve to nothing there.
+  describe 'path portability (#166)' do
+    let(:root) { '/srv/app' }
+
+    before { stub_const('Rails', double('Rails', root: Pathname.new(root))) }
+
+    def graph_with_unit(file_path)
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: file_path)
+      described_class.new.tap { |g| g.register(unit) }
+    end
+
+    it 'persists node file_path relative to the root' do
+      data = graph_with_unit("#{root}/app/models/user.rb").to_h
+
+      expect(data[:nodes]['User'][:file_path]).to eq('app/models/user.rb')
+    end
+
+    it 'persists file_map keys relative to the root' do
+      data = graph_with_unit("#{root}/app/models/user.rb").to_h
+
+      expect(data[:file_map].keys).to eq(['app/models/user.rb'])
+    end
+
+    it 'keeps absolute paths in memory, which is what File.exist? callers need' do
+      graph = graph_with_unit("#{root}/app/models/user.rb")
+
+      expect(graph.node('User')[:file_path]).to eq("#{root}/app/models/user.rb")
+      expect(graph.identifiers_for_path("#{root}/app/models/user.rb")).to eq(['User'])
+    end
+
+    it 'leaves out-of-tree paths alone' do
+      data = graph_with_unit('/gems/activerecord/lib/base.rb').to_h
+
+      expect(data[:nodes]['User'][:file_path]).to eq('/gems/activerecord/lib/base.rb')
+    end
+
+    it 'round-trips back to absolute paths' do
+      original = graph_with_unit("#{root}/app/models/user.rb")
+      restored = described_class.from_h(JSON.parse(JSON.generate(original.to_h)))
+
+      expect(restored.node('User')[:file_path]).to eq("#{root}/app/models/user.rb")
+      expect(restored.identifiers_for_path("#{root}/app/models/user.rb")).to eq(['User'])
+    end
+
+    # The whole point: a graph this version writes under one prefix resolves
+    # under another. Extraction in a container, Index Server on the host.
+    it 'resolves a graph written under one root against a different one' do
+      written_in_container = JSON.parse(
+        JSON.generate(graph_with_unit("#{root}/app/models/user.rb").to_h)
+      )
+
+      stub_const('Rails', double('Rails', root: Pathname.new('/host/checkout')))
+      rehydrated = described_class.from_h(written_in_container)
+
+      expect(rehydrated.identifiers_for_path('/host/checkout/app/models/user.rb')).to eq(['User'])
+      expect(rehydrated.node('User')[:file_path]).to eq('/host/checkout/app/models/user.rb')
+    end
+
+    # Stated limitation rather than a gap: a graph written *before* #166 holds
+    # absolute paths, and there is no way to know which prefix was that machine's
+    # root, so it cannot be re-pointed. It loads and works in place — which is
+    # what keeps it from needing a re-index — and becomes portable the next time
+    # a full extraction rewrites it.
+    it 'cannot re-point a pre-migration graph at a different root' do
+      pre_migration = {
+        'nodes' => { 'User' => { 'type' => 'model', 'file_path' => '/app/app/models/user.rb' } },
+        'file_map' => { '/app/app/models/user.rb' => ['User'] }
+      }
+
+      stub_const('Rails', double('Rails', root: Pathname.new('/host/checkout')))
+      restored = described_class.from_h(pre_migration)
+
+      expect(restored.identifiers_for_path('/app/app/models/user.rb')).to eq(['User'])
+      expect(restored.identifiers_for_path('/host/checkout/app/models/user.rb')).to be_empty
+    end
+
+    # A pre-#166 graph is already absolute; absolutizing must be idempotent so it
+    # loads without a re-index, the way normalize_edges/normalize_file_map do.
+    it 'loads a pre-migration absolute-keyed graph unchanged' do
+      restored = described_class.from_h(
+        'nodes' => { 'User' => { 'type' => 'model', 'file_path' => "#{root}/app/models/user.rb" } },
+        'file_map' => { "#{root}/app/models/user.rb" => ['User'] }
+      )
+
+      expect(restored.identifiers_for_path("#{root}/app/models/user.rb")).to eq(['User'])
+    end
+
+    it 'keeps file_map values as Sets so unregister can delete from them' do
+      graph = graph_with_unit("#{root}/app/models/user.rb")
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect { restored.unregister('User') }.not_to raise_error
+      expect(restored.identifiers_for_path("#{root}/app/models/user.rb")).to be_empty
+    end
+  end
 end
