@@ -195,6 +195,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   def run_sequence(operations)
     index_dir = Dir.mktmpdir('woods_diff_incr')
     (@scratch_dirs ||= []) << index_dir
+    @retired_paths = []
     Woods::Extractor.new(output_dir: index_dir).extract_all
 
     operations.each_with_index do |operation, step|
@@ -468,7 +469,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     case choice
     when :create
-      relative = random_artifact(random)
+      relative = random_artifact(random, live)
       live << relative unless live.include?(relative)
       write_artifact(relative, random)
     when :modify
@@ -503,6 +504,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     if random.rand(2).zero?
       move_file(from, to)
+      # The moved file still defines `from`'s constant. See {#random_artifact}.
+      (@retired_paths ||= []) << from
     else
       delete_file(from)
       write_artifact(to, random)
@@ -524,7 +527,29 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     File.join(dir, "r#{random.rand(1000)}_#{base}")
   end
 
-  def random_artifact(random)
+  # Pick a path to create, skipping any whose identifier is already spoken for
+  # by a file that was *moved* away from it.
+  #
+  # A content-preserving move carries the constant with the bytes, so
+  # `lib/gen/lb_4.rb` moved to `lib/gen/r415_lb_4.rb` leaves a file still
+  # defining `Lb4` while `lb_4.rb` itself is free to be created again — and
+  # creating it puts two files on one identifier. Full extraction then keeps the
+  # first by glob order while an incremental run keeps whichever was written
+  # last: B-063, pre-existing, and *not* what this harness measures. The tree is
+  # already broken in that state (Ruby would be redefining a constant), so the
+  # generator should not produce it. The existing per-family name prefixes guard
+  # the cross-type version of this; they cannot see the move-then-recreate one.
+  def random_artifact(random, live = [])
+    retired = @retired_paths || []
+    candidates = ARTIFACT_TEMPLATES.length.times.to_a.shuffle(random: random)
+
+    candidates.each do |slot|
+      relative = ARTIFACT_TEMPLATES[slot].call(random.rand(6))
+      next if retired.include?(relative) && !live.include?(relative)
+
+      return relative
+    end
+
     ARTIFACT_TEMPLATES[random.rand(ARTIFACT_TEMPLATES.size)].call(random.rand(6))
   end
 
