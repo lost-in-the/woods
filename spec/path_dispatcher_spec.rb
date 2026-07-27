@@ -133,6 +133,29 @@ RSpec.describe Woods::PathDispatcher do
       expected - covered_extractor_keys
     end
 
+    # Confirmed against a booted app during review: without this rule a created
+    # type/mutation/resolver produced no unit and a rename lost the unit
+    # outright (old side pruned, new side ignored). GraphQL types are not class
+    # -discoverable either, so dispatch is the only route they have.
+    it 'routes every graphql file kind to the graphql extractor' do
+      %w[
+        app/graphql/types/user_type.rb
+        app/graphql/mutations/create_user.rb
+        app/graphql/resolvers/user_resolver.rb
+        app/graphql/nested/deeply/thing_type.rb
+      ].each do |path|
+        expect(keys_for(path)).to(include(:graphql), "#{path} did not route to the graphql extractor")
+        expect(dispatcher.relevant?(path)).to(be(true), "#{path} would be filtered out before dispatch")
+      end
+    end
+
+    it 'names extract_graphql_file as the method for the graphql rule' do
+      rule = described_class.file_rules.find { |r| r.extractor_key == :graphql }
+
+      expect(rule.method_name).to eq(:extract_graphql_file)
+      expect(Woods::Extractors::GraphQLExtractor.instance_methods).to include(:extract_graphql_file)
+    end
+
     # Scenic keeps only the highest _vNN of each view, so a per-file rule
     # would index a superseded version a full extraction drops.
     it 'routes database views wholesale rather than per file' do
