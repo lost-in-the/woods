@@ -602,9 +602,16 @@ module Woods
     # loads only the directories we actually need for extraction.
     def safe_eager_load!
       Rails.application.eager_load!
+      # Recorded because it decides whether the runtime discovery sets are
+      # *complete*. On the fallback path they are known-partial — whole
+      # directories may have failed to load — and treating "absent from
+      # descendants" as "deleted" would then erase live units by the type.
+      # See {#stale_class_based_units}.
+      @eager_load_complete = true
     rescue NameError => e
       Rails.logger.warn "[Woods] eager_load! hit NameError: #{e.message}"
       Rails.logger.warn '[Woods] Falling back to per-directory eager loading'
+      @eager_load_complete = false
       eager_load_extraction_directories
     end
 
@@ -1492,40 +1499,98 @@ module Woods
     # the graph finds exactly those additions, using the same discovery code
     # a full extraction uses.
     #
-    # Only *additions* are handled here. Removals go through
-    # {#prune_vanished_units}, which keys on the source file being gone —
-    # a constant can outlive its file in a resident process that has not
-    # reloaded, and treating "absent from descendants" as deletion would make
-    # a partial eager load (the documented NameError fallback) erase whole
-    # types.
+    # Removals are handled here too, but only against a *complete* discovery
+    # set — see {#stale_class_based_units} for why that qualifier carries the
+    # whole safety argument.
     #
     # @param affected_types [Set<Symbol>]
-    # @return [Set<String>] identifiers added
+    # @return [Set<String>] identifiers added or removed
     def reconcile_class_based_types(affected_types, except: nil)
-      added = Set.new
+      touched = Set.new
       excluded = except&.to_set || Set.new
 
       CLASS_BASED_DISCOVERY.each do |key, spec|
         extractor = extractor_for(key)
         next unless extractor.respond_to?(:discoverable_classes)
 
+        discovered = extractor.discoverable_classes.reject { |k| k.name.nil? }
         known = @dependency_graph.units_of_type(spec[:type]).to_set
-        new_classes = extractor.discoverable_classes.reject do |k|
-          k.name.nil? || known.include?(k.name) || excluded.include?(k.name)
-        end
-        next if new_classes.empty?
 
-        units = new_classes.filter_map do |klass|
-          extractor.public_send(spec[:method], klass)
-        rescue StandardError => e
-          Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
-          nil
-        end
-
-        added.merge(register_and_write(key, units, affected_types))
+        touched.merge(add_discovered_classes(key, spec, discovered, known, excluded, affected_types))
+        touched.merge(remove_stale_classes(spec, discovered, known, affected_types))
       end
 
-      added
+      touched
+    end
+
+    def add_discovered_classes(key, spec, discovered, known, excluded, affected_types)
+      new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
+      return Set.new if new_classes.empty?
+
+      units = new_classes.filter_map do |klass|
+        extractor_for(key).public_send(spec[:method], klass)
+      rescue StandardError => e
+        Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
+        nil
+      end
+
+      register_and_write(key, units, affected_types)
+    end
+
+    def remove_stale_classes(spec, discovered, known, affected_types)
+      stale = stale_class_based_units(spec[:type], discovered, known)
+      return Set.new if stale.empty?
+
+      Rails.logger.info "[Woods] removing #{stale.size} #{spec[:type]} unit(s) whose class no longer exists"
+      stale.each_with_object(Set.new) do |identifier, removed|
+        removed.add(identifier) if remove_unit(identifier, affected_types)
+      end
+    end
+
+    # Class-based units the graph still holds that a full extraction would not
+    # produce.
+    #
+    # {#prune_vanished_units} keys on the source file being gone, which cannot
+    # see this case: a class removed from a file that still exists leaves no
+    # missing path, and class-based units register a *convention* path derived
+    # from the constant name, so a class defined somewhere unconventional was
+    # never attributed to the file it actually lived in. Two models in one
+    # `.rb`, one of them deleted, and the survivor's own re-extraction says
+    # nothing about the other. Nothing else in the run removes it, so it
+    # outlives every subsequent incremental — a permanent divergence from a
+    # full run, not a transient one.
+    #
+    # For all six class-based extractors `extract_all` is literally
+    # `discoverable_classes.map { ... }.compact`, so absence from that set is
+    # exactly "a full extraction would not produce this" — the equivalence the
+    # incremental path is held to.
+    #
+    # The `@eager_load_complete` gate is the whole safety argument, and it is
+    # why this is not simply the inverse of the addition pass:
+    #
+    # * **A partial eager load.** The documented NameError fallback loads only
+    #   `EXTRACTION_DIRECTORIES`, so descendants are known-incomplete and the
+    #   difference here would be most of the app. Deleting by the type is far
+    #   worse than a stale unit, so a partial load removes nothing.
+    # * **A constant outliving its file.** A resident daemon that has not
+    #   reloaded still holds a deleted class as a descendant, so it is *in* the
+    #   set and not stale — which is correct for that process, and the
+    #   subsequent reload is what makes it removable.
+    #
+    # @param type [Symbol] unit type
+    # @param discovered [Array<Class>] the extractor's current discovery set
+    # @param known [Set<String>] identifiers of that type already in the graph
+    # @return [Array<String>] identifiers to remove
+    def stale_class_based_units(type, discovered, known)
+      return [] unless @eager_load_complete
+
+      live = discovered.to_set(&:name)
+      known.reject { |identifier| live.include?(identifier) }
+           # Not redundant with `units_of_type`. The graph keys nodes on the
+           # bare identifier (B-062), so a same-named unit of another type can
+           # overwrite this node while the type index still lists it — and
+           # removing it here would delete that other unit instead.
+           .select { |identifier| @dependency_graph.node(identifier)&.fetch(:type, nil) == type }
     end
 
     # Re-run whole-app extractors whose trigger paths changed, replacing that

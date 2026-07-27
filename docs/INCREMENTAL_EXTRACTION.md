@@ -45,9 +45,10 @@ step before it.
 3. **Re-extract the rest of the blast radius** — units whose own file did not
    change but which depend on something that did.
 4. **Reconcile class-based types** against each extractor's
-   `#discoverable_classes`, catching classes added since the last extraction.
-   Exact by construction: it is the same discovery code a full extraction uses,
-   so there is no path-to-constant guessing.
+   `#discoverable_classes` — classes added since the last extraction, and
+   classes the graph still holds that the set no longer contains. Exact by
+   construction: it is the same discovery code a full extraction uses, so
+   there is no path-to-constant guessing.
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.
 6. **Prune vanished units** last, so anything steps 2–5 resurrected against a
@@ -126,11 +127,37 @@ Two of these deserve a note:
 
 Models, controllers, mailers, components, view components and channels are
 **not** dispatched by path. They are reconciled against
-`#discoverable_classes` on their own extractor. Only additions go through
-reconciliation — treating "absent from descendants" as deletion would make a
-partial eager load (the documented `NameError` fallback) erase whole types, and
-a constant outlives its file in a process that has not reloaded. Removing a
-class-based unit requires the caller to name its path.
+`#discoverable_classes` on their own extractor, in **both** directions:
+additions are that set minus the graph, removals are the graph minus that set.
+
+For all six, `extract_all` is literally `discoverable_classes.map { … }.compact`,
+so absence from the set is exactly "a full extraction would not produce this" —
+the equivalence the incremental path is held to.
+
+Removal is gated on the eager load having **completed**, and that gate carries
+the whole safety argument:
+
+- **A partial eager load.** The documented `NameError` fallback loads only
+  `EXTRACTION_DIRECTORIES`, so descendants are known-incomplete and the
+  difference would be most of the app. Deleting by the type is far worse than a
+  stale unit, so a partial load removes nothing.
+- **A constant outliving its file.** A resident daemon that has not reloaded
+  still holds a deleted class as a descendant, so it is *in* the set and not
+  stale — correct for that process. The subsequent reload is what makes it
+  removable.
+
+Without this, a class deleted from a file that still exists was never removed
+at all: path-keyed deletion sees no missing path, and a class-based unit
+records a *convention* path from its constant name, so a second model in one
+`.rb` was never attributed to the file it actually lived in. The unit outlived
+every subsequent incremental run.
+
+The booted harness cannot cover that case. Zeitwerk unloads only the constant a
+file is *expected* to define, so a class defined there as a side effect survives
+the reload, stays in `descendants`, and the in-process full extraction the
+oracle compares against emits it too — both sides agree, wrongly. The coverage
+is in `spec/extractor_spec.rb`, driving the reconciler with a shrinking
+discovery set.
 
 ### Deletion
 
@@ -260,8 +287,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
   `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
   real `ActiveRecord::Base` descendants whose file path
   (`app/models/active_record/schema_migration.rb`) no application has.
-  Deleting a class-based unit therefore requires the caller to name the path;
-  the sweep never infers it.
+  Deleting a class-based unit therefore requires either the caller naming the
+  path or the discovery-set reconciliation above; the sweep never infers it.
 - **Git metadata for untouched units.** An incremental run refreshes
   `metadata.git` on the units it wrote. A unit nothing touched keeps the git
   metadata from the last run that did, which goes stale as commits land on

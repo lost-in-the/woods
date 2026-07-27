@@ -862,6 +862,91 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── reconcile_class_based_types — removals ───────────────────────────
+
+  # The hole this closes: {#prune_vanished_units} keys on the source file being
+  # gone, so a class deleted from a file that still exists is invisible to it —
+  # and class-based units register a *convention* path from the constant name,
+  # so a second model in one `.rb` was never attributed to that file anyway.
+  # Two models in one file, one deleted, and nothing in the run removes it: it
+  # outlives every subsequent incremental. A permanent divergence from a full
+  # extraction, not a transient one.
+  #
+  # Driven here rather than in the booted harness because the harness cannot
+  # see it: Zeitwerk unloads only the constant a file is *expected* to define,
+  # so a second class defined as a side effect survives the reload, stays in
+  # `descendants`, and the in-process full extraction the oracle compares
+  # against emits it too. Both sides agree, wrongly.
+  describe '#reconcile_class_based_types removals' do
+    let(:live_class) { double('Model', name: 'Post') }
+    let(:fake_models) { double('ModelExtractor') }
+
+    def register(type:, identifier:)
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: type, identifier: identifier,
+                                 file_path: File.join(tmpdir, "app/models/#{identifier.downcase}.rb"))
+      )
+    end
+
+    before do
+      stub_const('Woods::Extractor::CLASS_BASED_DISCOVERY',
+                 { models: { type: :model, method: :extract_model } })
+      # extractor_for memoizes into this hash, so seeding it injects the double
+      # without stubbing the lookup itself.
+      extractor.instance_variable_set(:@incremental_extractors, { models: fake_models })
+      allow(fake_models).to receive(:discoverable_classes).and_return([live_class])
+      register(type: :model, identifier: 'Post')
+      register(type: :model, identifier: 'Sidecar')
+    end
+
+    def reconcile
+      extractor.send(:reconcile_class_based_types, Set.new)
+    end
+
+    context 'when the eager load was complete' do
+      before { extractor.instance_variable_set(:@eager_load_complete, true) }
+
+      it 'removes a unit whose class the discovery set no longer holds' do
+        expect(reconcile).to contain_exactly('Sidecar')
+        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(false)
+        expect(extractor.dependency_graph.node_exists?('Post')).to be(true)
+      end
+
+      it 'is idempotent — a second pass finds nothing left to do' do
+        reconcile
+
+        expect(reconcile).to be_empty
+      end
+
+      # The graph keys nodes on the bare identifier (B-062), so a factory named
+      # `Sidecar` can overwrite the model node while the model type index still
+      # lists it. Removing it as a stale model would delete the factory.
+      it 'leaves an identifier whose node another type has taken over' do
+        register(type: :factory, identifier: 'Sidecar')
+
+        expect(reconcile).to be_empty
+        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
+      end
+    end
+
+    # The documented NameError fallback loads only EXTRACTION_DIRECTORIES, so
+    # descendants are known-partial and the difference would be most of the
+    # app. A stale unit is a far better failure than deleting a type wholesale.
+    context 'when the eager load fell back to per-directory loading' do
+      before { extractor.instance_variable_set(:@eager_load_complete, false) }
+
+      it 'removes nothing' do
+        expect(reconcile).to be_empty
+        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
+      end
+    end
+
+    it 'removes nothing before an eager load has been attempted at all' do
+      expect(reconcile).to be_empty
+      expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
+    end
+  end
+
   # ── deduplicate_results ──────────────────────────────────────────────
 
   describe '#deduplicate_results' do

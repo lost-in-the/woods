@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A class removed from a file that still exists is now pruned** (#164 review, round 4).
+  Deletion keyed on the source file being gone, which cannot see this: two models in one `.rb`
+  with one deleted leaves no missing path, and class-based units register a *convention* path
+  derived from the constant name, so the second class was never attributed to the file it
+  actually lived in. Nothing in the run removed it, so it outlived every subsequent
+  incremental — a permanent divergence from a full extraction. Class-based reconciliation now
+  runs in both directions, with removal gated on the eager load having completed: on the
+  documented NameError fallback the discovery sets are known-partial, and deleting by the type
+  is a far worse failure than a stale unit. The booted harness cannot cover this — Zeitwerk
+  unloads only a file's expected constant, so the side-effect class survives the reload and
+  the in-process full extraction the oracle compares against emits it too.
+- **`RailsReloader#reload!` no longer carries an unreachable interlock wrapper** (#164 review,
+  round 4). The call was guarded by `interlock.respond_to?(:done)`, and
+  `ActiveSupport::Dependencies::Interlock` has never had a `#done` — so the guard was false on
+  every Rails version, the wrapper never ran, and the comment above it described locking that
+  was not happening. It is also not needed: `reload!` takes the unload lock itself via
+  `class_unload!` → `require_unload_lock!`. Found by writing the first test that drives the
+  real reloader instead of a double; it was stubbed in every spec and so ran on zero of the
+  seven matrix rows.
 - **New GraphQL files are indexed incrementally** (#164 review, round 3). `app/graphql` had no
   `PathDispatcher` rule and GraphQL types are not class-discoverable, so a created type,
   mutation or resolver routed nowhere and never entered the index, and a rename lost the unit
