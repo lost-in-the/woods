@@ -90,4 +90,63 @@ RSpec.describe Woods::Watch::TreeScan do
 
     expect(described_class.files(root: missing, ignored: ignored)).to eq([])
   end
+
+  # `Find` stats with lstat, so before this a symlinked directory was neither
+  # descended nor reported — the entry silently vanished, while a full
+  # extraction's `Dir.glob` followed it and indexed the tree.
+  describe 'symlinked directories' do
+    # The target lives *outside* the watched root, which is the case that was
+    # invisible: a monorepo linking shared code in, or a symlinked app/models.
+    it 'walks files under a symlinked directory' do
+      real = Dir.mktmpdir('woods_tree_scan_target')
+      File.write(File.join(real, 'shared.rb'), 'x')
+      link = File.join(root, 'app_link')
+      File.symlink(real, link)
+
+      expect(described_class.files(root: root, ignored: ignored))
+        .to include(File.join(link, 'shared.rb'))
+    ensure
+      FileUtils.rm_rf(real)
+    end
+
+    it 'terminates when a link points at its own ancestor' do
+      nested = File.join(root, 'app')
+      FileUtils.mkdir_p(nested)
+      File.write(File.join(nested, 'thing.rb'), 'x')
+      File.symlink(root, File.join(nested, 'loop'))
+
+      expect { described_class.files(root: root, ignored: ignored) }.not_to raise_error
+    end
+
+    # Outside the root, so the only routes to it are the two links. A target
+    # that also lives inside the tree legitimately appears twice — once at its
+    # real path, once through the link — and that is not what this guards.
+    it 'yields a shared target once when two links point at it' do
+      real = Dir.mktmpdir('woods_tree_scan_shared')
+      File.write(File.join(real, 'thing.rb'), 'x')
+      File.symlink(real, File.join(root, 'a_link'))
+      File.symlink(real, File.join(root, 'b_link'))
+
+      found = described_class.files(root: root, ignored: ignored)
+      expect(found.count { |path| path.end_with?('thing.rb') }).to eq(1)
+    ensure
+      FileUtils.rm_rf(real)
+    end
+
+    it 'does not follow a link into an ignored directory' do
+      real = File.join(root, 'node_modules')
+      FileUtils.mkdir_p(real)
+      File.write(File.join(real, 'dep.rb'), 'x')
+      File.symlink(real, File.join(root, 'node_modules_link'))
+
+      expect(described_class.files(root: root, ignored: %w[node_modules node_modules_link]))
+        .to be_empty
+    end
+
+    it 'ignores a broken link without raising' do
+      File.symlink(File.join(root, 'missing'), File.join(root, 'dangling'))
+
+      expect { described_class.files(root: root, ignored: ignored) }.not_to raise_error
+    end
+  end
 end

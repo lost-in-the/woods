@@ -538,4 +538,53 @@ RSpec.describe Woods::Watch::Daemon do
       expect(JSON.parse(File.read(pending_file))).to be_empty
     end
   end
+
+  # PipelineLock stops two daemons interleaving writes; nothing stopped them
+  # both existing, doubling the extraction work and making one status file
+  # answer for two processes.
+  describe 'a second daemon on one index' do
+    it 'stands down when another live daemon holds the index' do
+      allow_any_instance_of(Woods::Watch::Status).to receive(:alive?).and_return(true)
+      allow_any_instance_of(Woods::Watch::Status)
+        .to receive(:read).and_return({ 'state' => 'running', 'pid' => Process.pid + 100_000 })
+
+      expect(build.run).to eq(:already_running)
+    end
+
+    it 'starts anyway when WOODS_IGNORE_WATCH is set' do
+      allow_any_instance_of(Woods::Watch::Status).to receive(:alive?).and_return(true)
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('WOODS_IGNORE_WATCH').and_return('1')
+
+      daemon = build(idle_timeout: 0.01)
+      expect(daemon.run).not_to eq(:already_running)
+    end
+
+    # A crashed predecessor must not lock the index out — alive? requires the
+    # recorded pid to still exist, so an ordinary start is unaffected.
+    it 'starts when no daemon is recorded' do
+      daemon = build(idle_timeout: 0.01)
+      expect(daemon.run).not_to eq(:already_running)
+    end
+  end
+
+  # Every cycle writes generation.json and status.json, so watching the output
+  # directory means each cycle manufactures the events that trigger the next.
+  describe 'the output directory' do
+    it 'is ignored when it sits inside the watched tree' do
+      inside = File.join(root, '.woods')
+      FileUtils.mkdir_p(inside)
+      daemon = described_class.new(
+        output_dir: inside, root: root, extractor_factory: -> { extractor },
+        reloader: reloader, debounce: 0, catch_up: false
+      )
+
+      expect(daemon.send(:ignored_directories)).to include('.woods')
+    end
+
+    it 'is left alone when it sits outside the watched tree' do
+      expect(build.send(:ignored_directories))
+        .to eq(Woods::Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES)
+    end
+  end
 end

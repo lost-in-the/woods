@@ -154,10 +154,17 @@ module Woods
         true
       end
 
+      # Both sides of this comparison must come from the same clock.
+      #
+      # `@clock` is injected so a spec can drive staleness without sleeping for
+      # a quarter of an hour; reading the left-hand side from `Time.now`
+      # regardless made that injection a no-op for the one thing it exists to
+      # test — a stubbed clock could write an `updated_at` far in the past or
+      # future and `recent?` would still answer from the wall clock.
       def recent?(iso8601, max_age)
         return false if iso8601.nil?
 
-        Time.now - Time.parse(iso8601) <= max_age
+        Time.parse(@clock.call) - Time.parse(iso8601) <= max_age
       rescue ArgumentError, TypeError
         false
       end

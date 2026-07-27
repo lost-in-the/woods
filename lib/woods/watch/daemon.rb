@@ -167,8 +167,11 @@ module Woods
       # Watch until stopped, a restart is required, or the idle timeout fires.
       #
       # @return [Symbol] why the loop ended — `:stopped`, `:restart_required`,
-      #   or `:idle`
+      #   `:idle`, or `:already_running` when another daemon already covers this
+      #   index
       def run
+        return :already_running if another_daemon_alive?
+
         watcher = @watcher || build_watcher
         publish_status(:running, reason: nil)
         @last_event_at = monotonic_now
@@ -431,7 +434,7 @@ module Woods
 
       def uncovered_paths
         watermark = index_watermark
-        TreeScan.files(root: @root, ignored: Watcher::DEFAULT_IGNORED_DIRECTORIES)
+        TreeScan.files(root: @root, ignored: ignored_directories)
                 .select { |path| uncovered?(path, watermark) }
       end
 
@@ -716,8 +719,77 @@ module Woods
         @logger.warn("[Woods] watch: could not write status — #{e.message}")
       end
 
+      # Is a *different* live daemon already maintaining this index?
+      #
+      # {PipelineLock} keeps two daemons from interleaving writes, but nothing
+      # stopped them both existing: the second would poll the same tree, take
+      # the lock alternately with the first, and double the extraction work
+      # while each carried paths forward past cycles the other had already
+      # handled. Worse, both publish status to one file, so `alive?` answers for
+      # whichever wrote last and `woods:watch_status` cannot tell you there are
+      # two. Cheap to prevent at startup, and a crashed predecessor does not
+      # trip it — `Status#alive?` requires the recorded pid to still exist.
+      #
+      # `WOODS_IGNORE_WATCH=1` overrides, matching what it already means for
+      # `woods:incremental`.
+      #
+      # @return [Boolean]
+      def another_daemon_alive?
+        return false if ENV['WOODS_IGNORE_WATCH'] == '1'
+        return false unless @status.alive?
+
+        other = @status.read['pid']
+        return false if other.nil? || other.to_i == Process.pid
+
+        @logger.warn(
+          "[Woods] a watch daemon (pid #{other}) is already maintaining #{@output_dir} — standing down. " \
+          'Set WOODS_IGNORE_WATCH=1 to start anyway.'
+        )
+        true
+      end
+
       def build_watcher
-        @watcher = Watcher.build(root: @root, logger: @logger, force_polling: @force_polling)
+        @watcher = Watcher.build(
+          root: @root, ignored: ignored_directories, logger: @logger, force_polling: @force_polling
+        )
+      end
+
+      # The ignore list, plus this daemon's own output directory when it sits
+      # inside the watched tree.
+      #
+      # Every cycle writes `generation.json`, `status.json` and the unit files,
+      # so watching the output directory means each cycle manufactures the
+      # events that trigger the next one — a daemon that never goes idle and an
+      # index that rewrites itself forever. The default `tmp/woods` is already
+      # covered by `tmp` in {Watcher::DEFAULT_IGNORED_DIRECTORIES}, which is why
+      # this has not bitten in practice; a `WOODS_OUTPUT` pointing anywhere else
+      # under the root (`.woods/`, `woods_index/`) had nothing protecting it.
+      #
+      # @return [Array<String>] directory names/prefixes to skip
+      def ignored_directories
+        @ignored_directories ||= [
+          *Watcher::DEFAULT_IGNORED_DIRECTORIES, output_dir_within_root
+        ].compact.uniq
+      end
+
+      # @return [String, nil] output dir relative to the root, or nil when it
+      #   lives outside the watched tree entirely
+      def output_dir_within_root
+        base = resolve_path(@root)
+        out = resolve_path(@output_dir)
+        return nil if base.nil? || out.nil?
+        return nil unless out.start_with?("#{base}/")
+
+        out.delete_prefix("#{base}/")
+      end
+
+      # `realpath` so a symlinked root or output dir still compares, falling
+      # back to `expand_path` because the output directory need not exist yet on
+      # a first run.
+      def resolve_path(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.expand_path(path)
       end
 
       def monotonic_now

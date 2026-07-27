@@ -50,7 +50,16 @@ module Woods
       def discoverable_classes
         return [] unless @component_base
 
-        @component_base.descendants
+        # Previews are filtered here rather than only in {#extract_component},
+        # because this set is also the incremental path's reconciliation input.
+        # A preview class is never in the graph — `extract_component` rejects it
+        # — so leaving it in made every incremental run recompute the same
+        # "addition", extract it, get nil, and dirty the dependents pass for
+        # nothing. Anonymous classes go too: `extract_component` rejects a nil
+        # name for the same reason.
+        @component_base.descendants.reject do |component|
+          component.name.nil? || preview_class?(component)
+        end
       end
 
       # Extract a single ViewComponent component

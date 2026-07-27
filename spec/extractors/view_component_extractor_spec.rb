@@ -467,4 +467,32 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       expect(unit.metadata[:content_areas]).to match_array(%w[header body footer])
     end
   end
+
+  # `discoverable_classes` is also the incremental path's reconciliation input,
+  # so a class the extractor always rejects made every run recompute the same
+  # "addition", extract it, get nil, and dirty the dependents pass for nothing.
+  describe '#discoverable_classes' do
+    it 'excludes preview classes' do
+      preview_base = Class.new
+      stub_const('ViewComponent::Preview', preview_base)
+      preview = Class.new(preview_base)
+      stub_const('ButtonComponentPreview', preview)
+      real = Class.new
+      stub_const('ButtonComponent', real)
+
+      base = build_view_component_base(descendants: [real, preview])
+      stub_const('ViewComponent::Base', base)
+
+      expect(described_class.new.discoverable_classes).to eq([real])
+    end
+
+    it 'excludes anonymous classes' do
+      real = Class.new
+      stub_const('CardComponent', real)
+      base = build_view_component_base(descendants: [real, Class.new])
+      stub_const('ViewComponent::Base', base)
+
+      expect(described_class.new.discoverable_classes).to eq([real])
+    end
+  end
 end
