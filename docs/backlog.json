@@ -633,8 +633,8 @@
     "category": "code-bug",
     "layer": "embedding",
     "files": ["lib/woods/embedding/indexer.rb"],
-    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148.",
-    "status": "ready",
+    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148. RESOLVED: an incremental run now hydrates the in-memory vector store from dumps/latest and dumps again, the checkpoint is written only after the dump is promoted (interval saves suppressed on that path), and a checkpoint hit is honoured only when the dump actually holds a vector for that unit \u2014 so a checkpoint that ran ahead of its artifact self-heals into a re-embed instead of stranding the unit.",
+    "status": "resolved",
     "depends_on": []
   },
   {
