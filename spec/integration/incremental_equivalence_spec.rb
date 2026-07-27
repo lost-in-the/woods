@@ -454,7 +454,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # One randomized tree mutation. Returns the changed paths to hand to
   # extract_changed — deliberately *only* the paths a git diff would list, so
   # the harness exercises the same input shape the rake task produces.
-  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity -- a flat
+  # rubocop:disable Metrics/CyclomaticComplexity -- a flat
   # dispatch over the mutation vocabulary; splitting it would hide the shape.
   def random_operation(random, live)
     choice = live.empty? ? :create : %i[create create modify modify delete rename batch][random.rand(7)]
@@ -469,22 +469,47 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     when :delete
       delete_file(live.delete_at(random.rand(live.size)))
     when :rename
-      # A rename is a delete plus an add with fresh content — matching git's
-      # `--no-renames` diff semantics, and matching what a real rename does
-      # in Ruby, where the constant moves with the file.
-      from = live.delete_at(random.rand(live.size))
-      to = renamed_path(from, random)
-      live << to
-      delete_file(from)
-      write_artifact(to, random)
-      [from, to]
+      rename_operation(random, live)
     when :batch
       # A small storm: several files in one change set, as a rebase or a
       # branch switch would produce.
       Array.new(1 + random.rand(4)) { random_operation(random, live) }.flatten.compact
     end
   end
-  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  # rubocop:enable Metrics/CyclomaticComplexity
+
+  # Two shapes, because they exercise different machinery.
+  #
+  # The rewrite shape (delete + add with fresh content) matches git's
+  # `--no-renames` diff semantics and what a Ruby rename usually means: the
+  # constant moves with the file.
+  #
+  # The *move* shape preserves the bytes — `FileUtils.mv`, which is what an
+  # editor rename and `git mv` actually do. Only generating the rewrite shape
+  # meant any bug keyed on content-hash caching or identifier-follows-file
+  # tracking was invisible to the harness: the content always changed, so a
+  # cache that wrongly kept a hit could never be caught.
+  def rename_operation(random, live)
+    from = live.delete_at(random.rand(live.size))
+    to = renamed_path(from, random)
+    live << to
+
+    if random.rand(2).zero?
+      move_file(from, to)
+    else
+      delete_file(from)
+      write_artifact(to, random)
+    end
+
+    [from, to]
+  end
+
+  def move_file(from, to)
+    source = File.join(@app_root, from)
+    target = File.join(@app_root, to)
+    FileUtils.mkdir_p(File.dirname(target))
+    FileUtils.mv(source, target)
+  end
 
   def renamed_path(relative, random)
     dir = File.dirname(relative)

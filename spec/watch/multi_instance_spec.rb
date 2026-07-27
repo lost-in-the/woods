@@ -228,15 +228,32 @@ RSpec.describe 'Watch daemon multi-instance operation' do
         .to include('state' => 'stopped', 'reason' => 'idle')
     end
 
+    # Previously this asserted `not_to receive(:stop)` on a double that was
+    # never handed to the daemon, and never called `run` — so the only live
+    # assertion was a private-method check and the example could not fail.
+    # Drive the real heartbeat against a watcher the daemon actually holds.
     it 'stays up indefinitely when no idle timeout is configured' do
-      daemon = daemon_for(0, marker: 'Persistent')
-      watcher = double('watcher')
+      watcher = instance_spy(Woods::Watch::PollingWatcher)
+      daemon = daemon_for(0, marker: 'Persistent', watcher: watcher)
 
-      # The heartbeat runs regardless — it is what keeps the status believable
-      # — but with no idle timeout it must never be the thing that stops the
-      # watcher.
-      expect(watcher).not_to receive(:stop)
+      heartbeat = daemon.send(:start_heartbeat, watcher)
+      sleep 0.3
+      heartbeat.kill
+
       expect(daemon.send(:idle_expired?)).to be(false)
+      expect(watcher).not_to have_received(:stop)
+    end
+
+    it 'stops the watcher it was given once the idle window passes' do
+      watcher = instance_spy(Woods::Watch::PollingWatcher)
+      daemon = daemon_for(0, marker: 'Idles', watcher: watcher, idle_timeout: 0.1)
+      daemon.instance_variable_set(:@last_event_at, Process.clock_gettime(Process::CLOCK_MONOTONIC) - 5)
+
+      heartbeat = daemon.send(:start_heartbeat, watcher)
+      sleep 0.3
+      heartbeat.kill
+
+      expect(watcher).to have_received(:stop)
     end
   end
 
