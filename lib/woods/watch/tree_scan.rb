@@ -31,6 +31,13 @@ module Woods
       # are skipped wholesale except where Woods genuinely reads one.
       NOT_IGNORED_DOTFILES = ['.ruby-version'].freeze
 
+      # Dotfile *prefixes* Woods still has to see. `.env`, `.env.local`,
+      # `.env.development` and friends are boot-captured configuration
+      # ({ReloadPolicy} classifies them `:restart`), so filtering them out here
+      # would make that classification unreachable — the daemon would never
+      # learn the file changed at all.
+      NOT_IGNORED_DOTFILE_PREFIXES = ['.env'].freeze
+
       module_function
 
       # Yield every watched file under a root as an absolute path.
@@ -77,9 +84,17 @@ module Woods
       # @param relative [String] path relative to the watched root
       # @return [Boolean] whether any segment is a dotfile Woods does not read
       def hidden?(relative)
-        relative.split(File::SEPARATOR).any? do |segment|
-          segment.start_with?('.') && !NOT_IGNORED_DOTFILES.include?(segment) && segment != '.' && segment != '..'
-        end
+        relative.split(File::SEPARATOR).any? { |segment| hidden_segment?(segment) }
+      end
+
+      # @param segment [String] one path component
+      # @return [Boolean]
+      def hidden_segment?(segment)
+        return false unless segment.start_with?('.')
+        return false if ['.', '..'].include?(segment)
+        return false if NOT_IGNORED_DOTFILES.include?(segment)
+
+        NOT_IGNORED_DOTFILE_PREFIXES.none? { |prefix| segment.start_with?(prefix) }
       end
 
       # @param relative [String] path relative to the watched root

@@ -412,7 +412,8 @@ module Woods
 
       touched.merge(reconcile_class_based_types(affected_types))
       touched.merge(rerun_whole_app_extractors(change_set, affected_types))
-      touched.merge(prune_vanished_units(change_set, affected_types))
+      pruned = prune_vanished_units(change_set, affected_types)
+      touched.merge(pruned)
 
       # Reconcile once more, because pruning can un-know a class the first pass
       # skipped. A class-based file moved between autoload directories with its
@@ -422,7 +423,16 @@ module Woods
       # unit missing until some later run happens to notice — this pass closes it
       # in the same run. Idempotent when nothing was pruned: the discovery set is
       # compared against the graph, so an already-registered class is skipped.
-      touched.merge(reconcile_class_based_types(affected_types))
+      #
+      # `except:` is what keeps it from undoing a *deletion*. Without a reload,
+      # a constant outlives the file that defined it — so deleting
+      # `app/models/user.rb` prunes `User` and then this pass finds `User` still
+      # in `ActiveRecord::Base.descendants` and re-registers it against a path
+      # that no longer exists. From then on nothing can remove it: the sweep
+      # excludes class-based units and no future change set names that path
+      # again. A resident daemon processing a batch before its reload hits this
+      # every time.
+      touched.merge(reconcile_class_based_types(affected_types, except: pruned))
 
       finalize_incremental_unit_json(affected_types)
 
@@ -1393,11 +1403,21 @@ module Woods
         next if rules.empty?
 
         produced = Set.new
+        # A rule whose extraction *raised* tells us nothing about what the path
+        # defines, so it must not license pruning what the path defined before.
+        raised = false
         rules.each do |rule|
           units = extract_with_rule(rule, absolute_path)
+          if units.nil?
+            raised = true
+            next
+          end
+
           produced.merge(units.map(&:identifier))
           touched.merge(register_and_write(rule.extractor_key, units, affected_types))
         end
+
+        next if raised
 
         touched.merge(
           prune_path_leftovers(absolute_path, rules, produced, affected_types)
@@ -1429,7 +1449,14 @@ module Woods
       Array(result).compact
     rescue StandardError => e
       Rails.logger.warn "[Woods] #{rule.extractor_key} re-extraction of #{absolute_path} failed: #{e.message}"
-      []
+      # `nil`, not `[]`. The caller treats an empty result as "this path defines
+      # nothing any more" and prunes the units previously registered to it — so
+      # returning [] here turns a *transient* failure (a watcher batch catching
+      # an editor mid-write, an encoding hiccup) into silent deletion of a
+      # perfectly good unit, which nothing restores until that file is next
+      # touched. "Extraction raised" and "extracted successfully, defines
+      # nothing" are different answers and only the second licenses a prune.
+      nil
     end
 
     # Remove units the graph still attributes to a path that the path no
@@ -1474,15 +1501,18 @@ module Woods
     #
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers added
-    def reconcile_class_based_types(affected_types)
+    def reconcile_class_based_types(affected_types, except: nil)
       added = Set.new
+      excluded = except&.to_set || Set.new
 
       CLASS_BASED_DISCOVERY.each do |key, spec|
         extractor = extractor_for(key)
         next unless extractor.respond_to?(:discoverable_classes)
 
         known = @dependency_graph.units_of_type(spec[:type]).to_set
-        new_classes = extractor.discoverable_classes.reject { |k| k.name.nil? || known.include?(k.name) }
+        new_classes = extractor.discoverable_classes.reject do |k|
+          k.name.nil? || known.include?(k.name) || excluded.include?(k.name)
+        end
         next if new_classes.empty?
 
         units = new_classes.filter_map do |klass|

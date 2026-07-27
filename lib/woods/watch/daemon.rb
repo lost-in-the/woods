@@ -731,9 +731,24 @@ module Woods
           false
         end
 
+        # Reload under the load interlock.
+        #
+        # A bare `reloader.reload!` is fine in a dedicated `rake woods:watch`
+        # process, where nothing else is running app code. It is not fine in the
+        # embedded placement the class doc blesses — inside a dev server, where
+        # request threads are executing autoloaded code concurrently. Unloading
+        # constants underneath them is how you get a NameError in an unrelated
+        # request, or a deadlock between the reloader and a thread mid-autoload.
+        # `permit_concurrent_loads` is not what this needs; the interlock's
+        # unloading block is, and it is exactly what Rails' own file-watcher
+        # path takes before reloading.
+        #
         # @return [void]
         def reload!
-          Rails.application.reloader.reload!
+          interlock = defined?(ActiveSupport::Dependencies.interlock) && ActiveSupport::Dependencies.interlock
+          return Rails.application.reloader.reload! unless interlock.respond_to?(:done)
+
+          interlock.done { Rails.application.reloader.reload! }
         end
       end
     end

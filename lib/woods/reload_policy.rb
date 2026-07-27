@@ -74,6 +74,35 @@ module Woods
       db/structure.sql
     ].freeze
 
+    # Boot-captured configuration that is not under an initializer directory.
+    #
+    # `BehavioralProfile` introspects *resolved* `Rails.application.config`, and
+    # these are the files that feed it outside `config/initializers`: the
+    # `config` gem's settings, and the per-adapter YAML Rails reads at boot.
+    # They were classified `:ignore`, which is precisely the Spring-style
+    # under-scoping this file's own commentary warns against — a daemon that
+    # ignores them keeps serving a profile derived from the previous values.
+    #
+    # `.env` files are matched by prefix rather than listed, because dotenv
+    # conventionally ships `.env`, `.env.local`, `.env.development` and friends.
+    # They also have to survive the watcher's dotfile filter to be seen at all.
+    # Named rather than wildcarded, deliberately. `config/*.yml` also catches
+    # files Woods reads as *bytes* — `config/schedule.yml` is a scheduled-job
+    # source, and escalating it to `:restart` would stop the daemon for a change
+    # it could simply re-extract. The boot-captured set is small and knowable;
+    # guessing at it costs more than listing it.
+    RESTART_PATH_PATTERNS = [
+      %r{\Aconfig/settings\.ya?ml\z},
+      %r{\Aconfig/settings/[^/]+\.ya?ml\z},
+      # Note what is absent: `config/recurring.yml` and `config/sidekiq_cron.yml`
+      # are scheduled-job *sources* that Woods reads as bytes
+      # (`ScheduledJobExtractor::SCHEDULE_FILES`), so they stay `:reextract`.
+      # `spec/reload_policy_spec.rb` asserts that, which is how the first draft
+      # of this list got caught.
+      %r{\Aconfig/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml\z},
+      /\A\.env(\..+)?\z/
+    ].freeze
+
     # Directory prefixes whose change invalidates boot-captured state.
     RESTART_DIRECTORIES = %w[
       config/initializers
@@ -149,7 +178,8 @@ module Woods
     end
 
     def restart?(path)
-      RESTART_PATHS.include?(path) || under?(path, RESTART_DIRECTORIES)
+      RESTART_PATHS.include?(path) || under?(path, RESTART_DIRECTORIES) ||
+        RESTART_PATH_PATTERNS.any? { |pattern| pattern.match?(path) }
     end
 
     def reload?(path)

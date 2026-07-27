@@ -38,10 +38,20 @@ RSpec.describe Woods::Watch::TreeScan do
   end
 
   it 'skips dotfiles but keeps the ones Woods reads' do
-    write('.env', 'SECRET=1')
+    write('.hidden_thing', 'x')
     ruby_version = write('.ruby-version', "3.3.6\n")
 
     expect(files).to eq([ruby_version])
+  end
+
+  # ReloadPolicy classifies these :restart (they are boot-captured config), so
+  # filtering them out here would make that classification unreachable — the
+  # daemon would never learn the file changed at all.
+  it 'keeps dotenv files, which the reload policy treats as boot state' do
+    written = ['.env', '.env.local', '.env.development'].map { |name| write(name, 'A=1') }
+    written << write('.ruby-version', "3.3.6\n")
+
+    expect(files).to match_array(written)
   end
 
   # The point of Find.prune over Dir.glob: an ignored subtree must never be
