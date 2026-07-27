@@ -194,6 +194,13 @@ namespace :woods do
 
   desc 'Watch the app and keep the index current (resident daemon)'
   task watch: :environment do
+    # Both, and the extractor is not optional. The daemon's default
+    # extractor_factory names Woods::Extractor lazily, so omitting this require
+    # loaded and started cleanly and then NameError'd on the first real cycle —
+    # which the failure posture turns into a permanently degraded daemon rather
+    # than a crash. Every spec pre-requires the extractor in its own setup, so
+    # the suite stayed green over a broken entry point.
+    require 'woods/extractor'
     require 'woods/watch/daemon'
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
@@ -208,13 +215,23 @@ namespace :woods do
       # The documented fix for a container watching a bind mount, where native
       # FS events do not propagate and the daemon would sit silent. Nothing
       # exposed it before, which made the advice unfollowable.
-      force_polling: ENV['WOODS_WATCH_POLL'] == '1',
+      force_polling: ENV['WOODS_WATCH_POLL'] == '1', # container autodetect also applies; see Watcher.containerized?
       idle_timeout: ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT', nil) && Float(ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT')),
       catch_up: ENV['WOODS_WATCH_CATCH_UP'] != '0',
       logger: Rails.logger
     )
 
-    %w[INT TERM].each { |sig| Signal.trap(sig) { daemon.stop } }
+    # The trap sets a flag and nothing else. `daemon.stop` reaches
+    # `Listen::Listener#stop`, which drives a state machine behind mutexes —
+    # and taking a mutex in trap context raises ThreadError on some Ruby
+    # versions, turning Ctrl-C into a crash instead of a clean shutdown. A tiny
+    # supervisor thread does the real work outside trap context.
+    stop_requested = Queue.new
+    %w[INT TERM].each { |sig| Signal.trap(sig) { stop_requested.push(sig) } }
+    Thread.new do
+      stop_requested.pop
+      daemon.stop
+    end
 
     puts "Watching #{Rails.root} — index at #{output_dir}"
     puts 'Ctrl-C to stop.'

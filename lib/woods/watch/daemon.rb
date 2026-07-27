@@ -2,6 +2,7 @@
 
 require_relative '../change_set'
 require_relative '../coordination/pipeline_lock'
+require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../reload_policy'
 require_relative 'status'
@@ -182,6 +183,7 @@ module Woods
         @stop_reason || :stopped
       ensure
         heartbeat&.kill
+        persist_pending
         publish_status(:stopped, reason: @stop_reason&.to_s)
       end
 
@@ -340,10 +342,48 @@ module Woods
       # whether or not a daemon was watching at the time. With no generation
       # file at all there is no index, and every file is uncovered — which the
       # storm threshold correctly turns into one full extraction.
+      # Carry the pending set across a restart.
+      #
+      # Within a run, carried paths survive; at shutdown they were dropped, and
+      # recovery fell to the mtime watermark — which does not cover them. If
+      # another writer bumps the generation *after* the daemon carried a path
+      # forward, the watermark is newer than the file's mtime and catch-up skips
+      # it: the change is lost for good while the status says `running`.
+      # Sequence: save `user.rb`; a hook sync holds the lock; the daemon's cycle
+      # contends and carries it; the hook finishes and bumps; the daemon stops.
+      def persist_pending
+        paths = @pending_mutex.synchronize { @pending.to_a }
+        return AtomicFile.write(pending_path, JSON.generate([])) if paths.empty?
+
+        @logger.info("[Woods] watch: persisting #{paths.size} unindexed path(s) for the next run")
+        AtomicFile.write(pending_path, JSON.generate(paths))
+      rescue StandardError => e
+        @logger.warn("[Woods] watch: could not persist pending paths — #{e.message}")
+      end
+
+      # Paths a previous run owed, reloaded at startup so catch-up covers them
+      # regardless of what the watermark says.
+      def restore_pending
+        return [] unless File.exist?(pending_path)
+
+        paths = JSON.parse(File.read(pending_path))
+        return [] unless paths.is_a?(Array) && paths.any?
+
+        @logger.info("[Woods] watch: #{paths.size} path(s) carried over from the previous run")
+        paths.grep(String)
+      rescue StandardError
+        []
+      end
+
+      def pending_path
+        File.join(@output_dir, 'watch_pending.json')
+      end
+
       def catch_up(watcher)
         return unless @catch_up
 
-        paths = uncovered_paths
+        carried = restore_pending
+        paths = (uncovered_paths + carried).uniq
         if paths.empty?
           return reconcile_deletions if stale_deletions?
 
@@ -437,8 +477,26 @@ module Woods
             # at which point a contender would retire the lock of a run that is
             # still going. The holder has to keep saying it is alive.
             @lock.touch if @lock.respond_to?(:touch)
+            retry_pending(watcher)
           end
         end
+      end
+
+      # Retry work a degraded cycle carried forward, without waiting for a new
+      # file event.
+      #
+      # `drain_cycles` stops on a degraded result on purpose — retrying in a
+      # tight loop would spin on a cause that needs an edit to clear. But then
+      # only a *new* event starts another drain, so paths carried past a
+      # contending writer sit unindexed for as long as the developer happens to
+      # stop typing. The heartbeat is already the right cadence for "try that
+      # again": slow enough not to spin, frequent enough that a finished
+      # contender is noticed in minutes rather than never.
+      def retry_pending(watcher)
+        return if pending_empty? || @stop_reason
+
+        @logger.info('[Woods] watch: retrying paths carried forward from an earlier cycle')
+        drain(watcher)
       end
 
       def heartbeat_tick

@@ -3,6 +3,7 @@
 require 'json'
 require 'fileutils'
 require 'time'
+require 'socket'
 
 require_relative '../atomic_file'
 
@@ -60,6 +61,7 @@ module Woods
           'reason' => reason,
           'generation' => generation,
           'pid' => Process.pid,
+          'host' => self.class.host_identity,
           'updated_at' => @clock.call
         }.merge(details.transform_keys(&:to_s))
 
@@ -95,9 +97,22 @@ module Woods
       def alive?(max_age: STALE_AFTER)
         record = read
         return false unless %w[running degraded].include?(record['state'])
+        return false unless same_host?(record['host'])
         return false unless process_alive?(record['pid'])
 
         recent?(record['updated_at'], max_age)
+      end
+
+      # The identity a pid is only meaningful within.
+      #
+      # In a container the hostname defaults to the container id, so this
+      # changes exactly when the pid namespace does.
+      #
+      # @return [String]
+      def self.host_identity
+        @host_identity ||= Socket.gethostname
+      rescue StandardError
+        'unknown'
       end
 
       # Remove the status file. Used on a clean shutdown by callers that would
@@ -109,6 +124,22 @@ module Woods
       end
 
       private
+
+      # A pid is only meaningful inside the namespace that issued it.
+      #
+      # The daemon runs in a dev container while the status file is read by
+      # host-side worktree hooks through a bind mount — the documented
+      # deployment. A container pid like 47 almost always exists on the host, so
+      # a host hook would read `running` plus a live-looking pid plus a fresh
+      # timestamp and stand down while nothing was covering it. Comparing the
+      # recorded host means a cross-namespace reader disbelieves the record
+      # rather than misreading it.
+      #
+      # Records written before this field existed have no host; treat them as
+      # same-host so an in-place upgrade does not declare a live daemon dead.
+      def same_host?(host)
+        host.nil? || host == self.class.host_identity
+      end
 
       # Signal 0 asks "could I signal this process?" without sending anything.
       # EPERM means it exists but belongs to someone else — still alive.

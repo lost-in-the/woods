@@ -54,6 +54,8 @@ module Woods
       # @return [#start, #stop]
       def build(root:, ignored: DEFAULT_IGNORED_DIRECTORIES, poll_interval: 1.0,
                 force_polling: false, logger: nil)
+        force_polling ||= containerized?
+
         unless force_polling
           begin
             require 'listen'
@@ -66,6 +68,29 @@ module Woods
 
         logger&.info("[Woods] watch: polling every #{poll_interval}s")
         PollingWatcher.new(root: root, ignored: ignored, interval: poll_interval)
+      end
+
+      # Are we probably inside a container?
+      #
+      # The failure this guards is silent and total: on a runtime where FS
+      # events do not cross the bind mount, auto-preferring `listen` produces a
+      # daemon that reports `running`, never fires, and keeps the index frozen
+      # while claiming to maintain it. Polling on a runtime that would have
+      # propagated events costs some CPU. Those are not symmetric, so the
+      # ambiguous case defaults to the recoverable one.
+      #
+      # Deliberately a heuristic and deliberately overridable — event
+      # propagation is runtime-specific (OrbStack propagates; Docker Desktop's
+      # VM is the case `listen` itself documents as unreliable), so a host that
+      # knows better sets `WOODS_WATCH_POLL=0`.
+      #
+      # @return [Boolean]
+      def containerized?
+        return ENV['WOODS_WATCH_POLL'] != '0' if ENV.key?('WOODS_WATCH_POLL')
+
+        File.exist?('/.dockerenv') || File.exist?('/run/.containerenv')
+      rescue StandardError
+        false
       end
     end
   end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'find'
+
 module Woods
   module Watch
     # Walks a watched tree once, applying the ignore list.
@@ -11,11 +13,19 @@ module Woods
     # the daemon can never catch up over a different file set than the watcher
     # subsequently watches.
     #
-    # Note `base:` rather than interpolating the root into the pattern: a root
-    # containing glob metacharacters (`[`, `{`, `*` — all legal in a directory
-    # name, and `[` in particular shows up in generated worktree paths) makes an
-    # interpolated pattern match nothing at all, silently watching an empty
-    # tree.
+    # `Find.find` with `Find.prune`, not `Dir.glob`, and the difference is
+    # operational rather than stylistic. A glob enumerates the whole tree and
+    # filters afterwards, so it descends into `.git` and `node_modules` and
+    # stats everything inside them before discarding the results. On a monolith
+    # across a virtiofs or gRPC-FUSE bind mount — the exact deployment polling
+    # exists to serve — that alone can take longer than the poll interval,
+    # producing sustained IO and change latency measured in tens of seconds.
+    # Pruning means an ignored subtree is never entered at all.
+    #
+    # `Find` also takes the root as a plain path, which sidesteps the other
+    # trap: a root containing glob metacharacters (`[`, `{`, `*` — all legal in
+    # a directory name, and `[` shows up in generated worktree paths) makes an
+    # interpolated glob pattern match nothing, silently watching an empty tree.
     module TreeScan
       # Files that look like source but are editor or VCS bookkeeping. Dotfiles
       # are skipped wholesale except where Woods genuinely reads one.
@@ -31,16 +41,30 @@ module Woods
       # @return [void]
       def each_file(root:, ignored:)
         base = root.to_s
+        prefix = "#{base}/"
 
-        Dir.glob('**/*', File::FNM_DOTMATCH, base: base).each do |relative|
-          next if hidden?(relative)
-          next if ignored?(relative, ignored)
+        Find.find(base) do |path|
+          next if path == base
 
-          absolute = File.join(base, relative)
-          next unless File.file?(absolute)
+          relative = path.delete_prefix(prefix)
+          skip = skip?(relative, ignored)
 
-          yield absolute
+          if File.directory?(path)
+            Find.prune if skip
+          elsif !skip
+            yield path
+          end
         end
+      rescue Errno::ENOENT
+        # The root vanished mid-walk (a worktree removed under us). Nothing to
+        # report; the caller's next cycle sees it gone.
+        nil
+      end
+
+      # @return [Boolean] whether this entry is neither watched nor worth
+      #   descending into
+      def skip?(relative, ignored)
+        hidden?(relative) || ignored?(relative, ignored)
       end
 
       # @param root [String, Pathname] directory to walk

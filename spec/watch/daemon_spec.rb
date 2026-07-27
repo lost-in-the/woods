@@ -439,4 +439,50 @@ RSpec.describe Woods::Watch::Daemon do
       expect(extractor).to have_received(:extract_changed).twice
     end
   end
+
+  # Carried paths survived within a run but were dropped at shutdown, and the
+  # mtime watermark does not cover them: if another writer bumps the generation
+  # after the daemon carried a path forward, the watermark is newer than that
+  # file and catch-up skips it — lost for good, with the status saying running.
+  describe 'pending paths across a restart' do
+    let(:fake_watcher) { FakeWatcher.new }
+
+    def pending_file
+      File.join(output_dir, 'watch_pending.json')
+    end
+
+    it 'persists what a degraded cycle carried forward' do
+      touch('config/locales/en.yml')
+      allow(extractor).to receive(:extract_changed).and_raise(StandardError, 'boom')
+      daemon = build(watcher: fake_watcher)
+      fake_watcher.queue(['config/locales/en.yml'])
+
+      daemon.run
+
+      expect(JSON.parse(File.read(pending_file)))
+        .to include(a_string_ending_with('config/locales/en.yml'))
+    end
+
+    it 'replays them at the next startup even when the watermark has moved past' do
+      relative = touch('config/locales/en.yml')
+      File.write(pending_file, JSON.generate([File.join(root, relative)]))
+      # A later writer bumped the generation, so the watermark is newer than the
+      # carried file and the mtime scan alone would find nothing.
+      sleep 0.01
+      publish_generation('full')
+
+      build(watcher: fake_watcher, catch_up: true).run
+
+      expect(extractor).to have_received(:extract_changed) do |paths|
+        expect(paths).to include(a_string_ending_with('config/locales/en.yml'))
+      end
+    end
+
+    it 'clears the file once the work lands' do
+      touch('config/locales/en.yml')
+      build(watcher: fake_watcher).run
+
+      expect(JSON.parse(File.read(pending_file))).to be_empty
+    end
+  end
 end
