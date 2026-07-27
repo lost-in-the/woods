@@ -5,6 +5,7 @@ require_relative '../coordination/pipeline_lock'
 require_relative '../generation'
 require_relative '../reload_policy'
 require_relative 'status'
+require_relative 'tree_scan'
 require_relative 'watcher'
 require 'set'
 
@@ -59,6 +60,15 @@ module Woods
     # extraction and risk interleaving with a still-settling tree, so the
     # daemon falls back to a full run and logs that it did.
     #
+    # ## Startup is not a clean slate
+    #
+    # A daemon that only reacts to events it personally witnessed is stale the
+    # moment it starts: edits and pulled commits that landed while nothing was
+    # watching are invisible to it forever. That matters because callers stand
+    # down when a daemon is alive ({Status#alive?}), so "a daemon is running"
+    # has to mean "these changes are covered". {#run} therefore reconciles
+    # against the index's own watermark before waiting for its first event.
+    #
     # ## Placement
     #
     # Every collaborator is injected, so this class doesn't care whether it
@@ -66,7 +76,8 @@ module Woods
     # dev-server process, or driven a batch at a time by a host that owns its
     # own loop. {#process} is the whole cycle for one batch and is safe to
     # call directly — which is how the specs drive it, and how an embedded
-    # host would.
+    # host would. It also drains anything a previous cycle carried forward, so
+    # an embedded caller gets the same retry behaviour {#run} does.
     #
     # @example A dedicated daemon
     #   Woods::Watch::Daemon.new(output_dir: Rails.root.join("tmp/woods")).run
@@ -92,6 +103,17 @@ module Woods
       # minutes. This bounds how long a crashed writer can block the daemon.
       LOCK_STALE_TIMEOUT = 600
 
+      # How often an otherwise idle daemon re-stamps its status file.
+      #
+      # {Status#alive?} disbelieves a record older than {Status::STALE_AFTER},
+      # and cycle boundaries are the only other thing that writes one — so
+      # without a heartbeat a *healthy* daemon reads as dead after a quiet
+      # quarter-hour, which is the single most common state for a worktree
+      # nobody is typing in. Callers would then stop standing down and start
+      # contending for its lock. A third of the window leaves room for two
+      # missed beats.
+      HEARTBEAT_INTERVAL = Status::STALE_AFTER / 3.0
+
       # @return [Woods::Generation]
       attr_reader :generation
 
@@ -107,6 +129,12 @@ module Woods
       # @param debounce [Float] quiet window in seconds
       # @param full_extraction_threshold [Integer]
       # @param idle_timeout [Numeric, nil] stop after this many idle seconds
+      # @param lock [Woods::Coordination::PipelineLock, nil] writer lock for
+      #   this index; built from {LOCK_NAME} when nil
+      # @param catch_up [Boolean] reconcile changes that predate startup
+      # @param force_polling [Boolean] never use the `listen` backend — the
+      #   right choice across a container bind mount, where native FS events
+      #   do not propagate
       # @param logger [#info, #warn, #error]
       # rubocop:disable Metrics/ParameterLists -- every collaborator is
       # injectable on purpose; that is what makes the daemon placement-agnostic
@@ -114,7 +142,7 @@ module Woods
       def initialize(output_dir:, root: nil, extractor_factory: nil, reloader: nil, watcher: nil,
                      policy: ReloadPolicy.new, debounce: DEFAULT_DEBOUNCE,
                      full_extraction_threshold: DEFAULT_FULL_EXTRACTION_THRESHOLD,
-                     idle_timeout: nil, lock: nil, logger: nil)
+                     idle_timeout: nil, lock: nil, catch_up: true, force_polling: false, logger: nil)
         @output_dir = output_dir.to_s
         @root = (root || (defined?(Rails) ? Rails.root : Dir.pwd)).to_s
         @extractor_factory = extractor_factory || -> { Woods::Extractor.new(output_dir: @output_dir) }
@@ -124,14 +152,13 @@ module Woods
         @debounce = debounce
         @full_extraction_threshold = full_extraction_threshold
         @idle_timeout = idle_timeout
+        @catch_up = catch_up
+        @force_polling = force_polling
         @logger = logger || default_logger
         @generation = Generation.new(output_dir: @output_dir)
         @status = Status.new(output_dir: @output_dir)
-        @lock = lock || Coordination::PipelineLock.new(
-          lock_dir: @output_dir, name: LOCK_NAME, stale_timeout: LOCK_STALE_TIMEOUT
-        )
-        @pending = Set.new
-        @stop_reason = nil
+        @lock = lock || default_lock
+        reset_cycle_state
       end
       # rubocop:enable Metrics/ParameterLists
 
@@ -143,18 +170,17 @@ module Woods
         watcher = @watcher || build_watcher
         publish_status(:running, reason: nil)
         @last_event_at = monotonic_now
-        idle_monitor = start_idle_monitor(watcher)
+        heartbeat = start_heartbeat(watcher)
 
-        watcher.start do |paths|
-          @last_event_at = monotonic_now
-          settle(watcher)
-          result = process(paths_since(paths))
-          watcher.stop if result[:action] == :restart
+        catch_up(watcher)
+        start_watching(watcher) do |paths|
+          enqueue(paths)
+          drain(watcher)
         end
 
         @stop_reason || :stopped
       ensure
-        idle_monitor&.kill
+        heartbeat&.kill
         publish_status(:stopped, reason: @stop_reason&.to_s)
       end
 
@@ -172,65 +198,237 @@ module Woods
       # Calling it directly is the supported way to embed the daemon in a
       # process that owns its own event loop.
       #
-      # @param paths [Array<String>] changed paths, absolute or root-relative
+      # @param paths [Array<String>] changed paths, absolute or root-relative.
+      #   Anything a previous cycle carried forward is folded in.
       # @return [Hash] `{ action:, state:, generation:, reason:, count:,
       #   duration_ms: }`
-      def process(paths)
-        change_set = ChangeSet.new(paths: paths, root: @root)
-        action = @policy.classify_all(change_set.relative_paths)
+      def process(paths = [])
+        change_set = ChangeSet.new(paths: drain_with(paths), root: @root)
 
-        return outcome(:ignore, :running) if action == :ignore
-
-        action = :restart if action == :reload && !@reloader.enabled?
-        return require_restart(change_set) if action == :restart
-        return outcome(:reload, :degraded, reason: @reload_error) if action == :reload && !attempt_reload
-
-        extract(change_set)
+        case required_action(change_set)
+        when :ignore then nothing_to_do
+        when :restart then require_restart(change_set)
+        when :reload then attempt_reload ? extract(change_set) : degraded_reload(change_set)
+        else extract(change_set)
+        end
       end
 
       private
 
-      # Wait out the debounce window, draining anything that lands during it.
-      # Without this, a save that triggers three events runs three cycles.
-      def settle(_watcher)
+      # What this batch demands, with one escalation applied: an app that cannot
+      # reload at all (`config.enable_reloading = false` — the production
+      # default, and common in staging-shaped dev containers) can only honour a
+      # `:reload` by restarting, since extracting against constants that no
+      # longer match their source is the thing the classification exists to
+      # prevent.
+      def required_action(change_set)
+        action = @policy.classify_all(change_set.relative_paths)
+        return :restart if action == :reload && !@reloader.enabled?
+
+        action
+      end
+
+      # An all-ignorable batch is not evidence that a previously degraded
+      # condition cleared — nothing was retried, so nothing was proven. Flipping
+      # back to `running` here would advertise a healthy index while the reload
+      # that failed is still failing.
+      def nothing_to_do
+        outcome(:ignore, @degraded_reason ? :degraded : :running, reason: @degraded_reason)
+      end
+
+      def default_lock
+        Coordination::PipelineLock.new(
+          lock_dir: @output_dir, name: LOCK_NAME, stale_timeout: LOCK_STALE_TIMEOUT
+        )
+      end
+
+      def reset_cycle_state
+        @pending = Set.new
+        @pending_mutex = Mutex.new
+        @stop_reason = nil
+        @draining = false
+      end
+
+      # Wait out the debounce window so events that land during it join the
+      # same cycle.
+      #
+      # This only coalesces because the watcher callback merges into `@pending`
+      # and returns immediately ({#enqueue}) rather than processing inline —
+      # so a save, the formatter's rewrite, and the linter's touch accumulate
+      # here and {#process} drains all three as one batch. Sleeping alone would
+      # just delay the first of three cycles.
+      def settle
         sleep(@debounce) if @debounce.to_f.positive?
+      end
+
+      # Merge a watcher batch into the pending set without processing it.
+      def enqueue(paths)
+        absolute = ChangeSet.new(paths: paths, root: @root).absolute_paths
+        @pending_mutex.synchronize { @pending.merge(absolute) }
+        @last_event_at = monotonic_now
       end
 
       # Fold in anything a previous cycle could not process.
       #
-      # A cycle skipped for lock contention must not lose its paths — the
-      # files really did change, and no later event will mention them again.
-      # They ride along with the next batch instead.
-      def paths_since(paths)
-        return paths if @pending.empty?
-
-        carried = @pending.to_a
-        @pending = Set.new
-        (carried + Array(paths)).uniq
+      # A cycle skipped for lock contention, a failed reload, or a raising
+      # extraction must not lose its paths — the files really did change, and
+      # no later event will mention them again. They ride along with the next
+      # batch instead.
+      def drain_with(paths)
+        @pending_mutex.synchronize do
+          carried = @pending.to_a
+          @pending = Set.new
+          carried.empty? ? Array(paths) : (carried + Array(paths)).uniq
+        end
       end
 
-      # Stop the daemon after `idle_timeout` seconds without a file event.
-      #
-      # N worktrees means N booted apps, and most of them are dormant most of
-      # the time. A slot nobody is working in should not hold ~65 MB waiting
-      # to be needed; a worktree hook or session start revives it. Off by
-      # default — a single-worktree host wants the daemon to stay up.
-      #
-      # @return [Thread, nil]
-      def start_idle_monitor(watcher)
-        return nil unless @idle_timeout.to_f.positive?
+      def carry_forward(change_set)
+        @pending_mutex.synchronize { @pending.merge(change_set.absolute_paths) }
+      end
 
-        Thread.new do
-          loop do
-            sleep([@idle_timeout / 4.0, 1.0].max)
-            next if monotonic_now - @last_event_at < @idle_timeout
+      # Run cycles until the pending set is empty. One call per watcher batch;
+      # re-entrant calls return immediately so listen's thread pool cannot run
+      # two cycles against one index.
+      def drain(watcher)
+        return if @draining
 
-            @logger.info("[Woods] watch: idle for #{@idle_timeout}s — exiting")
-            @stop_reason = :idle
+        @draining = true
+        begin
+          drain_cycles(watcher)
+        ensure
+          @draining = false
+          # An extraction is work, not idleness. Stamping only on the event
+          # would let a cycle longer than `idle_timeout` read as a quiet
+          # daemon and stop the watcher mid-run.
+          @last_event_at = monotonic_now
+        end
+      end
+
+      def drain_cycles(watcher)
+        until pending_empty? || @stop_reason
+          settle
+          result = process
+
+          if result[:action] == :restart
             watcher.stop
             break
           end
+          # A degraded cycle deliberately carried its paths forward. Retrying
+          # them in a tight loop would spin on a failure that needs an edit to
+          # clear, so wait for the next event.
+          break if result[:state] == :degraded
         end
+      end
+
+      def pending_empty?
+        @pending_mutex.synchronize { @pending.empty? }
+      end
+
+      # Reconcile changes that predate this daemon.
+      #
+      # The generation file is rewritten as the last act of every successful
+      # extraction, so its mtime is "when this index was last known good".
+      # Anything modified since is uncovered, whoever made the change and
+      # whether or not a daemon was watching at the time. With no generation
+      # file at all there is no index, and every file is uncovered — which the
+      # storm threshold correctly turns into one full extraction.
+      def catch_up(watcher)
+        return unless @catch_up
+
+        paths = uncovered_paths
+        return @logger.info('[Woods] watch: index is current at startup') if paths.empty?
+
+        @logger.info("[Woods] watch: #{paths.size} path(s) changed before startup — catching up")
+        enqueue(paths)
+        drain(watcher)
+      end
+
+      def uncovered_paths
+        watermark = index_watermark
+        TreeScan.files(root: @root, ignored: Watcher::DEFAULT_IGNORED_DIRECTORIES)
+                .select { |path| uncovered?(path, watermark) }
+      end
+
+      def uncovered?(path, watermark)
+        return true if watermark.nil?
+
+        File.mtime(path).to_f > watermark
+      rescue SystemCallError
+        false
+      end
+
+      def index_watermark
+        File.mtime(@generation.path).to_f
+      rescue SystemCallError
+        nil
+      end
+
+      # Keep the status file believable, and stop a dormant daemon.
+      #
+      # Two jobs, one timer. The heartbeat exists because {Status#alive?}
+      # disbelieves an old record (see {HEARTBEAT_INTERVAL}); the idle stop
+      # exists because N worktrees means N booted apps and most are dormant
+      # most of the time — a slot nobody is working in should not hold ~65 MB
+      # waiting to be needed, and a worktree hook or session start revives it.
+      # Idle stopping is off by default; the heartbeat is not.
+      #
+      # @return [Thread]
+      def start_heartbeat(watcher)
+        Thread.new do
+          loop do
+            sleep(heartbeat_tick)
+            break if @stop_reason
+
+            if idle_expired?
+              @logger.info("[Woods] watch: idle for #{@idle_timeout}s — exiting")
+              @stop_reason = :idle
+              watcher.stop
+              break
+            end
+
+            restamp_status
+          end
+        end
+      end
+
+      def heartbeat_tick
+        ticks = [HEARTBEAT_INTERVAL]
+        ticks << (@idle_timeout / 4.0) if @idle_timeout.to_f.positive?
+        [ticks.min, 0.05].max
+      end
+
+      def idle_expired?
+        return false unless @idle_timeout.to_f.positive?
+        return false if @draining
+
+        monotonic_now - @last_event_at >= @idle_timeout
+      end
+
+      # Rewrite the last published record so its timestamp stays fresh. Note it
+      # republishes the *last* state rather than `:running` — a degraded daemon
+      # is still degraded between events, and saying otherwise is the one thing
+      # the status file exists to prevent.
+      def restamp_status
+        record = @last_status
+        return if record.nil?
+
+        @status.write(**record)
+      rescue StandardError => e
+        @logger.warn("[Woods] watch: could not refresh status — #{e.message}")
+      end
+
+      # Start the watcher, falling back to polling if the native backend cannot
+      # start at all (inotify exhaustion being the usual reason). A daemon that
+      # costs some CPU beats one that silently never fires.
+      def start_watching(watcher, &on_change)
+        watcher.start(&on_change)
+      rescue WatcherError => e
+        raise if @polling_fallback
+
+        @polling_fallback = true
+        @logger.warn("[Woods] watch: #{e.message} — falling back to polling")
+        @watcher = Watcher.build(root: @root, logger: @logger, force_polling: true)
+        @watcher.start(&on_change)
       end
 
       def attempt_reload
@@ -246,6 +444,18 @@ module Woods
         false
       end
 
+      # The reload failed, so the constants no longer match their source and
+      # extracting now would publish introspection of a stale class graph.
+      #
+      # The paths still have to survive. A developer who saves a valid
+      # `post.rb` while `user.rb` sits half-typed gets one app-wide reload
+      # failure covering both; when `user.rb` is fixed, that event names only
+      # `user.rb`, and `post.rb`'s change would never reach the index at all.
+      def degraded_reload(change_set)
+        carry_forward(change_set)
+        outcome(:reload, :degraded, reason: @reload_error, count: change_set.size)
+      end
+
       def require_restart(change_set)
         triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
         reason = "restart required: #{triggers.first(5).join(', ')}"
@@ -256,13 +466,23 @@ module Woods
 
       def extract(change_set)
         started = monotonic_now
-        return contended(change_set, started) unless @lock.acquire
+        # Acquiring is itself IO and can fail (a read-only or full output dir).
+        # Outside the failure posture that raised straight through the watcher
+        # callback and killed the loop.
+        acquired = @lock.acquire
+        return contended(change_set, started) unless acquired
 
         begin
           run_extraction(change_set, started)
         ensure
           @lock.release
         end
+      rescue ScriptError, StandardError => e
+        carry_forward(change_set)
+        reason = "could not take the extraction lock: #{e.class}: #{e.message}"
+        @logger.error("[Woods] watch: #{reason}")
+        outcome(:extract, :degraded, reason: reason, count: change_set.size,
+                                     duration_ms: elapsed_ms(started))
       end
 
       # Another writer holds the extraction lock — a manual `woods:extract`,
@@ -270,7 +490,7 @@ module Woods
       # run is doing the same job, and the daemon's paths are carried into the
       # next cycle so nothing is lost.
       def contended(change_set, started)
-        @pending.merge(change_set.absolute_paths)
+        carry_forward(change_set)
         reason = 'another writer holds the extraction lock — retrying on the next event'
         @logger.info("[Woods] watch: #{reason}")
         outcome(:contended, :degraded, reason: reason, count: change_set.size,
@@ -278,8 +498,12 @@ module Woods
       end
 
       def run_extraction(change_set, started)
-        full = change_set.size > @full_extraction_threshold
-        log_storm(change_set) if full
+        # Count only paths that imply extraction work. Sixty edited markdown
+        # files plus one model is a one-model change, and reading it as a storm
+        # would trade a millisecond cycle for a full extraction.
+        actionable = actionable_count(change_set)
+        full = actionable > @full_extraction_threshold
+        log_storm(actionable) if full
 
         extractor = @extractor_factory.call
         touched = if full
@@ -297,9 +521,13 @@ module Woods
         @logger.error("[Woods] watch: #{reason}")
         # The paths really did change; a later event will not mention them
         # again, so carry them forward and try once the cause clears.
-        @pending.merge(change_set.absolute_paths)
+        carry_forward(change_set)
         outcome(:extract, :degraded, reason: reason, count: change_set.size,
                                      duration_ms: elapsed_ms(started))
+      end
+
+      def actionable_count(change_set)
+        change_set.relative_paths.count { |path| @policy.classify(path) != :ignore }
       end
 
       def publish(action, change_set, touched, started)
@@ -316,14 +544,17 @@ module Woods
                                   duration_ms: duration, touched: touched)
       end
 
-      def log_storm(change_set)
-        @logger.info("[Woods] watch: #{change_set.size} paths changed " \
+      def log_storm(actionable)
+        @logger.info("[Woods] watch: #{actionable} actionable paths changed " \
                      "(> #{@full_extraction_threshold}) — full extraction instead of incremental")
       end
 
       # rubocop:disable Metrics/ParameterLists -- the shape of one cycle's result.
       def outcome(action, state, reason: nil, count: 0, duration_ms: nil, generation: nil, touched: nil)
         generation ||= @generation.current.number
+        # Remembered so an `:ignore` batch cannot advertise recovery, and so the
+        # heartbeat republishes the truth rather than `:running`.
+        @degraded_reason = state == :degraded ? reason : nil
         publish_status(state, reason: reason, generation: generation,
                               last_action: action.to_s, last_batch_size: count,
                               last_duration_ms: duration_ms)
@@ -334,14 +565,18 @@ module Woods
       # rubocop:enable Metrics/ParameterLists
 
       def publish_status(state, reason:, generation: nil, **details)
-        @status.write(state: state, reason: reason,
-                      generation: generation || @generation.current.number, **details)
+        record = { state: state, reason: reason,
+                   generation: generation || @generation.current.number, **details }
+        # Kept so the heartbeat can re-stamp exactly this record rather than
+        # inventing a fresh one.
+        @last_status = record
+        @status.write(**record)
       rescue StandardError => e
         @logger.warn("[Woods] watch: could not write status — #{e.message}")
       end
 
       def build_watcher
-        @watcher = Watcher.build(root: @root, logger: @logger)
+        @watcher = Watcher.build(root: @root, logger: @logger, force_polling: @force_polling)
       end
 
       def monotonic_now

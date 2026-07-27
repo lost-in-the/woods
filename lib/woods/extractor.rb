@@ -7,6 +7,7 @@ require 'open3'
 require 'pathname'
 require 'set'
 
+require_relative 'atomic_file'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
@@ -410,6 +411,16 @@ module Woods
       touched.merge(rerun_whole_app_extractors(change_set, affected_types))
       touched.merge(prune_vanished_units(change_set, affected_types))
 
+      # Reconcile once more, because pruning can un-know a class the first pass
+      # skipped. A class-based file moved between autoload directories with its
+      # constant unchanged is still registered under the old path when
+      # reconciliation runs, so it looks known and is not re-extracted; the prune
+      # that follows then removes it for its vanished path. One pass leaves the
+      # unit missing until some later run happens to notice — this pass closes it
+      # in the same run. Idempotent when nothing was pruned: the discovery set is
+      # compared against the graph, so an already-registered class is skipped.
+      touched.merge(reconcile_class_based_types(affected_types))
+
       finalize_incremental_unit_json(affected_types)
 
       # Regenerate type indexes for affected types
@@ -469,7 +480,7 @@ module Woods
 
       finalize_incremental_unit_json(affected_types)
       affected_types.each { |type_key| regenerate_type_index(type_key) }
-      finalize_incremental_run(touched)
+      finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
 
       { types: known, touched: touched.to_a, unknown: unknown }
     end
@@ -509,8 +520,12 @@ module Woods
     # record a snapshot whose diff reports every other unit as deleted.
     #
     # @param touched [Set<String>] identifiers added, re-extracted, or removed
+    # @param reason [String] what produced this run, recorded on the generation
+    #   so `woods_status` can distinguish a targeted refresh from a file-driven
+    #   incremental run — they have different blast radii and an operator
+    #   reading "incremental" after a `woods:refresh[routes]` is being misled
     # @return [void]
-    def finalize_incremental_run(touched)
+    def finalize_incremental_run(touched, reason: 'incremental')
       write_dependency_graph
 
       if touched.empty?
@@ -521,7 +536,7 @@ module Woods
       write_incremental_graph_analysis
       write_manifest(incremental: true)
       write_structural_summary
-      publish_generation('incremental')
+      publish_generation(reason)
 
       return unless Woods.configuration.enable_snapshots
 
@@ -765,12 +780,12 @@ module Woods
 
         type_dir = @output_dir.join(type.to_s)
         annotated.each do |unit|
-          File.write(
+          AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
-        File.write(
+        AtomicFile.write(
           type_dir.join('_index.json'),
           json_serialize(type_index_entries(units))
         )
@@ -961,14 +976,14 @@ module Woods
         type_dir = @output_dir.join(type.to_s)
 
         units.each do |unit|
-          File.write(
+          AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
             json_serialize(unit.to_h)
           )
         end
 
         # Also write a type index for fast lookups
-        File.write(
+        AtomicFile.write(
           type_dir.join('_index.json'),
           json_serialize(type_index_entries(units))
         )
@@ -998,7 +1013,7 @@ module Woods
       graph_data = @dependency_graph.to_h
       graph_data[:pagerank] = @dependency_graph.pagerank
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('dependency_graph.json'),
         json_serialize(graph_data)
       )
@@ -1014,7 +1029,7 @@ module Woods
         )
       )
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('graph_analysis.json'),
         json_serialize(enriched)
       )
@@ -1059,7 +1074,7 @@ module Woods
         schema_sha: schema_sha
       }
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('manifest.json'),
         json_serialize(manifest)
       )
@@ -1206,7 +1221,7 @@ module Woods
 
       summary << ''
 
-      File.write(
+      AtomicFile.write(
         @output_dir.join('SUMMARY.md'),
         summary.join("\n")
       )
@@ -1233,7 +1248,7 @@ module Woods
         }
       end
 
-      File.write(
+      AtomicFile.write(
         type_dir.join('_index.json'),
         json_serialize(index)
       )
@@ -1660,7 +1675,7 @@ module Woods
         # Keyed by relative path, which is how batch_git_data keys its result.
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
-        File.write(
+        AtomicFile.write(
           type_dir.join(collision_safe_filename(unit.identifier)),
           json_serialize(unit.to_h)
         )
@@ -1756,7 +1771,7 @@ module Woods
 
       return if JSON.generate(data) == before
 
-      File.write(path, json_serialize(data))
+      AtomicFile.write(path, json_serialize(data))
       affected_types&.add(extractor_key)
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"

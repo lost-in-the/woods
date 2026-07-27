@@ -99,14 +99,49 @@ RSpec.describe 'Watch daemon multi-instance operation' do
         lock_dir: outputs[0], name: Woods::Watch::Daemon::LOCK_NAME
       )
       other_writer.acquire
-      daemon.process(['config/locales/en.yml'])
+      expect(daemon.process(['config/locales/en.yml'])[:action]).to eq(:contended)
       other_writer.release
 
-      # A later, unrelated event — the earlier paths ride along with it.
+      # A later, unrelated event — the earlier paths ride along with it. The
+      # drain is inside #process, so an embedded caller gets it too.
       touch(0, 'config/locales/de.yml')
-      result = daemon.send(:paths_since, ['config/locales/de.yml'])
+      result = daemon.process(['config/locales/de.yml'])
 
-      expect(result).to include(File.join(roots[0], 'config/locales/en.yml'), 'config/locales/de.yml')
+      expect(result[:action]).to eq(:incremental)
+      expect(result[:count]).to eq(2)
+    end
+
+    # The other two ways a cycle can fail to land its work. Contention was the
+    # only one originally covered, and a failed reload was in fact dropping the
+    # batch.
+    it 'carries the paths forward when a reload fails' do
+      touch(0, 'app/models/user.rb')
+      reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      allow(reloader).to receive(:reload!).and_raise(SyntaxError, 'unexpected end')
+      daemon = daemon_for(0, marker: 'Reloaded', reloader: reloader)
+
+      expect(daemon.process(['app/models/user.rb'])[:state]).to eq(:degraded)
+
+      # The half-typed file is fixed; the event names only that file, but the
+      # batch it was part of has to be retried in full.
+      allow(reloader).to receive(:reload!).and_return(true)
+      expect(daemon.process([])[:count]).to eq(1)
+      expect(Dir[File.join(outputs[0], 'models', '*.json')]).not_to be_empty
+    end
+
+    it 'carries the paths forward when extraction raises' do
+      touch(0, 'config/locales/en.yml')
+      exploding = double('extractor')
+      allow(exploding).to receive(:extract_changed).and_raise(StandardError, 'boom')
+      daemon = Woods::Watch::Daemon.new(
+        output_dir: outputs[0], root: roots[0], extractor_factory: -> { exploding },
+        reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+        debounce: 0
+      )
+
+      expect(daemon.process(['config/locales/en.yml'])[:state]).to eq(:degraded)
+      # Nothing new happened, but the earlier batch is still owed.
+      expect(daemon.process([])[:count]).to eq(1)
     end
 
     it 'leaves no orphaned lock behind after a successful cycle' do
@@ -195,8 +230,46 @@ RSpec.describe 'Watch daemon multi-instance operation' do
 
     it 'stays up indefinitely when no idle timeout is configured' do
       daemon = daemon_for(0, marker: 'Persistent')
+      watcher = double('watcher')
 
-      expect(daemon.send(:start_idle_monitor, double('watcher'))).to be_nil
+      # The heartbeat runs regardless — it is what keeps the status believable
+      # — but with no idle timeout it must never be the thing that stops the
+      # watcher.
+      expect(watcher).not_to receive(:stop)
+      expect(daemon.send(:idle_expired?)).to be(false)
+    end
+  end
+
+  # Without a heartbeat, a healthy but quiet daemon reads as dead once its
+  # record ages past Status::STALE_AFTER — and every caller that stands down
+  # for a live daemon starts contending with it instead.
+  describe 'heartbeat' do
+    it 're-stamps the status file so a quiet daemon stays believable' do
+      daemon = daemon_for(0, marker: 'Beat')
+      status = Woods::Watch::Status.new(output_dir: outputs[0])
+      daemon.send(:publish_status, :running, reason: nil)
+      first = JSON.parse(File.read(status.path))['updated_at']
+
+      sleep 1.05 # the record carries whole-second ISO8601 precision
+      daemon.send(:restamp_status)
+
+      expect(JSON.parse(File.read(status.path))['updated_at']).not_to eq(first)
+      expect(status.alive?).to be(true)
+    end
+
+    it 'republishes a degraded state rather than claiming recovery' do
+      daemon = daemon_for(0, marker: 'Stuck')
+      daemon.send(:publish_status, :degraded, reason: 'SyntaxError: unexpected end')
+      daemon.send(:restamp_status)
+
+      record = JSON.parse(File.read(Woods::Watch::Status.new(output_dir: outputs[0]).path))
+      expect(record).to include('state' => 'degraded', 'reason' => 'SyntaxError: unexpected end')
+    end
+
+    it 'beats often enough to stay inside the staleness window' do
+      expect(Woods::Watch::Daemon::HEARTBEAT_INTERVAL).to be < Woods::Watch::Status::STALE_AFTER
+      expect(daemon_for(0, marker: 'Tick').send(:heartbeat_tick))
+        .to be <= Woods::Watch::Status::STALE_AFTER / 2.0
     end
   end
 

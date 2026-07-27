@@ -22,6 +22,11 @@ module Woods
         @root = root.to_s
         @ignored = ignored
         @listen_class = listen_class || ::Listen
+        # Set here rather than in #sleep_until_stopped: a `stop` arriving during
+        # startup — the daemon's signal handler racing its watcher thread, which
+        # they do by construction — used to be overwritten by the parking loop's
+        # own initialization, leaving a watcher nothing could stop.
+        @stopped = false
       end
 
       # Begin delivering events until {#stop}.
@@ -34,14 +39,25 @@ module Woods
       # @yieldparam changed [Array<String>] absolute paths
       # @return [void]
       def start(&on_change)
-        @listener = @listen_class.to(@root, ignore: ignore_patterns) do |modified, added, removed|
-          batch = (modified + added + removed).uniq
-          on_change.call(batch) if batch.any?
+        # Only the setup is wrapped. `sleep_until_stopped` parks for the whole
+        # life of the daemon, so folding it into this rescue labelled every
+        # later failure — including one raised by `on_change`, i.e. by the
+        # extraction itself — as "failed to start", and sent it up as a
+        # WatcherError the daemon then treated as a dead backend.
+        begin
+          @listener = @listen_class.to(@root, ignore: ignore_patterns) do |modified, added, removed|
+            batch = (modified + added + removed).uniq
+            on_change.call(batch) if batch.any?
+          end
+          @listener.start
+        rescue StandardError => e
+          # inotify watch exhaustion (ENOSPC) lands here, and it is the most
+          # likely failure on a large tree. {Watcher.build}'s caller falls back
+          # to polling on this, which works where listen just gave up.
+          raise WatcherError, "listen backend failed to start: #{e.class}: #{e.message}"
         end
-        @listener.start
+
         sleep_until_stopped
-      rescue StandardError => e
-        raise WatcherError, "listen backend failed to start: #{e.message}"
       end
 
       # @return [void]
@@ -58,7 +74,6 @@ module Woods
 
       # `listen` runs its own thread, so the caller's thread has to park.
       def sleep_until_stopped
-        @stopped = false
         sleep(0.2) until @stopped
       end
     end

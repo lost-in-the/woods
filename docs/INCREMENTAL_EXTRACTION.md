@@ -212,8 +212,9 @@ it, and belong to whoever implements the reload step:
   `:reload` because getting that right in-process is subtle and schema changes
   are rare.
 
-Nothing consumes the policy yet — it is the contract the phase-2 daemon needs,
-written and tested first.
+`Watch::Daemon` consumes the policy on every cycle: `classify_all` decides what
+the batch demands, and `paths_requiring(:restart)` names the offending paths in
+the restart message a supervisor sees. See `docs/WATCH_DAEMON.md`.
 
 ## Running the differential harness
 
@@ -270,6 +271,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
 - **A divergence floor is still worth keeping.** Incremental correctness is a
   ratchet, not a proof: schedule a periodic full extraction and gate on
   `woods:validate` so any undiscovered drift has a bounded lifetime.
-- **Phases 1–4** of #164 — a public single-extractor re-run API, the resident
-  `woods:watch` daemon, an MCP freshness contract, and multi-worktree operation
-  — are tracked in backlog B-064.
+- **Phases 1–4** of #164 — a public single-extractor re-run API
+  (`Extractor#refresh`), the resident `woods:watch` daemon, an MCP freshness
+  contract, and multi-worktree operation — all landed alongside this work
+  (B-064, resolved). `docs/WATCH_DAEMON.md` covers them, including the parts
+  that remain unmeasured.

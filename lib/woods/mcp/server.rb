@@ -1462,6 +1462,20 @@ module Woods
         # status claiming +embedding_model: "text-embedding-3-small"+ next to
         # +embedding_provider: "ollama"+ and reasonably distrust every field.
         def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
+          # Pin the generation across the whole payload. Without this the
+          # manifest can be read at generation N and `generation_fields` then
+          # report N+1 — a status report that describes counts from one index
+          # while announcing the number of another, which is precisely the
+          # confusion this tool exists to resolve.
+          return build_status_payload(reader, retriever, index_dir, bootstrap_state) unless
+            reader.respond_to?(:with_pinned_generation)
+
+          reader.with_pinned_generation do
+            build_status_payload(reader, retriever, index_dir, bootstrap_state)
+          end
+        end
+
+        def build_status_payload(reader, retriever, index_dir, bootstrap_state)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
           staleness = staleness_seconds(extracted_at)
@@ -1537,10 +1551,17 @@ module Woods
 
         # The generation the index is published at.
         #
-        # Every extraction mode bumps this as its last write, so it answers
-        # "has the index moved?" without comparing timestamps — which
-        # `staleness_seconds` can't, since it measures wall-clock age rather
-        # than whether anything changed.
+        # Every extraction mode that writes the *unit* index bumps this as its
+        # last write, so it answers "has the index moved?" without comparing
+        # timestamps — which `staleness_seconds` can't, since it measures
+        # wall-clock age rather than whether anything changed.
+        #
+        # One carve-out: `woods:extract_framework` writes only `rails_source/`
+        # and does not bump, so a framework re-extraction leaves this number
+        # where it was. That is deliberate — framework sources are pinned by the
+        # `Gemfile.lock`, reported separately above, and treating them as an
+        # index generation would invalidate every reader's cache for data that
+        # changes when dependencies do, not when the app does.
         #
         # @return [Hash]
         def generation_fields(index_dir)
@@ -1562,9 +1583,15 @@ module Woods
         # `git_sha_matches_head` only sees *committed* HEAD, so an agent
         # working through forty uncommitted edits could be told the index
         # matches HEAD while every answer described the tree before those
-        # edits. The fingerprint is a digest of `git status --porcelain`, so a
-        # caller can tell "same dirty state as when the index was built" from
-        # "the tree moved under me".
+        # edits. `working_tree_dirty` is the fix for that.
+        #
+        # The fingerprint is a digest of `git status --porcelain` *as of this
+        # call*. Nothing records the digest the index was built at, so it does
+        # not answer "is this the same dirty state the index describes" — it
+        # gives a caller a stable identity for the current dirty state, so two
+        # of its own calls can be compared to detect the tree moving underneath
+        # it. Pair it with `generation` to tell "tree changed, index followed"
+        # from "tree changed, index has not caught up".
         #
         # @return [Hash]
         def working_tree_fields(index_dir)
@@ -1576,15 +1603,21 @@ module Woods
         end
 
         # `git status --porcelain` for the repo containing +index_dir+, or nil
-        # when that can't be answered. capture2e for the same reason as
-        # {#resolve_head_sha}: git's stderr must not reach the stdio transport.
+        # when that can't be answered.
+        #
+        # capture3, not capture2e: stderr still must not reach the stdio
+        # transport, but folding it into stdout makes any warning git emits on a
+        # successful run — a stale index.lock notice, a detached-HEAD advisory,
+        # `core.fsmonitor` chatter — part of the "porcelain" output. A clean tree
+        # then reports dirty, and the fingerprint changes with the warning rather
+        # than with the code.
         def resolve_working_tree_status(index_dir)
           return nil unless index_dir
 
           dir = index_dir.to_s
           return nil unless File.directory?(dir)
 
-          output, status = Open3.capture2e('git', '-C', dir, 'status', '--porcelain')
+          output, _stderr, status = Open3.capture3('git', '-C', dir, 'status', '--porcelain')
           status.success? ? output : nil
         rescue StandardError
           nil

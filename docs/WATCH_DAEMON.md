@@ -27,7 +27,10 @@ Ctrl-C to stop.
 |---|---|---|
 | `WOODS_OUTPUT` | `tmp/woods` | Index directory |
 | `WOODS_WATCH_DEBOUNCE` | `0.4` | Seconds of quiet before a batch is considered settled |
-| `WOODS_WATCH_FULL_THRESHOLD` | `50` | Changed-file count above which a full extraction replaces incremental |
+| `WOODS_WATCH_FULL_THRESHOLD` | `50` | Actionable changed-file count above which a full extraction replaces incremental |
+| `WOODS_WATCH_POLL` | unset | `1` forces the polling backend — set this inside a container watching a bind mount |
+| `WOODS_WATCH_IDLE_TIMEOUT` | unset | Seconds of quiet after which a dormant daemon exits |
+| `WOODS_WATCH_CATCH_UP` | `1` | `0` skips the startup reconciliation |
 
 Run it under a supervisor. When boot-captured configuration changes the daemon
 exits `75` (`EX_TEMPFAIL`) on purpose — see [Restart triggers](#restart-triggers).
@@ -105,6 +108,50 @@ index). A stale answer is only dangerous when nothing says so.
 Note that `SyntaxError` is a `ScriptError`, not a `StandardError`. Rescuing
 only the latter would let a half-typed file kill the daemon.
 
+A cycle that fails to land its work never loses its paths. Lock contention, a
+failed reload, and a raising extraction all carry the batch into `@pending`, and
+the next cycle folds it back in — the files really did change, and no later
+event will mention them again. The retry is not a tight loop: a degraded cycle
+ends the drain and waits for the next event, because the cause needs an edit to
+clear.
+
+### The heartbeat
+
+`alive?` disbelieves a record older than `STALE_AFTER` (15 minutes), and cycle
+boundaries are otherwise the only thing that writes one. So the daemon re-stamps
+its record every `HEARTBEAT_INTERVAL` (a third of the window). Without it a
+perfectly healthy daemon reads as dead after a quiet quarter-hour — the most
+common state for a worktree nobody is typing in — and every caller that stands
+down for a live daemon starts contending with it instead.
+
+The heartbeat republishes the **last** state, not `running`. A degraded daemon
+is still degraded between events, and saying otherwise is the one thing this
+file exists to prevent.
+
+## Startup is not a clean slate
+
+A daemon that only reacts to events it personally witnessed is stale the moment
+it starts: edits and pulled commits that landed while nothing was watching are
+invisible to it forever. That matters because callers stand down when a daemon
+is alive, so *alive has to mean covered*.
+
+So `run` reconciles before it waits. The watermark is `generation.json`'s mtime
+— written last on every successful run, so it means "when this index was last
+known good" — and everything modified since is uncovered, whoever changed it.
+With no generation file there is no index, every file is uncovered, and the
+storm threshold correctly turns that into one full extraction.
+
+This is what makes the documented hook pattern safe:
+
+```bash
+bundle exec rake woods:watch_status || start_the_daemon
+bundle exec rake woods:incremental   # stands down — the daemon has these
+```
+
+Without the catch-up, the sync exits 0 while the changes that prompted it never
+reach the index. `woods:incremental` still runs when the daemon is *degraded*:
+alive but not updating is not coverage.
+
 ## Storms
 
 A branch switch or rebase touches hundreds of files at once. Above
@@ -124,7 +171,24 @@ reliably across container bind mounts** — `listen` documents this, and macOS
 Docker VMs are the usual casualty. Since extraction typically runs inside a dev
 container with the source bind-mounted, a host in that position should force
 polling rather than trust a watcher that may sit silent while files change
-under it.
+under it:
+
+```bash
+WOODS_WATCH_POLL=1 bundle exec rake woods:watch
+```
+
+Selection is also self-correcting at runtime. If `listen` cannot start at all —
+inotify watch exhaustion (`ENOSPC`) is the usual reason on a large tree — the
+daemon logs it and falls back to polling rather than exiting, because a daemon
+costing some CPU beats one that never fires. Failures *after* startup are not
+treated as backend failures: the rescue covers only the setup, so an error
+raised by the extraction inside a callback surfaces as itself.
+
+Polling compares `[mtime, size]` at full float resolution. Truncating mtime to
+whole seconds loses a second write inside the same second permanently — there is
+no later event to catch it — and save-then-formatter at a 1s interval is
+entirely ordinary. Size is the tiebreaker for filesystems that really do offer
+only whole seconds.
 
 Ignored by default: `.git`, `node_modules`, `tmp`, `log`, `coverage`,
 `vendor/bundle`, `public/assets`, `public/packs`, `storage`. That ignore list is

@@ -152,22 +152,6 @@ module Woods
         with_pinned_generation { warmup_steps }
       end
 
-      def warmup_steps
-        steps = {
-          manifest: -> { manifest },
-          summary: -> { summary },
-          dependency_graph: -> { dependency_graph },
-          graph_analysis: -> { graph_analysis },
-          identifier_map: -> { identifier_map }
-        }
-        steps.each_with_object({}) do |(step, runner), result|
-          runner.call
-          result[step] = true
-        rescue StandardError => e
-          result[step] = e
-        end
-      end
-
       # Clear all cached state so the next access re-reads from disk.
       #
       # @return [void]
@@ -513,6 +497,27 @@ module Woods
 
       private
 
+      # Touch every lazy accessor, recording rather than raising per-step
+      # failures so a missing optional artefact (graph_analysis.json on an index
+      # written before it existed) never blocks the rest.
+      #
+      # @return [Hash] `{step => true | Exception}`
+      def warmup_steps
+        steps = {
+          manifest: -> { manifest },
+          summary: -> { summary },
+          dependency_graph: -> { dependency_graph },
+          graph_analysis: -> { graph_analysis },
+          identifier_map: -> { identifier_map }
+        }
+        steps.each_with_object({}) do |(step, runner), result|
+          runner.call
+          result[step] = true
+        rescue StandardError => e
+          result[step] = e
+        end
+      end
+
       # Compile a case-insensitive regex from a query string.
       #
       # Treats the query as a raw Ruby regex pattern. Falls back to an escaped
@@ -521,19 +526,34 @@ module Woods
       #
       # @param query [String] Raw regex pattern
       # @return [Regexp] Compiled case-insensitive pattern
-      # mtime+size of the generation file, or nil when there is none. Cheap
-      # enough to call on every read; the file is only opened when this moves.
-      def generation_signature
-        stat = File.stat(@generation.path)
-        [stat.mtime.to_f, stat.size]
-      rescue SystemCallError
-        nil
-      end
-
       def compile_search_pattern(query)
         Regexp.new(query, Regexp::IGNORECASE)
       rescue RegexpError
         Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+      end
+
+      # A cheap stand-in for "has the generation file been rewritten?", so the
+      # common case costs one `File.stat` of a ~100-byte file instead of a parse.
+      #
+      # The inode is load-bearing, not belt-and-braces. `[mtime, size]` alone
+      # misses a bump whenever two writes land in the same mtime tick with the
+      # same payload length — and equal length is the daemon's *steady state*:
+      # reason `"incremental"` every cycle, fixed-width number and timestamp.
+      # Coarse mtime granularity is not exotic either; it includes the
+      # volume-mounted Docker deployment the Index Server is documented for. The
+      # reader would then serve a stale index indefinitely, which is the exact
+      # silent staleness generations exist to end.
+      #
+      # {AtomicFile} renames a fresh Tempfile over the target on every write, so
+      # a new inode is guaranteed per publish and this costs nothing extra.
+      #
+      # @return [Array, nil] opaque signature, or nil when there is no
+      #   generation file
+      def generation_signature
+        stat = File.stat(@generation.path)
+        [stat.mtime.to_f, stat.size, stat.ino]
+      rescue SystemCallError
+        nil
       end
 
       # Case-insensitive literal prefix/suffix check on an identifier.

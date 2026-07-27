@@ -44,6 +44,30 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
     expect(reader.manifest['total_units']).to eq(2)
   end
 
+  # The signature guards a parse, so a signature that fails to move means the
+  # reader never opens the file and serves the stale index forever. Every other
+  # double-bump in this file alternates the reason ('full' → 'incremental'),
+  # which changes the payload length and so passes on the mtime+size signature
+  # by accident. This one pins the case the daemon actually produces: the same
+  # reason every cycle, so identical length, in one mtime tick.
+  it 'notices a same-size republish inside one mtime tick' do
+    generation.bump!(reason: 'incremental')
+    reader = described_class.new(dir)
+    expect(reader.manifest['total_units']).to eq(1)
+
+    republish(total_units: 2, reason: 'incremental')
+    # Force the pathological case rather than hoping for it: pin the generation
+    # file's mtime back to what the first bump had, leaving size identical too.
+    pin_generation_mtime_to(reader.instance_variable_get(:@generation_signature).first)
+
+    expect(reader.manifest['total_units']).to eq(2)
+  end
+
+  def pin_generation_mtime_to(mtime)
+    stamp = Time.at(mtime)
+    File.utime(stamp, stamp, generation.path)
+  end
+
   it 'tracks the generation its caches came from' do
     generation.bump!(reason: 'full')
     reader = described_class.new(dir)

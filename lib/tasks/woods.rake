@@ -61,13 +61,25 @@ namespace :woods do
   # A session-start or worktree hook that fires `woods:incremental` on a tree
   # a daemon is already watching is pure duplicated work — and it contends for
   # the lock the daemon needs. Set WOODS_IGNORE_WATCH=1 to run anyway.
-  def woods_daemon_running?(output_dir)
-    return false if ENV['WOODS_IGNORE_WATCH'] == '1'
+  #
+  # Liveness alone is not coverage, and the difference matters. A `:running`
+  # daemon reconciles everything modified since the index's last successful
+  # publish when it starts (Daemon#catch_up), so changes that predate it are
+  # covered whether or not it witnessed them — that is what makes standing down
+  # safe. A `:degraded` daemon is alive but *cannot* currently update, so
+  # standing down for it would report success over work nothing is doing.
+  #
+  # @return [Symbol] `:none`, `:running`, or `:degraded`
+  def woods_daemon_coverage(output_dir)
+    return :none if ENV['WOODS_IGNORE_WATCH'] == '1'
 
     require 'woods/watch/status'
-    Woods::Watch::Status.new(output_dir: output_dir).alive?
+    status = Woods::Watch::Status.new(output_dir: output_dir)
+    return :none unless status.alive?
+
+    status.read['state'] == 'degraded' ? :degraded : :running
   rescue StandardError
-    false
+    :none
   end
 
   desc 'Full extraction of codebase for indexing'
@@ -138,10 +150,16 @@ namespace :woods do
       exit 0
     end
 
-    if woods_daemon_running?(output_dir)
-      puts 'A watch daemon is maintaining this index — skipping (it has already seen these changes).'
+    case woods_daemon_coverage(output_dir)
+    when :running
+      puts 'A watch daemon is maintaining this index — skipping.'
+      puts 'It reconciles anything changed since the last publish when it starts, so these are covered.'
       puts 'Set WOODS_IGNORE_WATCH=1 to extract anyway.'
       exit 0
+    when :degraded
+      # Alive but unable to update. Standing down here would exit 0 over work
+      # nothing is actually doing.
+      puts 'Warning: a watch daemon is alive but degraded — extracting anyway rather than assuming coverage.'
     end
 
     puts "Incremental extraction for #{changed_files.size} changed files..."
@@ -171,6 +189,12 @@ namespace :woods do
       full_extraction_threshold: Integer(
         ENV.fetch('WOODS_WATCH_FULL_THRESHOLD', Woods::Watch::Daemon::DEFAULT_FULL_EXTRACTION_THRESHOLD)
       ),
+      # The documented fix for a container watching a bind mount, where native
+      # FS events do not propagate and the daemon would sit silent. Nothing
+      # exposed it before, which made the advice unfollowable.
+      force_polling: ENV['WOODS_WATCH_POLL'] == '1',
+      idle_timeout: ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT', nil) && Float(ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT')),
+      catch_up: ENV['WOODS_WATCH_CATCH_UP'] != '0',
       logger: Rails.logger
     )
 
@@ -197,10 +221,16 @@ namespace :woods do
   task guard: :watch
 
   desc 'Report whether a watch daemon is maintaining this index (exit 0 if alive)'
-  task watch_status: :environment do
+  # Deliberately not `=> :environment`. This reads one small JSON file, and the
+  # whole point is that a worktree hook can call it before deciding whether to
+  # do real work — paying a full Rails boot to find out would cost more than the
+  # sync it is trying to avoid. WOODS_OUTPUT covers the non-default layout;
+  # otherwise the conventional path is derived without booting.
+  task :watch_status do
     require 'woods/watch/status'
+    require 'json'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT') { File.join(Dir.pwd, 'tmp/woods') }
     status = Woods::Watch::Status.new(output_dir: output_dir)
 
     puts JSON.pretty_generate(status.read)
@@ -230,8 +260,14 @@ namespace :woods do
     output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
     extractor = Woods::Extractor.new(output_dir: output_dir)
 
+    # A refresh is a fourth writer against this index, and it rewrites the whole
+    # dependency graph. Two writers loading the persisted graph, mutating
+    # divergent copies and writing back means the last one silently discards the
+    # other's work — and then bumps the generation, telling readers the
+    # clobbered state is fresh. Atomic writes do not help: each write is
+    # individually intact, the *set* is not. So it serializes like the others.
     begin
-      result = extractor.refresh(*keys)
+      result = woods_with_extraction_lock(output_dir) { extractor.refresh(*keys) }
     rescue ArgumentError => e
       puts "ERROR: #{e.message}"
       puts "Known extractors: #{Woods::Extractor::EXTRACTORS.keys.sort.join(', ')}"

@@ -2,6 +2,8 @@
 
 require 'set'
 
+require_relative 'tree_scan'
+
 module Woods
   module Watch
     # Detects changes by comparing a directory tree's mtimes between scans.
@@ -27,14 +29,22 @@ module Woods
         @interval = interval
         @sleeper = sleeper
         @running = false
+        @stop_requested = false
         @snapshot = nil
       end
 
       # Scan until {#stop}, yielding each batch of changed absolute paths.
       #
+      # A {#stop} that arrives before or during startup is honoured rather than
+      # overwritten: the daemon's signal handler and its watcher thread race by
+      # construction, and a `SIGINT` during boot used to be swallowed, leaving a
+      # watcher nobody could stop.
+      #
       # @yieldparam changed [Array<String>] absolute paths
       # @return [void]
       def start(&on_change)
+        return if @stop_requested
+
         @running = true
         primed_now?
 
@@ -51,6 +61,7 @@ module Woods
       #
       # @return [void]
       def stop
+        @stop_requested = true
         @running = false
       end
 
@@ -91,12 +102,24 @@ module Woods
 
       private
 
-      # @return [Hash{String => Integer}] path => mtime, for every watched file
+      # Full-resolution mtime *and* size, because whole-second mtimes lose real
+      # modifications. Truncating to `to_i` means a write at T+0.1s recorded by
+      # a poll at T+0.5s and a second write at T+0.9s produce the same stamp:
+      # the next poll sees no change and no later event ever mentions the file
+      # again. Save-then-formatter inside one second is entirely ordinary at the
+      # default 1s interval, and ext4/APFS/XFS all carry sub-second mtimes.
+      #
+      # Size is the tiebreaker for the residual case — a filesystem that really
+      # only offers 1s granularity (some network and container mounts), where a
+      # same-second rewrite that changes length is still caught.
+      #
+      # @return [Hash{String => Array}] path => [mtime, size], per watched file
       def scan
         snapshot = {}
 
         each_watched_path do |path|
-          snapshot[path] = File.mtime(path).to_i
+          stat = File.stat(path)
+          snapshot[path] = [stat.mtime.to_f, stat.size]
         rescue SystemCallError
           # Vanished between the glob and the stat — the next scan sees it as
           # removed, which is the same answer one interval later.
@@ -106,19 +129,8 @@ module Woods
         snapshot
       end
 
-      def each_watched_path
-        Dir.glob(File.join(@root, '**', '*'), File::FNM_DOTMATCH).each do |path|
-          next if File.basename(path).start_with?('.') && File.basename(path) != '.ruby-version'
-          next if ignored?(path)
-          next unless File.file?(path)
-
-          yield path
-        end
-      end
-
-      def ignored?(path)
-        relative = path.delete_prefix("#{@root}/")
-        @ignored.any? { |dir| relative == dir || relative.start_with?("#{dir}/") }
+      def each_watched_path(&block)
+        TreeScan.each_file(root: @root, ignored: @ignored, &block)
       end
     end
   end

@@ -21,6 +21,9 @@ RSpec.describe Woods::Watch::Daemon do
 
   after { FileUtils.rm_rf([root, output_dir]) }
 
+  # catch_up is off by default here so the behaviour under test is the batch
+  # the example hands over, not the state of the tmpdir. The startup
+  # reconciliation has its own describe block below.
   def build(**overrides)
     described_class.new(
       output_dir: output_dir,
@@ -28,6 +31,7 @@ RSpec.describe Woods::Watch::Daemon do
       extractor_factory: -> { extractor },
       reloader: reloader,
       debounce: 0,
+      catch_up: false,
       **overrides
     )
   end
@@ -262,6 +266,90 @@ RSpec.describe Woods::Watch::Daemon do
       build(watcher: fake_watcher).run
 
       expect(status['state']).to eq('stopped')
+    end
+  end
+
+  # Callers stand down when a daemon is alive, so "alive" has to mean "covered".
+  # A daemon that only ever reacts to events it personally witnessed is blind to
+  # anything that changed before it started — and the documented hook pattern
+  # (start a daemon, then sync) hits exactly that.
+  describe 'startup catch-up' do
+    let(:fake_watcher) { FakeWatcher.new }
+
+    it 'reconciles changes that predate startup' do
+      touch('app/services/before_the_daemon.rb')
+
+      build(watcher: fake_watcher, catch_up: true).run
+
+      expect(extractor).to have_received(:extract_changed) do |paths|
+        expect(paths).to include(a_string_ending_with('app/services/before_the_daemon.rb'))
+      end
+    end
+
+    it 'does nothing when every file predates the last successful extraction' do
+      touch('app/services/already_indexed.rb')
+      # The generation file is the watermark: written last on a successful run.
+      sleep 0.01
+      publish_generation('full')
+
+      build(watcher: fake_watcher, catch_up: true).run
+
+      expect(extractor).not_to have_received(:extract_changed)
+      expect(extractor).not_to have_received(:extract_all)
+    end
+
+    it 'treats a missing index as everything being uncovered' do
+      Array.new(4) { |i| touch("app/services/svc_#{i}.rb") }
+
+      build(watcher: fake_watcher, catch_up: true, full_extraction_threshold: 2).run
+
+      # No generation file at all means no index, and the storm threshold
+      # correctly turns "every file" into one full extraction.
+      expect(extractor).to have_received(:extract_all)
+    end
+
+    it 'can be turned off for a host that syncs by another route' do
+      touch('app/services/before_the_daemon.rb')
+
+      build(watcher: fake_watcher, catch_up: false).run
+
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+  end
+
+  # The debounce is only worth having if events landing inside the window join
+  # the cycle rather than queueing behind it.
+  describe 'debounce coalescing' do
+    it 'folds events that arrive during the settle window into one cycle' do
+      first = touch('app/services/saved.rb')
+      second = touch('app/services/formatted.rb')
+
+      daemon = build(debounce: 0.2)
+      # Stand in for the formatter's write landing mid-window. The real path is
+      # the watcher thread calling #enqueue while the drain loop sleeps in
+      # #settle; what matters is that the cycle after the window picks it up
+      # instead of leaving it for a second cycle.
+      allow(daemon).to receive(:settle) { daemon.send(:enqueue, [second]) }
+
+      daemon.send(:enqueue, [first])
+      daemon.send(:drain, instance_double(Woods::Watch::PollingWatcher))
+
+      expect(extractor).to have_received(:extract_changed).once do |paths|
+        expect(paths).to contain_exactly(
+          a_string_ending_with('app/services/saved.rb'),
+          a_string_ending_with('app/services/formatted.rb')
+        )
+      end
+    end
+
+    it 'counts only actionable paths towards the storm threshold' do
+      paths = Array.new(6) { |i| touch("docs/note_#{i}.md") } + [touch('app/models/user.rb')]
+
+      result = build(full_extraction_threshold: 3).process(paths)
+
+      # Six markdown files plus one model is a one-model change.
+      expect(result[:action]).to eq(:incremental)
+      expect(extractor).not_to have_received(:extract_all)
     end
   end
 end

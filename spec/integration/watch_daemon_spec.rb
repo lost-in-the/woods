@@ -45,6 +45,11 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       WoodsDummyApplication.initialize!
     end
 
+    # Rails applications are singletons and every :booted_app spec shares this
+    # constant, so a mismatch means another one booted first and this file is
+    # running against its root. Fail loudly rather than quietly testing nothing.
+    BootedAppRoot.assert!(@app_root)
+
     ActiveRecord::Base.establish_connection(:test)
     ActiveRecord::Schema.verbose = false
     ActiveRecord::Schema.define do

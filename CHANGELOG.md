@@ -9,6 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A cycle that can't land its work no longer loses it** (#164 review). Lock contention
+  already carried its paths into the next cycle; a *failed reload* did not. Saving a valid
+  `post.rb` while `user.rb` sat half-typed produced one app-wide reload failure covering both,
+  and when `user.rb` was fixed the event named only `user.rb` — so `post.rb`'s change never
+  reached the index at all. Failed reloads and raising extractions now carry forward too, and
+  the drain lives inside `Daemon#process`, so an embedded host gets the same retry behaviour
+  `#run` does.
+- **A quiet daemon is no longer declared dead** (#164 review). `Status#alive?` disbelieves a
+  record older than 15 minutes and only cycle boundaries wrote one, so a healthy daemon
+  watching a worktree nobody was typing in read as stopped — and every caller that stands down
+  for a live daemon started contending for its lock instead. A heartbeat now re-stamps the
+  last published record every 5 minutes, republishing `degraded` as `degraded` rather than
+  claiming recovery.
+- **The daemon reconciles changes that predate it** (#164 review). It only ever reacted to
+  events it personally witnessed, so the documented hook pattern — start a daemon, then sync —
+  stood the sync down over changes the fresh daemon had never seen. `Daemon#run` now
+  reconciles against the index's own watermark (`generation.json`'s mtime) before waiting for
+  its first event. `woods:incremental` also no longer stands down for a *degraded* daemon:
+  alive but not updating is not coverage.
+- **`woods:refresh` serializes with the other writers** (#164 review). It rewrites the whole
+  dependency graph and took no lock, so a refresh racing a daemon cycle silently discarded the
+  other's work and then bumped the generation over it — atomic writes don't help, because each
+  write is individually intact and the *set* is not. It now runs under `PipelineLock` like
+  `woods:extract` and `woods:incremental`, and records its own generation reason instead of
+  masquerading as an incremental run.
+- **The polling watcher no longer loses a same-second write** (#164 review). Snapshots
+  truncated mtime with `to_i`, so a second write inside the same second was invisible
+  permanently — there is no later event to catch it — and save-then-formatter at the default
+  1s interval is entirely ordinary. Snapshots now carry full-resolution mtime plus size.
+- **`IndexReader` no longer misses a same-size generation bump** (#164 review). The freshness
+  signature was `[mtime, size]`, and equal size is the daemon's steady state (reason
+  `"incremental"` every cycle). On a coarse-mtime filesystem — including the volume-mounted
+  Docker deployment the Index Server is documented for — two bumps in one tick were
+  indistinguishable and the reader served a stale index indefinitely. The inode is now part of
+  the signature, which `AtomicFile`'s rename-per-write guarantees moves.
+- **A clean working tree no longer reports dirty** (#164 review). `resolve_working_tree_status`
+  used `capture2e`, folding git's stderr into the porcelain output — so any warning on an
+  otherwise successful run (a stale `index.lock` notice, `core.fsmonitor` chatter) read as
+  uncommitted changes, and the fingerprint tracked the warning rather than the code.
+- **Index artifacts are written atomically.** `dependency_graph.json`, `manifest.json`,
+  `_index.json` and every per-unit file went through plain `File.write`. With a resident daemon
+  writing while resident MCP readers read, a reader could catch a truncated file mid-write;
+  all of them now route through `Woods::AtomicFile`.
+- **A class-based file moved between autoload directories is no longer dropped for a run**
+  (#164 review). Reconciliation ran before pruning, so a file moved with its constant unchanged
+  still looked "known" and was not re-extracted, then was pruned for its vanished path.
+  `extract_changed` now reconciles once more after pruning.
+- The `listen` backend degrades instead of dying: only its setup is wrapped in the
+  `WatcherError` rescue, so a failure raised once it is merely parked (including from the
+  extraction inside a callback) is no longer relabelled "failed to start", and inotify
+  exhaustion falls back to polling. Both watchers also honour a `stop` that races startup.
+- The storm threshold counts only paths the reload policy considers actionable — sixty edited
+  markdown files plus one model is a one-model change, not a storm.
+
+- **Token estimates now describe the file that is written.** `ExtractedUnit#estimated_tokens`
+  measured `metadata.to_json`, which with ActiveSupport loaded applies HTML-safe escaping (`>`
+  becomes `\u003e`), while the unit file is written with `JSON.generate`. Any unit whose
+  metadata contained a lambda scope was therefore indexed with a token count that described a
+  document that was never written — and differed depending on whether a full or an incremental
+  run last touched it. Both sides now measure `JSON.generate`.
+
 - **Incremental extraction is now equivalent to a full extraction** (#164, phase 0). Five
   confirmed correctness gaps in `woods:incremental` are closed. They mattered most in an
   incremental CI chain, where the previous graph is restored and `woods:incremental` runs per
@@ -96,9 +157,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Woods::ReloadPolicy`** — the reload-trigger inventory (#164). Classifies a changed path
   as `:ignore`, `:reextract` (Woods reads bytes; no Rails involvement), `:reload` (an
   autoloaded constant changed) or `:restart` (boot-captured state changed — initializers,
-  `config/**`, `Gemfile.lock`, schema). Nothing consumes it yet; it is the contract a
-  file-watching daemon needs, written and tested against the `railties >= 6.0` support matrix
-  before the daemon exists.
+  `config/**`, `Gemfile.lock`, schema). Consumed by `Watch::Daemon` on every cycle, and
+  tested against the `railties >= 6.0` support matrix. `spec/reload_policy_spec.rb` derives
+  its samples from the `PathDispatcher` rules themselves, so the two cannot drift apart
+  silently.
 - **Differential test harness for incremental extraction**
   (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
   randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at
@@ -106,18 +168,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   units, same unit content, same graph, PageRank recomputed. Tune with `WOODS_DIFF_OPS` and
   `WOODS_DIFF_SEEDS`; runs in CI on every Rails-matrix row.
 - `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
-  present from vanished) shared by every entry point, so a git-diff caller and a future
-  file-watching daemon can't drift apart.
-
-- **Token estimates now describe the file that is written.** `ExtractedUnit#estimated_tokens`
-  measured `metadata.to_json`, which with ActiveSupport loaded applies HTML-safe escaping (`>`
-  becomes `\u003e`), while the unit file is written with `JSON.generate`. Any unit whose
-  metadata contained a lambda scope was therefore indexed with a token count that described a
-  document that was never written — and differed depending on whether a full or an incremental
-  run last touched it. Both sides now measure `JSON.generate`.
+  present from vanished) shared by every entry point, so the git-diff caller and the watch
+  daemon can't drift apart.
 
 ### Changed
 
+- `woods:watch_status` no longer depends on `:environment`. It reads one small JSON file, and
+  the point is that a worktree hook can call it *before* deciding whether to do real work —
+  paying a full Rails boot to find out cost more than the sync it exists to avoid.
+- `WOODS_WATCH_POLL=1` forces the polling backend. `docs/WATCH_DAEMON.md` told container hosts
+  watching a bind mount to do this; nothing exposed it. `WOODS_WATCH_IDLE_TIMEOUT` and
+  `WOODS_WATCH_CATCH_UP` are exposed on the rake task for the same reason.
+- The debounce window now genuinely coalesces. The watcher callback merges into a pending set
+  and returns, so a save, the formatter's rewrite and the linter's touch become one cycle
+  rather than three — previously `settle` only delayed the first of the three.
+- `spec/reload_policy_spec.rb` derives its samples from the `PathDispatcher` rules rather than
+  a hand-written list, so a rule added for a new extractor is covered without editing the
+  spec. `spec/support/index_comparison.rb` compares PageRank *values* (to 6 dp) rather than
+  just keys — comparing keys alone said nothing about the modify-only operations most likely
+  to leave scores stale.
 - `GraphAnalyzer` output is now a pure function of graph content. `hubs` breaks ties on
   identifier instead of graph-insertion order, and `bridges` samples from a sorted node list,
   so two extractions of the same tree publish the same analysis.

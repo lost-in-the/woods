@@ -113,28 +113,49 @@ RSpec.describe Woods::ReloadPolicy do
   describe 'agreement with PathDispatcher' do
     let(:dispatcher) { Woods::PathDispatcher.new }
 
+    # Derived from the rules themselves rather than hand-picked, so a rule added
+    # for a new extractor is covered without anyone remembering to extend a list
+    # here. A hand-written sample set can only ever assert about the dispatch
+    # that existed when it was written — and with a `next unless relevant?`
+    # guard in front of it, samples that stop matching go quiet instead of
+    # failing, so the example can decay to zero assertions while still passing.
+    #
+    # One synthesized path per rule: the first directory it claims, the first
+    # extension it accepts, and any segment it requires.
+    def sample_for(rule)
+      return rule.exact_paths.first if rule.exact_paths&.any?
+
+      dir = rule.dirs.to_a.first
+      return nil if dir.nil?
+
+      extension = rule.extensions.to_a.first || '.rb'
+      segment = rule.require_segment
+      leaf = "woods_sample#{extension}"
+      [dir, segment, leaf].compact.join('/')
+    end
+
+    def dispatch_samples
+      (Woods::PathDispatcher.file_rules + Woods::PathDispatcher.whole_app_rules)
+        .filter_map { |rule| sample_for(rule) }
+        .uniq
+    end
+
+    it 'covers every dispatch rule with at least one sample' do
+      # Guards the derivation above: if a rule shape appears that sample_for
+      # cannot synthesize a matching path for, this fails rather than silently
+      # narrowing the example below.
+      uncovered = dispatch_samples.reject { |path| dispatcher.relevant?(path) }
+
+      expect(uncovered).to(be_empty, "no dispatchable sample synthesized for: #{uncovered.inspect}")
+    end
+
     it 'never ignores a path some dispatch rule claims' do
-      samples = %w[
-        app/services/checkout.rb
-        app/models/user.rb
-        app/views/posts/index.html.erb
-        config/locales/en.yml
-        config/initializers/redis.rb
-        config/routes.rb
-        db/migrate/20240101000000_create_posts.rb
-        db/views/reports_v01.sql
-        lib/tasks/export.rake
-        lib/reporting/csv_writer.rb
-        spec/models/post_spec.rb
-        spec/factories/posts.rb
-        Gemfile.lock
-      ]
+      dispatchable = dispatch_samples.select { |path| dispatcher.relevant?(path) }
+      expect(dispatchable).not_to be_empty
 
-      samples.each do |path|
-        next unless dispatcher.relevant?(path)
+      ignored = dispatchable.select { |path| policy.classify(path) == :ignore }
 
-        expect(policy.classify(path)).not_to(eq(:ignore), "#{path} is dispatchable but classified :ignore")
-      end
+      expect(ignored).to(be_empty, "dispatchable but classified :ignore: #{ignored.inspect}")
     end
   end
 end

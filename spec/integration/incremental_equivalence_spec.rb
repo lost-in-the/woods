@@ -102,6 +102,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       WoodsDummyApplication.initialize!
     end
 
+    # The guard above shares its constant with the other booted specs, so a
+    # mismatch means one of them booted first and this harness would compare two
+    # extractions of a tree it never mutates — passing vacuously.
+    BootedAppRoot.assert!(@app_root)
+
     ActiveRecord::Base.establish_connection(:test)
     ActiveRecord::Schema.verbose = false
     ActiveRecord::Schema.define do

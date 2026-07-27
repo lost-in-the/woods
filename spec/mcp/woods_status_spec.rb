@@ -130,7 +130,10 @@ RSpec.describe 'woods_status tool' do
 
     before do
       # Keep the git probes hermetic; this context is about the other fields.
+      # resolve_head_sha still folds stderr in (capture2e); the working-tree
+      # probe deliberately does not (capture3) — see below.
       allow(Open3).to receive(:capture2e).and_return(['', instance_double(Process::Status, success?: false)])
+      allow(Open3).to receive(:capture3).and_return(['', '', instance_double(Process::Status, success?: false)])
     end
 
     after { FileUtils.rm_rf(index_dir) }
@@ -156,20 +159,32 @@ RSpec.describe 'woods_status tool' do
       # git_sha_matches_head only sees committed HEAD. Forty uncommitted edits
       # leave it reporting a match while every answer describes the tree
       # before those edits.
+      def stub_porcelain(stdout, stderr = '', success: true)
+        allow(Open3).to receive(:capture3).with('git', '-C', anything, 'status', '--porcelain')
+                                          .and_return([stdout, stderr,
+                                                       instance_double(Process::Status, success?: success)])
+      end
+
       it 'reports a clean working tree' do
-        allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'status', '--porcelain')
-                                           .and_return(['', instance_double(Process::Status, success?: true)])
+        stub_porcelain('')
 
         expect(status_for[:index][:working_tree_dirty]).to be(false)
       end
 
       it 'reports a dirty working tree with a fingerprint of the change set' do
-        allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'status', '--porcelain')
-                                           .and_return([" M app/models/post.rb\n",
-                                                        instance_double(Process::Status, success?: true)])
+        stub_porcelain(" M app/models/post.rb\n")
 
         expect(status_for[:index][:working_tree_dirty]).to be(true)
         expect(status_for[:index][:working_tree_fingerprint]).to match(/\A[0-9a-f]{16}\z/)
+      end
+
+      # Folding stderr into stdout made any warning git emits on a *successful*
+      # run part of the porcelain output — so a clean tree read as dirty, and the
+      # fingerprint tracked the warning rather than the code.
+      it 'stays clean when git warns on stderr but succeeds' do
+        stub_porcelain('', "warning: unable to rmdir 'vendor/x': Directory not empty\n")
+
+        expect(status_for[:index][:working_tree_dirty]).to be(false)
       end
 
       it 'omits the fields entirely when git cannot answer' do

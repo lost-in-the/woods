@@ -10,7 +10,7 @@ require 'json'
 # so the harness spec can stay about *operations*, and so the definition is
 # stated once, in one place, with its exclusions justified.
 #
-# Three kinds of difference are deliberately tolerated, and nothing else:
+# Four kinds of difference are deliberately tolerated, and nothing else:
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
 #    `generated_at` plus the digest that covers it in `graph_analysis.json`.
@@ -22,9 +22,13 @@ require 'json'
 #    and bridges are emitted in graph-registration order, and an incremental
 #    run appends a new node where a full run would interleave it. Membership
 #    is what those lists mean.
+# 4. **PageRank beyond {PAGERANK_PRECISION} decimal places** — an iterative
+#    float computation, accumulated in whatever order each run registered
+#    nodes. Scores are compared as *values*, not just keys; only the last bits
+#    are forgiven.
 #
 # Everything else — unit sets, unit content, `_index.json`, graph nodes,
-# edges, reverse edges, file map, type index, stats, PageRank coverage, and
+# edges, reverse edges, file map, type index, stats, PageRank scores, and
 # manifest counts — must match exactly.
 module IndexComparison # rubocop:disable Metrics/ModuleLength
   VOLATILE_UNIT_KEYS = %w[extracted_at].freeze
@@ -139,8 +143,25 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       'stats' => graph['stats'],
       # PageRank must be recomputed by incremental runs too, not carried over
       # from the last full extraction (#164 gap 5).
-      'pagerank_keys' => graph['pagerank']&.keys&.sort
+      #
+      # Values, not just keys. Comparing key sets only catches a *stale node
+      # set*, which means it says nothing at all about the ops most likely to
+      # leave scores behind: modifying a file re-weights the graph without
+      # adding or removing a node, so a carried-over score set has exactly the
+      # keys the oracle expects and sails through.
+      'pagerank' => rounded_pagerank(graph['pagerank'])
     }
+  end
+
+  # PageRank is iterative floating point, so the two runs can accumulate in
+  # different orders and disagree in the last bits. Six decimal places is far
+  # tighter than any real divergence — a score carried over from a graph that
+  # has since changed differs in the first two or three — while leaving no room
+  # for float noise to produce a spurious failure.
+  PAGERANK_PRECISION = 6
+
+  def rounded_pagerank(pagerank)
+    (pagerank || {}).transform_values { |score| score.to_f.round(PAGERANK_PRECISION) }
   end
 
   def sorted_values(section, &block)

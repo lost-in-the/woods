@@ -5,9 +5,7 @@
     "severity": "critical",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractor.rb"
-    ],
+    "files": ["lib/woods/extractor.rb"],
     "description": "EXTRACTORS constant uses plural keys (:models, :controllers) but re_extract_unit looks up by singular type (:model, :controller). Incremental extraction silently fails to find the correct extractor for any unit.",
     "status": "resolved"
   },
@@ -17,9 +15,7 @@
     "severity": "critical",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractor.rb"
-    ],
+    "files": ["lib/woods/extractor.rb"],
     "description": "The case statement in re_extract_unit only handles :model, :controller, :service, :component. Missing: :job, :mailer, :graphql_type, :graphql_mutation, :graphql_resolver, :graphql_query, :rails_source.",
     "status": "resolved"
   },
@@ -29,9 +25,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractors/controller_extractor.rb"
-    ],
+    "files": ["lib/woods/extractors/controller_extractor.rb"],
     "description": "Controller discovery uses ApplicationController.descendants, which misses controllers inheriting from ActionController::API. API-only controllers are invisible to extraction.",
     "status": "resolved"
   },
@@ -41,9 +35,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "config",
-    "files": [
-      "lib/woods.rb"
-    ],
+    "files": ["lib/woods.rb"],
     "description": "Default extractors config only lists :models, :controllers, :services, :components. Missing: :jobs, :mailers, :graphql, :rails_source.",
     "status": "resolved"
   },
@@ -53,9 +45,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/tasks/woods.rake"
-    ],
+    "files": ["lib/tasks/woods.rake"],
     "description": "Incremental rake task scans app/models/, app/controllers/, app/services/, app/components/ but not app/graphql/. GraphQL type changes are never detected.",
     "status": "resolved"
   },
@@ -65,9 +55,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractor.rb"
-    ],
+    "files": ["lib/woods/extractor.rb"],
     "description": "Full extraction calls eager_load! but incremental path may skip it, meaning newly-added classes won't be found.",
     "status": "resolved"
   },
@@ -77,9 +65,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extracted_unit.rb"
-    ],
+    "files": ["lib/woods/extracted_unit.rb"],
     "description": "The (length / 4.0).ceil heuristic underestimates tokens for Ruby code. Ruby syntax (symbols, do/end, underscored_names) produces more tokens per character than natural language.",
     "status": "resolved"
   },
@@ -89,9 +75,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractors/phlex_extractor.rb"
-    ],
+    "files": ["lib/woods/extractors/phlex_extractor.rb"],
     "description": "Phlex extractor metadata structure is Phlex-specific. A future ViewComponent extractor needs different metadata patterns.",
     "status": "resolved"
   },
@@ -101,9 +85,7 @@
     "severity": "medium",
     "category": "design-gap",
     "layer": "retrieval",
-    "files": [
-      "docs/RETRIEVAL_ARCHITECTURE.md"
-    ],
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md"],
     "description": "merge_candidates uses ad-hoc weighted score fusion. Should use Reciprocal Rank Fusion (RRF): score(d) = sum(1/(k + rank_i(d))) where k=60.",
     "status": "resolved"
   },
@@ -113,9 +95,7 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "retrieval",
-    "files": [
-      "docs/RETRIEVAL_ARCHITECTURE.md"
-    ],
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md"],
     "description": "Pgvector build_where interpolates filter values directly into SQL. Should use parameterized queries.",
     "status": "resolved"
   },
@@ -125,9 +105,7 @@
     "severity": "low",
     "category": "design-gap",
     "layer": "retrieval",
-    "files": [
-      "docs/RETRIEVAL_ARCHITECTURE.md"
-    ],
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md"],
     "description": "Pipeline goes from initial ranking to context assembly with no reranking. Cross-encoder reranking would improve precision for code search.",
     "status": "resolved"
   },
@@ -137,9 +115,7 @@
     "severity": "low",
     "category": "design-gap",
     "layer": "extraction",
-    "files": [
-      "docs/CONTEXT_AND_CHUNKING.md"
-    ],
+    "files": ["docs/CONTEXT_AND_CHUNKING.md"],
     "description": "Scopes and per-concern chunks are specified in chunking strategy but not yet implemented in extraction.",
     "status": "resolved"
   },
@@ -149,9 +125,7 @@
     "severity": "low",
     "category": "design-gap",
     "layer": "embedding",
-    "files": [
-      "docs/OPERATIONS.md"
-    ],
+    "files": ["docs/OPERATIONS.md"],
     "description": "No checkpoint mechanism for embedding pipeline. Mid-batch failures require starting over.",
     "status": "resolved"
   },
@@ -161,9 +135,7 @@
     "severity": "high",
     "category": "doc-missing",
     "layer": "agentic",
-    "files": [
-      "docs/AGENTIC_STRATEGY.md"
-    ],
+    "files": ["docs/AGENTIC_STRATEGY.md"],
     "description": "No design for agents running extraction, managing the embedding pipeline, or diagnosing failures. Agents can only consume, not operate.",
     "status": "resolved"
   },
@@ -173,9 +145,7 @@
     "severity": "high",
     "category": "doc-missing",
     "layer": "agentic",
-    "files": [
-      "docs/AGENTIC_STRATEGY.md"
-    ],
+    "files": ["docs/AGENTIC_STRATEGY.md"],
     "description": "No design for multiple agents working with the same index concurrently. Missing: shared state model, locking, handoff patterns, token budget coordination.",
     "status": "resolved"
   },
@@ -185,9 +155,7 @@
     "severity": "high",
     "category": "doc-missing",
     "layer": "agentic",
-    "files": [
-      "docs/AGENTIC_STRATEGY.md"
-    ],
+    "files": ["docs/AGENTIC_STRATEGY.md"],
     "description": "No design for agents assessing retrieval quality, reporting gaps, or requesting improvements.",
     "status": "resolved"
   },
@@ -197,9 +165,7 @@
     "severity": "medium",
     "category": "doc-missing",
     "layer": "docs",
-    "files": [
-      "docs/OPERATIONS.md"
-    ],
+    "files": ["docs/OPERATIONS.md"],
     "description": "No documentation of which operations are safe for concurrent access and which require serialization.",
     "status": "resolved"
   },
@@ -209,9 +175,7 @@
     "severity": "medium",
     "category": "doc-missing",
     "layer": "docs",
-    "files": [
-      "docs/OPERATIONS.md"
-    ],
+    "files": ["docs/OPERATIONS.md"],
     "description": "When extraction produces new units, the embedding layer needs notification. No design for this bridge.",
     "status": "resolved"
   },
@@ -221,9 +185,7 @@
     "severity": "medium",
     "category": "doc-missing",
     "layer": "docs",
-    "files": [
-      "docs/OPERATIONS.md"
-    ],
+    "files": ["docs/OPERATIONS.md"],
     "description": "No design for how agents trigger and monitor pipeline tasks (extraction, embedding, validation).",
     "status": "resolved"
   },
@@ -233,10 +195,7 @@
     "severity": "low",
     "category": "doc-fix",
     "layer": "docs",
-    "files": [
-      "docs/RETRIEVAL_ARCHITECTURE.md",
-      "docs/MODEL_EXTRACTION_FIXES.md"
-    ],
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md", "docs/MODEL_EXTRACTION_FIXES.md"],
     "description": "Code uses / 3.5 (CLAUDE.md). RETRIEVAL_ARCHITECTURE.md pseudocode uses / 4.0 in TokenCounter class. MODEL_EXTRACTION_FIXES.md says / 4. Should all reference 3.5.",
     "status": "resolved"
   },
@@ -246,11 +205,7 @@
     "severity": "low",
     "category": "doc-fix",
     "layer": "docs",
-    "files": [
-      "docs/RETRIEVAL_ARCHITECTURE.md",
-      "docs/PROPOSAL.md",
-      "docs/REVIEW_FINDINGS.md"
-    ],
+    "files": ["docs/RETRIEVAL_ARCHITECTURE.md", "docs/PROPOSAL.md", "docs/REVIEW_FINDINGS.md"],
     "description": "REVIEW_FINDINGS.md CC-001 through CC-011 identified contradictions. Many resolved, some remain (tool count mismatch PROPOSAL vs AGENTIC_STRATEGY, default vector store, default embedding provider). Systematic pass needed.",
     "status": "resolved"
   },
@@ -260,9 +215,7 @@
     "severity": "low",
     "category": "doc-fix",
     "layer": "docs",
-    "files": [
-      "docs/plans/2026-02-13-ruby-analyzer-design.md"
-    ],
+    "files": ["docs/plans/2026-02-13-ruby-analyzer-design.md"],
     "description": "Says 'Status: Design approved, ready for implementation planning' but AST/RubyAnalyzer/Flow are all complete. Update to reflect implemented state.",
     "status": "resolved"
   },
@@ -272,9 +225,7 @@
     "severity": "medium",
     "category": "test-gap",
     "layer": "extraction",
-    "files": [
-      "spec/extractors/service_extractor_spec.rb"
-    ],
+    "files": ["spec/extractors/service_extractor_spec.rb"],
     "description": "ServiceExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
     "status": "resolved"
   },
@@ -284,9 +235,7 @@
     "severity": "medium",
     "category": "test-gap",
     "layer": "extraction",
-    "files": [
-      "spec/extractors/job_extractor_spec.rb"
-    ],
+    "files": ["spec/extractors/job_extractor_spec.rb"],
     "description": "JobExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
     "status": "resolved"
   },
@@ -296,9 +245,7 @@
     "severity": "medium",
     "category": "test-gap",
     "layer": "extraction",
-    "files": [
-      "spec/extractors/mailer_extractor_spec.rb"
-    ],
+    "files": ["spec/extractors/mailer_extractor_spec.rb"],
     "description": "MailerExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
     "status": "resolved"
   },
@@ -308,9 +255,7 @@
     "severity": "medium",
     "category": "test-gap",
     "layer": "extraction",
-    "files": [
-      "spec/extractors/graphql_extractor_spec.rb"
-    ],
+    "files": ["spec/extractors/graphql_extractor_spec.rb"],
     "description": "GraphqlExtractor has no gem-level unit specs. Needs tests for: happy path extraction, edge cases (empty files, namespaced classes), dependency detection.",
     "status": "resolved"
   },
@@ -320,9 +265,7 @@
     "severity": "medium",
     "category": "test-gap",
     "layer": "extraction",
-    "files": [
-      "spec/extractors/rails_source_extractor_spec.rb"
-    ],
+    "files": ["spec/extractors/rails_source_extractor_spec.rb"],
     "description": "RailsSourceExtractor has no gem-level unit specs. Needs tests for: happy path extraction, importance rating, public API detection.",
     "status": "resolved"
   },
@@ -332,9 +275,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": [
-      "lib/woods/storage/vector_store.rb"
-    ],
+    "files": ["lib/woods/storage/vector_store.rb"],
     "description": "Define interface: #store, #search, #delete, #count. In-memory adapter uses hash + cosine similarity. Zero-dependency baseline.",
     "status": "resolved"
   },
@@ -344,9 +285,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": [
-      "lib/woods/storage/metadata_store.rb"
-    ],
+    "files": ["lib/woods/storage/metadata_store.rb"],
     "description": "Unit metadata, type indexes, file paths, git data. SQLite for zero-dependency local usage.",
     "status": "resolved"
   },
@@ -356,9 +295,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "storage",
-    "files": [
-      "lib/woods/storage/graph_store.rb"
-    ],
+    "files": ["lib/woods/storage/graph_store.rb"],
     "description": "Existing DependencyGraph is the in-memory implementation. Wrap behind interface for future PG/MySQL backends.",
     "status": "resolved"
   },
@@ -368,9 +305,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "embedding",
-    "files": [
-      "lib/woods/embedding/provider.rb"
-    ],
+    "files": ["lib/woods/embedding/provider.rb"],
     "description": "Interface: #embed(text), #embed_batch(texts), #dimensions. Ollama first (zero external API cost), OpenAI second.",
     "status": "resolved"
   },
@@ -380,9 +315,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "embedding",
-    "files": [
-      "lib/woods/embedding/text_preparer.rb"
-    ],
+    "files": ["lib/woods/embedding/text_preparer.rb"],
     "description": "Per CONTEXT_AND_CHUNKING.md: chunk selection, prefix formatting, token limit enforcement.",
     "status": "resolved"
   },
@@ -392,16 +325,10 @@
     "severity": "high",
     "category": "implementation",
     "layer": "embedding",
-    "files": [
-      "lib/woods/embedding/indexer.rb"
-    ],
-    "description": "Reads ExtractedUnit JSON \u2192 prepares text \u2192 embeds \u2192 stores. Full + incremental modes via content_hash. Rake tasks: woods:embed, woods:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
+    "files": ["lib/woods/embedding/indexer.rb"],
+    "description": "Reads ExtractedUnit JSON → prepares text → embeds → stores. Full + incremental modes via content_hash. Rake tasks: woods:embed, woods:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
     "status": "resolved",
-    "depends_on": [
-      "B-028",
-      "B-031",
-      "B-032"
-    ]
+    "depends_on": ["B-028", "B-031", "B-032"]
   },
   {
     "id": "B-034",
@@ -409,9 +336,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": [
-      "lib/woods/retrieval/query_classifier.rb"
-    ],
+    "files": ["lib/woods/retrieval/query_classifier.rb"],
     "description": "Classify by intent (lookup, trace, explain, compare), scope (specific, bounded, broad), depth. Heuristic-based.",
     "status": "resolved"
   },
@@ -421,17 +346,10 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": [
-      "lib/woods/retrieval/search_executor.rb"
-    ],
-    "description": "Maps classification \u2192 strategy (vector, keyword, graph, hybrid, direct). Executes against storage backends. Depends on: B-028, B-029, B-030, B-034.",
+    "files": ["lib/woods/retrieval/search_executor.rb"],
+    "description": "Maps classification → strategy (vector, keyword, graph, hybrid, direct). Executes against storage backends. Depends on: B-028, B-029, B-030, B-034.",
     "status": "resolved",
-    "depends_on": [
-      "B-028",
-      "B-029",
-      "B-030",
-      "B-034"
-    ]
+    "depends_on": ["B-028", "B-029", "B-030", "B-034"]
   },
   {
     "id": "B-036",
@@ -439,14 +357,10 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "retrieval",
-    "files": [
-      "lib/woods/retrieval/ranker.rb"
-    ],
+    "files": ["lib/woods/retrieval/ranker.rb"],
     "description": "Reciprocal Rank Fusion (k=60) for combining multi-strategy results. Incorporates recency, PageRank, type-match signals. Depends on: B-035.",
     "status": "resolved",
-    "depends_on": [
-      "B-035"
-    ]
+    "depends_on": ["B-035"]
   },
   {
     "id": "B-037",
@@ -454,14 +368,10 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": [
-      "lib/woods/retrieval/context_assembler.rb"
-    ],
+    "files": ["lib/woods/retrieval/context_assembler.rb"],
     "description": "Token-budgeted assembly: 10% structural, 50% primary, 25% supporting, 15% framework. Source attribution. Depends on: B-036.",
     "status": "resolved",
-    "depends_on": [
-      "B-036"
-    ]
+    "depends_on": ["B-036"]
   },
   {
     "id": "B-038",
@@ -469,11 +379,8 @@
     "severity": "high",
     "category": "implementation",
     "layer": "retrieval",
-    "files": [
-      "lib/woods/retriever.rb",
-      "spec/retriever_spec.rb"
-    ],
-    "description": "Top-level Retriever class wiring classify \u2192 search \u2192 rank \u2192 assemble \u2192 format pipeline. Includes RetrievalResult struct and StructuralContextBuilder for 10% structural token budget.",
+    "files": ["lib/woods/retriever.rb", "spec/retriever_spec.rb"],
+    "description": "Top-level Retriever class wiring classify → search → rank → assemble → format pipeline. Includes RetrievalResult struct and StructuralContextBuilder for 10% structural token budget.",
     "status": "resolved"
   },
   {
@@ -482,9 +389,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "retrieval",
-    "files": [
-      "lib/woods/retriever.rb"
-    ],
+    "files": ["lib/woods/retriever.rb"],
     "description": "Private helper in Retriever that queries metadata_store for unit counts by type, generating codebase overview for the structural context budget.",
     "status": "resolved"
   },
@@ -494,10 +399,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "formatting",
-    "files": [
-      "lib/woods/formatting/base.rb",
-      "lib/woods/formatting/claude_adapter.rb"
-    ],
+    "files": ["lib/woods/formatting/base.rb", "lib/woods/formatting/claude_adapter.rb"],
     "description": "Abstract Formatting::Base with #format interface and #estimate_tokens helper. ClaudeAdapter outputs XML tags (<codebase-context>, <unit>, <source>) for Claude API/MCP.",
     "status": "resolved"
   },
@@ -507,16 +409,10 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "formatting",
-    "files": [
-      "lib/woods/formatting/gpt_adapter.rb",
-      "lib/woods/formatting/generic_adapter.rb",
-      "lib/woods/formatting/human_adapter.rb"
-    ],
+    "files": ["lib/woods/formatting/gpt_adapter.rb", "lib/woods/formatting/generic_adapter.rb", "lib/woods/formatting/human_adapter.rb"],
     "description": "GPTAdapter (Markdown headers + fenced code), GenericAdapter (plain text with separators), HumanAdapter (box-drawing chars for terminal).",
     "status": "resolved",
-    "depends_on": [
-      "B-040"
-    ]
+    "depends_on": ["B-040"]
   },
   {
     "id": "B-042",
@@ -524,10 +420,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": [
-      "lib/woods/storage/pgvector.rb",
-      "spec/storage/pgvector_spec.rb"
-    ],
+    "files": ["lib/woods/storage/pgvector.rb", "spec/storage/pgvector_spec.rb"],
     "description": "VectorStore::Pgvector for PostgreSQL teams. HNSW index, parameterized SQL, cosine distance, filter translation to WHERE clauses, ensure_schema! for auto-setup.",
     "status": "resolved"
   },
@@ -537,10 +430,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "storage",
-    "files": [
-      "lib/woods/storage/qdrant.rb",
-      "spec/storage/qdrant_spec.rb"
-    ],
+    "files": ["lib/woods/storage/qdrant.rb", "spec/storage/qdrant_spec.rb"],
     "description": "VectorStore::Qdrant via HTTP REST API. Qdrant-format filter translation, collection auto-creation, no gem dependencies.",
     "status": "resolved"
   },
@@ -550,10 +440,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "observability",
-    "files": [
-      "lib/woods/observability/instrumentation.rb",
-      "spec/observability/instrumentation_spec.rb"
-    ],
+    "files": ["lib/woods/observability/instrumentation.rb", "spec/observability/instrumentation_spec.rb"],
     "description": "Thin wrapper around ActiveSupport::Notifications with fallback to direct yield when AS unavailable (MCP server without Rails).",
     "status": "resolved"
   },
@@ -563,10 +450,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "observability",
-    "files": [
-      "lib/woods/observability/structured_logger.rb",
-      "spec/observability/structured_logger_spec.rb"
-    ],
+    "files": ["lib/woods/observability/structured_logger.rb", "spec/observability/structured_logger_spec.rb"],
     "description": "JSON-line logger for pipeline operations. Supports info/warn/error/debug levels with timestamps and structured data.",
     "status": "resolved"
   },
@@ -576,10 +460,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "observability",
-    "files": [
-      "lib/woods/observability/health_check.rb",
-      "spec/observability/health_check_spec.rb"
-    ],
+    "files": ["lib/woods/observability/health_check.rb", "spec/observability/health_check_spec.rb"],
     "description": "Reports system component status (:ok, :error, :not_configured) for vector_store, metadata_store, embedding_provider.",
     "status": "resolved"
   },
@@ -589,15 +470,10 @@
     "severity": "high",
     "category": "implementation",
     "layer": "resilience",
-    "files": [
-      "lib/woods/resilience/circuit_breaker.rb",
-      "spec/resilience/circuit_breaker_spec.rb"
-    ],
-    "description": "Three-state pattern (closed \u2192 open \u2192 half_open) protecting external service calls. Configurable threshold and reset_timeout. Raises CircuitOpenError when open.",
+    "files": ["lib/woods/resilience/circuit_breaker.rb", "spec/resilience/circuit_breaker_spec.rb"],
+    "description": "Three-state pattern (closed → open → half_open) protecting external service calls. Configurable threshold and reset_timeout. Raises CircuitOpenError when open.",
     "status": "resolved",
-    "depends_on": [
-      "B-038"
-    ]
+    "depends_on": ["B-038"]
   },
   {
     "id": "B-048",
@@ -605,15 +481,10 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "resilience",
-    "files": [
-      "lib/woods/resilience/retryable_provider.rb",
-      "spec/resilience/retryable_provider_spec.rb"
-    ],
+    "files": ["lib/woods/resilience/retryable_provider.rb", "spec/resilience/retryable_provider_spec.rb"],
     "description": "Decorator wrapping Embedding::Provider::Interface with exponential backoff and circuit breaker integration. Never retries CircuitOpenError.",
     "status": "resolved",
-    "depends_on": [
-      "B-047"
-    ]
+    "depends_on": ["B-047"]
   },
   {
     "id": "B-049",
@@ -621,10 +492,7 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "resilience",
-    "files": [
-      "lib/woods/resilience/index_validator.rb",
-      "spec/resilience/index_validator_spec.rb"
-    ],
+    "files": ["lib/woods/resilience/index_validator.rb", "spec/resilience/index_validator_spec.rb"],
     "description": "Validates extraction output health: _index.json existence, file references, content hash integrity, stale file detection. Returns ValidationReport.",
     "status": "resolved"
   },
@@ -634,10 +502,7 @@
     "severity": "high",
     "category": "implementation",
     "layer": "embedding",
-    "files": [
-      "lib/woods/embedding/openai.rb",
-      "spec/embedding/openai_spec.rb"
-    ],
+    "files": ["lib/woods/embedding/openai.rb", "spec/embedding/openai_spec.rb"],
     "description": "Provider::OpenAI supporting text-embedding-3-small (1536d) and text-embedding-3-large (3072d). HTTPS with Bearer auth, batch embedding with index-preservation.",
     "status": "resolved"
   },
@@ -647,15 +512,10 @@
     "severity": "high",
     "category": "implementation",
     "layer": "agentic",
-    "files": [
-      "lib/woods/mcp/server.rb",
-      "spec/mcp/server_spec.rb"
-    ],
+    "files": ["lib/woods/mcp/server.rb", "spec/mcp/server_spec.rb"],
     "description": "Semantic search tool added to MCP server. Accepts query + optional budget, returns formatted context + source attributions. Graceful degradation when no retriever configured.",
     "status": "resolved",
-    "depends_on": [
-      "B-038"
-    ]
+    "depends_on": ["B-038"]
   },
   {
     "id": "B-052",
@@ -663,14 +523,10 @@
     "severity": "medium",
     "category": "implementation",
     "layer": "agentic",
-    "files": [
-      "lib/tasks/woods.rake"
-    ],
+    "files": ["lib/tasks/woods.rake"],
     "description": "Three rake tasks: woods:retrieve[query] (CLI retrieval with HumanAdapter), woods:embed (full embedding pipeline), woods:embed_incremental (content_hash-based).",
     "status": "resolved",
-    "depends_on": [
-      "B-038"
-    ]
+    "depends_on": ["B-038"]
   },
   {
     "id": "B-053",
@@ -685,7 +541,7 @@
       "lib/woods/console/server.rb",
       "docs/CONSOLE_MCP_SETUP.md"
     ],
-    "description": "Embedded-mode console_eval is hard-refused at dispatch (EmbeddedExecutor#refusal_for), so EvalGuard is unreachable on the shipped path. The refusal message already advertises WOODS_CONSOLE_UNSAFE_EVAL + a Rails.env.production? rejection as the opt-in contract, but the execution wiring is not implemented. Deliver the full contract before running any Ruby: (1) gate on both config.console_unsafe_eval_enabled AND ENV['WOODS_CONSOLE_UNSAFE_EVAL']; (2) refuse unconditionally when Rails.env.production?; (3) run EvalGuard.check! before dispatch; (4) require Confirmation approval; (5) record the run in AuditLogger. Partial wiring is worse than the current refusal \u2014 ship all five or none. Tracked in issue #87 (option 2 deferral). RESOLVED: EmbeddedExecutor#handle_eval now runs all five controls (guard \u2192 confirmation \u2192 SafeContext \u2192 Timeout \u2192 audit). Server.build_embedded fails closed at boot when the flag is on but a Confirmation or audit-log path is missing.",
+    "description": "Embedded-mode console_eval is hard-refused at dispatch (EmbeddedExecutor#refusal_for), so EvalGuard is unreachable on the shipped path. The refusal message already advertises WOODS_CONSOLE_UNSAFE_EVAL + a Rails.env.production? rejection as the opt-in contract, but the execution wiring is not implemented. Deliver the full contract before running any Ruby: (1) gate on both config.console_unsafe_eval_enabled AND ENV['WOODS_CONSOLE_UNSAFE_EVAL']; (2) refuse unconditionally when Rails.env.production?; (3) run EvalGuard.check! before dispatch; (4) require Confirmation approval; (5) record the run in AuditLogger. Partial wiring is worse than the current refusal — ship all five or none. Tracked in issue #87 (option 2 deferral). RESOLVED: EmbeddedExecutor#handle_eval now runs all five controls (guard → confirmation → SafeContext → Timeout → audit). Server.build_embedded fails closed at boot when the flag is on but a Confirmation or audit-log path is missing.",
     "status": "resolved",
     "depends_on": []
   },
@@ -700,7 +556,7 @@
       "lib/woods/console/bridge.rb",
       "lib/woods/console/embedded_executor.rb"
     ],
-    "description": "Issue #82 renamed Woods::Console::Bridge to StubBridge so the scaffold status is obvious. The downstream smell \u2014 flagged by both reviewers \u2014 is that the canonical protocol contract (SUPPORTED_TOOLS, TIER1_TOOLS, TOOL_HANDLERS) still lives on the stub class. EmbeddedExecutor::TIER1_TOOLS = StubBridge::TIER1_TOOLS reads as 'the real executor borrows constants from the stub', which is backwards. Extract a Woods::Console::BridgeProtocol module owning the three constants; have StubBridge include or reference it; update EmbeddedExecutor to read from BridgeProtocol directly. When the real bridge-process implementation lands it can claim the Bridge class name without the protocol contract migrating with it. Pre-existing doc-rot in docs/design/CONSOLE_SERVER.md (sections 107/118/130 still describe rails runner lib/woods/console/bridge.rb as if it works) is in scope for the same PR. RESOLVED: new lib/woods/console/bridge_protocol.rb owns SUPPORTED_TOOLS / TIER1_TOOLS / TOOL_HANDLERS. StubBridge references BridgeProtocol (top-level aliases keep StubBridge::SUPPORTED_TOOLS working for existing callers). EmbeddedExecutor reads TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS and no longer imports bridge.rb. CONSOLE_SERVER.md Connection Modes section carries a callout that the three rails-runner configs describe the target bridge-process architecture, not the shipping state.",
+    "description": "Issue #82 renamed Woods::Console::Bridge to StubBridge so the scaffold status is obvious. The downstream smell — flagged by both reviewers — is that the canonical protocol contract (SUPPORTED_TOOLS, TIER1_TOOLS, TOOL_HANDLERS) still lives on the stub class. EmbeddedExecutor::TIER1_TOOLS = StubBridge::TIER1_TOOLS reads as 'the real executor borrows constants from the stub', which is backwards. Extract a Woods::Console::BridgeProtocol module owning the three constants; have StubBridge include or reference it; update EmbeddedExecutor to read from BridgeProtocol directly. When the real bridge-process implementation lands it can claim the Bridge class name without the protocol contract migrating with it. Pre-existing doc-rot in docs/design/CONSOLE_SERVER.md (sections 107/118/130 still describe rails runner lib/woods/console/bridge.rb as if it works) is in scope for the same PR. RESOLVED: new lib/woods/console/bridge_protocol.rb owns SUPPORTED_TOOLS / TIER1_TOOLS / TOOL_HANDLERS. StubBridge references BridgeProtocol (top-level aliases keep StubBridge::SUPPORTED_TOOLS working for existing callers). EmbeddedExecutor reads TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS and no longer imports bridge.rb. CONSOLE_SERVER.md Connection Modes section carries a callout that the three rails-runner configs describe the target bridge-process architecture, not the shipping state.",
     "status": "resolved",
     "depends_on": []
   },
@@ -716,7 +572,7 @@
       "lib/woods/storage/graph_store.rb",
       "lib/woods/mcp/bootstrapper.rb"
     ],
-    "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md \u00a73.5. Do NOT design a speculative write API before the concrete adapter exists \u2014 bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
+    "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md §3.5. Do NOT design a speculative write API before the concrete adapter exists — bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
     "status": "open",
     "depends_on": []
   },
@@ -755,9 +611,7 @@
     ],
     "description": "Woods::Obsidian::NoteBuilder (B-056) and Woods::Unblocked::DocumentBuilder independently walk unit metadata (associations-by-type, blast-radius buckets, entry points, side effects, schema highlights, deps/dependents-by-type). That selection/shaping logic is format-agnostic; only the final string assembly (plain-text + GitHub URIs vs wikilinks + frontmatter) diverges. Extract a Woods::Export::UnitFacts that turns a unit_data hash into a structured intermediate, and make both builders thin formatters over it, so a unit-type metadata change is fixed in one place. PREREQUISITE: Unblocked detects changes by hashing the rendered body (Exporter#fingerprint = SHA256(title + body)), and its specs guard determinism/structure but NOT byte-exact output, so a refactor could pass CI green yet force a one-time mass re-push. Before touching DocumentBuilder, add golden-output regression specs that pin its exact body bytes per unit type. Until this lands, B-056 mitigates drift with a shared metadata-shape fixture asserted by both spec suites. Tracked in #144. RESOLVED: added lib/woods/export/unit_facts.rb (associations_by_type, schema_highlights, blast_radius) + specs; added spec/unblocked/document_builder_golden_spec.rb pinning DocumentBuilder body bytes per unit type against spec/fixtures/unblocked/golden_units.rb + golden/*.md; migrated DocumentBuilder model_associations + model_schema_highlights onto UnitFacts with the golden suite confirming byte-identical output (no Unblocked re-push); migrated NoteBuilder associations onto UnitFacts and added a shared Schema section; GoldenUnits is now asserted by both the Unblocked golden suite and the Obsidian NoteBuilder suite as the shared metadata-shape fixture.",
     "status": "resolved",
-    "depends_on": [
-      "B-056"
-    ]
+    "depends_on": ["B-056"]
   },
   {
     "id": "B-058",
@@ -766,10 +620,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "storage",
-    "files": [
-      "lib/woods/storage/qdrant.rb",
-      "lib/woods/embedding/indexer.rb"
-    ],
+    "files": ["lib/woods/storage/qdrant.rb", "lib/woods/embedding/indexer.rb"],
     "description": "Qdrant only accepts uint/UUID point IDs but the adapter passes Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path is non-functional. Fix: UUIDv5 point id + identifier in payload + reverse-map in search/delete. Needs live-Qdrant validation. Tracked in GH #147.",
     "status": "ready",
     "depends_on": []
@@ -781,9 +632,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "embedding",
-    "files": [
-      "lib/woods/embedding/indexer.rb"
-    ],
+    "files": ["lib/woods/embedding/indexer.rb"],
     "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148.",
     "status": "ready",
     "depends_on": []
@@ -795,10 +644,7 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "export",
-    "files": [
-      "lib/woods/notion/exporter.rb",
-      "lib/woods/notion/mappers/column_mapper.rb"
-    ],
+    "files": ["lib/woods/notion/exporter.rb", "lib/woods/notion/mappers/column_mapper.rb"],
     "description": "Column pages are upserted by bare column name and found by title equality across the whole DB, so shared columns (id/created_at/updated_at) overwrite each other across models \u2014 the Columns DB collapses to one page per distinct name. Fix: qualify title (users.id) or filter lookup by Table relation. Tracked in GH #149.",
     "status": "ready",
     "depends_on": []
@@ -810,54 +656,45 @@
     "severity": "medium",
     "category": "code-bug",
     "layer": "mcp",
-    "files": [
-      "lib/woods/mcp/server.rb",
-      "lib/woods/notion/client.rb",
-      "lib/woods/unblocked/client.rb",
-      "lib/woods/resilience/circuit_breaker.rb",
-      "lib/woods/mcp/bootstrapper.rb"
-    ],
+    "files": ["lib/woods/mcp/server.rb", "lib/woods/notion/client.rb", "lib/woods/unblocked/client.rb", "lib/woods/resilience/circuit_breaker.rb", "lib/woods/mcp/bootstrapper.rb"],
     "description": "HTTP transport concurrent-handler unsynchronized IndexReader cache + lazy pipeline mutex init; Notion/Unblocked POST retry on read-timeout duplicates; Retry-After to_f zeros HTTP-date form; CircuitBreaker half-open unlimited probes + reset on overlap; bootstrapper/reload string-keyed vector metadata vs symbol-keyed search filters. Tracked in GH #150. PARTIAL (PR #151): FIXED the pipeline-lock mutex race (eager init), Retry-After (shared Woods::RetryAfter helper, both clients), and CircuitBreaker (single half-open probe + success_threshold). REMAINING: IndexReader cache guard, POST-retry idempotency, bootstrap/reload key-form normalization.",
     "status": "in-progress",
     "depends_on": []
   },
   {
     "id": "B-062",
+    "slug": "graph-identifier-collision",
     "title": "Dependency graph collapses same-identifier units of different types onto one node",
     "severity": "medium",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/dependency_graph.rb",
-      "lib/woods/extractor.rb"
-    ],
-    "description": "DependencyGraph keys nodes on the bare identifier, so two units of different types that share one (a Scenic view `reports` from db/views/reports_v01.sql and a factory `reports` from spec/factories/reports.rb) collapse onto a single node \u2014 last registration wins, and the loser also loses its type-index entry. Both unit JSON files are still written, so the index and the graph disagree. deduplicate_results only dedupes within a type. Surfaced by the #164 differential harness, which works around it by giving each generated artifact family its own name prefix. Fix likely means keying the graph on (type, identifier) or namespacing identifiers per type, which touches every graph consumer (MCP tools, Obsidian, retrieval).",
-    "status": "open"
+    "files": ["lib/woods/dependency_graph.rb", "lib/woods/extractor.rb"],
+    "description": "DependencyGraph keys nodes on the bare identifier, so two units of different types that share one (a Scenic view `reports` from db/views/reports_v01.sql and a factory `reports` from spec/factories/reports.rb) collapse onto a single node — last registration wins, and the loser also loses its type-index entry. Both unit JSON files are still written, so the index and the graph disagree. deduplicate_results only dedupes within a type. Surfaced by the #164 differential harness, which works around it by giving each generated artifact family its own name prefix. Fix likely means keying the graph on (type, identifier) or namespacing identifiers per type, which touches every graph consumer (MCP tools, Obsidian, retrieval).",
+    "status": "open",
+    "depends_on": []
   },
   {
     "id": "B-063",
+    "slug": "duplicate-constant-tiebreak",
     "title": "Two files defining the same constant resolve differently in full vs incremental extraction",
     "severity": "low",
     "category": "code-bug",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractor.rb"
-    ],
+    "files": ["lib/woods/extractor.rb"],
     "description": "When two source files yield units with the same identifier, full extraction keeps the first by glob order (deduplicate_results' uniq(&:identifier)) while the incremental path keeps whichever was written last. The tree is already broken in that state (Ruby would be redefining a constant), so this is a tie-break inconsistency rather than data loss, but it means full and incremental disagree. Surfaced by the #164 differential harness.",
-    "status": "open"
+    "status": "open",
+    "depends_on": []
   },
   {
     "id": "B-064",
+    "slug": "reactive-index-phases",
     "title": "Phase 1-4 of the reactive index spike: in-process extractor API, woods:watch daemon, MCP freshness contract, multi-instance operation",
     "severity": "medium",
     "category": "feature",
     "layer": "extraction",
-    "files": [
-      "lib/woods/extractor.rb",
-      "lib/woods/change_set.rb",
-      "lib/woods/mcp/index_reader.rb"
-    ],
-    "description": "Follow-on work from #164 now that phase 0 (incremental correctness + differential harness) has landed. Phase 1: a public API to re-run a single whole-app extractor against a booted app (WHOLE_APP_EXTRACTORS already does this internally). Phase 2: a resident file-watching daemon (woods:watch) \u2014 placement decision, restart triggers, storm handling, degraded status. Phase 3: a generation token IndexReader checks per request, plus working-tree staleness in woods_status. Phase 4: multi-worktree operation with per-daemon idle TTL. Each phase needs measurements against the success criteria in #164. RESOLVED: all four phases landed on claude/woods-issue-164-uu6tc0 (PR #165). Phase 1 = Extractor#refresh + woods:refresh + ReloadPolicy; phase 2 = Woods::Watch daemon + woods:watch; phase 3 = Woods::Generation + IndexReader self-refresh + woods_status freshness fields; phase 4 = PipelineLock write serialization, daemon deference for hook syncs, idle TTL, six-worktree spec. Outstanding and documented in docs/WATCH_DAEMON.md rather than tracked here: large-host-app latency, bind-mount event latency, and per-daemon memory at six-worktree scale \u2014 all three need a real host app.",
-    "status": "resolved"
+    "files": ["lib/woods/extractor.rb", "lib/woods/change_set.rb", "lib/woods/mcp/index_reader.rb"],
+    "description": "Follow-on work from #164 now that phase 0 (incremental correctness + differential harness) has landed. Phase 1: a public API to re-run a single whole-app extractor against a booted app (WHOLE_APP_EXTRACTORS already does this internally). Phase 2: a resident file-watching daemon (woods:watch) — placement decision, restart triggers, storm handling, degraded status. Phase 3: a generation token IndexReader checks per request, plus working-tree staleness in woods_status. Phase 4: multi-worktree operation with per-daemon idle TTL. Each phase needs measurements against the success criteria in #164. RESOLVED: all four phases landed on claude/woods-issue-164-uu6tc0 (PR #165). Phase 1 = Extractor#refresh + woods:refresh + ReloadPolicy; phase 2 = Woods::Watch daemon + woods:watch; phase 3 = Woods::Generation + IndexReader self-refresh + woods_status freshness fields; phase 4 = PipelineLock write serialization, daemon deference for hook syncs, idle TTL, six-worktree spec. Outstanding and documented in docs/WATCH_DAEMON.md rather than tracked here: large-host-app latency, bind-mount event latency, and per-daemon memory at six-worktree scale — all three need a real host app.",
+    "status": "resolved",
+    "depends_on": []
   }
 ]

@@ -6,12 +6,12 @@ module Woods
   # A normalized set of changed paths, shared by every entry point that has
   # to answer "what changed?".
   #
-  # Today that is the git-diff-driven `woods:incremental` rake task; a
-  # file-watching daemon (#164, phase 2) would feed the same object from FS
-  # events. Two code paths computing "what changed" independently is exactly
-  # how a watcher and a CI chain drift apart, so the normalization —
-  # absolutizing, de-duplicating, and splitting present-from-vanished — lives
-  # here rather than in either caller.
+  # Two callers feed it: the git-diff-driven `woods:incremental` rake task, and
+  # {Woods::Watch::Daemon}, which builds one per batch of FS events. Two code
+  # paths computing "what changed" independently is exactly how a watcher and a
+  # CI chain drift apart, so the normalization — absolutizing, de-duplicating,
+  # and splitting present-from-vanished — lives here rather than in either
+  # caller.
   #
   # Paths are held absolute (matching how {DependencyGraph} registers file
   # paths) and exposed relative on demand (matching how {PathDispatcher}

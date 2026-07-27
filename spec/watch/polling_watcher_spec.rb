@@ -110,6 +110,65 @@ RSpec.describe Woods::Watch::PollingWatcher do
     end
   end
 
+  # The granularity the `age` helper above deliberately sidesteps, characterized
+  # directly. Truncating mtime to whole seconds loses a second write inside the
+  # same second permanently — there is no later event to catch it — and
+  # save-then-formatter at a 1s poll interval is entirely ordinary.
+  describe 'sub-second resolution' do
+    it 'notices a second write within the same second' do
+      write('app/models/user.rb', 'first')
+      watcher.poll
+
+      write('app/models/user.rb', 'first') # same length, same second
+      File.utime(*Array.new(2) { Time.at(File.mtime(File.join(root, 'app/models/user.rb')).to_i + 0.4) },
+                 File.join(root, 'app/models/user.rb'))
+
+      expect(watcher.poll).to eq([File.join(root, 'app/models/user.rb')])
+    end
+
+    # The fallback for filesystems that genuinely only offer whole seconds:
+    # a same-second rewrite that changes length is still caught.
+    it 'notices a same-second rewrite of a different length' do
+      path = write('app/models/user.rb', 'short')
+      watcher.poll
+
+      File.write(path, 'considerably longer contents')
+      stamp = Time.at(File.mtime(path).to_i)
+      File.utime(stamp, stamp, path)
+
+      expect(watcher.poll).to eq([path])
+    end
+  end
+
+  # A root a Dir.glob pattern cannot express when interpolated. Generated
+  # worktree directories really do contain brackets.
+  describe 'awkward roots' do
+    it 'watches a root containing glob metacharacters' do
+      nested = File.join(root, 'slot[1]{a}')
+      FileUtils.mkdir_p(File.join(nested, 'app/models'))
+      watcher = described_class.new(root: nested, interval: 0)
+      watcher.poll
+
+      target = File.join(nested, 'app/models/user.rb')
+      File.write(target, 'x')
+
+      expect(watcher.poll).to eq([target])
+    end
+  end
+
+  describe '#stop' do
+    # The daemon's signal handler and its watcher thread race by construction.
+    it 'is honoured when it arrives before start' do
+      write('app/models/user.rb')
+      watcher.stop
+      yielded = false
+
+      watcher.start { yielded = true }
+
+      expect(yielded).to be(false)
+    end
+  end
+
   describe '#start' do
     it 'yields batches until stopped' do
       write('app/models/user.rb')
