@@ -1408,9 +1408,20 @@ RSpec.describe Woods::Extractor do
     let(:output_dir) { File.join(write_tmpdir, 'output') }
     let(:extractor) { described_class.new(output_dir: output_dir) }
 
-    before { FileUtils.mkdir_p(output_dir) }
+    # `json_serialize` reads `Woods.configuration.pretty_json`, so these
+    # examples must establish a configuration rather than inherit whatever an
+    # earlier example left behind — under a random seed they can run first.
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+    end
 
-    after { FileUtils.rm_rf(write_tmpdir) }
+    after do
+      Woods.configuration = @original_config
+      FileUtils.rm_rf(write_tmpdir)
+    end
     let(:unit) do
       Woods::ExtractedUnit.new(
         type: :model, identifier: 'Widget', file_path: 'app/models/widget.rb'
