@@ -239,6 +239,103 @@ end
     end
   end
 
+  # The only collaborator every other example in this file — and every unit
+  # spec — replaces with a double.
+  #
+  # `RailsReloader` is the daemon's whole contact with Rails' reloading
+  # machinery, and it is the one class in the change whose behaviour is
+  # genuinely Rails-version-sensitive: `enable_reloading` does not exist before
+  # 7.1, and `reload!`'s locking lives in Rails, not here. Stubbed everywhere,
+  # it ran on zero of the seven matrix rows. It runs on all of them now — and
+  # the first run disproved a comment this class used to carry.
+  #
+  # Placed in this file rather than its own so it rides an existing boot: a new
+  # `:booted_app` file is a new CI step and a new Rails application per row.
+  describe 'the real Rails reloader' do
+    subject(:reloader) { Woods::Watch::Daemon::RailsReloader.new }
+
+    # A real reload unloads every autoloaded constant, so anything that ran
+    # `eager_load!` at boot — which is how `ActiveRecord::Base.descendants` is
+    # populated for `ModelExtractor` — is left holding an empty descendant set
+    # until something references a model again. Every other example here
+    # extracts. Put the constants back.
+    after { Rails.application.eager_load! }
+
+    def post_source
+      File.read(File.join(@app_root, 'app/models/post.rb'))
+    end
+
+    it 'picks up changed source, which is the property `enabled?` promises' do
+      expect(reloader.enabled?).to be(true)
+      expect(Post.new).not_to respond_to(:woods_reload_probe)
+
+      File.write(File.join(@app_root, 'app/models/post.rb'),
+                 post_source.sub(/^class Post.*\n/) { |line| "#{line}  def woods_reload_probe = :fresh\n" })
+      reloader.reload!
+
+      # Not "reload! didn't raise" — that passes against a no-op. The constant
+      # has to actually reflect the bytes on disk, because extracting against a
+      # class that no longer matches its source is the exact failure the
+      # `:reload` classification exists to prevent.
+      expect(Post.new.woods_reload_probe).to eq(:fresh)
+    end
+
+    # This pins the reason `reload!` is a bare call rather than wrapped in
+    # `ActiveSupport::Dependencies.interlock`. It carried such a wrapper until
+    # this example was written: `interlock.respond_to?(:done)` — and `Interlock`
+    # has never had a `#done`. The guard was false on every Rails version, so
+    # the wrapper was unreachable, and the comment above it described locking
+    # that was not happening. It is not needed, because Rails takes the unload
+    # lock itself; but "not needed" and "silently skipped" are different states
+    # to be in, and only running the thing told them apart.
+    it 'reloads under the interlock unload lock, taken by Rails itself' do
+      interlock = ActiveSupport::Dependencies.interlock
+      taken = []
+      interlock.singleton_class.prepend(Module.new do
+        define_method(:start_unloading) do
+          taken << :start_unloading
+          super()
+        end
+      end)
+
+      reloader.reload!
+
+      expect(taken).to include(:start_unloading)
+    end
+
+    it 'reports reloading disabled when the app is configured that way' do
+      config = Rails.application.config
+      original = config.cache_classes
+      begin
+        # Set through `cache_classes` on purpose: from 7.1 on `enable_reloading`
+        # is *defined* as `!cache_classes`, so this drives the 7.1+ branch
+        # through to the same state the pre-7.1 branch reads directly. One
+        # assertion, both spellings, every row.
+        config.cache_classes = true
+        expect(reloader.enabled?).to be(false)
+      ensure
+        config.cache_classes = original
+      end
+    end
+
+    it 'escalates a reload-class change to a restart when reloading is off' do
+      config = Rails.application.config
+      original = config.cache_classes
+      begin
+        config.cache_classes = true
+        instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                            reloader: reloader, debounce: 0, catch_up: false)
+
+        result = instance.process(['app/models/post.rb'])
+
+        expect(result[:action]).to eq(:restart)
+        expect(result[:state]).to eq(:degraded)
+      ensure
+        config.cache_classes = original
+      end
+    end
+  end
+
   describe 'degraded operation' do
     it 'leaves the index intact and the generation frozen when a reload fails' do
       write_file('app/services/broken_service.rb', "class BrokenService\n  def call\n") # deliberately unterminated

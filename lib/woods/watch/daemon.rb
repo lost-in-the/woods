@@ -716,39 +716,48 @@ module Woods
       # `:restart` in that case rather than extracting against constants that
       # no longer match their source.
       class RailsReloader
-        # @return [Boolean] whether this process can reload code
+        # Whether this process can reload code.
+        #
+        # The two spellings are not two semantics: `enable_reloading` is
+        # *defined* as `!cache_classes` from 7.1 on, so both branches compute
+        # the same thing and the guard is only about which method exists (6.0
+        # through 7.0 have no `enable_reloading` at all). Deliberately reading
+        # the same value Rails' own finisher gates the reloader on — including
+        # the case where an app never sets `cache_classes` and it stays `nil`,
+        # which Rails reads as reloading-enabled and so must we.
+        #
+        # @return [Boolean]
         def enabled?
           return false unless defined?(Rails) && Rails.application
 
           config = Rails.application.config
-          if config.respond_to?(:enable_reloading)
-            config.enable_reloading
-          else
-            # Rails < 7.1 spells it the other way round.
-            !config.cache_classes
-          end
+          return config.enable_reloading if config.respond_to?(:enable_reloading)
+
+          !config.cache_classes
         rescue StandardError
           false
         end
 
-        # Reload under the load interlock.
+        # Reload the app's autoloaded constants.
         #
-        # A bare `reloader.reload!` is fine in a dedicated `rake woods:watch`
-        # process, where nothing else is running app code. It is not fine in the
-        # embedded placement the class doc blesses — inside a dev server, where
-        # request threads are executing autoloaded code concurrently. Unloading
-        # constants underneath them is how you get a NameError in an unrelated
-        # request, or a deadlock between the reloader and a thread mid-autoload.
-        # `permit_concurrent_loads` is not what this needs; the interlock's
-        # unloading block is, and it is exactly what Rails' own file-watcher
-        # path takes before reloading.
+        # Deliberately bare. Unloading constants while other threads execute
+        # autoloaded code — the embedded placement this class' doc blesses,
+        # inside a dev server — needs the interlock's unload lock held, or you
+        # get a `NameError` in an unrelated request or a deadlock against a
+        # thread mid-autoload. `reload!` already takes it: the instance's
+        # `class_unload!` calls `require_unload_lock!`, which is
+        # `interlock.start_unloading`, and Rails' finisher registers that
+        # callback whenever reloading is enabled. Wrapping this call in
+        # `interlock.unloading` would re-acquire the same exclusive lock the
+        # block below is about to take.
+        #
+        # `spec/integration/watch_daemon_spec.rb` pins that, so a Rails release
+        # that stopped locking here fails rather than quietly needing a wrapper
+        # nobody remembers to re-add.
         #
         # @return [void]
         def reload!
-          interlock = defined?(ActiveSupport::Dependencies.interlock) && ActiveSupport::Dependencies.interlock
-          return Rails.application.reloader.reload! unless interlock.respond_to?(:done)
-
-          interlock.done { Rails.application.reloader.reload! }
+          Rails.application.reloader.reload!
         end
       end
     end
