@@ -155,6 +155,66 @@ class-based unit requires the caller to name its path.
   at gem paths, and an index restored from a CI artifact can carry paths
   produced under a different root.
 
+## Refreshing one extractor on demand
+
+`Extractor#refresh` re-runs named extractors wholesale against an
+already-booted app. Incremental runs reach the whole-app extractors by trigger
+path; this reaches them by name, for a caller that already knows what went
+stale.
+
+```ruby
+# After editing config/routes.rb, or from a resident process that just reloaded
+Woods::Extractor.new(output_dir: "tmp/woods").refresh(:routes)
+# => { types: [:routes, :controllers, :mailers, ...], touched: [...], unknown: [] }
+```
+
+```bash
+bundle exec rake "woods:refresh[routes]"
+bundle exec rake "woods:refresh[state_machines,factories]"
+bundle exec rake woods:refresh          # lists the valid keys
+```
+
+Any extractor key works, not only the whole-app ones — `refresh(:models)` is a
+legitimate way to re-derive every model after a schema change. A routes refresh
+cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above. Like an
+incremental run, `refresh` rewrites the graph, `graph_analysis.json`, the
+affected type indexes and the manifest, so the result is durable.
+
+## What a change actually requires: reload, restart, or neither
+
+`Woods::ReloadPolicy` answers the question a resident process has to ask before
+re-extracting: extraction reads the *runtime*, so "the file changed" is not the
+same question as "what has to happen before re-reading it is worth anything".
+
+| Action | Path classes | Why |
+|---|---|---|
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files | Woods reads bytes. No constant involved. |
+| `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
+| `:restart` | `Gemfile`, `Gemfile.lock`, `config/application.rb`, `config/boot.rb`, `config/environment.rb`, `config/initializers/**`, `config/environments/**`, `config/database.yml`, credentials, `db/schema.rb`, `db/structure.sql` | Captured at boot. Rails' reloader re-runs none of it. |
+| `:ignore` | everything else | Not extraction input. |
+
+The `:restart` set is drawn generously on purpose. Rails' reloader replaces
+autoloaded constants and nothing else — it does not re-run initializers,
+re-resolve `Rails.application.config`, or rebuild the schema cache, all of
+which Woods captures (`BehavioralProfile`, `MiddlewareExtractor`, model column
+data). `rails/spring`'s staleness bugs came from under-scoping exactly this
+set.
+
+Two version-sensitive behaviours sit *behind* the classification rather than in
+it, and belong to whoever implements the reload step:
+
+- `ActiveSupport::DescendantsTracker` internals changed across Rails 6.0–8.x, so
+  a reload can leave stale entries in a descendants set. Discovery-based
+  extraction must re-read descendants *after* the reload completes, never
+  across it.
+- A schema change needs `reset_column_information` plus schema-cache
+  invalidation to become visible. It is classified `:restart` rather than
+  `:reload` because getting that right in-process is subtle and schema changes
+  are rare.
+
+Nothing consumes the policy yet — it is the contract the phase-2 daemon needs,
+written and tested first.
+
 ## Running the differential harness
 
 `spec/integration/incremental_equivalence_spec.rb` is the oracle. It boots the

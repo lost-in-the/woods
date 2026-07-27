@@ -205,6 +205,17 @@ module Woods
     # GraphQL types all use the same extractor method.
     GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
 
+    # Unit types each extractor owns — the inverse of {TYPE_TO_EXTRACTOR_KEY}.
+    #
+    # Wholesale replacement of an extractor's output has to know every type it
+    # can produce, and one extractor can own several (`graphql` covers types,
+    # mutations, resolvers and queries).
+    #
+    # @return [Hash{Symbol => Array<Symbol>}]
+    EXTRACTOR_KEY_TO_TYPES = TYPE_TO_EXTRACTOR_KEY.each_with_object({}) do |(type, key), map|
+      (map[key] ||= []) << type
+    end.freeze
+
     # Class-based extractors, which discover their units by walking runtime
     # descendants rather than by globbing files. The incremental path
     # reconciles each extractor's `discoverable_classes` against the
@@ -260,14 +271,14 @@ module Woods
     # here instead and these types are re-extracted wholesale whenever the
     # route set is re-run (#164).
     #
-    # @return [Hash{Symbol => Symbol}] extractor key => unit type
-    ROUTE_CONSUMER_EXTRACTORS = {
-      controllers: :controller,
-      mailers: :mailer,
-      components: :component,
-      view_components: :view_component,
-      view_templates: :view_template
-    }.freeze
+    # @return [Array<Symbol>] extractor keys
+    ROUTE_CONSUMER_EXTRACTORS = %i[
+      controllers
+      mailers
+      components
+      view_components
+      view_templates
+    ].freeze
 
     attr_reader :output_dir, :dependency_graph
 
@@ -378,19 +389,10 @@ module Woods
     # @param changed_files [Array<String>] List of changed file paths
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     def extract_changed(changed_files)
-      # Load existing graph
-      graph_path = @output_dir.join('dependency_graph.json')
-      @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path))) if graph_path.exist?
-
-      ModelNameCache.reset!
-
-      # Eager load to ensure newly-added classes are discoverable.
-      safe_eager_load!
+      prepare_incremental_run
 
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       affected_types = Set.new
-      @dependents_dirty = Set.new
-      @incremental_written = {}
 
       # Blast radius from the pre-change graph.
       affected_ids = @dependency_graph.affected_by(change_set.absolute_paths)
@@ -418,7 +420,78 @@ module Woods
       touched.to_a
     end
 
+    # ══════════════════════════════════════════════════════════════════════
+    # Targeted Refresh
+    # ══════════════════════════════════════════════════════════════════════
+
+    # Re-run one or more extractors wholesale against the already-booted app,
+    # replacing every unit of the types they own.
+    #
+    # This is the escape hatch for the unit types that have no per-file entry
+    # point — routes are derived from `Rails.application.routes`, the
+    # middleware unit from the live stack, events from a two-pass scan of all
+    # of `app/`. Incremental runs reach them by trigger path
+    # ({PathDispatcher.whole_app_rules}); this reaches them by name, for a
+    # caller that already knows what went stale: a resident process that just
+    # reloaded, a `woods:refresh` invocation after editing `config/routes.rb`,
+    # a deploy hook after a dependency bump.
+    #
+    # "Full extraction required for these types" was always a cold-boot
+    # artifact rather than something inherent: in a booted process re-running
+    # one extractor is seconds.
+    #
+    # Any extractor key works, not just the whole-app ones — `refresh(:models)`
+    # is a legitimate way to re-derive every model after a schema change.
+    #
+    # @example After editing config/routes.rb
+    #   Woods::Extractor.new(output_dir: "tmp/woods").refresh(:routes)
+    #
+    # @param keys [Array<Symbol>] keys into {EXTRACTORS}
+    # @return [Hash] `{ types:, touched:, unknown: }` — the extractors that
+    #   ran, the identifiers written or removed, and any key that isn't an
+    #   extractor
+    # @raise [ArgumentError] when no recognized key is given
+    def refresh(*keys)
+      keys = Array(keys).flatten.map(&:to_sym).uniq
+      known, unknown = keys.partition { |key| EXTRACTORS.key?(key) }
+      raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
+
+      known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
+      known.uniq!
+
+      prepare_incremental_run
+      affected_types = Set.new
+      touched = known.each_with_object(Set.new) do |key, acc|
+        acc.merge(replace_type_wholesale(key, affected_types))
+      end
+
+      finalize_incremental_unit_json(affected_types)
+      affected_types.each { |type_key| regenerate_type_index(type_key) }
+      finalize_incremental_run(touched)
+
+      { types: known, touched: touched.to_a, unknown: unknown }
+    end
+
     private
+
+    # Load the persisted graph and reset the per-run bookkeeping that the
+    # incremental helpers read. Shared by {#extract_changed} and {#refresh};
+    # calling either without this leaves `@dependents_dirty` and
+    # `@incremental_written` holding a previous run's state.
+    #
+    # @return [void]
+    def prepare_incremental_run
+      graph_path = @output_dir.join('dependency_graph.json')
+      @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path))) if graph_path.exist?
+
+      ModelNameCache.reset!
+      safe_eager_load!
+
+      @dependents_dirty = Set.new
+      @incremental_written = {}
+      @incremental_extractors = nil
+      @active_record_names = nil
+    end
 
     # Write the graph and the derived artifacts after an incremental run.
     #
@@ -1401,21 +1474,22 @@ module Woods
       keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
       return Set.new if keys.empty?
 
-      plan = keys.to_h { |key| [key, WHOLE_APP_EXTRACTORS[key]] }
-      plan = plan.merge(ROUTE_CONSUMER_EXTRACTORS) if keys.include?(:routes)
+      keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
 
-      plan.each_with_object(Set.new) do |(key, unit_type), touched|
-        touched.merge(replace_type_wholesale(key, unit_type, affected_types))
+      keys.each_with_object(Set.new) do |key, touched|
+        touched.merge(replace_type_wholesale(key, affected_types))
       end
     end
 
-    # Replace every unit of one type with a fresh extraction of that type.
+    # Replace every unit an extractor owns with a fresh extraction.
+    #
+    # Units of the extractor's types that the fresh run no longer produces are
+    # removed, which is what makes this a replacement rather than an upsert.
     #
     # @param key [Symbol] extractor key
-    # @param unit_type [Symbol] the unit type that extractor owns
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers written or removed
-    def replace_type_wholesale(key, unit_type, affected_types)
+    def replace_type_wholesale(key, affected_types)
       extractor = extractor_for(key)
       return Set.new unless extractor.respond_to?(:extract_all)
 
@@ -1425,8 +1499,10 @@ module Woods
       touched = register_and_write(key, units, affected_types)
 
       fresh = units.to_set(&:identifier)
-      (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
-        touched.add(stale) if remove_unit(stale, affected_types)
+      EXTRACTOR_KEY_TO_TYPES.fetch(key, []).each do |unit_type|
+        (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
+          touched.add(stale) if remove_unit(stale, affected_types)
+        end
       end
 
       touched

@@ -15,6 +15,7 @@ bundle exec rubocop --auto-gen-config             # Update .rubocop_todo.yml
 # In a host Rails app (extraction requires Rails boot)
 bundle exec rake woods:extract           # Full extraction
 bundle exec rake woods:incremental       # Changed files only
+bundle exec rake "woods:refresh[routes]" # Re-run named extractors wholesale
 bundle exec rake woods:extract_framework # Rails/gem sources
 bundle exec rake woods:validate          # Index integrity check
 bundle exec rake woods:stats             # Show extraction stats
@@ -107,6 +108,7 @@ lib/
 │   ├── extractor.rb                     # Orchestrator — coordinates all extractors
 │   ├── change_set.rb                    # Normalized "what changed" (shared by every entry point)
 │   ├── path_dispatcher.rb               # Changed path → extractor (file rules + whole-app triggers)
+│   ├── reload_policy.rb                 # Changed path → reload/restart/reextract/ignore
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
@@ -271,6 +273,8 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `FlowPrecomputer` is gated by `precompute_flows` config (default: false). Per-action errors are rescued so one failing action doesn't block others.
 - Incremental extraction is held to *equivalence with a full extraction* (#164). `Extractor#extract_changed` runs in a fixed order — blast radius from the pre-change graph, re-extract known units, dispatch changed paths the index has never seen (`PathDispatcher`), reconcile class-based types against their runtime discovery sets, re-run whole-app extractors whose triggers fired, prune vanished units last — and then refreshes `dependents`, `metadata.git`, PageRank and `graph_analysis.json`. The oracle is `spec/integration/incremental_equivalence_spec.rb` (`:booted_app`): randomized create/modify/delete/rename sequences compared against a cold full extraction at every step. Run it before and after touching anything on the incremental path.
 - Unit types with no per-file entry point (`route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`) are listed in `Extractor::WHOLE_APP_EXTRACTORS` and re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger path changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates) — those embed the route table, and the graph can't express that dependency because a route unit depends *on* its controller, not the other way round.
+- `Extractor#refresh(*keys)` (and `woods:refresh`) re-runs named extractors wholesale against a booted app — the by-name counterpart to the by-trigger-path path in `extract_changed`. It shares `replace_type_wholesale`, so a routes refresh cascades to `ROUTE_CONSUMER_EXTRACTORS` there too. Both entry points must call `prepare_incremental_run` first or they inherit the previous run's `@dependents_dirty`/`@incremental_written`.
+- `ReloadPolicy` classifies a changed path as `:ignore`/`:reextract`/`:reload`/`:restart` for a resident process. Nothing consumes it yet (phase 2). Keep it in agreement with `PathDispatcher`: `spec/reload_policy_spec.rb` fails if a dispatchable path is classified `:ignore`.
 - Adding a file-based extractor means adding a `PathDispatcher` rule, or new files of that type will never enter the index incrementally. `spec/path_dispatcher_spec.rb` fails if a `FILE_BASED` type has no rule. Rules reference each extractor's own `*_DIRECTORIES` constant, so a new directory flows through without a second edit.
 - Deletion is driven by the source file being gone. Paths named in the change set are authoritative for any unit type; the safety-net sweep over registered paths is bounded twice — to paths a file rule claims (some units name a *nominal* path: `BehavioralProfile` names `config/application.rb`), and away from class-based units entirely (they fall back to a convention path that need not exist — on Rails < 7.1 `ActiveRecord::SchemaMigration` is a real AR descendant whose `app/models/active_record/schema_migration.rb` the PORO rule *does* claim). Sweeping either would delete units a full extraction still produces.
 - Token estimates must measure `JSON.generate`, not `Hash#to_json`. With ActiveSupport loaded the latter HTML-escapes `>` to `\u003e`, and the unit file is written with `JSON.generate` — so estimating with `to_json` describes a document that was never written. `ExtractedUnit#estimated_tokens` and `Extractor#estimated_tokens_from` must stay on the same serializer or full and incremental runs disagree on `_index.json`.

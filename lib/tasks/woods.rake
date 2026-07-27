@@ -98,6 +98,40 @@ namespace :woods do
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
 
+  desc 'Re-run named extractors wholesale, e.g. woods:refresh[routes,middleware]'
+  task :refresh, [:extractor] => :environment do |_task, args|
+    require 'woods/extractor'
+
+    keys = [args[:extractor], *args.extras].compact.map(&:strip).reject(&:empty?)
+
+    if keys.empty?
+      puts 'Usage: rake "woods:refresh[routes]"  (comma-separate for several)'
+      puts
+      puts 'Whole-app extractors — no per-file entry point, so these are the'
+      puts 'ones a targeted refresh is normally for:'
+      puts "  #{Woods::Extractor::WHOLE_APP_EXTRACTORS.keys.sort.join(', ')}"
+      puts
+      puts 'Any extractor key is accepted:'
+      puts "  #{Woods::Extractor::EXTRACTORS.keys.sort.join(', ')}"
+      exit 1
+    end
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    extractor = Woods::Extractor.new(output_dir: output_dir)
+
+    begin
+      result = extractor.refresh(*keys)
+    rescue ArgumentError => e
+      puts "ERROR: #{e.message}"
+      puts "Known extractors: #{Woods::Extractor::EXTRACTORS.keys.sort.join(', ')}"
+      exit 1
+    end
+
+    puts "Refreshed: #{result[:types].join(', ')}"
+    puts "Warning: ignored unknown extractor(s): #{result[:unknown].join(', ')}" if result[:unknown].any?
+    puts "#{result[:touched].size} unit(s) written or removed."
+  end
+
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'
   task extract_framework: :environment do
     require 'woods/extractors/rails_source_extractor'

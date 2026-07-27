@@ -40,6 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
+  named extractors wholesale against an already-booted app, replacing every unit of the types
+  they own. The unit types with no per-file entry point — routes, middleware, engines,
+  scheduled jobs, state machines, factories, events, database views — were only reachable by
+  full extraction from a cold boot, which was an artifact of the boot cost rather than
+  anything inherent: in a booted process re-running one extractor takes seconds. A routes
+  refresh cascades to the extractors that embed the route table. Any extractor key is
+  accepted, so `refresh(:models)` is a legitimate way to re-derive models after a schema
+  change.
+- **`Woods::ReloadPolicy`** — the reload-trigger inventory (#164). Classifies a changed path
+  as `:ignore`, `:reextract` (Woods reads bytes; no Rails involvement), `:reload` (an
+  autoloaded constant changed) or `:restart` (boot-captured state changed — initializers,
+  `config/**`, `Gemfile.lock`, schema). Nothing consumes it yet; it is the contract a
+  file-watching daemon needs, written and tested against the `railties >= 6.0` support matrix
+  before the daemon exists.
 - **Differential test harness for incremental extraction**
   (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
   randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at

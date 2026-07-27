@@ -651,6 +651,99 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── refresh ──────────────────────────────────────────────────────────
+
+  describe '#refresh' do
+    before do
+      require 'woods'
+      # Time.current and Rails.version are reached through write_manifest;
+      # see the #write_manifest context for why the require + stub are needed.
+      require 'active_support/core_ext/time'
+      allow(Time).to receive(:current).and_return(Time.now)
+      allow(Rails).to receive(:version).and_return('8.0.0')
+      allow(Rails).to receive(:application).and_return(double('Application', eager_load!: nil))
+      allow(Woods::ModelNameCache).to receive(:reset!)
+      FileUtils.mkdir_p(File.join(tmpdir, 'output'))
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    # Stub the named extractors, plus the route consumers a routes refresh
+    # cascades to — those instantiate against a live route table, which this
+    # unit-level context has no business booting.
+    def stub_extractor(key, units)
+      cascaded = described_class::ROUTE_CONSUMER_EXTRACTORS.to_h do |consumer|
+        [consumer, double(new: double("#{consumer}Extractor", extract_all: []))]
+      end
+      stubbed = cascaded.merge(key => double(new: double("#{key}Extractor", extract_all: units)))
+
+      stub_const('Woods::Extractor::EXTRACTORS', described_class::EXTRACTORS.merge(stubbed))
+    end
+
+    def unit(type:, identifier:)
+      Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: nil)
+    end
+
+    it 'runs the named extractor and reports what it touched' do
+      stub_extractor(:routes, [unit(type: :route, identifier: 'GET /posts')])
+
+      result = extractor.refresh(:routes)
+
+      expect(result[:types]).to include(:routes)
+      expect(result[:touched]).to include('GET /posts')
+    end
+
+    it 'accepts strings as well as symbols' do
+      stub_extractor(:middleware, [unit(type: :middleware, identifier: 'MiddlewareStack')])
+
+      expect(extractor.refresh('middleware')[:types]).to eq([:middleware])
+    end
+
+    it 'replaces the type wholesale, dropping units the fresh run no longer produces' do
+      graph = extractor.dependency_graph
+      graph.register(unit(type: :route, identifier: 'GET /gone'))
+      stub_extractor(:routes, [unit(type: :route, identifier: 'GET /posts')])
+
+      result = extractor.refresh(:routes)
+
+      expect(result[:touched]).to include('GET /gone')
+      expect(graph.node_exists?('GET /gone')).to be(false)
+      expect(graph.node_exists?('GET /posts')).to be(true)
+    end
+
+    # Controllers and friends embed the route table, so refreshing routes
+    # without them would leave their metadata describing the old route set.
+    it 'cascades a routes refresh to the extractors that embed the route table' do
+      stub_extractor(:routes, [])
+
+      expect(extractor.refresh(:routes)[:types]).to include(*described_class::ROUTE_CONSUMER_EXTRACTORS)
+    end
+
+    it 'reports unknown keys instead of failing when at least one is known' do
+      stub_extractor(:routes, [])
+
+      result = extractor.refresh(:routes, :not_an_extractor)
+
+      expect(result[:unknown]).to eq([:not_an_extractor])
+      expect(result[:types]).to include(:routes)
+    end
+
+    it 'raises when no key is recognized' do
+      expect { extractor.refresh(:nonsense) }.to raise_error(ArgumentError, /No known extractor/)
+    end
+
+    it 'writes the dependency graph so the refresh is durable' do
+      stub_extractor(:routes, [unit(type: :route, identifier: 'GET /posts')])
+
+      extractor.refresh(:routes)
+
+      graph = JSON.parse(File.read(File.join(tmpdir, 'output', 'dependency_graph.json')))
+      expect(graph['nodes']).to have_key('GET /posts')
+    end
+  end
+
   # ── estimated_tokens_from ────────────────────────────────────────────
 
   # A full extraction indexes a unit's token estimate from the in-memory

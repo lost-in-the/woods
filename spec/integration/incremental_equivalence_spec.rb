@@ -363,6 +363,70 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── Targeted refresh (phase 1) ───────────────────────────────────────────
+
+  describe 'Extractor#refresh' do
+    it 'brings routes back into agreement with a full extraction' do
+      index_dir = Dir.mktmpdir('woods_refresh')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      write_file('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          resources :posts
+          resources :comments, only: [:index, :show]
+        end
+      RUBY
+      Rails.application.reload_routes!
+
+      # No change set, no path dispatch — just "routes went stale, fix routes".
+      result = Woods::Extractor.new(output_dir: index_dir).refresh(:routes)
+      expect(result[:types]).to include(:routes)
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to(be_empty, "refresh(:routes) diverged:\n  #{found.join("\n  ")}")
+    end
+
+    it 'drops route units the new route set no longer defines' do
+      index_dir = Dir.mktmpdir('woods_refresh_shrink')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      before_routes = index_snapshot(index_dir)['routes'].map { |e| e['identifier'] }
+      expect(before_routes).to include('GET /posts/:id')
+
+      write_file('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          resources :posts, only: [:index]
+        end
+      RUBY
+      Rails.application.reload_routes!
+      Woods::Extractor.new(output_dir: index_dir).refresh(:routes)
+
+      after_routes = index_snapshot(index_dir)['routes'].map { |e| e['identifier'] }
+      expect(after_routes).not_to include('GET /posts/:id')
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'refreshes a file-scanning whole-app extractor without a change set' do
+      index_dir = Dir.mktmpdir('woods_refresh_factories')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      write_file('spec/factories/posts.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :post do
+            title { 'x' }
+          end
+        end
+      RUBY
+
+      Woods::Extractor.new(output_dir: index_dir).refresh(:factories)
+
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+  end
+
   # ── Randomized differential run ──────────────────────────────────────────
 
   # The gap-specific examples above pin known failures; this is the part that
