@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'rake'
+require 'tmpdir'
 
 # Guards the seam every other spec papers over.
 #
@@ -52,6 +53,70 @@ RSpec.describe 'lib/tasks/woods.rake requires' do
 
     expect(body).to include("require 'woods/extractor'")
     expect(body).to include("require 'woods/watch/daemon'")
+  end
+
+  # The task bodies were only half the surface. `woods_with_extraction_lock` is
+  # on the path of every write task, and its default `wait` reads a constant
+  # from the daemon — resolved *above* its own requires, it NameError'd every
+  # incremental sync. Same load-order bug as the missing require it was written
+  # alongside.
+  describe 'shared helpers' do
+    def helper_body(name)
+      lines = source.lines
+      start = lines.index { |line| line.match?(/^  def #{Regexp.escape(name)}\b/) }
+      raise "could not locate the #{name} helper in lib/tasks/woods.rake" if start.nil?
+
+      rest = lines[(start + 1)..]
+      stop = rest.index { |line| line.match?(/^  (def|desc|task)\b/) } || rest.length
+      rest[0...stop].join
+    end
+
+    it 'requires before naming any constant those requires provide' do
+      body = helper_body('woods_with_extraction_lock')
+      lines = body.lines
+
+      first_require = lines.index { |line| line.include?("require 'woods/watch/daemon'") }
+      first_use = lines.index { |line| line.include?('Woods::Watch::Daemon') && !line.include?('require') }
+
+      expect(first_require).not_to(be_nil, 'the helper must require the daemon it names')
+      expect(first_use).to(
+        be > first_require,
+        'woods_with_extraction_lock names Woods::Watch::Daemon before requiring it — NameError at runtime'
+      )
+    end
+
+    it 'requires the pipeline lock it constructs' do
+      expect(helper_body('woods_with_extraction_lock'))
+        .to include("require 'woods/coordination/pipeline_lock'")
+    end
+
+    it 'requires the status class the coverage helper reads' do
+      expect(helper_body('woods_daemon_coverage')).to include("require 'woods/watch/status'")
+    end
+
+    # The text checks above encode *why* it broke; this one just runs it. The
+    # helper takes no Rails, so the load-order path every write task depends on
+    # is directly executable — which is the check that would have caught both
+    # NameErrors without anyone reasoning about requires at all.
+    describe 'executed against a real directory' do
+      before { load File.expand_path('../../lib/tasks/woods.rake', __dir__) }
+
+      it 'acquires, yields and releases without a booted Rails' do
+        Dir.mktmpdir('woods_helper') do |dir|
+          ran = false
+          Object.new.send(:woods_with_extraction_lock, dir) { ran = true }
+
+          expect(ran).to be(true)
+          expect(Dir.children(dir).grep(/\.lock\z/)).to be_empty
+        end
+      end
+
+      it 'honours an explicit wait without consulting the daemon default' do
+        Dir.mktmpdir('woods_helper') do |dir|
+          expect { Object.new.send(:woods_with_extraction_lock, dir, wait: 0) { nil } }.not_to raise_error
+        end
+      end
+    end
   end
 
   # The daemon resolves Woods::Extractor lazily inside its default factory, so

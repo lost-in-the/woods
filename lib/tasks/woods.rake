@@ -38,9 +38,14 @@ namespace :woods do
   # overrides it; exceeding it exits non-zero rather than corrupting the index,
   # which is the outcome a CI job or a developer can actually act on.
   def woods_with_extraction_lock(output_dir, wait: nil)
-    wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
+    # Requires first. The default wait reads a constant from the daemon, so
+    # resolving it above these lines NameError'd every write task — the same
+    # load-order bug as the missing require in `woods:watch`, reintroduced one
+    # method over by the fix for it.
     require 'woods/coordination/pipeline_lock'
     require 'woods/watch/daemon'
+
+    wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
 
     lock = Woods::Coordination::PipelineLock.new(
       lock_dir: output_dir.to_s,
