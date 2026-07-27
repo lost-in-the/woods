@@ -432,6 +432,9 @@ Off by default because a single-worktree host wants the daemon to stay up.
 
 | Property | Where |
 |---|---|
+| A real file write reaches `extract_changed` — watcher thread, callback, debounce and drain loop end to end | `spec/watch/watcher_integration_spec.rb` |
+| A burst coalesces into one extraction; a same-second rewrite is not lost; a `stop` racing startup is honoured | same |
+| A real `Rails.application.reloader` picks up changed source, under the interlock unload lock | `spec/integration/watch_daemon_spec.rb` |
 | Concurrent cycles serialize; no deadlock; no orphaned lock, even when extraction raises | `spec/watch/multi_instance_spec.rb` |
 | Contended cycle carries its paths forward | same |
 | Idle TTL exits and records why | same |
