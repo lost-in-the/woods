@@ -859,6 +859,45 @@ module Woods
     #
     # Must run after enrich_with_git_data, which needs absolute paths for
     # File.exist? checks and git log commands.
+    # Write a unit's JSON, unless the bytes on disk are already exactly that.
+    #
+    # A routes change replaces every `ROUTE_CONSUMER_EXTRACTORS` type wholesale
+    # — on a production-shaped host that measured 1,707 units, roughly a quarter
+    # of the index — and almost all of them re-serialize to the bytes already
+    # there. `AtomicFile.write` is a tempfile plus an fsync plus a rename each
+    # time, so the fsync is the cost being avoided here; the comparison read is
+    # cheaper than the write it replaces.
+    #
+    # Only the *write* is skipped. Graph registration, the dependents marking
+    # and `@incremental_written` all still happen for every unit, because those
+    # are what equivalence and the git-enrichment pass depend on — skipping any
+    # of them would make an unchanged unit differ from a full extraction.
+    #
+    # Compared as bytes: `AtomicFile.write` is binmode, and the encoding a read
+    # comes back tagged with depends on the process's default external encoding
+    # (US-ASCII under `LANG=C`, which is where the daemon runs).
+    #
+    # @param path [Pathname] destination
+    # @param unit [ExtractedUnit] unit to serialize
+    # @return [void]
+    def write_unit_file(path, unit)
+      payload = json_serialize(unit.to_h)
+      return if identical_on_disk?(path, payload)
+
+      AtomicFile.write(path, payload)
+    end
+
+    # @return [Boolean] true when the file already holds exactly these bytes
+    def identical_on_disk?(path, payload)
+      return false unless File.exist?(path)
+
+      AtomicFile.read(path).b == payload.b
+    rescue StandardError
+      # An unreadable or half-written file is not a match; fall through and
+      # rewrite it.
+      false
+    end
+
     def normalize_file_paths
       @results.each_value do |units|
         units.each do |unit|
@@ -1778,10 +1817,7 @@ module Woods
         # Keyed by relative path, which is how batch_git_data keys its result.
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
-        AtomicFile.write(
-          type_dir.join(collision_safe_filename(unit.identifier)),
-          json_serialize(unit.to_h)
-        )
+        write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
         written.add(unit.identifier)
       end
     end

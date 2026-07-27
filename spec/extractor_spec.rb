@@ -1399,4 +1399,53 @@ RSpec.describe Woods::Extractor do
       extractor.send(:log_summary)
     end
   end
+
+  # A routes change replaces every route-consuming type wholesale, and almost
+  # all of those units re-serialize to the bytes already on disk. Skipping the
+  # write must not skip the bookkeeping equivalence depends on.
+  describe '#write_unit_file' do
+    let(:write_tmpdir) { Dir.mktmpdir('woods_write_skip') }
+    let(:output_dir) { File.join(write_tmpdir, 'output') }
+    let(:extractor) { described_class.new(output_dir: output_dir) }
+
+    before { FileUtils.mkdir_p(output_dir) }
+
+    after { FileUtils.rm_rf(write_tmpdir) }
+    let(:unit) do
+      Woods::ExtractedUnit.new(
+        type: :model, identifier: 'Widget', file_path: 'app/models/widget.rb'
+      ).tap { |u| u.source_code = 'class Widget; end' }
+    end
+    let(:target) { Pathname.new(File.join(output_dir, 'widget.json')) }
+
+    it 'writes when the file does not exist' do
+      extractor.send(:write_unit_file, target, unit)
+
+      expect(target).to exist
+    end
+
+    it 'does not rewrite when the bytes are unchanged' do
+      extractor.send(:write_unit_file, target, unit)
+      expect(Woods::AtomicFile).not_to receive(:write)
+
+      extractor.send(:write_unit_file, target, unit)
+    end
+
+    it 'rewrites when the content changed' do
+      extractor.send(:write_unit_file, target, unit)
+      unit.source_code = 'class Widget; def call; end; end'
+
+      extractor.send(:write_unit_file, target, unit)
+
+      expect(Woods::AtomicFile.read(target)).to include('def call')
+    end
+
+    it 'rewrites when the file on disk is corrupt' do
+      File.binwrite(target, 'not json at all')
+
+      extractor.send(:write_unit_file, target, unit)
+
+      expect(Woods::AtomicFile.read(target)).to include('Widget')
+    end
+  end
 end
