@@ -37,13 +37,19 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of controller units
       def extract_all
-        controllers = ApplicationController.descendants
-
-        controllers = (controllers + ActionController::API.descendants).uniq if defined?(ActionController::API)
-
-        controllers.map do |controller|
+        discoverable_classes.map do |controller|
           extract_controller(controller)
         end.compact
+      end
+
+      # The controller classes this extractor would extract from the running
+      # app. Shared with the incremental path's class reconciliation (#164).
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
+        controllers = ApplicationController.descendants
+        controllers = (controllers + ActionController::API.descendants).uniq if defined?(ActionController::API)
+        controllers
       end
 
       # Extract a single controller

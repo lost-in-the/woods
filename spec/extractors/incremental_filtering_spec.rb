@@ -13,7 +13,9 @@ require 'woods/extractor'
 #   EventExtractor — two-pass, no single-file extraction method
 #
 # These types are in TYPE_TO_EXTRACTOR_KEY and EXTRACTORS but are absent from
-# both FILE_BASED and CLASS_BASED, so re_extract_unit returns nil and skips them.
+# both FILE_BASED and CLASS_BASED, so re_extract_unit reports "not re-extracted"
+# and skips them. Whole-app re-runs for these types are driven separately, by
+# trigger path, in Extractor#rerun_whole_app_extractors (#164).
 #
 # Types that DO have single-file support (FILE_BASED or CLASS_BASED) should
 # reach the extractor dispatch — verified here with a lightweight double.
@@ -56,13 +58,13 @@ RSpec.describe Woods::Extractor, '#re_extract_unit filtering' do
 
   describe 'unsupported types are silently skipped' do
     INCREMENTAL_UNSUPPORTED_TYPES.each do |type|
-      it "returns nil and does not raise for type :#{type}" do
+      it "reports no re-extraction and does not raise for type :#{type}" do
         unit_id = "Sample#{type.to_s.camelize}"
         register_node(type, unit_id)
 
         result = nil
         expect { result = extractor.send(:re_extract_unit, unit_id) }.not_to raise_error
-        # nil return means no unit was produced — the type was silently skipped
+        # A nil return means no unit was produced — the type was skipped
         expect(result).to be_nil
       end
     end

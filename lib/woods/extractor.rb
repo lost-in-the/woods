@@ -49,6 +49,8 @@ require_relative 'extractors/lib_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
+require_relative 'change_set'
+require_relative 'path_dispatcher'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -203,6 +205,70 @@ module Woods
     # GraphQL types all use the same extractor method.
     GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
 
+    # Class-based extractors, which discover their units by walking runtime
+    # descendants rather than by globbing files. The incremental path
+    # reconciles each extractor's `discoverable_classes` against the
+    # identifiers already in the graph, so a class added since the last
+    # extraction is found without having to guess a constant name from a
+    # path (#164, gap 1).
+    #
+    # @return [Hash{Symbol => Hash}] extractor key => { type:, method: }
+    CLASS_BASED_DISCOVERY = {
+      models: { type: :model, method: :extract_model },
+      controllers: { type: :controller, method: :extract_controller },
+      mailers: { type: :mailer, method: :extract_mailer },
+      components: { type: :component, method: :extract_component },
+      view_components: { type: :view_component, method: :extract_component },
+      action_cable_channels: { type: :action_cable_channel, method: :extract_channel }
+    }.freeze
+
+    # Extractors with no per-file entry point: they scan the whole app (or
+    # introspect the whole runtime) in one pass, so an incremental run
+    # replaces their output wholesale rather than per unit. Before #164
+    # these types were simply skipped by incremental runs while
+    # `config/routes.rb` still triggered one — the run rewrote the manifest,
+    # zeroing the staleness clock, without updating the data.
+    #
+    # `rails_source` is deliberately absent: framework sources change only on
+    # a dependency bump and have their own `woods:extract_framework` task.
+    #
+    # @return [Hash{Symbol => Symbol}] extractor key => unit type
+    WHOLE_APP_EXTRACTORS = {
+      routes: :route,
+      middleware: :middleware,
+      engines: :engine,
+      scheduled_jobs: :scheduled_job,
+      state_machines: :state_machine,
+      factories: :factory,
+      events: :event,
+      # DatabaseViewExtractor keeps only the highest `_vNN` of each Scenic
+      # view, so its unit set is a function of the whole directory rather
+      # than of each file independently: dispatching db/views/foo_v01.sql to
+      # the per-file method would index a version a full extraction drops.
+      database_views: :database_view
+    }.freeze
+
+    # Extractors whose output embeds the route table, and which therefore go
+    # stale when routes change even though none of their own files did.
+    #
+    # ControllerExtractor writes each action's routes into unit metadata and
+    # into the action chunks; everything that includes `RouteHelperResolver`
+    # resolves `_path`/`_url` references into navigation edges against the
+    # same table. The dependency graph can't express this — a route unit
+    # depends *on* its controller, so walking dependents from
+    # `config/routes.rb` never reaches it — so the relationship is declared
+    # here instead and these types are re-extracted wholesale whenever the
+    # route set is re-run (#164).
+    #
+    # @return [Hash{Symbol => Symbol}] extractor key => unit type
+    ROUTE_CONSUMER_EXTRACTORS = {
+      controllers: :controller,
+      mailers: :mailer,
+      components: :component,
+      view_components: :view_component,
+      view_templates: :view_template
+    }.freeze
+
     attr_reader :output_dir, :dependency_graph
 
     def initialize(output_dir: nil)
@@ -287,11 +353,30 @@ module Woods
     # Incremental Extraction
     # ══════════════════════════════════════════════════════════════════════
 
-    # Extract only units affected by changed files
-    # Used for incremental indexing in CI
+    # Extract only units affected by changed files.
+    #
+    # Used for incremental indexing in CI and by any caller that maintains a
+    # live index. The goal is equivalence: after this returns, the on-disk
+    # index should match what a cold full extraction of the same tree would
+    # have produced.
+    #
+    # The run proceeds in a fixed order, and the order matters:
+    #
+    # 1. Blast radius is computed against the *pre-change* graph, so
+    #    dependents of a file that just disappeared still get re-extracted.
+    # 2. Known units in the blast radius are re-extracted.
+    # 3. Changed paths the index has never seen are dispatched to an
+    #    extractor by path ({PathDispatcher}).
+    # 4. Class-based types are reconciled against their runtime discovery
+    #    sets, catching classes added since the last extraction.
+    # 5. Whole-app extractors whose trigger paths changed are re-run and
+    #    their type replaced wholesale.
+    # 6. Units whose source file has vanished are pruned last, so anything
+    #    resurrected by steps 2–5 against a deleted file is swept in the
+    #    same run rather than surviving as a ghost until the next one.
     #
     # @param changed_files [Array<String>] List of changed file paths
-    # @return [Array<String>] List of re-extracted unit identifiers
+    # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     def extract_changed(changed_files)
       # Load existing graph
       graph_path = @output_dir.join('dependency_graph.json')
@@ -302,42 +387,83 @@ module Woods
       # Eager load to ensure newly-added classes are discoverable.
       safe_eager_load!
 
-      # Normalize relative paths (from git diff) to absolute (as stored in file_map)
-      absolute_files = changed_files.map do |f|
-        Pathname.new(f).absolute? ? f : Rails.root.join(f).to_s
-      end
-
-      # Compute affected units
-      affected_ids = @dependency_graph.affected_by(absolute_files)
-      Rails.logger.info "[Woods] #{changed_files.size} changed files affect #{affected_ids.size} units"
-
-      # Re-extract affected units
+      change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       affected_types = Set.new
-      affected_ids.each do |unit_id|
-        re_extract_unit(unit_id, affected_types: affected_types)
+      @dependents_dirty = Set.new
+      @incremental_written = {}
+
+      # Blast radius from the pre-change graph.
+      affected_ids = @dependency_graph.affected_by(change_set.absolute_paths)
+      Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
+
+      touched = reconcile_changed_paths(change_set, affected_types)
+
+      (affected_ids - touched.to_a).each do |unit_id|
+        touched.add(unit_id) if re_extract_unit(unit_id, affected_types: affected_types)
       end
+
+      touched.merge(reconcile_class_based_types(affected_types))
+      touched.merge(rerun_whole_app_extractors(change_set, affected_types))
+      touched.merge(prune_vanished_units(change_set, affected_types))
+
+      finalize_incremental_unit_json(affected_types)
 
       # Regenerate type indexes for affected types
       affected_types.each do |type_key|
         regenerate_type_index(type_key)
       end
 
-      # Update graph, manifest, and summary. No capture_snapshot here:
-      # snapshots must hash the FULL unit set, and incremental runs only
-      # re-extract affected units (@results stays empty) — capturing would
-      # record a snapshot whose diff reports every unit as deleted.
-      # Snapshots are captured on full extraction only.
-      write_dependency_graph
-      write_manifest(incremental: true)
-      write_structural_summary
-      if Woods.configuration.enable_snapshots
-        Rails.logger.info '[Woods] Skipping snapshot capture — snapshots are captured on full extraction only'
-      end
+      finalize_incremental_run(touched)
 
-      affected_ids
+      touched.to_a
     end
 
     private
+
+    # Write the graph and the derived artifacts after an incremental run.
+    #
+    # The manifest is rewritten only when the run actually changed something.
+    # `staleness_seconds` is derived from the manifest timestamp, so touching
+    # it after a no-op run reports the index as freshly synced when nothing
+    # was re-read — the misleading half of #164 gap 4. The graph is written
+    # unconditionally: it is cheap, idempotent, and carries the PageRank
+    # recomputation.
+    #
+    # No `capture_snapshot` here: snapshots must hash the FULL unit set, and
+    # incremental runs only hold changed units in memory — capturing would
+    # record a snapshot whose diff reports every other unit as deleted.
+    #
+    # @param touched [Set<String>] identifiers added, re-extracted, or removed
+    # @return [void]
+    def finalize_incremental_run(touched)
+      write_dependency_graph
+
+      if touched.empty?
+        Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
+        return
+      end
+
+      write_incremental_graph_analysis
+      write_manifest(incremental: true)
+      write_structural_summary
+      return unless Woods.configuration.enable_snapshots
+
+      Rails.logger.info '[Woods] Skipping snapshot capture — snapshots are captured on full extraction only'
+    end
+
+    # Recompute graph_analysis.json after an incremental graph write.
+    #
+    # Structural analysis (orphans, hubs, cycles, bridges) is derived purely
+    # from the graph, so leaving it at the last full extraction's values let
+    # it drift continuously between full runs (#164 gap 5).
+    #
+    # @return [void]
+    def write_incremental_graph_analysis
+      @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
+      write_graph_analysis
+    rescue StandardError => e
+      Rails.logger.error "[Woods] Incremental graph analysis failed: #{e.message}"
+    end
 
     # ──────────────────────────────────────────────────────────────────────
     # Eager Loading
@@ -1087,28 +1213,457 @@ module Woods
     # Incremental Re-extraction
     # ──────────────────────────────────────────────────────────────────────
 
+    # Extractor instances are reused across a single incremental run, the way
+    # full extraction uses one instance per type. Several of them do real
+    # setup work in `initialize` (route-helper maps, routes maps), so a fresh
+    # instance per file would make an N-file change N times more expensive.
+    #
+    # @param key [Symbol] key into {EXTRACTORS}
+    # @return [Object, nil] the memoized extractor instance
+    def extractor_for(key)
+      @incremental_extractors ||= {}
+      return @incremental_extractors[key] if @incremental_extractors.key?(key)
+
+      @incremental_extractors[key] = EXTRACTORS[key]&.new
+    rescue StandardError => e
+      Rails.logger.warn "[Woods] Could not build #{key} extractor: #{e.message}"
+      @incremental_extractors[key] = nil
+    end
+
+    # ActiveRecord model names, needed by PoroExtractor to tell a plain class
+    # under app/models apart from a persisted model. Computed once per run.
+    #
+    # @return [Set<String>]
+    def active_record_names
+      @active_record_names ||=
+        if defined?(ActiveRecord::Base)
+          ActiveRecord::Base.descendants.filter_map(&:name).to_set
+        else
+          Set.new
+        end
+    end
+
+    # Re-extract every file-based unit defined by the changed paths that still
+    # exist on disk, and prune the ones those paths no longer define.
+    #
+    # This is the fix for #164 gap 1 (a path the index has never seen routed
+    # nowhere, so new files were silently ignored) and the per-path half of
+    # gap 3 (a file that defines several units — a `.rake` file with multiple
+    # tasks, an i18n YAML — could only ever resolve to one identifier).
+    # Reconciling the whole path at once means a task deleted from a
+    # multi-task file is removed rather than left behind.
+    #
+    # Removal is scoped to the unit types the matching rules could have
+    # produced, so a class-based unit sharing the path (the `User` model unit
+    # for `app/models/user.rb`) is never collaterally deleted here.
+    #
+    # @param change_set [ChangeSet]
+    # @param affected_types [Set<Symbol>] out-param of touched extractor keys
+    # @return [Set<String>] identifiers written or removed
+    def reconcile_changed_paths(change_set, affected_types)
+      dispatcher = PathDispatcher.new
+      touched = Set.new
+
+      change_set.existing_paths.each do |absolute_path|
+        rules = dispatcher.file_rules_for(change_set.relativize(absolute_path))
+        next if rules.empty?
+
+        produced = Set.new
+        rules.each do |rule|
+          units = extract_with_rule(rule, absolute_path)
+          produced.merge(units.map(&:identifier))
+          touched.merge(register_and_write(rule.extractor_key, units, affected_types))
+        end
+
+        touched.merge(
+          prune_path_leftovers(absolute_path, rules, produced, affected_types)
+        )
+      end
+
+      touched
+    end
+
+    # Run one {PathDispatcher::Rule} against one file.
+    #
+    # @param rule [PathDispatcher::Rule]
+    # @param absolute_path [String]
+    # @return [Array<ExtractedUnit>]
+    def extract_with_rule(rule, absolute_path)
+      extractor = extractor_for(rule.extractor_key)
+      return [] unless extractor.respond_to?(rule.method_name)
+
+      result =
+        if rule.extractor_key == :poros
+          # PoroExtractor needs the AR name set to reject persisted models;
+          # its default is an empty set, which would misfile every model
+          # under app/models as a PORO on the incremental path.
+          extractor.public_send(rule.method_name, absolute_path, ar_names: active_record_names)
+        else
+          extractor.public_send(rule.method_name, absolute_path)
+        end
+
+      Array(result).compact
+    rescue StandardError => e
+      Rails.logger.warn "[Woods] #{rule.extractor_key} re-extraction of #{absolute_path} failed: #{e.message}"
+      []
+    end
+
+    # Remove units the graph still attributes to a path that the path no
+    # longer produces — but only for the types the matching rules cover.
+    #
+    # @param absolute_path [String]
+    # @param rules [Array<PathDispatcher::Rule>]
+    # @param produced [Set<String>] identifiers just extracted from the path
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers removed
+    def prune_path_leftovers(absolute_path, rules, produced, affected_types)
+      covered_keys = rules.to_set(&:extractor_key)
+      removed = Set.new
+
+      @dependency_graph.identifiers_for_path(absolute_path).each do |identifier|
+        next if produced.include?(identifier)
+
+        node_type = @dependency_graph.node(identifier)&.fetch(:type, nil)
+        next unless covered_keys.include?(TYPE_TO_EXTRACTOR_KEY[node_type])
+
+        removed.add(identifier) if remove_unit(identifier, affected_types)
+      end
+
+      removed
+    end
+
+    # Reconcile class-based types against their runtime discovery sets.
+    #
+    # Models, controllers, mailers, components and channels are discovered by
+    # walking descendants, not by globbing files, so a class added since the
+    # last extraction is invisible to any path-based dispatch. Comparing each
+    # extractor's `discoverable_classes` against the identifiers already in
+    # the graph finds exactly those additions, using the same discovery code
+    # a full extraction uses.
+    #
+    # Only *additions* are handled here. Removals go through
+    # {#prune_vanished_units}, which keys on the source file being gone —
+    # a constant can outlive its file in a resident process that has not
+    # reloaded, and treating "absent from descendants" as deletion would make
+    # a partial eager load (the documented NameError fallback) erase whole
+    # types.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers added
+    def reconcile_class_based_types(affected_types)
+      added = Set.new
+
+      CLASS_BASED_DISCOVERY.each do |key, spec|
+        extractor = extractor_for(key)
+        next unless extractor.respond_to?(:discoverable_classes)
+
+        known = @dependency_graph.units_of_type(spec[:type]).to_set
+        new_classes = extractor.discoverable_classes.reject { |k| k.name.nil? || known.include?(k.name) }
+        next if new_classes.empty?
+
+        units = new_classes.filter_map do |klass|
+          extractor.public_send(spec[:method], klass)
+        rescue StandardError => e
+          Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
+          nil
+        end
+
+        added.merge(register_and_write(key, units, affected_types))
+      end
+
+      added
+    end
+
+    # Re-run whole-app extractors whose trigger paths changed, replacing that
+    # unit type wholesale.
+    #
+    # These extractors have no per-file entry point — a route unit is derived
+    # from `Rails.application.routes`, the middleware unit from the live
+    # stack, events from a two-pass scan of all of `app/`. Before this,
+    # incremental runs skipped them entirely, so a routes-only change
+    # triggered a run that re-extracted nothing while still rewriting the
+    # manifest (#164 gap 4). In an already-booted process re-running them is
+    # cheap, which is what makes wholesale replacement the right shape.
+    #
+    # @param change_set [ChangeSet]
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers written or removed
+    def rerun_whole_app_extractors(change_set, affected_types)
+      keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
+      return Set.new if keys.empty?
+
+      plan = keys.to_h { |key| [key, WHOLE_APP_EXTRACTORS[key]] }
+      plan = plan.merge(ROUTE_CONSUMER_EXTRACTORS) if keys.include?(:routes)
+
+      plan.each_with_object(Set.new) do |(key, unit_type), touched|
+        touched.merge(replace_type_wholesale(key, unit_type, affected_types))
+      end
+    end
+
+    # Replace every unit of one type with a fresh extraction of that type.
+    #
+    # @param key [Symbol] extractor key
+    # @param unit_type [Symbol] the unit type that extractor owns
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers written or removed
+    def replace_type_wholesale(key, unit_type, affected_types)
+      extractor = extractor_for(key)
+      return Set.new unless extractor.respond_to?(:extract_all)
+
+      units = Array(extractor.extract_all).compact.uniq(&:identifier)
+      Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
+
+      touched = register_and_write(key, units, affected_types)
+
+      fresh = units.to_set(&:identifier)
+      (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
+        touched.add(stale) if remove_unit(stale, affected_types)
+      end
+
+      touched
+    rescue StandardError => e
+      Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
+      Set.new
+    end
+
+    # Prune units whose source file no longer exists (#164 gap 2).
+    #
+    # Two inputs, deliberately:
+    #
+    # * **The change set.** A path the caller reports as changed which is no
+    #   longer on disk is authoritative — every unit the graph attributes to
+    #   it goes, whatever its type. This is the path that handles a deleted
+    #   model or controller, and the old side of a rename (git's
+    #   `--no-renames` semantics).
+    # * **A sweep** over registered paths, for callers whose change set is
+    #   incomplete: a git diff that omits deletions, a watcher that missed an
+    #   unlink, a branch switch. The sweep is limited to paths a
+    #   {PathDispatcher} file rule claims, because those are the paths whose
+    #   unit *is* a function of a file existing. Some units point at a
+    #   nominal path instead — `BehavioralProfile` names
+    #   `config/application.rb`, and a class-based unit falls back to a
+    #   convention path when its source location can't be resolved — and
+    #   sweeping those would delete units a full extraction still produces.
+    #
+    # Only paths under `Rails.root` are considered either way. Framework
+    # units point at gem paths, and an index restored from a CI artifact can
+    # carry paths produced under a different root; neither is a deletion.
+    #
+    # @param change_set [ChangeSet]
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers removed
+    def prune_vanished_units(change_set, affected_types)
+      root_prefix = "#{Rails.root}/"
+      dispatcher = PathDispatcher.new
+      removed = Set.new
+
+      candidates = change_set.missing_paths.to_set
+      @dependency_graph.registered_paths.each do |path|
+        next if candidates.include?(path)
+        next unless path.to_s.start_with?(root_prefix)
+        next if File.exist?(path)
+        next if dispatcher.file_rules_for(change_set.relativize(path)).empty?
+
+        candidates.add(path)
+      end
+
+      candidates.each do |path|
+        next unless path.to_s.start_with?(root_prefix)
+        next if File.exist?(path)
+
+        @dependency_graph.identifiers_for_path(path).each do |identifier|
+          removed.add(identifier) if remove_unit(identifier, affected_types)
+        end
+      end
+
+      Rails.logger.info "[Woods] Pruned #{removed.size} unit(s) whose source file is gone" if removed.any?
+      removed
+    end
+
+    # Register a batch of freshly-extracted units and write their JSON.
+    #
+    # Registration happens BEFORE path normalization — the graph's file map
+    # stores absolute paths (that is what changed files are matched against),
+    # exactly as full extraction registers in Phase 1 and only normalizes in
+    # Phase 4.5. Unit JSON carries the relative path.
+    #
+    # @param extractor_key [Symbol]
+    # @param units [Array<ExtractedUnit>]
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers written
+    def register_and_write(extractor_key, units, affected_types)
+      units = Array(units).compact
+      return Set.new if units.empty?
+
+      affected_types&.add(extractor_key)
+      type_dir = @output_dir.join(extractor_key.to_s)
+      FileUtils.mkdir_p(type_dir)
+
+      units.each_with_object(Set.new) do |unit, written|
+        mark_dependents_dirty(unit.identifier)
+        @dependency_graph.register(unit)
+        mark_dependents_dirty(unit.identifier)
+
+        unit.file_path = normalize_file_path(unit.file_path)
+        # Keyed by relative path, which is how batch_git_data keys its result.
+        (@incremental_written ||= {})[unit.identifier] = unit.file_path
+
+        File.write(
+          type_dir.join(collision_safe_filename(unit.identifier)),
+          json_serialize(unit.to_h)
+        )
+        written.add(unit.identifier)
+      end
+    end
+
+    # Remove a unit from the graph and delete its JSON from the index.
+    #
+    # @param identifier [String]
+    # @param affected_types [Set<Symbol>]
+    # @return [String, nil] the identifier when it existed and was removed
+    def remove_unit(identifier, affected_types)
+      node = @dependency_graph.node(identifier)
+      return nil unless node
+
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]]
+      mark_dependents_dirty(identifier)
+
+      if extractor_key
+        affected_types&.add(extractor_key)
+        path = @output_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
+        FileUtils.rm_f(path)
+      end
+
+      @dependency_graph.remove(identifier)
+      Rails.logger.debug { "[Woods] Removed #{identifier}" }
+      identifier
+    end
+
+    # Record that a unit's edges changed, so every target it points at (and
+    # the unit itself) has its `dependents` list rewritten at the end of the
+    # run.
+    #
+    # @param identifier [String]
+    # @return [void]
+    def mark_dependents_dirty(identifier)
+      @dependents_dirty ||= Set.new
+      @dependents_dirty.add(identifier)
+      @dependency_graph.dependencies_of(identifier).each { |target| @dependents_dirty.add(target) }
+    end
+
+    # Second pass over the unit JSON an incremental run touched, mirroring the
+    # two full-extraction phases that operate on already-extracted units:
+    # {#resolve_dependents} (Phase 2) and {#enrich_with_git_data} (Phase 4).
+    #
+    # Both were full-extraction-only, so incremental runs left `dependents`
+    # and `metadata.git` frozen at whatever the last full run wrote —
+    # divergence that compounds run over run in an incremental CI chain.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [void]
+    def finalize_incremental_unit_json(affected_types)
+      dependents_dirty = @dependents_dirty || Set.new
+      git_dirty = @incremental_written || {}
+      git_data = incremental_git_data(git_dirty.keys)
+
+      (dependents_dirty | git_dirty.keys).each do |identifier|
+        rewrite_unit_json(identifier, affected_types,
+                          refresh_dependents: dependents_dirty.include?(identifier),
+                          git: git_dirty.key?(identifier) ? git_data[git_dirty[identifier]] : nil)
+      end
+    end
+
+    # Read one unit's JSON, apply the second-pass patches, and write it back
+    # only if something actually changed.
+    #
+    # @param identifier [String]
+    # @param affected_types [Set<Symbol>]
+    # @param refresh_dependents [Boolean]
+    # @param git [Hash, nil] git metadata for the unit's file, if any
+    # @return [void]
+    def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git:)
+      node = @dependency_graph.node(identifier)
+      return unless node
+
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]]
+      return unless extractor_key
+
+      path = @output_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
+      return unless File.exist?(path)
+
+      data = JSON.parse(File.read(path))
+      # Serialized comparison, not `data.dup`: the git patch mutates the
+      # nested metadata hash in place, which a shallow copy would follow.
+      before = JSON.generate(data)
+
+      if refresh_dependents
+        data['dependents'] = @dependency_graph.dependents_detail(identifier)
+                                              .map { |d| { 'type' => d[:type].to_s, 'identifier' => d[:identifier] } }
+      end
+      (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git)) if git
+
+      return if JSON.generate(data) == before
+
+      File.write(path, json_serialize(data))
+      affected_types&.add(extractor_key)
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
+    end
+
+    # Batch-fetch git metadata for the units written by this run, in a single
+    # git invocation, keyed by Rails.root-relative path the way
+    # {#batch_git_data} returns it.
+    #
+    # @param identifiers [Array<String>]
+    # @return [Hash{String => Hash}]
+    def incremental_git_data(identifiers)
+      return {} if identifiers.empty? || !git_available?
+
+      paths = identifiers.filter_map do |identifier|
+        node = @dependency_graph.node(identifier)
+        next if node.nil? || %i[rails_source gem_source].include?(node[:type])
+
+        node[:file_path] if node[:file_path] && File.exist?(node[:file_path])
+      end
+
+      batch_git_data(paths.uniq)
+    rescue StandardError => e
+      Rails.logger.warn "[Woods] Incremental git enrichment failed: #{e.message}"
+      {}
+    end
+
+    # Re-extract a single known unit, identified by its graph node.
+    #
+    # Used for the transitive half of the blast radius — units whose own file
+    # did not change but which depend on something that did. Files that *did*
+    # change go through {#reconcile_changed_paths} instead, which reconciles
+    # the whole path rather than one identifier.
+    #
+    # @param unit_id [String]
+    # @param affected_types [Set<Symbol>, nil]
+    # @return [String, nil] the identifier when it was re-extracted and written
     def re_extract_unit(unit_id, affected_types: nil)
       # Framework source only changes on version updates
       if unit_id.start_with?('rails/') || unit_id.start_with?('gems/')
-        Rails.logger.debug "[Woods] Skipping framework re-extraction for #{unit_id}"
-        return
+        Rails.logger.debug { "[Woods] Skipping framework re-extraction for #{unit_id}" }
+        return nil
       end
 
       # Find the unit's type from the graph
-      node = @dependency_graph.to_h[:nodes][unit_id]
-      return unless node
+      node = @dependency_graph.node(unit_id)
+      return nil unless node
 
       type = node[:type]&.to_sym
       file_path = node[:file_path]
 
-      return unless file_path && File.exist?(file_path)
+      # A vanished file is not re-extractable; {#prune_vanished_units} owns it.
+      return nil unless file_path && File.exist?(file_path)
 
-      # Re-extract based on type
       extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
-      return unless extractor_key
+      return nil unless extractor_key
 
-      extractor = EXTRACTORS[extractor_key]&.new
-      return unless extractor
+      extractor = extractor_for(extractor_key)
+      return nil unless extractor
 
       unit = if (method = CLASS_BASED[type])
                klass = if unit_id.match?(/\A[A-Z][A-Za-z0-9_:]*\z/)
@@ -1120,45 +1675,31 @@ module Woods
                        end
                extractor.public_send(method, klass) if klass
              elsif (method = FILE_BASED[type])
-               extractor.public_send(method, file_path)
+               extract_file_based_unit(extractor, method, file_path, extractor_key)
              elsif GRAPHQL_TYPES.include?(type)
                extractor.extract_graphql_file(file_path)
              end
 
-      return unless unit
-
       # File-based extractors can return several units from one file (a .rake
       # file defining multiple tasks, etc.); class-based extractors return one.
-      # Normalize to an array so every unit is registered and written — passing
-      # an Array straight to DependencyGraph#register crashes on unit.identifier.
-      units = unit.is_a?(Array) ? unit : [unit]
-      return if units.empty?
+      units = Array(unit).compact
+      return nil if units.empty?
 
-      # Track which type was affected
-      affected_types&.add(extractor_key)
-
-      type_dir = @output_dir.join(extractor_key.to_s)
-
-      units.each do |extracted|
-        # Update dependency graph. Register BEFORE normalizing the path —
-        # the graph's file_map stores absolute paths (affected_by matches
-        # changed files against them), exactly as full extraction registers
-        # in Phase 1 and only normalizes in Phase 4.5.
-        @dependency_graph.register(extracted)
-
-        # Unit JSON carries Rails.root-relative paths (full extraction's
-        # Phase 4.5); writing the raw absolute source_location here would
-        # leak container-absolute paths into the index after incremental runs.
-        extracted.file_path = normalize_file_path(extracted.file_path)
-
-        # Write updated unit
-        File.write(
-          type_dir.join(collision_safe_filename(extracted.identifier)),
-          json_serialize(extracted.to_h)
-        )
-      end
-
+      register_and_write(extractor_key, units, affected_types)
       Rails.logger.info "[Woods] Re-extracted #{unit_id}"
+      unit_id
+    end
+
+    # Invoke a file-based extraction method, supplying the extra arguments
+    # the handful of non-uniform signatures need.
+    #
+    # @return [ExtractedUnit, Array<ExtractedUnit>, nil]
+    def extract_file_based_unit(extractor, method, file_path, extractor_key)
+      if extractor_key == :poros
+        extractor.public_send(method, file_path, ar_names: active_record_names)
+      else
+        extractor.public_send(method, file_path)
+      end
     end
   end
 end

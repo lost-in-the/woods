@@ -72,34 +72,12 @@ namespace :woods do
                       output.lines.map(&:strip)
                     end
 
-    # Filter to relevant files
-    relevant_patterns = [
-      %r{^app/models/},
-      %r{^app/controllers/},
-      %r{^app/services/},
-      %r{^app/components/},
-      %r{^app/views/components/},
-      %r{^app/views/.*\.rb$},  # Phlex views
-      %r{^app/interactors/},
-      %r{^app/operations/},
-      %r{^app/commands/},
-      %r{^app/use_cases/},
-      %r{^app/jobs/},
-      %r{^app/workers/},       # Sidekiq workers
-      %r{^app/mailers/},
-      %r{^app/graphql/}, # GraphQL types/mutations/resolvers
-      %r{^app/serializers/},
-      %r{^app/decorators/},
-      %r{^app/blueprinters/},
-      %r{^db/migrate/},
-      %r{^db/schema\.rb$}, # Schema changes affect model metadata
-      %r{^config/routes\.rb$},
-      /^Gemfile\.lock$/ # Dependency changes trigger framework re-index
-    ]
-
-    changed_files = changed_files.select do |f|
-      relevant_patterns.any? { |p| f.match?(p) }
-    end
+    # Filter to paths that imply extraction work. The rule set lives in
+    # PathDispatcher alongside the dispatch itself — a second hand-maintained
+    # pattern list here would drift, and a path this filter drops never
+    # reaches the index however good the dispatch behind it is (#164).
+    dispatcher = Woods::PathDispatcher.new
+    changed_files = changed_files.reject(&:empty?).select { |f| dispatcher.relevant?(f) }
 
     if changed_files.empty?
       puts 'No relevant files changed. Skipping extraction.'

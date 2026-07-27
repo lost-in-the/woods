@@ -89,7 +89,14 @@ module Woods
           dependents: dependents
         }
       end
-      identifiers_with_dependents.max_by(limit) { |h| h[:dependent_count] }
+      # Tie-break on identifier. Without it, which of the (often many) nodes
+      # sharing a dependent count land inside the top-N depends on graph
+      # insertion order, so two extractions of the same tree could publish
+      # different hub lists (#164) — incremental runs append new nodes at the
+      # end where a full extraction interleaves them by extractor.
+      identifiers_with_dependents
+        .sort_by { |h| [-h[:dependent_count], h[:identifier].to_s] }
+        .first(limit)
     end
 
     # Detect circular dependency chains in the graph.
@@ -123,7 +130,11 @@ module Woods
       nodes = graph_nodes
       return [] if nodes.size < 3
 
-      node_ids = nodes.keys
+      # Sorted, not insertion-ordered: the seeded sample indexes into this
+      # list, so leaving it in graph order would make the sampled pairs (and
+      # therefore the bridge scores) depend on the order units happened to be
+      # registered in rather than on the graph's content (#164).
+      node_ids = nodes.keys.sort
       scores = Hash.new(0)
 
       # Sample random pairs of nodes for shortest-path computation.

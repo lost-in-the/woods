@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Incremental extraction is now equivalent to a full extraction** (#164, phase 0). Five
+  confirmed correctness gaps in `woods:incremental` are closed. They mattered most in an
+  incremental CI chain, where the previous graph is restored and `woods:incremental` runs per
+  merge: a missed unit propagated forward run over run instead of being erased by the next
+  full rebuild.
+  - **New files are indexed.** Changes routed only through `DependencyGraph#affected_by`,
+    which resolves a path via the graph's file map — populated only from already-registered
+    units — so a file that did not exist at the last extraction routed nowhere and was
+    silently ignored. A new `Woods::PathDispatcher` supplies the missing direction, path →
+    extractor, for file-based types; class-based types (models, controllers, mailers,
+    components, channels) are reconciled against each extractor's own runtime discovery set,
+    now exposed as `#discoverable_classes`.
+  - **Deleted files no longer leave ghosts.** Units whose source file has vanished are pruned
+    — unit JSON removed, graph node unregistered, reverse edges withdrawn, type index
+    regenerated. Deletions named in the change set are authoritative; a sweep over registered
+    paths catches callers whose change set omits them. A rename resolves to delete-plus-add.
+  - **Files defining several units reconcile as a whole.** `DependencyGraph`'s file map is now
+    multi-valued (`path => Set<identifier>`), so a task removed from a multi-task `.rake` file
+    is dropped rather than left behind. Graphs written before this load unchanged.
+  - **Whole-app unit types refresh.** `route`, `middleware`, `engine`, `scheduled_job`,
+    `state_machine`, `factory`, `event`, and `database_view` are re-run wholesale when their
+    trigger paths change, instead of being skipped while the run still rewrote the manifest
+    and zeroed `staleness_seconds`. A routes change also re-extracts the types that embed the
+    route table (controllers, mailers, components, view templates).
+  - **Derived data no longer drifts.** Incremental runs recompute `graph_analysis.json`, and
+    refresh each affected unit's `dependents` list and `metadata.git` — all previously
+    full-extraction-only. A run that extracts nothing now leaves the manifest timestamp alone
+    rather than reporting the index as freshly synced.
+
+### Added
+
+- **Differential test harness for incremental extraction**
+  (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
+  randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at
+  every step, that the incrementally-maintained index matches a cold full extraction: same
+  units, same unit content, same graph, PageRank recomputed. Tune with `WOODS_DIFF_OPS` and
+  `WOODS_DIFF_SEEDS`; runs in CI on every Rails-matrix row.
+- `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
+  present from vanished) shared by every entry point, so a git-diff caller and a future
+  file-watching daemon can't drift apart.
+
+### Changed
+
+- `GraphAnalyzer` output is now a pure function of graph content. `hubs` breaks ties on
+  identifier instead of graph-insertion order, and `bridges` samples from a sorted node list,
+  so two extractions of the same tree publish the same analysis.
+
 ## [1.6.1] - 2026-07-22
 
 ### Fixed

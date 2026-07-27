@@ -105,6 +105,8 @@ lib/
 ├── woods.rb                             # Module interface, Configuration, entry point
 ├── woods/
 │   ├── extractor.rb                     # Orchestrator — coordinates all extractors
+│   ├── change_set.rb                    # Normalized "what changed" (shared by every entry point)
+│   ├── path_dispatcher.rb               # Changed path → extractor (file rules + whole-app triggers)
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
@@ -212,6 +214,7 @@ After gem-level specs pass, validate in a host app if the change affects extract
 See `docs/README.md` for the documentation index and roadmap.
 
 Key references:
+- Incremental extraction contract + dispatch inventory + differential harness → `docs/INCREMENTAL_EXTRACTION.md`
 - Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
 - Coverage gaps + future extractor work → `docs/COVERAGE_GAP_ANALYSIS.md`
 - Historical design documents (from the build phase) → `_project-resources/docs/`
@@ -266,15 +269,18 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `CallbackAnalyzer` parses source via regex, not AST — it scans for patterns like `self.col =`, `perform_later`, etc. Proc/lambda callbacks are skipped gracefully.
 - `BehavioralProfile` guards every config introspection with `respond_to?`/`defined?` — a missing config section produces `nil`, not an error.
 - `FlowPrecomputer` is gated by `precompute_flows` config (default: false). Per-action errors are rescued so one failing action doesn't block others.
-- Incremental re-extraction skips unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`. These types require full extraction to update. This is acceptable — their source files rarely change independently.
+- Incremental extraction is held to *equivalence with a full extraction* (#164). `Extractor#extract_changed` runs in a fixed order — blast radius from the pre-change graph, re-extract known units, dispatch changed paths the index has never seen (`PathDispatcher`), reconcile class-based types against their runtime discovery sets, re-run whole-app extractors whose triggers fired, prune vanished units last — and then refreshes `dependents`, `metadata.git`, PageRank and `graph_analysis.json`. The oracle is `spec/integration/incremental_equivalence_spec.rb` (`:booted_app`): randomized create/modify/delete/rename sequences compared against a cold full extraction at every step. Run it before and after touching anything on the incremental path.
+- Unit types with no per-file entry point (`route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`) are listed in `Extractor::WHOLE_APP_EXTRACTORS` and re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger path changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates) — those embed the route table, and the graph can't express that dependency because a route unit depends *on* its controller, not the other way round.
+- Adding a file-based extractor means adding a `PathDispatcher` rule, or new files of that type will never enter the index incrementally. `spec/path_dispatcher_spec.rb` fails if a `FILE_BASED` type has no rule. Rules reference each extractor's own `*_DIRECTORIES` constant, so a new directory flows through without a second edit.
+- Deletion is driven by the source file being gone. Paths named in the change set are authoritative for any unit type; the safety-net sweep over registered paths is limited to paths a file rule claims, because some units point at a *nominal* path (`BehavioralProfile` names `config/application.rb`, a class-based unit falls back to a convention path) and sweeping those would delete units a full extraction still produces.
 - Session tracer requires explicit store configuration (`session_store`) — no default store is provided. Set `session_tracer_enabled = true` and assign a store (FileStore, RedisStore, or SolidCacheStore) in the configure block.
 - Session tracer middleware position matters — it must be inserted after the session middleware but before the router. The railtie handles this via `app.middleware.use`.
 - `RedisStore` raises `SessionTracerError` if the `redis` gem is not available at initialization time.
 - `RakeTaskExtractor` reads `.rake` files statically (no Rails boot required for parsing). It uses `block_opener?` for depth tracking — `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks.
 - Temporal snapshots are gated by `enable_snapshots` config (default: false). `SnapshotStore` requires migrations 004 + 005 to be run first.
-- `StateMachineExtractor` and `FactoryExtractor` return arrays from their file methods (like `ScheduledJobExtractor`) — can't be registered in FILE_BASED dispatch map. Incremental re-extraction skips these types.
-- `EventExtractor` uses a two-pass approach (collect publishes, then subscribes, then merge) — no single-file extraction method exists. Like routes, it requires full extraction to update.
-- `DatabaseViewExtractor` only extracts the latest version of each Scenic view (highest `_vNN` suffix). Older versions are skipped.
+- `StateMachineExtractor` and `FactoryExtractor` return arrays from their file methods (like `ScheduledJobExtractor`) — can't be registered in the FILE_BASED dispatch map. They are refreshed wholesale instead (see `WHOLE_APP_EXTRACTORS`).
+- `EventExtractor` uses a two-pass approach (collect publishes, then subscribes, then merge) — no single-file extraction method exists. Like routes, it is refreshed by a wholesale re-run, triggered by any `.rb` change under `app/`.
+- `DatabaseViewExtractor` only extracts the latest version of each Scenic view (highest `_vNN` suffix). Older versions are skipped — which is why it is dispatched **wholesale**, not per file: pointing the per-file method at `db/views/foo_v01.sql` would index a version a full extraction drops.
 - `DecoratorExtractor` scans `app/decorators/`, `app/presenters/`, and `app/form_objects/` — these directories are also added to `EXTRACTION_DIRECTORIES` for eager loading.
 - `CachingExtractor` scans controllers, models, and view templates (`.erb`) — the `file_type` parameter on `extract_caching_file` defaults to nil (auto-detected from path).
 - `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.
@@ -285,3 +291,6 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `DependencyGraph` edges are stored as `[{ target:, via: }]` hashes (symbol keys). `IndexReader` normalizes from JSON to `[{ 'target' => ..., 'via' => ... }]` (string keys). The two normalizers (`DependencyGraph.normalize_edges` vs `IndexReader.normalize_all_edges`) are intentionally separate — do not merge them.
 - `DependencyGraph.from_h` handles both old-format (bare string) and new-format (hash) edges via `normalize_edges`. Old serialized graphs load without migration.
 - `dependencies_of` and `dependents_of` accept an optional `via:` filter (Symbol or Array<Symbol>). The MCP `dependencies`/`dependents` tools expose this as a `via` array parameter.
+- `DependencyGraph`'s `file_map` is `path => Set<identifier>` — one file can define several units. Graphs persisted before this stored a bare string and load through `normalize_file_map` without conversion. `#unregister` strips a registration's side effects so the identifier can be re-registered; `#remove` is the deletion path and drops the node and its edges too. `#node` exists so callers don't rebuild the memoized `to_h` inside a loop.
+- `GraphAnalyzer` output is a pure function of graph content: `hubs` tie-breaks on identifier and `bridges` samples from a sorted node list. Don't reintroduce insertion-order dependence — two extractions of the same tree must publish the same analysis.
+- **Known, pre-existing:** the graph keys nodes on the bare identifier, so two units of *different types* sharing an identifier (a Scenic view `reports` and a factory `reports`) collapse onto one node, last registration winning. `deduplicate_results` only dedupes within a type. Surfaced by the #164 harness; not fixed there.

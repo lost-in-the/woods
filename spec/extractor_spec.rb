@@ -593,7 +593,7 @@ RSpec.describe Woods::Extractor do
       FileUtils.touch(File.join(tmpdir, 'user.rb'))
 
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:to_h).and_return({ nodes: { '../malicious/path' => node } })
+      allow(graph).to receive(:node).with('../malicious/path').and_return(node)
 
       # constantize must NOT be called for an invalid identifier
       expect_any_instance_of(String).not_to receive(:constantize)
@@ -606,7 +606,7 @@ RSpec.describe Woods::Extractor do
       FileUtils.touch(File.join(tmpdir, 'user.rb'))
 
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:to_h).and_return({ nodes: { 'User' => node } })
+      allow(graph).to receive(:node).with('User').and_return(node)
 
       extractor_double = double('ModelExtractor')
       allow(Woods::Extractors::ModelExtractor).to receive(:new).and_return(extractor_double)
@@ -631,7 +631,7 @@ RSpec.describe Woods::Extractor do
 
       node = { type: 'rake_task', file_path: rake_path }
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:to_h).and_return({ nodes: { 'things:one' => node } })
+      allow(graph).to receive(:node).with('things:one').and_return(node)
       allow(graph).to receive(:register).and_call_original
 
       unit_one = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:one', file_path: rake_path)

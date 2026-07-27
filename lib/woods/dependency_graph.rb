@@ -26,7 +26,7 @@ module Woods
       @edges = {}      # identifier => [{ target:, via: }]
       @reverse = {}    # identifier => Set of dependent identifiers
       @reverse_via = {} # [target, via] => Set of dependent identifiers
-      @file_map = {}   # file_path => identifier
+      @file_map = {}   # file_path => Set of identifiers (one file can define many units)
       @type_index = {} # type => Set of identifiers
       @to_h = nil
     end
@@ -52,7 +52,7 @@ module Woods
       }
 
       @edges[unit.identifier] = unit.dependencies.map { |d| { target: d[:target], via: d[:via] } }
-      @file_map[unit.file_path] = unit.identifier if unit.file_path
+      (@file_map[unit.file_path] ||= Set.new).add(unit.identifier) if unit.file_path
 
       # Type index for filtering (Set-based for O(1) insert)
       (@type_index[unit.type] ||= Set.new).add(unit.identifier)
@@ -89,8 +89,59 @@ module Woods
       return unless old_node
 
       old_path = old_node[:file_path]
-      @file_map.delete(old_path) if old_path && @file_map[old_path] == identifier
-      @type_index[old_node[:type]]&.delete(identifier)
+      if old_path && (ids = @file_map[old_path])
+        ids.delete(identifier)
+        @file_map.delete(old_path) if ids.empty?
+      end
+
+      return unless (type_ids = @type_index[old_node[:type]])
+
+      type_ids.delete(identifier)
+      # Drop the key when the last unit of a type goes away — a full
+      # extraction never emits an empty type bucket, and a stale empty one
+      # would show up in to_h[:type_index] and stats[:types] as a phantom.
+      @type_index.delete(old_node[:type]) if type_ids.empty?
+    end
+
+    # Fully remove a unit from the graph — node, forward edges, reverse-edge
+    # contributions, file-map entry, and type-index entry.
+    #
+    # Distinct from {#unregister}, which strips only the *side effects* of a
+    # registration so the same identifier can be re-registered on top; this
+    # is the deletion path used when a source file disappears. Reverse
+    # entries keyed *on* the removed identifier are intentionally left alone:
+    # they are derived from other units' forward edges, which are unchanged,
+    # and a full extraction records them the same way (a dependency target
+    # need not be a registered node).
+    #
+    # @param identifier [String] Unit identifier to remove
+    # @return [Hash, nil] the removed node, or nil if it was not registered
+    def remove(identifier)
+      return nil unless @nodes.key?(identifier)
+
+      @to_h = nil
+      unregister(identifier)
+      @edges.delete(identifier)
+      @nodes.delete(identifier)
+    end
+
+    # Identifiers defined by a given file path.
+    #
+    # A single file can define several units (a `.rake` file with multiple
+    # tasks, an i18n YAML file, a lib file holding several classes), so this
+    # returns a list rather than a single identifier.
+    #
+    # @param file_path [String] Absolute file path as registered
+    # @return [Array<String>] Identifiers defined by that file (possibly empty)
+    def identifiers_for_path(file_path)
+      (@file_map[file_path] || []).to_a
+    end
+
+    # Every file path currently registered in the graph.
+    #
+    # @return [Array<String>]
+    def registered_paths
+      @file_map.keys
     end
 
     # Find all units affected by changes to given files
@@ -100,7 +151,7 @@ module Woods
     # @param max_depth [Integer] Maximum traversal depth (nil for unlimited)
     # @return [Array<String>] List of affected unit identifiers
     def affected_by(changed_files, max_depth: nil)
-      directly_changed = changed_files.filter_map { |f| @file_map[f] }
+      directly_changed = changed_files.flat_map { |f| (@file_map[f] || []).to_a }.uniq
 
       affected = Set.new(directly_changed)
       queue = directly_changed.map { |id| [id, 0] } # [identifier, depth]
@@ -120,6 +171,17 @@ module Woods
       end
 
       affected.to_a
+    end
+
+    # Fetch a node's metadata without materializing the whole graph.
+    #
+    # {#to_h} is memoized but rebuilds on every register/remove, so reaching
+    # for `to_h[:nodes][id]` inside a loop is quadratic. Use this instead.
+    #
+    # @param identifier [String] Unit identifier
+    # @return [Hash, nil] `{ type:, file_path:, namespace: }` or nil
+    def node(identifier)
+      @nodes[identifier]
     end
 
     # Check if a node exists in the graph by exact identifier.
@@ -168,6 +230,29 @@ module Woods
       Array(via).each_with_object(Set.new) do |v, result|
         @reverse_via.fetch([identifier, v], Set.new).each { |dep| result.add(dep) }
       end.to_a
+    end
+
+    # Dependents of a unit in the shape {Extractor#resolve_dependents} writes
+    # into unit JSON: `{ type:, identifier: }` per *edge*, not per source.
+    #
+    # Multiplicity is preserved deliberately — a source that references the
+    # same target twice (say once as `:belongs_to` and once as
+    # `:code_reference`) contributes two entries in a full extraction, so
+    # reconstructing this list incrementally has to do the same or the two
+    # paths produce different unit JSON. Order is registration order and is
+    # not guaranteed to match a full extraction's; callers comparing the two
+    # should compare as multisets.
+    #
+    # @param identifier [String] Unit identifier
+    # @return [Array<Hash>] `{ type: Symbol, identifier: String }` entries
+    def dependents_detail(identifier)
+      (@reverse[identifier] || []).flat_map do |source|
+        node = @nodes[source]
+        next [] unless node
+
+        edge_count = (@edges[source] || []).count { |e| e[:target] == identifier }
+        Array.new(edge_count) { { type: node[:type], identifier: source } }
+      end
     end
 
     # Get all units of a specific type
@@ -229,7 +314,7 @@ module Woods
         nodes: @nodes,
         edges: @edges,
         reverse: @reverse.transform_values(&:to_a),
-        file_map: @file_map,
+        file_map: @file_map.transform_values(&:to_a),
         type_index: @type_index.transform_values(&:to_a),
         stats: {
           node_count: @nodes.size,
@@ -260,7 +345,8 @@ module Woods
       raw_reverse = data[:reverse] || data['reverse'] || {}
       graph.instance_variable_set(:@reverse, raw_reverse.transform_values { |v| v.is_a?(Set) ? v : Set.new(v) })
 
-      graph.instance_variable_set(:@file_map, data[:file_map] || data['file_map'] || {})
+      raw_file_map = data[:file_map] || data['file_map'] || {}
+      graph.instance_variable_set(:@file_map, normalize_file_map(raw_file_map))
 
       raw_type_index = data[:type_index] || data['type_index'] || {}
       graph.instance_variable_set(:@type_index, raw_type_index.transform_keys(&:to_sym).transform_values do |v|
@@ -277,6 +363,31 @@ module Woods
       graph.instance_variable_set(:@reverse_via, reverse_via)
 
       graph
+    end
+
+    # Normalize a persisted file map to `path => Set<identifier>`.
+    #
+    # Graphs written before the multi-valued migration stored a single
+    # identifier per path (`{"app/models/user.rb" => "User"}`), which silently
+    # lost every unit but the last for files defining several units (a `.rake`
+    # file with multiple tasks, an i18n YAML, a lib file with several classes).
+    # Old graphs load without conversion — the bare string is wrapped — so the
+    # first incremental run after upgrading re-widens the map as it
+    # re-registers units.
+    #
+    # @param raw [Hash] Persisted file_map (values are String, Array, or Set)
+    # @return [Hash{String => Set<String>}]
+    def self.normalize_file_map(raw)
+      return {} unless raw.is_a?(Hash)
+
+      raw.each_with_object({}) do |(path, ids), map|
+        map[path] = case ids
+                    when Set then ids
+                    when Array then Set.new(ids)
+                    when nil then Set.new
+                    else Set.new([ids])
+                    end
+      end
     end
 
     # Normalize a node hash to use symbol keys

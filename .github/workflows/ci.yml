@@ -68,6 +68,13 @@ jobs:
       - name: Run booted-app extraction
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb
 
+      # Differential harness for incremental extraction (#164): random
+      # create/modify/delete/rename sequences, compared against a cold full
+      # extraction at every step. Runs in its own process — like the spec
+      # above, it boots the dummy app and can't share one.
+      - name: Run incremental equivalence harness
+        run: bundle exec rspec spec/integration/incremental_equivalence_spec.rb
+
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with
   # the real cause buried after the test output.
