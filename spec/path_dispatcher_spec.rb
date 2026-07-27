@@ -93,13 +93,44 @@ RSpec.describe Woods::PathDispatcher do
     # index (#164 gap 1). Every FILE_BASED type must therefore be reachable
     # either per-file or through a wholesale re-run.
     it 'covers every file-based unit type' do
-      covered = described_class.file_rules.to_set(&:extractor_key) +
-                described_class.whole_app_rules.to_set(&:extractor_key)
+      expect(uncovered_extractor_keys).to be_empty
+    end
+
+    # Deriving the expectation from FILE_BASED alone left a hole exactly the
+    # size of the bug it was meant to prevent: GRAPHQL_TYPES is its own
+    # constant (four unit types sharing one extractor method), so it was never
+    # in the expected set and `app/graphql` went unrouted — new types,
+    # mutations and resolvers never entered the index, which is #164 gap 1
+    # verbatim.
+    #
+    # The honest invariant is a subtraction, not a list: every unit type Woods
+    # knows about must be reachable *somehow* — per file, wholesale, or by
+    # runtime class discovery. Anything left over is un-indexable.
+    # `rails_source` is deliberately outside app-change dispatch: it extracts
+    # installed gem sources, which change when the Gemfile.lock does, not when
+    # app files do. It is driven by `woods:extract_framework` and is the one
+    # extraction mode that does not bump the generation.
+    let(:not_app_dispatched) { %i[rails_source] }
+
+    it 'leaves no unit type reachable by no route at all' do
+      class_based = Woods::Extractor::CLASS_BASED_DISCOVERY.values.map { |spec| spec[:type] }
+      unreachable = Woods::Extractor::TYPE_TO_EXTRACTOR_KEY.except(*class_based)
+                                                           .values.to_set - covered_extractor_keys -
+                    not_app_dispatched
+
+      expect(unreachable).to(be_empty, "unit types with no dispatch route: #{unreachable.to_a.inspect}")
+    end
+
+    def covered_extractor_keys
+      described_class.file_rules.to_set(&:extractor_key) +
+        described_class.whole_app_rules.to_set(&:extractor_key)
+    end
+
+    def uncovered_extractor_keys
       expected = Woods::Extractor::FILE_BASED.keys.to_set do |type|
         Woods::Extractor::TYPE_TO_EXTRACTOR_KEY[type]
       end
-
-      expect(expected - covered).to be_empty
+      expected - covered_extractor_keys
     end
 
     # Scenic keeps only the highest _vNN of each view, so a per-file rule

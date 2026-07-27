@@ -130,9 +130,8 @@ RSpec.describe 'woods_status tool' do
 
     before do
       # Keep the git probes hermetic; this context is about the other fields.
-      # resolve_head_sha still folds stderr in (capture2e); the working-tree
-      # probe deliberately does not (capture3) — see below.
-      allow(Open3).to receive(:capture2e).and_return(['', instance_double(Process::Status, success?: false)])
+      # Both probes use capture3 — stderr stays out of the stdio transport and
+      # out of the value.
       allow(Open3).to receive(:capture3).and_return(['', '', instance_double(Process::Status, success?: false)])
     end
 
@@ -235,12 +234,14 @@ RSpec.describe 'woods_status tool' do
 
     def stub_git_head(head:, status_ok: true, porcelain: '')
       process_status = instance_double(Process::Status, success?: status_ok)
-      allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'rev-parse', 'HEAD')
-                                         .and_return(["#{head}\n", process_status])
+      allow(Open3).to receive(:capture3).with('git', '-C', anything, 'rev-parse', 'HEAD')
+                                        .and_return(["#{head}\n", '', process_status])
       # build_status also asks for the working-tree state; without a stub the
-      # real git runs against whatever /tmp happens to be.
-      allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'status', '--porcelain')
-                                         .and_return([porcelain, process_status])
+      # real git runs against whatever /tmp happens to be. Note capture3 —
+      # that probe deliberately keeps stderr out of the porcelain output, and
+      # stubbing capture2e here left the stub dead and the real git running.
+      allow(Open3).to receive(:capture3).with('git', '-C', anything, 'status', '--porcelain')
+                                        .and_return([porcelain, '', process_status])
     end
 
     it 'reports git_sha_matches_head=true when manifest.git_sha matches HEAD' do

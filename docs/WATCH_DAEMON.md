@@ -259,8 +259,14 @@ didn't land:
 - **Not bumped on failure or on a no-op run**, so staleness stays honest.
 
 `IndexReader` checks it at the top of every read: one `File.stat` of a
-~100-byte file, parsed only when its mtime or size moved, caches dropped only
-when the number actually advanced. That makes the MCP `reload` tool an
+~100-byte file, with caches dropped only when the generation number actually
+advanced. The stat signature is `[mtime, size, inode]` — the inode is
+load-bearing, because two same-second bumps with an identical payload length
+are the daemon's steady state and `[mtime, size]` alone cannot tell them apart
+on a coarse-mtime filesystem. Since `AtomicFile` renames a fresh tempfile on
+every publish the inode always moves, so in practice the file is re-parsed once
+per publish; the saving is on the reads *between* publishes, which is the
+common case. That makes the MCP `reload` tool an
 *optimization* rather than a correctness requirement — previously a long-lived
 server held whatever it read at boot, so an agent working alongside a running
 extraction silently got answers describing the tree as of the last server
@@ -290,9 +296,15 @@ party) behaves exactly as it always did.
 
 `working_tree_dirty` closes a real hole: an agent forty uncommitted edits deep
 was told the index matched HEAD while every answer described the tree before
-those edits. The fingerprint (a digest of `git status --porcelain`) lets a
-caller distinguish "same dirty state as when the index was built" from "the
-tree moved under me".
+those edits.
+
+The fingerprint (a digest of `git status --porcelain`) is *as of the call*.
+Nothing records the digest the index was built at, so it cannot tell you "this
+is the same dirty state the index describes" — it gives a stable identity for
+the current dirty state, so two of your own calls can be compared to detect the
+tree moving underneath you. Pair it with `generation` to distinguish "tree
+changed and the index followed" from "tree changed and the index has not caught
+up".
 
 ### Multi-file read consistency
 
@@ -300,10 +312,19 @@ The index is a directory, not a file, so "read the index" is many reads. Two
 options were on the table.
 
 **Per-request generation re-check — implemented.** Each read checks the
-generation first, so the reader can never serve from a cache older than what is
-published. `IndexReader#with_pinned_generation` extends that across a sequence:
-freshness is checked once on entry and then held, so nothing already cached is
-dropped and re-read at a newer generation partway through. `warmup!` uses it.
+generation first, so an *unpinned* read never serves from a cache older than
+what is published. `IndexReader#with_pinned_generation` extends that across a
+sequence: freshness is checked once on entry and then held, so nothing already
+cached is dropped and re-read at a newer generation partway through. `warmup!`
+uses it.
+
+The pin is the deliberate exception to the sentence above, and it is reader-wide
+rather than per-request: while any pin is held, `refresh_if_stale` returns early
+and *every* read on that reader — including ones outside the pinned block, under
+a threaded transport — is served at the pinned generation. Pins are refcounted,
+so invalidation resumes when the last one releases. Consistency within a
+sequence is bought with bounded staleness across concurrent ones; for a
+development-time index that is the right side of the trade, but it is a trade.
 
 Its documented limit: pinning suppresses invalidation, it does not snapshot. An
 artifact never read before is still loaded from disk as it stands when the

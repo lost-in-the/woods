@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **New GraphQL files are indexed incrementally** (#164 review, round 3). `app/graphql` had no
+  `PathDispatcher` rule and GraphQL types are not class-discoverable, so a created type,
+  mutation or resolver routed nowhere and never entered the index, and a rename lost the unit
+  entirely — #164 gap 1 verbatim, in the one corner the gap-1 fix missed. The coverage guard
+  missed it too: `GRAPHQL_TYPES` is its own constant, so deriving the expectation from
+  `FILE_BASED` left a hole exactly the size of the bug. The guard now works by subtraction —
+  every unit type must be reachable per file, wholesale, or by class discovery, with
+  `rails_source` the one stated exception.
+- **`resolve_head_sha` no longer folds git's stderr into the SHA** (#164 review, round 3). The
+  same `capture2e` hazard as the working-tree probe one method over: a warning on an otherwise
+  successful `rev-parse` was concatenated into the value and then compared against the manifest
+  as if it were a SHA. The status spec's git stub had also gone dead when the working-tree
+  probe moved to `capture3`, so real git was running against `/tmp` in those examples.
 - **Startup catch-up now notices deletion-only downtime** (#164 review, round 2). The
   reconciliation scanned mtimes of files that exist, so a file deleted while no daemon was
   running left no trace: the daemon logged "index is current at startup" and the ghost units

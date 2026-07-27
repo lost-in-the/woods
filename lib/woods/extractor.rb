@@ -316,8 +316,11 @@ module Woods
       Rails.logger.info '[Woods] Deduplicating results...'
       deduplicate_results
 
-      # Rebuild graph from deduped results — Phase 1 registered all units including
-      # duplicates, and DependencyGraph has no remove/unregister API.
+      # Rebuild the graph from deduped results. #164 gave DependencyGraph
+      # `#remove`/`#unregister`, so surgical removal is now possible — but a
+      # full extraction has just registered every unit including duplicates,
+      # and rebuilding from the deduped set is both cheaper and less
+      # error-prone than unwinding registrations one at a time.
       @dependency_graph = DependencyGraph.new
       @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
 

@@ -139,6 +139,13 @@ module Woods
           # ConcernExtractor globs app/**/concerns, not just the two canonical
           # directories — match any .rb under app/ inside a concerns/ segment.
           file_rule(:concerns, :extract_concern_file, %w[app], require_segment: '/concerns/'),
+          # GraphQL types sit outside FILE_BASED (they share one extractor
+          # method across four unit types via GRAPHQL_TYPES), which is exactly
+          # why the FILE_BASED-driven coverage guard never noticed they had no
+          # rule: a *new* type/mutation/resolver routed nowhere and never
+          # entered the index — the same failure #164 gap 1 exists to close.
+          file_rule(:graphql, :extract_graphql_file,
+                    [ex::GraphQLExtractor::GRAPHQL_DIRECTORY], extensions: %w[.rb]),
           file_rule(:i18n, :extract_i18n_file, ex::I18nExtractor::I18N_DIRECTORIES, extensions: %w[.yml]),
           file_rule(:rake_tasks, :extract_rake_file, ex::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake]),
           file_rule(:view_templates, :extract_view_template_file,

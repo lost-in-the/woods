@@ -1651,16 +1651,20 @@ module Woods
         # Returns nil when git is unavailable or +index_dir+ is not in a repo —
         # callers treat nil as "can't compare" rather than "mismatch".
         #
-        # Uses +capture2e+ so git's "fatal: not a git repository" stderr banner
-        # does not leak through the MCP stdio transport. MCP clients that parse
-        # stderr for protocol framing can't tolerate stray lines.
+        # capture3 keeps git's stderr out of the MCP stdio transport — clients
+        # that parse stderr for protocol framing can't tolerate stray lines —
+        # *and* out of the SHA. capture2e folded them together, so a warning on
+        # an otherwise successful `rev-parse` (a stale `index.lock` notice, a
+        # `core.fsmonitor` complaint) was concatenated into the value this
+        # method returns and compared against the manifest as if it were a SHA.
+        # Same hazard as {#resolve_working_tree_status}, one probe over.
         def resolve_head_sha(index_dir)
           return nil unless index_dir
 
           dir = index_dir.to_s
           return nil unless File.directory?(dir)
 
-          output, status = Open3.capture2e('git', '-C', dir, 'rev-parse', 'HEAD')
+          output, _stderr, status = Open3.capture3('git', '-C', dir, 'rev-parse', 'HEAD')
           status.success? ? output.strip : nil
         rescue Errno::ENOENT, Errno::EACCES
           # git not installed or not executable on this host — equivalent to
