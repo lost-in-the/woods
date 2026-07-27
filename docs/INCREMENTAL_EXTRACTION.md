@@ -127,9 +127,10 @@ Two of these deserve a note:
 Models, controllers, mailers, components, view components and channels are
 **not** dispatched by path. They are reconciled against
 `#discoverable_classes` on their own extractor. Only additions go through
-reconciliation; removals go through the deletion sweep, because a constant
-outlives its file in a process that has not reloaded, and treating "absent from
-descendants" as deletion would make a partial eager load erase whole types.
+reconciliation — treating "absent from descendants" as deletion would make a
+partial eager load (the documented `NameError` fallback) erase whole types, and
+a constant outlives its file in a process that has not reloaded. Removing a
+class-based unit requires the caller to name its path.
 
 ### Deletion
 
@@ -137,11 +138,19 @@ descendants" as deletion would make a partial eager load erase whole types.
   any unit type. This covers deleted models and the old side of a rename.
 - A **sweep** over registered paths catches callers whose change set is
   incomplete (a git diff that omits deletions, a missed unlink, a branch
-  switch). The sweep is limited to paths a file rule claims, because some units
-  point at a *nominal* path — `BehavioralProfile` names
-  `config/application.rb`, and a class-based unit falls back to a convention
-  path when its source location can't be resolved. Sweeping those would delete
-  units a full extraction still produces.
+  switch). Being a heuristic, it is bounded twice:
+  - **To paths a file rule claims.** Some units name a *nominal* path rather
+    than a source file — `BehavioralProfile` names `config/application.rb`,
+    which no rule claims.
+  - **Away from class-based units entirely.** A class-based unit records a
+    convention path when its source location can't be resolved, and that path
+    need not exist. On Rails < 7.1, `ActiveRecord::SchemaMigration` and
+    `ActiveRecord::InternalMetadata` are real `ActiveRecord::Base` descendants
+    whose convention path (`app/models/active_record/schema_migration.rb`) no
+    application has — and *is* claimed by the PORO rule, so the first bound
+    doesn't cover it.
+
+  Sweeping either would delete units a full extraction still produces.
 - Only paths under `Rails.root` are considered either way: framework units point
   at gem paths, and an index restored from a CI artifact can carry paths
   produced under a different root.
@@ -184,6 +193,14 @@ owns the definition of "the two indexes agree" and documents every exclusion.
   B-062), and two files defining the same constant tie-break differently in
   full vs incremental extraction (B-063). Both pre-date this work; the harness
   side-steps them by giving each generated artifact family its own name prefix.
+- **Class-based units are never swept.** A unit discovered from runtime
+  descendants records a *convention* path when its source location can't be
+  resolved, and that path need not exist — on Rails < 7.1,
+  `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
+  real `ActiveRecord::Base` descendants whose file path
+  (`app/models/active_record/schema_migration.rb`) no application has.
+  Deleting a class-based unit therefore requires the caller to name the path;
+  the sweep never infers it.
 - **Git metadata for untouched units.** An incremental run refreshes
   `metadata.git` on the units it wrote. A unit nothing touched keeps the git
   metadata from the last run that did, which goes stale as commits land on

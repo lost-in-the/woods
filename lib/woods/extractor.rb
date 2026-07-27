@@ -1145,6 +1145,15 @@ module Woods
     # Token estimate for a unit parsed back from JSON, mirroring
     # ExtractedUnit#estimated_tokens (see docs/TOKEN_BENCHMARK.md).
     #
+    # `JSON.generate`, not `Hash#to_json`: with ActiveSupport loaded the
+    # latter applies HTML-safe escaping, rendering `>` as `\\u003e` — six
+    # characters where the file on disk has one. A model with
+    # `scope :recent, -> { ... }` in its metadata therefore estimated one
+    # token higher here than {ExtractedUnit#estimated_tokens} did over the
+    # same content, so a full and an incremental run disagreed on that unit's
+    # `_index.json` entry (#164). Both sides now measure the serialization
+    # {#json_serialize} actually writes.
+    #
     # @param data [Hash] Parsed unit JSON (string keys)
     # @return [Integer]
     def estimated_tokens_from(data)
@@ -1152,7 +1161,7 @@ module Woods
       metadata = data['metadata'] || {}
 
       source_tokens = source ? TokenUtils.estimate_tokens(source) : 0
-      metadata_tokens = metadata.any? ? TokenUtils.estimate_tokens(metadata.to_json) : 0
+      metadata_tokens = metadata.any? ? TokenUtils.estimate_tokens(JSON.generate(metadata)) : 0
       source_tokens + metadata_tokens
     end
 
@@ -1428,7 +1437,7 @@ module Woods
 
     # Prune units whose source file no longer exists (#164 gap 2).
     #
-    # Two inputs, deliberately:
+    # Two inputs, with deliberately different authority:
     #
     # * **The change set.** A path the caller reports as changed which is no
     #   longer on disk is authoritative — every unit the graph attributes to
@@ -1437,13 +1446,8 @@ module Woods
     #   `--no-renames` semantics).
     # * **A sweep** over registered paths, for callers whose change set is
     #   incomplete: a git diff that omits deletions, a watcher that missed an
-    #   unlink, a branch switch. The sweep is limited to paths a
-    #   {PathDispatcher} file rule claims, because those are the paths whose
-    #   unit *is* a function of a file existing. Some units point at a
-    #   nominal path instead — `BehavioralProfile` names
-    #   `config/application.rb`, and a class-based unit falls back to a
-    #   convention path when its source location can't be resolved — and
-    #   sweeping those would delete units a full extraction still produces.
+    #   unlink, a branch switch. The sweep is a heuristic, so it is bounded
+    #   twice — see {#sweep_candidates} and the class-based exclusion below.
     #
     # Only paths under `Rails.root` are considered either way. Framework
     # units point at gem paths, and an index restored from a CI artifact can
@@ -1453,31 +1457,79 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers removed
     def prune_vanished_units(change_set, affected_types)
+      removed = prune_paths(change_set.missing_paths, affected_types, class_based: true)
+      removed.merge(prune_paths(sweep_candidates(change_set), affected_types, class_based: false))
+
+      Rails.logger.info "[Woods] Pruned #{removed.size} unit(s) whose source file is gone" if removed.any?
+      removed
+    end
+
+    # Registered paths that have vanished and that the sweep is allowed to act
+    # on: under Rails.root, gone from disk, and claimed by a file dispatch
+    # rule.
+    #
+    # The file-rule bound exists because some units point at a *nominal* path
+    # rather than a source file — `BehavioralProfile` names
+    # `config/application.rb`, which no rule claims — and sweeping those would
+    # delete units a full extraction still produces.
+    #
+    # @param change_set [ChangeSet]
+    # @return [Array<String>] absolute paths
+    def sweep_candidates(change_set)
       root_prefix = "#{Rails.root}/"
       dispatcher = PathDispatcher.new
-      removed = Set.new
+      already_named = change_set.missing_paths.to_set
 
-      candidates = change_set.missing_paths.to_set
-      @dependency_graph.registered_paths.each do |path|
-        next if candidates.include?(path)
-        next unless path.to_s.start_with?(root_prefix)
-        next if File.exist?(path)
-        next if dispatcher.file_rules_for(change_set.relativize(path)).empty?
-
-        candidates.add(path)
+      @dependency_graph.registered_paths.reject do |path|
+        already_named.include?(path) ||
+          !path.to_s.start_with?(root_prefix) ||
+          File.exist?(path) ||
+          dispatcher.file_rules_for(change_set.relativize(path)).empty?
       end
+    end
 
-      candidates.each do |path|
+    # Remove every unit the graph attributes to each of `paths`.
+    #
+    # @param paths [Enumerable<String>] absolute paths believed to be gone
+    # @param affected_types [Set<Symbol>]
+    # @param class_based [Boolean] whether class-based units may be pruned
+    # @return [Set<String>] identifiers removed
+    def prune_paths(paths, affected_types, class_based:)
+      root_prefix = "#{Rails.root}/"
+
+      paths.each_with_object(Set.new) do |path, removed|
         next unless path.to_s.start_with?(root_prefix)
         next if File.exist?(path)
 
         @dependency_graph.identifiers_for_path(path).each do |identifier|
+          next if !class_based && class_based_unit?(identifier)
+
           removed.add(identifier) if remove_unit(identifier, affected_types)
         end
       end
+    end
 
-      Rails.logger.info "[Woods] Pruned #{removed.size} unit(s) whose source file is gone" if removed.any?
-      removed
+    # Is this unit's type one discovered from runtime descendants?
+    #
+    # Such units record a *convention* path when their source location can't
+    # be resolved, and that path need not exist. On Rails < 7.1, for instance,
+    # `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
+    # real `ActiveRecord::Base` descendants that a full extraction emits with
+    # `app/models/active_record/schema_migration.rb` as their file path — a
+    # file no application has. That path *is* claimed by a file rule (the
+    # PORO rule takes all of `app/models/**/*.rb`), so the sweep's file-rule
+    # bound doesn't cover it and this check has to.
+    #
+    # Deleting a class-based unit therefore requires the caller to name the
+    # path explicitly; the sweep never infers it.
+    #
+    # @param identifier [String]
+    # @return [Boolean]
+    def class_based_unit?(identifier)
+      node = @dependency_graph.node(identifier)
+      return false unless node
+
+      CLASS_BASED.key?(node[:type])
     end
 
     # Register a batch of freshly-extracted units and write their JSON.

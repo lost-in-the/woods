@@ -69,8 +69,29 @@ module Woods
     # @return [Integer] Estimated token count
     def estimated_tokens
       source_tokens = source_code ? (source_code.length / 4.0).ceil : 0
-      metadata_tokens = metadata.any? ? (metadata.to_json.length / 4.0).ceil : 0
+      metadata_tokens = metadata.any? ? (serialized_metadata.length / 4.0).ceil : 0
       source_tokens + metadata_tokens
+    end
+
+    # Metadata serialized the way the index writer serializes it.
+    #
+    # `Hash#to_json` and `JSON.generate` disagree about values JSON has no
+    # native representation for. With ActiveSupport loaded, `to_json` routes
+    # through `as_json`, which renders a Class as its (empty) instance values
+    # — `{}`. `JSON.generate`, which `Extractor#json_serialize` uses to write
+    # the unit file, falls back to `to_s` — `"ActionDispatch::Session::CookieStore"`.
+    #
+    # Estimating against `to_json` therefore described a document that was
+    # never written: on Rails < 7.1, `BehavioralProfile` carries
+    # `config.session_store` as a Class, and the estimate came out ~9 tokens
+    # short of the file on disk. Since an incremental run recomputes the
+    # estimate by reading that file back, the two paths disagreed (#164).
+    #
+    # @return [String]
+    def serialized_metadata
+      JSON.generate(metadata)
+    rescue StandardError
+      metadata.to_json
     end
 
     # Check if unit needs chunking based on size

@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present from vanished) shared by every entry point, so a git-diff caller and a future
   file-watching daemon can't drift apart.
 
+- **Token estimates now describe the file that is written.** `ExtractedUnit#estimated_tokens`
+  measured `metadata.to_json`, which with ActiveSupport loaded applies HTML-safe escaping (`>`
+  becomes `\u003e`), while the unit file is written with `JSON.generate`. Any unit whose
+  metadata contained a lambda scope was therefore indexed with a token count that described a
+  document that was never written — and differed depending on whether a full or an incremental
+  run last touched it. Both sides now measure `JSON.generate`.
+
 ### Changed
 
 - `GraphAnalyzer` output is now a pure function of graph content. `hubs` breaks ties on

@@ -651,6 +651,124 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── estimated_tokens_from ────────────────────────────────────────────
+
+  # A full extraction indexes a unit's token estimate from the in-memory
+  # object; an incremental run recomputes it by reading the written file
+  # back. The two must agree, or the same unit's `_index.json` entry changes
+  # depending on which path last touched it.
+  describe '#estimated_tokens_from' do
+    def round_trip_estimate(unit)
+      extractor.send(:estimated_tokens_from, JSON.parse(JSON.generate(unit.to_h)))
+    end
+
+    it 'matches ExtractedUnit#estimated_tokens for plain metadata' do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.source_code = "class User < ApplicationRecord\nend\n"
+      unit.metadata = { table_name: 'users', column_count: 3 }
+
+      expect(round_trip_estimate(unit)).to eq(unit.estimated_tokens)
+    end
+
+    # ActiveSupport's Hash#to_json HTML-escapes `>` to `>`, six
+    # characters where JSON.generate — which writes the file — emits one.
+    # Any model with a lambda scope in its metadata tripped this.
+    it 'matches for metadata containing characters ActiveSupport HTML-escapes' do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: 'app/models/post.rb')
+      unit.source_code = "class Post < ApplicationRecord\nend\n"
+      unit.metadata = {
+        scopes: [{ name: 'recent', source: '  scope :recent, -> { order(created_at: :desc) }' }],
+        note: 'a < b && b > c'
+      }
+
+      expect(round_trip_estimate(unit)).to eq(unit.estimated_tokens)
+    end
+
+    # A booted Rails app turns HTML-entity escaping on (the ActiveSupport
+    # railtie sets it); the bare unit suite doesn't load that railtie, so the
+    # condition is established here rather than assumed.
+    it 'measures the serialization that is written, not ActiveSupport\'s' do
+      require 'active_support/json'
+      previous = ActiveSupport::JSON::Encoding.escape_html_entities_in_json
+      ActiveSupport::JSON::Encoding.escape_html_entities_in_json = true
+
+      metadata = { source: '-> { x }' }
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Scoped', file_path: 'app/models/scoped.rb')
+      unit.metadata = metadata
+
+      # Guard the premise: if the two serializers ever stop disagreeing, this
+      # example is no longer testing anything.
+      expect(metadata.to_json.length).to be > JSON.generate(metadata).length
+      expect(unit.estimated_tokens).to eq(Woods::TokenUtils.estimate_tokens(JSON.generate(metadata)))
+      expect(round_trip_estimate(unit)).to eq(unit.estimated_tokens)
+    ensure
+      ActiveSupport::JSON::Encoding.escape_html_entities_in_json = previous
+    end
+  end
+
+  # ── prune_vanished_units ─────────────────────────────────────────────
+
+  describe '#prune_vanished_units' do
+    def register(type:, identifier:, relative_path:)
+      unit = Woods::ExtractedUnit.new(
+        type: type, identifier: identifier, file_path: File.join(tmpdir, relative_path)
+      )
+      extractor.dependency_graph.register(unit)
+      unit
+    end
+
+    def prune(changed_paths)
+      change_set = Woods::ChangeSet.new(paths: changed_paths, root: rails_root)
+      extractor.send(:prune_vanished_units, change_set, Set.new)
+    end
+
+    # On Rails < 7.1, ActiveRecord::SchemaMigration and
+    # ActiveRecord::InternalMetadata are real ActiveRecord::Base descendants,
+    # so a full extraction emits them with the *convention* path
+    # app/models/active_record/schema_migration.rb — a file no application
+    # has. That path is claimed by the PORO file rule, so the sweep's
+    # file-rule bound doesn't exclude it; pruning it would delete a unit
+    # every full extraction still produces.
+    it 'leaves a class-based unit whose convention path never existed alone' do
+      register(type: :model, identifier: 'ActiveRecord::SchemaMigration',
+               relative_path: 'app/models/active_record/schema_migration.rb')
+
+      expect(prune(['app/services/unrelated.rb'])).to be_empty
+      expect(extractor.dependency_graph.node_exists?('ActiveRecord::SchemaMigration')).to be(true)
+    end
+
+    it 'still removes a class-based unit when the caller names its path' do
+      register(type: :model, identifier: 'Ghost', relative_path: 'app/models/ghost.rb')
+
+      expect(prune(['app/models/ghost.rb'])).to contain_exactly('Ghost')
+      expect(extractor.dependency_graph.node_exists?('Ghost')).to be(false)
+    end
+
+    it 'sweeps a file-based unit the caller forgot to mention' do
+      register(type: :service, identifier: 'GoneService', relative_path: 'app/services/gone_service.rb')
+
+      expect(prune(['app/services/other.rb'])).to contain_exactly('GoneService')
+    end
+
+    it 'leaves units whose nominal path no file rule claims alone' do
+      # BehavioralProfile names config/application.rb, which the dummy tmpdir
+      # has no file for and no dispatch rule claims.
+      register(type: :configuration, identifier: 'BehavioralProfile', relative_path: 'config/application.rb')
+
+      expect(prune(['app/services/unrelated.rb'])).to be_empty
+    end
+
+    it 'leaves paths outside Rails.root alone' do
+      unit = Woods::ExtractedUnit.new(
+        type: :rails_source, identifier: 'rails/activerecord/lib/active_record/base.rb',
+        file_path: '/gems/activerecord/lib/active_record/base.rb'
+      )
+      extractor.dependency_graph.register(unit)
+
+      expect(prune([])).to be_empty
+    end
+  end
+
   # ── deduplicate_results ──────────────────────────────────────────────
 
   describe '#deduplicate_results' do
