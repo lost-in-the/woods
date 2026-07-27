@@ -4,8 +4,13 @@ require 'spec_helper'
 require 'woods/console/connection_manager'
 
 RSpec.describe Woods::Console::ConnectionManager do
+  # `cat` rather than `echo ok`, because `alive?` is `@wait_thread.alive?` and
+  # `echo` exits before the assertion can run — the example only passed when the
+  # machine was loaded enough to lose the race. `cat` blocks on stdin, so it is
+  # alive until `disconnect!` closes stdin, which is exactly the transition
+  # under test.
   let(:config) do
-    { 'mode' => 'direct', 'command' => 'echo ok' }
+    { 'mode' => 'direct', 'command' => 'cat' }
   end
 
   subject(:manager) { described_class.new(config: config) }
