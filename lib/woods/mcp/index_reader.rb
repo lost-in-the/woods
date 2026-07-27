@@ -7,6 +7,8 @@ require 'json'
 require 'pathname'
 require 'set'
 
+require_relative '../generation'
+
 module Woods
   module MCP
     # Reads extraction output from disk for the MCP server.
@@ -42,8 +44,11 @@ module Woods
       MAX_UNIT_CACHE = 50
 
       # @param index_dir [String] Path to extraction output directory
+      # @param auto_refresh [Boolean] re-read the index when its published
+      #   generation moves. On by default; specs that assert caching behaviour
+      #   turn it off.
       # @raise [ArgumentError] if directory doesn't exist or has no manifest.json
-      def initialize(index_dir)
+      def initialize(index_dir, auto_refresh: true)
         @index_dir = Pathname.new(index_dir)
         raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
         raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
@@ -51,6 +56,84 @@ module Woods
         @unit_cache = {}
         @unit_cache_order = []
         @identifier_map = nil
+        @auto_refresh = auto_refresh
+        @pinned = false
+        @generation = Woods::Generation.new(output_dir: @index_dir)
+        @loaded_generation = nil
+        @generation_signature = nil
+      end
+
+      # The generation this reader's caches were populated from.
+      #
+      # @return [Integer, nil] nil until something has been read
+      attr_reader :loaded_generation
+
+      # Drop caches if the index has been rewritten since they were populated.
+      #
+      # This is what makes the MCP `reload` tool an optimization rather than a
+      # correctness requirement. A long-lived server used to hold whatever it
+      # read at boot until someone thought to call `reload` — so an agent
+      # working alongside a running extraction got answers describing the tree
+      # as of the last time the server happened to start.
+      #
+      # Called at the top of every public read. The cost is one `File.stat` of
+      # a ~100-byte file; the file is only parsed when its mtime or size moved,
+      # and the caches are only dropped when the generation number actually
+      # advanced. An index with no generation file (written before generations
+      # existed, or by a third party) never refreshes — same behaviour as
+      # before.
+      #
+      # @return [Integer, nil] the generation now loaded, or nil when the
+      #   caches were already current
+      def ensure_fresh!
+        return nil unless @auto_refresh
+        return nil if @pinned
+
+        signature = generation_signature
+        return nil if signature.nil? || signature == @generation_signature
+
+        @generation_signature = signature
+        published = @generation.current.number
+        return nil if published.zero? || published == @loaded_generation
+
+        reload!
+        @loaded_generation = published
+      end
+
+      # Suppress cache invalidation for the duration of a block.
+      #
+      # {#ensure_fresh!} runs per read, which bounds staleness but does not
+      # make a *sequence* of reads consistent: a caller that reads the manifest
+      # and then a unit can straddle two generations if a write lands between
+      # them. Both halves describe a real state of the tree, but not the same
+      # one.
+      #
+      # Wrapping a multi-read operation checks freshness once, up front, and
+      # then holds it — so nothing already cached is dropped and re-read at a
+      # newer generation partway through.
+      #
+      # **What this does not do:** an artifact that has never been read is
+      # still loaded from whatever is on disk when the block reaches it.
+      # Guaranteeing more would mean materializing the whole index on entry,
+      # which is what {#warmup!} costs, per request. Closing that last gap
+      # properly needs the payload behind an atomic pointer — see
+      # docs/WATCH_DAEMON.md.
+      #
+      # @example
+      #   reader.with_pinned_generation { [reader.manifest, reader.find_unit("Post")] }
+      #
+      # @yield the block to run against a single generation
+      # @return [Object] the block's value
+      def with_pinned_generation
+        return yield if @pinned
+
+        ensure_fresh!
+        @pinned = true
+        begin
+          yield
+        ensure
+          @pinned = false
+        end
       end
 
       # Pre-populate cached state so the first MCP tool call doesn't pay
@@ -66,6 +149,10 @@ module Woods
       #
       # @return [Hash] Per-step outcome: `{step => true | Exception}`
       def warmup!
+        with_pinned_generation { warmup_steps }
+      end
+
+      def warmup_steps
         steps = {
           manifest: -> { manifest },
           summary: -> { summary },
@@ -99,6 +186,7 @@ module Woods
 
       # @return [Hash] Parsed manifest.json
       def manifest
+        ensure_fresh!
         @manifest ||= parse_json('manifest.json')
       end
 
@@ -115,6 +203,7 @@ module Woods
 
       # @return [String, nil] SUMMARY.md content, or nil if not present
       def summary
+        ensure_fresh!
         @summary ||= begin
           path = @index_dir.join('SUMMARY.md')
           path.file? ? path.read : nil
@@ -123,6 +212,7 @@ module Woods
 
       # @return [Woods::DependencyGraph] Graph loaded from disk
       def dependency_graph
+        ensure_fresh!
         @dependency_graph ||= begin
           data = parse_json('dependency_graph.json')
           Woods::DependencyGraph.from_h(data)
@@ -131,6 +221,7 @@ module Woods
 
       # @return [Hash] Parsed graph_analysis.json
       def graph_analysis
+        ensure_fresh!
         @graph_analysis ||= parse_json('graph_analysis.json')
       end
 
@@ -139,6 +230,7 @@ module Woods
       # @param identifier [String] Unit identifier (e.g. "Post", "Api::V1::HealthController")
       # @return [Hash, nil] Full unit data or nil if not found
       def find_unit(identifier)
+        ensure_fresh!
         location = identifier_map[identifier]
         return nil unless location
 
@@ -150,6 +242,7 @@ module Woods
       # @param type [String, nil] Singular type name (e.g. "model", "controller")
       # @return [Array<Hash>] Index entries for matching units
       def list_units(type: nil)
+        ensure_fresh!
         dirs = if type
                  dir = TYPE_TO_DIR[type]
                  dir ? [dir] : []
@@ -194,6 +287,7 @@ module Woods
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
       # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
       def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
+        ensure_fresh!
         prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
         suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
         if query.blank? && !prefix && !suffix
@@ -330,6 +424,7 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
+        ensure_fresh!
         # Multi-word keywords ("ActiveRecord callbacks") are split on
         # whitespace and ANDed. Single-word queries behave as before.
         tokens = keyword.to_s.strip.split(/\s+/)
@@ -375,6 +470,7 @@ module Woods
       # @param types [Array<String>, nil] Filter to these singular type names
       # @return [Array<Hash>] Units sorted by last_modified descending
       def recent_changes(limit: 10, types: nil)
+        ensure_fresh!
         dirs = if types
                  types.filter_map { |t| TYPE_TO_DIR[t] }
                else
@@ -411,6 +507,7 @@ module Woods
 
       # @return [Hash] Raw dependency graph data from JSON
       def raw_graph_data
+        ensure_fresh!
         @raw_graph_data ||= parse_json('dependency_graph.json')
       end
 
@@ -424,6 +521,15 @@ module Woods
       #
       # @param query [String] Raw regex pattern
       # @return [Regexp] Compiled case-insensitive pattern
+      # mtime+size of the generation file, or nil when there is none. Cheap
+      # enough to call on every read; the file is only opened when this moves.
+      def generation_signature
+        stat = File.stat(@generation.path)
+        [stat.mtime.to_f, stat.size]
+      rescue SystemCallError
+        nil
+      end
+
       def compile_search_pattern(query)
         Regexp.new(query, Regexp::IGNORECASE)
       rescue RegexpError

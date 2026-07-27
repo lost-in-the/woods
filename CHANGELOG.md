@@ -58,9 +58,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
     scan otherwise — which is also the right choice inside a container, where native FS events
     don't cross bind mounts reliably.
+- **An MCP freshness contract** (#164, phase 3). `woods_status` now reports the index
+  `generation` (number, when it moved, what moved it), whether the **working tree** is dirty
+  plus a fingerprint of it, and the watch daemon's state (`running` / `degraded` + reason /
+  `stopped` / `absent`). `git_sha_matches_head` only ever saw *committed* HEAD, so an agent
+  forty uncommitted edits deep was told the index matched while every answer described the
+  tree before those edits.
+- **`IndexReader` self-refreshes on a generation change**, making the MCP `reload` tool an
+  optimization rather than a correctness requirement. A long-lived server used to hold
+  whatever it read at boot, so an agent working alongside a running extraction silently got
+  answers describing the tree as of the last server start. The check costs one `File.stat` of
+  a ~100-byte file per read. `IndexReader#with_pinned_generation` extends it across a sequence
+  of reads. Indexes with no generation file behave exactly as before.
 - **`Woods::Generation`** — a monotonic marker for "which version of the index is on disk",
-  written atomically as the last step of a successful run. Readers get a cheap staleness check
-  without stat-ing the whole index.
+  written atomically as the last step of a successful run by *every* extraction mode (full,
+  incremental, targeted refresh, daemon cycle). Never advanced by a run that failed or changed
+  nothing, so staleness stays honest.
 - **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
   named extractors wholesale against an already-booted app, replacing every unit of the types
   they own. The unit types with no per-file entry point — routes, middleware, engines,

@@ -9,7 +9,14 @@ require 'woods/watch/daemon'
 RSpec.describe Woods::Watch::Daemon do
   let(:root) { Dir.mktmpdir('woods_watch_root') }
   let(:output_dir) { Dir.mktmpdir('woods_watch_out') }
-  let(:extractor) { instance_spy('Woods::Extractor', extract_changed: ['Thing'], extract_all: {}) }
+  # The real extractor bumps the generation as the last write of a successful
+  # run (that is the contract the daemon reads), so the stub does too.
+  let(:extractor) do
+    instance_spy('Woods::Extractor').tap do |double|
+      allow(double).to receive(:extract_changed) { publish_generation('incremental') && ['Thing'] }
+      allow(double).to receive(:extract_all) { publish_generation('full') && {} }
+    end
+  end
   let(:reloader) { instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true) }
 
   after { FileUtils.rm_rf([root, output_dir]) }
@@ -23,6 +30,10 @@ RSpec.describe Woods::Watch::Daemon do
       debounce: 0,
       **overrides
     )
+  end
+
+  def publish_generation(reason)
+    Woods::Generation.new(output_dir: output_dir).bump!(reason: reason)
   end
 
   def touch(relative)
@@ -161,17 +172,31 @@ RSpec.describe Woods::Watch::Daemon do
   end
 
   describe 'publishing' do
-    it 'bumps the generation after a successful extraction' do
+    # The extractor owns the bump; the daemon reports it. Two bumps per cycle
+    # would make the counter lie about how many times the index moved.
+    it 'reports the generation the extraction published' do
+      touch('config/locales/en.yml')
+      daemon = build
+
+      result = nil
+      expect { result = daemon.process(['config/locales/en.yml']) }
+        .to change { daemon.generation.current.number }.by(1)
+      expect(result[:generation]).to eq(daemon.generation.current.number)
+    end
+
+    it 'does not mint a generation of its own when extraction publishes none' do
+      allow(extractor).to receive(:extract_changed).and_return(['Thing'])
       touch('config/locales/en.yml')
       daemon = build
 
       expect { daemon.process(['config/locales/en.yml']) }
-        .to change { daemon.generation.current.number }.by(1)
+        .not_to(change { daemon.generation.current.number })
     end
 
     it 'leaves the generation alone when nothing was relevant' do
+      touch('config/locales/en.yml')
       daemon = build
-      daemon.process(['config/locales/en.yml'.tap { touch('config/locales/en.yml') }])
+      daemon.process(['config/locales/en.yml'])
 
       expect { daemon.process(['README.md']) }.not_to(change { daemon.generation.current.number })
     end

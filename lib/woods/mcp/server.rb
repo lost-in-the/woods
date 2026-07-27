@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'logger'
 require 'mcp'
 require 'open3'
 require 'time'
 require 'set'
+require_relative '../generation'
 require_relative '../tasks'
+require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
@@ -1477,6 +1480,7 @@ module Woods
               update: Woods::UpdateCheck.status_hash
             },
             index: index_section(manifest, extracted_at, staleness, index_dir),
+            watch: watch_section(index_dir),
             retriever: {
               configured: !retriever.nil?,
               class: retriever&.class&.name
@@ -1519,6 +1523,9 @@ module Woods
             schema_sha: manifest && manifest['schema_sha']
           }
 
+          base.merge!(generation_fields(index_dir))
+          base.merge!(working_tree_fields(index_dir))
+
           manifest_sha = manifest && manifest['git_sha']
           head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
           return base unless head_sha
@@ -1526,6 +1533,85 @@ module Woods
           base[:head_git_sha] = head_sha
           base[:git_sha_matches_head] = (manifest_sha == head_sha)
           base
+        end
+
+        # The generation the index is published at.
+        #
+        # Every extraction mode bumps this as its last write, so it answers
+        # "has the index moved?" without comparing timestamps — which
+        # `staleness_seconds` can't, since it measures wall-clock age rather
+        # than whether anything changed.
+        #
+        # @return [Hash]
+        def generation_fields(index_dir)
+          return {} unless index_dir
+
+          marker = Woods::Generation.new(output_dir: index_dir).current
+          return { generation: nil } if marker.number.zero?
+
+          { generation: marker.number,
+            generation_updated_at: marker.updated_at,
+            generation_reason: marker.reason }
+        rescue StandardError
+          {}
+        end
+
+        # Whether the working tree has uncommitted changes, and a fingerprint
+        # of them.
+        #
+        # `git_sha_matches_head` only sees *committed* HEAD, so an agent
+        # working through forty uncommitted edits could be told the index
+        # matches HEAD while every answer described the tree before those
+        # edits. The fingerprint is a digest of `git status --porcelain`, so a
+        # caller can tell "same dirty state as when the index was built" from
+        # "the tree moved under me".
+        #
+        # @return [Hash]
+        def working_tree_fields(index_dir)
+          porcelain = resolve_working_tree_status(index_dir)
+          return {} if porcelain.nil?
+
+          { working_tree_dirty: !porcelain.empty?,
+            working_tree_fingerprint: Digest::SHA256.hexdigest(porcelain)[0, 16] }
+        end
+
+        # `git status --porcelain` for the repo containing +index_dir+, or nil
+        # when that can't be answered. capture2e for the same reason as
+        # {#resolve_head_sha}: git's stderr must not reach the stdio transport.
+        def resolve_working_tree_status(index_dir)
+          return nil unless index_dir
+
+          dir = index_dir.to_s
+          return nil unless File.directory?(dir)
+
+          output, status = Open3.capture2e('git', '-C', dir, 'status', '--porcelain')
+          status.success? ? output : nil
+        rescue StandardError
+          nil
+        end
+
+        # The watch daemon's state, so an agent can branch on whether anything
+        # is keeping this index current.
+        #
+        # Three states matter and they are not interchangeable: `running`
+        # (current, or current within a debounce window), `degraded` (alive but
+        # unable to update — the reason says why, and the index is frozen at a
+        # known generation), and `stopped`/`absent` (nothing is maintaining
+        # this index; fall back to whatever the last explicit run left).
+        #
+        # @return [Hash]
+        def watch_section(index_dir)
+          return { state: 'absent' } unless index_dir
+
+          path = File.join(index_dir.to_s, Woods::Watch::Status::FILENAME)
+          return { state: 'absent' } unless File.exist?(path)
+
+          record = JSON.parse(File.read(path))
+          { state: record['state'], reason: record['reason'], generation: record['generation'],
+            pid: record['pid'], updated_at: record['updated_at'],
+            last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
+        rescue StandardError
+          { state: 'absent' }
         end
 
         # Resolve the current HEAD SHA for the git repo containing +index_dir+.

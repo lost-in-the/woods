@@ -4,6 +4,10 @@ require 'spec_helper'
 require 'woods'
 require 'woods/mcp/server'
 require 'woods/mcp/index_reader'
+require 'woods/generation'
+require 'woods/watch/status'
+require 'tmpdir'
+require 'fileutils'
 
 RSpec.describe 'woods_status tool' do
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
@@ -117,6 +121,93 @@ RSpec.describe 'woods_status tool' do
     end
   end
 
+  # #164 phase 3: an agent needs to distinguish "the index is current",
+  # "something is maintaining it but currently can't", and "nothing is
+  # maintaining it" — none of which the manifest timestamp can express.
+  describe 'freshness contract' do
+    let(:index_dir) { Dir.mktmpdir('woods_status_freshness') }
+    let(:reader) { double('reader', manifest: { 'extracted_at' => nil, 'counts' => {} }) }
+
+    before do
+      # Keep the git probes hermetic; this context is about the other fields.
+      allow(Open3).to receive(:capture2e).and_return(['', instance_double(Process::Status, success?: false)])
+    end
+
+    after { FileUtils.rm_rf(index_dir) }
+
+    def status_for
+      Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: index_dir)
+    end
+
+    describe 'index.generation' do
+      it 'reports the published generation, when it moved, and what moved it' do
+        Woods::Generation.new(output_dir: index_dir).bump!(reason: 'incremental')
+
+        expect(status_for[:index]).to include(generation: 1, generation_reason: 'incremental')
+        expect(status_for[:index][:generation_updated_at]).not_to be_nil
+      end
+
+      it 'reports a nil generation for an index that has never published one' do
+        expect(status_for[:index][:generation]).to be_nil
+      end
+    end
+
+    describe 'index.working_tree_*' do
+      # git_sha_matches_head only sees committed HEAD. Forty uncommitted edits
+      # leave it reporting a match while every answer describes the tree
+      # before those edits.
+      it 'reports a clean working tree' do
+        allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'status', '--porcelain')
+                                           .and_return(['', instance_double(Process::Status, success?: true)])
+
+        expect(status_for[:index][:working_tree_dirty]).to be(false)
+      end
+
+      it 'reports a dirty working tree with a fingerprint of the change set' do
+        allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'status', '--porcelain')
+                                           .and_return([" M app/models/post.rb\n",
+                                                        instance_double(Process::Status, success?: true)])
+
+        expect(status_for[:index][:working_tree_dirty]).to be(true)
+        expect(status_for[:index][:working_tree_fingerprint]).to match(/\A[0-9a-f]{16}\z/)
+      end
+
+      it 'omits the fields entirely when git cannot answer' do
+        expect(status_for[:index]).not_to have_key(:working_tree_dirty)
+      end
+    end
+
+    describe 'watch' do
+      it 'reports absent when no daemon has ever run' do
+        expect(status_for[:watch]).to eq(state: 'absent')
+      end
+
+      it 'reports a running daemon' do
+        Woods::Watch::Status.new(output_dir: index_dir)
+                            .write(state: :running, generation: 7, last_action: 'incremental')
+
+        expect(status_for[:watch]).to include(state: 'running', generation: 7, last_action: 'incremental')
+      end
+
+      # The state that matters: alive, but the index is frozen and the reason
+      # says why. Without this an agent cannot tell stale from wrong.
+      it 'reports a degraded daemon with its reason' do
+        Woods::Watch::Status.new(output_dir: index_dir)
+                            .write(state: :degraded, generation: 7,
+                                   reason: 'SyntaxError: unexpected end-of-input')
+
+        expect(status_for[:watch]).to include(state: 'degraded', generation: 7)
+        expect(status_for[:watch][:reason]).to include('SyntaxError')
+      end
+
+      it 'reports absent rather than raising on an unreadable status file' do
+        File.write(File.join(index_dir, Woods::Watch::Status::FILENAME), 'not json')
+
+        expect(status_for[:watch]).to eq(state: 'absent')
+      end
+    end
+  end
+
   describe 'staleness gate (index.git_sha_matches_head)' do
     # Regression — the manifest captures git_sha / gemfile_lock_sha / schema_sha
     # at extraction time, but historic build_status never compared them against
@@ -127,10 +218,14 @@ RSpec.describe 'woods_status tool' do
     let(:manifest_sha) { 'a' * 40 }
     let(:head_sha) { 'b' * 40 }
 
-    def stub_git_head(head:, status_ok: true)
+    def stub_git_head(head:, status_ok: true, porcelain: '')
       process_status = instance_double(Process::Status, success?: status_ok)
       allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'rev-parse', 'HEAD')
                                          .and_return(["#{head}\n", process_status])
+      # build_status also asks for the working-tree state; without a stub the
+      # real git runs against whatever /tmp happens to be.
+      allow(Open3).to receive(:capture2e).with('git', '-C', anything, 'status', '--porcelain')
+                                         .and_return([porcelain, process_status])
     end
 
     it 'reports git_sha_matches_head=true when manifest.git_sha matches HEAD' do

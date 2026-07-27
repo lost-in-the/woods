@@ -50,6 +50,7 @@ require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
 require_relative 'change_set'
+require_relative 'generation'
 require_relative 'path_dispatcher'
 
 module Woods
@@ -354,6 +355,7 @@ module Woods
       write_manifest
       write_structural_summary
       capture_snapshot
+      publish_generation('full')
 
       log_summary
 
@@ -519,9 +521,31 @@ module Woods
       write_incremental_graph_analysis
       write_manifest(incremental: true)
       write_structural_summary
+      publish_generation('incremental')
+
       return unless Woods.configuration.enable_snapshots
 
       Rails.logger.info '[Woods] Skipping snapshot capture — snapshots are captured on full extraction only'
+    end
+
+    # Publish a new generation — the last write of any successful run.
+    #
+    # Every extraction mode does this, so a long-lived reader can detect that
+    # the index moved without stat-ing the whole directory, whatever produced
+    # the change: a full run, an incremental run, a targeted refresh, or the
+    # watch daemon. Ordering is the contract: the generation goes last, so a
+    # reader that sees generation N knows N's files are already on disk. A run
+    # that raised, or that changed nothing, never reaches this.
+    #
+    # @param reason [String] what produced this generation
+    # @return [void]
+    def publish_generation(reason)
+      Generation.new(output_dir: @output_dir).bump!(reason: reason)
+    rescue StandardError => e
+      # A failed generation bump must not fail the extraction that produced a
+      # perfectly good index — readers just keep their current view until the
+      # next run.
+      Rails.logger.warn "[Woods] Could not publish generation: #{e.message}"
     end
 
     # Recompute graph_analysis.json after an incremental graph write.

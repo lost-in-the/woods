@@ -163,6 +163,109 @@ event latency across a container bind mount. #164's success criterion 2 asks
 for both before the feature is called production-ready. Until then the daemon
 is opt-in and documented as such.
 
+## The freshness contract
+
+A daemon that keeps the index current is only half the problem. The other half
+is a reader that notices.
+
+### Generations
+
+Every extraction mode — full, incremental, targeted refresh, daemon cycle —
+writes `tmp/woods/generation.json` as its **last** action:
+
+```json
+{ "number": 42, "token": "9f2c81ad3e4b7c05", "updated_at": "2026-07-27T04:55:12Z", "reason": "incremental" }
+```
+
+Two properties, both from the same rule — never advance a cursor over work that
+didn't land:
+
+- **Bumped last**, so a reader that sees generation N knows N's files are
+  already on disk.
+- **Not bumped on failure or on a no-op run**, so staleness stays honest.
+
+`IndexReader` checks it at the top of every read: one `File.stat` of a
+~100-byte file, parsed only when its mtime or size moved, caches dropped only
+when the number actually advanced. That makes the MCP `reload` tool an
+*optimization* rather than a correctness requirement — previously a long-lived
+server held whatever it read at boot, so an agent working alongside a running
+extraction silently got answers describing the tree as of the last server
+start.
+
+An index with no generation file (written before this existed, or by a third
+party) behaves exactly as it always did.
+
+### `woods_status`
+
+```jsonc
+{ "index": {
+    "generation": 42,
+    "generation_reason": "incremental",
+    "generation_updated_at": "2026-07-27T04:55:12Z",
+    "git_sha_matches_head": true,
+    "working_tree_dirty": true,           // git_sha_matches_head only sees committed HEAD
+    "working_tree_fingerprint": "3f9a2c81ad3e4b7c",
+    "staleness_seconds": 12
+  },
+  "watch": {
+    "state": "degraded",                  // running | degraded | stopped | absent
+    "reason": "SyntaxError: unexpected end-of-input",
+    "generation": 41
+  } }
+```
+
+`working_tree_dirty` closes a real hole: an agent forty uncommitted edits deep
+was told the index matched HEAD while every answer described the tree before
+those edits. The fingerprint (a digest of `git status --porcelain`) lets a
+caller distinguish "same dirty state as when the index was built" from "the
+tree moved under me".
+
+### Multi-file read consistency
+
+The index is a directory, not a file, so "read the index" is many reads. Two
+options were on the table.
+
+**Per-request generation re-check — implemented.** Each read checks the
+generation first, so the reader can never serve from a cache older than what is
+published. `IndexReader#with_pinned_generation` extends that across a sequence:
+freshness is checked once on entry and then held, so nothing already cached is
+dropped and re-read at a newer generation partway through. `warmup!` uses it.
+
+Its documented limit: pinning suppresses invalidation, it does not snapshot. An
+artifact never read before is still loaded from disk as it stands when the
+block reaches it. Guaranteeing more would mean materializing the whole index on
+entry, which is what `warmup!` costs — per request.
+
+**Atomic pointer over the whole payload — evaluated, not adopted.** Extending
+the `IndexArtifact` `dumps/latest` pattern to all of `tmp/woods` (write
+`gen-N/`, flip a pointer) would close the gap completely. It was rejected for
+now because it changes the on-disk contract for every consumer that reads
+`tmp/woods/models/…` directly — the Obsidian exporter, CI artifact chains,
+`woods:validate`, the docs — and doubles disk during a write. The remaining
+window is between two reads inside one call, versus the unbounded staleness
+that existed before, so the cost/benefit does not currently favour it. Worth
+revisiting if a concrete straddle ever bites.
+
+### MCP `resources/updated` — evaluated, not implemented
+
+The MCP spec supports server-initiated `notifications/resources/updated`, and
+#164 asked whether it is worth adding as a push channel. It is not, yet:
+
+- The `mcp` gem gives the server `notify_resources_list_changed` but no
+  `notify_resources_updated`, and gates the method behind a
+  `resources.subscribe` capability with no handler hooks for
+  `resources/subscribe` / `unsubscribe`.
+- The index server runs over stdio as a request/response loop. Pushing would
+  mean writing unsolicited frames from a background thread while the main loop
+  reads stdin.
+- Client support is not something we could depend on anyway, so it would be
+  strictly additive on top of a reader-side check that already delivers the
+  correctness property for every client.
+
+The reader-side generation check is the robust answer, and it is the one
+implemented. Revisit if the gem grows the server-side API and a client we care
+about acts on it.
+
 ## Embedding it
 
 ```ruby

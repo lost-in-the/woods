@@ -64,6 +64,7 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
     require 'woods'
     require 'woods/extractor'
     require 'woods/watch/daemon'
+    require 'woods/mcp/server'
     @original_woods_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.concurrent_extraction = false
@@ -175,6 +176,61 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
 
       expect(result[:action]).to eq(:full)
       expect(differences(@index_dir, full_extraction)).to be_empty
+    end
+  end
+
+  # #164 success criterion 3: "with a daemon running, no MCP response is ever
+  # served from a cache older than the current published generation — verified
+  # by a test that extracts, then queries a long-lived server *without* calling
+  # reload, and asserts fresh data."
+  describe 'the MCP freshness contract' do
+    it 'serves fresh data from a long-lived reader with no reload call' do
+      require 'woods/mcp/index_reader'
+      reader = Woods::MCP::IndexReader.new(@index_dir)
+
+      expect(reader.find_unit('FreshService')).to be_nil
+
+      write_file('app/services/fresh_service.rb', "class FreshService
+  def call = :ok
+end
+")
+      daemon.process(['app/services/fresh_service.rb'])
+
+      # No reader.reload! anywhere in this example — that is the point.
+      expect(reader.find_unit('FreshService')).not_to be_nil
+      expect(reader.loaded_generation).to eq(Woods::Generation.new(output_dir: @index_dir).current.number)
+    end
+
+    it 'keeps serving the last good answer when the daemon is degraded' do
+      require 'woods/mcp/index_reader'
+      reader = Woods::MCP::IndexReader.new(@index_dir)
+      expect(reader.find_unit('Post')).not_to be_nil
+
+      failing = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      allow(failing).to receive(:reload!).and_raise(SyntaxError, 'unexpected end-of-input')
+      write_file('app/models/post.rb', "class Post < ApplicationRecord
+  # half-edited")
+      daemon(reloader: failing).process(['app/models/post.rb'])
+
+      # The index is frozen, not broken — and woods_status says why.
+      expect(reader.find_unit('Post')).not_to be_nil
+      status = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: @index_dir)
+      expect(status[:watch][:state]).to eq('degraded')
+      expect(status[:watch][:reason]).to include('SyntaxError')
+    end
+
+    it 'reports the generation an extraction published in woods_status' do
+      require 'woods/mcp/server'
+      reader = Woods::MCP::IndexReader.new(@index_dir)
+
+      write_file('config/locales/fr.yml', "fr:
+  hello: Bonjour
+")
+      daemon.process(['config/locales/fr.yml'])
+
+      status = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: @index_dir)
+      expect(status[:index][:generation]).to eq(Woods::Generation.new(output_dir: @index_dir).current.number)
+      expect(status[:index][:generation_reason]).to eq('incremental')
     end
   end
 

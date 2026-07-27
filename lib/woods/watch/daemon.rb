@@ -228,9 +228,11 @@ module Woods
       end
 
       def publish(action, change_set, touched, started)
-        # Bump last, and only here: a reader that sees generation N knows the
-        # files for N are already on disk.
-        marker = @generation.bump!(reason: action.to_s)
+        # The extractor bumps the generation as the last write of a successful
+        # run, so the daemon reads the number rather than minting a second one
+        # — two bumps per cycle would make the counter lie about how many
+        # times the index actually moved.
+        marker = @generation.current
         duration = elapsed_ms(started)
         @logger.info("[Woods] watch: #{action} over #{change_set.size} path(s) " \
                      "in #{duration}ms → generation #{marker.number}")
