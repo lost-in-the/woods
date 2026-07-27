@@ -242,4 +242,33 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
     expect { reader.manifest }.not_to raise_error
     expect(reader.manifest['total_units']).to eq(1)
   end
+
+  # bump! is a read-modify-write, so two overlapping writers can publish the
+  # same number. Comparing numbers, a reader already loaded at N+1 concludes it
+  # is current and serves the *other* writer's N+1 forever. The token is fresh
+  # per publish and distinguishes them.
+  it 'notices a republish that collapsed onto the same generation number' do
+    generation.bump!(reason: 'incremental')
+    reader = described_class.new(dir)
+    expect(reader.manifest['total_units']).to eq(1)
+
+    # A second writer republishes at the same number with a different token.
+    write_manifest(total_units: 2)
+    collided = JSON.parse(File.read(generation.path)).merge('token' => 'ffffffffffffffff')
+    Woods::AtomicFile.write(generation.path, JSON.generate(collided))
+
+    expect(reader.manifest['total_units']).to eq(2)
+  end
+
+  it 'falls back to the number for pre-token generation files' do
+    write_manifest(total_units: 1)
+    Woods::AtomicFile.write(generation.path, JSON.generate('number' => 1, 'updated_at' => nil))
+    reader = described_class.new(dir)
+    expect(reader.manifest['total_units']).to eq(1)
+
+    write_manifest(total_units: 2)
+    Woods::AtomicFile.write(generation.path, JSON.generate('number' => 2, 'updated_at' => nil))
+
+    expect(reader.manifest['total_units']).to eq(2)
+  end
 end

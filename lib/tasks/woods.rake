@@ -22,15 +22,23 @@ namespace :woods do
   # its own output dir), so these only ever mediate writers against the *same*
   # index: a manual rake run, a hook-triggered sync, and the watch daemon.
 
-  # Run a block holding the extraction lock, waiting briefly for another
-  # writer to finish.
+  # Run a block holding the extraction lock, waiting for another writer to
+  # finish.
   #
-  # Proceeding without the lock after the wait is deliberate: a daemon cycle
-  # is milliseconds, so a wait this long means something unusual, and hanging
-  # a CI job or a developer's terminal indefinitely is worse than two writers
-  # overlapping — which the index survives, since every write is atomic and
-  # the generation is bumped last.
-  def woods_with_extraction_lock(output_dir, wait: 30)
+  # This used to proceed *without* the lock after 30s, on the reasoning that a
+  # daemon cycle is milliseconds so a longer wait meant something unusual. That
+  # reasoning was wrong in the case that matters: a cycle includes a
+  # storm-triggered `extract_all`, which on a large host app runs for minutes.
+  # Proceeding then means two writers load `dependency_graph.json`, mutate
+  # divergent copies, and the last one silently discards the other's work — then
+  # bumps the generation, marking the clobbered graph fresh. Per-file atomic
+  # writes do not help, because the file *set* is not atomic.
+  #
+  # So the wait is now generous and the failure explicit. `WOODS_LOCK_WAIT`
+  # overrides it; exceeding it exits non-zero rather than corrupting the index,
+  # which is the outcome a CI job or a developer can actually act on.
+  def woods_with_extraction_lock(output_dir, wait: nil)
+    wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
     require 'woods/coordination/pipeline_lock'
     require 'woods/watch/daemon'
 
@@ -47,13 +55,21 @@ namespace :woods do
       acquired = lock.acquire
     end
 
-    puts 'Warning: another writer still holds the extraction lock — proceeding anyway.' unless acquired
+    woods_abort_on_lock_timeout(wait) unless acquired
 
     begin
       yield
     ensure
-      lock.release if acquired
+      lock.release
     end
+  end
+
+  def woods_abort_on_lock_timeout(wait)
+    warn "ERROR: another writer has held the extraction lock for #{wait.round}s."
+    warn 'Refusing to write: two concurrent writers rewrite the dependency graph from divergent'
+    warn 'copies, and the loser\'s work is discarded under a generation that says "fresh".'
+    warn 'Set WOODS_LOCK_WAIT to wait longer, or stop the other writer.'
+    exit 1
   end
 
   # Is a watch daemon already maintaining this index?

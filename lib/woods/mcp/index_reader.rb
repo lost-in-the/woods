@@ -61,6 +61,7 @@ module Woods
         @freshness_mutex = Mutex.new
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
+        @loaded_token = nil
         @generation_signature = nil
       end
 
@@ -278,7 +279,20 @@ module Woods
       # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
       # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
       def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
-        ensure_fresh!
+        # Pinned, not merely checked-once. This walks the identifier map and
+        # then loads units for the hits; each nested `find_unit` re-checks
+        # freshness, so a publish landing mid-walk rebuilt the caches while the
+        # result list still held identifiers from the previous generation — one
+        # response describing two indexes.
+        with_pinned_generation do
+          search_within_pin(query, types: types, fields: fields, limit: limit,
+                                   exact_prefix: exact_prefix, exact_suffix: exact_suffix)
+        end
+      end
+
+      # @api private
+      def search_within_pin(query = nil, types: nil, fields: %w[identifier], limit: 20,
+                            exact_prefix: nil, exact_suffix: nil)
         prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
         suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
         if query.blank? && !prefix && !suffix
@@ -415,7 +429,11 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @return [Array<Hash>] Matching rails_source unit summaries
       def framework_sources(keyword, limit: 20)
-        ensure_fresh!
+        with_pinned_generation { framework_sources_within_pin(keyword, limit: limit) }
+      end
+
+      # @api private
+      def framework_sources_within_pin(keyword, limit: 20)
         # Multi-word keywords ("ActiveRecord callbacks") are split on
         # whitespace and ANDed. Single-word queries behave as before.
         tokens = keyword.to_s.strip.split(/\s+/)
@@ -461,7 +479,11 @@ module Woods
       # @param types [Array<String>, nil] Filter to these singular type names
       # @return [Array<Hash>] Units sorted by last_modified descending
       def recent_changes(limit: 10, types: nil)
-        ensure_fresh!
+        with_pinned_generation { recent_changes_within_pin(limit: limit, types: types) }
+      end
+
+      # @api private
+      def recent_changes_within_pin(limit: 10, types: nil)
         dirs = if types
                  types.filter_map { |t| TYPE_TO_DIR[t] }
                else
@@ -517,11 +539,31 @@ module Woods
         return nil if signature.nil? || signature == @generation_signature
 
         @generation_signature = signature
-        published = @generation.current.number
-        return nil if published.zero? || published == @loaded_generation
+        marker = @generation.current
+        return nil if marker.number.zero? || same_generation?(marker)
 
         reload!
-        @loaded_generation = published
+        @loaded_token = marker.token
+        @loaded_generation = marker.number
+      end
+
+      # Compare the *token*, not the number.
+      #
+      # `bump!` is a read-modify-write, so two writers that overlap can both
+      # publish the same number — which the design permits, since a manual rake
+      # run proceeds after waiting for the lock. A reader already loaded at N+1
+      # would then see `published == loaded`, conclude it was current, and hold
+      # caches describing the *other* writer's N+1 indefinitely: a stale index
+      # that believes it is fresh, which is the one failure generations exist to
+      # prevent.
+      #
+      # The token is a fresh random value per publish, so it distinguishes two
+      # collapsed bumps that the counter cannot. Falls back to the number for
+      # generation files written before tokens existed.
+      def same_generation?(marker)
+        return @loaded_generation == marker.number if marker.token.nil?
+
+        @loaded_token == marker.token
       end
 
       # Touch every lazy accessor, recording rather than raising per-step

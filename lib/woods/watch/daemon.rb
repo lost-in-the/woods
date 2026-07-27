@@ -433,6 +433,10 @@ module Woods
             end
 
             restamp_status
+            # A storm-triggered full extraction can outlive LOCK_STALE_TIMEOUT,
+            # at which point a contender would retire the lock of a run that is
+            # still going. The holder has to keep saying it is alive.
+            @lock.touch if @lock.respond_to?(:touch)
           end
         end
       end

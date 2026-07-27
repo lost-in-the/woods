@@ -678,8 +678,15 @@ module Woods
                          'externally — their counts in the response reflect the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            reader.reload!
-            manifest = reader.manifest
+            # Through the pin, not around it. A bare `reload!` under the
+            # threaded HTTP transport drops the caches of a concurrent pinned
+            # sequence mid-flight — the exact tear refcounted pins exist to
+            # prevent. Pinning here also makes the manifest read below describe
+            # the generation this reload just loaded.
+            manifest = reader.with_pinned_generation do
+              reader.reload!
+              reader.manifest
+            end
             payload = {
               reloaded: true,
               extracted_at: manifest['extracted_at'],
@@ -1493,7 +1500,7 @@ module Woods
               index_dir: index_dir.to_s,
               update: Woods::UpdateCheck.status_hash
             },
-            index: index_section(manifest, extracted_at, staleness, index_dir),
+            index: index_section(manifest, extracted_at, staleness, index_dir, reader),
             watch: watch_section(index_dir),
             retriever: {
               configured: !retriever.nil?,
@@ -1523,7 +1530,7 @@ module Woods
         # diff directly. This is an observability signal, not a hard gate —
         # hard-refusing responses would be much more disruptive than a loudly-
         # visible staleness flag that agents can branch on.
-        def index_section(manifest, extracted_at, staleness, index_dir)
+        def index_section(manifest, extracted_at, staleness, index_dir, reader = nil)
           base = {
             extracted_at: extracted_at,
             staleness_seconds: staleness,
@@ -1537,7 +1544,7 @@ module Woods
             schema_sha: manifest && manifest['schema_sha']
           }
 
-          base.merge!(generation_fields(index_dir))
+          base.merge!(generation_fields(index_dir, reader))
           base.merge!(working_tree_fields(index_dir))
 
           manifest_sha = manifest && manifest['git_sha']
@@ -1564,15 +1571,36 @@ module Woods
         # changes when dependencies do, not when the app does.
         #
         # @return [Hash]
-        def generation_fields(index_dir)
+        def generation_fields(index_dir, reader = nil)
           return {} unless index_dir
 
           marker = Woods::Generation.new(output_dir: index_dir).current
           return { generation: nil } if marker.number.zero?
 
-          { generation: marker.number,
-            generation_updated_at: marker.updated_at,
-            generation_reason: marker.reason }
+          fields = { generation: marker.number,
+                     generation_updated_at: marker.updated_at,
+                     generation_reason: marker.reason }
+          fields.merge(served_generation_fields(marker, reader))
+        rescue StandardError
+          {}
+        end
+
+        # What the *reader* is actually serving, which is not always what is
+        # published.
+        #
+        # `build_status` pins the reader so the manifest and counts above come
+        # from one generation, but this method reads `generation.json` from
+        # disk — so a publish landing mid-call would otherwise report a
+        # generation number beside counts from the previous one, the exact
+        # mismatch the pin is there to remove. When they differ, say so instead
+        # of quietly picking one.
+        def served_generation_fields(marker, reader)
+          return {} unless reader.respond_to?(:loaded_generation)
+
+          served = reader.loaded_generation
+          return {} if served.nil? || served == marker.number
+
+          { served_generation: served, generation_lag: marker.number - served }
         rescue StandardError
           {}
         end
@@ -1640,8 +1668,17 @@ module Woods
           return { state: 'absent' } unless File.exist?(path)
 
           record = JSON.parse(File.read(path))
+          # `state` is whatever the daemon last wrote, and a `kill -9`'d daemon
+          # leaves `running` behind forever. `alive?` adds the two checks that
+          # catch that — the pid still exists and the record is recent — so the
+          # payload can distinguish "maintaining this index" from "claimed to be,
+          # once". Reported as a separate field rather than by overwriting
+          # `state`, because the recorded state and the liveness verdict answer
+          # different questions and an operator wants both.
+          status = Woods::Watch::Status.new(output_dir: index_dir)
           { state: record['state'], reason: record['reason'], generation: record['generation'],
             pid: record['pid'], updated_at: record['updated_at'],
+            alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
             last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
         rescue StandardError
           { state: 'absent' }
