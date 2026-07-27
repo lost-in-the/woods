@@ -196,6 +196,40 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
       republish(total_units: 2)
       expect(reader.manifest['total_units']).to eq(2)
     end
+
+    # Pins are refcounted because `woods-mcp-http` runs tool handlers on its
+    # Rack server's request threads. With a boolean, the first of two
+    # overlapping pins to finish unpinned the reader for both — the survivor's
+    # remaining reads could then be invalidated mid-sequence, the exact tear
+    # pinning exists to prevent.
+    it 'holds the pin until the last overlapping holder releases' do
+      generation.bump!(reason: 'full')
+      reader = described_class.new(dir)
+      reader.manifest
+
+      entered = Queue.new
+      release = Queue.new
+      holder = Thread.new do
+        reader.with_pinned_generation do
+          entered << true
+          release.pop
+          reader.manifest['total_units']
+        end
+      end
+      entered.pop
+
+      # A second pin overlaps and finishes first; the holder is still pinned.
+      reader.with_pinned_generation { reader.manifest }
+      republish(total_units: 2)
+
+      expect(reader.manifest['total_units']).to eq(1)
+
+      release << true
+      expect(holder.value).to eq(1)
+
+      # Invalidation resumes once the last pin is gone.
+      expect(reader.manifest['total_units']).to eq(2)
+    end
   end
 
   it 'survives a corrupt generation file rather than failing the read' do

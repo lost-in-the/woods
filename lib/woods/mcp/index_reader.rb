@@ -57,7 +57,8 @@ module Woods
         @unit_cache_order = []
         @identifier_map = nil
         @auto_refresh = auto_refresh
-        @pinned = false
+        @pin_depth = 0
+        @freshness_mutex = Mutex.new
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
         @generation_signature = nil
@@ -83,21 +84,18 @@ module Woods
       # existed, or by a third party) never refreshes — same behaviour as
       # before.
       #
+      # The check-and-reload is a mutex-guarded critical section. The stdio
+      # transport serializes tool calls, but `woods-mcp-http` runs handlers on
+      # its Rack server's request threads — and unguarded, two concurrent reads
+      # race the signature bookkeeping: duplicate `reload!`s, or one request's
+      # freshly populated caches dropped mid-sequence by the other's refresh.
+      #
       # @return [Integer, nil] the generation now loaded, or nil when the
       #   caches were already current
       def ensure_fresh!
         return nil unless @auto_refresh
-        return nil if @pinned
 
-        signature = generation_signature
-        return nil if signature.nil? || signature == @generation_signature
-
-        @generation_signature = signature
-        published = @generation.current.number
-        return nil if published.zero? || published == @loaded_generation
-
-        reload!
-        @loaded_generation = published
+        @freshness_mutex.synchronize { refresh_if_stale }
       end
 
       # Suppress cache invalidation for the duration of a block.
@@ -119,20 +117,29 @@ module Woods
       # properly needs the payload behind an atomic pointer — see
       # docs/WATCH_DAEMON.md.
       #
+      # Pins are *refcounted*, not a boolean. Under a threaded transport two
+      # requests can hold pins at once, and with a boolean the first to finish
+      # unpinned the reader while the second still relied on it — its remaining
+      # reads could then be invalidated mid-sequence, the exact tear this
+      # method exists to prevent. Freshness is checked only when the depth goes
+      # 0 → 1; nested and overlapping pins ride the generation already held,
+      # and invalidation resumes when the last pin releases.
+      #
       # @example
       #   reader.with_pinned_generation { [reader.manifest, reader.find_unit("Post")] }
       #
       # @yield the block to run against a single generation
       # @return [Object] the block's value
       def with_pinned_generation
-        return yield if @pinned
+        @freshness_mutex.synchronize do
+          refresh_if_stale if @auto_refresh && @pin_depth.zero?
+          @pin_depth += 1
+        end
 
-        ensure_fresh!
-        @pinned = true
         begin
           yield
         ensure
-          @pinned = false
+          @freshness_mutex.synchronize { @pin_depth -= 1 }
         end
       end
 
@@ -496,6 +503,26 @@ module Woods
       end
 
       private
+
+      # The body of {#ensure_fresh!}. Callers must hold `@freshness_mutex`; it
+      # is split out so {#with_pinned_generation} can run it inside the same
+      # critical section that increments the pin depth.
+      #
+      # @return [Integer, nil] the generation now loaded, or nil when the
+      #   caches were already current
+      def refresh_if_stale
+        return nil if @pin_depth.positive?
+
+        signature = generation_signature
+        return nil if signature.nil? || signature == @generation_signature
+
+        @generation_signature = signature
+        published = @generation.current.number
+        return nil if published.zero? || published == @loaded_generation
+
+        reload!
+        @loaded_generation = published
+      end
 
       # Touch every lazy accessor, recording rather than raising per-step
       # failures so a missing optional artefact (graph_analysis.json on an index

@@ -141,6 +141,16 @@ known good" — and everything modified since is uncovered, whoever changed it.
 With no generation file there is no index, every file is uncovered, and the
 storm threshold correctly turns that into one full extraction.
 
+Deletions need one extra step, because a deleted file leaves no mtime to scan:
+if any path the index attributes a unit to is gone from disk, the daemon runs
+one cycle with an *empty* change set, which reaches the ghost units through the
+extractor's bounded deletion sweep. Deliberately empty — naming the paths would
+make the deletions authoritative for every unit type, and some registered paths
+are nominal (on Rails < 7.1, `ActiveRecord::SchemaMigration` registers a
+convention path no app has), which authoritative deletion would wrongly remove.
+The sweep carries the bounds that make reconciliation safe; the daemon only
+supplies the trigger.
+
 This is what makes the documented hook pattern safe:
 
 ```bash
@@ -367,6 +377,14 @@ Liveness needs three things to agree, each ruling out a different way the
 status file lies: a state a live daemon writes, a pid that still exists (a
 `kill -9` leaves the file behind), and a recent timestamp (a machine that lost
 power leaves a `running` record whose pid some unrelated process now owns).
+
+One known limit: the pid check sees only the caller's own pid namespace. In the
+Docker layout — daemon in the container, output volume-mounted to the host — a
+host-side `watch_status` tests a host pid that has nothing to do with the
+containerized daemon, so it can misread liveness in either direction for up to
+`STALE_AFTER` (the timestamp check still bounds it, and the heartbeat keeps a
+live daemon inside that bound). Run `watch_status` on the same side as the
+daemon; a cross-namespace liveness protocol isn't worth its complexity here.
 
 ### Reader multiplicity is free
 

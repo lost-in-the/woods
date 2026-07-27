@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Startup catch-up now notices deletion-only downtime** (#164 review, round 2). The
+  reconciliation scanned mtimes of files that exist, so a file deleted while no daemon was
+  running left no trace: the daemon logged "index is current at startup" and the ghost units
+  survived until the next unrelated event. Catch-up now also checks the graph's registered
+  paths for files gone from disk and, if any, runs one cycle with an *empty* change set — the
+  extractor's bounded sweep reaches the ghosts, with the bounds that keep nominal paths
+  (Rails < 7.1 `SchemaMigration`) safe from authoritative deletion.
+- **The drain guard is an atomic test-and-set** (#164 review, round 2). The re-entrancy guard
+  was a check-then-act boolean — the exact race it guarded against: two `listen` callback
+  threads could both read `false` before either wrote `true` and run two overlapping drain
+  loops. It is now `Mutex#try_lock`; the refused caller's paths are already in the pending set,
+  so the winning loop picks them up and nothing is lost.
+- **`IndexReader` freshness bookkeeping is safe under a threaded transport** (#164 review,
+  round 2). The generation check-and-reload was unguarded check-then-act, and the pin was a
+  boolean — under `woods-mcp-http`, whose tool handlers run on the Rack server's request
+  threads, two concurrent reads could double-reload or drop each other's caches mid-sequence,
+  and the first of two overlapping `with_pinned_generation` blocks to finish unpinned the
+  reader for both. The check-and-reload now runs under a per-reader mutex and pins are
+  refcounted: invalidation resumes when the *last* pin releases.
 - **A cycle that can't land its work no longer loses it** (#164 review). Lock contention
   already carried its paths into the next cycle; a *failed reload* did not. Saving a valid
   `post.rb` while `user.rb` sat half-typed produced one app-wide reload failure covering both,

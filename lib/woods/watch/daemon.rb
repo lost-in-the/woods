@@ -7,6 +7,7 @@ require_relative '../reload_policy'
 require_relative 'status'
 require_relative 'tree_scan'
 require_relative 'watcher'
+require 'json'
 require 'set'
 
 module Woods
@@ -246,7 +247,7 @@ module Woods
         @pending = Set.new
         @pending_mutex = Mutex.new
         @stop_reason = nil
-        @draining = false
+        @drain_mutex = Mutex.new
       end
 
       # Wait out the debounce window so events that land during it join the
@@ -289,18 +290,25 @@ module Woods
       # Run cycles until the pending set is empty. One call per watcher batch;
       # re-entrant calls return immediately so listen's thread pool cannot run
       # two cycles against one index.
+      #
+      # `try_lock`, not a boolean: check-then-set on an ivar is exactly the
+      # race it is guarding against — two callback threads could both read
+      # `false` before either wrote `true` and run two overlapping drains. The
+      # loser's paths are already in `@pending` (the callback enqueues before
+      # calling here), so the winner's loop picks them up; nothing is lost by
+      # returning. `try_lock` also returns false on same-thread re-entry, so a
+      # synchronous callback fired from inside a cycle cannot deadlock.
       def drain(watcher)
-        return if @draining
+        return unless @drain_mutex.try_lock
 
-        @draining = true
         begin
           drain_cycles(watcher)
         ensure
-          @draining = false
           # An extraction is work, not idleness. Stamping only on the event
           # would let a cycle longer than `idle_timeout` read as a quiet
           # daemon and stop the watcher mid-run.
           @last_event_at = monotonic_now
+          @drain_mutex.unlock
         end
       end
 
@@ -336,11 +344,49 @@ module Woods
         return unless @catch_up
 
         paths = uncovered_paths
-        return @logger.info('[Woods] watch: index is current at startup') if paths.empty?
+        if paths.empty?
+          return reconcile_deletions if stale_deletions?
+
+          return @logger.info('[Woods] watch: index is current at startup')
+        end
 
         @logger.info("[Woods] watch: #{paths.size} path(s) changed before startup — catching up")
         enqueue(paths)
         drain(watcher)
+      end
+
+      # A file deleted while nothing was watching leaves no mtime for the scan
+      # to see — {TreeScan} only walks files that exist — so a deletion-only
+      # downtime would log "index is current" while ghost units survive. The
+      # graph knows every path it attributed a unit to; any of those gone from
+      # disk means the extractor's sweep has reconciling to do.
+      #
+      # The daemon only *detects*; it does not name the paths. Naming them
+      # would put them in the change set, whose deletions are authoritative for
+      # any unit type — and some registered paths are nominal (on Rails < 7.1,
+      # `ActiveRecord::SchemaMigration` registers a convention path no app
+      # has), so authoritative deletion would remove units a full extraction
+      # still produces. An empty-change-set run reaches the same ghosts through
+      # the sweep, which carries the bounds that make it safe.
+      def stale_deletions?
+        root_prefix = "#{@root}/"
+
+        persisted_registered_paths.any? do |path|
+          path.start_with?(root_prefix) && !File.exist?(path)
+        end
+      end
+
+      def persisted_registered_paths
+        graph = File.join(@output_dir, 'dependency_graph.json')
+        file_map = JSON.parse(File.read(graph))['file_map']
+        file_map.is_a?(Hash) ? file_map.keys : []
+      rescue SystemCallError, JSON::ParserError
+        []
+      end
+
+      def reconcile_deletions
+        @logger.info('[Woods] watch: registered file(s) vanished before startup — reconciling deletions')
+        extract(ChangeSet.new(paths: [], root: @root))
       end
 
       def uncovered_paths
@@ -399,7 +445,7 @@ module Woods
 
       def idle_expired?
         return false unless @idle_timeout.to_f.positive?
-        return false if @draining
+        return false if @drain_mutex.locked?
 
         monotonic_now - @last_event_at >= @idle_timeout
       end

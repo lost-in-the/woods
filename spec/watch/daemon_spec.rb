@@ -51,6 +51,13 @@ RSpec.describe Woods::Watch::Daemon do
     JSON.parse(File.read(File.join(output_dir, Woods::Watch::Status::FILENAME)))
   end
 
+  def write_graph_with_paths(paths)
+    File.write(
+      File.join(output_dir, 'dependency_graph.json'),
+      JSON.generate('file_map' => paths.to_h { |path| [path, ['SomeUnit']] })
+    )
+  end
+
   describe 'classification' do
     it 'does nothing for paths no extractor cares about' do
       result = build.process(['README.md'])
@@ -315,6 +322,33 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(extractor).not_to have_received(:extract_changed)
     end
+
+    it 'reconciles a deletion that predates startup' do
+      # The index claims a path that no longer exists. Nothing on disk moved,
+      # so the mtime scan alone would call the index current — TreeScan only
+      # walks files that exist.
+      publish_generation('full')
+      write_graph_with_paths([File.join(root, 'app/services/deleted_service.rb')])
+
+      build(watcher: fake_watcher, catch_up: true).run
+
+      # An *empty* change set, deliberately: it reaches the ghosts through the
+      # extractor's bounded sweep. Naming the path would make the deletion
+      # authoritative for unit types the sweep exists to protect (nominal
+      # paths, class-based units).
+      expect(extractor).to have_received(:extract_changed).with([])
+    end
+
+    it 'ignores vanished paths outside the watched root' do
+      # Framework units and indexes restored from CI artifacts register paths
+      # under other roots; neither is a deletion in this worktree.
+      publish_generation('full')
+      write_graph_with_paths(['/somewhere/else/app/models/thing.rb'])
+
+      build(watcher: fake_watcher, catch_up: true).run
+
+      expect(extractor).not_to have_received(:extract_changed)
+    end
   end
 
   # The debounce is only worth having if events landing inside the window join
@@ -350,6 +384,59 @@ RSpec.describe Woods::Watch::Daemon do
       # Six markdown files plus one model is a one-model change.
       expect(result[:action]).to eq(:incremental)
       expect(extractor).not_to have_received(:extract_all)
+    end
+  end
+
+  # `listen` delivers callbacks from its own thread pool, so two batches can
+  # race into `drain`. The guard has to be an atomic test-and-set — a plain
+  # boolean is check-then-act, and both threads can read false before either
+  # writes true.
+  describe 'drain concurrency' do
+    it 'never runs two cycles at once and loses nothing when a drain is refused' do
+      in_extraction = Queue.new
+      release = Queue.new
+      concurrent = { now: 0, max: 0 }
+      tally = Mutex.new
+
+      allow(extractor).to receive(:extract_changed) do |paths|
+        tally.synchronize do
+          concurrent[:now] += 1
+          concurrent[:max] = [concurrent[:max], concurrent[:now]].max
+        end
+        in_extraction << true
+        release.pop
+        tally.synchronize { concurrent[:now] -= 1 }
+        publish_generation('incremental')
+        paths
+      end
+
+      daemon = build
+      watcher = instance_double(Woods::Watch::PollingWatcher)
+      first = touch('app/services/one.rb')
+      second = touch('app/services/two.rb')
+
+      holder = Thread.new do
+        daemon.send(:enqueue, [first])
+        daemon.send(:drain, watcher)
+      end
+      in_extraction.pop # the first drain is mid-extraction, holding the guard
+
+      racer = Thread.new do
+        daemon.send(:enqueue, [second])
+        daemon.send(:drain, watcher)
+      end
+      # The racing drain must return promptly — refused, not queued behind the
+      # lock, and above all not running a second cycle in parallel.
+      expect(racer.join(2)).not_to be_nil
+
+      release << true
+      # The holder's loop picks up the batch the refused drain enqueued.
+      in_extraction.pop
+      release << true
+      expect(holder.join(2)).not_to be_nil
+
+      expect(concurrent[:max]).to eq(1)
+      expect(extractor).to have_received(:extract_changed).twice
     end
   end
 end
