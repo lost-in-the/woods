@@ -210,4 +210,71 @@ RSpec.describe Woods::Coordination::PipelineLock do
       expect(results.count(true)).to eq(1)
     end
   end
+
+  # `touch` gated on `locked?` — `@held && File.exist?` — which stays true after
+  # a contender retires us and puts its own lock at the same path. A retired
+  # holder then refreshed the SUCCESSOR's mtime, so if that successor crashed,
+  # its lock never aged out while the retired process lived and every writer was
+  # blocked until it exited.
+  #
+  # Being retired mid-run is the exact scenario a heartbeat exists to prevent,
+  # so it is also the state a heartbeat is most likely to find itself in when it
+  # fails to.
+  describe '#touch ownership' do
+    let(:lock_dir) { Dir.mktmpdir('woods_touch_own') }
+
+    after { FileUtils.rm_rf(lock_dir) }
+
+    def build(stale_timeout: 0.2)
+      described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: stale_timeout)
+    end
+
+    it 'refuses to refresh a lock a contender has taken over' do
+      holder = build
+      holder.acquire
+      sleep 0.3
+      expect(build.acquire).to be true
+
+      expect(holder.touch).to be false
+    end
+
+    it 'does not move the successor mtime' do
+      holder = build
+      holder.acquire
+      sleep 0.3
+      build.acquire
+      before = File.mtime(File.join(lock_dir, 'extraction.lock'))
+      sleep 0.05
+
+      holder.touch
+
+      expect(File.mtime(File.join(lock_dir, 'extraction.lock'))).to eq(before)
+    end
+
+    it 'stops believing it holds the lock once it learns otherwise' do
+      holder = build
+      holder.acquire
+      sleep 0.3
+      build.acquire
+
+      holder.touch
+
+      expect(holder.locked?).to be false
+    end
+
+    it 'still refreshes for the live holder' do
+      holder = build(stale_timeout: 5)
+      holder.acquire
+
+      expect(holder.touch).to be true
+    end
+
+    it 'refuses after its own release' do
+      holder = build(stale_timeout: 5)
+      holder.acquire
+      holder.release
+
+      expect(holder.touch).to be false
+    end
+  end
 end

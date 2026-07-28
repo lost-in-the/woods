@@ -30,6 +30,13 @@ module Woods
       # @param lock_dir [String] Directory for lock files
       # @param name [String] Lock name (used as filename prefix)
       # @param stale_timeout [Integer] Seconds after which a lock is considered stale
+      # The window after which an untouched lock is considered abandoned.
+      # Exposed so a heartbeat paces itself from the lock it is refreshing
+      # rather than from a constant that only happens to match.
+      #
+      # @return [Numeric]
+      attr_reader :stale_timeout
+
       def initialize(lock_dir:, name:, stale_timeout: DEFAULT_STALE_TIMEOUT)
         @lock_dir = lock_dir
         @name = name
@@ -137,6 +144,25 @@ module Woods
       def touch
         return false unless locked?
 
+        # Ownership, not just presence. `locked?` asks whether *a* lock file
+        # exists and this instance thinks it holds one — which stays true after
+        # a contender has retired us and put its own lock at the same path. A
+        # retired holder would then refresh the **successor's** mtime, and if
+        # that successor crashed its lock would never age out while the retired
+        # process lived, blocking every writer until it exited.
+        #
+        # That is not hypothetical for a heartbeat: being retired mid-run is the
+        # exact scenario a heartbeat exists to prevent, so it is also the state a
+        # heartbeat is most likely to find itself in when it fails to.
+        #
+        # Clearing @held is the honest response — we do not hold it, and
+        # continuing to believe we do would let `release` act on a lock that is
+        # someone else's.
+        unless touchable?
+          @held = false
+          return false
+        end
+
         FileUtils.touch(@lock_path)
         true
       rescue SystemCallError
@@ -199,6 +225,21 @@ module Woods
       # @return [Boolean] true when the token matches, or the file is corrupt
       #   (an unparseable lock we already renamed aside is treated as ours to
       #   discard rather than restore).
+      # Can this instance prove the lock at @lock_path is its own?
+      #
+      # Deliberately stricter than {#own_lock?}, which treats an unparseable
+      # lock as ours so `release` still cleans up a corrupt file it renamed
+      # aside. Refreshing is the opposite situation: a lock we cannot read is
+      # one we cannot prove we hold, and touching it would extend a stranger's
+      # claim. Not proving it means we stop, which is the safe direction.
+      #
+      # @return [Boolean]
+      def touchable?
+        JSON.parse(File.read(@lock_path))['token'] == @token
+      rescue JSON::ParserError, SystemCallError
+        false
+      end
+
       def own_lock?(path)
         JSON.parse(File.read(path))['token'] == @token
       rescue JSON::ParserError
