@@ -54,7 +54,7 @@ Metrics/ClassLength:
     # atomicity handling (TOCTOU-safe acquire, rename-then-inspect release,
     # ownership-checked touch). Splitting it would scatter invariants that
     # only make sense together.
-    - 'lib/woods/coordination/**/*'
+    - 'lib/woods/coordination/pipeline_lock.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'

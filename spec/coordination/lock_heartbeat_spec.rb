@@ -35,13 +35,23 @@ RSpec.describe Woods::Coordination::LockHeartbeat do
     # `join` re-raises a thread's exception and the join sits in an `ensure`, so
     # without isolation a heartbeat failure would replace the caller's error —
     # exactly when the real message matters most.
+    # The block must outlive an interval, or the heartbeat never ticks and the
+    # rescue under test is never entered — the example then passes with the
+    # protection deleted, which is exactly the gap these exist to close. The
+    # `have_received` assertion is what makes that failure visible.
     it 'does not let a failing heartbeat become the caller error' do
       lock = build_lock(stale_timeout: 0.03)
       lock.acquire
       allow(lock).to receive(:touch).and_raise('heartbeat blew up')
 
-      expect { described_class.run(lock, tick: 0.01) { raise ArgumentError, 'real error' } }
+      expect do
+        described_class.run(lock, tick: 0.01) do
+          sleep 0.1
+          raise ArgumentError, 'real error'
+        end
+      end
         .to raise_error(ArgumentError, 'real error')
+      expect(lock).to have_received(:touch).at_least(:once)
     end
 
     it 'does not let a failing heartbeat fail a successful run' do
@@ -49,7 +59,11 @@ RSpec.describe Woods::Coordination::LockHeartbeat do
       lock.acquire
       allow(lock).to receive(:touch).and_raise('heartbeat blew up')
 
-      expect(described_class.run(lock, tick: 0.01) { :ok }).to eq(:ok)
+      expect(described_class.run(lock, tick: 0.01) do
+        sleep 0.1
+        :ok
+      end).to eq(:ok)
+      expect(lock).to have_received(:touch).at_least(:once)
     end
   end
 

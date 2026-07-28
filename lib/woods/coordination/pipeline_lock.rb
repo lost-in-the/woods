@@ -158,13 +158,23 @@ module Woods
         # Clearing @held is the honest response — we do not hold it, and
         # continuing to believe we do would let `release` act on a lock that is
         # someone else's.
-        unless touchable?
+        case lock_ownership
+        when :ours
+          FileUtils.touch(@lock_path)
+          true
+        when :foreign
+          # Proven someone else's: stop believing we hold it, or `release` would
+          # act on their lock.
           @held = false
-          return false
+          false
+        else
+          # Unreadable — a torn write, most likely. Refuse to refresh, but stay
+          # the owner: "I cannot prove this is mine" is not "this is not mine",
+          # and disowning it here would strand the file. `release` opens with
+          # `return unless @held`, so a disowned lock is never cleaned up and
+          # every writer blocks until the stale window expires.
+          false
         end
-
-        FileUtils.touch(@lock_path)
-        true
       rescue SystemCallError
         # The lock vanished (retired by a contender, or the dir went away).
         # Nothing useful to do here; the next acquire/release resolves it.
@@ -225,19 +235,21 @@ module Woods
       # @return [Boolean] true when the token matches, or the file is corrupt
       #   (an unparseable lock we already renamed aside is treated as ours to
       #   discard rather than restore).
-      # Can this instance prove the lock at @lock_path is its own?
+      # Three-state, deliberately — a boolean here conflates the two states
+      # that need different handling.
       #
-      # Deliberately stricter than {#own_lock?}, which treats an unparseable
-      # lock as ours so `release` still cleans up a corrupt file it renamed
-      # aside. Refreshing is the opposite situation: a lock we cannot read is
-      # one we cannot prove we hold, and touching it would extend a stranger's
-      # claim. Not proving it means we stop, which is the safe direction.
+      # `:unknown` is not `:foreign`. Both refuse a refresh, because touching a
+      # lock we cannot prove is ours would extend a stranger's claim. Only
+      # `:foreign` justifies disowning, because only that means someone else
+      # holds it. Collapsing them made an unreadable-but-ours lock leak: `touch`
+      # cleared `@held`, and `release` returns early on `@held`, so nothing ever
+      # removed the file and every writer blocked for the full stale window.
       #
-      # @return [Boolean]
-      def touchable?
-        JSON.parse(File.read(@lock_path))['token'] == @token
+      # @return [Symbol] `:ours`, `:foreign`, or `:unknown`
+      def lock_ownership
+        JSON.parse(File.read(@lock_path))['token'] == @token ? :ours : :foreign
       rescue JSON::ParserError, SystemCallError
-        false
+        :unknown
       end
 
       def own_lock?(path)

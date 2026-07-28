@@ -269,6 +269,32 @@ RSpec.describe Woods::Coordination::PipelineLock do
       expect(holder.touch).to be true
     end
 
+    # A hardening commit introduced this: `touch` cleared @held whenever it
+    # could not prove ownership, and `release` opens with `return unless @held`,
+    # so a lock that was genuinely ours but unreadable was never cleaned up and
+    # every writer blocked for the full stale window. "I cannot prove this is
+    # mine" is not "this is not mine".
+    it 'refuses to refresh an unreadable lock without disowning it' do
+      holder = build(stale_timeout: 600)
+      holder.acquire
+      File.write(File.join(lock_dir, 'extraction.lock'), '{"pid":123,"tok')
+
+      expect(holder.touch).to be false
+      expect(holder.locked?).to be true
+    end
+
+    it 'still releases an unreadable lock it holds' do
+      holder = build(stale_timeout: 600)
+      holder.acquire
+      path = File.join(lock_dir, 'extraction.lock')
+      File.write(path, '{"pid":123,"tok')
+
+      holder.touch
+      holder.release
+
+      expect(File.exist?(path)).to be false
+    end
+
     it 'refuses after its own release' do
       holder = build(stale_timeout: 5)
       holder.acquire

@@ -67,8 +67,12 @@ module Woods
         # replaced by it, precisely when the real message matters most.
         thread = Thread.new do
           beat
-        rescue StandardError
-          nil
+        rescue StandardError => e
+          # Swallowed so it cannot become the caller's error — but not silently.
+          # A dead heartbeat leaves the run unprotected for the rest of its
+          # life, which is the same silent-failure class this class exists to
+          # prevent.
+          warn "[Woods] lock heartbeat stopped: #{e.class}: #{e.message}"
         end
         thread.report_on_exception = false
         thread
