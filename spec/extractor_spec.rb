@@ -802,10 +802,11 @@ RSpec.describe Woods::Extractor do
   # ── prune_vanished_units ─────────────────────────────────────────────
 
   describe '#prune_vanished_units' do
-    def register(type:, identifier:, relative_path:)
+    def register(type:, identifier:, relative_path:, synthetic_path: false)
       unit = Woods::ExtractedUnit.new(
         type: type, identifier: identifier, file_path: File.join(tmpdir, relative_path)
       )
+      unit.synthetic_path = synthetic_path
       extractor.dependency_graph.register(unit)
       unit
     end
@@ -841,6 +842,32 @@ RSpec.describe Woods::Extractor do
       register(type: :service, identifier: 'GoneService', relative_path: 'app/services/gone_service.rb')
 
       expect(prune(['app/services/other.rb'])).to contain_exactly('GoneService')
+    end
+
+    # B-070 / #171. The #167 fix spared GraphQL from the sweep by unit *type*,
+    # but the property it wanted is per-unit: a type the static file pass read
+    # out of `app/graphql/**.rb` has a real path, and deleting that file has to
+    # remove it. Named-path deletion always worked; the exposed caller is the
+    # daemon's catch-up, which runs an empty change set precisely because
+    # deletions leave no mtime behind to notice.
+    it 'sweeps a file-defined GraphQL unit the caller forgot to mention' do
+      register(type: :graphql_type, identifier: 'Types::GoneType',
+               relative_path: 'app/graphql/types/gone_type.rb')
+
+      expect(prune(['app/services/other.rb'])).to contain_exactly('Types::GoneType')
+      expect(extractor.dependency_graph.node_exists?('Types::GoneType')).to be(false)
+    end
+
+    # The other half, and the case #167 exists for: a type built by a schema
+    # builder has no file at all, so `source_file_for_class` hands it a
+    # convention path that the `app/graphql/**` rule *does* claim. Sweeping it
+    # deleted the unit in the same run that added it.
+    it 'leaves a runtime-defined GraphQL unit whose path is a convention alone' do
+      register(type: :graphql_type, identifier: 'Types::RuntimeType',
+               relative_path: 'app/graphql/types/runtime_type.rb', synthetic_path: true)
+
+      expect(prune(['app/services/other.rb'])).to be_empty
+      expect(extractor.dependency_graph.node_exists?('Types::RuntimeType')).to be(true)
     end
 
     it 'leaves units whose nominal path no file rule claims alone' do
@@ -1559,12 +1586,13 @@ RSpec.describe Woods::Extractor do
       expect(spec[:types]).to include(:graphql_query)
     end
 
-    it 'treats GraphQL units as convention-path units so the sweep spares them' do
+    it 'treats a runtime-defined GraphQL unit as a convention-path unit' do
       graph = Woods::DependencyGraph.new
       unit = Woods::ExtractedUnit.new(
         type: :graphql_query, identifier: 'Types::QueryType',
         file_path: '/nonexistent/app/graphql/types/query_type.rb'
       )
+      unit.synthetic_path = true
       graph.register(unit)
       extractor = described_class.new(output_dir: Dir.mktmpdir)
       extractor.instance_variable_set(:@dependency_graph, graph)
@@ -1574,6 +1602,23 @@ RSpec.describe Woods::Extractor do
       # removed it in the same run that added it, and the follow-up reconcile
       # refused to re-add it because it was in `pruned`.
       expect(extractor.send(:convention_path_unit?, 'Types::QueryType')).to be true
+    end
+
+    # B-070 / #171: the same unit type, read out of a real file, must stay
+    # sweepable. Keying the check on the type alone made these two cases
+    # indistinguishable and silently retired deletion for file-defined types.
+    it 'still treats a file-defined GraphQL unit as sweepable' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(
+          type: :graphql_type, identifier: 'Types::PostType',
+          file_path: '/nonexistent/app/graphql/types/post_type.rb'
+        )
+      )
+      extractor = described_class.new(output_dir: Dir.mktmpdir)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+
+      expect(extractor.send(:convention_path_unit?, 'Types::PostType')).to be false
     end
 
     it 'still treats a genuinely file-based unit as sweepable' do

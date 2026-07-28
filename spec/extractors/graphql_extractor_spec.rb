@@ -480,6 +480,59 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       unit = described_class.new.extract_graphql_file('/nonexistent/path.rb')
       expect(unit).to be_nil
     end
+
+    # B-070 / #171. The deletion sweep has to tell a unit read out of a file
+    # from one handed a convention path it does not own, and only the producer
+    # knows which happened. A file the pass globbed is by definition a real
+    # file, so this must stay false or deleting it would never remove the unit.
+    it 'does not mark a file-read unit as having a synthetic path' do
+      path = create_file('app/graphql/types/real_type.rb', <<~RUBY)
+        module Types
+          class RealType < Types::BaseObject
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_graphql_file(path)
+      expect(unit.synthetic_path).to be false
+    end
+  end
+
+  # ── extract_from_runtime_type ─────────────────────────────────────────
+
+  describe '#extract_from_runtime_type' do
+    # The runtime pass is the whole point of #167: a type built by a schema
+    # builder has no source file, and `source_file_for_class` falls back to a
+    # convention path under app/graphql that the file rule claims. Marking it
+    # is what keeps the sweep off it — without this the unit is deleted in the
+    # same run that adds it.
+    # A real class, not a double: classify_runtime_type walks `<` against the
+    # stubbed GraphQL constants, and a double answers those in whatever way the
+    # stub happens to say rather than the way Ruby would.
+    def runtime_class(class_name)
+      Class.new { define_singleton_method(:name) { class_name } }
+    end
+
+    it 'marks a type with no source file as having a synthetic path' do
+      unit = described_class.new.extract_from_runtime_type(runtime_class('Types::BuiltAtRuntime'))
+
+      expect(unit.file_path).to eq(File.join(tmp_dir, 'app/graphql/types/built_at_runtime.rb'))
+      expect(File.exist?(unit.file_path)).to be false
+      expect(unit.synthetic_path).to be true
+    end
+
+    it 'leaves a type backed by a real file sweepable' do
+      create_file('app/graphql/types/on_disk_type.rb', <<~RUBY)
+        module Types
+          class OnDiskType < Types::BaseObject
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_from_runtime_type(runtime_class('Types::OnDiskType'))
+
+      expect(unit.synthetic_path).to be false
+    end
   end
 
   # ── Enum extraction ───────────────────────────────────────────────────

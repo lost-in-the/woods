@@ -166,7 +166,8 @@ module Woods
         return nil if type_class.name.start_with?('GraphQL::')
 
         file_path = source_file_for_class(type_class)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        on_disk = file_path ? File.exist?(file_path) : false
+        source = on_disk ? File.read(file_path) : ''
         unit_type = classify_runtime_type(type_class)
 
         unit = ExtractedUnit.new(
@@ -174,6 +175,11 @@ module Woods
           identifier: type_class.name,
           file_path: file_path
         )
+
+        # No file behind it means `source_file_for_class` fell back to the
+        # convention path — the deletion sweep must leave this unit alone, and
+        # nothing downstream can work that out for itself once the run is over.
+        unit.synthetic_path = !on_disk
 
         unit.namespace = extract_namespace(type_class.name)
         unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)

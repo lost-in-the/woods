@@ -45,11 +45,21 @@ module Woods
 
       unregister(unit.identifier) if @nodes.key?(unit.identifier)
 
-      @nodes[unit.identifier] = {
+      node = {
         type: unit.type,
         file_path: unit.file_path,
         namespace: unit.namespace
       }
+      # Only when true, so the persisted artifact does not grow a false for
+      # every node. See {ExtractedUnit#synthetic_path} for what it means and
+      # {Extractor#convention_path_unit?} for the one thing that reads it.
+      #
+      # `respond_to?` because registration is duck-typed — callers pass
+      # unit-shaped Structs, and `file_path` is already optional the same way.
+      # Real units always answer: {ExtractedUnit} initializes it to false.
+      node[:synthetic_path] = true if unit.respond_to?(:synthetic_path) && unit.synthetic_path
+
+      @nodes[unit.identifier] = node
 
       @edges[unit.identifier] = unit.dependencies.map { |d| { target: d[:target], via: d[:via] } }
       (@file_map[unit.file_path] ||= Set.new).add(unit.identifier) if unit.file_path
@@ -496,11 +506,19 @@ module Woods
     def self.symbolize_node(node)
       return node unless node.is_a?(Hash)
 
-      {
+      symbolized = {
         type: (node[:type] || node['type'])&.to_sym,
         file_path: node[:file_path] || node['file_path'],
         namespace: node[:namespace] || node['namespace']
       }
+      # Absent in a graph persisted before B-070, which reads as false — so a
+      # runtime-defined GraphQL type is briefly sweepable again after upgrading.
+      # It self-heals on the next run: class-based reconciliation re-adds it
+      # from `discoverable_classes` with the flag set. Same shape as the #166
+      # path migration, which also becomes correct once a run rewrites it.
+      symbolized[:synthetic_path] = true if node[:synthetic_path] || node['synthetic_path']
+
+      symbolized
     end
 
     # Normalize edge data from either old format (bare strings) or new format (hashes).

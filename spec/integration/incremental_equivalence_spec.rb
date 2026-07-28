@@ -276,6 +276,27 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    # B-070 / #171. GraphQL was spared the unnamed-path sweep by unit *type*,
+    # to protect runtime-defined types whose path is a convention — but that
+    # equally spared types the file pass read out of a real file. Nothing else
+    # could remove those: GraphQL sets `reconcile_removals: false` and is not a
+    # whole-app extractor, so the divergence was permanent rather than
+    # transient. The other examples in this block all name the deleted path;
+    # only an unnamed delete exercises the sweep.
+    it 'prunes a deleted GraphQL type even when the caller forgets to list it' do
+      write_file('app/graphql/types/doomed_type.rb',
+                 "module Types\n  class DoomedType < Types::BaseObject\n    " \
+                 "field :id, ID, null: false\n  end\nend\n")
+
+      run_sequence([
+                     lambda {
+                       delete_file('app/graphql/types/doomed_type.rb')
+                       write_file('app/services/graphql_bystander_service.rb',
+                                  service_source('GraphqlBystanderService'))
+                     }
+                   ])
+    end
+
     it 'treats a rename as a delete plus an add' do
       write_file('app/services/old_name_service.rb', service_source('OldNameService'))
 

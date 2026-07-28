@@ -32,6 +32,25 @@ module Woods
                   :dependents,     # Array<Hash>: What references this unit (populated in second pass)
                   :chunks          # Array<Hash>: Pre-chunked versions if unit is large
 
+    # Does {#file_path} name a *convention* derived from this unit's constant
+    # rather than a file the unit was read out of?
+    #
+    # Only the producing extractor can answer this, which is why it is carried
+    # on the unit rather than inferred later: by the time the deletion sweep
+    # looks, both cases are just a path that is no longer on disk. A runtime
+    # GraphQL type built by a schema builder gets
+    # `app/graphql/<underscored>.rb` as a placeholder — a path the
+    # `app/graphql/**` dispatch rule claims — so without this the sweep deleted
+    # it in the same run that added it (B-070 / #171).
+    #
+    # Deliberately absent from {#to_h}: the only consumer is
+    # {DependencyGraph#register}, which copies it onto the node, and adding a
+    # key to every unit's JSON would rewrite the whole index on upgrade for
+    # something no reader looks at.
+    #
+    # @return [Boolean]
+    attr_accessor :synthetic_path
+
     def initialize(type:, identifier:, file_path:)
       @type = type
       @identifier = identifier
@@ -40,6 +59,7 @@ module Woods
       @dependencies = []
       @dependents = []
       @chunks = []
+      @synthetic_path = false
     end
 
     # Serialize to hash for JSON output

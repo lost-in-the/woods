@@ -1811,12 +1811,21 @@ module Woods
     # that derives its path from a constant name rather than from a file it was
     # read out of. Class-based types have always been excluded for that reason.
     #
-    # GraphQL joins them (#167): `source_file_for_class` falls back to
-    # `app/graphql/<underscored>.rb` when it cannot resolve a source location,
-    # and a runtime-defined type — the exact case #167 exists to index — has no
-    # such file. Without this the sweep pruned those units in the *same run*
-    # that added them, and `reconcile_class_based_types(..., except: pruned)`
-    # then refused to re-add them, so #167's target case never survived.
+    # GraphQL joins them (#167) — but per *unit*, not per type (B-070 / #171).
+    # `source_file_for_class` falls back to `app/graphql/<underscored>.rb` when
+    # it cannot resolve a source location, and a runtime-defined type — the
+    # exact case #167 exists to index — has no such file. Without sparing those
+    # the sweep pruned them in the *same run* that added them, and
+    # `reconcile_class_based_types(..., except: pruned)` then refused to re-add
+    # them, so #167's target case never survived.
+    #
+    # The first cut of that keyed on `GRAPHQL_TYPES.include?(type)`, which is
+    # equally true of units the static file pass read out of a real
+    # `app/graphql/**.rb` — so deleting one of those stopped removing it from
+    # the index. The producer is the only thing that knows which case it is, so
+    # it now records {ExtractedUnit#synthetic_path} and the graph carries it.
+    # Deriving it here instead is not possible: by the time the sweep looks,
+    # both cases are just a path that is no longer on disk.
     #
     # The original case: on Rails < 7.1 `ActiveRecord::SchemaMigration` and
     # `InternalMetadata` are real `ActiveRecord::Base` descendants a full
@@ -1826,14 +1835,8 @@ module Woods
     # to. Deleting such a unit requires the caller to name the path; the sweep
     # never infers it.
     #
-    # KNOWN COST (review, #167): this keys on unit *type*, but the property is
-    # per-unit — GRAPHQL_TYPES is also true of units the static file pass
-    # produced, whose path is a real file. So a deleted `app/graphql/**.rb`
-    # now survives an unnamed-path sweep. Named-path deletion still works, so
-    # `woods:incremental` on a git diff is unaffected; the exposed caller is
-    # the daemon's catch-up, which runs an empty change set precisely because
-    # deletions leave no mtime. Tracked separately; strictly better than the
-    # pre-#167 state, where the whole feature was inert.
+    # Class-based types stay a blanket type check: every one of them derives
+    # its path from a constant, so there is no per-unit distinction to draw.
     #
     # @param identifier [String]
     # @return [Boolean]
@@ -1841,7 +1844,7 @@ module Woods
       node = @dependency_graph.node(identifier)
       return false unless node
 
-      CLASS_BASED.key?(node[:type]) || GRAPHQL_TYPES.include?(node[:type])
+      CLASS_BASED.key?(node[:type]) || node[:synthetic_path] == true
     end
 
     # Register a batch of freshly-extracted units and write their JSON.
