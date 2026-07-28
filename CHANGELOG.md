@@ -16,12 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surviving unit's `source_hash`, so `woods:embed_incremental` reported `processed: 0`, skipped
   the dump, and left the deleted unit's metadata promoted. Its leftover vector went from inert
   — `ContextAssembler#find_batch` could not resolve it, so it contributed nothing — to a live
-  `codebase_retrieve` hit returning source for a file that no longer exists. The skip now also
-  asks whether the promoted dump describes a unit the index has since lost, comparing against
-  the identifiers `hydrate_persisted_vectors` already loaded, so it costs one pass and no extra
-  IO. Runs that genuinely changed nothing still skip the dump, so the retention window is not
-  churned. The leftover vector itself is still left for a full `woods:embed` to compact, as
-  before; dropping the metadata is what puts it back out of reach.
+  `codebase_retrieve` hit returning source for a file that no longer exists. The same shape hid
+  a second case: `source_hash` covers `source_code` only, so an extraction that rewrites
+  `dependents` leaves every hash intact, and the promoted metadata kept the pre-change value
+  indefinitely. The skip now asks the metadata store directly, comparing what the run rebuilt
+  against the promoted `metadata.msgpack` — which catches a vanished unit and a changed value
+  alike, where comparing identifier sets would catch only the first. Reading the dump to decide
+  against rewriting it is strictly cheaper than the write it avoids, which also carries an
+  fsync of every vector and a rotation of the retention window. Runs that genuinely changed
+  nothing still skip the dump, so the churn the skip exists to prevent is unaffected. The
+  leftover vector itself is still left for a full `woods:embed` to compact, as before; dropping
+  the metadata is what puts it back out of reach.
 
 - **Deleting a GraphQL type removes it from the index again** (B-070, #171). The #167 fix
   spared GraphQL units from the deletion sweep so that runtime-defined types — built by a

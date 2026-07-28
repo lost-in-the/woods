@@ -843,6 +843,11 @@ RSpec.describe Woods::Embedding::Indexer do
       Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).each_entry.map { |id, _data| id }
     end
 
+    def persisted_metadata_for(identifier)
+      artifact = Woods::IndexArtifact.new(output_dir)
+      Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).find(identifier)
+    end
+
     before do
       File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
       fresh_indexer.index_all
@@ -880,6 +885,42 @@ RSpec.describe Woods::Embedding::Indexer do
 
       expect(stats[:processed]).to eq(0)
       expect(persisted_metadata_ids).to contain_exactly('User')
+    end
+
+    # `updated_at` records when each side was built, never what it holds:
+    # InMemory#store re-stamps it on every call, and Snapshotter::Metadata
+    # restores entries *through* `store`, so the loaded copy carries load time.
+    # Comparing it would mark every run stale and reinstate the churn the gate
+    # exists to prevent.
+    #
+    # Driven at this level deliberately — the behavioural specs above cannot
+    # see it. Time#iso8601 has one-second resolution, so in a run this fast
+    # both sides stamp the same second and the comparison passes either way.
+    # On an index large enough for the embed and the compare to straddle a
+    # second boundary it would not, which is the only place it matters.
+    it 'ignores updated_at when comparing metadata' do
+      indexer = fresh_indexer
+      embedded = [['User', { 'type' => 'model', 'updated_at' => '2026-01-01T00:00:00Z' }]]
+      loaded   = [['User', { 'type' => 'model', 'updated_at' => '2026-06-06T12:00:00Z' }]]
+
+      expect(indexer.send(:comparable_metadata, embedded))
+        .to eq(indexer.send(:comparable_metadata, loaded))
+    end
+
+    # The half a set comparison cannot see. `source_hash` covers source_code
+    # only, so an extraction that rewrites `dependents` — every unit that gains
+    # or loses a referrer — leaves every source_hash intact. `processed` is 0,
+    # and the promoted metadata keeps the pre-change value indefinitely.
+    it 'refreshes metadata that changed without the unit set changing' do
+      fresh_indexer.index_incremental # consumes the pending unit
+      changed = second_unit_data.merge('dependents' => [{ 'type' => 'model', 'target' => 'User' }])
+      File.write(File.join(output_dir, 'payment_service.json'), JSON.generate(changed))
+
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(0)
+      expect(persisted_metadata_for('PaymentService')['dependents'])
+        .to eq([{ 'type' => 'model', 'target' => 'User' }])
     end
 
     # The retention-window half of the same gate: a run where units vanished

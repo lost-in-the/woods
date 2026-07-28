@@ -147,16 +147,26 @@ module Woods
       # A checkpoint self-heal counts as processed, so a run that re-embeds a
       # stranded unit still dumps.
       #
-      # It is **not** safe for the metadata store, which is why deletions get a
-      # vote (B-069 / #171). `persist_snapshot` also writes metadata.msgpack,
-      # and `persist_unit_metadata` runs over every unit the index holds rather
-      # than the changed ones — so a run that embedded nothing has still
-      # rebuilt the metadata store, and skipping the dump throws that away.
-      # Deleting a unit changes no surviving unit's source_hash, so `processed`
-      # is 0 and the deleted unit's metadata stayed promoted: the difference
-      # between its leftover vector being inert (`ContextAssembler#find_batch`
-      # misses it) and being a live `codebase_retrieve` hit for source that no
-      # longer exists.
+      # It is **not** safe for the metadata store (B-069 / #171).
+      # `persist_snapshot` also writes metadata.msgpack, and
+      # `persist_unit_metadata` runs over every unit the index holds rather than
+      # the changed ones — so a run that embedded nothing has still rebuilt the
+      # metadata store, and skipping the dump throws that away. `source_hash`
+      # covers `source_code` only, so two ordinary cases change metadata while
+      # leaving `processed` at zero: a deleted unit (whose entry then stays
+      # promoted, taking its leftover vector from inert to a live
+      # `codebase_retrieve` hit for source that no longer exists), and
+      # `dependents` rewritten by an extraction-only run.
+      #
+      # So the metadata store gets its own vote, and it is asked directly
+      # rather than inferred from a proxy — see {#metadata_dump_stale?}.
+      #
+      # Two guards come first, both protecting against dumping over a good
+      # artifact rather than against churn. An empty `@persisted_ids` means
+      # {#hydrate_persisted_vectors} fell back to `clear!`, so the store this
+      # run holds is not a description of the index; and a zero-unit run is far
+      # more likely a partial or wiped output directory than a deliberate
+      # deletion of every unit, which `woods:embed` is the way to record.
       #
       # Full runs always dump: they rebuild the store from scratch, so "nothing
       # processed" there means the store is genuinely empty and the dump must
@@ -166,35 +176,57 @@ module Woods
       def snapshot_worth_writing?(stats, units, incremental:)
         return true unless incremental
         return true if stats[:processed].positive?
+        return false if @persisted_ids.empty? || units.empty?
 
-        units_vanished?(units)
+        metadata_dump_stale?
       end
 
-      # Does the promoted dump describe a unit the index no longer holds?
+      # Does the promoted dump's metadata differ from what this run rebuilt?
       #
-      # `@persisted_ids` is the previous dump's base identifiers, already built
-      # by {#hydrate_persisted_vectors} — so this costs one pass over the units
-      # and no extra IO.
+      # `persist_unit_metadata` has already stored every unit the index holds,
+      # so `@metadata_store` is this run's answer in full and the comparison is
+      # exact — it catches a vanished unit (present there, absent here) and a
+      # changed value alike, where a set comparison could only see the first.
       #
-      # Empty when hydration failed and fell back to `clear!`. That is the
-      # right answer rather than a missing case: an emptied store re-embeds
-      # every unit, so `processed` carries the run and the dump happens anyway,
-      # while a genuinely empty index must not dump an empty store over a good
-      # one.
+      # `updated_at` is excluded on both sides. `InMemory#store` re-stamps it on
+      # every call and `Snapshotter::Metadata.load_or_empty` restores entries
+      # through `store`, so it reflects when each side was built, never what it
+      # holds. Comparing it would report every run as changed and reinstate
+      # exactly the churn this gate exists to prevent.
       #
-      # The leftover *vector* is deliberately left alone — a full `woods:embed`
-      # compacts those, as it always has. Dropping the metadata is what makes it
-      # unreachable again, which is the regression this closes.
+      # Reading the dump to decide against rewriting it is the same trade
+      # `Extractor#register_and_write` makes when it compares bytes before
+      # rewriting a unit file: the read is strictly cheaper than the write it
+      # avoids, which here also carries an fsync of every vector and a rotation
+      # of the retention window.
       #
-      # @param units [Array<Hash>] every unit the index currently holds
+      # An unreadable dump answers "stale" — writing a fresh one is the
+      # recovery, and it is what the vector path already does on a failed
+      # hydrate.
+      #
       # @return [Boolean]
-      def units_vanished?(units)
-        return false if @persisted_ids.empty?
+      def metadata_dump_stale?
+        return false unless @metadata_store.respond_to?(:each_entry)
 
-        current = {}
-        units.each { |unit_data| current[unit_data['identifier']] = true }
+        comparable_metadata(@metadata_store.each_entry) != persisted_metadata
+      rescue StandardError => e
+        warn "[woods] could not compare the promoted metadata dump (#{e.class}: #{e.message}); " \
+             'writing a new one.'
+        true
+      end
 
-        @persisted_ids.each_key.any? { |identifier| !current.key?(identifier) }
+      def persisted_metadata
+        require_relative '../index_artifact'
+        require_relative '../storage/snapshotter'
+
+        loaded = Storage::Snapshotter::Metadata.load_or_empty(IndexArtifact.new(@output_dir))
+        comparable_metadata(loaded.each_entry)
+      end
+
+      def comparable_metadata(entries)
+        entries.each_with_object({}) do |(id, data), out|
+          out[id] = data.is_a?(Hash) ? data.except('updated_at') : data
+        end
       end
 
       # Per-run state. An Indexer instance may be reused across runs, and
