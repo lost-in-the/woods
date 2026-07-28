@@ -720,5 +720,17 @@
     "description": "GraphQLExtractor#extract_all runs a static file pass and a runtime pass (extract_from_runtime_type). PR #165 made the file pass unconditional, fixing the divergence visible without graphql-ruby loaded (the per-file path indexed types a full run dropped). Remaining: with the gem loaded, the runtime pass can emit units the file pass cannot reach — dynamically defined types, schema-builder/DSL types, anything whose constant exists only after the schema is constructed. Those units have no source file, so no changed path dispatches to them and an incremental run cannot recreate them. Fix is probably a discoverable_classes equivalent so the incremental path reconciles the runtime set in both directions like class-based types, provided the schema type map is exact by construction; otherwise move GraphQL to WHOLE_APP_EXTRACTORS. Either way needs gem 'graphql' in the version gemfiles as a dev/test dependency plus a harness template exercising a dynamic type — which is why it was left out of #165. Tracked in GH #167.",
     "status": "resolved",
     "depends_on": []
+  },
+  {
+    "id": "B-067",
+    "slug": "stale-framework-units",
+    "title": "Framework units are permanently stale carry-over and woods-sync's Gemfile.lock advice cannot fix them",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/tasks/woods.rake", "bin/woods-sync", "lib/woods/extractors/rails_source_extractor.rb"],
+    "description": "rails_source and gem_source units are written only by an explicit woods:extract_framework. Nothing automatic runs it — not bin/woods-sync, not the watch daemon, not woods:incremental, and not woods:extract — so once written they persist unchanged forever. Confirmed on a real host: 140 units (116 rails_source, 24 gem_source) carry host-style paths from a different worktree that resolve nowhere in either host or container; they were also the only units left absolute after #166, the same symptom. The sharp edge is that bin/woods-sync flags a Gemfile.lock change as 'only takes effect with a full extraction' and tells the user to clear .sync_head and re-run, but a full extraction is exactly what does not refresh framework units — so a Rails upgrade worktree keeps describing the old framework internals. The exclusion from incremental is deliberate and correct (WHOLE_APP_EXTRACTORS documents it); the gap is that 'changes only on dependency changes' was never wired to anything detecting one. Options in the issue; leaning toward refreshing on a lockfile-digest mismatch during full extraction plus a woods:validate warning. woods:validate has no unresolvable-file_path check at all, which would have surfaced this unprompted. Tracked in GH #169.",
+    "status": "ready",
+    "depends_on": []
   }
 ]

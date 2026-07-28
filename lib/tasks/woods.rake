@@ -37,7 +37,7 @@ namespace :woods do
   # So the wait is now generous and the failure explicit. `WOODS_LOCK_WAIT`
   # overrides it; exceeding it exits non-zero rather than corrupting the index,
   # which is the outcome a CI job or a developer can actually act on.
-  def woods_with_extraction_lock(output_dir, wait: nil)
+  def woods_with_extraction_lock(output_dir, wait: nil, &block)
     # Requires first. The default wait reads a constant from the daemon, so
     # resolving it above these lines NameError'd every write task — the same
     # load-order bug as the missing require in `woods:watch`, reintroduced one
@@ -63,9 +63,59 @@ namespace :woods do
     woods_abort_on_lock_timeout(wait) unless acquired
 
     begin
-      yield
+      woods_with_lock_heartbeat(lock, &block)
     ensure
       lock.release
+    end
+  end
+
+  # Keep the lock's mtime moving while a long run holds it.
+  #
+  # Staleness is mtime-only with a 600s timeout, so a run that exceeds it has
+  # its lock retired by the next writer to come along — producing exactly the
+  # two-writer clobber the lock exists to prevent, silently, with the
+  # generation bumped so the clobbered index reads as fresh. `PipelineLock#touch`
+  # was added for this and the daemon calls it every cycle; the rake path
+  # (`woods:extract`, `woods:incremental`, `woods:refresh`) never did, so the
+  # protection covered the writer least likely to be slow and missed the three
+  # most likely.
+  #
+  # Headroom is currently ~10x on a production-shaped host (a full extraction
+  # measured ~50s against a 600s timeout), so this is latent rather than live —
+  # but it closes with app growth, on cold or slow machines, and immediately if
+  # anything slower is ever put under this lock.
+  #
+  # The heartbeat runs in its own thread rather than inline because the work it
+  # protects is a single opaque `yield` with no cycle boundary to hook. A
+  # `touch` on a lock this process no longer holds is a no-op that returns
+  # false, so a late tick after release cannot revive a retired lock.
+  def woods_with_lock_heartbeat(lock, &block)
+    stop = false
+    heartbeat = Thread.new { woods_heartbeat_loop(lock) { stop } }
+
+    block.call
+  ensure
+    stop = true
+    heartbeat&.join(2)
+  end
+
+  # Touch on interval boundaries, but wake every second so the end of a short
+  # run is noticed promptly rather than a third of the window later.
+  #
+  # A third of the timeout is the same ratio {Woods::Watch::Status} uses for its
+  # own heartbeat: frequent enough that two consecutive misses still leave the
+  # lock fresh, infrequent enough to stay invisible.
+  def woods_heartbeat_loop(lock)
+    interval = Woods::Watch::Daemon::LOCK_STALE_TIMEOUT / 3.0
+    elapsed = 0
+
+    until yield
+      sleep 1
+      elapsed += 1
+      next if elapsed < interval || yield
+
+      lock.touch
+      elapsed = 0
     end
   end
 
