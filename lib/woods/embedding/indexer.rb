@@ -127,10 +127,35 @@ module Woods
         embed_batches(units, checkpoint, stats, incremental: incremental)
 
         report_checkpoint_misses
-        persist_snapshot if persistable?
+        persist_snapshot if persistable? && snapshot_worth_writing?(stats, incremental: incremental)
         save_checkpoint(checkpoint)
 
         stats
+      end
+
+      # Is there anything new for a dump to capture?
+      #
+      # A dump is a whole-store snapshot, so writing one for a run that embedded
+      # nothing rewrites and fsyncs every vector to produce byte-identical
+      # content — and, worse, rotates the retention window, so three no-op
+      # `woods:embed_incremental` runs evict every genuinely older dump in
+      # favour of copies of the same state.
+      #
+      # Safe because nothing else mutates the store on a zero-processed run:
+      # `prune_superseded_vectors` is reached only from `store_vectors`, which
+      # runs only for items that were actually embedded. A checkpoint self-heal
+      # counts as processed, so a run that re-embeds a stranded unit still
+      # dumps.
+      #
+      # Full runs always dump: they rebuild the store from scratch, so "nothing
+      # processed" there means the store is genuinely empty and the dump must
+      # say so rather than leave a stale one promoted.
+      #
+      # @return [Boolean]
+      def snapshot_worth_writing?(stats, incremental:)
+        return true unless incremental
+
+        stats[:processed].positive?
       end
 
       # Per-run state. An Indexer instance may be reused across runs, and

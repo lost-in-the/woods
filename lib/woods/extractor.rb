@@ -259,7 +259,16 @@ module Woods
       # Additions only — see `reconcile_removals: false`. GraphQL is the one
       # entry whose discovery set is not authoritative for its unit type
       # (#167).
-      graphql: { type: :graphql_type, method: :extract_from_runtime_type, reconcile_removals: false }
+      # `types:` because this extractor emits four unit types, not one:
+      # `classify_runtime_type` returns :graphql_type, :graphql_mutation,
+      # :graphql_resolver or :graphql_query. Declaring only :graphql_type made
+      # `known` miss the others — the schema's query root is always in
+      # `Schema.types` and classifies as :graphql_query — so they were
+      # re-"discovered" and re-added on *every* incremental run. That leaves
+      # `touched` non-empty on a genuine no-op, which rewrites the manifest and
+      # bumps the generation each cycle: the #164 gap-4 symptom, reintroduced.
+      graphql: { type: :graphql_type, types: GRAPHQL_TYPES,
+                 method: :extract_from_runtime_type, reconcile_removals: false }
     }.freeze
 
     # Extractors with no per-file entry point: they scan the whole app (or
@@ -1585,7 +1594,8 @@ module Woods
         next unless extractor.respond_to?(:discoverable_classes)
 
         discovered = extractor.discoverable_classes.reject { |k| k.name.nil? }
-        known = @dependency_graph.units_of_type(spec[:type]).to_set
+        known = Array(spec[:types] || spec[:type])
+                .flat_map { |type| @dependency_graph.units_of_type(type) }.to_set
 
         touched.merge(add_discovered_classes(key, spec, discovered, known, excluded, affected_types))
         next if spec[:reconcile_removals] == false
@@ -1788,7 +1798,7 @@ module Woods
         next if File.exist?(path)
 
         @dependency_graph.identifiers_for_path(path).each do |identifier|
-          next if !class_based && class_based_unit?(identifier)
+          next if !class_based && convention_path_unit?(identifier)
 
           removed.add(identifier) if remove_unit(identifier, affected_types)
         end
@@ -1811,11 +1821,23 @@ module Woods
     #
     # @param identifier [String]
     # @return [Boolean]
-    def class_based_unit?(identifier)
+    # Does this unit's `file_path` name a *convention* that need not exist?
+    #
+    # The sweep deletes units whose file is gone, which is wrong for anything
+    # that derives its path from a constant name rather than from a file it was
+    # read out of. Class-based types have always been excluded for that reason.
+    #
+    # GraphQL joins them (#167): `source_file_for_class` falls back to
+    # `app/graphql/<underscored>.rb` when it cannot resolve a source location,
+    # and a runtime-defined type — the exact case #167 exists to index — has no
+    # such file. Without this the sweep pruned those units in the *same run*
+    # that added them, and `reconcile_class_based_types(..., except: pruned)`
+    # then refused to re-add them, so #167's target case never survived.
+    def convention_path_unit?(identifier)
       node = @dependency_graph.node(identifier)
       return false unless node
 
-      CLASS_BASED.key?(node[:type])
+      CLASS_BASED.key?(node[:type]) || GRAPHQL_TYPES.include?(node[:type])
     end
 
     # Register a batch of freshly-extracted units and write their JSON.

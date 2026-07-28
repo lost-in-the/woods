@@ -843,6 +843,28 @@ RSpec.describe Woods::Embedding::Indexer do
       File.write(File.join(output_dir, 'payment_service.json'), JSON.generate(second_unit_data))
     end
 
+    # A dump is a whole-store snapshot, so writing one for a run that embedded
+    # nothing produces byte-identical content AND rotates the retention window —
+    # three no-op runs would evict every genuinely older dump in favour of
+    # copies of the same state.
+    it 'writes no new dump for an incremental run that embedded nothing' do
+      fresh_indexer.index_incremental # consumes the pending unit
+      dumps = Woods::IndexArtifact.new(output_dir).dumps_root
+      before = Dir.children(dumps).sort
+
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(0)
+      expect(Dir.children(dumps).sort).to eq(before)
+    end
+
+    it 'still leaves the previously persisted vectors readable after a no-op run' do
+      fresh_indexer.index_incremental
+      fresh_indexer.index_incremental
+
+      expect(persisted_vector_ids).to contain_exactly('User', 'PaymentService')
+    end
+
     it 'persists the newly embedded unit into the promoted dump' do
       stats = fresh_indexer.index_incremental
 

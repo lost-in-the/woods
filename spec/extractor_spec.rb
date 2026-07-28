@@ -1516,4 +1516,49 @@ RSpec.describe Woods::Extractor do
                            "raises NoMethodError and the entry adds nothing: #{offenders.join(', ')}"
     end
   end
+
+  # Both of these are #167 regressions found in review: the change added
+  # runtime-only GraphQL types to the incremental path, and two separate
+  # mechanisms then undid it.
+  describe 'GraphQL incremental reconciliation (#167)' do
+    it 'covers every unit type the extractor emits, not just graphql_type' do
+      spec = described_class::CLASS_BASED_DISCOVERY[:graphql]
+
+      # classify_runtime_type returns four types; the schema's query root is
+      # always in Schema.types and classifies as :graphql_query. Declaring only
+      # :graphql_type left the others permanently "new", so they were re-added
+      # every run — leaving `touched` non-empty on a no-op and bumping the
+      # generation each cycle.
+      expect(spec[:types]).to eq(described_class::GRAPHQL_TYPES)
+      expect(spec[:types]).to include(:graphql_query)
+    end
+
+    it 'treats GraphQL units as convention-path units so the sweep spares them' do
+      graph = Woods::DependencyGraph.new
+      unit = Woods::ExtractedUnit.new(
+        type: :graphql_query, identifier: 'Types::QueryType',
+        file_path: '/nonexistent/app/graphql/types/query_type.rb'
+      )
+      graph.register(unit)
+      extractor = described_class.new(output_dir: Dir.mktmpdir)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+
+      # A runtime-defined type has no file: source_file_for_class falls back to
+      # a convention path that need not exist. Without this the prune sweep
+      # removed it in the same run that added it, and the follow-up reconcile
+      # refused to re-add it because it was in `pruned`.
+      expect(extractor.send(:convention_path_unit?, 'Types::QueryType')).to be true
+    end
+
+    it 'still treats a genuinely file-based unit as sweepable' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :lib, identifier: 'Thing', file_path: '/nope/lib/thing.rb')
+      )
+      extractor = described_class.new(output_dir: Dir.mktmpdir)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+
+      expect(extractor.send(:convention_path_unit?, 'Thing')).to be false
+    end
+  end
 end
