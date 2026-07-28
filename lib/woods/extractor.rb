@@ -240,6 +240,14 @@ module Woods
     # safe in both worlds — they are exactly the runtime-only types no changed
     # path can dispatch to, which is the #167 divergence.
     #
+    # The consequence, stated so it does not read as a bug later: a runtime-only
+    # type that *disappears* is never removed by an incremental run. It survives
+    # until a full extraction rebuilds the type. Confirmed against a live schema
+    # during review — probe units outlived deletion of the file that defined
+    # them. That is the cost of the opt-out, and it is the right side to err on:
+    # a stale unit is recoverable by one full run, whereas the removal half
+    # would delete units a full extraction still emits.
+    #
     # @return [Hash{Symbol => Hash}] extractor key => { type:, method: }
     CLASS_BASED_DISCOVERY = {
       models: { type: :model, method: :extract_model },
