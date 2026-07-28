@@ -1521,6 +1521,32 @@ RSpec.describe Woods::Extractor do
   # runtime-only GraphQL types to the incremental path, and two separate
   # mechanisms then undid it.
   describe 'GraphQL incremental reconciliation (#167)' do
+    # The behavioural half of the `types:` fix is the `known` union in
+    # reconcile_class_based_types. Asserting the table holds GRAPHQL_TYPES is a
+    # tautology — the table literally holds that constant — and the whole suite
+    # passes with the union reverted, because graphql-ruby is in no bundle so
+    # `discoverable_classes` returns [] and the addition path never fires.
+    #
+    # This drives the union directly with a stubbed multi-type entry: the class
+    # is already in the graph under the entry's *second* type, so a `known`
+    # built from `spec[:type]` alone misses it and re-adds it every run —
+    # leaving `touched` non-empty on a no-op, which rewrites the manifest and
+    # bumps the generation each cycle.
+    it 'treats a unit known under a secondary type as already known' do
+      already_known = double('QueryType', name: 'Types::QueryType')
+      fake = double('GraphQLExtractor', discoverable_classes: [already_known])
+      stub_const('Woods::Extractor::CLASS_BASED_DISCOVERY',
+                 { graphql: { type: :graphql_type, types: %i[graphql_type graphql_query],
+                              method: :extract_from_runtime_type, reconcile_removals: false } })
+      extractor.instance_variable_set(:@incremental_extractors, { graphql: fake })
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :graphql_query, identifier: 'Types::QueryType',
+                                 file_path: File.join(tmpdir, 'app/graphql/types/query_type.rb'))
+      )
+
+      expect(extractor.send(:reconcile_class_based_types, Set.new)).to be_empty
+    end
+
     it 'covers every unit type the extractor emits, not just graphql_type' do
       spec = described_class::CLASS_BASED_DISCOVERY[:graphql]
 

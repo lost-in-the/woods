@@ -1805,22 +1805,6 @@ module Woods
       end
     end
 
-    # Is this unit's type one discovered from runtime descendants?
-    #
-    # Such units record a *convention* path when their source location can't
-    # be resolved, and that path need not exist. On Rails < 7.1, for instance,
-    # `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
-    # real `ActiveRecord::Base` descendants that a full extraction emits with
-    # `app/models/active_record/schema_migration.rb` as their file path — a
-    # file no application has. That path *is* claimed by a file rule (the
-    # PORO rule takes all of `app/models/**/*.rb`), so the sweep's file-rule
-    # bound doesn't cover it and this check has to.
-    #
-    # Deleting a class-based unit therefore requires the caller to name the
-    # path explicitly; the sweep never infers it.
-    #
-    # @param identifier [String]
-    # @return [Boolean]
     # Does this unit's `file_path` name a *convention* that need not exist?
     #
     # The sweep deletes units whose file is gone, which is wrong for anything
@@ -1833,6 +1817,26 @@ module Woods
     # such file. Without this the sweep pruned those units in the *same run*
     # that added them, and `reconcile_class_based_types(..., except: pruned)`
     # then refused to re-add them, so #167's target case never survived.
+    #
+    # The original case: on Rails < 7.1 `ActiveRecord::SchemaMigration` and
+    # `InternalMetadata` are real `ActiveRecord::Base` descendants a full
+    # extraction emits with `app/models/active_record/schema_migration.rb` as
+    # their path — a file no application has, and one the PORO rule *does*
+    # claim, so the sweep's file-rule bound doesn't cover it and this check has
+    # to. Deleting such a unit requires the caller to name the path; the sweep
+    # never infers it.
+    #
+    # KNOWN COST (review, #167): this keys on unit *type*, but the property is
+    # per-unit — GRAPHQL_TYPES is also true of units the static file pass
+    # produced, whose path is a real file. So a deleted `app/graphql/**.rb`
+    # now survives an unnamed-path sweep. Named-path deletion still works, so
+    # `woods:incremental` on a git diff is unaffected; the exposed caller is
+    # the daemon's catch-up, which runs an empty change set precisely because
+    # deletions leave no mtime. Tracked separately; strictly better than the
+    # pre-#167 state, where the whole feature was inert.
+    #
+    # @param identifier [String]
+    # @return [Boolean]
     def convention_path_unit?(identifier)
       node = @dependency_graph.node(identifier)
       return false unless node
