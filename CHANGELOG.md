@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A deleted unit stops being retrievable after an incremental embed** (B-069, #171). The
+  no-op dump skip added alongside #148 reasons about the vector store, and correctly so — but
+  `persist_snapshot` also writes `metadata.msgpack`, and `persist_unit_metadata` runs over
+  every unit the index holds rather than only the changed ones. Deleting a unit changes no
+  surviving unit's `source_hash`, so `woods:embed_incremental` reported `processed: 0`, skipped
+  the dump, and left the deleted unit's metadata promoted. Its leftover vector went from inert
+  — `ContextAssembler#find_batch` could not resolve it, so it contributed nothing — to a live
+  `codebase_retrieve` hit returning source for a file that no longer exists. The skip now also
+  asks whether the promoted dump describes a unit the index has since lost, comparing against
+  the identifiers `hydrate_persisted_vectors` already loaded, so it costs one pass and no extra
+  IO. Runs that genuinely changed nothing still skip the dump, so the retention window is not
+  churned. The leftover vector itself is still left for a full `woods:embed` to compact, as
+  before; dropping the metadata is what puts it back out of reach.
+
+- **Deleting a GraphQL type removes it from the index again** (B-070, #171). The #167 fix
+  spared GraphQL units from the deletion sweep so that runtime-defined types — built by a
+  schema builder, with no source file — would stop being pruned in the same run that added
+  them. But it keyed on unit *type*, and that is equally true of types the static file pass
+  read out of a real `app/graphql/**.rb`, so deleting one of those stopped removing its unit.
+  Nothing else could: GraphQL sets `reconcile_removals: false` and is not a whole-app
+  extractor, so the ghost unit outlived every subsequent incremental run rather than being
+  corrected by the next one. Naming the deleted path still worked, which is why
+  `woods:incremental` fed a git diff was unaffected; the exposed caller is the watch daemon's
+  catch-up, which runs an empty change set precisely because deletions leave no mtime behind
+  to notice. Comparing the recorded path against one derived from the constant cannot
+  separate the two cases — a file-defined type at `app/graphql/types/gone_type.rb` derives
+  exactly that path — so the producing extractor now records the answer: `ExtractedUnit`
+  carries `synthetic_path`, `GraphQLExtractor#extract_from_runtime_type` sets it when no file
+  backs the type, and the sweep reads it off the graph node. A graph written before this
+  carries no flag, so a runtime-only type is briefly sweepable after upgrading and is re-added
+  by the next run's class-based reconciliation.
+
 - **`woods:embed_incremental` no longer discards the vectors it embeds** (B-059, #148). On the
   `:local` and `:shared_filesystem` presets the vector store is in-memory and the dump under
   `dumps/` is the *only* durable copy — but `Indexer#index_incremental` never called
