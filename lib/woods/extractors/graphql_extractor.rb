@@ -147,6 +147,46 @@ module Woods
         nil
       end
 
+      # Extract a unit from a runtime-loaded GraphQL type class.
+      #
+      # Public because {Extractor::CLASS_BASED_DISCOVERY} names it as the
+      # graphql entry's `method:` and the reconciler invokes it with
+      # `public_send` (#167). Private, it raised NoMethodError for every
+      # candidate — swallowed by the reconciler's `rescue StandardError` into a
+      # warn — so the incremental path silently added nothing, which is exactly
+      # what #167 set out to fix. `spec/extractor_spec.rb` asserts every
+      # CLASS_BASED_DISCOVERY method is publicly callable on its real
+      # extractor so no future entry can regress the same way.
+      #
+      # @param type_class [Class] A graphql-ruby type class
+      # @return [ExtractedUnit, nil]
+      def extract_from_runtime_type(type_class)
+        return nil unless type_class.respond_to?(:name) && type_class.name
+        # Skip anonymous or internal graphql-ruby classes
+        return nil if type_class.name.start_with?('GraphQL::')
+
+        file_path = source_file_for_class(type_class)
+        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        unit_type = classify_runtime_type(type_class)
+
+        unit = ExtractedUnit.new(
+          type: unit_type,
+          identifier: type_class.name,
+          file_path: file_path
+        )
+
+        unit.namespace = extract_namespace(type_class.name)
+        unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)
+        unit.metadata = build_metadata(source, type_class.name, unit_type, type_class)
+        unit.dependencies = extract_dependencies(source, type_class.name)
+        unit.chunks = build_chunks(unit, type_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
+
+        unit
+      rescue StandardError => e
+        Rails.logger.error("Failed to extract GraphQL type #{type_class.name}: #{e.message}") if defined?(Rails)
+        nil
+      end
+
       private
 
       # ──────────────────────────────────────────────────────────────────────
@@ -206,41 +246,6 @@ module Woods
         types
       rescue StandardError
         {}
-      end
-
-      # ──────────────────────────────────────────────────────────────────────
-      # Runtime Type Extraction
-      # ──────────────────────────────────────────────────────────────────────
-
-      # Extract a unit from a runtime-loaded GraphQL type class
-      #
-      # @param type_class [Class] A graphql-ruby type class
-      # @return [ExtractedUnit, nil]
-      def extract_from_runtime_type(type_class)
-        return nil unless type_class.respond_to?(:name) && type_class.name
-        # Skip anonymous or internal graphql-ruby classes
-        return nil if type_class.name.start_with?('GraphQL::')
-
-        file_path = source_file_for_class(type_class)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
-        unit_type = classify_runtime_type(type_class)
-
-        unit = ExtractedUnit.new(
-          type: unit_type,
-          identifier: type_class.name,
-          file_path: file_path
-        )
-
-        unit.namespace = extract_namespace(type_class.name)
-        unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)
-        unit.metadata = build_metadata(source, type_class.name, unit_type, type_class)
-        unit.dependencies = extract_dependencies(source, type_class.name)
-        unit.chunks = build_chunks(unit, type_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
-
-        unit
-      rescue StandardError => e
-        Rails.logger.error("Failed to extract GraphQL type #{type_class.name}: #{e.message}") if defined?(Rails)
-        nil
       end
 
       # Determine the source file for a runtime-loaded class, validating that

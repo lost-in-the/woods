@@ -1487,5 +1487,33 @@ RSpec.describe Woods::Extractor do
       expect(spec[:type]).to eq(:graphql_type)
       expect(spec[:method]).to eq(:extract_from_runtime_type)
     end
+
+    # {Extractor#add_discovered_classes} calls
+    # `extractor_for(key).public_send(spec[:method], klass)`. A private method
+    # there raises NoMethodError, which the surrounding `rescue StandardError`
+    # turns into a warn and a nil that `filter_map` drops — so the entry
+    # silently contributes nothing rather than failing loudly.
+    #
+    # Asserting the symbol matches the table (above) does not catch that, and
+    # neither do the reconcile specs: they inject a double, which answers
+    # `public_send` for anything stubbed on it regardless of the real class's
+    # visibility. Visibility is a static property, so unlike a behavioural
+    # reconcile test this needs neither graphql-ruby nor a booted app.
+    #
+    # Regression: #167 shipped with `extract_from_runtime_type` below
+    # `private`, making the whole change inert.
+    it 'exposes every discovery method as a public instance method' do
+      offenders = described_class::CLASS_BASED_DISCOVERY.filter_map do |key, spec|
+        extractor_class = described_class::EXTRACTORS[key]
+        next if extractor_class.nil?
+        next if extractor_class.public_method_defined?(spec[:method])
+
+        "#{key} -> #{extractor_class}##{spec[:method]}"
+      end
+
+      expect(offenders).to be_empty,
+                           'these discovery methods are not publicly callable, so public_send ' \
+                           "raises NoMethodError and the entry adds nothing: #{offenders.join(', ')}"
+    end
   end
 end
