@@ -127,7 +127,7 @@ module Woods
         embed_batches(units, checkpoint, stats, incremental: incremental)
 
         report_checkpoint_misses
-        persist_snapshot if persistable? && snapshot_worth_writing?(stats, incremental: incremental)
+        persist_snapshot if persistable? && snapshot_worth_writing?(stats, units, incremental: incremental)
         save_checkpoint(checkpoint)
 
         stats
@@ -141,21 +141,60 @@ module Woods
       # `woods:embed_incremental` runs evict every genuinely older dump in
       # favour of copies of the same state.
       #
-      # Safe because nothing else mutates the store on a zero-processed run:
-      # `prune_superseded_vectors` is reached only from `store_vectors`, which
-      # runs only for items that were actually embedded. A checkpoint self-heal
-      # counts as processed, so a run that re-embeds a stranded unit still
-      # dumps.
+      # Safe for the *vector* store because nothing else mutates it on a
+      # zero-processed run: `prune_superseded_vectors` is reached only from
+      # `store_vectors`, which runs only for items that were actually embedded.
+      # A checkpoint self-heal counts as processed, so a run that re-embeds a
+      # stranded unit still dumps.
+      #
+      # It is **not** safe for the metadata store, which is why deletions get a
+      # vote (B-069 / #171). `persist_snapshot` also writes metadata.msgpack,
+      # and `persist_unit_metadata` runs over every unit the index holds rather
+      # than the changed ones — so a run that embedded nothing has still
+      # rebuilt the metadata store, and skipping the dump throws that away.
+      # Deleting a unit changes no surviving unit's source_hash, so `processed`
+      # is 0 and the deleted unit's metadata stayed promoted: the difference
+      # between its leftover vector being inert (`ContextAssembler#find_batch`
+      # misses it) and being a live `codebase_retrieve` hit for source that no
+      # longer exists.
       #
       # Full runs always dump: they rebuild the store from scratch, so "nothing
       # processed" there means the store is genuinely empty and the dump must
       # say so rather than leave a stale one promoted.
       #
       # @return [Boolean]
-      def snapshot_worth_writing?(stats, incremental:)
+      def snapshot_worth_writing?(stats, units, incremental:)
         return true unless incremental
+        return true if stats[:processed].positive?
 
-        stats[:processed].positive?
+        units_vanished?(units)
+      end
+
+      # Does the promoted dump describe a unit the index no longer holds?
+      #
+      # `@persisted_ids` is the previous dump's base identifiers, already built
+      # by {#hydrate_persisted_vectors} — so this costs one pass over the units
+      # and no extra IO.
+      #
+      # Empty when hydration failed and fell back to `clear!`. That is the
+      # right answer rather than a missing case: an emptied store re-embeds
+      # every unit, so `processed` carries the run and the dump happens anyway,
+      # while a genuinely empty index must not dump an empty store over a good
+      # one.
+      #
+      # The leftover *vector* is deliberately left alone — a full `woods:embed`
+      # compacts those, as it always has. Dropping the metadata is what makes it
+      # unreachable again, which is the regression this closes.
+      #
+      # @param units [Array<Hash>] every unit the index currently holds
+      # @return [Boolean]
+      def units_vanished?(units)
+        return false if @persisted_ids.empty?
+
+        current = {}
+        units.each { |unit_data| current[unit_data['identifier']] = true }
+
+        @persisted_ids.each_key.any? { |identifier| !current.key?(identifier) }
       end
 
       # Per-run state. An Indexer instance may be reused across runs, and

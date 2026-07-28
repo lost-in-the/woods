@@ -836,6 +836,13 @@ RSpec.describe Woods::Embedding::Indexer do
       JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
     end
 
+    # What `ContextAssembler#find_batch` would actually resolve — the half of
+    # the artifact that decides whether a stale vector is inert or retrievable.
+    def persisted_metadata_ids
+      artifact = Woods::IndexArtifact.new(output_dir)
+      Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).each_entry.map { |id, _data| id }
+    end
+
     before do
       File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
       fresh_indexer.index_all
@@ -856,6 +863,37 @@ RSpec.describe Woods::Embedding::Indexer do
 
       expect(stats[:processed]).to eq(0)
       expect(Dir.children(dumps).sort).to eq(before)
+    end
+
+    # B-069 / #171. The dump skip reasons about the vector store, but
+    # `persist_snapshot` also writes metadata.msgpack and `persist_unit_metadata`
+    # runs over every unit, not just changed ones. Deleting a unit changes no
+    # surviving unit's source_hash, so `processed` is 0 and the skip fired —
+    # leaving the deleted unit's metadata promoted. That is the difference
+    # between a stale vector being inert (find_batch misses it) and being a live
+    # `codebase_retrieve` hit for source that no longer exists.
+    it 'drops a deleted unit from the metadata dump even when it embedded nothing' do
+      fresh_indexer.index_incremental # consumes the pending unit
+      FileUtils.rm_f(File.join(output_dir, 'payment_service.json'))
+
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(0)
+      expect(persisted_metadata_ids).to contain_exactly('User')
+    end
+
+    # The retention-window half of the same gate: a run where units vanished
+    # has genuinely new state to record, so it must write a dump rather than
+    # leave the previous one promoted.
+    it 'writes a dump for a run whose only change is a deletion' do
+      fresh_indexer.index_incremental
+      dumps = Woods::IndexArtifact.new(output_dir).dumps_root
+      before = Dir.children(dumps).sort
+      FileUtils.rm_f(File.join(output_dir, 'payment_service.json'))
+
+      fresh_indexer.index_incremental
+
+      expect(Dir.children(dumps).sort).not_to eq(before)
     end
 
     it 'still leaves the previously persisted vectors readable after a no-op run' do
