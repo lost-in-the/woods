@@ -858,6 +858,34 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(Dir.children(dumps).sort).to eq(before)
     end
 
+    # B-069: the dump gate skipped persist_snapshot on processed==0, which also
+    # froze metadata.msgpack — so a deleted unit kept both its stale vector AND
+    # its metadata, taking the vector from inert to retrievable. Deleting a unit
+    # changes no other unit's source_hash, so processed stays 0 and only the
+    # vanished-unit check can notice.
+    it 'rewrites the dump when a unit vanished from the index, even with nothing embedded' do
+      fresh_indexer.index_incremental # consume the pending unit
+      File.delete(File.join(output_dir, 'payment_service.json'))
+
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(0)
+      expect(persisted_vector_ids).to eq(['User'])
+    end
+
+    it 'drops the vanished unit from the metadata dump as well as the vectors' do
+      fresh_indexer.index_incremental
+      File.delete(File.join(output_dir, 'payment_service.json'))
+
+      fresh_indexer.index_incremental
+
+      metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(
+        Woods::IndexArtifact.new(output_dir)
+      )
+      expect(metadata.find('PaymentService')).to be_nil
+      expect(metadata.find('User')).not_to be_nil
+    end
+
     it 'still leaves the previously persisted vectors readable after a no-op run' do
       fresh_indexer.index_incremental
       fresh_indexer.index_incremental

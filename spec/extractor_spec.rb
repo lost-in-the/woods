@@ -1559,21 +1559,42 @@ RSpec.describe Woods::Extractor do
       expect(spec[:types]).to include(:graphql_query)
     end
 
-    it 'treats GraphQL units as convention-path units so the sweep spares them' do
+    # Per-unit, not per-type (B-070). `source_file_for_class` derives exactly one
+    # fallback — app/graphql/<constant.underscore>.rb — so a unit sitting at that
+    # path has no file behind it and must be spared. Any other path came from the
+    # static file pass and is sweepable like anything else.
+    def register_graphql(identifier, file_path)
       graph = Woods::DependencyGraph.new
-      unit = Woods::ExtractedUnit.new(
-        type: :graphql_query, identifier: 'Types::QueryType',
-        file_path: '/nonexistent/app/graphql/types/query_type.rb'
+      graph.register(
+        Woods::ExtractedUnit.new(type: :graphql_query, identifier: identifier, file_path: file_path)
       )
-      graph.register(unit)
-      extractor = described_class.new(output_dir: Dir.mktmpdir)
-      extractor.instance_variable_set(:@dependency_graph, graph)
+      described_class.new(output_dir: Dir.mktmpdir).tap do |extractor|
+        extractor.instance_variable_set(:@dependency_graph, graph)
+      end
+    end
 
-      # A runtime-defined type has no file: source_file_for_class falls back to
-      # a convention path that need not exist. Without this the prune sweep
-      # removed it in the same run that added it, and the follow-up reconcile
-      # refused to re-add it because it was in `pruned`.
+    it 'spares a runtime-defined type sitting at its convention path' do
+      convention = Rails.root.join('app/graphql/types/query_type.rb').to_s
+      extractor = register_graphql('Types::QueryType', convention)
+
+      # Without this the prune sweep removed it in the same run that added it,
+      # and the follow-up reconcile refused to re-add it because it was in
+      # `pruned` — so #167's target case never survived.
       expect(extractor.send(:convention_path_unit?, 'Types::QueryType')).to be true
+    end
+
+    # KNOWN GAP, deliberately asserted as it behaves rather than as it should
+    # (B-070 / #171). The predicate keys on unit *type*, so a file-defined type
+    # is spared from the unnamed-path sweep exactly like a runtime-defined one.
+    # A path comparison cannot separate them — see the pending example in
+    # spec/integration/incremental_equivalence_spec.rb for the disproof. Fixing
+    # it needs extraction-time provenance on the graph node.
+    it 'currently spares a file-defined type too, which is B-070' do
+      extractor = register_graphql(
+        'Types::PostType', Rails.root.join('app/graphql/types/nested/post_type.rb').to_s
+      )
+
+      expect(extractor.send(:convention_path_unit?, 'Types::PostType')).to be true
     end
 
     it 'still treats a genuinely file-based unit as sweepable' do

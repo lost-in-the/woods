@@ -276,6 +276,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    # B-070: `convention_path_unit?` was widened to spare GraphQL units from the
+    # sweep, because a *runtime*-defined type records an app/graphql convention
+    # path it does not own. But it keyed on unit *type*, so units the static file
+    # pass produced — whose path is a real file it was read from — were spared
+    # too, and a deleted app/graphql/**.rb survived an unnamed-path sweep
+    # forever. The daemon's catch-up is the exposed caller: it runs an empty
+    # change set precisely because deletions leave no mtime.
+    it 'prunes a deleted graphql type even when the caller forgets to list it',
+       pending: 'B-070/#171 — convention_path_unit? keys on unit type, so file-defined ' \
+                'GraphQL units are spared from the unnamed-path sweep. A path comparison ' \
+                'cannot fix it: Types::ForgottenType conventionally lives AT its ' \
+                'convention path, so a file-defined type is indistinguishable from a ' \
+                'runtime-defined one. Needs extraction-time provenance on the graph node.' do
+      write_file('app/graphql/types/forgotten_type.rb', <<~SRC)
+        module Types
+          class ForgottenType < Types::BaseObject
+            field :id, ID, null: false
+          end
+        end
+      SRC
+
+      run_sequence([
+                     lambda {
+                       delete_file('app/graphql/types/forgotten_type.rb')
+                       write_file('app/services/unrelated_service.rb', service_source('UnrelatedService'))
+                     }
+                   ])
+    end
+
     it 'treats a rename as a delete plus an add' do
       write_file('app/services/old_name_service.rb', service_source('OldNameService'))
 

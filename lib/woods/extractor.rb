@@ -1826,14 +1826,35 @@ module Woods
     # to. Deleting such a unit requires the caller to name the path; the sweep
     # never infers it.
     #
-    # KNOWN COST (review, #167): this keys on unit *type*, but the property is
+    # KNOWN COST (B-070 / #171): this keys on unit *type*, but the property is
     # per-unit — GRAPHQL_TYPES is also true of units the static file pass
     # produced, whose path is a real file. So a deleted `app/graphql/**.rb`
-    # now survives an unnamed-path sweep. Named-path deletion still works, so
-    # `woods:incremental` on a git diff is unaffected; the exposed caller is
-    # the daemon's catch-up, which runs an empty change set precisely because
-    # deletions leave no mtime. Tracked separately; strictly better than the
-    # pre-#167 state, where the whole feature was inert.
+    # survives an unnamed-path sweep. Named-path deletion still works, so
+    # `woods:incremental` on a git diff is unaffected; the exposed caller is the
+    # daemon's catch-up, which runs an empty change set precisely because
+    # deletions leave no mtime.
+    #
+    # Two obvious fixes were tried and **both are wrong** — do not re-attempt
+    # them without reading this:
+    #
+    # 1. *Compare the recorded path against the convention path derived from the
+    #    constant.* `Types::ForgottenType` conventionally lives at
+    #    `app/graphql/types/forgotten_type.rb`, which IS its convention path — so
+    #    a conventionally-named file-defined type is indistinguishable from a
+    #    runtime-defined one, and the common case stays spared. Disproven by
+    #    `spec/integration/incremental_equivalence_spec.rb`'s pending example.
+    # 2. *Let the sweep prune GraphQL and rely on the reconciler's addition half
+    #    to re-add whatever the schema still holds.* This is what `except: pruned`
+    #    exists to prevent (see the comment at its call site): without a reload a
+    #    constant outlives its deleted file, and the schema attachment survives in
+    #    memory too, so the re-add resurrects the deleted unit against a path that
+    #    no longer exists — permanently, since the sweep then spares it.
+    #
+    # What would actually work is provenance: record at extraction time whether a
+    # source file existed for the unit (`extract_from_runtime_type` already knows
+    # — it falls back to a convention path only when `File.exist?` fails) and
+    # spare only the units that never had one. That needs the graph node to carry
+    # the flag, so it is a serialization change rather than a predicate tweak.
     #
     # @param identifier [String]
     # @return [Boolean]
@@ -1844,6 +1865,20 @@ module Woods
       CLASS_BASED.key?(node[:type]) || GRAPHQL_TYPES.include?(node[:type])
     end
 
+    # Is this GraphQL unit's recorded path the convention derived from its
+    # constant, rather than a file it was read out of?
+    #
+    # Keying the whole question on unit *type* was wrong (B-070 / #171): the
+    # property is per-unit. `GRAPHQL_TYPES` is equally true of units the static
+    # file pass produced, whose `file_path` is a real file — so sparing the type
+    # wholesale meant a deleted `app/graphql/**.rb` survived an unnamed-path
+    # sweep forever, with the daemon's empty-change-set catch-up as the exposed
+    # caller.
+    #
+    # `GraphQLExtractor#source_file_for_class` derives exactly one fallback:
+    # `app/graphql/#{constant.underscore}.rb`. A unit whose path is that
+    # fallback has no file behind it and must be spared; any other path came
+    # from the file pass and is sweepable like anything else.
     # Register a batch of freshly-extracted units and write their JSON.
     #
     # Registration happens BEFORE path normalization — the graph's file map

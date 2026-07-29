@@ -3,6 +3,7 @@
 require 'json'
 require 'digest'
 require 'fileutils'
+require 'set'
 
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
@@ -127,7 +128,8 @@ module Woods
         embed_batches(units, checkpoint, stats, incremental: incremental)
 
         report_checkpoint_misses
-        persist_snapshot if persistable? && snapshot_worth_writing?(stats, incremental: incremental)
+        vanished = incremental && persistable? ? drop_vanished_units : 0
+        persist_snapshot if persistable? && snapshot_worth_writing?(stats, vanished, incremental: incremental)
         save_checkpoint(checkpoint)
 
         stats
@@ -141,21 +143,63 @@ module Woods
       # `woods:embed_incremental` runs evict every genuinely older dump in
       # favour of copies of the same state.
       #
-      # Safe because nothing else mutates the store on a zero-processed run:
-      # `prune_superseded_vectors` is reached only from `store_vectors`, which
-      # runs only for items that were actually embedded. A checkpoint self-heal
-      # counts as processed, so a run that re-embeds a stranded unit still
-      # dumps.
+      # Safe because nothing else mutates the *vector* store on a zero-processed
+      # run: `prune_superseded_vectors` is reached only from `store_vectors`,
+      # which runs only for items that were actually embedded. A checkpoint
+      # self-heal counts as processed, so a run that re-embeds a stranded unit
+      # still dumps.
+      #
+      # But "nothing embedded" is not "nothing changed" (B-069). `persist_snapshot`
+      # writes the vector dump, the *metadata* dump and the config into one
+      # directory and promotes them together, so skipping it also freezes
+      # `metadata.msgpack`. A unit deleted from the index changes no unit's
+      # `source_hash`, so `processed` stays 0 — and pre-#171 that left both the
+      # stale vector *and* its metadata in place, which is what took the vector
+      # from inert (no metadata, so `ContextAssembler#find_batch` missed it) to
+      # retrievable by `codebase_retrieve`.
+      #
+      # Splitting the dump is not an option — a promoted directory holding fresh
+      # metadata and no vectors would hydrate empty on the next run. So instead
+      # the gate asks the fuller question: does the promoted dump describe units
+      # the index no longer has? `@persisted_ids` is what the dump holds (the
+      # hydration already read it, so this costs nothing) and
+      # `@current_identifiers` is what this run saw. Anything in the first and
+      # not the second is stale, and the dump has to be rewritten to drop it.
       #
       # Full runs always dump: they rebuild the store from scratch, so "nothing
       # processed" there means the store is genuinely empty and the dump must
       # say so rather than leave a stale one promoted.
       #
       # @return [Boolean]
-      def snapshot_worth_writing?(stats, incremental:)
+      def snapshot_worth_writing?(stats, vanished, incremental:)
         return true unless incremental
 
-        stats[:processed].positive?
+        stats[:processed].positive? || vanished.positive?
+      end
+
+      # Delete vectors the promoted dump holds for units the index no longer has.
+      #
+      # Detecting staleness is not enough on its own: `hydrate_persisted_vectors`
+      # loads *every* vector in the dump back into the store, and
+      # `prune_superseded_vectors` only touches identifiers that were embedded
+      # this run — so without this the rewritten dump would faithfully reproduce
+      # the stale vector it was rewritten to drop.
+      #
+      # `@persisted_ids` is what the dump holds (hydration already read it, so
+      # this costs no IO) and `@current_identifiers` is what this run saw.
+      # Pruning with an empty fresh-id list removes every chunk of the unit.
+      #
+      # @return [Integer] how many units were dropped
+      def drop_vanished_units
+        return 0 if @persisted_ids.nil? || @persisted_ids.empty?
+
+        vanished = @persisted_ids.keys.reject { |identifier| @current_identifiers.include?(identifier) }
+        return 0 if vanished.empty?
+
+        vanished.each { |identifier| prune_identifier(identifier, []) }
+        warn "[woods] dropped #{vanished.size} unit(s) from the vector index that the " \
+             'extraction no longer holds; rewriting the dump.'
+        vanished.size
       end
 
       # Per-run state. An Indexer instance may be reused across runs, and
@@ -163,6 +207,7 @@ module Woods
       # them.
       def prepare_run(incremental:)
         @persisted_ids = {}
+        @current_identifiers = Set.new
         @checkpoint_misses = 0
         hydrate_persisted_vectors if incremental && persistable?
       end
@@ -195,6 +240,9 @@ module Woods
 
       def process_batch(batch, checkpoint, stats, incremental:)
         to_embed = batch.each_with_object([]) do |unit_data, items|
+          # Every unit passes through here, embedded or skipped, so this is the
+          # authoritative "what the index holds this run" set.
+          @current_identifiers << unit_data['identifier']
           persist_unit_metadata(unit_data)
           if incremental && checkpoint_satisfied?(unit_data, checkpoint)
             stats[:skipped] += 1
