@@ -620,9 +620,9 @@
     "severity": "high",
     "category": "code-bug",
     "layer": "storage",
-    "files": ["lib/woods/storage/qdrant.rb", "lib/woods/embedding/indexer.rb"],
-    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passes Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path is non-functional. Fix: UUIDv5 point id + identifier in payload + reverse-map in search/delete. Needs live-Qdrant validation. Tracked in GH #147.",
-    "status": "ready",
+    "files": ["lib/woods/storage/qdrant.rb", "lib/woods/util/uuid5.rb"],
+    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passed Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path was non-functional. Fixed: point ids are now UUIDv5 over a pinned namespace (Qdrant::POINT_ID_NAMESPACE), the identifier rides in the payload under `woods_identifier`, and search reverse-maps while delete translates through the same Qdrant.point_id so it can't compute a different id than the upsert did. Translation is confined to the adapter — pgvector and the in-memory store are untouched, and the Indexer needed no change. UUIDv5 is implemented in Woods::Util::UUID5 and unit-tested against the published DNS-namespace vectors for python.org and www.example.com. STILL UNVALIDATED AGAINST A LIVE QDRANT: that a real server accepts these upserts, that a re-embed of an unchanged unit replaces rather than duplicates, and that delete actually removes the point. All current coverage is against a mocked Net::HTTP. Tracked in GH #147.",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -633,8 +633,8 @@
     "category": "code-bug",
     "layer": "embedding",
     "files": ["lib/woods/embedding/indexer.rb"],
-    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148.",
-    "status": "ready",
+    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148. RESOLVED: an incremental run now hydrates the in-memory vector store from dumps/latest and dumps again, the checkpoint is written only after the dump is promoted (interval saves suppressed on that path), and a checkpoint hit is honoured only when the dump actually holds a vector for that unit \u2014 so a checkpoint that ran ahead of its artifact self-heals into a re-embed instead of stranding the unit.",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -706,7 +706,7 @@
     "layer": "extraction",
     "files": ["lib/woods/dependency_graph.rb", "lib/woods/extractor.rb", "lib/woods/change_set.rb", "lib/woods/mcp/index_reader.rb"],
     "description": "dependency_graph.json stores absolute paths (file_map keys and nodes[].file_path) while every per-unit JSON stores relative ones. Ordering, not intent: extract_all rebuilds the graph at phase 1.6 and normalize_file_paths runs at phase 4.5, so registration captures the absolute string and the later reassignment of unit.file_path never reaches the copies in @nodes/@file_map. register_and_write has the same order, so full and incremental agree — this is not an equivalence bug and the #164 harness is right not to flag it. It matters for the documented Docker deployment (extraction inside the container, Index Server on the host reading the volume mount): the graph carries /app/... paths, so affected_by, identifiers_for_path and the prune sweep match nothing host-side, and a host-run woods:incremental computes an empty blast radius silently. A moved or renamed checkout has the same effect. Fix: normalize before registration and relativize at the lookup boundary. Needs a from_h migration for absolute-keyed graphs already on disk — same shape as normalize_edges and normalize_file_map, which handle pre-#164 formats without a rebuild. Surfaced by the #164 review (finding 17); deferred from PR #165 as too large for it. Tracked in GH #166.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -718,7 +718,55 @@
     "layer": "extraction",
     "files": ["lib/woods/extractors/graphql_extractor.rb", "lib/woods/extractor.rb", "lib/woods/path_dispatcher.rb"],
     "description": "GraphQLExtractor#extract_all runs a static file pass and a runtime pass (extract_from_runtime_type). PR #165 made the file pass unconditional, fixing the divergence visible without graphql-ruby loaded (the per-file path indexed types a full run dropped). Remaining: with the gem loaded, the runtime pass can emit units the file pass cannot reach — dynamically defined types, schema-builder/DSL types, anything whose constant exists only after the schema is constructed. Those units have no source file, so no changed path dispatches to them and an incremental run cannot recreate them. Fix is probably a discoverable_classes equivalent so the incremental path reconciles the runtime set in both directions like class-based types, provided the schema type map is exact by construction; otherwise move GraphQL to WHOLE_APP_EXTRACTORS. Either way needs gem 'graphql' in the version gemfiles as a dev/test dependency plus a harness template exercising a dynamic type — which is why it was left out of #165. Tracked in GH #167.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-067",
+    "slug": "stale-framework-units",
+    "title": "Framework units are permanently stale carry-over and woods-sync's Gemfile.lock advice cannot fix them",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/extractor.rb", "lib/woods/path_dispatcher.rb", "lib/tasks/woods.rake", "lib/woods/extractors/rails_source_extractor.rb"],
+    "description": "rails_source and gem_source units are written only by an explicit woods:extract_framework. Nothing automatic runs it — not bin/woods-sync, not the watch daemon, not woods:incremental, and not woods:extract — so once written they persist unchanged forever. Confirmed on a real host: 140 units (116 rails_source, 24 gem_source) carry host-style paths from a different worktree that resolve nowhere in either host or container; they were also the only units left absolute after #166, the same symptom. The sharp edge is that bin/woods-sync flags a Gemfile.lock change as 'only takes effect with a full extraction' and tells the user to clear .sync_head and re-run, but a full extraction is exactly what does not refresh framework units — so a Rails upgrade worktree keeps describing the old framework internals. The exclusion from incremental is deliberate and correct (WHOLE_APP_EXTRACTORS documents it); the gap is that 'changes only on dependency changes' was never wired to anything detecting one. Options in the issue; leaning toward refreshing on a lockfile-digest mismatch during full extraction plus a woods:validate warning. woods:validate has no unresolvable-file_path check at all, which would have surfaced this unprompted. NOTE: bin/woods-sync is NOT in this repo — it lives in the consuming application's repo, so the message fix and its full-only filter land there, not here. Preferred fix per review: make rails_source a Gemfile.lock-keyed WHOLE_APP_EXTRACTORS member rather than calling woods:extract_framework more often, since that task bypasses normalize_file_paths, the type index, the manifest, publish_generation AND the extraction lock. Tracked in GH #169.",
     "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-068",
+    "slug": "unlocked-clean-and-embed",
+    "title": "woods:clean and the embed tasks write against the index unlocked",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/tasks/woods.rake"],
+    "description": "woods:clean is a bare FileUtils.rm_rf(output_dir) with no woods_with_extraction_lock. Run mid-cycle it removes the lock file itself, so the holder's release hits ENOENT (handled) and the next contender acquires immediately — two writers plus a daemon publishing into a deleted tree. Deliberate human action so frequency is low, but silent, and recovery is a full re-extraction. The fix is not simply 'take the lock', since the thing being deleted contains the lock: either delete everything except the lock file then release and remove it, or refuse to run while a daemon is alive the way woods:incremental stands down. woods:embed / woods:embed_incremental are also unlocked; arguably a separate concurrency domain since the daemon does not embed, but worth an explicit decision — PipelineGuard's cooldown reduces the window for full runs without serialising them, and incremental embeds are not rate-limited at all. Split out of #169, where the mechanism is unrelated and would have been closed alongside a fix that does not address it. Tracked in GH #170.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-069",
+    "slug": "noop-embed-skips-metadata-dump",
+    "title": "A no-op incremental embed no longer refreshes unit metadata, so a deleted unit stays retrievable",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "embedding",
+    "files": ["lib/woods/embedding/indexer.rb"],
+    "description": "snapshot_worth_writing? gates persist_snapshot on stats[:processed], reasoning only about the vector store — sound for vectors (prune_superseded_vectors is reachable only from store_vectors) but persist_snapshot also writes metadata.msgpack, and persist_unit_metadata runs over load_units, which for index_incremental is every unit. So a zero-processed run rebuilds the metadata store and discards it. Delete a model, run woods:incremental then woods:embed_incremental: no source_hash changed so processed==0, and pre-fix metadata.msgpack was rewritten without the unit, making the stale vector inert (ContextAssembler#find_batch missed it). Post-fix both vector and metadata survive, so codebase_retrieve can return a deleted model as a live hit — stale vectors went from latent to visible. The gate does prevent a worse bug: a failed hydrate calls clear! and pre-fix would dump the emptied store over latest. Options: split the gate so only the vector dump is skipped; widen it to consider whether the unit set changed; or accept and document. Tracked in GH #171.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-070",
+    "slug": "convention-path-unit-keys-on-type",
+    "title": "convention_path_unit? keys on unit type where the property is per-unit, so file-defined GraphQL units leave the deletion sweep",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": ["lib/woods/extractor.rb", "spec/integration/incremental_equivalence_spec.rb"],
+    "description": "convention_path_unit? was widened to include GRAPHQL_TYPES so the prune sweep would stop deleting runtime-defined types in the same run that added them, but it keyed on unit type where the property is per-unit, so units the static file pass produced (real file behind them) were spared too and a deleted app/graphql/**.rb survived an unnamed-path sweep forever; the daemon catch-up, which runs an empty change set because deletions leave no mtime, was the exposed caller. RESOLVED at the source rather than in the predicate: source_file_for_class no longer fabricates an app/graphql/<constant>.rb fallback when nothing resolves, it returns nil, which is the honest answer and the only point where no-file-backs-this is knowable. DependencyGraph#register skips nil paths, so a runtime-defined unit never enters file_map and the path sweep cannot reach it; GraphQL then came back OUT of convention_path_unit? entirely, so file-defined types are swept like anything else. The two changes are a pair: removing GraphQL from the predicate is only safe because runtime-only units no longer carry a path. Two approaches were tried and rejected first, comparing the recorded path against the convention path derived from the constant (cannot discriminate, since Types::FooType conventionally lives AT its convention path) and letting the sweep prune then relying on the reconciler to re-add (exactly what except: pruned prevents). Reproduction is now a live harness example in incremental_equivalence_spec gap 2, mutation-verified against the predicate change. The #167-preservation half cannot be end-to-end tested without graphql-ruby, which is in no bundle; it rests on the source_file_for_class nil specs plus the register nil guard. Tracked in GH #171.",
+    "status": "resolved",
     "depends_on": []
   }
 ]

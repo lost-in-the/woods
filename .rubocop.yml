@@ -50,6 +50,11 @@ Metrics/ModuleLength:
 
 Metrics/ClassLength:
   Exclude:
+    # PipelineLock is a cohesive lock implementation whose length is mostly
+    # atomicity handling (TOCTOU-safe acquire, rename-then-inspect release,
+    # ownership-checked touch). Splitting it would scatter invariants that
+    # only make sense together.
+    - 'lib/woods/coordination/pipeline_lock.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'

@@ -43,6 +43,26 @@ module Woods
         @runtime_types = load_runtime_types
       end
 
+      # The type classes runtime introspection can reach.
+      #
+      # Shared with the incremental path's class reconciliation (#167), which
+      # uses it for **additions only**. A runtime-defined type — built by a
+      # schema builder or a DSL rather than a literal `class ... <
+      # Types::BaseObject` — has no source file, so no changed path ever
+      # dispatches to it and `extract_graphql_file` cannot reproduce it. Only a
+      # full extraction emitted such units, which meant an incremental run
+      # could never create them and an index built incrementally from empty
+      # never had them at all.
+      #
+      # Empty when graphql-ruby is not loaded or the app has no schema, which is
+      # why the reconciliation must not read absence here as deletion — see
+      # `reconcile_removals: false` in {Extractor::CLASS_BASED_DISCOVERY}.
+      #
+      # @return [Array<Class>]
+      def discoverable_classes
+        @runtime_types.values.reject { |type_class| type_class.name.nil? }
+      end
+
       # Extract all GraphQL types, mutations, queries, and resolvers
       #
       # Returns an empty array when the app has neither an `app/graphql`
@@ -127,6 +147,46 @@ module Woods
         nil
       end
 
+      # Extract a unit from a runtime-loaded GraphQL type class.
+      #
+      # Public because {Extractor::CLASS_BASED_DISCOVERY} names it as the
+      # graphql entry's `method:` and the reconciler invokes it with
+      # `public_send` (#167). Private, it raised NoMethodError for every
+      # candidate — swallowed by the reconciler's `rescue StandardError` into a
+      # warn — so the incremental path silently added nothing, which is exactly
+      # what #167 set out to fix. `spec/extractor_spec.rb` asserts every
+      # CLASS_BASED_DISCOVERY method is publicly callable on its real
+      # extractor so no future entry can regress the same way.
+      #
+      # @param type_class [Class] A graphql-ruby type class
+      # @return [ExtractedUnit, nil]
+      def extract_from_runtime_type(type_class)
+        return nil unless type_class.respond_to?(:name) && type_class.name
+        # Skip anonymous or internal graphql-ruby classes
+        return nil if type_class.name.start_with?('GraphQL::')
+
+        file_path = source_file_for_class(type_class)
+        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        unit_type = classify_runtime_type(type_class)
+
+        unit = ExtractedUnit.new(
+          type: unit_type,
+          identifier: type_class.name,
+          file_path: file_path
+        )
+
+        unit.namespace = extract_namespace(type_class.name)
+        unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)
+        unit.metadata = build_metadata(source, type_class.name, unit_type, type_class)
+        unit.dependencies = extract_dependencies(source, type_class.name)
+        unit.chunks = build_chunks(unit, type_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
+
+        unit
+      rescue StandardError => e
+        Rails.logger.error("Failed to extract GraphQL type #{type_class.name}: #{e.message}") if defined?(Rails)
+        nil
+      end
+
       private
 
       # ──────────────────────────────────────────────────────────────────────
@@ -188,41 +248,6 @@ module Woods
         {}
       end
 
-      # ──────────────────────────────────────────────────────────────────────
-      # Runtime Type Extraction
-      # ──────────────────────────────────────────────────────────────────────
-
-      # Extract a unit from a runtime-loaded GraphQL type class
-      #
-      # @param type_class [Class] A graphql-ruby type class
-      # @return [ExtractedUnit, nil]
-      def extract_from_runtime_type(type_class)
-        return nil unless type_class.respond_to?(:name) && type_class.name
-        # Skip anonymous or internal graphql-ruby classes
-        return nil if type_class.name.start_with?('GraphQL::')
-
-        file_path = source_file_for_class(type_class)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
-        unit_type = classify_runtime_type(type_class)
-
-        unit = ExtractedUnit.new(
-          type: unit_type,
-          identifier: type_class.name,
-          file_path: file_path
-        )
-
-        unit.namespace = extract_namespace(type_class.name)
-        unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)
-        unit.metadata = build_metadata(source, type_class.name, unit_type, type_class)
-        unit.dependencies = extract_dependencies(source, type_class.name)
-        unit.chunks = build_chunks(unit, type_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
-
-        unit
-      rescue StandardError => e
-        Rails.logger.error("Failed to extract GraphQL type #{type_class.name}: #{e.message}") if defined?(Rails)
-        nil
-      end
-
       # Determine the source file for a runtime-loaded class, validating that
       # paths are within Rails.root to avoid returning graphql gem internals.
       #
@@ -231,11 +256,34 @@ module Woods
       #
       # @param klass [Class]
       # @return [String] Absolute path to the source file
+      # Locate the file this type was defined in, or nil when there is none.
+      #
+      # **nil, not a fabricated convention path** (B-070). A runtime-defined type
+      # — built by a schema builder or DSL — has no file, and inventing
+      # `app/graphql/<constant>.rb` for it created a unit indistinguishable from a
+      # file-defined one whose file had since been deleted. That ambiguity is
+      # unresolvable downstream: the conventional location of `Types::FooType`
+      # *is* `app/graphql/types/foo_type.rb`, so no path comparison can separate
+      # "never had a file" from "file was deleted".
+      #
+      # Returning nil resolves it at the only point where the answer is known.
+      # `DependencyGraph#register` skips nil paths, so such a unit never enters
+      # `file_map` and the deletion sweep — which walks registered paths — cannot
+      # reach it. No predicate required, and a full extraction produces the same
+      # nil, so the two paths still agree.
+      #
+      # `resolve_source_location` is tried first and has three tiers of real
+      # discovery (`const_source_location`, then instance and singleton method
+      # locations). It reaches its fallback only when Ruby cannot place the class
+      # in app source at all, which is precisely the no-file case.
+      #
+      # @param klass [Class]
+      # @return [String, nil]
       def source_file_for_class(klass)
         convention_path = Rails.root.join("#{GRAPHQL_DIRECTORY}/#{klass.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)
 
-        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: convention_path)
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # ──────────────────────────────────────────────────────────────────────

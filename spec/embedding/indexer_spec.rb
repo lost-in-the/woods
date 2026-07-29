@@ -271,6 +271,18 @@ RSpec.describe Woods::Embedding::Indexer do
 
     context 'in incremental mode' do
       before do
+        # A previous run's dump is what makes a checkpoint hit honourable —
+        # without one the Indexer re-embeds rather than trusting the
+        # checkpoint (see 'incremental persistence' below). Run a full pass
+        # through its own indexer so this example's metadata store starts
+        # empty, which is the point of the assertion.
+        described_class.new(
+          provider: provider, text_preparer: text_preparer,
+          vector_store: Woods::Storage::VectorStore::InMemory.new,
+          metadata_store: Woods::Storage::MetadataStore::InMemory.new,
+          output_dir: output_dir, batch_size: 2
+        ).index_all
+
         File.write(File.join(output_dir, 'checkpoint.json'),
                    JSON.generate('User' => 'abc123', 'PaymentService' => 'stale'))
       end
@@ -279,8 +291,9 @@ RSpec.describe Woods::Embedding::Indexer do
         # The checkpoint says User is unchanged — embedding skips it — but
         # the metadata store is a fresh empty in-memory store this run, so
         # metadata must still be written or retrieval sees a void.
-        indexer_with_metadata.index_incremental
+        stats = indexer_with_metadata.index_incremental
 
+        expect(stats[:skipped]).to eq(1)
         expect(metadata_store.find('User')).not_to be_nil
         expect(metadata_store.find('PaymentService')).not_to be_nil
       end
@@ -300,19 +313,56 @@ RSpec.describe Woods::Embedding::Indexer do
       end
     end
 
-    context 'when checkpoint matches current hash' do
+    context 'when checkpoint matches current hash and a dump holds the vector' do
       before do
-        checkpoint = { 'User' => 'abc123' }
-        File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+        # The consistent world: a previous full run left both a dump and a
+        # checkpoint. `indexer` hydrates from that dump, so the checkpoint hit
+        # is honourable and nothing is re-embedded.
+        described_class.new(
+          provider: provider, text_preparer: text_preparer,
+          vector_store: Woods::Storage::VectorStore::InMemory.new,
+          output_dir: output_dir, batch_size: 2
+        ).index_all
       end
 
       it 'skips unchanged units and does not embed them' do
+        embed_calls_before = provider.embed_batch_calls
+
         stats = indexer.index_incremental
 
         expect(stats[:processed]).to eq(0)
         expect(stats[:skipped]).to eq(1)
-        expect(provider.embed_batch_calls).to eq(0)
-        expect(vector_store.count).to eq(0)
+        expect(provider.embed_batch_calls).to eq(embed_calls_before)
+        # Hydrated from the dump rather than embedded — the vector is still
+        # there for the dump this run writes.
+        expect(vector_store.count).to eq(1)
+      end
+    end
+
+    context 'when the checkpoint matches but no durable dump holds the vector' do
+      before do
+        File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate('User' => 'abc123'))
+      end
+
+      it 'ignores the checkpoint and embeds the unit anyway' do
+        # B-059 / #148 — honouring this checkpoint would write a dump missing
+        # User's vector while leaving the checkpoint claiming it is done, and
+        # no later incremental run would ever produce it.
+        allow(indexer).to receive(:warn)
+
+        stats = indexer.index_incremental
+
+        expect(stats[:processed]).to eq(1)
+        expect(stats[:skipped]).to eq(0)
+        expect(vector_store.count).to eq(1)
+      end
+
+      it 'warns that the checkpoint had advanced past the durable artifact' do
+        allow(indexer).to receive(:warn)
+
+        indexer.index_incremental
+
+        expect(indexer).to have_received(:warn).with(/checkpoint had advanced past/)
       end
     end
 
@@ -736,6 +786,230 @@ RSpec.describe Woods::Embedding::Indexer do
         # The oldest directory should have been pruned
         expect(File.exist?(old_dirs.first)).to be false
       end
+    end
+  end
+
+  # Regression — B-059 / #148. On the :local and :shared_filesystem presets the
+  # vector store is in-memory and the *dump* is the only durable copy. Every
+  # `rake woods:embed_incremental` builds a fresh empty store (see
+  # Woods::Tasks.build_embed_indexer), so unless the incremental run hydrates
+  # from the latest dump and dumps again, the vectors it embeds live and die
+  # inside that one process — while checkpoint.json advances over them, so no
+  # later incremental run will ever produce them again.
+  #
+  # These specs use the real Snapshotter and IndexArtifact deliberately: the
+  # failure is in the interaction between the checkpoint file and the on-disk
+  # dump, and doubles would hide it.
+  describe 'incremental persistence' do
+    require 'woods/index_artifact'
+    require 'woods/storage/snapshotter'
+
+    let(:resolved_config) do
+      double('ResolvedConfig',
+             model_name: 'stub-embed',
+             to_snapshot_json: { 'schema_version' => 1, 'gem_version' => '0.0.1',
+                                 'created_at' => '2026-04-22T00:00:00Z',
+                                 'embedding_provider' => {}, 'stores' => {} })
+    end
+
+    # A new store per indexer — this is what a separate `rake` process gets.
+    def fresh_indexer
+      described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: Woods::Storage::VectorStore::InMemory.new,
+        metadata_store: Woods::Storage::MetadataStore::InMemory.new,
+        output_dir: output_dir,
+        batch_size: 2,
+        resolved_config: resolved_config
+      )
+    end
+
+    # Ids durably readable from the promoted dump — i.e. what a fresh
+    # woods-mcp boot would actually see.
+    def persisted_vector_ids
+      artifact = Woods::IndexArtifact.new(output_dir)
+      Woods::Storage::Snapshotter::Vector.load_or_empty(artifact).each_entry.map { |id, _v, _m| id }
+    end
+
+    def checkpoint_on_disk
+      JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+    end
+
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+      fresh_indexer.index_all
+      # A unit the full run never saw — the incremental run's only work.
+      File.write(File.join(output_dir, 'payment_service.json'), JSON.generate(second_unit_data))
+    end
+
+    # A dump is a whole-store snapshot, so writing one for a run that embedded
+    # nothing produces byte-identical content AND rotates the retention window —
+    # three no-op runs would evict every genuinely older dump in favour of
+    # copies of the same state.
+    it 'writes no new dump for an incremental run that embedded nothing' do
+      fresh_indexer.index_incremental # consumes the pending unit
+      dumps = Woods::IndexArtifact.new(output_dir).dumps_root
+      before = Dir.children(dumps).sort
+
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(0)
+      expect(Dir.children(dumps).sort).to eq(before)
+    end
+
+    # B-069: the dump gate skipped persist_snapshot on processed==0, which also
+    # froze metadata.msgpack — so a deleted unit kept both its stale vector AND
+    # its metadata, taking the vector from inert to retrievable. Deleting a unit
+    # changes no other unit's source_hash, so processed stays 0 and only the
+    # vanished-unit check can notice.
+    it 'rewrites the dump when a unit vanished from the index, even with nothing embedded' do
+      fresh_indexer.index_incremental # consume the pending unit
+      File.delete(File.join(output_dir, 'payment_service.json'))
+
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(0)
+      expect(persisted_vector_ids).to eq(['User'])
+    end
+
+    it 'drops the vanished unit from the metadata dump as well as the vectors' do
+      fresh_indexer.index_incremental
+      File.delete(File.join(output_dir, 'payment_service.json'))
+
+      fresh_indexer.index_incremental
+
+      metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(
+        Woods::IndexArtifact.new(output_dir)
+      )
+      expect(metadata.find('PaymentService')).to be_nil
+      expect(metadata.find('User')).not_to be_nil
+    end
+
+    it 'still leaves the previously persisted vectors readable after a no-op run' do
+      fresh_indexer.index_incremental
+      fresh_indexer.index_incremental
+
+      expect(persisted_vector_ids).to contain_exactly('User', 'PaymentService')
+    end
+
+    it 'persists the newly embedded unit into the promoted dump' do
+      stats = fresh_indexer.index_incremental
+
+      expect(stats[:processed]).to eq(1)
+      expect(persisted_vector_ids).to include('PaymentService')
+    end
+
+    it 'keeps the previously embedded units in the dump it writes' do
+      fresh_indexer.index_incremental
+
+      expect(persisted_vector_ids).to include('User')
+    end
+
+    it 'does not advance the checkpoint over a unit no durable store holds' do
+      # The unrecoverability proof: whatever this run decided, a following
+      # incremental run must not skip a unit that is absent from the dump.
+      fresh_indexer.index_incremental
+
+      second_run = fresh_indexer
+      second_run.index_incremental
+
+      expect(persisted_vector_ids).to include('PaymentService')
+      expect(checkpoint_on_disk['PaymentService']).to eq('def456')
+    end
+
+    it 're-embeds a unit the checkpoint claims but the dump does not hold' do
+      # Simulates a checkpoint that ran ahead of the durable artifact for any
+      # reason (an interrupted dump, a store swap, this very bug in an older
+      # gem version). Trusting it would strand the unit forever.
+      File.write(File.join(output_dir, 'checkpoint.json'),
+                 JSON.generate('User' => 'abc123', 'PaymentService' => 'def456'))
+
+      indexer = fresh_indexer
+      allow(indexer).to receive(:warn)
+
+      stats = indexer.index_incremental
+
+      expect(stats[:processed]).to eq(1)
+      expect(persisted_vector_ids).to include('PaymentService')
+    end
+
+    it 'drops chunk ids a re-embedded unit no longer produces' do
+      chunked = lambda do |count, hash|
+        unit_data.merge(
+          'source_hash' => hash,
+          'chunks' => Array.new(count) { |i| { 'chunk_index' => i, 'content' => "chunk #{i} content" } }
+        )
+      end
+
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked.call(3, 'three')))
+      fresh_indexer.index_all
+      expect(persisted_vector_ids).to include('User#chunk_2')
+
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked.call(2, 'two')))
+      fresh_indexer.index_incremental
+
+      expect(persisted_vector_ids).to include('User#chunk_0', 'User#chunk_1')
+      expect(persisted_vector_ids).not_to include('User#chunk_2')
+    end
+
+    it 'falls back to a complete re-embed when the latest dump cannot be read' do
+      dump_dir = File.join(output_dir, 'dumps', File.read(File.join(output_dir, 'dumps', 'latest')).strip)
+      File.binwrite(File.join(dump_dir, 'vectors.bin'), 'garbage')
+
+      indexer = fresh_indexer
+      allow(indexer).to receive(:warn)
+
+      stats = indexer.index_incremental
+
+      expect(stats[:processed]).to eq(2)
+      expect(persisted_vector_ids).to include('User', 'PaymentService')
+      expect(indexer).to have_received(:warn).with(/could not hydrate vectors/)
+    end
+
+    it 'leaves the checkpoint untouched when the dump cannot be written' do
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:dump)
+        .and_raise(Errno::ENOSPC, 'dumps')
+
+      before_checkpoint = checkpoint_on_disk
+
+      expect { fresh_indexer.index_incremental }.to raise_error(Errno::ENOSPC)
+      expect(checkpoint_on_disk).to eq(before_checkpoint)
+      expect(checkpoint_on_disk).not_to have_key('PaymentService')
+    end
+
+    it 'writes no interval checkpoint for batches that only exist in memory' do
+      # checkpoint_interval saves are the same failure mode in miniature: a
+      # batch stored into an in-memory store is not durable until the dump is
+      # promoted, so a crash later in the run must not leave the checkpoint
+      # claiming the earlier batches.
+      one_shot_provider = Class.new do
+        def initialize
+          @calls = 0
+        end
+
+        def embed_batch(texts)
+          @calls += 1
+          raise StandardError, 'provider died' if @calls > 1
+
+          Array.new(texts.length) { [0.1, 0.2] }
+        end
+      end.new
+
+      File.write(File.join(output_dir, 'third.json'),
+                 JSON.generate(second_unit_data.merge('identifier' => 'Third', 'source_hash' => 'ghi789')))
+
+      indexer = described_class.new(
+        provider: one_shot_provider, text_preparer: text_preparer,
+        vector_store: Woods::Storage::VectorStore::InMemory.new,
+        output_dir: output_dir, batch_size: 1, checkpoint_interval: 1,
+        resolved_config: resolved_config
+      )
+
+      before_checkpoint = checkpoint_on_disk
+
+      expect { indexer.index_incremental }.to raise_error(Woods::Error, /provider died/)
+      expect(checkpoint_on_disk).to eq(before_checkpoint)
     end
   end
 

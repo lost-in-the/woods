@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../change_set'
+require_relative '../dependency_graph'
 require_relative '../coordination/pipeline_lock'
 require_relative '../atomic_file'
 require_relative '../generation'
@@ -419,10 +420,22 @@ module Woods
         end
       end
 
+      # The graph persists **relative** paths (#166) so the index is portable off
+      # the machine that wrote it. They have to be absolutized here, because the
+      # caller tests them with `File.exist?` and bounds the check with
+      # `start_with?(root_prefix)` — against relative paths that guard excludes
+      # every entry, which would silently disable deletion reconciliation
+      # entirely rather than fail visibly.
+      #
+      # A path that is already absolute passes through, which covers a graph
+      # written before #166 as well as genuinely out-of-tree paths (gem sources)
+      # that the caller's prefix check is there to exclude.
       def persisted_registered_paths
         graph = File.join(@output_dir, 'dependency_graph.json')
         file_map = JSON.parse(AtomicFile.read(graph))['file_map']
-        file_map.is_a?(Hash) ? file_map.keys : []
+        return [] unless file_map.is_a?(Hash)
+
+        file_map.keys.map { |path| Woods::DependencyGraph.absolutize(path, @root) }
       rescue SystemCallError, JSON::ParserError
         []
       end

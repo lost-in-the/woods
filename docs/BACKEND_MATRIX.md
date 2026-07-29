@@ -135,6 +135,18 @@ config.vector_store_url = ENV.fetch("QDRANT_URL", "http://localhost:6333")
 config.vector_store_collection = "woods"
 ```
 
+**Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point
+id, so the adapter cannot store a Woods identifier directly. It derives a
+deterministic UUIDv5 from the identifier over a pinned namespace
+(`Qdrant::POINT_ID_NAMESPACE`) and carries the identifier in the payload
+under `woods_identifier`; `#search` reverse-maps hits back to identifiers
+and `#delete` translates through the same function, so a delete always
+names the point the upsert wrote. The translation lives entirely inside the
+Qdrant adapter — pgvector and the in-memory store keep using identifiers as
+ids. The namespace must never change: a v5 id is what makes re-embedding an
+unchanged unit *replace* its point instead of adding a second one, and a new
+namespace would orphan every existing vector. See #147.
+
 **Docker Compose:**
 ```yaml
 services:

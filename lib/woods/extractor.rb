@@ -225,6 +225,29 @@ module Woods
     # extraction is found without having to guess a constant name from a
     # path (#164, gap 1).
     #
+    # `reconcile_removals: false` opts an entry out of the removal half. Only
+    # GraphQL sets it, and the reason is that its unit type is produced by two
+    # independent discovery mechanisms whose union is the truth: runtime schema
+    # introspection *and* a static file pass over `app/graphql`. Every other
+    # entry here owns its type outright, which is what makes
+    # "in the graph but not in `discoverable_classes`" mean "deleted".
+    #
+    # For GraphQL that inference is wrong twice over. Without graphql-ruby
+    # loaded the runtime set is empty, so removal would delete every GraphQL
+    # unit in the index; with it loaded, a type defined in a file but not
+    # attached to the schema is legitimately absent from the type map, so
+    # removal would delete units a full extraction still emits. Additions are
+    # safe in both worlds — they are exactly the runtime-only types no changed
+    # path can dispatch to, which is the #167 divergence.
+    #
+    # The consequence, stated so it does not read as a bug later: a runtime-only
+    # type that *disappears* is never removed by an incremental run. It survives
+    # until a full extraction rebuilds the type. Confirmed against a live schema
+    # during review — probe units outlived deletion of the file that defined
+    # them. That is the cost of the opt-out, and it is the right side to err on:
+    # a stale unit is recoverable by one full run, whereas the removal half
+    # would delete units a full extraction still emits.
+    #
     # @return [Hash{Symbol => Hash}] extractor key => { type:, method: }
     CLASS_BASED_DISCOVERY = {
       models: { type: :model, method: :extract_model },
@@ -232,7 +255,20 @@ module Woods
       mailers: { type: :mailer, method: :extract_mailer },
       components: { type: :component, method: :extract_component },
       view_components: { type: :view_component, method: :extract_component },
-      action_cable_channels: { type: :action_cable_channel, method: :extract_channel }
+      action_cable_channels: { type: :action_cable_channel, method: :extract_channel },
+      # Additions only — see `reconcile_removals: false`. GraphQL is the one
+      # entry whose discovery set is not authoritative for its unit type
+      # (#167).
+      # `types:` because this extractor emits four unit types, not one:
+      # `classify_runtime_type` returns :graphql_type, :graphql_mutation,
+      # :graphql_resolver or :graphql_query. Declaring only :graphql_type made
+      # `known` miss the others — the schema's query root is always in
+      # `Schema.types` and classifies as :graphql_query — so they were
+      # re-"discovered" and re-added on *every* incremental run. That leaves
+      # `touched` non-empty on a genuine no-op, which rewrites the manifest and
+      # bumps the generation each cycle: the #164 gap-4 symptom, reintroduced.
+      graphql: { type: :graphql_type, types: GRAPHQL_TYPES,
+                 method: :extract_from_runtime_type, reconcile_removals: false }
     }.freeze
 
     # Extractors with no per-file entry point: they scan the whole app (or
@@ -1558,9 +1594,12 @@ module Woods
         next unless extractor.respond_to?(:discoverable_classes)
 
         discovered = extractor.discoverable_classes.reject { |k| k.name.nil? }
-        known = @dependency_graph.units_of_type(spec[:type]).to_set
+        known = Array(spec[:types] || spec[:type])
+                .flat_map { |type| @dependency_graph.units_of_type(type) }.to_set
 
         touched.merge(add_discovered_classes(key, spec, discovered, known, excluded, affected_types))
+        next if spec[:reconcile_removals] == false
+
         touched.merge(remove_stale_classes(spec, discovered, known, affected_types))
       end
 
@@ -1759,36 +1798,87 @@ module Woods
         next if File.exist?(path)
 
         @dependency_graph.identifiers_for_path(path).each do |identifier|
-          next if !class_based && class_based_unit?(identifier)
+          next if !class_based && convention_path_unit?(identifier)
 
           removed.add(identifier) if remove_unit(identifier, affected_types)
         end
       end
     end
 
-    # Is this unit's type one discovered from runtime descendants?
+    # Does this unit's `file_path` name a *convention* that need not exist?
     #
-    # Such units record a *convention* path when their source location can't
-    # be resolved, and that path need not exist. On Rails < 7.1, for instance,
-    # `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
-    # real `ActiveRecord::Base` descendants that a full extraction emits with
-    # `app/models/active_record/schema_migration.rb` as their file path — a
-    # file no application has. That path *is* claimed by a file rule (the
-    # PORO rule takes all of `app/models/**/*.rb`), so the sweep's file-rule
-    # bound doesn't cover it and this check has to.
+    # The sweep deletes units whose file is gone, which is wrong for anything
+    # that derives its path from a constant name rather than from a file it was
+    # read out of. Class-based types have always been excluded for that reason.
     #
-    # Deleting a class-based unit therefore requires the caller to name the
-    # path explicitly; the sweep never infers it.
+    # GraphQL joins them (#167): `source_file_for_class` falls back to
+    # `app/graphql/<underscored>.rb` when it cannot resolve a source location,
+    # and a runtime-defined type — the exact case #167 exists to index — has no
+    # such file. Without this the sweep pruned those units in the *same run*
+    # that added them, and `reconcile_class_based_types(..., except: pruned)`
+    # then refused to re-add them, so #167's target case never survived.
+    #
+    # The original case: on Rails < 7.1 `ActiveRecord::SchemaMigration` and
+    # `InternalMetadata` are real `ActiveRecord::Base` descendants a full
+    # extraction emits with `app/models/active_record/schema_migration.rb` as
+    # their path — a file no application has, and one the PORO rule *does*
+    # claim, so the sweep's file-rule bound doesn't cover it and this check has
+    # to. Deleting such a unit requires the caller to name the path; the sweep
+    # never infers it.
+    #
+    # KNOWN COST (B-070 / #171): this keys on unit *type*, but the property is
+    # per-unit — GRAPHQL_TYPES is also true of units the static file pass
+    # produced, whose path is a real file. So a deleted `app/graphql/**.rb`
+    # survives an unnamed-path sweep. Named-path deletion still works, so
+    # `woods:incremental` on a git diff is unaffected; the exposed caller is the
+    # daemon's catch-up, which runs an empty change set precisely because
+    # deletions leave no mtime.
+    #
+    # Two obvious fixes were tried and **both are wrong** — do not re-attempt
+    # them without reading this:
+    #
+    # 1. *Compare the recorded path against the convention path derived from the
+    #    constant.* `Types::ForgottenType` conventionally lives at
+    #    `app/graphql/types/forgotten_type.rb`, which IS its convention path — so
+    #    a conventionally-named file-defined type is indistinguishable from a
+    #    runtime-defined one, and the common case stays spared. Disproven by
+    #    `spec/integration/incremental_equivalence_spec.rb`'s pending example.
+    # 2. *Let the sweep prune GraphQL and rely on the reconciler's addition half
+    #    to re-add whatever the schema still holds.* This is what `except: pruned`
+    #    exists to prevent (see the comment at its call site): without a reload a
+    #    constant outlives its deleted file, and the schema attachment survives in
+    #    memory too, so the re-add resurrects the deleted unit against a path that
+    #    no longer exists — permanently, since the sweep then spares it.
+    #
+    # What would actually work is provenance: record at extraction time whether a
+    # source file existed for the unit (`extract_from_runtime_type` already knows
+    # — it falls back to a convention path only when `File.exist?` fails) and
+    # spare only the units that never had one. That needs the graph node to carry
+    # the flag, so it is a serialization change rather than a predicate tweak.
     #
     # @param identifier [String]
     # @return [Boolean]
-    def class_based_unit?(identifier)
+    def convention_path_unit?(identifier)
       node = @dependency_graph.node(identifier)
       return false unless node
 
       CLASS_BASED.key?(node[:type])
     end
 
+    # Is this GraphQL unit's recorded path the convention derived from its
+    # constant, rather than a file it was read out of?
+    #
+    # Keying the whole question on unit *type* was wrong (B-070 / #171): the
+    # property is per-unit. `GRAPHQL_TYPES` is equally true of units the static
+    # file pass produced, whose `file_path` is a real file — so sparing the type
+    # wholesale meant a deleted `app/graphql/**.rb` survived an unnamed-path
+    # sweep forever, with the daemon's empty-change-set catch-up as the exposed
+    # caller.
+    #
+    # `GraphQLExtractor#source_file_for_class` derives exactly one fallback:
+    # `app/graphql/#{constant.underscore}.rb`. A unit whose path is that
+    # fallback has no file behind it and must be spared; any other path came
+    # from the file pass and is sweepable like anything else.
     # Register a batch of freshly-extracted units and write their JSON.
     #
     # Registration happens BEFORE path normalization — the graph's file map

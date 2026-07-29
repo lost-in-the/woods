@@ -30,6 +30,13 @@ module Woods
       # @param lock_dir [String] Directory for lock files
       # @param name [String] Lock name (used as filename prefix)
       # @param stale_timeout [Integer] Seconds after which a lock is considered stale
+      # The window after which an untouched lock is considered abandoned.
+      # Exposed so a heartbeat paces itself from the lock it is refreshing
+      # rather than from a constant that only happens to match.
+      #
+      # @return [Numeric]
+      attr_reader :stale_timeout
+
       def initialize(lock_dir:, name:, stale_timeout: DEFAULT_STALE_TIMEOUT)
         @lock_dir = lock_dir
         @name = name
@@ -137,8 +144,37 @@ module Woods
       def touch
         return false unless locked?
 
-        FileUtils.touch(@lock_path)
-        true
+        # Ownership, not just presence. `locked?` asks whether *a* lock file
+        # exists and this instance thinks it holds one — which stays true after
+        # a contender has retired us and put its own lock at the same path. A
+        # retired holder would then refresh the **successor's** mtime, and if
+        # that successor crashed its lock would never age out while the retired
+        # process lived, blocking every writer until it exited.
+        #
+        # That is not hypothetical for a heartbeat: being retired mid-run is the
+        # exact scenario a heartbeat exists to prevent, so it is also the state a
+        # heartbeat is most likely to find itself in when it fails to.
+        #
+        # Clearing @held is the honest response — we do not hold it, and
+        # continuing to believe we do would let `release` act on a lock that is
+        # someone else's.
+        case lock_ownership
+        when :ours
+          FileUtils.touch(@lock_path)
+          true
+        when :foreign
+          # Proven someone else's: stop believing we hold it, or `release` would
+          # act on their lock.
+          @held = false
+          false
+        else
+          # Unreadable — a torn write, most likely. Refuse to refresh, but stay
+          # the owner: "I cannot prove this is mine" is not "this is not mine",
+          # and disowning it here would strand the file. `release` opens with
+          # `return unless @held`, so a disowned lock is never cleaned up and
+          # every writer blocks until the stale window expires.
+          false
+        end
       rescue SystemCallError
         # The lock vanished (retired by a contender, or the dir went away).
         # Nothing useful to do here; the next acquire/release resolves it.
@@ -199,6 +235,23 @@ module Woods
       # @return [Boolean] true when the token matches, or the file is corrupt
       #   (an unparseable lock we already renamed aside is treated as ours to
       #   discard rather than restore).
+      # Three-state, deliberately — a boolean here conflates the two states
+      # that need different handling.
+      #
+      # `:unknown` is not `:foreign`. Both refuse a refresh, because touching a
+      # lock we cannot prove is ours would extend a stranger's claim. Only
+      # `:foreign` justifies disowning, because only that means someone else
+      # holds it. Collapsing them made an unreadable-but-ours lock leak: `touch`
+      # cleared `@held`, and `release` returns early on `@held`, so nothing ever
+      # removed the file and every writer blocked for the full stale window.
+      #
+      # @return [Symbol] `:ours`, `:foreign`, or `:unknown`
+      def lock_ownership
+        JSON.parse(File.read(@lock_path))['token'] == @token ? :ours : :foreign
+      rescue JSON::ParserError, SystemCallError
+        :unknown
+      end
+
       def own_lock?(path)
         JSON.parse(File.read(path))['token'] == @token
       rescue JSON::ParserError

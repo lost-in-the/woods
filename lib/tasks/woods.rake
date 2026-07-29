@@ -37,12 +37,13 @@ namespace :woods do
   # So the wait is now generous and the failure explicit. `WOODS_LOCK_WAIT`
   # overrides it; exceeding it exits non-zero rather than corrupting the index,
   # which is the outcome a CI job or a developer can actually act on.
-  def woods_with_extraction_lock(output_dir, wait: nil)
+  def woods_with_extraction_lock(output_dir, wait: nil, &block)
     # Requires first. The default wait reads a constant from the daemon, so
     # resolving it above these lines NameError'd every write task — the same
     # load-order bug as the missing require in `woods:watch`, reintroduced one
     # method over by the fix for it.
     require 'woods/coordination/pipeline_lock'
+    require 'woods/coordination/lock_heartbeat'
     require 'woods/watch/daemon'
 
     wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
@@ -53,20 +54,29 @@ namespace :woods do
       stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
     )
 
+    woods_abort_on_lock_timeout(wait) unless woods_acquire_within(lock, wait)
+
+    begin
+      Woods::Coordination::LockHeartbeat.run(lock, &block)
+    ensure
+      lock.release
+    end
+  end
+
+  # Poll for the lock until `wait` seconds have elapsed.
+  #
+  # Monotonic, so a clock adjustment mid-wait cannot cut the window short or
+  # extend it indefinitely.
+  #
+  # @return [Boolean] whether the lock was acquired
+  def woods_acquire_within(lock, wait)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
     acquired = lock.acquire
     until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
       sleep 0.25
       acquired = lock.acquire
     end
-
-    woods_abort_on_lock_timeout(wait) unless acquired
-
-    begin
-      yield
-    ensure
-      lock.release
-    end
+    acquired
   end
 
   def woods_abort_on_lock_timeout(wait)

@@ -1459,4 +1459,151 @@ RSpec.describe Woods::Extractor do
       expect(Woods::AtomicFile.read(target)).to include('Widget')
     end
   end
+
+  # #167 — GraphQL is the one class-based entry whose discovery set is not
+  # authoritative for its unit type, because the type is produced by the union
+  # of runtime introspection and a static file pass. Reading absence from the
+  # runtime set as deletion would wipe every GraphQL unit in the index whenever
+  # graphql-ruby is not loaded, and would delete file-defined types not attached
+  # to the schema even when it is.
+  #
+  # This is a guard on the wiring, not a behavioural test of a live reconcile —
+  # the behaviour needs graphql-ruby installed to observe, which is #167's
+  # remaining unvalidated surface.
+  describe 'CLASS_BASED_DISCOVERY removal opt-out' do
+    it 'opts GraphQL out of removal reconciliation' do
+      expect(described_class::CLASS_BASED_DISCOVERY[:graphql][:reconcile_removals]).to be false
+    end
+
+    it 'leaves every other entry subject to removal' do
+      others = described_class::CLASS_BASED_DISCOVERY.except(:graphql)
+
+      expect(others.values.map { |spec| spec[:reconcile_removals] }).to all(be_nil)
+    end
+
+    it 'routes GraphQL additions at the runtime-introspection extractor' do
+      spec = described_class::CLASS_BASED_DISCOVERY[:graphql]
+
+      expect(spec[:type]).to eq(:graphql_type)
+      expect(spec[:method]).to eq(:extract_from_runtime_type)
+    end
+
+    # {Extractor#add_discovered_classes} calls
+    # `extractor_for(key).public_send(spec[:method], klass)`. A private method
+    # there raises NoMethodError, which the surrounding `rescue StandardError`
+    # turns into a warn and a nil that `filter_map` drops — so the entry
+    # silently contributes nothing rather than failing loudly.
+    #
+    # Asserting the symbol matches the table (above) does not catch that, and
+    # neither do the reconcile specs: they inject a double, which answers
+    # `public_send` for anything stubbed on it regardless of the real class's
+    # visibility. Visibility is a static property, so unlike a behavioural
+    # reconcile test this needs neither graphql-ruby nor a booted app.
+    #
+    # Regression: #167 shipped with `extract_from_runtime_type` below
+    # `private`, making the whole change inert.
+    it 'exposes every discovery method as a public instance method' do
+      offenders = described_class::CLASS_BASED_DISCOVERY.filter_map do |key, spec|
+        extractor_class = described_class::EXTRACTORS[key]
+        next if extractor_class.nil?
+        next if extractor_class.public_method_defined?(spec[:method])
+
+        "#{key} -> #{extractor_class}##{spec[:method]}"
+      end
+
+      expect(offenders).to be_empty,
+                           'these discovery methods are not publicly callable, so public_send ' \
+                           "raises NoMethodError and the entry adds nothing: #{offenders.join(', ')}"
+    end
+  end
+
+  # Both of these are #167 regressions found in review: the change added
+  # runtime-only GraphQL types to the incremental path, and two separate
+  # mechanisms then undid it.
+  describe 'GraphQL incremental reconciliation (#167)' do
+    # The behavioural half of the `types:` fix is the `known` union in
+    # reconcile_class_based_types. Asserting the table holds GRAPHQL_TYPES is a
+    # tautology — the table literally holds that constant — and the whole suite
+    # passes with the union reverted, because graphql-ruby is in no bundle so
+    # `discoverable_classes` returns [] and the addition path never fires.
+    #
+    # This drives the union directly with a stubbed multi-type entry: the class
+    # is already in the graph under the entry's *second* type, so a `known`
+    # built from `spec[:type]` alone misses it and re-adds it every run —
+    # leaving `touched` non-empty on a no-op, which rewrites the manifest and
+    # bumps the generation each cycle.
+    it 'treats a unit known under a secondary type as already known' do
+      already_known = double('QueryType', name: 'Types::QueryType')
+      fake = double('GraphQLExtractor', discoverable_classes: [already_known])
+      stub_const('Woods::Extractor::CLASS_BASED_DISCOVERY',
+                 { graphql: { type: :graphql_type, types: %i[graphql_type graphql_query],
+                              method: :extract_from_runtime_type, reconcile_removals: false } })
+      extractor.instance_variable_set(:@incremental_extractors, { graphql: fake })
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :graphql_query, identifier: 'Types::QueryType',
+                                 file_path: File.join(tmpdir, 'app/graphql/types/query_type.rb'))
+      )
+
+      expect(extractor.send(:reconcile_class_based_types, Set.new)).to be_empty
+    end
+
+    it 'covers every unit type the extractor emits, not just graphql_type' do
+      spec = described_class::CLASS_BASED_DISCOVERY[:graphql]
+
+      # classify_runtime_type returns four types; the schema's query root is
+      # always in Schema.types and classifies as :graphql_query. Declaring only
+      # :graphql_type left the others permanently "new", so they were re-added
+      # every run — leaving `touched` non-empty on a no-op and bumping the
+      # generation each cycle.
+      expect(spec[:types]).to eq(described_class::GRAPHQL_TYPES)
+      expect(spec[:types]).to include(:graphql_query)
+    end
+
+    # Per-unit, not per-type (B-070). `source_file_for_class` derives exactly one
+    # fallback — app/graphql/<constant.underscore>.rb — so a unit sitting at that
+    # path has no file behind it and must be spared. Any other path came from the
+    # static file pass and is sweepable like anything else.
+    def register_graphql(identifier, file_path)
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :graphql_query, identifier: identifier, file_path: file_path)
+      )
+      described_class.new(output_dir: Dir.mktmpdir).tap do |extractor|
+        extractor.instance_variable_set(:@dependency_graph, graph)
+      end
+    end
+
+    # B-070 is fixed at the source rather than in this predicate: a
+    # runtime-defined type now records file_path = nil, so it never enters
+    # `file_map` and the path sweep cannot reach it. GraphQL is therefore back
+    # out of `convention_path_unit?` entirely, and a file-defined type — which
+    # has a real path — is swept like anything else.
+    it 'does not spare a file-defined GraphQL type' do
+      extractor = register_graphql(
+        'Types::PostType', Rails.root.join('app/graphql/types/nested/post_type.rb').to_s
+      )
+
+      expect(extractor.send(:convention_path_unit?, 'Types::PostType')).to be false
+    end
+
+    it 'does not need to spare a runtime-defined type, because it has no path to sweep' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :graphql_query, identifier: 'Types::QueryType', file_path: nil)
+      )
+
+      expect(graph.to_h[:file_map]).to be_empty
+    end
+
+    it 'still treats a genuinely file-based unit as sweepable' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :lib, identifier: 'Thing', file_path: '/nope/lib/thing.rb')
+      )
+      extractor = described_class.new(output_dir: Dir.mktmpdir)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+
+      expect(extractor.send(:convention_path_unit?, 'Thing')).to be false
+    end
+  end
 end

@@ -310,11 +310,12 @@ module Woods
     #
     # @return [Hash] Complete graph data
     def to_h
+      root = self.class.graph_root
       @to_h ||= {
-        nodes: @nodes,
+        nodes: self.class.relativize_nodes(@nodes, root),
         edges: @edges,
         reverse: @reverse.transform_values(&:to_a),
-        file_map: @file_map.transform_values(&:to_a),
+        file_map: self.class.relativize_file_map(@file_map, root),
         type_index: @type_index.transform_values(&:to_a),
         stats: {
           node_count: @nodes.size,
@@ -325,19 +326,117 @@ module Woods
       @to_h.dup
     end
 
+    # ── Path portability (#166) ────────────────────────────────────────────
+    #
+    # The graph holds **absolute** paths in memory, because every consumer of
+    # them resolves against the filesystem in the extracting process:
+    # `re_extract_unit` and `incremental_git_data` both gate on `File.exist?`,
+    # and `affected_by` / `identifiers_for_path` are handed absolute paths by
+    # `ChangeSet`. Persisting them absolute made the artifact non-portable —
+    # extraction in a container writes `/app/...` while a host reading the
+    # volume mount sees `/Users/.../woods/...`, so a host-run `woods:incremental`
+    # computed an empty blast radius and silently re-extracted nothing.
+    #
+    # So paths are relativized on the way out and absolutized on the way back.
+    # Nothing on the read side is affected: no MCP tool, exporter or formatter
+    # reads a graph node's `file_path` — they all read the per-unit JSON, which
+    # has always been relative.
+    #
+    # Absolutizing is idempotent for a path that is already absolute, which is
+    # what lets a graph persisted before this load without a re-index — the same
+    # approach {normalize_edges} and {normalize_file_map} take for their own
+    # legacy formats.
+
+    # @return [String, nil] the extraction root, or nil outside a Rails process
+    #   (a host-side reader), in which case paths pass through untouched
+    def self.graph_root
+      return nil unless defined?(Rails) && Rails.respond_to?(:root) && Rails.root
+
+      Rails.root.to_s
+    end
+
+    # @return [String, nil] path relative to root, or unchanged when it is nil,
+    #   root is unknown, or it lives outside the tree (a gem path)
+    def self.relativize(path, root)
+      return path if path.nil? || root.nil?
+
+      prefix = root.end_with?(File::SEPARATOR) ? root : "#{root}#{File::SEPARATOR}"
+      path.start_with?(prefix) ? path.delete_prefix(prefix) : path
+    end
+
+    # @return [String, nil] absolute path, or unchanged when it is nil, root is
+    #   unknown, or it is already absolute (a pre-#166 graph, or a gem path)
+    def self.absolutize(path, root)
+      return path if path.nil? || root.nil?
+      return path if path.start_with?(File::SEPARATOR)
+
+      File.join(root, path)
+    end
+
+    def self.relativize_nodes(nodes, root)
+      return nodes if root.nil?
+
+      nodes.transform_values do |node|
+        node[:file_path] ? node.merge(file_path: relativize(node[:file_path], root)) : node
+      end
+    end
+
+    def self.absolutize_nodes(nodes, root)
+      return nodes if root.nil?
+
+      nodes.transform_values do |node|
+        node[:file_path] ? node.merge(file_path: absolutize(node[:file_path], root)) : node
+      end
+    end
+
+    # Serialization form: **arrays**, matching what `to_h` has always emitted.
+    def self.relativize_file_map(file_map, root)
+      relocate_file_map(file_map) { |path| relativize(path, root) }
+        .transform_values(&:to_a)
+    end
+
+    # In-memory form: **Sets**, which is the `@file_map` contract every path
+    # lookup depends on. Returning arrays here would break `#unregister`, which
+    # calls `Set#delete` on the value.
+    def self.absolutize_file_map(file_map, root)
+      relocate_file_map(file_map) { |path| absolutize(path, root) }
+    end
+
+    # Rekey a file map, merging rather than overwriting: two keys can collapse
+    # onto one after transformation — a path inside the root and its
+    # already-relative twin from a pre-#166 graph — and the identifiers of both
+    # belong to the survivor. Values come back as Sets; callers that need the
+    # serialized shape convert.
+    def self.relocate_file_map(file_map)
+      file_map.each_with_object({}) do |(path, ids), moved|
+        key = yield(path)
+        (moved[key] ||= Set.new).merge(ids.is_a?(Set) ? ids : Array(ids))
+      end
+    end
+
     # Load graph from persisted data
     #
     # After JSON round-trip all keys become strings. This method normalizes
     # them back to the expected types: node values use symbol keys (:type,
     # :file_path, :namespace), and type_index uses symbol keys for types.
     #
+    # The root is resolved ambiently rather than accepted as a keyword. Adding a
+    # `root:` kwarg here silently breaks every caller that passes a bare hash
+    # literal — `from_h('nodes' => ..., 'file_map' => ...)` binds as *keywords*
+    # once the method accepts any, so `data` arrives empty and the call raises
+    # ArgumentError. The specs in this file call it exactly that way.
+    #
     # @param data [Hash] Previously serialized graph data
     # @return [DependencyGraph] Restored graph
     def self.from_h(data)
       graph = new
 
+      root = graph_root
+
       raw_nodes = data[:nodes] || data['nodes'] || {}
-      graph.instance_variable_set(:@nodes, raw_nodes.transform_values { |v| symbolize_node(v) })
+      graph.instance_variable_set(
+        :@nodes, absolutize_nodes(raw_nodes.transform_values { |v| symbolize_node(v) }, root)
+      )
 
       raw_edges = data[:edges] || data['edges'] || {}
       graph.instance_variable_set(:@edges, raw_edges.transform_values { |edges| normalize_edges(edges) })
@@ -346,7 +445,7 @@ module Woods
       graph.instance_variable_set(:@reverse, raw_reverse.transform_values { |v| v.is_a?(Set) ? v : Set.new(v) })
 
       raw_file_map = data[:file_map] || data['file_map'] || {}
-      graph.instance_variable_set(:@file_map, normalize_file_map(raw_file_map))
+      graph.instance_variable_set(:@file_map, absolutize_file_map(normalize_file_map(raw_file_map), root))
 
       raw_type_index = data[:type_index] || data['type_index'] || {}
       graph.instance_variable_set(:@type_index, raw_type_index.transform_keys(&:to_sym).transform_values do |v|

@@ -97,7 +97,12 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
     let(:extractor) { described_class.new }
     let(:app_root) { tmp_dir }
 
-    it 'skips graphql gem paths and returns the convention path' do
+    # These three pinned the fabricated-convention-path fallback, which WAS the
+    # B-070 bug: a runtime-defined type recorded a path it did not own, making it
+    # indistinguishable from a file-defined type whose file had been deleted.
+    # nil is the honest answer, and `DependencyGraph#register` skips nil paths, so
+    # such a unit never enters `file_map` and the deletion sweep cannot reach it.
+    it 'skips graphql gem paths and returns nil rather than inventing a path' do
       gem_path = '/path/to/gems/graphql/lib/graphql/schema/object.rb'
 
       klass = double('TypeClass')
@@ -111,7 +116,7 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       result = extractor.send(:source_file_for_class, klass)
 
       expect(result).not_to eq(gem_path)
-      expect(result).to eq(File.join(app_root, 'app/graphql/types/user_type.rb'))
+      expect(result).to be_nil
     end
 
     it 'returns an app-root instance method path when found' do
@@ -150,7 +155,7 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(result).to eq(app_path)
     end
 
-    it 'returns convention path when no methods resolve to app root' do
+    it 'returns nil when no methods resolve to app root' do
       klass = double('TypeClass')
       allow(klass).to receive(:name).and_return('Types::PostType')
       allow(klass).to receive(:instance_methods).with(false).and_return([])
@@ -158,18 +163,17 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
 
       result = extractor.send(:source_file_for_class, klass)
 
-      expect(result).to eq(File.join(app_root, 'app/graphql/types/post_type.rb'))
+      expect(result).to be_nil
     end
 
-    it 'returns convention path on StandardError instead of nil' do
+    it 'returns nil on StandardError rather than a path nothing backs' do
       klass = double('TypeClass')
       allow(klass).to receive(:name).and_return('Types::BrokenType')
       allow(klass).to receive(:instance_methods).with(false).and_raise(StandardError, 'introspection failed')
 
       result = extractor.send(:source_file_for_class, klass)
 
-      expect(result).not_to be_nil
-      expect(result).to eq(File.join(app_root, 'app/graphql/types/broken_type.rb'))
+      expect(result).to be_nil
     end
   end
 
@@ -995,6 +999,55 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       source = "class Types::UserType < Types::BaseObject\nend"
       kind = extractor.send(:detect_graphql_kind, source, nil)
       expect(kind).to eq(:object)
+    end
+  end
+
+  # #167 — a runtime-defined type has no source file, so no changed path can
+  # dispatch to it. Exposing the runtime set lets the incremental path add them.
+  describe '#discoverable_classes' do
+    it 'is empty when graphql-ruby is not loaded' do
+      hide_const('GraphQL::Schema')
+      FileUtils.mkdir_p(File.join(tmp_dir, 'app/graphql'))
+
+      expect(described_class.new.discoverable_classes).to eq([])
+    end
+
+    # Real singleton methods rather than stubs: `verify_partial_doubles` is on,
+    # and a bare Class.new implements neither `types` nor `descendants`.
+    def stub_schema_with(types)
+      schema = Class.new do
+        class << self
+          attr_accessor :type_map
+        end
+        def self.types = type_map
+      end
+      schema.type_map = types
+      stub_const('AppSchema', schema)
+      stub_const('GraphQL::Schema', Class.new { def self.descendants = @descendants || [] })
+      GraphQL::Schema.instance_variable_set(:@descendants, [schema])
+      schema
+    end
+
+    it 'returns the schema type classes when the runtime is available' do
+      user_type = Class.new
+      stub_const('Types::UserType', user_type)
+      stub_schema_with({ 'User' => user_type })
+
+      expect(described_class.new.discoverable_classes).to eq([user_type])
+    end
+
+    it 'rejects anonymous type classes' do
+      stub_schema_with({ 'Anon' => Class.new })
+
+      expect(described_class.new.discoverable_classes).to eq([])
+    end
+
+    it 'skips graphql-ruby introspection types' do
+      user_type = Class.new
+      stub_const('Types::UserType', user_type)
+      stub_schema_with({ '__Schema' => Class.new, 'User' => user_type })
+
+      expect(described_class.new.discoverable_classes).to eq([user_type])
     end
   end
 end
