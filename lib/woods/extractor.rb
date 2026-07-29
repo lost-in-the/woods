@@ -1862,7 +1862,7 @@ module Woods
       node = @dependency_graph.node(identifier)
       return false unless node
 
-      CLASS_BASED.key?(node[:type]) || GRAPHQL_TYPES.include?(node[:type])
+      CLASS_BASED.key?(node[:type])
     end
 
     # Is this GraphQL unit's recorded path the convention derived from its

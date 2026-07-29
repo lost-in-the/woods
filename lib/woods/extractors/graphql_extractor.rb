@@ -256,11 +256,34 @@ module Woods
       #
       # @param klass [Class]
       # @return [String] Absolute path to the source file
+      # Locate the file this type was defined in, or nil when there is none.
+      #
+      # **nil, not a fabricated convention path** (B-070). A runtime-defined type
+      # — built by a schema builder or DSL — has no file, and inventing
+      # `app/graphql/<constant>.rb` for it created a unit indistinguishable from a
+      # file-defined one whose file had since been deleted. That ambiguity is
+      # unresolvable downstream: the conventional location of `Types::FooType`
+      # *is* `app/graphql/types/foo_type.rb`, so no path comparison can separate
+      # "never had a file" from "file was deleted".
+      #
+      # Returning nil resolves it at the only point where the answer is known.
+      # `DependencyGraph#register` skips nil paths, so such a unit never enters
+      # `file_map` and the deletion sweep — which walks registered paths — cannot
+      # reach it. No predicate required, and a full extraction produces the same
+      # nil, so the two paths still agree.
+      #
+      # `resolve_source_location` is tried first and has three tiers of real
+      # discovery (`const_source_location`, then instance and singleton method
+      # locations). It reaches its fallback only when Ruby cannot place the class
+      # in app source at all, which is precisely the no-file case.
+      #
+      # @param klass [Class]
+      # @return [String, nil]
       def source_file_for_class(klass)
         convention_path = Rails.root.join("#{GRAPHQL_DIRECTORY}/#{klass.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)
 
-        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: convention_path)
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # ──────────────────────────────────────────────────────────────────────

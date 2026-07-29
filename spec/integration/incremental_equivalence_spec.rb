@@ -283,12 +283,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # too, and a deleted app/graphql/**.rb survived an unnamed-path sweep
     # forever. The daemon's catch-up is the exposed caller: it runs an empty
     # change set precisely because deletions leave no mtime.
-    it 'prunes a deleted graphql type even when the caller forgets to list it',
-       pending: 'B-070/#171 — convention_path_unit? keys on unit type, so file-defined ' \
-                'GraphQL units are spared from the unnamed-path sweep. A path comparison ' \
-                'cannot fix it: Types::ForgottenType conventionally lives AT its ' \
-                'convention path, so a file-defined type is indistinguishable from a ' \
-                'runtime-defined one. Needs extraction-time provenance on the graph node.' do
+    it 'prunes a deleted graphql type even when the caller forgets to list it' do
       write_file('app/graphql/types/forgotten_type.rb', <<~SRC)
         module Types
           class ForgottenType < Types::BaseObject

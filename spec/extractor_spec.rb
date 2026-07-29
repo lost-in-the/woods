@@ -1573,28 +1573,26 @@ RSpec.describe Woods::Extractor do
       end
     end
 
-    it 'spares a runtime-defined type sitting at its convention path' do
-      convention = Rails.root.join('app/graphql/types/query_type.rb').to_s
-      extractor = register_graphql('Types::QueryType', convention)
-
-      # Without this the prune sweep removed it in the same run that added it,
-      # and the follow-up reconcile refused to re-add it because it was in
-      # `pruned` — so #167's target case never survived.
-      expect(extractor.send(:convention_path_unit?, 'Types::QueryType')).to be true
-    end
-
-    # KNOWN GAP, deliberately asserted as it behaves rather than as it should
-    # (B-070 / #171). The predicate keys on unit *type*, so a file-defined type
-    # is spared from the unnamed-path sweep exactly like a runtime-defined one.
-    # A path comparison cannot separate them — see the pending example in
-    # spec/integration/incremental_equivalence_spec.rb for the disproof. Fixing
-    # it needs extraction-time provenance on the graph node.
-    it 'currently spares a file-defined type too, which is B-070' do
+    # B-070 is fixed at the source rather than in this predicate: a
+    # runtime-defined type now records file_path = nil, so it never enters
+    # `file_map` and the path sweep cannot reach it. GraphQL is therefore back
+    # out of `convention_path_unit?` entirely, and a file-defined type — which
+    # has a real path — is swept like anything else.
+    it 'does not spare a file-defined GraphQL type' do
       extractor = register_graphql(
         'Types::PostType', Rails.root.join('app/graphql/types/nested/post_type.rb').to_s
       )
 
-      expect(extractor.send(:convention_path_unit?, 'Types::PostType')).to be true
+      expect(extractor.send(:convention_path_unit?, 'Types::PostType')).to be false
+    end
+
+    it 'does not need to spare a runtime-defined type, because it has no path to sweep' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :graphql_query, identifier: 'Types::QueryType', file_path: nil)
+      )
+
+      expect(graph.to_h[:file_map]).to be_empty
     end
 
     it 'still treats a genuinely file-based unit as sweepable' do

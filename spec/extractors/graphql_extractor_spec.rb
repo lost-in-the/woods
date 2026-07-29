@@ -97,7 +97,12 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
     let(:extractor) { described_class.new }
     let(:app_root) { tmp_dir }
 
-    it 'skips graphql gem paths and returns the convention path' do
+    # These three pinned the fabricated-convention-path fallback, which WAS the
+    # B-070 bug: a runtime-defined type recorded a path it did not own, making it
+    # indistinguishable from a file-defined type whose file had been deleted.
+    # nil is the honest answer, and `DependencyGraph#register` skips nil paths, so
+    # such a unit never enters `file_map` and the deletion sweep cannot reach it.
+    it 'skips graphql gem paths and returns nil rather than inventing a path' do
       gem_path = '/path/to/gems/graphql/lib/graphql/schema/object.rb'
 
       klass = double('TypeClass')
@@ -111,7 +116,7 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       result = extractor.send(:source_file_for_class, klass)
 
       expect(result).not_to eq(gem_path)
-      expect(result).to eq(File.join(app_root, 'app/graphql/types/user_type.rb'))
+      expect(result).to be_nil
     end
 
     it 'returns an app-root instance method path when found' do
@@ -150,7 +155,7 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(result).to eq(app_path)
     end
 
-    it 'returns convention path when no methods resolve to app root' do
+    it 'returns nil when no methods resolve to app root' do
       klass = double('TypeClass')
       allow(klass).to receive(:name).and_return('Types::PostType')
       allow(klass).to receive(:instance_methods).with(false).and_return([])
@@ -158,18 +163,17 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
 
       result = extractor.send(:source_file_for_class, klass)
 
-      expect(result).to eq(File.join(app_root, 'app/graphql/types/post_type.rb'))
+      expect(result).to be_nil
     end
 
-    it 'returns convention path on StandardError instead of nil' do
+    it 'returns nil on StandardError rather than a path nothing backs' do
       klass = double('TypeClass')
       allow(klass).to receive(:name).and_return('Types::BrokenType')
       allow(klass).to receive(:instance_methods).with(false).and_raise(StandardError, 'introspection failed')
 
       result = extractor.send(:source_file_for_class, klass)
 
-      expect(result).not_to be_nil
-      expect(result).to eq(File.join(app_root, 'app/graphql/types/broken_type.rb'))
+      expect(result).to be_nil
     end
   end
 
