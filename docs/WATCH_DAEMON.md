@@ -232,11 +232,58 @@ The daemon's own footprint is small; the cost of option (b) is the booted app,
 not Woods. That is why (a) is worth keeping available for hosts that already
 pay for one.
 
-**Not yet measured, and the honest gap:** these are fixture-app numbers. A
-large host app (thousands of units) has not been measured, and neither has
-event latency across a container bind mount. #164's success criterion 2 asks
-for both before the feature is called production-ready. Until then the daemon
-is opt-in and documented as such.
+### Measured at scale
+
+The numbers above are fixture-app numbers. Below are the same measurements on a
+**1,940-unit app** — `apps/rails-8.0-large` in
+[woods-testbed](https://github.com/lost-in-the/woods-testbed), a hand-written
+kernel covering all 34 unit types plus a deterministically generated tree, run by
+`scripts/woods_bench.rb` (Ruby 3.3.1 / Rails 8.0.5, in-container, 5 reps per
+scenario). See [woods-testbed#2](https://github.com/lost-in-the/woods-testbed/issues/2).
+
+Cold full extraction: **5,541 ms**, and the phase split is the surprise:
+
+| Phase | ms | share |
+|---|---|---|
+| `write_and_publish` | 2,925 | 53% |
+| extraction | 2,556 | 46% |
+| graph analysis (PageRank + structural) | 27.8 | 0.5% |
+| dedupe | 12.5 | 0.2% |
+| git enrichment | 10.6 | 0.2% |
+| path normalisation | 4.6 | 0.1% |
+| dependents resolution | 4.3 | 0.1% |
+
+**PageRank and the dependents pass do not dominate.** Together they are 32 ms of
+5,541 — six tenths of one percent. The cost is extraction itself plus *writing
+the output*, and the latter is dominated by `AtomicFile`'s fsync per unit file.
+Anyone optimising the graph passes here would be tuning 0.5% of the runtime; the
+lever is the write path.
+
+Incremental, per scenario, with the units each change causes to be rewritten:
+
+| Change | p50 | p95 | Units written | % of index |
+|---|---|---|---|---|
+| a controller | 274 ms | 341 ms | 6 | 0.3% |
+| a model | 402 ms | 451 ms | 38 | 2.0% |
+| **`config/routes.rb`** | **2,534 ms** | 2,830 ms | **1,036** | **53.4%** |
+| `db/schema.rb` | 107 ms | 134 ms | 0 | 0.0% |
+
+The routes row is the wholesale re-run of `ROUTE_CONSUMER_EXTRACTORS`. Read the
+**shape** alongside the size: 53.4% is higher than the ~24% measured on a
+production host, because the testbed's generated tree is deliberately dense in
+controllers and view templates — exactly the route-consumer types. A real app
+with more models per controller sits lower. Any figure quoted from that variant
+therefore carries its scale *and* its composition, which is why the harness
+embeds the generator manifest in every result.
+
+`db/schema.rb` writing zero units is correct, not a gap: `ReloadPolicy`
+classifies it `:restart`, and a plain `extract_changed` touches nothing because
+the models are class-based and their constants have not changed.
+
+**Still not measured:** event latency across a **macOS** Docker Desktop bind
+mount. A Linux bind mount measures 723–824 ms from write to generation bump, but
+osxfs/gRPC-FUSE is the behaviour actually in question and needs a macOS host —
+so that gap stays open rather than being closed with a Linux number.
 
 ## The freshness contract
 
@@ -442,12 +489,26 @@ Off by default because a single-worktree host wants the daemon to stay up.
 | Six real worktrees stay disjoint, validate-green, independently versioned | `spec/integration/multi_worktree_spec.rb` |
 | Many concurrent readers per worktree converge without coordination | same |
 
-**Not covered:** `Rails.root` is a process singleton, so six *concurrently
-extracting* booted apps cannot exist in one Ruby process — that shape needs six
-processes and is not in CI. Per-daemon memory at that scale is likewise
-extrapolated from the single-app measurement above rather than measured. Both
-are part of the same outstanding validation as the large-host-app latency
-numbers.
+**Per-daemon memory at six-worktree scale — measured.** `Rails.root` is a
+process singleton, so six *concurrently extracting* booted apps cannot exist in
+one Ruby process. That constraint is about processes, not containers, so six
+forks with disjoint output directories satisfy it —
+`scripts/woods_daemon_scale_smoke.rb` in woods-testbed does exactly that:
+
+| | |
+|---|---|
+| Parent booted app, no extraction | 83.3 MB |
+| Per worktree after two full extractions | 165.9 – 166.3 MB (mean **166.0**) |
+| Summed across six | 996.2 MB |
+
+**The 72.1 MB figure above is a fixture-app number; at 1,940 units it is 166 MB
+— 2.3× that.** Plan for the measured figure, not the extrapolation.
+
+Two caveats the harness prints itself: forks share the parent heap
+copy-on-write, so the 996 MB sum is an upper bound rather than true additional
+memory and the mean is the per-daemon figure; and this measures repeated
+`Extractor` cycles, so it is the extraction footprint rather than the idle
+steady state a dormant daemon holds.
 
 ## Embedding it
 
