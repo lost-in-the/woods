@@ -988,7 +988,7 @@
       "lib/woods/retriever.rb"
     ],
     "description": "TARGET_PATTERNS treat common words as type signals (\\bget\\b -> :route, \\bemail\\b -> :mailer, \\bquery\\b/\\btype\\b -> :graphql, \\bperform\\b -> :job) and SearchExecutor#build_vector_filters pushes classifier-derived target_type down as a HARD vector-metadata filter; unlike caller-supplied types there is no within-type fallback (retriever.rb:318 falls back only for caller type_list). 'How do we get the current user?' filters to route units only and can return an empty primary section. Fix: stop pushing classifier-derived target_type into the vector filter and let Ranker's soft type_match express it, or reuse within_type_fallback on empty results and tighten the worst patterns. Acceptance: the example queries return non-empty, sensible results on a non-route/non-graphql index. Tracked in GH #184.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

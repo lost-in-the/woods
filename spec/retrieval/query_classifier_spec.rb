@@ -109,6 +109,52 @@ RSpec.describe Woods::Retrieval::QueryClassifier do
     end
   end
 
+  describe 'target type tightening (#184)' do
+    # Ordinary conversational words must not read as type signals — the
+    # canonical failure was "How do we get the current user?" classifying
+    # target :route via bare "get".
+    {
+      'How do we get the current user?' => nil,
+      'how do we post a comment on an article?' => nil,
+      'where do we delete stale sessions?' => nil,
+      'what does this method perform?' => nil,
+      'how does the push notification banner work?' => nil
+    }.each do |query, expected|
+      it "classifies #{query.inspect} with no target type" do
+        expect(classifier.classify(query).target_type).to eq(expected)
+      end
+    end
+
+    it 'does not treat bare "query", "type", or "field" as graphql signals' do
+      expect(classifier.classify('what query does this report run?').target_type).to be_nil
+      expect(classifier.classify('what type of authentication do we use?').target_type).to be_nil
+      expect(classifier.classify('how is the published field populated?').target_type).to be_nil
+    end
+
+    it 'still classifies uppercase HTTP verbs as :route' do
+      expect(classifier.classify('what happens on a GET to /users?').target_type).to eq(:route)
+      expect(classifier.classify('handling a DELETE against /sessions').target_type).to eq(:route)
+    end
+
+    it 'classifies verb-plus-context phrases via the controller pattern' do
+      # "get request" / "delete endpoint" carry route-ish context words that
+      # the controller pattern (checked first) already claims — the verb
+      # itself adds nothing, so bare lowercase verbs stay signal-free.
+      expect(classifier.classify('trace the get request for orders').target_type).to eq(:controller)
+      expect(classifier.classify('where is the delete endpoint?').target_type).to eq(:controller)
+    end
+
+    it 'still classifies mailer queries with real mail context' do
+      expect(classifier.classify('how do we send an email to new users?').target_type).to eq(:mailer)
+      expect(classifier.classify('the notification email for signups').target_type).to eq(:mailer)
+      expect(classifier.classify('how does mail delivery get retried?').target_type).to eq(:mailer)
+    end
+
+    it 'still classifies job queries with perform_later context' do
+      expect(classifier.classify('what happens when we perform_later a sync?').target_type).to eq(:job)
+    end
+  end
+
   describe 'framework context detection' do
     %w[Rails ActiveRecord ActionController ActiveJob ActionMailer ActiveSupport Rack middleware].each do |term|
       it "detects framework context for queries mentioning #{term}" do

@@ -60,7 +60,8 @@ module Woods
       #   strategies push this down into the vector store's metadata
       #   filter — used by {Retriever#retrieve} to rank-within-type when
       #   the unfiltered global top-K had no candidate of the requested type.
-      #   Overrides the classifier-derived +target_type+ in filter construction.
+      #   This explicit caller filter is the ONLY source of vector type
+      #   filters — the classifier's +target_type+ never becomes one (#184).
       # @param strategy [Symbol, nil] Override the classifier-selected strategy.
       #   {Retriever#within_type_fallback} passes +:vector+ here because the
       #   vector path is the only one that honors +type_filter+; if the
@@ -126,7 +127,7 @@ module Woods
       def run_strategy(strategy, query:, classification:, limit:, type_filter: nil)
         case strategy
         when :vector
-          execute_vector(query, classification: classification, limit: limit, type_filter: type_filter)
+          execute_vector(query, limit: limit, type_filter: type_filter)
         when :keyword
           execute_keyword(classification: classification, limit: limit)
         when :graph
@@ -140,10 +141,13 @@ module Woods
 
       # Vector strategy: embed the query and search by similarity.
       #
+      # Takes no classification — the vector path is filtered only by the
+      # caller's explicit +type_filter+; see {#build_vector_filters} (#184).
+      #
       # @return [Array<Candidate>]
-      def execute_vector(query, classification:, limit:, type_filter: nil)
+      def execute_vector(query, limit:, type_filter: nil)
         query_vector = @embedding_provider.embed(query)
-        filters = build_vector_filters(classification, type_filter: type_filter)
+        filters = build_vector_filters(type_filter)
 
         results = @vector_store.search(query_vector, limit: limit, filters: filters)
         results.map do |r|
@@ -229,8 +233,7 @@ module Woods
       # @return [Array<Candidate>]
       def execute_hybrid(query, classification:, limit:, type_filter: nil)
         # Gather from all three sources
-        vector_candidates = execute_vector(query, classification: classification, limit: limit,
-                                                  type_filter: type_filter)
+        vector_candidates = execute_vector(query, limit: limit, type_filter: type_filter)
         keyword_candidates = execute_keyword(classification: classification, limit: limit)
 
         # Graph expansion on top vector results
@@ -285,24 +288,25 @@ module Woods
         candidates
       end
 
-      # Build metadata filters for vector search based on classification
-      # and an optional explicit type filter from the caller.
+      # Build metadata filters for vector search from the caller's
+      # explicit type filter.
       #
-      # The caller's explicit +type_filter+ overrides classifier-derived
-      # +target_type+ when both are present — the caller opted into a
-      # specific set of types and that intent beats a heuristic.
+      # The classifier-derived +target_type+ is deliberately NOT pushed
+      # down here (#184). It is a heuristic, and hard-filtering on it had
+      # no fallback — a mainline query like "How do we get the current
+      # user?" classified target :route and the vector search excluded
+      # everything but route units. The heuristic still reaches the
+      # {Ranker} as the soft +type_match+ signal, which boosts matching
+      # types without excluding anything. A caller-supplied +type_filter+
+      # keeps hard-filter semantics: the caller opted into specific types,
+      # and {Retriever#retrieve} owns the within-type fallback for that path.
       #
-      # @param classification [QueryClassifier::Classification]
       # @param type_filter [Array<String>, nil]
       # @return [Hash]
-      def build_vector_filters(classification, type_filter: nil)
-        filters = {}
-        if type_filter && !type_filter.empty?
-          filters[:type] = type_filter.map(&:to_s)
-        elsif classification.target_type
-          filters[:type] = classification.target_type.to_s
-        end
-        filters
+      def build_vector_filters(type_filter)
+        return {} if type_filter.nil? || type_filter.empty?
+
+        { type: type_filter.map(&:to_s) }
       end
 
       # Find seed identifiers from classification keywords via metadata search.
