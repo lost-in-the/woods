@@ -18,6 +18,24 @@ module Woods
       class ModelMapper # rubocop:disable Metrics/ClassLength
         include Shared
 
+        # Derive the table name for a model unit — the exact value the Data
+        # Models page title is built from. Shared with the Columns sync so the
+        # column title qualifier ("<table>.<column>") and the Table relation
+        # always agree on which table a column belongs to (#149).
+        #
+        # Falls back to a naive tableized identifier when extraction produced
+        # no table_name (close enough to ActiveRecord convention for a title).
+        #
+        # @param unit_data [Hash] Parsed model ExtractedUnit JSON
+        # @return [String]
+        def self.table_name_for(unit_data)
+          metadata = unit_data['metadata'] || {}
+          return metadata['table_name'] if metadata['table_name']
+
+          identifier = unit_data['identifier'] || ''
+          "#{identifier.split('::').last.to_s.gsub(/([a-z])([A-Z])/, '\1_\2').downcase}s"
+        end
+
         # Map a model unit to Notion Data Models page properties.
         #
         # @param unit_data [Hash] Parsed model ExtractedUnit JSON
@@ -35,7 +53,7 @@ module Woods
         # @return [Hash] Text-based Notion properties
         def build_text_properties(unit_data, metadata)
           {
-            'Table Name' => title_property(table_name(unit_data, metadata)),
+            'Table Name' => title_property(table_name(unit_data)),
             'Model Name' => rich_text_property(unit_data['identifier']),
             'Description' => rich_text_property(extract_description(unit_data['source_code'])),
             'Associations' => rich_text_property(format_associations(metadata['associations'])),
@@ -54,11 +72,8 @@ module Woods
         end
 
         # @return [String]
-        def table_name(unit_data, metadata)
-          return metadata['table_name'] if metadata['table_name']
-
-          identifier = unit_data['identifier'] || ''
-          "#{identifier.split('::').last.to_s.gsub(/([a-z])([A-Z])/, '\1_\2').downcase}s"
+        def table_name(unit_data)
+          self.class.table_name_for(unit_data)
         end
 
         # @return [Integer]

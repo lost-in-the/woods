@@ -800,7 +800,7 @@
       "lib/woods/notion/mappers/column_mapper.rb"
     ],
     "description": "Column pages are upserted by bare column name and found by title equality across the whole DB, so shared columns (id/created_at/updated_at) overwrite each other across models \u2014 the Columns DB collapses to one page per distinct name. Fix: qualify title (users.id) or filter lookup by Table relation. Tracked in GH #149.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
