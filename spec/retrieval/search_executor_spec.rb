@@ -87,6 +87,23 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
       expect(candidate.source).to eq(:vector)
       expect(candidate.metadata).to eq({ type: 'model' })
     end
+
+    it 'defaults matched_fields to nil when not provided' do
+      candidate = described_class::Candidate.new(
+        identifier: 'User', score: 0.95, source: :vector, metadata: {}
+      )
+
+      expect(candidate.matched_fields).to be_nil
+    end
+
+    it 'stores matched_fields when provided' do
+      candidate = described_class::Candidate.new(
+        identifier: 'User', score: 0.95, source: :keyword, metadata: {},
+        matched_fields: %w[identifier description]
+      )
+
+      expect(candidate.matched_fields).to eq(%w[identifier description])
+    end
   end
 
   describe 'ExecutionResult struct' do
@@ -242,7 +259,11 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
         result = executor.execute(query: 'How do we get the current user?', classification: classification)
 
         expect(result.candidates).not_to be_empty
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
+        # Symbol-keyed on purpose — vector metadata is written symbol-keyed
+        # by the Indexer's live embed path and by the Bootstrapper back-fill
+        # alike (#150 item 5); hedging with ['type'] here would mask a
+        # string-keyed regression on the hydration path.
+        types = result.candidates.map { |c| c.metadata[:type] }
         expect(types).not_to include('route')
         expect(types).to include('model')
       end
@@ -277,7 +298,11 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
           classification: classification,
           type_filter: ['controller']
         )
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
+        # Symbol-keyed on purpose — vector metadata is written symbol-keyed
+        # by the Indexer's live embed path and by the Bootstrapper back-fill
+        # alike (#150 item 5); hedging with ['type'] here would mask a
+        # string-keyed regression on the hydration path.
+        types = result.candidates.map { |c| c.metadata[:type] }
         expect(types).to all(eq('controller'))
         expect(result.candidates.map(&:identifier)).to eq(%w[UsersController])
       end
@@ -289,7 +314,11 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
           classification: classification,
           type_filter: %w[service controller]
         )
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
+        # Symbol-keyed on purpose — vector metadata is written symbol-keyed
+        # by the Indexer's live embed path and by the Bootstrapper back-fill
+        # alike (#150 item 5); hedging with ['type'] here would mask a
+        # string-keyed regression on the hydration path.
+        types = result.candidates.map { |c| c.metadata[:type] }
         expect(types).to all(satisfy { |t| %w[service controller].include?(t) })
         expect(result.candidates.map(&:identifier)).to contain_exactly('UserService', 'UsersController')
       end
@@ -306,7 +335,11 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
           classification: classification,
           type_filter: ['service']
         )
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
+        # Symbol-keyed on purpose — vector metadata is written symbol-keyed
+        # by the Indexer's live embed path and by the Bootstrapper back-fill
+        # alike (#150 item 5); hedging with ['type'] here would mask a
+        # string-keyed regression on the hydration path.
+        types = result.candidates.map { |c| c.metadata[:type] }
         expect(types).to all(eq('service'))
       end
 
@@ -320,7 +353,11 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
         # With type_filter: [], the vector search runs unfiltered — the
         # classifier's target_type :model is a soft ranking signal only
         # (#184), so candidates of every seeded type come back.
-        types = result.candidates.map { |c| c.metadata[:type] || c.metadata['type'] }
+        # Symbol-keyed on purpose — vector metadata is written symbol-keyed
+        # by the Indexer's live embed path and by the Bootstrapper back-fill
+        # alike (#150 item 5); hedging with ['type'] here would mask a
+        # string-keyed regression on the hydration path.
+        types = result.candidates.map { |c| c.metadata[:type] }
         expect(types).to include('model', 'service', 'controller')
       end
     end
@@ -342,6 +379,41 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
 
       # May return empty or partial results depending on keyword matching
       expect(result.candidates).to be_an(Array)
+    end
+
+    # B-073 / #185 — keyword candidates must carry matched_fields or the
+    # Ranker's keyword signal (WEIGHTS[:keyword] = 0.20) scores every
+    # candidate 0.0 and is inert. The store's #search doesn't report which
+    # fields hit, so the executor approximates from the returned record:
+    # every non-bookkeeping field whose value contains the keyword.
+    describe 'matched_fields population (B-073)' do
+      it 'names the record fields whose values matched the keyword' do
+        classification = classifier.classify('Where is the User defined?')
+        result = executor.execute(query: 'Where is the User defined?', classification: classification)
+
+        user = result.candidates.find { |c| c.identifier == 'User' }
+        expect(user).not_to be_nil
+        # Seeded record: type=model, identifier=User, file_path=app/models/user.rb,
+        # description="The User model" — "user" matches all but type.
+        expect(user.matched_fields).to contain_exactly('identifier', 'file_path', 'description')
+      end
+
+      it 'never counts the store-injected id field as a match' do
+        classification = classifier.classify('Where is the User defined?')
+        result = executor.execute(query: 'Where is the User defined?', classification: classification)
+
+        result.candidates.each do |candidate|
+          expect(candidate.matched_fields).not_to include('id') if candidate.matched_fields
+        end
+      end
+
+      it 'leaves matched_fields nil on vector candidates' do
+        classification = classifier.classify('How does authentication work?')
+        result = executor.execute(query: 'How does authentication work?', classification: classification)
+
+        expect(result.candidates).not_to be_empty
+        expect(result.candidates.map(&:matched_fields)).to all(be_nil)
+      end
     end
   end
 

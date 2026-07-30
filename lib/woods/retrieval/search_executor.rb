@@ -26,7 +26,12 @@ module Woods
     #
     class SearchExecutor
       # A single search candidate with provenance tracking.
-      Candidate = Struct.new(:identifier, :score, :source, :metadata, keyword_init: true)
+      #
+      # +matched_fields+ is populated only on the keyword path — the list of
+      # metadata field names whose values matched a query keyword. It feeds
+      # {Ranker#keyword_score} (0.25 per field, capped at 1.0). Defaults to
+      # nil for every other source (vector/graph/direct), which scores 0.0.
+      Candidate = Struct.new(:identifier, :score, :source, :metadata, :matched_fields, keyword_init: true)
 
       # The result of a search execution.
       ExecutionResult = Struct.new(:candidates, :strategy, :query, keyword_init: true)
@@ -171,8 +176,12 @@ module Woods
 
       # Search each keyword individually and merge, keeping best score per ID.
       #
+      # Alongside the best score, accumulates +matched_fields+ — the union
+      # across keywords of the record fields that matched (see
+      # {#matched_fields_for}).
+      #
       # @param keywords [Array<String>]
-      # @return [Hash<String, Hash>] id => { score:, metadata: }
+      # @return [Hash<String, Hash>] id => { score:, metadata:, matched_fields: }
       def merge_keyword_results(keywords)
         results_by_id = {}
         keywords.each do |keyword|
@@ -180,10 +189,61 @@ module Woods
           results.each_with_index do |r, index|
             id = r['id']
             score = 1.0 - (index.to_f / [results.size, 10].max)
-            results_by_id[id] = { score: score, metadata: r } if !results_by_id[id] || score > results_by_id[id][:score]
+            merge_keyword_hit(results_by_id, id, score, r, matched_fields_for(r, keyword))
           end
         end
         results_by_id
+      end
+
+      # Fold a single keyword hit into the merged results: best score wins,
+      # matched fields union across keywords.
+      #
+      # @param results_by_id [Hash<String, Hash>] Accumulator (mutated)
+      # @param id [String] Candidate identifier
+      # @param score [Float] Rank-derived score for this hit
+      # @param record [Hash] The metadata record returned by the store
+      # @param matched [Array<String>] Fields that matched this keyword
+      # @return [void]
+      def merge_keyword_hit(results_by_id, id, score, record, matched)
+        entry = results_by_id[id]
+        if entry.nil?
+          results_by_id[id] = { score: score, metadata: record, matched_fields: matched }
+        else
+          entry[:score] = score if score > entry[:score]
+          entry[:matched_fields] |= matched
+        end
+      end
+
+      # Metadata record fields never counted as keyword matches: +id+
+      # duplicates +identifier+ (the store injects it), and +updated_at+
+      # is bookkeeping.
+      KEYWORD_MATCH_SKIPPED_FIELDS = %w[id updated_at].freeze
+      private_constant :KEYWORD_MATCH_SKIPPED_FIELDS
+      # Approximate which fields of a metadata record matched a keyword.
+      #
+      # The metadata store's +search+ probes fields but does not report
+      # which ones hit (SQLite runs a LIKE over the JSON blob; InMemory
+      # scans serialized records) — so per-candidate matched fields are not
+      # recoverable from the store without changing its interface. Instead,
+      # the executor re-checks the returned record: every top-level field
+      # whose stringified value contains the keyword (case-insensitively,
+      # matching SQLite's ASCII LIKE semantics) counts as matched. This is
+      # the input to {Ranker#keyword_score}'s 0.25-per-field table.
+      #
+      # @param record [Hash] Metadata record from the store (string keys)
+      # @param keyword [String] The keyword that produced this record
+      # @return [Array<String>] Names of fields whose values matched
+      def matched_fields_for(record, keyword)
+        return [] unless record.is_a?(Hash)
+
+        needle = keyword.to_s.downcase
+        return [] if needle.empty?
+
+        record.filter_map do |field, value|
+          next if KEYWORD_MATCH_SKIPPED_FIELDS.include?(field.to_s)
+
+          field.to_s if value.to_s.downcase.include?(needle)
+        end
       end
 
       # Rank merged keyword results into Candidate objects.
@@ -193,7 +253,10 @@ module Woods
       # @return [Array<Candidate>]
       def rank_keyword_results(results, limit)
         scored = results.map do |id, data|
-          Candidate.new(identifier: id, score: data[:score], source: :keyword, metadata: data[:metadata])
+          matched = data[:matched_fields]
+          Candidate.new(identifier: id, score: data[:score], source: :keyword,
+                        metadata: data[:metadata],
+                        matched_fields: matched && !matched.empty? ? matched : nil)
         end
         scored.sort_by { |c| -c.score }.first(limit)
       end

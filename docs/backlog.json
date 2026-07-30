@@ -1005,7 +1005,7 @@
       "lib/woods/mcp/bootstrapper.rb"
     ],
     "description": "Four compounding defects: (1) Ranker#keyword_score guards on candidate.matched_fields but SearchExecutor::Candidate has no such member anywhere in lib/, so 20% of the weight budget is permanently 0.0. (2) apply_rrf replaces scores with raw RRF values (max ~0.016/source) fed unnormalized into 0-1-scaled weighted scoring, so the 0.40 semantic weight contributes at most ~0.02 and metadata signals swamp fused relevance on every hybrid query. (3) ContextAssembler#assemble_section re-sorts by raw candidate.score, discarding the Ranker's weighted ordering entirely - recency/importance/type_match/diversity never influence what enters the context or what truncation cuts. (4) Ranker memoizes @pagerank_importance_map forever; Bootstrapper.reload_stores! swaps the graph in place but never invalidates it, so a long-lived woods-mcp-http serves boot-time percentiles after reload. Fix: populate matched_fields from the keyword path (or drop the signal and renormalize), min-max normalize RRF before weighting, make Ranker rewrite candidate.score to the weighted score (or preserve order in the assembler), and invalidate the memo from reload_stores!. Acceptance: a ranker-demoted candidate stays demoted in the assembled context; fused-relevance winner survives divergent recency/type metadata; reload picks up new PageRank. Tracked in GH #185.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1019,7 +1019,7 @@
       "lib/woods/retrieval/context_assembler.rb"
     ],
     "description": "Section membership is not disjoint: primary takes candidates.reject(:graph_expansion) which includes vector-sourced rails_source/gem_source units, and the framework section selects framework_candidate? over the same list - a framework unit retrieved by vector search is formatted twice in one context, spending both budgets on identical content (sources.uniq hides it from the attribution list). Fires precisely on framework_context queries whose top hits are rails_source units. Fix: exclude framework candidates from primary when the framework budget is active. Acceptance: each identifier's source text appears exactly once in the assembled context. Tracked in GH #186.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

@@ -223,6 +223,79 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
 
       expect(result.sections).not_to include(:framework)
     end
+
+    # Regression — #186 / B-074. The primary section was built by
+    # reject(:graph_expansion), which kept vector-sourced rails_source/
+    # gem_source hits, while the framework section selected
+    # framework_candidate? over the SAME list — so a framework-source top
+    # hit was formatted twice, spending both budgets on identical text.
+    describe 'framework/primary partition (#186)' do
+      it 'formats a framework-source vector hit exactly once when the framework budget is active' do
+        allow(metadata_store).to receive(:find).with('ActiveRecord::Base').and_return(
+          unit_data(identifier: 'ActiveRecord::Base', type: :rails_source,
+                    file_path: 'activerecord/lib/active_record/base.rb',
+                    source_code: 'FRAMEWORK_SOURCE_TEXT')
+        )
+        allow(metadata_store).to receive(:find).with('User').and_return(
+          unit_data(identifier: 'User', source_code: 'APP_SOURCE_TEXT')
+        )
+
+        result = assembler.assemble(
+          candidates: [
+            candidate(identifier: 'ActiveRecord::Base', score: 0.95, source: :vector,
+                      metadata: { type: 'rails_source' }),
+            candidate(identifier: 'User', score: 0.8, source: :vector, metadata: { type: 'model' })
+          ],
+          classification: classification(framework_context: true)
+        )
+
+        expect(result.context.scan('FRAMEWORK_SOURCE_TEXT').size).to eq(1)
+        expect(result.context.scan('APP_SOURCE_TEXT').size).to eq(1)
+        expect(result.sections).to eq(%i[primary framework])
+      end
+
+      it 'keeps a framework-source hit in primary (once) when the framework budget is inactive' do
+        allow(metadata_store).to receive(:find).with('ActiveRecord::Base').and_return(
+          unit_data(identifier: 'ActiveRecord::Base', type: :rails_source,
+                    file_path: 'activerecord/lib/active_record/base.rb',
+                    source_code: 'FRAMEWORK_SOURCE_TEXT')
+        )
+
+        result = assembler.assemble(
+          candidates: [
+            candidate(identifier: 'ActiveRecord::Base', score: 0.95, source: :vector,
+                      metadata: { type: 'rails_source' })
+          ],
+          classification: classification(framework_context: false)
+        )
+
+        expect(result.context.scan('FRAMEWORK_SOURCE_TEXT').size).to eq(1)
+        expect(result.sections).to eq(%i[primary])
+      end
+
+      it 'moves a graph-expansion framework candidate out of supporting into framework' do
+        allow(metadata_store).to receive(:find).with('Expanded').and_return(
+          unit_data(identifier: 'Expanded', source_code: 'EXPANDED_TEXT')
+        )
+        allow(metadata_store).to receive(:find).with('ActionController::Base').and_return(
+          unit_data(identifier: 'ActionController::Base', type: :rails_source,
+                    source_code: 'FRAMEWORK_EXPANSION_TEXT')
+        )
+
+        result = assembler.assemble(
+          candidates: [
+            candidate(identifier: 'Expanded', score: 0.6, source: :graph_expansion,
+                      metadata: { type: 'model' }),
+            candidate(identifier: 'ActionController::Base', score: 0.5, source: :graph_expansion,
+                      metadata: { type: 'rails_source' })
+          ],
+          classification: classification(framework_context: true)
+        )
+
+        expect(result.context.scan('FRAMEWORK_EXPANSION_TEXT').size).to eq(1)
+        expect(result.sections).to eq(%i[supporting framework])
+      end
+    end
   end
 
   # ── Token budget ───────────────────────────────────────────────────
