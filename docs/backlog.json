@@ -1166,7 +1166,7 @@
       "lib/woods/watch/daemon.rb"
     ],
     "description": "Daemon#run's ensure block runs on the early return :already_running path, so a correctly standing-down second daemon still executes persist_pending([]) and publish_status(:stopped) - overwriting the LIVE daemon's record under the stander-down's pid for up to HEARTBEAT_INTERVAL (300s). Every caller's stand-down logic inverts: a 'watch_status || start' hook immediately starts a third daemon (exactly the state the guard prevents), woods:incremental contends with the live lock, and carried-forward paths in watch_pending.json are lost (reproduced end-to-end). Fix: return before side-effecting state and guard the ensure (e.g. @started flag or inner run_started method). Acceptance: status record and watch_pending.json byte-identical after a stand-down. Tracked in GH #196.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1180,7 +1180,7 @@
       "lib/woods/coordination/pipeline_lock.rb"
     ],
     "description": "touch uses FileUtils.touch, which CREATES the file when missing. The heartbeat racing release (lock_ownership reads :ours, release renames+deletes, touch recreates) leaves a fresh 0-byte lock no process owns and no release will delete - every writer blocks for the full 600s stale window and manual rake runs exit 1 claiming a writer exists while none does (reproduced). Fix: refresh without create semantics - File.utime(t, t, path) (ENOENT already rescued by the method's SystemCallError rescue); optionally re-verify ownership on the same fd. Tracked in GH #197.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

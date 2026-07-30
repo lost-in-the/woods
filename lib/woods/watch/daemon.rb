@@ -171,24 +171,18 @@ module Woods
       #   `:idle`, or `:already_running` when another daemon already covers this
       #   index
       def run
+        # Standing down must leave no trace. The shutdown writes live in
+        # {#run_started}'s `ensure`, which Ruby runs on an early `return` too —
+        # so hanging them off *this* method had the daemon that correctly
+        # refused to start persist an empty pending file over the live daemon's
+        # carried paths and publish `stopped` under its own pid over the live
+        # `running` record. Until the live daemon's next heartbeat re-stamped
+        # the truth (up to {HEARTBEAT_INTERVAL}), `woods:watch_status` read
+        # dead — a `watch_status || start` hook booted a third daemon and
+        # `woods:incremental` stopped standing down.
         return :already_running if another_daemon_alive?
 
-        watcher = @watcher || build_watcher
-        publish_status(:running, reason: nil)
-        @last_event_at = monotonic_now
-        heartbeat = start_heartbeat(watcher)
-
-        catch_up(watcher)
-        start_watching(watcher) do |paths|
-          enqueue(paths)
-          drain(watcher)
-        end
-
-        @stop_reason || :stopped
-      ensure
-        heartbeat&.kill
-        persist_pending
-        publish_status(:stopped, reason: @stop_reason&.to_s)
+        run_started
       end
 
       # Stop the loop at the next opportunity.
@@ -221,6 +215,30 @@ module Woods
       end
 
       private
+
+      # The watch loop proper, split from {#run} so the shutdown `ensure` —
+      # publish `stopped`, persist carried paths — can only ever fire for a
+      # daemon that actually started. A stand-down returns from {#run} without
+      # entering this method, so nothing it does on the way out can clobber
+      # the live daemon's records.
+      def run_started
+        watcher = @watcher || build_watcher
+        publish_status(:running, reason: nil)
+        @last_event_at = monotonic_now
+        heartbeat = start_heartbeat(watcher)
+
+        catch_up(watcher)
+        start_watching(watcher) do |paths|
+          enqueue(paths)
+          drain(watcher)
+        end
+
+        @stop_reason || :stopped
+      ensure
+        heartbeat&.kill
+        persist_pending
+        publish_status(:stopped, reason: @stop_reason&.to_s)
+      end
 
       # What this batch demands, with one escalation applied: an app that cannot
       # reload at all (`config.enable_reloading = false` — the production

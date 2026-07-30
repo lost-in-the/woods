@@ -302,5 +302,47 @@ RSpec.describe Woods::Coordination::PipelineLock do
 
       expect(holder.touch).to be false
     end
+
+    # `touch` used to refresh via FileUtils.touch, which CREATES a missing
+    # file. A heartbeat racing a release could read :ours, lose the file to
+    # the release's rename+delete, and then recreate an empty 0-byte lock no
+    # process owns and no release will ever delete — every writer blocked for
+    # the full stale window.
+    describe 'a lock that vanishes' do
+      let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+
+      it 'does not recreate the file after its own release removed it' do
+        holder = build(stale_timeout: 600)
+        holder.acquire
+        holder.release
+
+        expect(holder.touch).to be false
+        expect(File.exist?(lock_path)).to be false
+      end
+
+      it 'does not recreate a lock deleted out from under it' do
+        holder = build(stale_timeout: 600)
+        holder.acquire
+        FileUtils.rm_f(lock_path)
+
+        expect(holder.touch).to be false
+        expect(File.exist?(lock_path)).to be false
+      end
+
+      it 'does not recreate a lock that vanishes between the ownership read and the refresh' do
+        holder = build(stale_timeout: 600)
+        holder.acquire
+        # Interleave the race deterministically: ownership reads :ours, then
+        # the lock vanishes (a release racing this heartbeat) before the
+        # refresh lands.
+        allow(holder).to receive(:lock_ownership) do
+          FileUtils.rm_f(lock_path)
+          :ours
+        end
+
+        expect(holder.touch).to be false
+        expect(File.exist?(lock_path)).to be false
+      end
+    end
   end
 end
