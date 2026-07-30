@@ -1060,6 +1060,178 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── extract_all orphan sweep (#177) ──────────────────────────────────
+
+  # A full extraction never wipes the output directory, so extracting into a
+  # directory that saw a different version of the app left the previous run's
+  # unit files in place. The freshly-written _index.json and manifest were
+  # correct — but the NEXT incremental run's regenerate_type_index rebuilds
+  # the index from a disk glob of the type dir, resurrecting every orphan into
+  # the listed index, and persisted_counts then wrote the inflated counts into
+  # the manifest. On a full run the in-memory @results are authoritative (the
+  # argument rewrite_flow_annotated_units already makes), so anything they do
+  # not account for is swept.
+  describe 'full extraction orphan sweep (#177)' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:models_dir) { File.join(output_dir, 'models') }
+    let(:rails_source_dir) { File.join(output_dir, 'rails_source') }
+    let(:framework_id) { 'rails/activerecord/lib/active_record/enum.rb' }
+
+    let(:current_unit) do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.source_code = 'class User; end'
+      unit
+    end
+
+    let(:fake_models_class) do
+      unit = current_unit
+      Class.new { define_method(:extract_all) { [unit] } }
+    end
+
+    let(:fake_empty_class) do
+      Class.new do
+        def extract_all
+          []
+        end
+      end
+    end
+
+    before do
+      require 'woods'
+      # extract_all runs the whole write pipeline: Time.current (timing logs +
+      # manifest), Rails.version (manifest), titleize (SUMMARY.md). Require and
+      # stub so the examples don't depend on suite ordering — see the
+      # #write_manifest context for the pattern.
+      require 'active_support'
+      require 'active_support/isolated_execution_state'
+      require 'active_support/core_ext/time'
+      require 'active_support/core_ext/string/inflections'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.concurrent_extraction = false
+      allow(Time).to receive(:current).and_return(Time.now)
+      allow(Rails).to receive(:version).and_return('8.0.0')
+      allow(extractor).to receive(:safe_eager_load!)
+      allow(extractor).to receive(:git_available?).and_return(false)
+      stub_const('Woods::Extractor::EXTRACTORS',
+                 { models: fake_models_class, rails_source: fake_empty_class })
+    end
+
+    after { Woods.configuration = @original_config }
+
+    def seed_unit_file(dir, filename, identifier)
+      FileUtils.mkdir_p(dir)
+      File.write(
+        File.join(dir, filename),
+        JSON.generate(identifier: identifier, file_path: 'x', namespace: nil,
+                      source_code: '', metadata: {}, chunks: [])
+      )
+    end
+
+    def filename_for(identifier)
+      extractor.send(:collision_safe_filename, identifier)
+    end
+
+    it 'removes stale unit files of both name shapes while keeping the current units and _index.json' do
+      seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost') # current (digest) shape
+      seed_unit_file(models_dir, 'Legacy.json', 'Legacy')        # legacy safe_filename shape
+      seed_unit_file(models_dir, 'User.json', 'User')            # legacy name of a CURRENT unit — still an orphan
+
+      extractor.extract_all
+
+      expect(File.exist?(File.join(models_dir, filename_for('User')))).to be(true)
+      expect(File.exist?(File.join(models_dir, filename_for('Ghost')))).to be(false)
+      expect(File.exist?(File.join(models_dir, 'Legacy.json'))).to be(false)
+      expect(File.exist?(File.join(models_dir, 'User.json'))).to be(false)
+
+      index = JSON.parse(File.read(File.join(models_dir, '_index.json')))
+      expect(index.map { |e| e['identifier'] }).to eq(['User'])
+      expect(File.exist?(File.join(output_dir, 'manifest.json'))).to be(true)
+    end
+
+    it 'touches only *.json inside the type dirs — never non-JSON files or the output root' do
+      seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
+      File.write(File.join(models_dir, 'notes.txt'), 'not woods output')
+      FileUtils.mkdir_p(File.join(output_dir, 'dumps'))
+      File.write(File.join(output_dir, 'dumps', 'stale_vector.json'), '{}')
+      File.write(File.join(output_dir, 'woods.json'), '{}')
+
+      extractor.extract_all
+
+      expect(File.exist?(File.join(models_dir, 'notes.txt'))).to be(true)
+      expect(File.exist?(File.join(models_dir, '_index.json'))).to be(true)
+      expect(File.exist?(File.join(output_dir, 'dumps', 'stale_vector.json'))).to be(true)
+      expect(File.exist?(File.join(output_dir, 'woods.json'))).to be(true)
+    end
+
+    # #169: `woods:extract_framework` writes framework units on demand for
+    # knob-off hosts. A knob-off full run produces no :rails_source key in
+    # @results, so its directory must not be entered at all.
+    it 'leaves the rails_source directory untouched when include_framework_sources is off' do
+      Woods.configuration.include_framework_sources = false
+      seed_unit_file(rails_source_dir, filename_for(framework_id), framework_id)
+
+      extractor.extract_all
+
+      expect(File.exist?(File.join(rails_source_dir, filename_for(framework_id)))).to be(true)
+    end
+
+    # The gate is the @results key, not the type name: with the knob on, the
+    # run produced (an empty) rails_source and its stale files are orphans
+    # like any other type's.
+    it 'sweeps rails_source like any other produced type when the knob is on' do
+      seed_unit_file(rails_source_dir, filename_for(framework_id), framework_id)
+
+      extractor.extract_all
+
+      expect(File.exist?(File.join(rails_source_dir, filename_for(framework_id)))).to be(false)
+    end
+
+    it 'sweeps under concurrent extraction too' do
+      Woods.configuration.concurrent_extraction = true
+      model_name_cache = double('ModelNameCache')
+      allow(model_name_cache).to receive_messages(reset!: nil, model_names: [], model_names_regex: /(?!)/,
+                                                  short_name_map: {}, short_names_regex: /(?!)/)
+      stub_const('Woods::ModelNameCache', model_name_cache)
+      seed_unit_file(models_dir, 'Legacy.json', 'Legacy')
+
+      extractor.extract_all
+
+      expect(File.exist?(File.join(models_dir, 'Legacy.json'))).to be(false)
+      expect(File.exist?(File.join(models_dir, filename_for('User')))).to be(true)
+    end
+
+    # The worsening half of #177, end to end: before the sweep, the orphan the
+    # full run left behind was resurrected into _index.json by the next
+    # incremental run's disk-glob rebuild, and persisted_counts then inflated
+    # the manifest with it. After the sweep there is nothing left to glob.
+    it 'prevents the next incremental regenerate_type_index from resurrecting the orphan' do
+      seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
+
+      extractor.extract_all
+      extractor.send(:regenerate_type_index, :models) # the incremental path's disk-glob rebuild
+
+      index = JSON.parse(File.read(File.join(models_dir, '_index.json')))
+      expect(index.map { |e| e['identifier'] }).to eq(['User'])
+
+      counts, = extractor.send(:persisted_counts)
+      expect(counts[:models]).to eq(1)
+    end
+
+    # The incremental path holds only changed units in memory, so "not in
+    # memory" means nothing there — its deletions are driven by the graph and
+    # the change set (prune_vanished_units, remove_replaced_units), and it
+    # must not inherit the sweep.
+    it 'does not sweep on the incremental path' do
+      seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
+
+      expect(extractor).not_to receive(:sweep_orphaned_unit_files)
+      extractor.extract_changed([])
+
+      expect(File.exist?(File.join(models_dir, filename_for('Ghost')))).to be(true)
+    end
+  end
+
   # ── estimated_tokens_from ────────────────────────────────────────────
 
   # A full extraction indexes a unit's token estimate from the in-memory

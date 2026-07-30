@@ -396,6 +396,12 @@ module Woods
       Rails.logger.info '[Woods] Writing output...'
       write_results
 
+      # Phase 5.1: Sweep unit files no current unit accounts for (#177). Must
+      # run after write_results — the just-written set is what defines
+      # "legitimate" — and belongs to the full path only; the incremental path
+      # deletes through the graph instead. See {#sweep_orphaned_unit_files}.
+      sweep_orphaned_unit_files
+
       # Phase 5.5: Precompute request flows (opt-in). Must run AFTER
       # write_results — FlowAssembler loads unit JSON from disk, so running
       # earlier assembled every flow from absent (fresh output dir) or
@@ -1170,6 +1176,72 @@ module Woods
           json_serialize(type_index_entries(units))
         )
       end
+    end
+
+    # Delete unit JSON files in the just-written type directories that this
+    # full run did not write (#177).
+    #
+    # A full extraction never wipes the output directory —
+    # {#setup_output_directory} only mkdir_p's — so extracting into a
+    # directory that saw a different version of the app left the previous
+    # run's `<Unit>_<digest>.json` files behind. The manifest and the freshly
+    # written `_index.json` were correct, but the NEXT incremental run's
+    # {#regenerate_type_index} rebuilds the index from a disk glob of the type
+    # dir, resurrecting every orphan into the listed index, and
+    # {#persisted_counts} then writes the inflated counts into the manifest —
+    # orphans became listed, retrievable-by-listing units the graph knows
+    # nothing about. On a full run the in-memory `@results` are authoritative
+    # — the same argument {#rewrite_flow_annotated_units} makes for refusing
+    # the disk glob — so a unit file no current unit accounts for is stale by
+    # definition and is removed here.
+    #
+    # The boundary is deliberately narrow:
+    #
+    # * Only the per-type directories this run produced — `@results` keys —
+    #   are entered. When `include_framework_sources` gates rails_source out
+    #   of the run ({#skip_by_configuration?}), `@results` holds no
+    #   `:rails_source` key, so a knob-off full run leaves explicitly
+    #   extracted framework units (`woods:extract_framework`) alone — the
+    #   #169 preservation decision. Nothing outside those directories is
+    #   reachable: manifest, graph, generation, `woods.json`, `dumps/`,
+    #   `flows/` and the lock/status files all live in the output root or in
+    #   directories no extractor key names.
+    # * Only `*.json` directly inside a type dir is considered, and
+    #   `_index.json` is always kept. Non-JSON files and subdirectories are
+    #   never touched.
+    # * Legitimate names are exactly what {#write_results} just wrote —
+    #   {FilenameUtils#collision_safe_filename} over the type's deduped units
+    #   (which covers every unit type the extractor emits: gem_source shares
+    #   `@results[:rails_source]`). Legacy {FilenameUtils#safe_filename} names
+    #   carry no digest suffix, so they never match a current name and are by
+    #   definition orphans of a pre-collision-safe run.
+    #
+    # The incremental path deliberately has no counterpart: it holds only
+    # changed units in memory, so "not in memory" means nothing there —
+    # deletion on that path is driven by the graph and the change set
+    # ({#prune_vanished_units}, {#remove_replaced_units}).
+    #
+    # @return [void]
+    def sweep_orphaned_unit_files
+      @results.each do |type, units|
+        type_dir = @output_dir.join(type.to_s)
+        next unless type_dir.directory?
+
+        keep = units.to_set { |unit| collision_safe_filename(unit.identifier) }
+        keep << '_index.json'
+
+        orphans = Dir[type_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
+        next if orphans.empty?
+
+        orphans.each { |file| FileUtils.rm_f(file) }
+        Rails.logger.info "[Woods] Swept #{orphans.size} orphaned unit file(s) from #{type}/"
+      end
+    rescue StandardError => e
+      # The extraction itself already succeeded; aborting the run over cleanup
+      # would trade orphaned files for a lost index. Error, not warn: the
+      # files this leaves behind are exactly what the next incremental run's
+      # disk glob resurrects.
+      Rails.logger.error "[Woods] Orphaned-unit sweep failed: #{e.message}"
     end
 
     # Build the `_index.json` entry list for a set of in-memory units.
