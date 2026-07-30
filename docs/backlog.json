@@ -1293,7 +1293,7 @@
       "lib/woods/dependency_graph.rb"
     ],
     "description": "Out-degree counts raw edges but incoming contributions sum over the deduplicated @reverse Set - a source with both a :belongs_to and a :code_reference edge to one target (documented-normal) delivers half its mass; edges to unregistered targets leak entirely yet the node is not counted dangling. Reproduced: total mass decayed to 0.46 vs 1.0. Systematically under-ranks the most-referenced units, feeding retrieval ranking and exports. Fix: weight contributions by edge multiplicity; compute out-degree over resolvable edges and treat zero-resolvable nodes as dangling; extend the sum-to-one spec with duplicate-edge and unresolved-target cases. Tracked in GH #205.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1307,7 +1307,7 @@
       "lib/woods/temporal/snapshot_store.rb"
     ],
     "description": "capture upserts with INSERT OR REPLACE keyed on UNIQUE(git_sha); REPLACE mints a NEW autoincrement id, the subsequent DELETE FROM woods_snapshot_units uses the new id and removes nothing, and PRAGMA foreign_keys is never enabled - so the ordinary edit-extract loop at an unchanged HEAD silently leaks a full unit set (~7k rows on a production-shaped host) per run, unboundedly (reproduced). Fix: INSERT ... ON CONFLICT(git_sha) DO UPDATE (keeps the rowid) or fetch-existing-id-first. Spec: double capture at one SHA leaves exactly units.size rows. Tracked in GH #206.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

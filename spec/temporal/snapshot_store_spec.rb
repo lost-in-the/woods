@@ -81,6 +81,38 @@ RSpec.describe Woods::Temporal::SnapshotStore do
       expect(count).to eq(1)
     end
 
+    # #206 — INSERT OR REPLACE deleted the old snapshot row and minted a new
+    # autoincrement id, so the per-unit DELETE keyed on the new id removed
+    # nothing and every re-extraction at an unchanged HEAD leaked a full
+    # unit-hash set (foreign keys are never enabled on this connection).
+    it 'does not leak unit rows when the same SHA is captured twice (#206)' do
+      store.capture(manifest_v1, units_v1)
+      store.capture(manifest_v1, units_v1)
+
+      count = db.get_first_value('SELECT COUNT(*) FROM woods_snapshot_units')
+      expect(count).to eq(units_v1.size)
+    end
+
+    it 'keeps the snapshot row id stable across re-capture (#206)' do
+      first_id = store.capture(manifest_v1, units_v1)[:id]
+      second_id = store.capture(manifest_v1, units_v1)[:id]
+
+      expect(second_id).to eq(first_id)
+    end
+
+    it 'sweeps unit rows orphaned by a pre-#206 leak' do
+      db.execute(<<~SQL, [999, 'Ghost', 'model', 'h9', 'm9', 'd9'])
+        INSERT INTO woods_snapshot_units
+          (snapshot_id, identifier, unit_type, source_hash, metadata_hash, dependencies_hash)
+        VALUES (?, ?, ?, ?, ?, ?)
+      SQL
+
+      store.capture(manifest_v1, units_v1)
+
+      orphans = db.get_first_value('SELECT COUNT(*) FROM woods_snapshot_units WHERE snapshot_id = 999')
+      expect(orphans).to eq(0)
+    end
+
     it 'computes diff stats vs previous snapshot' do
       store.capture(manifest_v1, units_v1)
       result = store.capture(manifest_v2, units_v2)
@@ -218,6 +250,28 @@ RSpec.describe Woods::Temporal::SnapshotStore do
       expect(result[:added]).to eq([])
       expect(result[:modified]).to eq([])
       expect(result[:deleted]).to eq([])
+    end
+  end
+
+  # ── diff / history across a re-captured SHA (#206) ─────────────────
+
+  describe 'diff and history across a re-captured SHA' do
+    before do
+      store.capture(manifest_v1, units_v1)
+      store.capture(manifest_v1, units_v1) # re-extraction at an unchanged HEAD
+      store.capture(manifest_v2, units_v2)
+    end
+
+    it 'diffs the two SHAs exactly as if each had been captured once' do
+      result = store.diff('aaa1111', 'bbb2222')
+
+      expect(result[:added].map { |u| u[:identifier] }).to contain_exactly('Comment')
+      expect(result[:modified].map { |u| u[:identifier] }).to contain_exactly('User')
+      expect(result[:deleted].map { |u| u[:identifier] }).to contain_exactly('Post')
+    end
+
+    it 'keeps unit history at one entry per SHA' do
+      expect(store.unit_history('User').map { |e| e[:git_sha] }).to eq(%w[bbb2222 aaa1111])
     end
   end
 

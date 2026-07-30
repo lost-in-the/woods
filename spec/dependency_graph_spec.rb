@@ -176,6 +176,66 @@ RSpec.describe Woods::DependencyGraph do
       total = graph.pagerank.values.sum
       expect(total).to be_within(0.01).of(1.0)
     end
+
+    # #205 — out-degree was counted over raw edges while contributions were
+    # summed over the deduplicated reverse Set, so a source with two edges to
+    # one target (`:belongs_to` + `:code_reference` is documented normal, see
+    # #dependents_detail) delivered only half its mass.
+    context 'when a source has two edges to one target (#205)' do
+      before do
+        graph.register(make_unit(type: :model, identifier: 'User'))
+        graph.register(make_unit(type: :model, identifier: 'Account'))
+        graph.register(make_unit(
+                         type: :model, identifier: 'Order',
+                         dependencies: [
+                           { type: :model, target: 'User', via: :belongs_to },
+                           { type: :model, target: 'User', via: :code_reference },
+                           { type: :model, target: 'Account', via: :belongs_to }
+                         ]
+                       ))
+      end
+
+      it 'conserves total mass' do
+        total = graph.pagerank.values.sum
+        expect(total).to be_within(0.01).of(1.0)
+      end
+
+      it 'ranks the twice-referenced target above the once-referenced one' do
+        scores = graph.pagerank
+        expect(scores['User']).to be > scores['Account']
+      end
+    end
+
+    # #205 — an edge to a target that is not a registered node (a gem or
+    # framework constant) inflated out-degree, so its share of the source's
+    # mass vanished from the system every iteration.
+    context 'when edges point at unregistered targets (#205)' do
+      before do
+        graph.register(make_unit(type: :model, identifier: 'User'))
+        graph.register(make_unit(
+                         type: :service, identifier: 'Signup',
+                         dependencies: [
+                           { type: :model, target: 'User', via: :code_reference },
+                           { type: :service, target: 'Stripe::Client', via: :code_reference }
+                         ]
+                       ))
+      end
+
+      it 'conserves total mass' do
+        total = graph.pagerank.values.sum
+        expect(total).to be_within(0.01).of(1.0)
+      end
+
+      it 'treats a node whose every edge is unresolvable as dangling' do
+        graph.register(make_unit(
+                         type: :service, identifier: 'Webhook',
+                         dependencies: [{ type: :service, target: 'Stripe::Event', via: :code_reference }]
+                       ))
+
+        total = graph.pagerank.values.sum
+        expect(total).to be_within(0.01).of(1.0)
+      end
+    end
   end
 
   describe '#node_exists?' do
