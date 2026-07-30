@@ -1152,7 +1152,7 @@
       "lib/woods/chunking/semantic_chunker.rb"
     ],
     "description": "All three chunkers track depth only for 'do' blocks (ModelChunker also def), never multi-line if/unless/case/begin/while - a guard-clause if...end mid-method terminates the chunk, misclassifying everything after it (plus the real closing end) into :summary with wrong chunk_type metadata. Endless defs (def show = ...) open a method that never closes, swallowing all subsequent methods (reproduced against the real chunker). Fix: reuse RakeTaskExtractor#block_opener?'s opener set, or better slice chunks by Ast::MethodExtractor (Prism) line ranges; skip method-tracking state for 'def x = expr'. Acceptance: the action chunk contains the method's final end and code following a nested if. Tracked in GH #195.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

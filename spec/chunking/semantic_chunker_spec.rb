@@ -532,4 +532,379 @@ RSpec.describe Woods::Chunking::SemanticChunker do
         .to(change { unit.chunks.size })
     end
   end
+
+  describe 'nested block and endless-def depth tracking (B-083 / #195)' do
+    subject(:chunker) { described_class.new(threshold: 10) }
+
+    def build_unit(type, identifier, source)
+      unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: 'x.rb')
+      unit.source_code = source
+      unit.metadata = {}
+      unit
+    end
+
+    context 'with a controller action containing a nested multi-line if' do
+      let(:unit) do
+        build_unit(:controller, 'PostsController', <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              @post = Post.new(post_params)
+              if @post.save
+                redirect_to @post
+              end
+              NotifyJob.perform_later(@post)
+            end
+
+            def destroy
+              @post.destroy
+              redirect_to posts_url
+            end
+          end
+        RUBY
+      end
+
+      it 'keeps statements after the nested if inside the action chunk' do
+        create_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :action_create }
+        expect(create_chunk.content).to include('NotifyJob.perform_later(@post)')
+      end
+
+      it 'keeps the action closing end inside the action chunk' do
+        create_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :action_create }
+        expect(create_chunk.content.scan(/^\s*end\s*$/).size).to eq(2)
+      end
+
+      it 'does not leak action lines into the summary chunk' do
+        summary = chunker.chunk(unit).find { |c| c.chunk_type == :summary }
+        expect(summary.content).not_to include('NotifyJob')
+      end
+
+      it 'still recognizes the following action' do
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:action_destroy)
+      end
+    end
+
+    context 'with a controller action containing a nested case/when' do
+      let(:unit) do
+        build_unit(:controller, 'PostsController', <<~RUBY)
+          class PostsController < ApplicationController
+            def show
+              case params[:variant]
+              when 'json'
+                render json: @post
+              else
+                render :show
+              end
+              track_view
+            end
+
+            def index
+              @posts = Post.all
+            end
+          end
+        RUBY
+      end
+
+      it 'keeps statements after the case inside the action chunk' do
+        show_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :action_show }
+        expect(show_chunk.content).to include('track_view')
+      end
+
+      it 'does not swallow the following action' do
+        index_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :action_index }
+        expect(index_chunk.content).to include('@posts = Post.all')
+      end
+    end
+
+    context 'with an endless controller action followed by normal actions' do
+      let(:unit) do
+        build_unit(:controller, 'HealthController', <<~RUBY)
+          class HealthController < ApplicationController
+            def show = head :ok
+
+            def index
+              render json: STATUS
+            end
+
+            def create
+              Probe.run!
+              head :created
+            end
+          end
+        RUBY
+      end
+
+      it 'emits three separate action chunks' do
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:action_show, :action_index, :action_create)
+      end
+
+      it 'gives the endless action its own single-line chunk' do
+        show_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :action_show }
+        expect(show_chunk.content.strip).to eq('def show = head :ok')
+      end
+
+      it 'does not swallow subsequent actions into the endless one' do
+        index_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :action_index }
+        expect(index_chunk.content).to include('render json: STATUS')
+        expect(index_chunk.content).not_to include('Probe')
+      end
+    end
+
+    context 'with a service method containing a nested multi-line if' do
+      let(:unit) do
+        build_unit(:service, 'Syncer', <<~RUBY)
+          class Syncer
+            def call
+              if stale?
+                refresh
+              end
+              publish!
+            end
+
+            def status
+              :ok
+            end
+          end
+        RUBY
+      end
+
+      it 'keeps statements after the nested if inside the method chunk' do
+        call_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_call }
+        expect(call_chunk.content).to include('publish!')
+        expect(call_chunk.content.scan(/^\s*end\s*$/).size).to eq(2)
+      end
+
+      it 'does not leak method lines into the summary chunk' do
+        summary = chunker.chunk(unit).find { |c| c.chunk_type == :summary }
+        expect(summary.content).not_to include('publish!')
+      end
+
+      it 'still recognizes the following method' do
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:method_status)
+      end
+    end
+
+    context 'with an endless service method followed by two normal methods' do
+      let(:unit) do
+        build_unit(:service, 'Toolkit', <<~RUBY)
+          class Toolkit
+            def ping = :pong
+
+            def alpha
+              build(1)
+            end
+
+            def beta
+              build(2)
+            end
+          end
+        RUBY
+      end
+
+      it 'emits three separate method chunks' do
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:method_ping, :method_alpha, :method_beta)
+      end
+
+      it 'gives the endless method its own single-line chunk' do
+        ping_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_ping }
+        expect(ping_chunk.content.strip).to eq('def ping = :pong')
+      end
+
+      it 'does not swallow subsequent methods into the endless one' do
+        alpha_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_alpha }
+        expect(alpha_chunk.content).to include('build(1)')
+        expect(alpha_chunk.content).not_to include('build(2)')
+      end
+    end
+
+    context 'with an operator method definition (def ==) that has a body' do
+      let(:unit) do
+        build_unit(:service, 'Money', <<~RUBY)
+          class Money
+            def ==(other)
+              amount == other.amount
+            end
+
+            def positive?
+              amount.positive?
+            end
+          end
+        RUBY
+      end
+
+      it 'tracks it as a normal method, keeping its body and end in one chunk' do
+        eq_chunk = chunker.chunk(unit).find { |c| c.content.include?('def ==(other)') }
+        expect(eq_chunk.chunk_type).to eq(:'method_==')
+        expect(eq_chunk.content).to include('amount == other.amount')
+        expect(eq_chunk.content).to include('end')
+      end
+
+      it 'does not leak the operator method body into the summary chunk' do
+        summary = chunker.chunk(unit).find { |c| c.chunk_type == :summary }
+        expect(summary.content).not_to include('other.amount')
+      end
+
+      it 'still recognizes the following method' do
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:method_positive)
+      end
+    end
+
+    context 'with a setter method definition (def x=) that has a body' do
+      let(:unit) do
+        build_unit(:service, 'Config', <<~RUBY)
+          class Config
+            def timeout=(value)
+              @timeout = Integer(value)
+            end
+
+            def retries
+              @retries || 3
+            end
+          end
+        RUBY
+      end
+
+      it 'is not misread as endless — body and end stay in the method chunk' do
+        setter_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_timeout }
+        expect(setter_chunk.content).to include('@timeout = Integer(value)')
+      end
+
+      it 'still recognizes the following method' do
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:method_retries)
+      end
+    end
+
+    context 'with trailing modifiers, chained ends, and assignment-position keywords' do
+      let(:unit) do
+        build_unit(:service, 'Reporter', <<~RUBY)
+          class Reporter
+            def names
+              return if skipped?
+              list = items.map do |item|
+                item.name
+              end.compact
+              label = if urgent?
+                'URGENT'
+              else
+                'normal'
+              end
+              [label, list].join(': ')
+            end
+
+            def follow_up
+              :done
+            end
+          end
+        RUBY
+      end
+
+      it 'balances the depth so the method closes at its real end' do
+        names_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_names }
+        expect(names_chunk.content).to include("[label, list].join(': ')")
+      end
+
+      it 'does not swallow the following method' do
+        follow_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_follow_up }
+        expect(follow_chunk.content).to include(':done')
+      end
+    end
+
+    context 'with a model method containing a guard-style nested if' do
+      let(:unit) do
+        build_unit(:model, 'Post', <<~RUBY)
+          class Post < ApplicationRecord
+            has_many :comments
+
+            def publish!
+              if draft?
+                update!(published_at: Time.current)
+              end
+              notify_subscribers
+            end
+
+            def archived?
+              archived_at.present?
+            end
+          end
+        RUBY
+      end
+
+      it 'keeps the whole method body in the :methods chunk' do
+        methods_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :methods }
+        expect(methods_chunk.content).to include('notify_subscribers')
+        expect(methods_chunk.content).to include('def archived?')
+      end
+
+      it 'does not misclassify method lines into other sections' do
+        chunks = chunker.chunk(unit)
+        assoc_chunk = chunks.find { |c| c.chunk_type == :associations }
+        summary = chunks.find { |c| c.chunk_type == :summary }
+        expect(assoc_chunk.content).not_to include('notify_subscribers')
+        expect(summary.content).not_to include('notify_subscribers')
+      end
+    end
+
+    context 'with an endless model method followed by DSL declarations' do
+      let(:unit) do
+        build_unit(:model, 'Post', <<~RUBY)
+          class Post < ApplicationRecord
+            def title = super&.strip
+
+            validates :body, presence: true
+
+            def word_count
+              body.split.size
+            end
+          end
+        RUBY
+      end
+
+      it 'does not swallow subsequent declarations into :methods' do
+        validations = chunker.chunk(unit).find { |c| c.chunk_type == :validations }
+        expect(validations).not_to be_nil
+        expect(validations.content).to include('validates :body')
+      end
+
+      it 'keeps both methods in the :methods chunk' do
+        methods_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :methods }
+        expect(methods_chunk.content).to include('def title = super&.strip')
+        expect(methods_chunk.content).to include('body.split.size')
+      end
+    end
+
+    context 'with a model method containing case/in pattern matching' do
+      let(:unit) do
+        build_unit(:model, 'Event', <<~RUBY)
+          class Event < ApplicationRecord
+            validates :payload, presence: true
+
+            def dispatch
+              case payload
+              in { type: 'a' }
+                handle_a
+              in { type: 'b' }
+                handle_b
+              end
+              audit!
+            end
+          end
+        RUBY
+      end
+
+      it 'keeps statements after the case inside the :methods chunk' do
+        methods_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :methods }
+        expect(methods_chunk.content).to include('audit!')
+      end
+
+      it 'does not misclassify method lines into the :validations section' do
+        validations = chunker.chunk(unit).find { |c| c.chunk_type == :validations }
+        expect(validations.content).not_to include('audit!')
+      end
+    end
+  end
 end

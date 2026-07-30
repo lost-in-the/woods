@@ -29,6 +29,114 @@ module Woods
       end
     end
 
+    # Shared line-level Ruby block accounting for the chunkers in this
+    # file (B-083 / #195). Mirrors the proven heuristic in
+    # Woods::Extractors::RakeTaskExtractor#block_opener? — credit to that
+    # implementation for the "modifier keywords only count in statement
+    # position" rule (`return if x` must not open a block). Copied rather
+    # than shared so the extractor and the chunkers stay independent.
+    #
+    # Known limitations (deliberate — this is a line classifier, not a
+    # parser): heredoc and multi-line string bodies whose lines look like
+    # keywords (`<<~SQL` containing a bare `end` or a leading `case`)
+    # will skew the depth count, multi-line brace blocks (`{ ... }`) are
+    # not tracked, and a trailing comment containing `do`/`end` on the
+    # same line as real code can miscount. The AST layer
+    # (Woods::Ast) is the right tool when exactness matters.
+    module LineDepthTracking
+      # Multi-line `do` block opener — `items.each do |item|`. Anchored
+      # to end-of-line (optionally through block args and a trailing
+      # comment) so prose containing "do" mid-line doesn't count.
+      DO_BLOCK_PATTERN = /\bdo\s*(?:\|[^|]*\|)?\s*(?:#.*)?\z/
+
+      # Keywords that open an `end`-terminated body only in statement
+      # position: at line start, or directly after an assignment
+      # (`status = if urgent?`, `@memo ||= begin`). Trailing modifier
+      # forms (`return if x`, `retry while busy?`) must not count, and
+      # ternaries / `case ... in` clauses never involve these keywords
+      # in statement position, so they add no depth.
+      STATEMENT_KEYWORD_PATTERN =
+        /(?:\A|=\s*)(?:if|unless|case|begin|while|until|for|def|class|module)\b/
+
+      # A line that begins with `end` closes one body — including the
+      # chained (`end.compact`) and modifier (`end while retry?`) forms.
+      # `(?!:)` excludes `end:` (a symbol hash key, legal despite the
+      # reserved word).
+      END_LINE_PATTERN = /\Aend\b(?!:)/
+
+      # Operator method names, longest-first so `<=>` wins over `<=`.
+      OPERATOR_METHOD_NAMES =
+        '<=>|===|==|=~|!~|!=|\[\]=|\[\]|\*\*|<<|>>|<=|>=|[+-]@|[+\-*\/%<>&|^~!]'
+
+      # Name of an operator method definition (`def ==(other)`).
+      OPERATOR_DEF_NAME_PATTERN = /\A\s*def\s+(?:self\s*\.\s*)?(#{OPERATOR_METHOD_NAMES})/
+
+      # Endless (Ruby 3.0+) method definition: `def show = head :ok`.
+      # The endless marker is an `=` AFTER the method name and optional
+      # parameter list — `def ==(other)` and `def x=(v)` are ordinary
+      # defs whose *name* contains `=`, and both open a body. The
+      # marker's `=` must follow whitespace or a closing paren, which
+      # also keeps the rare space-form setter (`def x= v`) classified
+      # as a normal def. Limitation: a parameter default containing
+      # `)` (`def f(a = (1)) = a`) is misread as a normal def.
+      ENDLESS_DEF_PATTERN = /
+        \A \s* def \s+
+        (?: self \s* \. \s* )?
+        (?: #{OPERATOR_METHOD_NAMES}
+          | \w+ = (?= \s* \( )   # setter name (`def x=(v)`) — `=` is part of the name
+          | \w+ [?!]?            # plain name, may end with ? or !
+        )
+        (?: \s* \( [^)]* \) \s* | \s+ )
+        = \s* \S
+      /x
+
+      private
+
+      # Does this line open a block that a later `end` will close?
+      #
+      # @param line [String] raw source line
+      # @return [Boolean]
+      def block_opener?(line)
+        stripped = line.strip
+        return false if stripped.empty? || stripped.start_with?('#')
+        return false if endless_def?(stripped)
+        # An opener whose `end` sits on the same line is self-balancing
+        # (`if x then y end`) — count neither side.
+        return false if stripped.match?(/\bend\s*\z/)
+
+        stripped.match?(STATEMENT_KEYWORD_PATTERN) || stripped.match?(DO_BLOCK_PATTERN)
+      end
+
+      # Does this line close a block (`end`, `end.compact`, `end while x`)?
+      #
+      # @param line [String] raw source line
+      # @return [Boolean]
+      def block_terminator?(line)
+        line.strip.match?(END_LINE_PATTERN)
+      end
+
+      # Is this line an endless method definition (`def show = head :ok`)?
+      # Endless defs have no body and no closing `end`, so they must
+      # never enter method-tracking state or contribute depth.
+      #
+      # @param line [String] raw source line
+      # @return [Boolean]
+      def endless_def?(line)
+        line.match?(ENDLESS_DEF_PATTERN)
+      end
+
+      # Extract an operator method name (`==`, `<=>`, `[]`) from a def
+      # line. Fallback for the chunkers' `\w+`-based name extraction —
+      # without it `current_method` is set to nil (falsy), tracking never
+      # engages, and the operator method's body leaks out of its chunk.
+      #
+      # @param line [String] raw source line
+      # @return [String, nil] the operator name, or nil for non-operator defs
+      def operator_def_name(line)
+        line[OPERATOR_DEF_NAME_PATTERN, 1]
+      end
+    end
+
     # Class-like unit types that MethodChunker handles — anything
     # shaped as "class or module with public methods, maybe privates,
     # maybe callbacks/filters." Extend this list when new extractors
@@ -298,6 +406,7 @@ module Woods
     # @api private
     class ModelChunker
       include ChunkBuilder
+      include LineDepthTracking
 
       ASSOCIATION_PATTERN = /^\s*(has_many|has_one|belongs_to|has_and_belongs_to_many)\b/
       VALIDATION_PATTERN = /^\s*validates?\b/
@@ -370,12 +479,15 @@ module Woods
       def track_method_line(state, line)
         state[:sections][:methods] << line
         update_method_depth(state, line)
-        state[:in_method] = false if state[:depth] <= 0 && line.strip.match?(/^end\s*$/)
+        state[:in_method] = false if state[:depth] <= 0 && block_terminator?(line)
       end
 
+      # Balance nested blocks (`do`, multi-line `if`/`unless`/`case`/
+      # `begin`/`while`/`until`, nested `def`) so a nested `end` doesn't
+      # close the method early (B-083 / #195).
       def update_method_depth(state, line)
-        state[:depth] += 1 if line.match?(/\bdo\b|\bdef\b/) && !line.match?(/\bend\b/)
-        state[:depth] -= 1 if line.strip == 'end' || (line.match?(/\bend\s*$/) && state[:depth].positive?)
+        state[:depth] += 1 if block_opener?(line)
+        state[:depth] -= 1 if block_terminator?(line)
       end
 
       # Classify a single non-method line.
@@ -404,9 +516,14 @@ module Woods
       end
 
       def start_method(state, line)
+        state[:sections][:methods] << line
+        # An endless def (`def title = super&.strip`) has no body and no
+        # closing `end` — entering tracking state for it would swallow
+        # every subsequent line into :methods.
+        return if endless_def?(line)
+
         state[:in_method] = true
         state[:depth] = 1
-        state[:sections][:methods] << line
       end
 
       def assign_fallback(state, line)
@@ -424,6 +541,7 @@ module Woods
     # @api private
     class ControllerChunker
       include ChunkBuilder
+      include LineDepthTracking
 
       FILTER_PATTERN = /^\s*(before_action|after_action|around_action|skip_before_action)\b/
 
@@ -458,10 +576,13 @@ module Woods
         state
       end
 
+      # While inside an action body, collect every line and balance
+      # nested blocks (`do`, multi-line `if`/`case`/…) so a nested `end`
+      # doesn't close the action early (B-083 / #195).
       def track_action_line(state, line)
         state[:actions][state[:current_action]] << line
-        state[:depth] += 1 if line.match?(/\bdo\b/) && !line.match?(/\bend\b/)
-        return unless line.strip.match?(/^end\s*$/)
+        state[:depth] += 1 if block_opener?(line)
+        return unless block_terminator?(line)
 
         state[:depth] -= 1
         return unless state[:depth] <= 0
@@ -483,9 +604,14 @@ module Woods
 
       def start_action(state, line)
         action_name = line[/def\s+(\w+)/, 1]
+        state[:actions][action_name] = [line]
+        # An endless def (`def show = head :ok`) is a complete action on
+        # its own line — no body follows, so entering tracking state
+        # would swallow every subsequent action into this chunk.
+        return if endless_def?(line)
+
         state[:current_action] = action_name
         state[:depth] = 1
-        state[:actions][action_name] = [line]
       end
 
       # @param state [Hash]
@@ -520,6 +646,7 @@ module Woods
     # @api private
     class MethodChunker
       include ChunkBuilder
+      include LineDepthTracking
 
       # @param unit [ExtractedUnit]
       def initialize(unit)
@@ -555,15 +682,15 @@ module Woods
       end
 
       # While inside a method body, collect every line and track depth so
-      # we know when the method closes. Blocks (`do...end`, `if...end`)
-      # nest inside methods and must be balanced before the method's own
-      # `end` line counts.
+      # we know when the method closes. Blocks (`do...end`, multi-line
+      # `if...end`, `case...end`, …) nest inside methods and must be
+      # balanced before the method's own `end` line counts (B-083 / #195).
       def track_method_line(state, line)
         target = state[:in_private] ? state[:private_methods] : state[:methods][state[:current_method]]
         target << line
 
-        state[:depth] += 1 if line.match?(/\bdo\b/) && !line.match?(/\bend\b/)
-        return unless line.strip.match?(/^end\s*$/)
+        state[:depth] += 1 if block_opener?(line)
+        return unless block_terminator?(line)
 
         state[:depth] -= 1
         return unless state[:depth] <= 0
@@ -588,9 +715,7 @@ module Woods
       end
 
       def start_method(state, line)
-        method_name = line[/def\s+(?:self\.)?(\w+)/, 1]
-        state[:current_method] = method_name
-        state[:depth] = 1
+        method_name = line[/def\s+(?:self\.)?(\w+)/, 1] || operator_def_name(line)
 
         if state[:in_private]
           state[:private_methods] << line
@@ -600,6 +725,13 @@ module Woods
           # methods in source order.
           state[:methods][method_name] = [line]
         end
+
+        # An endless def (`def ping = :pong`) is complete on its own line
+        # — entering tracking state would swallow every later method.
+        return if endless_def?(line)
+
+        state[:current_method] = method_name
+        state[:depth] = 1
       end
 
       # Build the final chunk array from the parse state.
