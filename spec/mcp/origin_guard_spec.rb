@@ -6,10 +6,11 @@ require 'woods/mcp/origin_guard'
 RSpec.describe Woods::MCP::OriginGuard do
   let(:inner_app) { ->(_env) { [200, { 'content-type' => 'text/plain' }, ['ok']] } }
 
-  def call(middleware, origin: nil, method: 'POST', host: nil)
+  def call(middleware, origin: nil, method: 'POST', host: nil, path: nil)
     env = { 'REQUEST_METHOD' => method }
     env['HTTP_ORIGIN'] = origin if origin
     env['HTTP_HOST'] = host if host
+    env['PATH_INFO'] = path if path
     middleware.call(env)
   end
 
@@ -152,6 +153,90 @@ RSpec.describe Woods::MCP::OriginGuard do
     it 'rejects mixed-radix IPv4 (0x7f.0.0.1 = 127.0.0.1)' do
       status, = call(middleware, host: '0x7f.0.0.1:3000')
       expect(status).to eq(403)
+    end
+  end
+
+  # Regression for #183: the railtie used to mount OriginGuard with no path
+  # scoping, so any non-loopback Host 403'd the ENTIRE host app. With
+  # `path:` set, only requests under that prefix are guarded.
+  describe 'path scoping (path: kwarg)' do
+    subject(:middleware) { described_class.new(inner_app, path: '/mcp/console') }
+
+    it 'passes GET / with a disallowed Origin through untouched' do
+      status, headers, body = call(middleware, origin: 'http://evil.example.com', path: '/')
+      expect(status).to eq(200)
+      expect(body).to eq(['ok'])
+      expect(headers).not_to have_key('access-control-allow-origin')
+    end
+
+    it 'passes a non-loopback Host through untouched outside the scoped path' do
+      status, = call(middleware, host: 'app.internal.example.com', path: '/posts')
+      expect(status).to eq(200)
+    end
+
+    it 'still rejects a disallowed Origin at the scoped path' do
+      status, = call(middleware, origin: 'http://evil.example.com', path: '/mcp/console')
+      expect(status).to eq(403)
+    end
+
+    it 'still rejects a disallowed Host on subpaths of the scoped path' do
+      status, = call(middleware, host: 'attacker.example.com', path: '/mcp/console/rpc')
+      expect(status).to eq(403)
+    end
+
+    it 'still allows loopback requests at the scoped path' do
+      status, = call(middleware, origin: 'http://localhost', host: 'localhost:3000', path: '/mcp/console')
+      expect(status).to eq(200)
+    end
+  end
+
+  describe 'with path: nil (default)' do
+    subject(:middleware) { described_class.new(inner_app) }
+
+    it 'guards every path — existing standalone behavior' do
+      status, = call(middleware, origin: 'http://evil.example.com', path: '/')
+      expect(status).to eq(403)
+    end
+  end
+
+  # Request-time enablement — the railtie passes a proc reading
+  # Woods.configuration.console_mcp_enabled so a flag set in
+  # config/initializers takes effect (#183).
+  describe 'enabled predicate (enabled: kwarg)' do
+    it 'passes requests through unguarded while the predicate returns false' do
+      middleware = described_class.new(inner_app, enabled: -> { false })
+      status, = call(middleware, origin: 'http://evil.example.com')
+      expect(status).to eq(200)
+    end
+
+    it 'evaluates the predicate on every request' do
+      on = false
+      middleware = described_class.new(inner_app, enabled: -> { on })
+
+      expect(call(middleware, origin: 'http://evil.example.com').first).to eq(200)
+      on = true
+      expect(call(middleware, origin: 'http://evil.example.com').first).to eq(403)
+    end
+  end
+
+  # Regression for #183: middleware arguments are captured before
+  # config/initializers run, so an allow-list configured there must be
+  # resolved lazily, not at construction time.
+  describe 'deferred (callable) allow-list' do
+    it 'resolves the allow-list at request time, not construction time' do
+      origins = []
+      middleware = described_class.new(inner_app, allowed_origins: -> { origins })
+      origins << 'https://app.example.com' # set after construction
+
+      expect(call(middleware, origin: 'https://app.example.com').first).to eq(200)
+      expect(call(middleware, origin: 'http://localhost').first).to eq(403)
+    end
+
+    it 'falls back to the loopback defaults when the callable returns an empty list' do
+      middleware = described_class.new(inner_app, allowed_origins: -> { [] })
+
+      expect(call(middleware, origin: 'http://localhost').first).to eq(200)
+      expect(call(middleware, origin: 'http://evil.example.com').first).to eq(403)
     end
   end
 end

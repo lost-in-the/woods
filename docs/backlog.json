@@ -972,7 +972,7 @@
       "lib/woods/mcp/origin_guard.rb"
     ],
     "description": "railtie.rb:68 inserts OriginGuard and BearerAuth via app.middleware.use with no path scoping; BearerAuth 401s every request lacking the bearer header and OriginGuard 403s any non-loopback Host, so enabling the documented Rack console mode takes the whole host app down. Separately railtie.rb:13/:60 evaluate console_mcp_enabled/session_tracer_enabled at railtie-initializer time, which runs before :load_config_initializers, so setting either flag in config/initializers/woods.rb (the generator-created location every doc names) is a silent no-op. Fix: path-scope the guards (path: kwarg or compose inside Console::RackMiddleware after its path check) and decide enablement lazily at request time (or warn from after_initialize when the flag is set but nothing mounted). Verified against a booted railties 8.1 app. Acceptance: enabling via the initializer mounts and serves only the console path; GET / is untouched. Tracked in GH #183.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

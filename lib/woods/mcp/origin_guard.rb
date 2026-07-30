@@ -48,14 +48,39 @@ module Woods
       FORBIDDEN_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' }, id: nil }.to_json.freeze
       FORBIDDEN_HOST_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Host not allowed' }, id: nil }.to_json.freeze
 
-      def initialize(app, allowed_origins: nil)
+      # @param app [#call] The next Rack app in the middleware stack
+      # @param allowed_origins [Array<String>, #call, nil] Origin allow-list,
+      #   or a callable returning one. A callable is resolved (and memoized)
+      #   on the first guarded request, so an allow-list configured after the
+      #   middleware was inserted — e.g. in `config/initializers/woods.rb`,
+      #   which runs after Rails railtie initializers captured the middleware
+      #   arguments — still takes effect (#183). Empty/nil falls back to
+      #   {DEFAULT_ALLOWED}.
+      # @param path [String, nil] When set, only requests whose PATH_INFO
+      #   starts with this prefix are guarded — everything else passes
+      #   straight through to the app. Nil (the default) guards every request.
+      # @param enabled [#call, nil] Optional request-time predicate. When it
+      #   returns falsy the request passes through unguarded. Nil (the
+      #   default) means always guard.
+      def initialize(app, allowed_origins: nil, path: nil, enabled: nil)
         @app = app
-        @allowed = Array(allowed_origins).compact.reject { |o| o.to_s.strip.empty? }.map { |o| normalize(o) }
-        @allowed = DEFAULT_ALLOWED.dup if @allowed.empty?
-        @allowed_hosts = @allowed.map { |o| extract_host(o) }.compact.uniq
+        @path = path
+        @enabled = enabled
+        if allowed_origins.respond_to?(:call)
+          @allowed_source = allowed_origins
+        else
+          build_allow_list(allowed_origins)
+        end
       end
 
+      # Rack entry point. Out-of-scope requests (non-matching `path:` prefix
+      # or a falsy `enabled:` predicate) pass through untouched.
+      #
+      # @param env [Hash] Rack environment
+      # @return [Array] Rack response triple
       def call(env)
+        return @app.call(env) unless guard?(env)
+
         origin = env['HTTP_ORIGIN']
         method = env['REQUEST_METHOD']
         host = env['HTTP_HOST']
@@ -71,6 +96,40 @@ module Woods
       end
 
       private
+
+      # @param env [Hash] Rack environment
+      # @return [Boolean] whether this request falls under the guard
+      def guard?(env)
+        return false if @path && !env['PATH_INFO'].to_s.start_with?(@path)
+        return false if @enabled && !@enabled.call
+
+        true
+      end
+
+      # Normalize a raw allow-list into `@allowed` + `@allowed_hosts`.
+      #
+      # @param origins [Array<String>, nil]
+      # @return [Array<String>] the normalized allow-list
+      def build_allow_list(origins)
+        allowed = Array(origins).compact.reject { |o| o.to_s.strip.empty? }.map { |o| normalize(o) }
+        allowed = DEFAULT_ALLOWED.dup if allowed.empty?
+        @allowed_hosts = allowed.map { |o| extract_host(o) }.compact.uniq
+        @allowed = allowed
+      end
+
+      # The allow-list, resolving a deferred source on first use. Memoized —
+      # configuration is settled by the time the first request arrives.
+      #
+      # @return [Array<String>]
+      def allowed
+        @allowed || build_allow_list(@allowed_source.call)
+      end
+
+      # @return [Array<String>] hosts extracted from the allow-list
+      def allowed_hosts
+        allowed
+        @allowed_hosts
+      end
 
       def normalize(origin)
         origin.to_s.sub(%r{/\z}, '').downcase
@@ -96,13 +155,13 @@ module Woods
 
         return true if LOOPBACK_HOSTS.include?(bare)
 
-        @allowed_hosts.include?(normalized) || @allowed_hosts.include?(bare)
+        allowed_hosts.include?(normalized) || allowed_hosts.include?(bare)
       end
 
       def origin_allowed?(origin)
         return false if origin.match?(/[[:cntrl:]]/)
 
-        @allowed.include?(normalize(origin)) || @allowed.include?(normalize(origin).sub(/:\d+\z/, ''))
+        allowed.include?(normalize(origin)) || allowed.include?(normalize(origin).sub(/:\d+\z/, ''))
       end
 
       def preflight(origin)

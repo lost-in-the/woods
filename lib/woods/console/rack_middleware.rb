@@ -31,10 +31,12 @@ module Woods
     #     config.console_redacted_columns = %w[api_token password_digest]
     #   end
     #
-    # With the flag off, requests to the mounted path return 410 Gone so
-    # operators can see the endpoint exists but is gated. See
-    # docs/CONSOLE_MCP_SETUP.md for the full security posture (blocked tables,
-    # credential scanner, column/EAV redaction, SafeContext rollback).
+    # With the flag off, requests — including those at the mounted path —
+    # pass through to the app untouched. The Woods railtie mounts this
+    # middleware unconditionally (#183), so a host that has not opted in
+    # must be completely unaffected. See docs/CONSOLE_MCP_SETUP.md for the
+    # full security posture (blocked tables, credential scanner, column/EAV
+    # redaction, SafeContext rollback).
     #
     # == Enabling read tools (console_sql + console_query)
     #
@@ -68,7 +70,10 @@ module Woods
     class RackMiddleware
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the MCP endpoint (default: '/mcp/console')
-      # @param embedded_read_tools [Boolean] Enable sql/query tools in embedded mode (default: false)
+      # @param embedded_read_tools [Boolean, #call] Enable sql/query tools in
+      #   embedded mode (default: false). May be a callable resolved when the
+      #   server is first built — the railtie passes one because middleware
+      #   arguments are captured before config/initializers run (#183).
       # @param unsafe_eval_confirmation [Confirmation, nil] Approval callback for the
       #   `console_eval` opt-in. Required when `WOODS_CONSOLE_UNSAFE_EVAL=true` (or
       #   `config.console_unsafe_eval_enabled = true`); the server refuses to boot
@@ -87,33 +92,32 @@ module Woods
         @transport = nil
       end
 
-      DISABLED_BODY = JSON.generate(
-        error: 'woods_console_disabled',
-        message: 'Woods Console MCP is disabled. Set ' \
-                 'Woods.configuration.console_mcp_enabled = true to enable. ' \
-                 'See docs/CONSOLE_MCP_SETUP.md for the full security posture.'
-      ).freeze
-
       # Rack interface — intercepts requests at the configured path.
       #
-      # Returns 410 Gone when Woods.configuration.console_mcp_enabled is false
-      # (the default). This keeps the middleware inert on hosts that have
-      # mounted it but not yet opted into the feature. All other requests at
-      # non-matching paths pass through to the wrapped app unchanged.
+      # The enabled flag is read from Woods.configuration on every request,
+      # never captured at construction: the railtie inserts this middleware
+      # before config/initializers have run (#183). While
+      # `console_mcp_enabled` is false (the default), requests — even at the
+      # mounted path — pass through to the wrapped app unchanged, so a host
+      # that never opted in is completely unaffected. Requests at
+      # non-matching paths always pass through.
       #
       # @param env [Hash] Rack environment
       # @return [Array] Rack response triple
       def call(env)
-        return @app.call(env) unless env['PATH_INFO'].start_with?(@path)
-        return [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]] unless enabled?
+        return @app.call(env) unless env['PATH_INFO'].to_s.start_with?(@path)
+        return @app.call(env) unless enabled?
 
         ensure_transport.handle_request(Rack::Request.new(env))
       end
 
       private
 
+      # Whether the console is enabled, read from the live configuration on
+      # every request. Nil-safe: the railtie mounts this middleware in every
+      # app (#183), including hosts that never called Woods.configure.
       def enabled?
-        Woods.configuration.console_mcp_enabled
+        Woods.configuration&.console_mcp_enabled
       end
 
       # Thread-safe lazy initialization of the MCP server and transport.
@@ -180,7 +184,7 @@ module Woods
           safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
           redacted_columns: Array(config&.console_redacted_columns),
           redacted_key_values: Array(config&.console_redacted_key_values),
-          read_tools_enabled: @embedded_read_tools,
+          read_tools_enabled: resolve_deferred(@embedded_read_tools),
           model_tables: introspection[:tables],
           model_reflections: introspection[:reflections],
           unsafe_eval_confirmation: @unsafe_eval_confirmation,
@@ -233,6 +237,17 @@ module Woods
         rescue StandardError
           next
         end
+      end
+
+      # Resolve a constructor option that may have been passed as a callable.
+      # The railtie defers option values because middleware arguments are
+      # captured at railtie-initializer time — before config/initializers
+      # have run (#183).
+      #
+      # @param value [Object, #call]
+      # @return [Object]
+      def resolve_deferred(value)
+        value.respond_to?(:call) ? value.call : value
       end
 
       def structured_logger

@@ -360,9 +360,10 @@ Set these in your Rails initializer:
 Woods.configure do |config|
   # Master on/off switch for the Console MCP feature (Layer 0). Default: false.
   # Applies to every transport: stdio (rake / rails runner), bridge, and Rack.
-  # When false, entry points exit with a "disabled" notice (stdio) or return
-  # 410 Gone (Rack). Set to true only after configuring the layers below that
-  # match your threat model.
+  # When false, stdio entry points exit with a "disabled" notice and the Rack
+  # middleware passes the request through to the host app untouched (the
+  # console path is indistinguishable from an unknown route). Set to true only
+  # after configuring the layers below that match your threat model.
   config.console_mcp_enabled = true
 
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
@@ -423,7 +424,7 @@ end
 Until this flag is `true`, none of the transports route traffic:
 
 - `exe/woods-console-mcp` (bridge stdio) and `exe/woods-console` (embedded stdio) print a notice to stderr and exit 1. MCP clients see the process fail to start.
-- `Woods::Console::RackMiddleware` returns `410 Gone` with a JSON body pointing here. Non-matching paths pass through untouched.
+- `Woods::Console::RackMiddleware` passes the request through to the host app (typically its 404), so a disabled console path is indistinguishable from an unknown route. Non-matching paths always pass through untouched.
 
 Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment — e.g. in `config/environments/development.rb` or a staging-only initializer — once the layers below are configured for that environment's threat model.
 
