@@ -1096,7 +1096,7 @@
       "lib/woods/embedding/indexer.rb"
     ],
     "description": "If an incremental embed run sees zero unit JSONs (mismatched WOODS_OUTPUT between shells, deleted extraction output, glob failure), every hydrated identifier counts as vanished: all vectors pruned, an effectively empty dump promoted, and three runs later retention (default 3) has evicted every dump that held real data (reproduced with the real Indexer). Obsidian/Unblocked gate destructive sweeps behind a 30% purge guard; this sweep has a post-hoc warn. Fix: refuse when current identifiers are empty but persisted ids are not; add a proportional guard (>30% vanished requires override), warning BEFORE deleting. Tracked in GH #191.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1110,7 +1110,7 @@
       "lib/woods/storage/snapshotter/vector.rb"
     ],
     "description": "parse_idx builds ids with byteslice on a binread buffer, so hydrated ids are BINARY-tagged. A non-ASCII identifier is not eql? to the same bytes tagged UTF-8: @persisted_ids.key? misses (checkpoint self-heal re-embeds the unit every incremental run forever) and InMemory#store appends a second live entry instead of overwriting, doubling counts and search results per run. The existing spec asserts byte equality only, papering over it. Fix: force_encoding(UTF_8) in parse_idx (the format already documents UTF-8 bytes) and tighten the spec to include encoding. Tracked in GH #192.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

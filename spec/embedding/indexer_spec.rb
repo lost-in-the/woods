@@ -901,6 +901,18 @@ RSpec.describe Woods::Embedding::Indexer do
       JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
     end
 
+    # The vanished-unit sweep sits behind a 30% purge guard (B-079 / #191),
+    # so specs exercising a *genuine* small deletion need enough persisted
+    # units for one deletion to stay at or under the threshold.
+    def write_filler_units(count)
+      (1..count).each do |i|
+        File.write(File.join(output_dir, "filler_#{i}.json"),
+                   JSON.generate(unit_data.merge('identifier' => "Filler#{i}",
+                                                 'file_path' => "app/models/filler_#{i}.rb",
+                                                 'source_hash' => "filler#{i}")))
+      end
+    end
+
     before do
       File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
       fresh_indexer.index_all
@@ -929,16 +941,18 @@ RSpec.describe Woods::Embedding::Indexer do
     # changes no other unit's source_hash, so processed stays 0 and only the
     # vanished-unit check can notice.
     it 'rewrites the dump when a unit vanished from the index, even with nothing embedded' do
-      fresh_indexer.index_incremental # consume the pending unit
+      write_filler_units(2) # 4 persisted units, so 1 deletion stays under the purge guard
+      fresh_indexer.index_incremental # consume the pending units
       File.delete(File.join(output_dir, 'payment_service.json'))
 
       stats = fresh_indexer.index_incremental
 
       expect(stats[:processed]).to eq(0)
-      expect(persisted_vector_ids).to eq(['User'])
+      expect(persisted_vector_ids).to contain_exactly('User', 'Filler1', 'Filler2')
     end
 
     it 'drops the vanished unit from the metadata dump as well as the vectors' do
+      write_filler_units(2) # 4 persisted units, so 1 deletion stays under the purge guard
       fresh_indexer.index_incremental
       File.delete(File.join(output_dir, 'payment_service.json'))
 
@@ -1018,6 +1032,56 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(persisted_vector_ids).not_to include('User#chunk_2')
     end
 
+    context 'when a unit has a non-ASCII identifier' do
+      # Regression — B-080 / #192. Snapshotter::Vector's parse_idx built ids
+      # with byteslice on a binread buffer, so hydrated ids came back tagged
+      # ASCII-8BIT. A non-ASCII identifier is not eql? to its UTF-8 twin, so
+      # @persisted_ids.key?('Café') missed — the checkpoint self-heal
+      # re-embedded the unit on every incremental run forever — and the
+      # InMemory store's id_to_index lookup missed too, appending a second
+      # live entry per run (doubling counts and search results). Complements
+      # the index_all 'Café' round-trip above, which never hydrates a dump.
+      let(:cafe_unit) do
+        unit_data.merge('identifier' => 'Café',
+                        'file_path' => 'app/models/café.rb',
+                        'source_hash' => 'cafe123')
+      end
+
+      before do
+        File.delete(File.join(output_dir, 'payment_service.json'))
+        Woods::AtomicFile.write(File.join(output_dir, 'cafe.json'), JSON.generate(cafe_unit))
+        fresh_indexer.index_incremental # embeds Café and promotes a dump holding it
+      end
+
+      it 'skips the unchanged unit instead of re-embedding it every run' do
+        embed_calls_before = provider.embed_batch_calls
+
+        stats = fresh_indexer.index_incremental
+
+        expect(stats[:processed]).to eq(0)
+        expect(stats[:skipped]).to eq(2) # User + Café
+        expect(provider.embed_batch_calls).to eq(embed_calls_before)
+      end
+
+      it 'holds exactly one live store entry for the identifier after hydration' do
+        store = Woods::Storage::VectorStore::InMemory.new
+        indexer = described_class.new(
+          provider: provider, text_preparer: text_preparer,
+          vector_store: store,
+          metadata_store: Woods::Storage::MetadataStore::InMemory.new,
+          output_dir: output_dir, batch_size: 2, resolved_config: resolved_config
+        )
+
+        indexer.index_incremental
+
+        # Count by bytes so a duplicate under a different encoding tag is
+        # caught, then assert full equality — encoding included.
+        cafe_entries = store.each_entry.select { |id, _v, _m| id.b == 'Café'.b }
+        expect(cafe_entries.length).to eq(1)
+        expect(cafe_entries.first.first).to eq('Café')
+      end
+    end
+
     it 'falls back to a complete re-embed when the latest dump cannot be read' do
       dump_dir = File.join(output_dir, 'dumps', File.read(File.join(output_dir, 'dumps', 'latest')).strip)
       File.binwrite(File.join(dump_dir, 'vectors.bin'), 'garbage')
@@ -1075,6 +1139,164 @@ RSpec.describe Woods::Embedding::Indexer do
 
       expect { indexer.index_incremental }.to raise_error(Woods::Error, /provider died/)
       expect(checkpoint_on_disk).to eq(before_checkpoint)
+    end
+  end
+
+  # Regression — B-079 / #191. "Vanished" is computed as persisted-minus-
+  # current, so an incremental run that loads zero unit JSONs (mismatched
+  # WOODS_OUTPUT between shells, deleted extraction output, a glob failure)
+  # reads as "every unit vanished": drop_vanished_units pruned every vector
+  # and persist_snapshot promoted an effectively empty dump — and with
+  # retention 3, two more such runs evicted every dump that held real data.
+  # The gem's other destructive sweeps (Obsidian, Unblocked) sit behind a
+  # 30% purge guard; the vanished-unit sweep now has the same guard, with
+  # WOODS_ALLOW_PURGE=1 as the explicit override.
+  describe 'vanished-unit purge guard' do
+    require 'woods/index_artifact'
+    require 'woods/storage/snapshotter'
+
+    let(:resolved_config) do
+      double('ResolvedConfig',
+             model_name: 'stub-embed',
+             to_snapshot_json: { 'schema_version' => 1, 'gem_version' => '0.0.1',
+                                 'created_at' => '2026-04-22T00:00:00Z',
+                                 'embedding_provider' => {}, 'stores' => {} })
+    end
+
+    let(:all_identifiers) { %w[User PaymentService Order Invoice] }
+
+    def fresh_indexer
+      described_class.new(
+        provider: provider,
+        text_preparer: text_preparer,
+        vector_store: Woods::Storage::VectorStore::InMemory.new,
+        metadata_store: Woods::Storage::MetadataStore::InMemory.new,
+        output_dir: output_dir,
+        batch_size: 2,
+        resolved_config: resolved_config
+      )
+    end
+
+    def guarded_indexer
+      indexer = fresh_indexer
+      allow(indexer).to receive(:warn)
+      indexer
+    end
+
+    def persisted_vector_ids
+      artifact = Woods::IndexArtifact.new(output_dir)
+      Woods::Storage::Snapshotter::Vector.load_or_empty(artifact).each_entry.map { |id, _v, _m| id }
+    end
+
+    def dump_dir_names
+      Dir.children(File.join(output_dir, 'dumps')).sort
+    end
+
+    def delete_unit_files(*identifiers)
+      identifiers.each { |name| File.delete(File.join(output_dir, "#{name.downcase}.json")) }
+    end
+
+    before do
+      all_identifiers.each do |name|
+        File.write(File.join(output_dir, "#{name.downcase}.json"),
+                   JSON.generate(unit_data.merge('identifier' => name,
+                                                 'file_path' => "app/models/#{name.downcase}.rb",
+                                                 'source_hash' => "hash-#{name}")))
+      end
+      fresh_indexer.index_all # promote a dump holding all four units
+    end
+
+    context 'when the run loads no units at all' do
+      before { delete_unit_files(*all_identifiers) }
+
+      it 'refuses the prune and keeps every persisted vector' do
+        stats = guarded_indexer.index_incremental
+
+        expect(stats[:processed]).to eq(0)
+        expect(persisted_vector_ids).to match_array(all_identifiers)
+      end
+
+      it 'writes no dump, so the retention window is not rotated' do
+        before_dumps = dump_dir_names
+
+        guarded_indexer.index_incremental
+
+        expect(dump_dir_names).to eq(before_dumps)
+      end
+
+      it 'warns before deleting anything, naming the override' do
+        indexer = guarded_indexer
+
+        indexer.index_incremental
+
+        expect(indexer).to have_received(:warn)
+          .with(/nothing loaded.*refusing to prune 4 persisted.*WOODS_ALLOW_PURGE=1/m)
+      end
+
+      context 'with WOODS_ALLOW_PURGE=1' do
+        before { ENV['WOODS_ALLOW_PURGE'] = '1' }
+        after { ENV.delete('WOODS_ALLOW_PURGE') }
+
+        it 'prunes everything and promotes the (empty) dump' do
+          guarded_indexer.index_incremental
+
+          expect(persisted_vector_ids).to be_empty
+        end
+      end
+    end
+
+    context 'when more than 30% of the persisted units vanished' do
+      before { delete_unit_files('PaymentService', 'Order') } # 2 of 4 = 50%
+
+      it 'refuses the prune and keeps every persisted vector' do
+        stats = guarded_indexer.index_incremental
+
+        expect(stats[:processed]).to eq(0)
+        expect(persisted_vector_ids).to match_array(all_identifiers)
+      end
+
+      it 'warns with the vanished/persisted counts and the override' do
+        indexer = guarded_indexer
+
+        indexer.index_incremental
+
+        expect(indexer).to have_received(:warn)
+          .with(/refusing to prune 2 of 4.*WOODS_ALLOW_PURGE=1/m)
+      end
+
+      context 'with WOODS_ALLOW_PURGE=1' do
+        before { ENV['WOODS_ALLOW_PURGE'] = '1' }
+        after { ENV.delete('WOODS_ALLOW_PURGE') }
+
+        it 'prunes the vanished units' do
+          guarded_indexer.index_incremental
+
+          expect(persisted_vector_ids).to contain_exactly('User', 'Invoice')
+        end
+      end
+    end
+
+    context 'when 30% or fewer of the persisted units vanished' do
+      before { delete_unit_files('Order') } # 1 of 4 = 25%
+
+      it 'prunes and rewrites the dump (the B-069 behaviour is preserved)' do
+        stats = guarded_indexer.index_incremental
+
+        expect(stats[:processed]).to eq(0)
+        expect(persisted_vector_ids).to contain_exactly('User', 'PaymentService', 'Invoice')
+      end
+    end
+
+    context 'on a full run' do
+      it 'still dumps an empty store when the output dir holds no units' do
+        # Full runs never reach the guard: there "nothing loaded" means the
+        # store is genuinely empty and the dump must say so.
+        delete_unit_files(*all_identifiers)
+
+        fresh_indexer.index_all
+
+        expect(persisted_vector_ids).to be_empty
+      end
     end
   end
 

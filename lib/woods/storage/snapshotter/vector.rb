@@ -125,7 +125,14 @@ module Woods
             while pos < idx_data.bytesize
               id_len = idx_data.byteslice(pos, 4).unpack1('L<')
               pos += 4
-              id = idx_data.byteslice(pos, id_len)
+              # The idx format stores ids as UTF-8 bytes (build_idx writes
+              # id.encode('UTF-8').b), but byteslice on a binread buffer
+              # yields ASCII-8BIT. Left untagged, a non-ASCII id is not eql?
+              # to its UTF-8 twin, so every hash lookup keyed on a hydrated
+              # id misses: the Indexer's checkpoint self-heal re-embedded the
+              # unit on every incremental run, and InMemory#store appended a
+              # duplicate live entry each time (B-080 / #192).
+              id = idx_data.byteslice(pos, id_len).force_encoding(Encoding::UTF_8)
               pos += id_len + 8 # skip the u64 offset (not needed for load)
               pairs << id
             end
