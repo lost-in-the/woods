@@ -358,19 +358,32 @@ module Woods
 
       # Extract the fully-qualified class name from source or file path
       #
+      # The identifier is the *outermost* class: the module declarations that
+      # enclose the first `class` line, joined with that class's own (possibly
+      # compact, `Mutations::CreateUser`-style) name. Declarations after the
+      # first `class` are nested — joining every declaration in the file made
+      # a mutation with an inner `class InvalidInput < StandardError` identify
+      # as `Mutations::CreateUser::InvalidInput`, so the file-pass unit never
+      # deduped against the runtime unit in {#extract_all}: double-indexing
+      # with graphql-ruby loaded, dangling edges without it (#202).
+      #
       # @param file_path [String]
       # @param source [String]
       # @return [String, nil]
       def extract_class_name(file_path, source)
-        # Build from nested module/class declarations
-        modules = source.scan(/^\s*(?:module|class)\s+([\w:]+)/).flatten
-        return nil if modules.empty?
+        enclosing_modules = []
 
-        # If first token is a fully-qualified name, use it directly
-        return modules.first if modules.first.include?('::')
+        source.scan(/^\s*(module|class)\s+([\w:]+)/) do |kind, name|
+          # First class declaration wins; anything after it is nested.
+          return (enclosing_modules << name).join('::') if kind == 'class'
 
-        # Otherwise join the nesting
-        modules.join('::')
+          enclosing_modules << name
+        end
+
+        return nil if enclosing_modules.empty?
+
+        # Module-only file (e.g. an interface): the full module nesting.
+        enclosing_modules.join('::')
       rescue StandardError
         # Fall back to convention from file path
         return nil unless defined?(Rails)

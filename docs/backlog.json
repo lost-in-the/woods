@@ -1236,7 +1236,7 @@
       "lib/woods/extractors/caching_extractor.rb"
     ],
     "description": "extract_cache_calls iterates occurrences but calls extract_key_pattern/extract_ttl against the WHOLE source with String#match, which returns the first match in the file - every entry reports the first call's key_pattern and the first expires_in, wrong for any file with more than one cache call (the mainline case; reproduced with the extractor's verbatim regexes). Fix: iterate with MatchData positions and parse key/TTL from each call's own argument text. Spec: two calls produce two distinct key_patterns. Tracked in GH #201.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1250,7 +1250,7 @@
       "lib/woods/extractors/graphql_extractor.rb"
     ],
     "description": "extract_class_name joins EVERY module/class declaration in the file, so a nested 'class InvalidInput < StandardError' inside a mutation yields Mutations::CreateUser::InvalidInput - the file-pass unit no longer collides with the runtime unit's correct identifier, so the class is indexed twice with the gem loaded, and without the gem only the wrong identifier exists and edges targeting the real name dangle. Fix: join only modules preceding the first class declaration plus that class name (same shape as the PORO/Lib half of the #174 family). Related: #174. Tracked in GH #202.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1265,7 +1265,7 @@
       "lib/woods/extractors/scheduled_job_extractor.rb"
     ],
     "description": "Neither YAML.safe_load call passes aliases: true; on Ruby 3.1+ any locale or schedule file using '<<: *defaults' (a widespread idiom) raises Psych::AliasesNotEnabled, converted by the surrounding rescue into a logged skip - the whole file vanishes from the index with no validate-level signal. Fix: aliases: true on both calls (alias expansion of already-permitted scalar types adds no deserialization risk); anchored-YAML specs. Tracked in GH #203.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1279,7 +1279,7 @@
       "lib/woods/extractors/scheduled_job_extractor.rb"
     ],
     "description": "parse_whenever_blocks uses /every\\s+(.+?)\\s+do\\s*\\n(.*?)end/m - the terminator is neither word-bounded nor line-anchored, so the lazy body stops at the first literal 'end' anywhere, including inside CalendarSyncJob or WeekendDigest; the truncated body fails command detection, yielding command_type :unknown, no job_class, and no :job edge (reproduced with the real methods). Fix: line-anchor the terminator (^\\s*end\\s*$) or reuse RakeTaskExtractor's depth tracker; spec with a job name containing 'end'. Tracked in GH #204.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

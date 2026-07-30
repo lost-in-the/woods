@@ -456,6 +456,70 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(unit.source_code).to include('Fields:')
     end
 
+    # #202 — the identifier used to join EVERY module/class declaration in the
+    # file, so a nested error class extended it to
+    # Mutations::CreateUser::InvalidInput. That unit could never dedup against
+    # the runtime unit for the same type in extract_all: double-indexing with
+    # graphql-ruby loaded, dangling edges without it.
+    it 'derives the identifier from the outermost class, ignoring nested classes' do
+      source = <<~RUBY
+        module Mutations
+          class CreateUser < BaseMutation
+            class InvalidInput < StandardError; end
+
+            argument :name, String, required: true
+
+            def resolve(name:)
+              raise InvalidInput if name.empty?
+
+              User.create!(name: name)
+            end
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::CreateUser')
+      expect(unit.namespace).to eq('Mutations')
+    end
+
+    it 'derives the identifier from a compact class declaration' do
+      source = <<~RUBY
+        class Mutations::CreateUser < BaseMutation
+          class InvalidInput < StandardError; end
+
+          argument :name, String, required: true
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::CreateUser')
+    end
+
+    it 'handles mixed nesting with a compact inner class name' do
+      source = <<~RUBY
+        module Mutations
+          class Admin::CreateUser < BaseMutation
+            class InvalidInput < StandardError; end
+
+            argument :name, String, required: true
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/admin/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::Admin::CreateUser')
+    end
+
     it 'returns nil for non-GraphQL files' do
       source = <<~RUBY
         class PlainService
