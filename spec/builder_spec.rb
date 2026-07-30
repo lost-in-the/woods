@@ -222,12 +222,76 @@ RSpec.describe Woods::Builder do
       described_class.new(config).build_retriever
     end
 
-    it 'passes the embedding provider to Retriever' do
-      expect(Woods::Retriever).to receive(:new)
-        .with(hash_including(embedding_provider: fake_embedding_provider))
-        .and_return(fake_retriever)
+    # B-076 / #188 — the raw provider used to be handed straight to the
+    # Retriever, so a single 429/5xx from the provider aborted retrieval
+    # with no retry and no breaker.
+    it 'passes the embedding provider to Retriever wrapped in the resilience stack' do
+      expect(Woods::Retriever).to receive(:new) do |kwargs|
+        wrapped = kwargs[:embedding_provider]
+        expect(wrapped).to be_a(Woods::Resilience::RetryableProvider)
+        expect(wrapped.provider).to be(fake_embedding_provider)
+        fake_retriever
+      end
 
       described_class.new(config).build_retriever
+    end
+  end
+
+  # ── Builder#build_resilient_embedding_provider (#188 / B-076) ─────────
+
+  describe '#build_resilient_embedding_provider' do
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :in_memory
+        c.metadata_store = :sqlite
+        c.graph_store = :in_memory
+        c.embedding_provider = :ollama
+      end
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    before do
+      allow(Woods::Embedding::Provider::Ollama).to receive(:new).and_return(fake_embedding_provider)
+    end
+
+    it 'returns the provider wrapped in RetryableProvider' do
+      expect(builder.build_resilient_embedding_provider)
+        .to be_a(Woods::Resilience::RetryableProvider)
+    end
+
+    it 'wraps a freshly built provider from configuration by default' do
+      expect(builder.build_resilient_embedding_provider.provider).to be(fake_embedding_provider)
+    end
+
+    it 'wraps an explicitly passed provider without rebuilding' do
+      other = instance_double('OtherProvider')
+
+      wrapped = builder.build_resilient_embedding_provider(other)
+
+      expect(wrapped.provider).to be(other)
+      expect(Woods::Embedding::Provider::Ollama).not_to have_received(:new)
+    end
+
+    it 'attaches a circuit breaker to the wrapped provider' do
+      expect(builder.build_resilient_embedding_provider.circuit_breaker)
+        .to be_a(Woods::Resilience::CircuitBreaker)
+    end
+
+    # CLAUDE.md: breaker state is per-instance, never shared across
+    # unrelated components — two builds must not share breaker state.
+    it 'gives each wrapped provider its own breaker instance' do
+      first = builder.build_resilient_embedding_provider
+      second = builder.build_resilient_embedding_provider
+
+      expect(first.circuit_breaker).not_to be(second.circuit_breaker)
+    end
+
+    it 'does not share breakers across Builder instances either' do
+      other_builder = described_class.new(config)
+
+      expect(builder.build_resilient_embedding_provider.circuit_breaker)
+        .not_to be(other_builder.build_resilient_embedding_provider.circuit_breaker)
     end
   end
 
@@ -493,6 +557,17 @@ RSpec.describe Woods::Builder do
       preparer = builder.build_text_preparer(provider)
       expect(preparer.max_tokens).to eq(Woods::Embedding::TextPreparer::DEFAULT_MAX_TOKENS)
     end
+
+    # #188 — calibration must see through the resilience wrapper, or a
+    # wrapped Ollama silently gets OpenAI's 4.0 chars/token ratio.
+    it 'calibrates a resilience-wrapped Ollama exactly like the raw provider' do
+      wrapped = builder.build_resilient_embedding_provider(
+        Woods::Embedding::Provider::Ollama.new(num_ctx: 4096)
+      )
+      preparer = builder.build_text_preparer(wrapped)
+      expect(preparer.chars_per_token).to eq(1.5)
+      expect(preparer.max_tokens).to eq(4096)
+    end
   end
 
   describe '#build_chunker' do
@@ -539,6 +614,16 @@ RSpec.describe Woods::Builder do
       provider = Woods::Embedding::Provider::OpenAI.new(api_key: 'sk-test')
       chunker = builder.build_chunker(provider)
       expect(chunker.instance_variable_get(:@token_counter)).to be_nil
+    end
+
+    # #188 — same see-through requirement as build_text_preparer: a
+    # resilience-wrapped Ollama must still get its TokenCounter.
+    it 'wires a TokenCounter for a resilience-wrapped Ollama provider' do
+      wrapped = builder.build_resilient_embedding_provider(
+        Woods::Embedding::Provider::Ollama.new(num_ctx: 8192)
+      )
+      chunker = builder.build_chunker(wrapped)
+      expect(chunker.instance_variable_get(:@token_counter)).to be_a(Woods::Embedding::TokenCounter)
     end
   end
 end

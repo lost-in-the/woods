@@ -38,10 +38,42 @@ RSpec.describe Woods::Tasks do
     it 'wires the indexer with the configured provider and vector store' do
       described_class.build_embed_indexer
 
-      expect(captured[:provider]).to be(fake_provider)
+      expect(captured[:provider].provider).to be(fake_provider)
       expect(captured[:vector_store]).to be(fake_vector_store)
       expect(captured[:text_preparer]).to be(fake_text_preparer)
       expect(captured[:chunker]).to be(fake_chunker)
+    end
+
+    # B-076 / #188 — the raw provider used to be handed straight to the
+    # Indexer, so a single OpenAI 429 mid-run raised out of embed_batch and
+    # aborted the whole woods:embed run (discarding every embedding already
+    # paid for on the dump-at-end presets).
+    it 'wraps the provider in RetryableProvider with its own circuit breaker' do
+      described_class.build_embed_indexer
+
+      expect(captured[:provider]).to be_a(Woods::Resilience::RetryableProvider)
+      expect(captured[:provider].circuit_breaker).to be_a(Woods::Resilience::CircuitBreaker)
+    end
+
+    it 'builds a fresh breaker per indexer (no shared breaker state)' do
+      described_class.build_embed_indexer
+      first_breaker = captured[:provider].circuit_breaker
+
+      described_class.build_embed_indexer
+
+      expect(captured[:provider].circuit_breaker).not_to be(first_breaker)
+    end
+
+    # Tokenizer calibration dispatches on the provider's concrete class, so
+    # the preparer and chunker must be tuned against the raw provider, not
+    # the resilience wrapper.
+    it 'tunes the text preparer and chunker against the raw provider' do
+      expect_any_instance_of(Woods::Builder).to receive(:build_text_preparer)
+        .with(fake_provider).and_return(fake_text_preparer)
+      expect_any_instance_of(Woods::Builder).to receive(:build_chunker)
+        .with(fake_provider).and_return(fake_chunker)
+
+      described_class.build_embed_indexer
     end
 
     it 'uses config.output_dir by default' do

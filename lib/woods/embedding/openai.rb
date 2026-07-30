@@ -116,7 +116,7 @@ module Woods
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body) # rubocop:disable Metrics/AbcSize
+        def post_request(body)
           request = Net::HTTP::Post.new(ENDPOINT.path)
           request['Content-Type'] = 'application/json'
           request['Authorization'] = "Bearer #{@api_key}"
@@ -124,20 +124,31 @@ module Woods
 
           response = http_client.request(request)
 
-          unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
-          end
+          raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
         rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
           # Connection dropped — reset and retry once
           @http_client = nil
           response = http_client.request(request)
-          unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}"
-          end
+          raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
+        end
+
+        # Build a {RequestError} from a non-success OpenAI response,
+        # attaching the HTTP status and any +Retry-After+ header so the
+        # resilience layer can classify the failure (429/5xx retryable,
+        # 400/401 not) and honor the server-requested back-off.
+        #
+        # @param response [Net::HTTPResponse]
+        # @return [RequestError]
+        def request_error(response)
+          RequestError.new(
+            "OpenAI API error: #{response.code} #{truncate_response_body(response.body)}",
+            http_status: response.code.to_i,
+            retry_after: response['Retry-After']
+          )
         end
 
         # Return a reusable, started HTTP client for the OpenAI API.

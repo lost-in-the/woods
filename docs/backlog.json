@@ -1051,7 +1051,7 @@
       "lib/woods/resilience/retryable_provider.rb"
     ],
     "description": "RetryableProvider and CircuitBreaker have zero production callers; Tasks.build_embed_indexer and Builder#build_retriever hand the raw provider to the pipeline, so any OpenAI 429/5xx raises Woods::Error and aborts the run. On :local/:shared_filesystem presets interval checkpoints are suppressed and the dump only lands at end-of-run, so a mid-run rate limit discards every embedding already paid for. Violates .claude/rules/storage-retrieval.md ('Never let a rate limit crash the indexing pipeline'). Fix: wrap providers in RetryableProvider + per-provider CircuitBreaker at both build sites; honor Retry-After on 429. Acceptance: a provider raising 429 twice then succeeding completes the run. Tracked in GH #188.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

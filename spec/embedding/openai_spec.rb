@@ -152,7 +152,9 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
 
     before do
       allow(error_429_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(error_429_response).to receive(:[]).with('Retry-After').and_return('12')
       allow(error_500_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(error_500_response).to receive(:[]).with('Retry-After').and_return(nil)
     end
 
     it 'raises Woods::Error on 429 response' do
@@ -167,6 +169,28 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       expect { provider.embed('text') }.to raise_error(
         Woods::Error, /OpenAI API error: 500 internal server error/
       )
+    end
+
+    # #188 — the error must carry the HTTP status and Retry-After header so
+    # RetryableProvider can classify it and honor the server's back-off.
+    it 'attaches http_status and Retry-After to a 429 error' do
+      allow(http_double).to receive(:request).and_return(error_429_response)
+
+      expect { provider.embed('text') }
+        .to raise_error(Woods::Embedding::Provider::RequestError) do |error|
+          expect(error.http_status).to eq(429)
+          expect(error.retry_after).to eq('12')
+        end
+    end
+
+    it 'attaches http_status (and nil retry_after) to a 500 error' do
+      allow(http_double).to receive(:request).and_return(error_500_response)
+
+      expect { provider.embed('text') }
+        .to raise_error(Woods::Embedding::Provider::RequestError) do |error|
+          expect(error.http_status).to eq(500)
+          expect(error.retry_after).to be_nil
+        end
     end
   end
 

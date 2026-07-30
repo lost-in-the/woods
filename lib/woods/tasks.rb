@@ -30,6 +30,16 @@ module Woods
       builder = Builder.new(config)
       provider = builder.build_embedding_provider
 
+      # The Indexer gets the provider wrapped in the resilience stack
+      # (retry with backoff + per-instance circuit breaker) so a transient
+      # 429/5xx degrades the run instead of aborting it — on the :local /
+      # :shared_filesystem presets the dump only lands at end-of-run, so an
+      # unwrapped mid-run rate limit used to discard every embedding
+      # already paid for (#188 / B-076). The *raw* provider still feeds
+      # the tokenizer-calibration helpers and the ResolvedConfig probe,
+      # which key off the provider's concrete class.
+      resilient_provider = builder.build_resilient_embedding_provider(provider)
+
       # Wire the persistence-arc pieces (resolved_config, metadata_store,
       # dump_retention_count) so Indexer#persist_snapshot can write
       # woods.json, dump metadata, and honour the user's retention setting.
@@ -40,7 +50,7 @@ module Woods
       # metadata_store and resolved_config are nil-safe — hosts that don't
       # configure metadata or that pre-date the persistence arc still work.
       Embedding::Indexer.new(
-        provider: provider,
+        provider: resilient_provider,
         text_preparer: builder.build_text_preparer(provider),
         vector_store: builder.build_vector_store,
         metadata_store: config.metadata_store ? builder.build_metadata_store : nil,

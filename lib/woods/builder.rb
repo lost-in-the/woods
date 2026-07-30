@@ -8,6 +8,7 @@ require_relative 'storage/metadata_store'
 require_relative 'storage/graph_store'
 require_relative 'embedding/provider'
 require_relative 'embedding/openai'
+require_relative 'resilience/retryable_provider'
 require_relative 'embedding/text_preparer'
 require_relative 'embedding/token_counter'
 require_relative 'token_utils'
@@ -107,7 +108,7 @@ module Woods
     #   on disk and passes the populated store here.
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
     def build_retriever(vector_store: nil, metadata_store: nil, graph_store: nil)
-      provider = build_embedding_provider
+      provider = build_resilient_embedding_provider
       cache = build_cache_store
 
       provider = wrap_with_embedding_cache(provider, cache) if cache
@@ -155,6 +156,30 @@ module Woods
       when :ollama then Embedding::Provider::Ollama.new(**opts)
       else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
       end
+    end
+
+    # Wrap an embedding provider in the resilience stack: retry with
+    # full-jitter exponential backoff (Retry-After aware) plus a dedicated
+    # {Resilience::CircuitBreaker}.
+    #
+    # This is the provider every pipeline entry point must hand to the
+    # Indexer or Retriever — with it, a transient 429/5xx burst degrades a
+    # run instead of aborting it (#188 / B-076). {#build_embedding_provider}
+    # deliberately keeps returning the *raw* provider: the MCP boot path
+    # ({MCP::ProviderProbe}) dispatches on the provider's concrete class and
+    # reads its internals, so the wrap happens here, one layer up.
+    #
+    # Each call constructs a fresh breaker — breaker state is per-instance
+    # and must never be shared across unrelated components.
+    #
+    # @param provider [Embedding::Provider::Interface] raw provider to wrap;
+    #   defaults to a freshly built one from the configuration
+    # @return [Resilience::RetryableProvider] the wrapped provider
+    def build_resilient_embedding_provider(provider = build_embedding_provider)
+      Resilience::RetryableProvider.new(
+        provider: provider,
+        circuit_breaker: Resilience::CircuitBreaker.new
+      )
     end
 
     # Kwargs accepted by embedding provider constructors — everything in
@@ -260,7 +285,7 @@ module Woods
     # @param provider [Embedding::Provider::Interface]
     # @return [Embedding::TokenCounter, nil]
     def token_counter_for(provider)
-      return unless provider.is_a?(Embedding::Provider::Ollama)
+      return unless unwrap_provider(provider).is_a?(Embedding::Provider::Ollama)
 
       Embedding::TokenCounter.new
     end
@@ -272,11 +297,23 @@ module Woods
     # @param provider [Embedding::Provider::Interface]
     # @return [Float]
     def chars_per_token_for(provider)
-      symbol = case provider
+      symbol = case unwrap_provider(provider)
                when Embedding::Provider::Ollama then :ollama
                else :openai
                end
       TokenUtils.chars_per_token_for(symbol)
+    end
+
+    # Reach the concrete provider through the resilience wrapper.
+    # Tokenizer calibration dispatches on the provider's real class, so a
+    # {Resilience::RetryableProvider} handed to {#build_text_preparer} or
+    # {#build_chunker} must calibrate exactly like its inner provider —
+    # without this, a wrapped Ollama silently got OpenAI ratios.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Embedding::Provider::Interface] the innermost provider
+    def unwrap_provider(provider)
+      provider.is_a?(Resilience::RetryableProvider) ? provider.provider : provider
     end
 
     # Diagnostic for the build_chunker budget guard.

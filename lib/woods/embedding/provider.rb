@@ -4,6 +4,11 @@ require 'net/http'
 require 'json'
 
 module Woods
+  # Standalone-load guard — keeps `require 'woods/embedding/provider'`
+  # working without the top-level woods.rb (same pattern as storage/
+  # and console/). {Provider::RequestError} subclasses this at load time.
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Embedding
     # Interface and adapters for embedding providers.
     #
@@ -58,6 +63,33 @@ module Woods
         # @raise [NotImplementedError] if not implemented by the provider
         def max_input_tokens
           raise NotImplementedError
+        end
+      end
+
+      # Raised when an embedding API answers with a non-success HTTP
+      # response. Carries the HTTP status and the raw +Retry-After+ header
+      # (when the server sent one) so {Woods::Resilience::RetryableProvider}
+      # can distinguish transient failures (429 rate limits, 5xx) from
+      # hopeless ones (400 bad request, 401 bad credentials) and honor the
+      # server's requested back-off instead of its own schedule.
+      #
+      # Subclasses {Woods::Error}, so existing `rescue Woods::Error` call
+      # sites keep working unchanged.
+      class RequestError < Woods::Error
+        # @return [Integer, nil] HTTP status code of the failed response
+        attr_reader :http_status
+
+        # @return [String, nil] raw +Retry-After+ header value (delta-seconds
+        #   or HTTP-date form), or nil when the server sent none
+        attr_reader :retry_after
+
+        # @param message [String] human-readable error message
+        # @param http_status [Integer, nil] HTTP status code
+        # @param retry_after [String, nil] raw +Retry-After+ header value
+        def initialize(message, http_status: nil, retry_after: nil)
+          super(message)
+          @http_status = http_status
+          @retry_after = retry_after
         end
       end
 
@@ -213,14 +245,12 @@ module Woods
         # @param body [Hash] request body
         # @return [Hash] parsed JSON response
         # @raise [Woods::Error] if the API returns a non-success status
-        def post_request(body) # rubocop:disable Metrics/AbcSize
+        def post_request(body)
           request = Net::HTTP::Post.new(@uri.path, 'Content-Type' => 'application/json')
           request.body = body.to_json
           response = http_client.request(request)
 
-          unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Ollama API error: #{response.code} #{truncate_response_body(response.body)}"
-          end
+          raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
         rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout, IOError
@@ -231,11 +261,24 @@ module Woods
           rescue StandardError => retry_error
             raise Woods::Error, "Ollama API error (retry failed): #{retry_error.message}"
           end
-          unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Ollama API error: #{response.code} #{truncate_response_body(response.body)}"
-          end
+          raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
+        end
+
+        # Build a {RequestError} from a non-success Ollama response,
+        # attaching the HTTP status and any +Retry-After+ header so the
+        # resilience layer can classify the failure and honor the
+        # server-requested back-off.
+        #
+        # @param response [Net::HTTPResponse]
+        # @return [RequestError]
+        def request_error(response)
+          RequestError.new(
+            "Ollama API error: #{response.code} #{truncate_response_body(response.body)}",
+            http_status: response.code.to_i,
+            retry_after: response['Retry-After']
+          )
         end
 
         # Return a reusable, started HTTP client for the Ollama API.
