@@ -1138,7 +1138,7 @@
       "lib/woods/extractors/test_mapping_extractor.rb"
     ],
     "description": "extract_rspec_subject's constant regex requires whitespace immediately after the constant, so the comma form never matches; the string fallback then matches the FIRST quoted describe anywhere in the file (typically an inner describe 'validations') and that string becomes subject_class and a :model dependency target - the real coverage edge is lost and ghost graph nodes are minted. Since ', type:' metadata is the generator default, most real host apps get a broken test->code mapping. Fix: allow [\\s,] after the constant; anchor the string fallback to the file's first describe line; add specs for the metadata form. Tracked in GH #194.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
