@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -25,6 +26,7 @@ module Woods
     class StateMachineExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       MODEL_DIRECTORIES = %w[app/models].freeze
 
@@ -66,13 +68,19 @@ module Woods
       # Class Discovery
       # ──────────────────────────────────────────────────────────────────────
 
-      # Detect class name from source or derive it from the file path.
+      # Detect the fully-qualified class name from source or derive it from
+      # the file path.
+      #
+      # Uses the position-aware nesting scanner (SourceNesting) so a model
+      # defined as `module Billing; class Payment` is named
+      # +Billing::Payment+, not bare +Payment+ (#174).
       #
       # @param source [String] Ruby source code
       # @param file_path [String] File path
-      # @return [String] Class name
+      # @return [String] Fully-qualified class name
       def detect_class_name(source, file_path)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
+        qualified = qualified_first_class_name(source)
+        return qualified if qualified
 
         relative = file_path.sub("#{Rails.root}/", '')
         relative.sub(%r{^app/models/}, '').sub('.rb', '').camelize
@@ -324,18 +332,9 @@ module Woods
         nil
       end
 
-      # Check if a line opens a new block.
-      #
-      # Mirrors the implementation in RakeTaskExtractor to correctly handle
-      # trailing +if+/+unless+ modifiers vs standalone block openers.
-      #
-      # @param stripped [String] Stripped line content
-      # @return [Boolean]
-      def block_opener?(stripped)
-        return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
-
-        stripped.match?(/\A(if|unless)\b/)
-      end
+      # NOTE: block_opener? (the RakeTaskExtractor-style depth-tracking
+      # discipline used by extract_block_for_state_machine above) is provided
+      # by the included SourceNesting module.
 
       # ──────────────────────────────────────────────────────────────────────
       # Unit Construction

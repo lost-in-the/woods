@@ -275,6 +275,88 @@ RSpec.describe Woods::Extractors::PoroExtractor do
     end
   end
 
+  # ── Namespaced identifiers (#174) ────────────────────────────────────
+
+  describe 'namespaced identifiers (#174)' do
+    it 'qualifies a module-nested class with its enclosing namespace' do
+      path = create_file('app/models/billing/adjustment.rb', <<~RUBY)
+        module Billing
+          class Adjustment
+            def apply(amount); end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_poro_file(path)
+      expect(unit.identifier).to eq('Billing::Adjustment')
+      expect(unit.namespace).to eq('Billing')
+    end
+
+    it 'qualifies a compact-form declaration' do
+      path = create_file('app/models/order/update.rb', <<~RUBY)
+        class Order::Update
+          def call; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_poro_file(path)
+      expect(unit.identifier).to eq('Order::Update')
+    end
+
+    it 'does not let a helper module nested inside the class pollute the identifier' do
+      path = create_file('app/models/invoice.rb', <<~RUBY)
+        class Invoice
+          module Formatting
+            def self.currency(amount); end
+          end
+
+          def total; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_poro_file(path)
+      expect(unit.identifier).to eq('Invoice')
+      expect(unit.namespace).to be_nil
+    end
+
+    it 'does not include sibling modules that closed before the class opened' do
+      path = create_file('app/models/billing/adjustment.rb', <<~RUBY)
+        module Billing
+          module Constants
+            FEE = 1
+          end
+
+          class Adjustment
+            def apply(amount); end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_poro_file(path)
+      expect(unit.identifier).to eq('Billing::Adjustment')
+    end
+
+    it 'keeps cross-namespace same-named classes distinct' do
+      create_file('app/models/billing/payment.rb', <<~RUBY)
+        module Billing
+          class Payment
+            def capture!; end
+          end
+        end
+      RUBY
+      create_file('app/models/legacy/payment.rb', <<~RUBY)
+        module Legacy
+          class Payment
+            def archive!; end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('Billing::Payment', 'Legacy::Payment')
+    end
+  end
+
   # ── Metadata ─────────────────────────────────────────────────────────
 
   describe 'metadata' do

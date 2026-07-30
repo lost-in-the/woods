@@ -220,6 +220,116 @@ RSpec.describe Woods::Extractors::LibExtractor do
                     RUBY
   end
 
+  # ── Namespaced identifiers (#174) ────────────────────────────────────
+
+  describe 'namespaced identifiers (#174)' do
+    it 'qualifies a module-nested class with its enclosing namespace' do
+      path = create_file('lib/external/analytics.rb', <<~RUBY)
+        module External
+          class Analytics
+            def track(event); end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_lib_file(path)
+      expect(unit.identifier).to eq('External::Analytics')
+      expect(unit.namespace).to eq('External')
+    end
+
+    it 'qualifies a compact-form declaration' do
+      path = create_file('lib/json_api/serializer.rb', <<~RUBY)
+        class JsonApi::Serializer
+          def serialize(resource); end
+        end
+      RUBY
+
+      unit = described_class.new.extract_lib_file(path)
+      expect(unit.identifier).to eq('JsonApi::Serializer')
+    end
+
+    it 'does not let a helper module nested inside the class pollute the identifier' do
+      path = create_file('lib/analytics.rb', <<~RUBY)
+        class Analytics
+          module Helpers
+            def self.normalize(event); end
+          end
+
+          def track(event); end
+        end
+      RUBY
+
+      unit = described_class.new.extract_lib_file(path)
+      expect(unit.identifier).to eq('Analytics')
+      expect(unit.namespace).to be_nil
+    end
+
+    it 'does not include sibling modules that closed before the class opened' do
+      path = create_file('lib/external/analytics.rb', <<~RUBY)
+        module External
+          module Config
+            ENDPOINT = 'https://example.test'.freeze
+          end
+
+          class Analytics
+            def track(event); end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_lib_file(path)
+      expect(unit.identifier).to eq('External::Analytics')
+    end
+
+    it 'names a module-only file by its outer module, ignoring inner modules after content' do
+      path = create_file('lib/json_api.rb', <<~RUBY)
+        module JsonApi
+          MEDIA_TYPE = 'application/vnd.api+json'
+
+          module Utils
+            def self.helper; end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_lib_file(path)
+      expect(unit.identifier).to eq('JsonApi')
+    end
+
+    it 'names a namespace-wrapped module-only file by the full chain' do
+      path = create_file('lib/external/config.rb', <<~RUBY)
+        module External
+          module Config
+            ENDPOINT = 'https://example.test'.freeze
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_lib_file(path)
+      expect(unit.identifier).to eq('External::Config')
+    end
+
+    it 'keeps cross-namespace same-named classes distinct' do
+      create_file('lib/billing/client.rb', <<~RUBY)
+        module Billing
+          class Client
+            def call; end
+          end
+        end
+      RUBY
+      create_file('lib/legacy/client.rb', <<~RUBY)
+        module Legacy
+          class Client
+            def call; end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('Billing::Client', 'Legacy::Client')
+    end
+  end
+
   # ── Metadata ─────────────────────────────────────────────────────────
 
   describe 'metadata' do

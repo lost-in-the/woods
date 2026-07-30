@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -25,6 +26,7 @@ module Woods
     class ServiceExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       # Directories to scan for service objects
       SERVICE_DIRECTORIES = %w[
@@ -55,7 +57,12 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a service
       def extract_service_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(file_path, source, '(?:services|interactors|operations|commands|use_cases)')
+        # Position-aware nesting scan first, so `module Billing; class Payment`
+        # is named Billing::Payment, not bare Payment (#174). When the file has
+        # no class declaration at all, extract_class_name falls through to the
+        # same path-based convention as before.
+        class_name = qualified_first_class_name(source) ||
+                     extract_class_name(file_path, source, '(?:services|interactors|operations|commands|use_cases)')
 
         return nil unless class_name
         return nil if skip_file?(source)

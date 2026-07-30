@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -25,6 +26,7 @@ module Woods
     class PoroExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       # Glob pattern for all Ruby files in app/models/ (recursive).
       MODELS_GLOB = 'app/models/**/*.rb'
@@ -123,25 +125,21 @@ module Woods
 
       # Infer the primary class name from source or fall back to file path.
       #
-      # For regular class definitions we parse the first `class Foo` line,
-      # joining outer module namespaces when present. For Struct.new / Data.define
-      # patterns we read the constant assignment name. Falls back to the
-      # Rails camelize convention on the relative path.
+      # For regular class definitions the position-aware nesting scan
+      # (SourceNesting) qualifies the first `class` declaration with the
+      # modules actually open at that position — so a helper module nested
+      # inside the class, or a sibling module that closed before the class
+      # opened, no longer pollutes the identifier (#174). For Struct.new /
+      # Data.define patterns we read the constant assignment name. Falls back
+      # to the Rails camelize convention on the relative path.
       #
       # @param file_path [String] Absolute path to the file
       # @param source [String] Ruby source code
       # @return [String, nil] The inferred class name
       def infer_class_name(file_path, source)
-        # Explicit class keyword — combine outer module namespaces + class name
-        class_match = source.match(/^\s*class\s+([\w:]+)/)
-        if class_match
-          base = class_match[1]
-          # If already fully qualified (e.g., Order::Update), use as-is
-          return base if base.include?('::')
-
-          namespaces = source.scan(/^\s*module\s+([\w:]+)/).flatten
-          return namespaces.any? ? "#{namespaces.join('::')}::#{base}" : base
-        end
+        # Explicit class keyword — enclosing modules joined by position
+        qualified = qualified_first_class_name(source)
+        return qualified if qualified
 
         # Struct.new / Data.define: ConstantName = Struct.new(...)
         struct_match = source.match(/^(\w[\w:]*)\s*=\s*(?:Struct\.new|Data\.define)/)

@@ -325,6 +325,122 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
     end
   end
 
+  # ── Namespaced identifiers (#174) ────────────────────────────────────
+
+  describe 'namespaced identifiers (#174)' do
+    it 'names a concern by its outer module, not an inner ClassMethods module' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            has_many :trackings
+          end
+
+          module ClassMethods
+            def tracked
+              where(tracked: true)
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.identifier).to eq('Trackable')
+      expect(unit.namespace).to be_nil
+    end
+
+    it 'names a plain mixin by its outer module when ClassMethods opens first' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          module ClassMethods
+            def tracked
+              where(tracked: true)
+            end
+          end
+
+          def track!
+            update!(tracked: true)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.identifier).to eq('Trackable')
+    end
+
+    it 'names a concern by its outer module, not an inner InstanceMethods module' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          module InstanceMethods
+            def track!
+              update!(tracked: true)
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.identifier).to eq('Trackable')
+    end
+
+    it 'qualifies a module-nested concern with its namespace wrappers' do
+      path = create_file('app/models/concerns/gateway/stripe/refundable.rb', <<~RUBY)
+        module Gateway
+          module Stripe
+            module Refundable
+              extend ActiveSupport::Concern
+
+              def refund!; end
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.identifier).to eq('Gateway::Stripe::Refundable')
+      expect(unit.namespace).to eq('Gateway::Stripe')
+    end
+
+    it 'qualifies a compact-form concern declaration' do
+      path = create_file('app/models/concerns/billing/invoiceable.rb', <<~RUBY)
+        module Billing::Invoiceable
+          extend ActiveSupport::Concern
+
+          def generate_invoice; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.identifier).to eq('Billing::Invoiceable')
+      expect(unit.namespace).to eq('Billing')
+    end
+
+    it 'keeps cross-namespace same-named concerns distinct' do
+      create_file('app/models/concerns/billing/trackable.rb', <<~RUBY)
+        module Billing
+          module Trackable
+            extend ActiveSupport::Concern
+
+            def track!; end
+          end
+        end
+      RUBY
+      create_file('app/models/concerns/legacy/trackable.rb', <<~RUBY)
+        module Legacy
+          module Trackable
+            extend ActiveSupport::Concern
+
+            def track!; end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('Billing::Trackable', 'Legacy::Trackable')
+    end
+  end
+
   # ── Dependencies ─────────────────────────────────────────────────────
 
   describe 'dependency extraction' do

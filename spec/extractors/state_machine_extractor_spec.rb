@@ -621,6 +621,106 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
     end
   end
 
+  # ── Namespaced identifiers (#174) ────────────────────────────────────
+
+  describe 'namespaced identifiers (#174)' do
+    it 'qualifies a module-nested model with its enclosing namespace' do
+      path = create_file('app/models/billing/payment.rb', <<~RUBY)
+        module Billing
+          class Payment < ApplicationRecord
+            include AASM
+            aasm do
+              state :pending, initial: true
+              state :captured
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+      expect(units.first.identifier).to eq('Billing::Payment::aasm')
+      expect(units.first.namespace).to eq('Billing')
+      expect(units.first.metadata[:model_name]).to eq('Billing::Payment')
+    end
+
+    it 'targets the fully-qualified model constant in dependencies' do
+      path = create_file('app/models/billing/payment.rb', <<~RUBY)
+        module Billing
+          class Payment < ApplicationRecord
+            include AASM
+            aasm do
+              state :pending, initial: true
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+      model_dep = units.first.dependencies.find { |d| d[:type] == :model }
+      expect(model_dep[:target]).to eq('Billing::Payment')
+    end
+
+    it 'qualifies a compact-form declaration' do
+      path = create_file('app/models/billing/payment.rb', <<~RUBY)
+        class Billing::Payment < ApplicationRecord
+          include AASM
+          aasm do
+            state :pending, initial: true
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+      expect(units.first.identifier).to eq('Billing::Payment::aasm')
+      expect(units.first.namespace).to eq('Billing')
+    end
+
+    it 'qualifies a module-nested state_machines gem declaration' do
+      path = create_file('app/models/billing/payment.rb', <<~RUBY)
+        module Billing
+          class Payment < ApplicationRecord
+            state_machine :status, initial: :pending do
+              state :pending
+              state :captured
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+      expect(units.first.identifier).to eq('Billing::Payment::state_machine_status')
+    end
+
+    it 'keeps cross-namespace same-named models distinct' do
+      create_file('app/models/billing/payment.rb', <<~RUBY)
+        module Billing
+          class Payment < ApplicationRecord
+            include AASM
+            aasm do
+              state :pending, initial: true
+            end
+          end
+        end
+      RUBY
+      create_file('app/models/legacy/payment.rb', <<~RUBY)
+        module Legacy
+          class Payment < ApplicationRecord
+            include AASM
+            aasm do
+              state :archived, initial: true
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly(
+        'Billing::Payment::aasm',
+        'Legacy::Payment::aasm'
+      )
+    end
+  end
+
   # ── Serialization round-trip ─────────────────────────────────────────
 
   describe 'serialization' do

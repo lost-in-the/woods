@@ -362,6 +362,96 @@ RSpec.describe Woods::Extractors::ServiceExtractor do
     end
   end
 
+  # ── Namespaced identifiers (#174) ────────────────────────────────────
+
+  describe 'namespaced identifiers (#174)' do
+    it 'qualifies a module-nested class with its enclosing namespace' do
+      path = create_file('app/services/billing/payment_service.rb', <<~RUBY)
+        module Billing
+          class PaymentService
+            def call(order)
+              order.charge!
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_service_file(path)
+      expect(unit.identifier).to eq('Billing::PaymentService')
+      expect(unit.namespace).to eq('Billing')
+    end
+
+    it 'qualifies a class nested in multiple modules' do
+      path = create_file('app/services/billing/payments/refund_service.rb', <<~RUBY)
+        module Billing
+          module Payments
+            class RefundService
+              def call(order)
+                order.refund!
+              end
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_service_file(path)
+      expect(unit.identifier).to eq('Billing::Payments::RefundService')
+      expect(unit.namespace).to eq('Billing::Payments')
+    end
+
+    it 'joins compact-form segments with enclosing modules' do
+      path = create_file('app/services/billing/payments/refund_service.rb', <<~RUBY)
+        module Billing
+          class Payments::RefundService
+            def call(order)
+              order.refund!
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_service_file(path)
+      expect(unit.identifier).to eq('Billing::Payments::RefundService')
+    end
+
+    it 'does not include sibling modules that closed before the class opened' do
+      path = create_file('app/services/billing/payment_service.rb', <<~RUBY)
+        module Billing
+          module Constants
+            FEE = 1
+          end
+
+          class PaymentService
+            def call; end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_service_file(path)
+      expect(unit.identifier).to eq('Billing::PaymentService')
+    end
+
+    it 'keeps cross-namespace same-named services distinct' do
+      create_file('app/services/billing/payment.rb', <<~RUBY)
+        module Billing
+          class Payment
+            def call; end
+          end
+        end
+      RUBY
+      create_file('app/services/legacy/payment.rb', <<~RUBY)
+        module Legacy
+          class Payment
+            def call; end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('Billing::Payment', 'Legacy::Payment')
+    end
+  end
+
   # ── Service Type Inference ───────────────────────────────────────────
 
   describe 'infer_service_type' do
