@@ -949,6 +949,74 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  # ── extract_dependencies (association edges) ──────────────────────
+
+  describe '#extract_dependencies (association edges)' do
+    before do
+      stub_const('Rails', double('Rails', root: Pathname.new('/app'), logger: double(error: nil)))
+    end
+
+    # A model double with exactly the surface extract_dependencies touches
+    # when no source is resolvable: associations plus empty module lists.
+    def model_with_associations(*assocs)
+      model = double('Model',
+                     name: 'Comment',
+                     module_parent: Object,
+                     reflect_on_all_associations: assocs,
+                     included_modules: [],
+                     singleton_class: double('SC', included_modules: []))
+      allow(extractor).to receive(:source_file_for).and_return(nil)
+      model
+    end
+
+    it 'labels a polymorphic belongs_to as :polymorphic_interface, never as a :belongs_to model edge' do
+      # AssociationReflection#class_name camelizes without constantizing, so
+      # a polymorphic belongs_to yields an interface name ("Commentable"),
+      # not a model — the NameError rescue never fires (#199).
+      poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
+                                          class_name: 'Commentable', polymorphic?: true)
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
+
+      commentable_edges = deps.select { |d| d[:target] == 'Commentable' }
+      expect(commentable_edges).to contain_exactly(
+        { type: :model, target: 'Commentable', via: :polymorphic_interface }
+      )
+    end
+
+    it 'keeps the macro via label for a normal belongs_to' do
+      normal = double('Assoc(author)', name: :author, macro: :belongs_to,
+                                       class_name: 'User', polymorphic?: false)
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(normal), nil)
+
+      expect(deps).to include({ type: :model, target: 'User', via: :belongs_to })
+      expect(deps.map { |d| d[:via] }).not_to include(:polymorphic_interface)
+    end
+
+    it 'distinguishes polymorphic and normal associations on the same model' do
+      poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
+                                          class_name: 'Commentable', polymorphic?: true)
+      normal = double('Assoc(author)', name: :author, macro: :belongs_to,
+                                       class_name: 'User', polymorphic?: false)
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(poly, normal), nil)
+
+      expect(deps).to include({ type: :model, target: 'Commentable', via: :polymorphic_interface })
+      expect(deps).to include({ type: :model, target: 'User', via: :belongs_to })
+    end
+
+    it 'treats a reflection that lacks #polymorphic? as a plain association' do
+      # Plain RSpec doubles answer respond_to?(:polymorphic?) with false
+      # when the method is not stubbed — exercising the respond_to? guard.
+      habtm = double('Assoc(tags)', name: :tags, macro: :has_and_belongs_to_many, class_name: 'Tag')
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(habtm), nil)
+
+      expect(deps).to include({ type: :model, target: 'Tag', via: :has_and_belongs_to_many })
+    end
+  end
+
   # ── build_callback_effects_chunk ──────────────────────────────────
 
   describe '#build_callback_effects_chunk' do

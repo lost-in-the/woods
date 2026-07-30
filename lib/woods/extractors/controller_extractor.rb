@@ -45,18 +45,48 @@ module Woods
       # The controller classes this extractor would extract from the running
       # app. Shared with the incremental path's class reconciliation (#164).
       #
+      # Discovery walks +ActionController::Base.descendants+ and
+      # +ActionController::API.descendants+ — not
+      # +ApplicationController.descendants+, which excludes the receiver
+      # (Class#descendants never includes the class itself, so
+      # ApplicationController — usually the richest controller in the app —
+      # was never indexed) and misses controllers inheriting straight from
+      # +ActionController::Base+ (#200). Each base is guarded with
+      # +defined?+ so a host missing one, or both (no NameError on hosts
+      # without an ApplicationController constant), simply contributes
+      # nothing.
+      #
+      # Framework-internal descendants (Rails::InfoController,
+      # ActiveStorage controllers, engine controllers) share this ancestry
+      # but live in gem source; {#app_defined_controller?} keeps them out.
+      # That filter is shared with {#extract_controller} so this set stays
+      # exactly the set extract_controller accepts — it is the incremental
+      # reconciliation input, and any class listed here that
+      # extract_controller rejects would be recomputed as a phantom
+      # "addition" on every incremental run (same reasoning as
+      # ViewComponentExtractor's preview filtering).
+      #
       # @return [Array<Class>]
       def discoverable_classes
-        controllers = ApplicationController.descendants
-        controllers = (controllers + ActionController::API.descendants).uniq if defined?(ActionController::API)
-        controllers
+        controllers = []
+        controllers.concat(ActionController::Base.descendants) if defined?(ActionController::Base)
+        controllers.concat(ActionController::API.descendants) if defined?(ActionController::API)
+        controllers.uniq.select { |controller| app_defined_controller?(controller) }
       end
 
       # Extract a single controller
       #
+      # Rejects classes the extractor does not own — anonymous classes and
+      # framework-internal controllers — via {#app_defined_controller?},
+      # the same gate {#discoverable_classes} applies, so the two stay in
+      # agreement for incremental class reconciliation.
+      #
       # @param controller [Class] The controller class
-      # @return [ExtractedUnit] The extracted unit
+      # @return [ExtractedUnit, nil] The extracted unit, or nil for classes
+      #   the extractor rejects
       def extract_controller(controller)
+        return nil unless app_defined_controller?(controller)
+
         unit = ExtractedUnit.new(
           type: :controller,
           identifier: controller.name,
@@ -121,6 +151,32 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
       # Source Building
       # ──────────────────────────────────────────────────────────────────────
+
+      # Whether a controller class belongs to the host application.
+      #
+      # Discovery starts from the ActionController bases (#200), which
+      # framework controllers (Rails::InfoController, ActiveStorage's
+      # controllers, engine controllers) also descend from. App-defined
+      # means: the class is named, and it resolves to an existing source
+      # file that {SharedUtilityMethods#app_source?} accepts (under
+      # +Rails.root+, outside vendor/ and node_modules/). Framework classes
+      # resolve to gem paths, so {#source_file_for} falls back to a
+      # convention path that does not exist and they are rejected.
+      #
+      # Shared by {#discoverable_classes} and {#extract_controller}; the
+      # two must agree or the incremental class reconciliation recomputes
+      # the same phantom "additions" every run.
+      #
+      # @param controller [Class] Candidate controller class
+      # @return [Boolean]
+      def app_defined_controller?(controller)
+        return false if controller.name.nil?
+
+        path = source_file_for(controller)
+        return false unless path
+
+        File.exist?(path) && app_source?(path, Rails.root.to_s)
+      end
 
       # Find the source file for a controller, validating paths are within Rails.root.
       #

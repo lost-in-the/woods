@@ -2,6 +2,8 @@
 
 require 'spec_helper'
 require 'set'
+require 'tmpdir'
+require 'fileutils'
 require 'woods'
 require 'woods/extractors/controller_extractor'
 
@@ -415,6 +417,139 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       source = 'redirect_to @post'
       result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
       expect(result).to be_empty
+    end
+  end
+
+  # ── discoverable_classes (#200) ──────────────────────────────────────
+  #
+  # Discovery must start from the ActionController bases: Class#descendants
+  # excludes the receiver, so ApplicationController.descendants never
+  # yielded ApplicationController itself, and controllers inheriting
+  # straight from ActionController::Base were invisible. Framework-internal
+  # controllers (gem source) must stay out, and the set must equal what
+  # extract_controller accepts — it is the incremental class-reconciliation
+  # input (#164).
+
+  describe '#discoverable_classes' do
+    let(:tmp_dir) { Dir.mktmpdir }
+    let(:rails_root) { Pathname.new(tmp_dir) }
+
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', application: app_double, root: rails_root,
+                                          logger: double('Logger').as_null_object))
+      described_class.new
+    end
+
+    after { FileUtils.rm_rf(tmp_dir) }
+
+    # A named controller-like class exposing what extraction introspects.
+    # With no file under Rails.root, every resolvable source location points
+    # at this spec file — outside the app — so the extractor must reject it.
+    def named_controller_class(name)
+      klass = Class.new
+      klass.define_singleton_method(:name) { name }
+      klass.define_singleton_method(:action_methods) { Set.new }
+      klass.define_singleton_method(:_process_action_callbacks) { [] }
+      klass.define_singleton_method(:ancestors) { [] }
+      klass.define_singleton_method(:included_modules) { [] }
+      klass.define_singleton_method(:instance_methods) { |_inherit = true| [] }
+      klass
+    end
+
+    # An app-defined controller: named, with a source file at the
+    # convention path under Rails.root.
+    def app_controller_class(name)
+      relative = "app/controllers/#{name.underscore}.rb"
+      full_path = File.join(tmp_dir, relative)
+      FileUtils.mkdir_p(File.dirname(full_path))
+      File.write(full_path, "class #{name} < ActionController::Base\nend\n")
+      named_controller_class(name)
+    end
+
+    def stub_action_controller_base(*descendant_classes)
+      base = Class.new
+      base.define_singleton_method(:descendants) { descendant_classes }
+      stub_const('ActionController::Base', base)
+    end
+
+    def stub_action_controller_api(*descendant_classes)
+      api = Class.new
+      api.define_singleton_method(:descendants) { descendant_classes }
+      stub_const('ActionController::API', api)
+    end
+
+    it 'includes ApplicationController itself, which Class#descendants excludes' do
+      application_controller = app_controller_class('ApplicationController')
+      posts = app_controller_class('PostsController')
+      stub_action_controller_base(application_controller, posts)
+      # Mirror the real hierarchy: the old discovery read this constant's
+      # descendants, which never include the receiver.
+      stub_const('ApplicationController', application_controller)
+      application_controller.define_singleton_method(:descendants) { [posts] }
+
+      expect(extractor.discoverable_classes).to contain_exactly(application_controller, posts)
+    end
+
+    it 'includes controllers inheriting directly from ActionController::Base' do
+      application_controller = app_controller_class('ApplicationController')
+      legacy = app_controller_class('LegacyController')
+      stub_action_controller_base(application_controller, legacy)
+      stub_const('ApplicationController', application_controller)
+      application_controller.define_singleton_method(:descendants) { [] }
+
+      expect(extractor.discoverable_classes).to include(legacy)
+    end
+
+    it 'excludes framework-internal controllers whose source lives outside the app' do
+      posts = app_controller_class('PostsController')
+      framework = named_controller_class('Rails::InfoController')
+      stub_action_controller_base(posts, framework)
+
+      expect(extractor.discoverable_classes).to contain_exactly(posts)
+    end
+
+    it 'excludes anonymous controller classes' do
+      posts = app_controller_class('PostsController')
+      anonymous = Class.new
+      stub_action_controller_base(posts, anonymous)
+
+      expect(extractor.discoverable_classes).to contain_exactly(posts)
+    end
+
+    it 'finds API controllers without NameError when the host has no ApplicationController' do
+      api_controller = app_controller_class('Api::BaseController')
+      stub_action_controller_api(api_controller)
+
+      expect(extractor.discoverable_classes).to contain_exactly(api_controller)
+    end
+
+    it 'returns an empty array when neither ActionController base is defined' do
+      hide_const('ActionController') if defined?(ActionController)
+
+      expect(extractor.discoverable_classes).to eq([])
+    end
+
+    it 'deduplicates classes discovered through both bases' do
+      shared = app_controller_class('SharedController')
+      stub_action_controller_base(shared)
+      stub_action_controller_api(shared)
+
+      expect(extractor.discoverable_classes).to contain_exactly(shared)
+    end
+
+    it 'discovers exactly the set extract_controller accepts (reconciliation stability)' do
+      app_controller = app_controller_class('PagesController')
+      framework = named_controller_class('Rails::WelcomeController')
+      anonymous = Class.new
+      universe = [app_controller, framework, anonymous]
+      stub_action_controller_base(*universe)
+
+      accepted = universe.select { |klass| extractor.send(:extract_controller, klass) }
+
+      expect(accepted).to contain_exactly(app_controller)
+      expect(extractor.discoverable_classes).to match_array(accepted)
     end
   end
 end

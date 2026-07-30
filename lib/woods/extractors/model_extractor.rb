@@ -687,11 +687,24 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      # Extract what this model depends on
+      # Extract what this model depends on.
+      #
+      # Association reflections normally become a +:model+ edge labeled with
+      # the association macro. Polymorphic associations are the exception:
+      # `belongs_to :commentable, polymorphic: true` names an *interface*,
+      # not a model — +AssociationReflection#class_name+ camelizes the
+      # association name ("Commentable") without constantizing it, so the
+      # NameError rescue never fires and the edge pointed at a nonexistent
+      # node, or worse, at an unrelated real constant (an app's Commentable
+      # concern) mislabeled as a +:belongs_to+ model edge (#199). Those
+      # edges now carry +via: :polymorphic_interface+ instead of the macro:
+      # the interface name stays visible in the graph but is distinguishable
+      # from a resolvable model reference.
       def extract_dependencies(model, source = nil)
         # Associations point to other models
         deps = model.reflect_on_all_associations.filter_map do |assoc|
-          { type: :model, target: assoc.class_name, via: assoc.macro }
+          via = polymorphic_reflection?(assoc) ? :polymorphic_interface : assoc.macro
+          { type: :model, target: assoc.class_name, via: via }
         rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
           nil
@@ -727,6 +740,18 @@ module Woods
         end
 
         consolidate_dependencies(deps)
+      end
+
+      # Whether an association reflection declares a polymorphic interface.
+      #
+      # Guarded with +respond_to?+ because not every reflection type across
+      # Rails versions exposes +#polymorphic?+ — a reflection without it is
+      # treated as a plain (non-polymorphic) association.
+      #
+      # @param assoc [ActiveRecord::Reflection::AbstractReflection]
+      # @return [Boolean]
+      def polymorphic_reflection?(assoc)
+        assoc.respond_to?(:polymorphic?) && assoc.polymorphic?
       end
 
       # Build a parse-friendly composite for callback side-effect analysis.

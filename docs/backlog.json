@@ -1208,7 +1208,7 @@
       "lib/woods/extractors/model_extractor.rb"
     ],
     "description": "extract_dependencies maps every reflection to {type: :model, target: assoc.class_name, via: assoc.macro} without checking assoc.polymorphic?. belongs_to :commentable, polymorphic: true derives class_name 'Commentable' - an interface, not a model - producing an edge to a nonexistent node, or worse to the app's real Commentable CONCERN mislabeled as a :model/:belongs_to edge. Fix: emit via: :polymorphic_interface (or resolve concrete types from other models' as: options) instead of a :model edge. Tracked in GH #199.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1222,7 +1222,7 @@
       "lib/woods/extractors/controller_extractor.rb"
     ],
     "description": "discoverable_classes is ApplicationController.descendants (+ API descendants); Class#descendants excludes the receiver, so the app's richest controller (auth filters, rescue_froms, concern includes) is invisible in full-stack apps, and bespoke ActionController::Base subclasses never enter the index. The unguarded ApplicationController reference also raises NameError out of reconcile_class_based_types on hosts without the constant. Fix: discover from ActionController::Base.descendants + ActionController::API.descendants (defined?-guarded), filtered to app-defined classes by source path. Tracked in GH #200.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
