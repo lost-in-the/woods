@@ -431,9 +431,12 @@ module Woods
       end
       private_class_method :populate_vector_metadata
 
-      # Reduce a metadata-store record to the exact SYMBOL-keyed subset the
-      # live embed path writes per vector — see
-      # {Embedding::Indexer#store_vectors}: +{ type:, identifier:, file_path: }+.
+      # Reduce a metadata-store record to the SYMBOL-keyed subset the live
+      # embed path writes per vector — see
+      # {Embedding::Indexer#store_vectors}: +{ type:, identifier:, file_path: }+
+      # — plus +namespace:+, which only the backfill can supply (the store
+      # carries it per unit) and which namespace-filtered search after a
+      # dump/reload depends on.
       #
       # The metadata store returns STRING-keyed records on every real
       # backend (SQLite round-trips through JSON.parse; InMemory stringifies
@@ -451,7 +454,8 @@ module Woods
         {
           type: meta['type'] || meta[:type],
           identifier: meta['identifier'] || meta[:identifier],
-          file_path: meta['file_path'] || meta[:file_path]
+          file_path: meta['file_path'] || meta[:file_path],
+          namespace: meta['namespace'] || meta[:namespace]
         }.compact
       end
       private_class_method :vector_filter_metadata

@@ -217,7 +217,7 @@ module Woods
         def delete_by_filter(filters)
           @ids.each_with_index do |id, idx|
             next if @tombstones.include?(idx)
-            next unless filters.all? { |key, value| @metadata[idx][key] == value }
+            next unless filters.all? { |key, value| metadata_value(@metadata[idx], key) == value }
 
             @tombstones << idx
             @id_to_index.delete(id)
@@ -235,6 +235,16 @@ module Woods
         # membership filters ("any of"); scalars are equality.
         def filter_match?(filter_value, meta_value)
           filter_value.is_a?(Array) ? filter_value.include?(meta_value) : filter_value == meta_value
+        end
+
+        # Indifferent metadata lookup: vector metadata is symbol-keyed on the
+        # live embed path (Indexer#store_vectors) but callers may filter with
+        # string keys, and pre-fix dumps hydrated string-keyed records — the
+        # key form must never decide whether a filter matches (#150 item 5).
+        def metadata_value(meta, key)
+          return nil unless meta
+
+          meta.fetch(key) { key.is_a?(Symbol) ? meta[key.to_s] : meta[key.to_sym] }
         end
 
         # Append a new entry to the flat buffer.
@@ -272,7 +282,7 @@ module Woods
               next
             end
             meta = @metadata[idx]
-            unless filters.empty? || filters.all? { |k, v| filter_match?(v, meta[k]) }
+            unless filters.empty? || filters.all? { |k, v| filter_match?(v, metadata_value(meta, k)) }
               idx += 1
               next
             end
