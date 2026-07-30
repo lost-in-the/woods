@@ -4,6 +4,58 @@ require 'spec_helper'
 require 'woods/storage/metadata_store'
 
 RSpec.describe Woods::Storage::MetadataStore do
+  # B-097 / #209 — hardened #search: field names are whitelist-validated
+  # (the SQLite adapter interpolates them into a json_extract JSON-path
+  # literal) and LIKE metacharacters in the query match literally. Both
+  # adapters must agree on these observable behaviors so Builder can swap
+  # them freely. (Known, deliberate divergence NOT covered here: InMemory is
+  # case-sensitive while SQLite LIKE is ASCII case-insensitive.)
+  shared_examples 'hardened search' do
+    describe 'search hardening (B-097 / #209)' do
+      before do
+        store.store('Coupon', { type: 'model', description: '50% off promo' })
+        store.store('FiftyOff', { type: 'model', description: '50 dollars off promo' })
+        store.store('Snake', { type: 'model', description: 'user_name column' })
+        store.store('NotSnake', { type: 'model', description: 'userXname column' })
+      end
+
+      it 'raises ArgumentError for a field name that breaks out of a JSON-path literal' do
+        expect { store.search('x', fields: ["description') OR 1=1 --"]) }
+          .to raise_error(ArgumentError, /Invalid search field/)
+      end
+
+      it 'raises ArgumentError for a field name containing a quote' do
+        expect { store.search('x', fields: ["desc'ription"]) }
+          .to raise_error(ArgumentError, /Invalid search field/)
+      end
+
+      it 'raises ArgumentError for a field name starting with a digit' do
+        expect { store.search('x', fields: %w[1description]) }
+          .to raise_error(ArgumentError, /Invalid search field/)
+      end
+
+      it 'still accepts symbol field names' do
+        ids = store.search('user_name', fields: [:description]).map { |r| r['id'] }
+        expect(ids).to eq(['Snake'])
+      end
+
+      it 'treats % in the query as a literal, not a wildcard' do
+        ids = store.search('50% off', fields: ['description']).map { |r| r['id'] }
+        expect(ids).to eq(['Coupon']) # pre-fix, LIKE '%50% off%' also matched FiftyOff
+      end
+
+      it 'treats _ in the query as a literal, not a single-character wildcard' do
+        ids = store.search('user_name', fields: ['description']).map { |r| r['id'] }
+        expect(ids).to eq(['Snake']) # pre-fix, LIKE '%user_name%' also matched NotSnake
+      end
+
+      it 'treats metacharacters literally on the all-fields path too' do
+        ids = store.search('user_name').map { |r| r['id'] }
+        expect(ids).to eq(['Snake'])
+      end
+    end
+  end
+
   describe 'Interface contract' do
     let(:dummy_class) do
       Class.new do
@@ -154,6 +206,18 @@ RSpec.describe Woods::Storage::MetadataStore do
       end
     end
 
+    include_examples 'hardened search'
+
+    describe 'hostile field names (SQLite-specific)' do
+      it 'executes no SQL when a field name fails validation' do
+        db = store.instance_variable_get(:@db)
+        expect(db).not_to receive(:execute)
+
+        expect { store.search('x', fields: ["a') OR 1=1 --"]) }
+          .to raise_error(ArgumentError, /Invalid search field/)
+      end
+    end
+
     describe '#delete' do
       it 'removes a unit by ID' do
         store.store('User', { type: 'model' })
@@ -268,6 +332,8 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(store.search('nope')).to be_empty
       end
     end
+
+    include_examples 'hardened search'
 
     describe '#delete' do
       it 'removes a unit by ID' do

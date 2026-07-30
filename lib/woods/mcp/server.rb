@@ -265,7 +265,7 @@ module Woods
         # Load a precomputed flow document written by FlowPrecomputer, when
         # `config.precompute_flows` was enabled during extraction. Returns nil
         # when the entry point is missing a method suffix, the JSON file isn't
-        # on disk, or the file can't be parsed — callers fall back to
+        # on disk, or the file can't be read or parsed — callers fall back to
         # FlowAssembler.
         #
         # @param index_dir [String]
@@ -282,11 +282,27 @@ module Woods
           # flows/) using the SAME transform FlowPrecomputer writes with, so a
           # legitimately precomputed flow always resolves to the file on disk.
           filename = Woods::FilenameUtils.flow_filename(controller, action)
+          # The path is derived from the entry point and joined against THIS
+          # process's index_dir — the path *values* in flow_index.json /
+          # metadata[:flow_paths] are never consulted. That is what keeps
+          # both formats working unchanged: post-#190 indexes persist
+          # output_dir-relative values ("flows/X_y.json"), while pre-#190
+          # indexes persisted the extraction machine's absolute paths (e.g.
+          # container-side "/app/tmp/woods/flows/X_y.json"), which need not
+          # resolve on the reading host at all.
           path = File.join(index_dir, 'flows', filename)
           return nil unless File.exist?(path)
 
-          Woods::FlowDocument.from_h(JSON.parse(File.read(path)))
-        rescue JSON::ParserError, Errno::ENOENT
+          # AtomicFile.read, not File.read: flow documents carry free-text
+          # (args_hint / condition strings) that can be non-ASCII, and a bare
+          # read under LANG=C tags the result US-ASCII so the first
+          # JSON.parse raises Encoding::InvalidByteSequenceError.
+          Woods::FlowDocument.from_h(JSON.parse(Woods::AtomicFile.read(path)))
+        rescue JSON::ParserError, Errno::ENOENT, EncodingError
+          # EncodingError included so ANY unreadable precomputed flow (torn,
+          # corrupt, mis-encoded bytes) degrades to query-time reassembly as
+          # documented, instead of escaping to trace_flow's generic handler
+          # as an internal_error.
           nil
         end
 

@@ -63,8 +63,9 @@ RSpec.describe Woods::FlowPrecomputer do
 
       expect(result).to be_a(Hash)
       expect(result.keys).to contain_exactly('PostsController#index', 'PostsController#create')
+      # Values are output_dir-relative (B-078 / #190) — resolve before stat.
       result.each_value do |path|
-        expect(File.exist?(path)).to eq(true)
+        expect(File.exist?(File.join(output_dir, path))).to eq(true)
       end
     end
 
@@ -344,6 +345,103 @@ RSpec.describe Woods::FlowPrecomputer do
 
       precomputer = described_class.new(units: [controller], graph: graph, output_dir: output_dir)
       precomputer.precompute
+    end
+  end
+
+  # ── Relative paths + atomic writes (B-078 / #190) ──────────────────
+
+  describe 'persisted path portability (B-078 / #190)' do
+    def build_controller(identifier, actions)
+      controller = make_unit(
+        type: :controller,
+        identifier: identifier,
+        file_path: "app/controllers/#{identifier.downcase}.rb",
+        metadata: { actions: actions },
+        source_code: "class #{identifier} < ApplicationController\nend"
+      )
+      write_unit_json(controller)
+      graph.register(controller)
+      controller
+    end
+
+    it 'stores output_dir-relative paths in the map, flow_index.json, and metadata[:flow_paths]' do
+      controller = build_controller('PortableController', %w[index])
+
+      result = described_class.new(units: [controller], graph: graph, output_dir: output_dir).precompute
+
+      expect(result['PortableController#index']).to eq('flows/PortableController_index.json')
+
+      index = JSON.parse(File.read(File.join(output_dir, 'flows', 'flow_index.json')))
+      expect(index['PortableController#index']).to eq('flows/PortableController_index.json')
+      expect(index.values).to all(satisfy('be relative') { |v| !v.start_with?('/') })
+
+      expect(controller.metadata[:flow_paths]['index']).to eq('flows/PortableController_index.json')
+    end
+
+    it 'remains resolvable when the index is served from a different mount point' do
+      controller = build_controller('MountController', %w[show])
+
+      flow = Woods::FlowDocument.new(entry_point: 'MountController#show', steps: [])
+      assembler = instance_double(Woods::FlowAssembler)
+      allow(assembler).to receive(:assemble).and_return(flow)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
+
+      original_root = Dir.mktmpdir('flow_mount_a')
+      relocated_parent = Dir.mktmpdir('flow_mount_b')
+      relocated_root = File.join(relocated_parent, 'woods')
+      begin
+        described_class.new(units: [controller], graph: graph, output_dir: original_root).precompute
+        # Simulate extraction in a container (/app/...) read from a host
+        # volume mount at a different prefix: move the whole output dir.
+        FileUtils.mv(original_root, relocated_root)
+
+        index = JSON.parse(File.read(File.join(relocated_root, 'flows', 'flow_index.json')))
+        resolved = File.join(relocated_root, index.fetch('MountController#show'))
+        expect(File.exist?(resolved)).to eq(true)
+        expect(JSON.parse(File.read(resolved))['entry_point']).to eq('MountController#show')
+      ensure
+        FileUtils.rm_rf(original_root)
+        FileUtils.rm_rf(relocated_parent)
+      end
+    end
+
+    it 'writes flow documents and flow_index.json via AtomicFile' do
+      controller = build_controller('AtomicController', %w[index])
+
+      written = []
+      allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+        written << path.to_s
+        original.call(path, content)
+      end
+
+      described_class.new(units: [controller], graph: graph, output_dir: output_dir).precompute
+
+      expect(written).to include(
+        File.join(output_dir, 'flows', 'AtomicController_index.json'),
+        File.join(output_dir, 'flows', 'flow_index.json')
+      )
+    end
+
+    it 'round-trips non-ASCII flow content under the suite US-ASCII default external' do
+      controller = build_controller('UnicodeController', %w[show])
+
+      flow = Woods::FlowDocument.new(
+        entry_point: 'UnicodeController#show',
+        steps: [
+          { unit: 'UnicodeController#show', type: 'controller',
+            operations: [{ type: 'call', target: 'Svc', args_hint: 'label — em dash' }] }
+        ]
+      )
+      assembler = instance_double(Woods::FlowAssembler)
+      allow(assembler).to receive(:assemble).and_return(flow)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
+
+      described_class.new(units: [controller], graph: graph, output_dir: output_dir).precompute
+
+      path = File.join(output_dir, 'flows', 'UnicodeController_show.json')
+      parsed = JSON.parse(Woods::AtomicFile.read(path))
+      hint = parsed['steps'].first['operations'].first['args_hint']
+      expect(hint).to eq('label — em dash')
     end
   end
 

@@ -967,6 +967,22 @@ RSpec.describe Woods::MCP::Server do
         expect(mock_assembler).to have_received(:assemble).with('PostsController#destroy', max_depth: 3)
         expect(parse_response(response)['entry_point']).to eq('PostsController#create')
       end
+
+      it 'degrades to reassembly when the precomputed file is torn or mis-encoded, not internal_error' do
+        # Bytes invalid in UTF-8 *and* truncated mid-document — what a torn
+        # pre-#190 plain File.write left behind. Before the EncodingError
+        # rescue, this escaped load_precomputed_flow and trace_flow answered
+        # internal_error instead of reassembling.
+        File.binwrite(
+          File.join(tmp_index_dir, 'flows', 'PostsController_edit.json'),
+          "{\"entry_point\": \"PostsController#edit\xFF".b
+        )
+
+        response = call_tool(precomputed_server, 'trace_flow', entry_point: 'PostsController#edit')
+
+        expect(response.error?).to be(false)
+        expect(mock_assembler).to have_received(:assemble).with('PostsController#edit', max_depth: 3)
+      end
     end
 
     describe '.load_precomputed_flow' do
@@ -1009,6 +1025,86 @@ RSpec.describe Woods::MCP::Server do
           JSON.pretty_generate(entry_point: 'stolen', steps: [])
         )
         expect(described_class.send(:load_precomputed_flow, tmp_dir, '../evil#x')).to be_nil
+      end
+
+      it 'reads non-ASCII flow content under the suite US-ASCII default external encoding' do
+        # The suite runs under LANG=C (US-ASCII default external) — a bare
+        # File.read here used to tag the UTF-8 bytes US-ASCII, so JSON.parse
+        # raised Encoding::InvalidByteSequenceError past the old rescue list
+        # and trace_flow reported internal_error (B-078 / #190).
+        payload = JSON.pretty_generate(
+          entry_point: 'X#y',
+          steps: [
+            { unit: 'X#y', type: 'controller',
+              operations: [{ type: 'call', target: 'Svc', args_hint: 'label — em dash' }] }
+          ]
+        )
+        Woods::AtomicFile.write(File.join(tmp_dir, 'flows', 'X_y.json'), payload)
+
+        doc = described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')
+        expect(doc).to be_a(Woods::FlowDocument)
+        # from_h deep-symbolizes keys.
+        expect(doc.steps.first[:operations].first[:args_hint]).to eq('label — em dash')
+      end
+
+      it 'returns nil (degrades) when the file is torn mid-write with bytes invalid in UTF-8' do
+        # Both failure modes at once: truncated JSON and a byte invalid in
+        # UTF-8. Depending on json-gem version this raises JSON::ParserError
+        # or an EncodingError — either must degrade to nil, never escape.
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.binwrite(File.join(tmp_dir, 'flows', 'X_y.json'), "{\"entry_point\": \"X#y\xFF".b)
+
+        expect(described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')).to be_nil
+      end
+
+      it 'resolves a flow even when a legacy flow_index.json holds another machine absolute paths' do
+        # Pre-#190 indexes persisted the extraction machine's absolute paths
+        # in flow_index.json (e.g. container-side /app/...). The reader never
+        # consults those values — it derives the filename from the entry
+        # point and joins its OWN index_dir — so legacy indexes keep
+        # resolving with no migration.
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.write(
+          File.join(tmp_dir, 'flows', 'flow_index.json'),
+          JSON.pretty_generate('X#y' => '/app/tmp/woods/flows/X_y.json')
+        )
+        File.write(
+          File.join(tmp_dir, 'flows', 'X_y.json'),
+          JSON.pretty_generate(entry_point: 'X#y', steps: [])
+        )
+
+        doc = described_class.send(:load_precomputed_flow, tmp_dir, 'X#y')
+        expect(doc).to be_a(Woods::FlowDocument)
+        expect(doc.entry_point).to eq('X#y')
+      end
+
+      it 'resolves flows written by FlowPrecomputer after the index dir moves to a new mount point' do
+        require 'woods/flow_precomputer'
+
+        controller = Woods::ExtractedUnit.new(
+          type: :controller,
+          identifier: 'PostsController',
+          file_path: 'app/controllers/posts_controller.rb'
+        )
+        controller.metadata = { actions: %w[create] }
+        graph = Woods::DependencyGraph.new
+        graph.register(controller)
+
+        source_dir = Dir.mktmpdir('woods-flows-source')
+        begin
+          # FlowAssembler.new is stubbed to mock_assembler in this describe,
+          # so the precomputer writes mock_flow_doc's payload.
+          Woods::FlowPrecomputer.new(units: [controller], graph: graph, output_dir: source_dir).precompute
+
+          moved_dir = File.join(tmp_dir, 'relocated-index')
+          FileUtils.mv(source_dir, moved_dir)
+
+          doc = described_class.send(:load_precomputed_flow, moved_dir, 'PostsController#create')
+          expect(doc).to be_a(Woods::FlowDocument)
+          expect(doc.entry_point).to eq('PostsController#create')
+        ensure
+          FileUtils.rm_rf(source_dir)
+        end
       end
     end
   end

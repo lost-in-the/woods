@@ -1082,7 +1082,7 @@
       "lib/woods/mcp/server.rb"
     ],
     "description": "FlowPrecomputer writes flow docs and flow_index.json with plain File.write (only index artifacts not using temp+fsync+rename) and stores ABSOLUTE paths in flow_map and unit metadata[:flow_paths], which Extractor#rewrite_flow_annotated_units persists into per-unit JSON - breaking the #166 portability contract (container /app/... paths served verbatim to host readers; identical trees at different roots produce different bytes). Read side (mcp/server.rb) uses bare File.read rescuing only JSON::ParserError/ENOENT, so an encoding error under LANG=C makes trace_flow return internal_error instead of degrading to query-time reassembly. Fix: relative paths (join against index_dir at read time, as load_precomputed_flow already does), AtomicFile both ways, rescue EncodingError into the reassembly fallback. Tracked in GH #190.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1350,7 +1350,7 @@
       "lib/woods/storage/metadata_store.rb"
     ],
     "description": "search(query, fields:) builds json_extract(data, '$.#{'{'}field{'}'}') LIKE ? by string interpolation; a crafted field name breaks out of the JSON-path literal (injection confirmed mechanically). No production caller currently passes fields, so latent - but Interface documents fields as public, and pgvector's build_where shows the house standard (validate + quote). LIKE metacharacters (%/_) from the query are also unescaped in both adapters, silently broadening matches. Fix: validate field names against a whitelist regex and escape LIKE metacharacters. Tracked in GH #209.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   }
 ]
