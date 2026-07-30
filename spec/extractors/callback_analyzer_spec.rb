@@ -284,6 +284,33 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(result).to have_key(:side_effects)
     end
 
+    it 'finds callback methods defined inside a raw concern module appended after the class' do
+      # ModelExtractor's analysis composite concatenates raw concern module
+      # source after the model class (the display composite comments it out).
+      # The analyzer's :def search must reach defs inside top-level modules.
+      source = <<~RUBY
+        class User < ApplicationRecord
+        end
+
+        module Sluggable
+          extend ActiveSupport::Concern
+
+          included do
+            before_save :set_slug
+          end
+
+          def set_slug
+            self.status = 'slugged'
+            SlugJob.perform_later(id)
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'set_slug'))
+      expect(result[:side_effects][:columns_written]).to include('status')
+      expect(result[:side_effects][:jobs_enqueued]).to include('SlugJob')
+    end
+
     it 'finds callback methods defined in inlined concern source' do
       source = <<~RUBY
         class User < ApplicationRecord

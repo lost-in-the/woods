@@ -1124,7 +1124,7 @@
       "lib/woods/extractors/model_extractor.rb"
     ],
     "description": "build_model_source_with_concerns inserts the concern block via source.sub(/(class\\s+<demodulized>.*$)/): compact-style 'class Library::Book < ApplicationRecord' never matches, so sub no-ops and the block is silently discarded while metadata.inlined_concerns still claims inlining happened; the missing \\b also lets 'class BookmarkError' capture Book's insertion point. Separately, concern source is inlined as '# '-prefixed comments and that composite is handed to CallbackAnalyzer, whose Prism parse cannot see commented code - so the standard 'included do; before_save :set_slug; end' idiom always yields empty side_effects. Fix: match compact+nested forms with \\b, append-with-warning fallback, derive inlined_concerns from actual insertion; give CallbackAnalyzer a parse-friendly composite (raw concern sources), keep comments for display only. Tracked in GH #193.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

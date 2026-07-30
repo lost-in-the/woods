@@ -1,10 +1,54 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'active_support/core_ext/object/blank' # count_loc uses present?
 require 'woods/extractors/model_extractor'
 
 RSpec.describe Woods::Extractors::ModelExtractor do
   let(:extractor) { described_class.new }
+
+  # Stub every callback-chain reader extract_callbacks and callback_count
+  # ask a model for. Empty by default; individual examples override.
+  def stub_callback_chains(model)
+    %i[before_validation after_validation before_save after_save around_save
+       before_create after_create around_create before_update after_update
+       around_update before_destroy after_destroy around_destroy
+       after_commit after_rollback after_initialize after_find after_touch
+       validation save create update destroy commit rollback].each do |type|
+      allow(model).to receive(:"_#{type}_callbacks").and_return([])
+    end
+  end
+
+  # A minimally viable model double for extract_metadata / extract_model:
+  # no table, no associations, no validators, empty callback chains.
+  def stub_bare_model(name)
+    model = double('Model', name: name)
+    allow(model).to receive_messages(
+      table_name: name.underscore.tr('/', '_'),
+      primary_key: 'id',
+      module_parent: Object,
+      reflect_on_all_associations: [],
+      _validators: {},
+      inheritance_column: 'type',
+      descends_from_active_record?: true,
+      superclass: double('Superclass', name: 'ApplicationRecord'),
+      singleton_class: double('SingletonClass', included_modules: []),
+      table_exists?: false,
+      instance_methods: []
+    )
+    stub_callback_chains(model)
+    model
+  end
+
+  # Stub the extractor to see exactly one included concern with the given
+  # name and source code (bypasses concern file discovery).
+  def stub_inlined_concern(name, code)
+    mod = Module.new
+    allow(mod).to receive(:name).and_return(name)
+    allow(extractor).to receive(:extract_included_modules).and_return([mod])
+    allow(extractor).to receive(:concern_source).with(mod).and_return([name, code])
+    mod
+  end
 
   # ── habtm_join_model? ─────────────────────────────────────────────
 
@@ -291,6 +335,181 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  # ── build_model_source_with_concerns ──────────────────────────────
+
+  describe '#build_model_source_with_concerns' do
+    let(:concern_code) do
+      <<~RUBY
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            before_save :set_slug
+          end
+
+          def set_slug
+            self.slug = name.parameterize
+          end
+        end
+      RUBY
+    end
+
+    it 'inlines the concern block after a compact-style namespaced class declaration' do
+      stub_inlined_concern('Trackable', concern_code)
+      model = double('Model', name: 'Admin::AuditLog')
+      source = <<~RUBY
+        class Admin::AuditLog < ApplicationRecord
+          validates :action, presence: true
+        end
+      RUBY
+
+      inlined, names = extractor.send(:build_model_source_with_concerns, model, source)
+
+      expect(inlined).to include('Included from: Trackable')
+      expect(inlined).to include('before_save :set_slug')
+      expect(inlined.index('class Admin::AuditLog')).to be < inlined.index('Included from: Trackable')
+      expect(names).to eq(['Trackable'])
+      expect(extractor.warnings).to be_empty
+    end
+
+    it 'inserts after the model class line, not an earlier class sharing the name prefix' do
+      stub_inlined_concern('Trackable', concern_code)
+      model = double('Model', name: 'Book')
+      source = <<~RUBY
+        class BookmarkError < StandardError
+        end
+
+        class Book < ApplicationRecord
+        end
+      RUBY
+
+      inlined, = extractor.send(:build_model_source_with_concerns, model, source)
+
+      expect(inlined.index('Included from: Trackable')).to be > inlined.index('class Book < ApplicationRecord')
+      # BookmarkError's declaration must be left untouched
+      expect(inlined).to include("class BookmarkError < StandardError\nend")
+    end
+
+    it 'appends the concern block with a warning when no class declaration matches' do
+      stub_inlined_concern('Trackable', concern_code)
+      model = double('Model', name: 'Ledger')
+      source = <<~RUBY
+        Ledger = Class.new(ApplicationRecord) do
+          validates :entry, presence: true
+        end
+      RUBY
+
+      inlined, names = extractor.send(:build_model_source_with_concerns, model, source)
+
+      expect(inlined).to include('Included from: Trackable')
+      expect(inlined.index('Included from: Trackable')).to be > inlined.index('Ledger = Class.new')
+      expect(names).to eq(['Trackable'])
+      expect(extractor.warnings.size).to eq(1)
+      expect(extractor.warnings.first).to include('Ledger')
+    end
+
+    it 'returns the source untouched with no inlined names when no concern resolves' do
+      allow(extractor).to receive(:extract_included_modules).and_return([])
+      model = double('Model', name: 'Plain')
+      source = "class Plain < ApplicationRecord\nend\n"
+
+      expect(extractor.send(:build_model_source_with_concerns, model, source)).to eq([source, []])
+    end
+  end
+
+  # ── extract_metadata — inlined_concerns truthfulness ──────────────
+
+  describe '#extract_metadata (inlined_concerns)' do
+    it 'does not claim concerns were inlined when the model source cannot be read' do
+      model = stub_bare_model('Admin::AuditLog')
+      stub_inlined_concern('Trackable', "module Trackable\nend\n")
+      allow(extractor).to receive(:source_file_for).and_return(nil)
+
+      metadata = extractor.send(:extract_metadata, model, nil)
+
+      expect(metadata[:inlined_concerns]).to eq([])
+    end
+
+    it 'lists the concerns actually inlined when source is present' do
+      model = stub_bare_model('Admin::AuditLog')
+      stub_inlined_concern('Trackable', "module Trackable\nend\n")
+      source = <<~RUBY
+        class Admin::AuditLog < ApplicationRecord
+        end
+      RUBY
+
+      metadata = extractor.send(:extract_metadata, model, source)
+
+      expect(metadata[:inlined_concerns]).to eq(['Trackable'])
+    end
+  end
+
+  # ── extract_model — concern inlining end to end ───────────────────
+
+  describe '#extract_model (concern-defined callbacks)' do
+    let(:model_path) { '/app/app/models/audit_log.rb' }
+
+    let(:model_source) do
+      <<~RUBY
+        class AuditLog < ApplicationRecord
+        end
+      RUBY
+    end
+
+    let(:concern_code) do
+      <<~RUBY
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            before_save :set_slug
+          end
+
+          def set_slug
+            self.slug = name.parameterize
+            SlugJob.perform_later(id)
+          end
+        end
+      RUBY
+    end
+
+    before do
+      stub_const('Rails', double('Rails', root: Pathname.new('/app'), logger: double('Logger').as_null_object))
+    end
+
+    it 'enriches a concern-defined callback with side effects while keeping the commented display block' do
+      model = stub_bare_model('AuditLog')
+      column = double('Column', name: 'slug', type: :string, sql_type: 'varchar(255)',
+                                limit: nil, null: true, default: nil)
+      allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug])
+      callback = double('Callback', filter: :set_slug, kind: :before)
+      allow(model).to receive(:_before_save_callbacks).and_return([callback])
+      stub_inlined_concern('Trackable', concern_code)
+      allow(extractor).to receive(:source_file_for).and_return(model_path)
+      allow(File).to receive(:exist?).and_call_original
+      allow(File).to receive(:exist?).with(model_path).and_return(true)
+      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:read).with(model_path).and_return(model_source)
+
+      unit = extractor.send(:extract_model, model)
+
+      expect(extractor.warnings).to be_empty
+      expect(unit).not_to be_nil
+
+      # Display composite keeps the deliberate commented presentation
+      expect(unit.source_code).to include('Included from: Trackable')
+      expect(unit.source_code).to include('  # module Trackable')
+
+      # Metadata reflects what was actually inlined
+      expect(unit.metadata[:inlined_concerns]).to eq(['Trackable'])
+
+      # The concern-defined callback method is visible to the analyzer
+      enriched = unit.metadata[:callbacks].find { |cb| cb[:filter] == 'set_slug' }
+      expect(enriched[:side_effects][:columns_written]).to include('slug')
+      expect(enriched[:side_effects][:jobs_enqueued]).to include('SlugJob')
+    end
+  end
+
   # ── enrich_callbacks_with_side_effects ─────────────────────────────
 
   describe '#enrich_callbacks_with_side_effects' do
@@ -319,6 +538,41 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       callback = unit.metadata[:callbacks].first
       expect(callback).to have_key(:side_effects)
       expect(callback[:side_effects][:columns_written]).to include('email')
+    end
+
+    it 'analyzes concern-defined callback methods via the parse-friendly analysis source' do
+      model_source = <<~RUBY
+        class User < ApplicationRecord
+        end
+      RUBY
+      concern_source = <<~RUBY
+        module Sluggable
+          included do
+            before_save :set_slug
+          end
+
+          def set_slug
+            self.slug = name.parameterize
+            SlugJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      # The display composite carries the concern only as comment lines —
+      # deliberately — so it must NOT be what the analyzer parses.
+      unit.source_code = model_source + concern_source.lines.map { |l| "  # #{l.rstrip}" }.join("\n")
+      unit.metadata = {
+        callbacks: [{ type: :before_save, filter: 'set_slug', kind: :before, conditions: {} }],
+        column_names: %w[slug name]
+      }
+
+      extractor.send(:enrich_callbacks_with_side_effects, unit, model_source,
+                     analysis_source: "#{model_source}\n#{concern_source}")
+
+      callback = unit.metadata[:callbacks].first
+      expect(callback[:side_effects][:columns_written]).to include('slug')
+      expect(callback[:side_effects][:jobs_enqueued]).to include('SlugJob')
     end
 
     it 'skips enrichment when source is nil' do

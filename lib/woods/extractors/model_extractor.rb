@@ -81,12 +81,15 @@ module Woods
         source = source_path && File.exist?(source_path) ? File.read(source_path) : nil
 
         unit.namespace = model.module_parent.name unless model.module_parent == Object
-        unit.source_code = build_composite_source(model, source)
-        unit.metadata = extract_metadata(model, source)
+        inlined_source, inlined_concerns = build_model_source_with_concerns(model, source)
+        unit.source_code = build_composite_source(model, inlined_source)
+        unit.metadata = extract_metadata(model, source, inlined_concerns: inlined_concerns)
         unit.dependencies = extract_dependencies(model, source)
 
-        # Enrich callbacks with side-effect analysis
-        enrich_callbacks_with_side_effects(unit, source)
+        # Enrich callbacks with side-effect analysis. The analyzer parses real
+        # Ruby, so it gets the raw analysis composite — the display composite
+        # comments concern bodies out, which Prism cannot see.
+        enrich_callbacks_with_side_effects(unit, source, analysis_source: build_analysis_source(model, source))
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
         unit.chunks = build_chunks(unit)
@@ -120,17 +123,15 @@ module Woods
         model.name.demodulize.start_with?('HABTM_')
       end
 
-      # Build composite source with schema header and inlined concerns
-      def build_composite_source(model, source = nil)
-        parts = []
-
-        # Schema information as a header comment
-        parts << build_schema_comment(model)
-
-        # Main model source with concerns inlined
-        parts << build_model_source_with_concerns(model, source)
-
-        parts.compact.join("\n\n")
+      # Build composite source with schema header and the concern-inlined
+      # model source.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @param inlined_source [String] Model source with concerns already
+      #   inlined (see {#build_model_source_with_concerns})
+      # @return [String]
+      def build_composite_source(model, inlined_source)
+        [build_schema_comment(model), inlined_source].compact.join("\n\n")
       end
 
       # Generate schema comment block with columns, indexes, and foreign keys
@@ -191,39 +192,93 @@ module Woods
         []
       end
 
-      # Read model source and inline all included concerns
+      # Read model source and inline all included concerns.
+      #
+      # Concern code is inserted as '# '-prefixed comment lines right after
+      # the model's class declaration, matching both nested (+class Book+)
+      # and compact (+class Library::Book+) declaration styles. When no
+      # declaration line can be found in unconventional source, the block is
+      # appended at the end instead of being silently discarded, and a
+      # warning naming the model is recorded.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @param source [String, nil] Pre-read model source (read from disk when nil)
+      # @return [Array(String, Array<String>)] The concern-inlined source and
+      #   the demodulized names of the concerns actually inlined into it.
+      #   Returning the pair keeps metadata[:inlined_concerns] truthful —
+      #   it is derived from the insertion result, never recomputed
+      #   independently of what the composite source carries.
       def build_model_source_with_concerns(model, source = nil)
         if source.nil?
           source_path = source_file_for(model)
-          return '' unless source_path && File.exist?(source_path)
+          return ['', []] unless source_path && File.exist?(source_path)
 
           source = File.read(source_path)
         end
 
-        # Find all included concerns and inline them
-        included_modules = extract_included_modules(model)
-        concern_sources = included_modules.filter_map { |mod| concern_source(mod) }
+        concern_sources = resolved_concern_sources(model)
+        return [source, []] if concern_sources.empty?
 
-        if concern_sources.any?
-          # Insert concern code as comments showing what's mixed in
-          concern_block = concern_sources.map do |name, code|
-            indented = code.lines.map { |l| "  # #{l.rstrip}" }.join("\n")
-            <<~CONCERN
-              # ┌─────────────────────────────────────────────────────────────────────┐
-              # │ Included from: #{name.ljust(54)}│
-              # └─────────────────────────────────────────────────────────────────────┘
-              #{indented}
-              # ─────────────────────────── End #{name} ───────────────────────────
-            CONCERN
-          end.join("\n\n")
+        [insert_concern_block(model, source, build_concern_block(concern_sources)),
+         concern_sources.map { |name, _code| name.demodulize }]
+      end
 
-          # Insert after class declaration line
-          source.sub(/(class\s+#{Regexp.escape(model.name.demodulize)}.*$)/) do
-            "#{::Regexp.last_match(1)}\n\n#{concern_block}"
-          end
-        else
-          source
-        end
+      # Resolve [name, code] pairs for every concern included in the model
+      # whose source file can be located.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @return [Array<Array(String, String)>]
+      def resolved_concern_sources(model)
+        extract_included_modules(model).filter_map { |mod| concern_source(mod) }
+      end
+
+      # Render concern sources as a '#'-commented display block showing
+      # what's mixed in.
+      #
+      # @param concern_sources [Array<Array(String, String)>] [name, code] pairs
+      # @return [String]
+      def build_concern_block(concern_sources)
+        concern_sources.map do |name, code|
+          indented = code.lines.map { |l| "  # #{l.rstrip}" }.join("\n")
+          <<~CONCERN
+            # ┌─────────────────────────────────────────────────────────────────────┐
+            # │ Included from: #{name.ljust(54)}│
+            # └─────────────────────────────────────────────────────────────────────┘
+            #{indented}
+            # ─────────────────────────── End #{name} ───────────────────────────
+          CONCERN
+        end.join("\n\n")
+      end
+
+      # Insert the concern block after the model's class declaration line.
+      #
+      # Falls back to appending at end-of-source (recording a warning) when
+      # no declaration matches — dropping the block silently would leave
+      # source_code contradicting metadata[:inlined_concerns].
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @param source [String] The model source
+      # @param concern_block [String] Commented concern block to insert
+      # @return [String]
+      def insert_concern_block(model, source, concern_block)
+        pattern = class_declaration_pattern(model)
+        return source.sub(pattern) { "#{::Regexp.last_match(1)}\n\n#{concern_block}" } if source.match?(pattern)
+
+        @warnings << "[#{model.name}] No class declaration matched for concern inlining; " \
+                     'appending inlined concern block at end of source'
+        "#{source.chomp}\n\n#{concern_block}"
+      end
+
+      # Regexp matching the model's class declaration in either nested
+      # (+class Book+) or compact (+class Library::Book+) style. The word
+      # boundary stops +class BookmarkError+ from claiming model Book's
+      # concern block; the +(?!::)+ lookahead stops a nested
+      # +class Book::Error+ from claiming it either.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @return [Regexp]
+      def class_declaration_pattern(model)
+        /(class\s+(?:[\w:]+::)?#{Regexp.escape(model.name.demodulize)}\b(?!::).*$)/
       end
 
       # Get modules included specifically in this model (not inherited)
@@ -325,7 +380,16 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       # Extract comprehensive metadata for retrieval and filtering
-      def extract_metadata(model, source = nil)
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @param source [String, nil] The model source code
+      # @param inlined_concerns [Array<String>, nil] Demodulized names of the
+      #   concerns actually inlined into the unit's source_code (from
+      #   {#build_model_source_with_concerns}). When nil, derived by running
+      #   the same inlining — the metadata must never claim a concern the
+      #   composite source does not carry.
+      # @return [Hash]
+      def extract_metadata(model, source = nil, inlined_concerns: nil)
         {
           # Core identifiers
           table_name: model.table_name,
@@ -337,9 +401,7 @@ module Woods
           callbacks: extract_callbacks(model),
           scopes: extract_scopes(model, source),
           enums: extract_enums(model),
-          inlined_concerns: extract_included_modules(model)
-                            .select { |mod| mod.name && concern_source(mod) }
-                            .map { |mod| mod.name.demodulize },
+          inlined_concerns: inlined_concerns || build_model_source_with_concerns(model, source).last,
 
           # API surface
           class_methods: model.methods(false).sort,
@@ -667,18 +729,47 @@ module Woods
         consolidate_dependencies(deps)
       end
 
+      # Build a parse-friendly composite for callback side-effect analysis.
+      #
+      # The displayed source_code inlines concern code as comment lines — a
+      # deliberate presentation choice — but Prism cannot see commented
+      # code, so the standard idiom (a concern's +included do+ registering a
+      # callback whose method is defined in the concern body) was invisible
+      # to CallbackAnalyzer. This composite concatenates the raw model
+      # source with each concern's raw module source: top-level modules
+      # parse fine and the analyzer's method search walks the whole tree.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @param source [String, nil] The raw model source
+      # @return [String, nil] Concatenated raw sources, or +source+ when no
+      #   concern source is resolvable
+      def build_analysis_source(model, source)
+        return source unless source
+
+        concern_codes = resolved_concern_sources(model).map { |_name, code| code }
+        return source if concern_codes.empty?
+
+        ([source] + concern_codes).join("\n\n")
+      end
+
       # Enrich callback metadata with side-effect analysis.
       #
       # Uses CallbackAnalyzer to find each callback's method body and
       # classify its side effects (column writes, job enqueues, etc.).
+      # The analyzer parses real Ruby, so callers should hand it a
+      # parse-friendly +analysis_source+ (raw model + raw concern code, see
+      # {#build_analysis_source}) rather than the display composite whose
+      # concern bodies are commented out. Falls back to +unit.source_code+
+      # when no analysis source is given.
       #
       # @param unit [ExtractedUnit] The model unit with metadata[:callbacks] set
       # @param source [String, nil] The model source code
-      def enrich_callbacks_with_side_effects(unit, source)
+      # @param analysis_source [String, nil] Parse-friendly composite source
+      def enrich_callbacks_with_side_effects(unit, source, analysis_source: nil)
         return unless source && unit.metadata[:callbacks]&.any?
 
         analyzer = CallbackAnalyzer.new(
-          source_code: unit.source_code,
+          source_code: analysis_source || unit.source_code,
           column_names: unit.metadata[:column_names] || []
         )
 
