@@ -60,5 +60,48 @@ RSpec.describe Woods::Operator::StatusReporter do
         expect(status[:total_units]).to eq(0)
       end
     end
+
+    context 'when the manifest contains non-ASCII bytes' do
+      # Regression — B-077 / #189. read_manifest used a bare File.read, which
+      # tags the bytes with the process's default external encoding — US-ASCII
+      # under LANG=C, which is how this suite runs — so a manifest with a
+      # non-ASCII branch name raised Encoding::InvalidByteSequenceError out of
+      # JSON.parse (not the JSON::ParserError being rescued) and took the whole
+      # status report down with it.
+      before do
+        manifest = {
+          'extracted_at' => '2026-02-15T10:00:00Z',
+          'total_units' => 1,
+          'counts' => { 'models' => 1 },
+          'git_sha' => 'abc123',
+          'git_branch' => 'fix/café-menu'
+        }
+        Woods::AtomicFile.write(File.join(output_dir, 'manifest.json'), JSON.generate(manifest))
+      end
+
+      it 'reads the manifest instead of raising' do
+        status = reporter.report
+
+        expect(status[:git_branch]).to eq('fix/café-menu')
+        expect(status[:total_units]).to eq(1)
+      end
+    end
+
+    context 'when the manifest is unparseable' do
+      it 'degrades to :not_extracted like a missing manifest' do
+        File.write(File.join(output_dir, 'manifest.json'), 'not json')
+
+        expect(reporter.report[:status]).to eq(:not_extracted)
+      end
+    end
+
+    context 'when the manifest cannot be read' do
+      it 'degrades to :not_extracted like a missing manifest' do
+        File.write(File.join(output_dir, 'manifest.json'), '{}')
+        allow(Woods::AtomicFile).to receive(:read).and_raise(Errno::EACCES)
+
+        expect(reporter.report[:status]).to eq(:not_extracted)
+      end
+    end
   end
 end

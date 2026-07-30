@@ -1067,7 +1067,7 @@
       "lib/woods/operator/status_reporter.rb"
     ],
     "description": "CLAUDE.md mandates AtomicFile.read for Woods' own JSON artifacts, but three satellites still use bare File.read + narrow rescues: Indexer#load_units (indexer.rb:91) crashes woods:embed with Encoding::InvalidByteSequenceError on any non-ASCII unit source under LANG=C (reproduced); load_checkpoint/save_checkpoint share the breach (save is also non-atomic); Unblocked SyncManifest#load (sync_manifest.rb:114) crashes every subsequent sync once a non-ASCII URI lands in the manifest, violating its own degrade-to-fresh contract (reproduced); StatusReporter reads manifest.json rescuing only JSON::ParserError. Fix: AtomicFile.read/.write everywhere, widen rescues to include EncodingError on degrade paths, add non-ASCII fixtures under forced US-ASCII external encoding. Consider a custom cop banning bare File.read/File.write under lib/woods. Tracked in GH #189.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

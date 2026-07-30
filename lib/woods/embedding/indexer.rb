@@ -5,6 +5,7 @@ require 'digest'
 require 'fileutils'
 require 'set'
 
+require_relative '../atomic_file'
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
 
@@ -88,12 +89,17 @@ module Woods
         Dir.glob(File.join(@output_dir, '**', '*.json')).filter_map do |path|
           next if File.basename(path) == 'checkpoint.json'
 
-          data = JSON.parse(File.read(path))
+          # AtomicFile.read, not File.read: a bare read tags the bytes with the
+          # process's default external encoding (US-ASCII under LANG=C), so a
+          # single multibyte character in one unit raised EncodingError out of
+          # JSON.parse and aborted the whole embed run.
+          data = JSON.parse(AtomicFile.read(path))
           # Extraction output also contains index listings (_index.json arrays) and
           # summary files (manifest.json, dependency_graph.json, graph_analysis.json)
           # that live alongside per-unit JSON. Filter to the unit shape.
           data if data.is_a?(Hash) && data.key?('type') && data.key?('identifier')
-        rescue JSON::ParserError
+        rescue JSON::ParserError, EncodingError => e
+          warn "[woods] skipping unreadable unit file #{path} (#{e.class}: #{e.message})"
           nil
         end
       end
@@ -482,17 +488,24 @@ module Woods
         @persisted_ids[identifier] = fresh_ids
       end
 
+      # A checkpoint that cannot be parsed *or read* degrades to "no
+      # checkpoint" — every unit reads as changed and is re-embedded, the same
+      # self-healing outcome as a corrupt checkpoint. AtomicFile.read keeps a
+      # non-ASCII identifier from raising EncodingError here in the first place.
       def load_checkpoint
         path = File.join(@output_dir, 'checkpoint.json')
         return {} unless File.exist?(path)
 
-        JSON.parse(File.read(path))
-      rescue JSON::ParserError
+        JSON.parse(AtomicFile.read(path))
+      rescue JSON::ParserError, EncodingError
         {}
       end
 
+      # AtomicFile.write, not File.write: a crash mid-write must leave the old
+      # checkpoint intact, never a torn partial — a truncated checkpoint reads
+      # as "no checkpoint" and silently re-embeds everything.
       def save_checkpoint(checkpoint)
-        File.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+        AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
       end
 
       # Returns true when the vector store is an in-memory adapter that supports

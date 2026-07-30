@@ -3,6 +3,8 @@
 require 'json'
 require 'fileutils'
 
+require_relative '../atomic_file'
+
 module Woods
   module Unblocked
     # Tracks what was last pushed to an Unblocked collection so a sync can
@@ -103,15 +105,22 @@ module Woods
       private
 
       # Load the persisted documents, discarding data from a different
-      # collection, a different schema version, or an unparseable file.
-      # Every discard warns to stderr — the consequence (a full re-push) is
-      # expensive enough that operators need to know why it happened.
+      # collection, a different schema version, or an unparseable/unreadable
+      # file. Every discard warns to stderr — the consequence (a full re-push)
+      # is expensive enough that operators need to know why it happened.
+      #
+      # AtomicFile.read, not File.read: a bare read tags the bytes with the
+      # process's default external encoding (US-ASCII under LANG=C), so a
+      # non-ASCII document URI raised EncodingError out of JSON.parse instead
+      # of degrading. Read failures (e.g. Errno::EACCES) take the same discard
+      # path — the manifest is a cache, and "everything is new" is always a
+      # correct answer.
       #
       # @return [Hash{String=>Hash}] uri => { 'hash' =>, 'document_id' => }
       def load
         return {} unless File.exist?(@path)
 
-        parsed = JSON.parse(File.read(@path))
+        parsed = JSON.parse(AtomicFile.read(@path))
         return discard('not a JSON object') unless parsed.is_a?(Hash)
         return discard("schema version #{parsed['version'].inspect}, expected #{VERSION}") unless
           parsed['version'] == VERSION
@@ -122,6 +131,8 @@ module Woods
         documents.is_a?(Hash) ? documents : {}
       rescue JSON::ParserError
         discard('unparseable JSON')
+      rescue EncodingError, SystemCallError => e
+        discard("unreadable file: #{e.class}: #{e.message}")
       end
 
       # @param reason [String] Why the persisted manifest is unusable

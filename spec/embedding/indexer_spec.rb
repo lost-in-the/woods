@@ -161,6 +161,44 @@ RSpec.describe Woods::Embedding::Indexer do
       end
     end
 
+    context 'when a unit file contains non-ASCII bytes' do
+      # Regression — B-077 / #189. load_units read unit JSON with a bare
+      # File.read, which tags the bytes with the process's default external
+      # encoding — US-ASCII under LANG=C, which is exactly how this suite
+      # runs — so the first multibyte character (an accent, an em dash)
+      # raised Encoding::InvalidByteSequenceError out of JSON.parse and
+      # aborted the whole woods:embed run instead of anything per-unit.
+      let(:accented_unit) do
+        unit_data.merge(
+          'identifier' => 'Café',
+          'file_path' => 'app/models/café.rb',
+          'source_code' => "class Café < ApplicationRecord\n  # naïve ordering — see notes\nend",
+          'source_hash' => 'cafe123'
+        )
+      end
+
+      before do
+        Woods::AtomicFile.write(File.join(output_dir, 'cafe.json'), JSON.generate(accented_unit))
+      end
+
+      it 'embeds the unit instead of raising' do
+        stats = indexer.index_all
+
+        expect(stats[:processed]).to eq(2)
+        expect(stats[:errors]).to eq(0)
+      end
+
+      it 'round-trips the non-ASCII identifier through checkpoint.json' do
+        # Covers the whole loop: load_units (AtomicFile.read of the unit),
+        # save_checkpoint (now AtomicFile.write — atomic, binmode) and
+        # load_checkpoint-compatible bytes on disk.
+        indexer.index_all
+
+        checkpoint = JSON.parse(Woods::AtomicFile.read(File.join(output_dir, 'checkpoint.json')))
+        expect(checkpoint['Café']).to eq('cafe123')
+      end
+    end
+
     context 'when the checkpoint file already exists' do
       before do
         File.write(File.join(output_dir, 'checkpoint.json'), '{}')
@@ -389,6 +427,33 @@ RSpec.describe Woods::Embedding::Indexer do
       it 'treats all units as new' do
         stats = indexer.index_incremental
         expect(stats[:processed]).to eq(1)
+      end
+    end
+
+    context 'when the checkpoint contains non-ASCII bytes' do
+      # Regression — B-077 / #189. load_checkpoint's bare File.read made
+      # JSON.parse raise EncodingError (not JSON::ParserError, the only class
+      # rescued) under a US-ASCII default external encoding, aborting the run.
+      # The full fix must *parse* the checkpoint, not merely rescue it into
+      # {} — hence the skipped-unit assertion: a degraded-to-empty checkpoint
+      # would re-embed User instead of skipping it.
+      before do
+        described_class.new(
+          provider: provider, text_preparer: text_preparer,
+          vector_store: Woods::Storage::VectorStore::InMemory.new,
+          output_dir: output_dir, batch_size: 2
+        ).index_all
+
+        checkpoint = JSON.parse(Woods::AtomicFile.read(File.join(output_dir, 'checkpoint.json')))
+        Woods::AtomicFile.write(File.join(output_dir, 'checkpoint.json'),
+                                JSON.generate(checkpoint.merge('Café' => 'naïve')))
+      end
+
+      it 'honours the checkpoint instead of raising or degrading to a re-embed' do
+        stats = indexer.index_incremental
+
+        expect(stats[:skipped]).to eq(1)
+        expect(stats[:processed]).to eq(0)
       end
     end
   end
