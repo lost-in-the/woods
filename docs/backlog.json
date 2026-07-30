@@ -818,7 +818,7 @@
       "lib/woods/mcp/bootstrapper.rb"
     ],
     "description": "HTTP transport concurrent-handler unsynchronized IndexReader cache + lazy pipeline mutex init; Notion/Unblocked POST retry on read-timeout duplicates; Retry-After to_f zeros HTTP-date form; CircuitBreaker half-open unlimited probes + reset on overlap; bootstrapper/reload string-keyed vector metadata vs symbol-keyed search filters. Tracked in GH #150. PARTIAL (PR #151): FIXED the pipeline-lock mutex race (eager init), Retry-After (shared Woods::RetryAfter helper, both clients), and CircuitBreaker (single half-open probe + success_threshold). REMAINING: IndexReader cache guard, POST-retry idempotency, bootstrap/reload key-form normalization.",
-    "status": "in-progress",
+    "status": "resolved",
     "depends_on": []
   },
   {

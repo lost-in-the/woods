@@ -97,6 +97,132 @@ RSpec.describe Woods::Unblocked::Client do
     end
   end
 
+  describe 'verb-aware network retry' do
+    let(:http) { instance_double(Net::HTTP) }
+
+    before do
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(client).to receive(:sleep)
+    end
+
+    def success_response(body)
+      resp = instance_double(Net::HTTPSuccess, code: '200', body: JSON.generate(body))
+      allow(resp).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      resp
+    end
+
+    def fail_then_succeed(error_class, body)
+      resp = success_response(body)
+      calls = 0
+      allow(http).to receive(:request) do
+        calls += 1
+        raise error_class if calls == 1
+
+        resp
+      end
+      -> { calls }
+    end
+
+    def always_fail(error_class)
+      calls = 0
+      allow(http).to receive(:request) do
+        calls += 1
+        raise error_class
+      end
+      -> { calls }
+    end
+
+    describe 'POST on Net::ReadTimeout (mid-exchange: may have been committed)' do
+      it 'raises an error noting the operation may or may not have been applied' do
+        always_fail(Net::ReadTimeout)
+
+        expect do
+          client.create_collection(name: 'Woods', description: 'an index')
+        end.to raise_error(Woods::Error, /may or may not have been applied/)
+      end
+
+      it 'gives up after a single attempt instead of retrying' do
+        calls = always_fail(Net::ReadTimeout)
+
+        expect do
+          client.create_collection(name: 'Woods', description: 'an index')
+        end.to raise_error(Woods::Error)
+        expect(calls.call).to eq(1)
+      end
+    end
+
+    it 'does not retry a POST on ECONNRESET (mid-exchange)' do
+      calls = always_fail(Errno::ECONNRESET)
+
+      expect do
+        client.create_collection(name: 'Woods', description: 'an index')
+      end.to raise_error(Woods::Error, /may or may not have been applied/)
+      expect(calls.call).to eq(1)
+    end
+
+    it 'retries a POST on Net::OpenTimeout (connection never established)' do
+      calls = fail_then_succeed(Net::OpenTimeout, { 'id' => 'col-1' })
+
+      result = client.create_collection(name: 'Woods', description: 'an index')
+      expect(result['id']).to eq('col-1')
+      expect(calls.call).to eq(2)
+    end
+
+    it 'retries a POST on ECONNREFUSED (connection never established)' do
+      calls = fail_then_succeed(Errno::ECONNREFUSED, { 'id' => 'col-1' })
+
+      result = client.create_collection(name: 'Woods', description: 'an index')
+      expect(result['id']).to eq('col-1')
+      expect(calls.call).to eq(2)
+    end
+
+    it 'still retries a GET on Net::ReadTimeout (idempotent verb)' do
+      calls = fail_then_succeed(Net::ReadTimeout, [])
+
+      expect(client.list_collections).to eq([])
+      expect(calls.call).to eq(2)
+    end
+
+    it 'still retries a PUT on Net::ReadTimeout (documents upsert by uri)' do
+      calls = fail_then_succeed(Net::ReadTimeout, { 'id' => 'doc-1' })
+
+      result = client.put_document(collection_id: 'c', title: 't', body: 'b', uri: 'u')
+      expect(result['id']).to eq('doc-1')
+      expect(calls.call).to eq(2)
+    end
+
+    it 'retries a POST on 429 honoring the Retry-After delay' do
+      throttled = instance_double(Net::HTTPResponse, code: '429', body: JSON.generate({ 'message' => 'slow' }))
+      allow(throttled).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(throttled).to receive(:[]).with('Retry-After').and_return('7')
+      allow(http).to receive(:request).and_return(throttled, success_response({ 'id' => 'col-1' }))
+
+      result = client.create_collection(name: 'Woods', description: 'an index')
+      expect(result['id']).to eq('col-1')
+      expect(client).to have_received(:sleep).with(7.0)
+    end
+
+    it 'retries a POST on 503 (server answered without committing)' do
+      unavailable = instance_double(Net::HTTPResponse, code: '503', body: JSON.generate({ 'message' => 'down' }))
+      allow(unavailable).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(unavailable).to receive(:[]).with('Retry-After').and_return(nil)
+      allow(http).to receive(:request).and_return(unavailable, success_response({ 'id' => 'col-1' }))
+
+      result = client.create_collection(name: 'Woods', description: 'an index')
+      expect(result['id']).to eq('col-1')
+    end
+
+    it 'classifies PATCH like POST (non-idempotent) for future endpoints' do
+      # The client has no PATCH endpoint today; pin the classification so a
+      # future one inherits the safe behavior.
+      expect(client.send(:safe_to_retry?, :patch, Net::ReadTimeout.new)).to be(false)
+      expect(client.send(:safe_to_retry?, :patch, Net::OpenTimeout.new)).to be(true)
+    end
+  end
+
   describe 'error responses' do
     it 'raises ApiError carrying the HTTP status (and remains a Woods::Error)' do
       err = instance_double(Net::HTTPResponse, code: '404', body: JSON.generate({ 'title' => 'Not Found' }))

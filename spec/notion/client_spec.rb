@@ -284,6 +284,139 @@ RSpec.describe Woods::Notion::Client do
     end
   end
 
+  describe 'verb-aware network retry' do
+    let(:http) { instance_double(Net::HTTP) }
+
+    before do
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(client).to receive(:sleep)
+    end
+
+    def success_response(body)
+      response = instance_double(Net::HTTPResponse, code: '200', body: JSON.generate(body))
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      response
+    end
+
+    def fail_then_succeed(error_class, body)
+      response = success_response(body)
+      calls = 0
+      allow(http).to receive(:request) do
+        calls += 1
+        raise error_class if calls == 1
+
+        response
+      end
+      -> { calls }
+    end
+
+    def always_fail(error_class)
+      calls = 0
+      allow(http).to receive(:request) do
+        calls += 1
+        raise error_class
+      end
+      -> { calls }
+    end
+
+    describe 'POST on Net::ReadTimeout (mid-exchange: may have been committed)' do
+      it 'raises an error noting the operation may or may not have been applied' do
+        always_fail(Net::ReadTimeout)
+
+        expect do
+          client.create_page(database_id: 'db', properties: {})
+        end.to raise_error(Woods::Error, /may or may not have been applied/)
+      end
+
+      it 'gives up after a single attempt instead of retrying' do
+        calls = always_fail(Net::ReadTimeout)
+
+        expect do
+          client.create_page(database_id: 'db', properties: {})
+        end.to raise_error(Woods::Error)
+        expect(calls.call).to eq(1)
+      end
+    end
+
+    it 'classifies PATCH like POST: no retry on Net::ReadTimeout' do
+      calls = always_fail(Net::ReadTimeout)
+
+      expect do
+        client.update_page(page_id: 'page-1', properties: {})
+      end.to raise_error(Woods::Error, /may or may not have been applied/)
+      expect(calls.call).to eq(1)
+    end
+
+    it 'does not retry a POST on ECONNRESET (mid-exchange)' do
+      calls = always_fail(Errno::ECONNRESET)
+
+      expect do
+        client.create_page(database_id: 'db', properties: {})
+      end.to raise_error(Woods::Error, /may or may not have been applied/)
+      expect(calls.call).to eq(1)
+    end
+
+    it 'retries a POST on Net::OpenTimeout (connection never established)' do
+      calls = fail_then_succeed(Net::OpenTimeout, { 'id' => 'page-ok' })
+
+      result = client.create_page(database_id: 'db', properties: {})
+      expect(result['id']).to eq('page-ok')
+      expect(calls.call).to eq(2)
+    end
+
+    it 'retries a POST on ECONNREFUSED (connection never established)' do
+      calls = fail_then_succeed(Errno::ECONNREFUSED, { 'id' => 'page-ok' })
+
+      result = client.create_page(database_id: 'db', properties: {})
+      expect(result['id']).to eq('page-ok')
+      expect(calls.call).to eq(2)
+    end
+
+    it 'still retries a GET on Net::ReadTimeout (idempotent verb)' do
+      # No public Notion endpoint issues a GET today, so drive the private
+      # request path directly to pin the idempotent classification.
+      calls = fail_then_succeed(Net::ReadTimeout, { 'ok' => true })
+
+      result = client.send(:request, :get, 'users')
+      expect(result['ok']).to be(true)
+      expect(calls.call).to eq(2)
+    end
+
+    it 'retries a POST on 429 honoring the Retry-After delay' do
+      throttled = instance_double(Net::HTTPResponse, code: '429', body: JSON.generate({ 'message' => 'Rate limited' }))
+      allow(throttled).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(throttled).to receive(:[]).with('Retry-After').and_return('7')
+      allow(http).to receive(:request).and_return(throttled, success_response({ 'id' => 'page-after-429' }))
+
+      result = client.create_page(database_id: 'db', properties: {})
+      expect(result['id']).to eq('page-after-429')
+      expect(client).to have_received(:sleep).with(7.0)
+    end
+
+    it 'retries a POST on 503 (server answered without committing)' do
+      unavailable = instance_double(Net::HTTPResponse, code: '503', body: JSON.generate({ 'message' => 'down' }))
+      allow(unavailable).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(unavailable).to receive(:[]).with('Retry-After').and_return(nil)
+      allow(http).to receive(:request).and_return(unavailable, success_response({ 'id' => 'page-after-503' }))
+
+      result = client.create_page(database_id: 'db', properties: {})
+      expect(result['id']).to eq('page-after-503')
+    end
+
+    it 'still raises on a POST 500 (ambiguous 5xx is not retried)' do
+      broken = instance_double(Net::HTTPResponse, code: '500', body: JSON.generate({ 'message' => 'boom' }))
+      allow(broken).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(http).to receive(:request).and_return(broken)
+
+      expect do
+        client.create_page(database_id: 'db', properties: {})
+      end.to raise_error(Woods::Error, /500/)
+    end
+  end
+
   describe 'bearer-token redaction in errors' do
     it 'redacts the api_token from a reflected error message body' do
       reflected_response = instance_double(
