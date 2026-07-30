@@ -79,7 +79,7 @@ Columns:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `embedding_provider` | Symbol | — | Embedding backend: `:openai` or `:ollama` |
+| `embedding_provider` | Symbol or Object | — | Embedding backend: `:openai`, `:ollama`, `:fake` (deterministic, offline — see below), or an already-constructed provider object responding to `#embed`/`#embed_batch` |
 | `embedding_model` | String | `'text-embedding-3-small'` | Model name for the embedding provider |
 | `embedding_options` | Hash | `nil` | Provider-specific options (see below) |
 
@@ -117,6 +117,23 @@ gem 'tokenizers', '~> 0.5'
 ```
 
 See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full model comparison and the procedure for adding a new model to the registry.
+
+### Fake Embeddings (CI / sandboxes / offline hosts)
+
+```ruby
+config.embedding_provider = :fake
+config.embedding_options = { dims: 128 }  # optional; default 128
+```
+
+`:fake` wires `Woods::Embedding::Provider::Fake` — a deterministic bag-of-words hashing provider that needs no network endpoint, so `rake woods:embed` and `rake woods:retrieve` run in CI, sandboxes, and offline hosts. Vectors are L2-normalized, so cosine similarity stays mechanically meaningful (texts sharing vocabulary rank closer), but they are **not semantically meaningful embeddings** — use `:fake` for pipeline smoke tests, never for production retrieval quality. It pairs with any configured store stack: `:in_memory` everywhere for a self-contained smoke run, or the same pgvector/Qdrant + SQLite stores a real provider would use (MySQL-backed hosts pair with Qdrant exactly as in the [backend matrix](BACKEND_MATRIX.md); the provider itself never touches the database).
+
+### Injecting a Provider Object
+
+Anything responding to `#embed` and `#embed_batch` can be assigned directly — it is used as-is and wrapped in the same retry/circuit-breaker resilience stack as the built-in adapters:
+
+```ruby
+config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
+```
 
 ## Storage Options
 

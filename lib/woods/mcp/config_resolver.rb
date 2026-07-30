@@ -142,7 +142,8 @@ module Woods
       # Populate a blank {Woods::Configuration} from a stored {ResolvedConfig}.
       #
       # Maps the serialised provider class name back to the +:ollama+ /
-      # +:openai+ symbol that {Builder} expects, and restores store types.
+      # +:openai+ / +:fake+ symbol that {Builder} expects, and restores
+      # store types.
       # Applied when an MCP server starts without a host Rails initializer.
       #
       # @param config [Woods::Configuration]
@@ -198,6 +199,7 @@ module Woods
         case class_name.to_s
         when /Ollama/ then :ollama
         when /OpenAI/ then :openai
+        when /Fake/ then :fake
         else class_name.to_s
         end
       end

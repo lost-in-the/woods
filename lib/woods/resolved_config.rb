@@ -291,6 +291,7 @@ module Woods
         case provider
         when :openai then 'Woods::Embedding::Provider::OpenAI'
         when :ollama then 'Woods::Embedding::Provider::Ollama'
+        when :fake   then 'Woods::Embedding::Provider::Fake'
         when String  then provider
         when Class   then provider.name
         when nil     then ''

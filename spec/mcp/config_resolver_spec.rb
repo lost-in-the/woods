@@ -128,6 +128,31 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
+      # #178 — a CI/sandbox host embeds with :fake, then boots woods-mcp
+      # against the dump. The stored class name must round-trip back to the
+      # :fake symbol Builder understands, carrying the recorded dimension.
+      it 'maps the Fake class name back to :fake with no credential requirement' do
+        Dir.mktmpdir do |dir|
+          fake_hash = woods_json_hash.merge(
+            'embedding_provider' => {
+              'class' => 'Woods::Embedding::Provider::Fake',
+              'model' => 'fake-embedding-test',
+              'dimension' => 128
+            }
+          )
+          write_woods_json(dir, fake_hash)
+          artifact = Woods::IndexArtifact.new(dir)
+          config, = described_class.resolve(blank_config, artifact: artifact, env: {})
+          expect(config.embedding_provider).to eq(:fake)
+          expect(config.embedding_options[:dimension]).to eq(128)
+
+          # And Builder can construct the provider offline from that config.
+          provider = Woods::Builder.new(config).build_embedding_provider
+          expect(provider).to be_a(Woods::Embedding::Provider::Fake)
+          expect(provider.dimensions).to eq(128)
+        end
+      end
+
       it 'raises MissingCredential when OpenAI snapshot is loaded without OPENAI_API_KEY' do
         Dir.mktmpdir do |dir|
           openai_hash = woods_json_hash.merge(

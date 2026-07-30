@@ -114,6 +114,18 @@ If you want Woods to auto-pick `num_ctx` for a model we don't ship support for:
 - Multilingual content (Arctic Embed 2 is BGE M3 with a stronger non-English
   story).
 
+## Deterministic fake provider (no model at all)
+
+For CI, sandboxes, and offline hosts where neither OpenAI nor Ollama is
+reachable, `config.embedding_provider = :fake` wires
+`Woods::Embedding::Provider::Fake` — deterministic bag-of-words hashing with
+L2 normalization, no network endpoint, configurable dimension
+(`embedding_options = { dims: 128 }`). Cosine similarity stays mechanically
+meaningful (shared vocabulary ranks closer), but the vectors are **not
+semantically meaningful embeddings**: use it to smoke-test the
+embed → store → retrieve pipeline, never for production retrieval quality.
+See [CONFIGURATION_REFERENCE.md](./CONFIGURATION_REFERENCE.md#fake-embeddings-ci--sandboxes--offline-hosts).
+
 ## Related
 
 - [CONFIGURATION_REFERENCE.md](./CONFIGURATION_REFERENCE.md) — full config surface

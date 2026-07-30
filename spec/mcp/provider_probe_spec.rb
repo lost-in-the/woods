@@ -209,6 +209,17 @@ RSpec.describe Woods::MCP::ProviderProbe do
       end
     end
 
+    # --- Fake provider (#178) ---
+
+    context 'with the deterministic fake provider' do
+      it 'is trivially reachable without any network I/O' do
+        fake = Woods::Embedding::Provider::Fake.new(dims: 8)
+        expect(Net::HTTP).not_to receive(:new)
+
+        expect(described_class.reachable!(fake)).to be(fake)
+      end
+    end
+
     # --- Unknown provider ---
 
     context 'with an unknown provider class' do

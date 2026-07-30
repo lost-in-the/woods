@@ -3,6 +3,8 @@
 require 'net/http'
 require 'uri'
 
+require_relative '../embedding/fake'
+
 module Woods
   module MCP
     # Probes an embedding provider's HTTP endpoint to confirm it is reachable
@@ -39,10 +41,14 @@ module Woods
       #   with +reason: "unauthorized"+ because an invalid key means the
       #   provider cannot be used; network failures raise with the appropriate
       #   reason string.
+      # - {Woods::Embedding::Provider::Fake} → trivially reachable (#178).
+      #   The provider is deterministic and in-process; there is no endpoint
+      #   to probe, so the probe succeeds without any network I/O.
       # - Any other class → raises +ArgumentError+.
       #
       # @param provider [Woods::Embedding::Provider::Ollama,
-      #   Woods::Embedding::Provider::OpenAI] a concrete embedding provider
+      #   Woods::Embedding::Provider::OpenAI,
+      #   Woods::Embedding::Provider::Fake] a concrete embedding provider
       # @return [Object] the same +provider+ if reachable
       # @raise [Woods::MCP::ProviderUnreachable] if the endpoint is unreachable,
       #   times out, returns 5xx, or (for OpenAI) returns 401
@@ -53,6 +59,10 @@ module Woods
           probe_ollama!(provider)
         when Woods::Embedding::Provider::OpenAI
           probe_openai!(provider)
+        when Woods::Embedding::Provider::Fake
+          # In-process, no endpoint: nothing to probe (#178). The case arm
+          # is deliberately empty — the method returns +provider+ below.
+          nil
         else
           raise ArgumentError,
                 "#{self}.reachable! does not know how to probe #{provider.class} — " \

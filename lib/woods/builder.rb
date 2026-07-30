@@ -8,6 +8,7 @@ require_relative 'storage/metadata_store'
 require_relative 'storage/graph_store'
 require_relative 'embedding/provider'
 require_relative 'embedding/openai'
+require_relative 'embedding/fake'
 require_relative 'resilience/retryable_provider'
 require_relative 'embedding/text_preparer'
 require_relative 'embedding/token_counter'
@@ -142,6 +143,15 @@ module Woods
 
     # Instantiate the embedding provider specified by the configuration.
     #
+    # `embedding_provider` accepts three shapes (#178):
+    # - +:openai+ / +:ollama+ — the network-backed adapters.
+    # - +:fake+ — {Embedding::Provider::Fake}: deterministic, offline, for
+    #   CI/smoke runs. See {#build_fake_provider} for dimension resolution.
+    # - an already-constructed provider *object* — anything responding to
+    #   +#embed+ and +#embed_batch+ is returned as-is, so hosts can plug in
+    #   their own implementation without patching the Builder. It flows
+    #   through {#build_resilient_embedding_provider} like the built-ins.
+    #
     # Strips `embedding_options` keys that belong to the ResolvedConfig layer
     # (like `:dimension`) before splatting into the provider's constructor —
     # those keys are useful for the Snapshotter's schema header but
@@ -150,11 +160,18 @@ module Woods
     # @return [Embedding::Provider::Interface] Embedding provider instance
     # @raise [ArgumentError] if the configured type is not recognized
     def build_embedding_provider
+      configured = @config.embedding_provider
+      return configured if provider_object?(configured)
+
       opts = provider_kwargs
-      case @config.embedding_provider
+      case configured
       when :openai then Embedding::Provider::OpenAI.new(**opts)
       when :ollama then Embedding::Provider::Ollama.new(**opts)
-      else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
+      when :fake then build_fake_provider
+      else
+        raise ArgumentError,
+              "Unknown embedding_provider: #{configured}. Valid: :openai, :ollama, :fake, " \
+              'or a provider object responding to #embed and #embed_batch'
       end
     end
 
@@ -171,6 +188,11 @@ module Woods
     #
     # Each call constructs a fresh breaker — breaker state is per-instance
     # and must never be shared across unrelated components.
+    #
+    # The wrap is harmless for providers that never raise transient
+    # failures ({Embedding::Provider::Fake}, most injected provider
+    # objects): nothing retryable ever fires, so the wrapper is a
+    # transparent pass-through.
     #
     # @param provider [Embedding::Provider::Interface] raw provider to wrap;
     #   defaults to a freshly built one from the configuration
@@ -194,6 +216,39 @@ module Woods
       opts
     end
     private :provider_kwargs
+
+    # True when the configured `embedding_provider` is not a Symbol naming a
+    # built-in adapter but an already-constructed provider object (#178).
+    # Duck-typed on the two methods every pipeline consumer calls; the rest
+    # of {Embedding::Provider::Interface} (+#dimensions+, +#model_name+,
+    # +#max_input_tokens+) is probed with +respond_to?+ at each call site,
+    # so an object that omits them still works where they are optional.
+    #
+    # @param candidate [Object]
+    # @return [Boolean]
+    def provider_object?(candidate)
+      !candidate.is_a?(Symbol) && candidate.respond_to?(:embed) && candidate.respond_to?(:embed_batch)
+    end
+    private :provider_object?
+
+    # Build the deterministic fake provider (#178).
+    #
+    # Dimension resolution: `embedding_options[:dims]` maps directly onto
+    # the {Embedding::Provider::Fake} constructor; failing that, the
+    # ResolvedConfig-level `embedding_options[:dimension]` key — normally
+    # snapshot-only bookkeeping stripped by {#provider_kwargs} — is
+    # honoured, so hosts that declare their dimension there (and the MCP
+    # boot path, which restores exactly that key from woods.json) get
+    # vectors of the recorded dimension.
+    #
+    # @return [Embedding::Provider::Fake]
+    def build_fake_provider
+      opts = provider_kwargs
+      declared = (@config.embedding_options || {}).transform_keys(&:to_sym)[:dimension]
+      opts[:dims] ||= declared if declared
+      Embedding::Provider::Fake.new(**opts)
+    end
+    private :build_fake_provider
 
     # Build a {Embedding::TextPreparer} calibrated to a given provider.
     #

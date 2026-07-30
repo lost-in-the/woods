@@ -473,6 +473,140 @@ RSpec.describe Woods::Builder do
       expect { described_class.new(config).build_retriever }
         .to raise_error(ArgumentError, /Unknown embedding_provider: cohere/)
     end
+
+    # #178 — the error must teach the fix: name every valid option,
+    # including the offline :fake provider and the object-injection escape
+    # hatch.
+    it 'names the valid options including :fake in the error message' do
+      expect { described_class.new(config).build_retriever }
+        .to raise_error(ArgumentError, /:openai, :ollama, :fake.*#embed and #embed_batch/)
+    end
+  end
+
+  # ── Builder#build_embedding_provider — :fake (#178) ──────────────────
+
+  describe '#build_embedding_provider with :fake' do
+    let(:config) do
+      Woods::Configuration.new.tap { |c| c.embedding_provider = :fake }
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    it 'returns the promoted deterministic provider' do
+      expect(builder.build_embedding_provider).to be_a(Woods::Embedding::Provider::Fake)
+    end
+
+    it 'defaults to the provider default dimensionality' do
+      expect(builder.build_embedding_provider.dimensions)
+        .to eq(Woods::Embedding::Provider::Fake::DEFAULT_DIMS)
+    end
+
+    it 'honours embedding_options[:dims]' do
+      config.embedding_options = { dims: 64 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(64)
+    end
+
+    # The :dimension key is normally snapshot-only bookkeeping stripped by
+    # provider_kwargs — but it is also the key the MCP boot path restores
+    # from woods.json, so the fake honours it as a dims fallback.
+    it 'honours the snapshot-level embedding_options[:dimension] key' do
+      config.embedding_options = { dimension: 32 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(32)
+    end
+
+    it 'prefers :dims over :dimension when both are set' do
+      config.embedding_options = { dims: 64, dimension: 32 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(64)
+    end
+
+    it 'embeds without any network endpoint' do
+      vector = builder.build_embedding_provider.embed('class User < ApplicationRecord; end')
+
+      expect(vector.length).to eq(Woods::Embedding::Provider::Fake::DEFAULT_DIMS)
+    end
+
+    # #178 — the fake never 429s, so the wrap is a no-op, but it must still
+    # apply so every pipeline entry point treats providers uniformly.
+    it 'is wrapped in the resilience stack like the network providers' do
+      wrapped = builder.build_resilient_embedding_provider
+
+      expect(wrapped).to be_a(Woods::Resilience::RetryableProvider)
+      expect(wrapped.provider).to be_a(Woods::Embedding::Provider::Fake)
+      expect(wrapped.circuit_breaker).to be_a(Woods::Resilience::CircuitBreaker)
+    end
+
+    it 'embeds through the resilience wrapper transparently' do
+      wrapped = builder.build_resilient_embedding_provider
+
+      expect(wrapped.embed('some woods text').length)
+        .to eq(Woods::Embedding::Provider::Fake::DEFAULT_DIMS)
+    end
+  end
+
+  # ── Builder#build_embedding_provider — injected object (#178) ─────────
+
+  describe '#build_embedding_provider with an injected provider object' do
+    let(:injected) do
+      Class.new do
+        def embed(_text)
+          [1.0, 0.0]
+        end
+
+        def embed_batch(texts)
+          texts.map { [1.0, 0.0] }
+        end
+
+        def dimensions
+          2
+        end
+
+        def model_name
+          'host-custom'
+        end
+      end.new
+    end
+
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :in_memory
+        c.metadata_store = :in_memory
+        c.graph_store = :in_memory
+        c.embedding_provider = injected
+      end
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    it 'uses the object as-is' do
+      expect(builder.build_embedding_provider).to be(injected)
+    end
+
+    it 'wraps the injected object in the resilience stack' do
+      wrapped = builder.build_resilient_embedding_provider
+
+      expect(wrapped).to be_a(Woods::Resilience::RetryableProvider)
+      expect(wrapped.provider).to be(injected)
+    end
+
+    it 'flows through build_retriever wrapped around the same object' do
+      expect(Woods::Retriever).to receive(:new) do |kwargs|
+        expect(kwargs[:embedding_provider]).to be_a(Woods::Resilience::RetryableProvider)
+        expect(kwargs[:embedding_provider].provider).to be(injected)
+        fake_retriever
+      end
+
+      expect(builder.build_retriever).to be(fake_retriever)
+    end
+
+    it 'rejects objects that do not implement the provider interface' do
+      config.embedding_provider = Object.new
+
+      expect { builder.build_embedding_provider }
+        .to raise_error(ArgumentError, /Unknown embedding_provider/)
+    end
   end
 
   # ── options hashes are passed through ────────────────────────────────

@@ -605,36 +605,38 @@ namespace :woods do
   desc 'Clear the brush — remove index (alias for clean)'
   task clear: :clean
 
+  # Resolve the configured retrieval stack and run one ad-hoc query (#178).
+  #
+  # Every backend — embedding provider, vector store, metadata store, graph
+  # store — is resolved through Woods::Builder from Woods.configuration,
+  # the same wiring `woods:embed` writes through
+  # (Woods::Tasks.build_embed_indexer). The old task body hardcoded
+  # Ollama + InMemory + SQLite + Memory, so on any other configured stack it
+  # queried backends the embed run never wrote to and silently returned
+  # nothing.
+  #
+  # In-memory stores start empty in a fresh process; hosts on the :local /
+  # :shared_filesystem presets should query through woods-mcp, which
+  # hydrates them from the dumps on disk.
+  #
+  # @param query [String] natural-language retrieval query
+  # @return [String] human-formatted retrieval output
+  def woods_run_retrieval(query)
+    require 'woods'
+    require 'woods/formatting/human_adapter'
+
+    config = Woods.configuration
+    retriever = Woods::Builder.new(config).build_retriever
+    result = retriever.retrieve(query, budget: config.max_context_tokens)
+
+    Woods::Formatting::HumanAdapter.new.format(result)
+  end
+
   # Internal debugging tool — hidden from `rails -T`
   task :retrieve, [:query] => :environment do |_t, args|
     query = args[:query] || raise('Usage: rake woods:retrieve[query]')
 
-    require 'woods'
-    require 'woods/retriever'
-    require 'woods/embedding/provider'
-    require 'woods/storage/vector_store'
-    require 'woods/storage/metadata_store'
-    require 'woods/storage/graph_store'
-    require 'woods/formatting/human_adapter'
-
-    config = Woods.configuration
-
-    provider = Woods::Embedding::Provider::Ollama.new
-    vector_store = Woods::Storage::VectorStore::InMemory.new
-    metadata_store = Woods::Storage::MetadataStore::SQLite.new
-    graph_store = Woods::Storage::GraphStore::Memory.new
-
-    retriever = Woods::Retriever.new(
-      vector_store: vector_store,
-      metadata_store: metadata_store,
-      graph_store: graph_store,
-      embedding_provider: provider
-    )
-
-    result = retriever.retrieve(query, budget: config.max_context_tokens)
-
-    formatter = Woods::Formatting::HumanAdapter.new
-    puts formatter.format(result)
+    puts woods_run_retrieval(query)
   end
 
   desc 'Embed all extracted units'
