@@ -923,15 +923,52 @@ module Woods
       AtomicFile.write(path, payload)
     end
 
-    # @return [Boolean] true when the file already holds exactly these bytes
+    # The serialized `extracted_at` scalar as {ExtractedUnit#to_h} +
+    # {#json_serialize} emit it, compact or pretty. `Time#iso8601` produces
+    # exactly this value shape — no fractional seconds, `Z` or a `±hh:mm`
+    # offset — and `spec/extracted_unit_spec.rb` pins that, so a change to the
+    # stamp's shape fails a spec instead of quietly un-matching this mask.
+    # The value constraint is what keeps the mask honest against user code: a
+    # bare `"extracted_at":` cannot occur inside any JSON *string* value
+    # (interior quotes serialize as `\"`), so only a real JSON key can match,
+    # and only when it holds a timestamp — which no extractor emits below the
+    # top level.
+    EXTRACTED_AT_SCALAR =
+      /("extracted_at":\s*")\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})(?=")/
+    # An implementation detail of the byte comparison, not part of the
+    # extractor's surface (`private` does not scope constants).
+    private_constant :EXTRACTED_AT_SCALAR
+
+    # @return [Boolean] true when the file already holds exactly these bytes,
+    #   the `extracted_at` stamp aside
     def identical_on_disk?(path, payload)
       return false unless File.exist?(path)
 
-      AtomicFile.read(path).b == payload.b
+      mask_extracted_at(AtomicFile.read(path).b) == mask_extracted_at(payload.b)
     rescue StandardError
       # An unreadable or half-written file is not a match; fall through and
       # rewrite it.
       false
+    end
+
+    # Blank the `extracted_at` value so the byte comparison ignores it.
+    #
+    # {ExtractedUnit#to_h} stamps `extracted_at: Time.now.iso8601` on every
+    # serialization, so compared raw the two sides *always* differed across
+    # runs and the skip was inert (#208): every write did the comparison read
+    # and then paid the fsync anyway. Masked with a regex rather than parsed,
+    # because a JSON parse of both sides would cost more than the write being
+    # avoided. A skipped write leaves the older stamp on disk deliberately —
+    # the equivalence oracle (`spec/support/index_comparison.rb`) lists
+    # `extracted_at` in `VOLATILE_UNIT_KEYS`: "a unit an incremental run
+    # correctly left alone keeps an older stamp".
+    #
+    # @param bytes [String] serialized unit JSON, binary-tagged (`.b`) — the
+    #   ASCII-only pattern matches bytewise regardless of the content's
+    #   original encoding
+    # @return [String] the bytes with the stamp's value removed
+    def mask_extracted_at(bytes)
+      bytes.gsub(EXTRACTED_AT_SCALAR, '\1')
     end
 
     def normalize_file_paths
@@ -1518,9 +1555,19 @@ module Woods
     #
     # @param rule [PathDispatcher::Rule]
     # @param absolute_path [String]
-    # @return [Array<ExtractedUnit>]
+    # @return [Array<ExtractedUnit>, nil] the units the path defines, or nil
+    #   when the attempt says nothing about what it defines (see the rescue)
     def extract_with_rule(rule, absolute_path)
       extractor = extractor_for(rule.extractor_key)
+      # nil, not [] — the same distinction the rescue below defends (#198).
+      # {#extractor_for} rescues a raising *constructor* and memoizes nil, and
+      # nil fails the respond_to? guard — so a failed construction used to fall
+      # through to the [] "this path defines nothing any more" answer, and one
+      # broken constructor licensed pruning every previously-registered unit
+      # on every changed path of that type, with the generation bumped over
+      # the loss. Construction failure tells us nothing about the path; only
+      # a genuinely constructed extractor that lacks the method earns the [].
+      return nil if extractor.nil?
       return [] unless extractor.respond_to?(rule.method_name)
 
       result =
@@ -1704,7 +1751,9 @@ module Woods
     # Replace every unit an extractor owns with a fresh extraction.
     #
     # Units of the extractor's types that the fresh run no longer produces are
-    # removed, which is what makes this a replacement rather than an upsert.
+    # removed, which is what makes this a replacement rather than an upsert —
+    # subject to the same eager-load gate the reconciler applies, see
+    # {#remove_replaced_units}.
     #
     # @param key [Symbol] extractor key
     # @param affected_types [Set<Symbol>]
@@ -1717,18 +1766,56 @@ module Woods
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
       touched = register_and_write(key, units, affected_types)
-
-      fresh = units.to_set(&:identifier)
-      EXTRACTOR_KEY_TO_TYPES.fetch(key, []).each do |unit_type|
-        (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
-          touched.add(stale) if remove_unit(stale, affected_types)
-        end
-      end
-
-      touched
+      touched.merge(remove_replaced_units(key, units, affected_types))
     rescue StandardError => e
       Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
       Set.new
+    end
+
+    # The removal half of a wholesale replacement: drop every unit of `key`'s
+    # types that the fresh run no longer produced.
+    #
+    # Gated exactly the way {#stale_class_based_units} is, and for the same
+    # reason (#198): for the extractors in {CLASS_BASED_DISCOVERY},
+    # `extract_all` is `discoverable_classes.map { ... }` — a function of the
+    # runtime descendants — so on the documented NameError-fallback boot the
+    # fresh set is known-partial and "absent from it" does not mean "deleted".
+    # The reconciler's gate ("the whole safety argument") never protected this
+    # path, and {ROUTE_CONSUMER_EXTRACTORS} routes four descendants-discovered
+    # types through here on *every* routes change — so one routes edit on a
+    # fallback boot mass-deleted most controller units. Registration above is
+    # not gated: additions are safe against a partial set (the same asymmetry
+    # {#reconcile_class_based_types} relies on); only removal needs the
+    # complete one.
+    #
+    # File-derived whole-app types (routes, view_templates, events, ...) keep
+    # unconditional removal — their `extract_all` globs files or introspects
+    # structures that do not depend on eager loading, so their fresh set is
+    # authoritative on any boot.
+    #
+    # The skip is warned, not silent: until a run with a clean boot removes
+    # them, the type may hold stale units, and an operator chasing a ghost
+    # unit needs to know which run declined to delete it and why.
+    #
+    # @param key [Symbol] extractor key
+    # @param units [Array<ExtractedUnit>] the fresh extraction
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers removed
+    def remove_replaced_units(key, units, affected_types)
+      if CLASS_BASED_DISCOVERY.key?(key) && !@eager_load_complete
+        Rails.logger.warn(
+          "[Woods] Skipping stale-unit removal for #{key}: the eager load was incomplete, " \
+          'so its discovery set is known-partial — the type may hold stale units until a clean boot'
+        )
+        return Set.new
+      end
+
+      fresh = units.to_set(&:identifier)
+      EXTRACTOR_KEY_TO_TYPES.fetch(key, []).each_with_object(Set.new) do |unit_type, removed|
+        (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
+          removed.add(stale) if remove_unit(stale, affected_types)
+        end
+      end
     end
 
     # Prune units whose source file no longer exists (#164 gap 2).

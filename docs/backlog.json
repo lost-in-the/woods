@@ -1194,7 +1194,7 @@
       "lib/woods/extractor.rb"
     ],
     "description": "Two twins of documented safety principles applied in one place but not the other. (1) extract_with_rule returns nil on per-file failure precisely so a transient failure cannot license pruning - but when the extractor INSTANCE fails to construct, extractor_for memoizes nil and 'return [] unless extractor.respond_to?' produces the 'path defines nothing' answer: a watcher batch then prunes every unit on those paths and bumps the generation. Fix: return nil when extractor_for yields nil. (2) stale_class_based_units gates removal on @eager_load_complete ('the whole safety argument'), but replace_type_wholesale performs the same discovery-set-driven removal ungated, and the routes cascade routes four descendants-discovered types through it - on a degraded (NameError-fallback) boot, one routes edit mass-deletes controller units. Fix: gate the removal loop for CLASS_BASED_DISCOVERY keys, warn when skipped. Tracked in GH #198.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1336,7 +1336,7 @@
       "lib/woods/extracted_unit.rb"
     ],
     "description": "ExtractedUnit#to_h embeds extracted_at: Time.now.iso8601, so the serialized payload always differs from the previous run's file and identical_on_disk? never fires in its motivating scenario (wholesale replacement, ~1,707 units on a routes change) - the documented fsync-avoidance instead ADDS a read of every file and writes anyway. Fix: compare with the volatile key masked (mirroring VOLATILE_UNIT_KEYS in the equivalence oracle), or move extracted_at to the manifest; freeze time in the spec. Tracked in GH #208.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

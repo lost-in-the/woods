@@ -651,6 +651,57 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── reconcile_changed_paths — failed extractor construction (#198) ──
+
+  # `extractor_for` rescues a raising *constructor* and memoizes nil, and nil
+  # fails `extract_with_rule`'s respond_to? guard — which used to answer []:
+  # the "this path defines nothing any more" answer that licenses
+  # `prune_path_leftovers`. So one broken constructor (a DB connection down, a
+  # route-helper map that raised) deleted every previously-registered unit on
+  # every changed path of that type, and the run bumped the generation over
+  # the loss. Construction failure and "extracted successfully, defines
+  # nothing" are different answers; only the second may prune.
+  describe '#reconcile_changed_paths when an extractor cannot be constructed' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      allow(Woods::Extractors::ServiceExtractor).to receive(:new)
+        .and_raise(StandardError, 'no database connection')
+    end
+
+    after { Woods.configuration = @original_config }
+
+    let(:service_path) { File.join(tmpdir, 'app/services/billing_service.rb') }
+    let(:service_rule) { Woods::PathDispatcher.new.file_rules_for('app/services/billing_service.rb').fetch(0) }
+
+    it 'does not prune the units previously registered on the changed path' do
+      FileUtils.mkdir_p(File.dirname(service_path))
+      File.write(service_path, 'class BillingService; end')
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :service, identifier: 'BillingService', file_path: service_path)
+      )
+
+      extractor.send(:reconcile_changed_paths,
+                     Woods::ChangeSet.new(paths: ['app/services/billing_service.rb'], root: rails_root),
+                     Set.new)
+
+      expect(extractor.dependency_graph.node_exists?('BillingService')).to be(true)
+    end
+
+    it 'returns nil from extract_with_rule — "tells us nothing", not "defines nothing"' do
+      expect(extractor.send(:extract_with_rule, service_rule, service_path)).to be_nil
+    end
+
+    it 'still returns [] for a genuinely constructed extractor lacking the rule method' do
+      # Seeding the memo hash sidesteps construction, as the reconcile specs
+      # do. An instance without the method IS the "defines nothing" answer.
+      extractor.instance_variable_set(:@incremental_extractors, { services: Object.new })
+
+      expect(extractor.send(:extract_with_rule, service_rule, service_path)).to eq([])
+    end
+  end
+
   # ── refresh ──────────────────────────────────────────────────────────
 
   describe '#refresh' do
@@ -741,6 +792,92 @@ RSpec.describe Woods::Extractor do
 
       graph = JSON.parse(File.read(File.join(tmpdir, 'output', 'dependency_graph.json')))
       expect(graph['nodes']).to have_key('GET /posts')
+    end
+  end
+
+  # ── replace_type_wholesale — removal gate (#198) ─────────────────────
+
+  # {#stale_class_based_units} opens with `return [] unless
+  # @eager_load_complete` — documented as the whole safety argument — but
+  # replace_type_wholesale performed the same discovery-set-driven removal
+  # with no gate at all. For the CLASS_BASED_DISCOVERY extractors,
+  # `extract_all` is a function of the runtime descendants, so on the
+  # NameError-fallback boot the fresh set is known-partial — and
+  # ROUTE_CONSUMER_EXTRACTORS routes four such types through here on every
+  # routes change, so one routes edit mass-deleted most controller units.
+  describe '#replace_type_wholesale removal gate' do
+    let(:fresh_unit) do
+      Woods::ExtractedUnit.new(type: :controller, identifier: 'PostsController', file_path: nil)
+    end
+    let(:fake_controllers) { double('ControllerExtractor', extract_all: [fresh_unit]) }
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(File.join(tmpdir, 'output'))
+      # extractor_for memoizes into this hash, so seeding it injects the
+      # double without booting a real extractor against no Rails app.
+      extractor.instance_variable_set(:@incremental_extractors, { controllers: fake_controllers })
+      register(type: :controller, identifier: 'PostsController')
+      register(type: :controller, identifier: 'GoneController')
+    end
+
+    after { Woods.configuration = @original_config }
+
+    def register(type:, identifier:)
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: nil)
+      )
+    end
+
+    def replace(key)
+      extractor.send(:replace_type_wholesale, key, Set.new)
+    end
+
+    context 'when the eager load fell back to per-directory loading' do
+      before { extractor.instance_variable_set(:@eager_load_complete, false) }
+
+      it 'does not remove class-based units absent from the partial discovery set' do
+        replace(:controllers)
+
+        expect(extractor.dependency_graph.node_exists?('GoneController')).to be(true)
+        expect(extractor.dependency_graph.node_exists?('PostsController')).to be(true)
+      end
+
+      it 'warns that the type may hold stale units until a clean boot' do
+        expect(Rails.logger).to receive(:warn).with(/Skipping stale-unit removal for controllers/)
+
+        replace(:controllers)
+      end
+
+      # Routes, view_templates and friends glob files or introspect the live
+      # route table — their extract_all does not depend on eager loading, so
+      # their fresh set stays authoritative on any boot.
+      it 'still removes stale units of file-derived whole-app types' do
+        register(type: :route, identifier: 'GET /gone')
+        extractor.instance_variable_get(:@incremental_extractors)[:routes] =
+          double('RoutesExtractor', extract_all: [])
+
+        expect(replace(:routes)).to include('GET /gone')
+        expect(extractor.dependency_graph.node_exists?('GET /gone')).to be(false)
+      end
+    end
+
+    context 'when the eager load was complete' do
+      before { extractor.instance_variable_set(:@eager_load_complete, true) }
+
+      it 'removes units the fresh run no longer produces (existing behavior pinned)' do
+        expect(replace(:controllers)).to include('GoneController')
+        expect(extractor.dependency_graph.node_exists?('GoneController')).to be(false)
+        expect(extractor.dependency_graph.node_exists?('PostsController')).to be(true)
+      end
+
+      it 'does not warn' do
+        expect(Rails.logger).not_to receive(:warn)
+
+        replace(:controllers)
+      end
     end
   end
 
@@ -1411,11 +1548,19 @@ RSpec.describe Woods::Extractor do
     # `json_serialize` reads `Woods.configuration.pretty_json`, so these
     # examples must establish a configuration rather than inherit whatever an
     # earlier example left behind — under a random seed they can run first.
+    #
+    # Time is frozen because `ExtractedUnit#to_h` stamps `extracted_at` from
+    # `Time.now`: before the #208 mask, the same-bytes examples only passed
+    # when both serializations landed in the same wall-clock second — a flake
+    # by construction. The #208 examples below advance the clock explicitly.
+    let(:base_time) { Time.at(1_700_000_000) }
+
     before do
       require 'woods'
       @original_config = Woods.configuration
       Woods.configuration = Woods::Configuration.new
       FileUtils.mkdir_p(output_dir)
+      allow(Time).to receive(:now).and_return(base_time)
     end
 
     after do
@@ -1457,6 +1602,51 @@ RSpec.describe Woods::Extractor do
       extractor.send(:write_unit_file, target, unit)
 
       expect(Woods::AtomicFile.read(target)).to include('Widget')
+    end
+
+    # #208 — ExtractedUnit#to_h stamps `extracted_at: Time.now.iso8601` on
+    # every serialization, so compared raw the bytes never matched across
+    # runs: the documented fsync-avoidance read every file and wrote it
+    # anyway. The comparison must be insensitive to the stamp and nothing
+    # else.
+    it 'skips the rewrite when only the extracted_at stamp differs (#208)' do
+      extractor.send(:write_unit_file, target, unit)
+
+      allow(Time).to receive(:now).and_return(base_time + 3600)
+      expect(Woods::AtomicFile).not_to receive(:write)
+
+      extractor.send(:write_unit_file, target, unit)
+
+      # The *older* stamp stays on disk — deliberately. The equivalence
+      # oracle (spec/support/index_comparison.rb) lists extracted_at in
+      # VOLATILE_UNIT_KEYS: an untouched unit keeping an older stamp is
+      # inside the contract.
+      expect(JSON.parse(Woods::AtomicFile.read(target))['extracted_at']).to eq(base_time.iso8601)
+    end
+
+    it 'still rewrites when a real field changed along with the stamp' do
+      extractor.send(:write_unit_file, target, unit)
+
+      allow(Time).to receive(:now).and_return(base_time + 3600)
+      unit.source_code = 'class Widget; def call; end; end'
+
+      extractor.send(:write_unit_file, target, unit)
+
+      written = JSON.parse(Woods::AtomicFile.read(target))
+      expect(written['source_code']).to include('def call')
+      expect(written['extracted_at']).to eq((base_time + 3600).iso8601)
+    end
+
+    # json_serialize has two output shapes; the mask must match the stamp in
+    # both ("extracted_at":"..." compact, "extracted_at": "..." pretty).
+    it 'skips the rewrite under pretty_json output too' do
+      Woods.configuration.pretty_json = true
+      extractor.send(:write_unit_file, target, unit)
+
+      allow(Time).to receive(:now).and_return(base_time + 3600)
+      expect(Woods::AtomicFile).not_to receive(:write)
+
+      extractor.send(:write_unit_file, target, unit)
     end
   end
 

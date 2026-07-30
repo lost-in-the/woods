@@ -59,6 +59,16 @@ RSpec.describe Woods::ExtractedUnit do
       expect(unit.to_h[:extracted_at]).to be_a(String)
     end
 
+    # The write-skip byte mask (Extractor::EXTRACTED_AT_SCALAR, #208) matches
+    # this exact scalar shape instead of parsing JSON — Time#iso8601 emits no
+    # fractional seconds and either 'Z' or a ±hh:mm offset. If the stamp's
+    # shape ever changes, the mask stops matching and the skip goes quietly
+    # inert again; this pin turns that into a visible failure.
+    it 'stamps extracted_at in the ISO8601 shape the write-skip mask expects' do
+      expect(unit.to_h[:extracted_at])
+        .to match(/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})\z/)
+    end
+
     it 'includes source_hash' do
       hash = unit.to_h
       expect(hash[:source_hash]).to eq(Digest::SHA256.hexdigest('class User < ApplicationRecord; end'))
