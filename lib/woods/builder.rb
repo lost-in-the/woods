@@ -124,12 +124,16 @@ module Woods
 
     # Instantiate the vector store adapter specified by the configuration.
     #
+    # The :pgvector branch also ensures the adapter's own schema exists —
+    # see {#build_pgvector_store}.
+    #
     # @return [Storage::VectorStore::Interface] Vector store adapter instance
     # @raise [ArgumentError] if the configured type is not recognized
+    # @raise [Woods::Error] if the pgvector schema cannot be created
     def build_vector_store
       case @config.vector_store
       when :in_memory then Storage::VectorStore::InMemory.new
-      when :pgvector then Storage::VectorStore::Pgvector.new(**(@config.vector_store_options || {}))
+      when :pgvector then build_pgvector_store
       when :qdrant then Storage::VectorStore::Qdrant.new(**(@config.vector_store_options || {}))
       else raise ArgumentError, "Unknown vector_store: #{@config.vector_store}"
       end
@@ -309,6 +313,33 @@ module Woods
     end
 
     private
+
+    # Construct the pgvector adapter and ensure its schema exists.
+    #
+    # The adapter reads and writes its own `woods_vectors` table. The
+    # `woods:pgvector` generator can create it via a migration, but nothing
+    # guarantees that migration ran — so the builder calls the adapter's
+    # idempotent {Storage::VectorStore::Pgvector#ensure_schema!}
+    # (CREATE ... IF NOT EXISTS DDL) after construction. Without this, the
+    # first embed against a bare database fails with PG::UndefinedTable
+    # (#187 / B-075). Schema/connection failures are re-raised as
+    # {Woods::Error} with the original error preserved as the cause.
+    #
+    # @return [Storage::VectorStore::Pgvector]
+    # @raise [Woods::Error] when the schema cannot be created
+    def build_pgvector_store
+      store = Storage::VectorStore::Pgvector.new(**(@config.vector_store_options || {}))
+      begin
+        store.ensure_schema!
+      rescue StandardError => e
+        raise Woods::Error,
+              "pgvector schema setup failed (#{e.class}: #{e.message}). " \
+              'Verify vector_store_options[:connection] is a live PostgreSQL ' \
+              'connection and that the pgvector extension is available ' \
+              '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
+      end
+      store
+    end
 
     # Build a cache store from configuration, or nil if caching is disabled.
     #

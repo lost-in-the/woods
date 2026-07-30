@@ -114,6 +114,101 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
     end
   end
 
+  # #181 regression coverage. Deliberately uses a plain double (not the
+  # string-named instance_double above, which verifies nothing) so the
+  # message expectations have teeth.
+  describe '#store_batch in-batch duplicate handling (#181)' do
+    let(:strict_connection) { double('connection') }
+    let(:strict_store) { described_class.new(connection: strict_connection, dimensions: 3) }
+    let(:executed_sql) { [] }
+
+    before do
+      allow(strict_connection).to receive(:quote) { |v| "'#{v}'" }
+      allow(strict_connection).to receive(:execute) do |sql|
+        executed_sql << sql
+        []
+      end
+    end
+
+    it 'keeps exactly one row per duplicated id — the LAST occurrence (upsert semantics)' do
+      entries = [
+        { id: 'dup', vector: [1.0, 1.0, 1.0], metadata: { 'v' => 'first' } },
+        { id: 'other', vector: [2.0, 2.0, 2.0], metadata: {} },
+        { id: 'dup', vector: [9.0, 9.0, 9.0], metadata: { 'v' => 'last' } }
+      ]
+
+      expect { strict_store.store_batch(entries) }.to output(/dup/).to_stderr
+
+      sql = executed_sql.fetch(0)
+      expect(sql.scan("'dup'").length).to eq(1)
+      expect(sql).to include('[9.0,9.0,9.0]')
+      expect(sql).not_to include('[1.0,1.0,1.0]')
+    end
+
+    it 'logs the duplicated ids when dropping so the upstream cause stays visible' do
+      entries = [
+        { id: 'twin', vector: [1.0, 2.0, 3.0], metadata: {} },
+        { id: 'twin', vector: [4.0, 5.0, 6.0], metadata: {} }
+      ]
+
+      expect { strict_store.store_batch(entries) }
+        .to output(/store_batch received duplicate ids.*twin/).to_stderr
+    end
+
+    it 'leaves batches without duplicates untouched and silent' do
+      entries = [
+        { id: 'a', vector: [1.0, 2.0, 3.0], metadata: {} },
+        { id: 'b', vector: [4.0, 5.0, 6.0], metadata: {} },
+        { id: 'c', vector: [7.0, 8.0, 9.0], metadata: {} }
+      ]
+
+      expect { strict_store.store_batch(entries) }.not_to output.to_stderr
+
+      sql = executed_sql.fetch(0)
+      %w[a b c].each { |id| expect(sql.scan("'#{id}'").length).to eq(1) }
+    end
+
+    it 're-raises a PG cardinality violation as Woods::Error naming the batch ids' do
+      stub_const('PG::CardinalityViolation', Class.new(StandardError))
+      allow(strict_connection).to receive(:execute)
+        .and_raise(PG::CardinalityViolation,
+                   'ERROR: ON CONFLICT DO UPDATE command cannot affect row a second time')
+
+      entries = [
+        { id: 'alpha', vector: [1.0, 2.0, 3.0], metadata: {} },
+        { id: 'beta', vector: [4.0, 5.0, 6.0], metadata: {} }
+      ]
+
+      expect { strict_store.store_batch(entries) }
+        .to raise_error(Woods::Error, /duplicate-row conflict.*Batch ids: alpha, beta/m)
+    end
+
+    it 'detects the violation on the cause (ActiveRecord::StatementInvalid-style wrapping)' do
+      stub_const('PG::CardinalityViolation', Class.new(StandardError))
+      allow(strict_connection).to receive(:execute) do
+        raise PG::CardinalityViolation, 'unremarkable message'
+      rescue StandardError
+        raise StandardError, 'statement invalid'
+      end
+
+      entries = [{ id: 'wrapped', vector: [1.0, 2.0, 3.0], metadata: {} }]
+
+      expect { strict_store.store_batch(entries) }
+        .to raise_error(Woods::Error, /Batch ids: wrapped/)
+    end
+
+    it 'lets unrelated execution errors propagate untouched' do
+      allow(strict_connection).to receive(:execute).and_raise(StandardError, 'network down')
+
+      entries = [{ id: 'a', vector: [1.0, 2.0, 3.0], metadata: {} }]
+
+      expect { strict_store.store_batch(entries) }.to raise_error(StandardError) do |error|
+        expect(error).not_to be_a(Woods::Error)
+        expect(error.message).to eq('network down')
+      end
+    end
+  end
+
   describe '#search' do
     let(:result_row) do
       { 'id' => 'doc1', 'distance' => 0.1, 'metadata' => '{"type":"model"}' }

@@ -283,6 +283,47 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  # ── Builder#build_vector_store — :pgvector schema wiring (#187) ──────
+
+  describe '#build_vector_store with :pgvector (#187)' do
+    let(:fake_connection) { double('connection') }
+    let(:pg_store) { instance_double(Woods::Storage::VectorStore::Pgvector) }
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :pgvector
+        c.vector_store_options = { connection: fake_connection, dimensions: 3 }
+      end
+    end
+
+    before do
+      allow(Woods::Storage::VectorStore::Pgvector).to receive(:new)
+        .with(connection: fake_connection, dimensions: 3)
+        .and_return(pg_store)
+    end
+
+    it 'calls ensure_schema! after construction so the woods_vectors table exists' do
+      expect(pg_store).to receive(:ensure_schema!)
+
+      expect(described_class.new(config).build_vector_store).to eq(pg_store)
+    end
+
+    it 'wraps schema-setup failures in Woods::Error with a diagnosable message' do
+      allow(pg_store).to receive(:ensure_schema!)
+        .and_raise(StandardError, 'connection to server was lost')
+
+      expect { described_class.new(config).build_vector_store }
+        .to raise_error(Woods::Error, /pgvector schema setup failed.*connection to server was lost/)
+    end
+
+    it 'preserves the original error as the cause' do
+      allow(pg_store).to receive(:ensure_schema!)
+        .and_raise(StandardError, 'no pg_hba.conf entry')
+
+      expect { described_class.new(config).build_vector_store }
+        .to raise_error(Woods::Error) { |e| expect(e.cause.message).to eq('no pg_hba.conf entry') }
+    end
+  end
+
   # ── Builder#build_vector_store — unknown type ────────────────────────
 
   describe '#build_vector_store with unknown type' do

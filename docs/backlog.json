@@ -1035,7 +1035,7 @@
       "lib/generators/woods/pgvector/pgvector_generator.rb"
     ],
     "description": "Pgvector reads/writes woods_vectors, created only by ensure_schema! - which nothing calls (Builder#build_vector_store instantiates the adapter bare). The documented setup (rails generate woods:pgvector && db:migrate) creates an embedding_vector column on woods_embeddings that has zero readers/writers in lib/. A user following every documented step gets PG::UndefinedTable on the first embed. Fix: call ensure_schema! from the builder (or lazily on first write) and rewrite/delete the generator so migrations manage the table actually used. Related: #181 (batch dedup). Acceptance: configure_with_preset(:postgresql) + woods:embed works against a fresh database. Tracked in GH #187.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

@@ -4,6 +4,12 @@ require 'json'
 require_relative 'vector_store'
 
 module Woods
+  # Same conditional-define pattern used elsewhere in the gem so this
+  # file can be required in isolation (e.g. by specs that bypass the
+  # full lib/woods.rb load) without tripping NameError on the
+  # dimension-mismatch and batch-conflict raises below.
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Storage
     module VectorStore
       # PostgreSQL + pgvector adapter for vector storage and similarity search.
@@ -71,9 +77,17 @@ module Woods
 
         # Store multiple vectors in a single multi-row INSERT.
         #
+        # Duplicate ids within one batch are collapsed to the LAST occurrence
+        # (upsert semantics) before the statement is built — a multi-row
+        # `INSERT ... ON CONFLICT (id) DO UPDATE` cannot touch the same row
+        # twice, and PostgreSQL's `PG::CardinalityViolation` names no id and
+        # lands after earlier batches have already been written (#181).
+        #
         # @param entries [Array<Hash>] Each entry has :id, :vector, :metadata keys
         # @raise [ArgumentError] if any entry has a non-numeric or wrong-dimension vector.
         #   Validation runs BEFORE any INSERT so partial-batch writes can't occur.
+        # @raise [Woods::Error] if PostgreSQL still reports a cardinality or
+        #   uniqueness violation — re-raised naming every id in the batch.
         def store_batch(entries)
           return if entries.empty?
 
@@ -85,9 +99,10 @@ module Woods
             validate_dimensions!(vector, index: idx) if @dimensions
           end
 
+          entries = deduplicate_entries(entries)
           values = entries.map { |entry| format_entry(entry[:id], entry[:vector], entry[:metadata] || {}) }
 
-          @connection.execute(<<~SQL)
+          execute_upsert(<<~SQL, entries)
             INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
             VALUES #{values.join(",\n")}
             ON CONFLICT (id) DO UPDATE SET
@@ -140,6 +155,61 @@ module Woods
         end
 
         private
+
+        # Collapse duplicate ids within a batch, keeping the LAST occurrence
+        # of each id (upsert semantics — the final write wins). Duplicates
+        # signal an upstream problem (cross-type identifier twins, orphaned
+        # files re-embedding one unit twice), so dropped ids are logged
+        # rather than silently discarded.
+        #
+        # @param entries [Array<Hash>] Batch entries with :id keys
+        # @return [Array<Hash>] Entries with at most one row per id, original
+        #   order preserved
+        def deduplicate_entries(entries)
+          deduped = entries.reverse.uniq { |entry| entry[:id] }.reverse
+          return entries if deduped.length == entries.length
+
+          duplicated = entries.group_by { |entry| entry[:id] }
+                              .select { |_, occurrences| occurrences.length > 1 }
+                              .keys
+          warn '[Woods::Storage::Pgvector] store_batch received duplicate ids ' \
+               "(keeping the last occurrence of each): #{duplicated.join(', ')}"
+          deduped
+        end
+
+        # Execute the multi-row upsert, converting a cardinality/uniqueness
+        # violation that still escapes the in-batch dedup into a
+        # {Woods::Error} naming every id in the batch — the raw PostgreSQL
+        # error names no id, which makes a partially-landed embed (earlier
+        # batches already committed) very hard to diagnose.
+        #
+        # @param sql [String] The INSERT ... ON CONFLICT statement
+        # @param entries [Array<Hash>] The batch, used for the error message
+        # @raise [Woods::Error] on a cardinality or uniqueness violation
+        def execute_upsert(sql, entries)
+          @connection.execute(sql)
+        rescue StandardError => e
+          raise unless conflict_violation?(e)
+
+          ids = entries.map { |entry| entry[:id] }
+          raise Woods::Error,
+                "pgvector batch upsert hit a duplicate-row conflict (#{e.class}: #{e.message.strip}). " \
+                "Batch ids: #{ids.join(', ')}"
+        end
+
+        # Duck-typed detection of PostgreSQL cardinality/uniqueness
+        # violations. The gem does not depend on the pg gem, and the error
+        # usually arrives wrapped in ActiveRecord::StatementInvalid, so match
+        # on class name and message across the error and its cause.
+        #
+        # @param error [StandardError]
+        # @return [Boolean]
+        def conflict_violation?(error)
+          [error, error.cause].compact.any? do |err|
+            err.class.name.to_s.match?(/CardinalityViolation|UniqueViolation/) ||
+              err.message.to_s.match?(/cannot affect row a second time|duplicate key value/)
+          end
+        end
 
         # Format a single entry as a SQL VALUES tuple.
         #

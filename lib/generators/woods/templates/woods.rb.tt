@@ -68,7 +68,9 @@ Woods.configure do |config|
   # Vector store: :in_memory, :pgvector (PostgreSQL), :qdrant
   # config.vector_store = :in_memory
 
-  # pgvector — run `rails generate woods:pgvector && rails db:migrate` first.
+  # pgvector — Woods creates its `woods_vectors` table automatically on first
+  # use (idempotent DDL). To manage the schema through your app's migrations
+  # instead, run `rails generate woods:pgvector && rails db:migrate`.
   # config.vector_store         = :pgvector
   # config.vector_store_options = {
   #   connection: ActiveRecord::Base.connection,

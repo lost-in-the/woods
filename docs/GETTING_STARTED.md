@@ -85,6 +85,8 @@ Woods.configure_with_preset(:postgresql)
 Woods.configure_with_preset(:production)
 ```
 
+The pgvector store keeps its vectors in a dedicated `woods_vectors` table (id, native `vector` column, JSONB metadata, HNSW index), which Woods creates automatically on first use with idempotent DDL. If you prefer to manage that schema through your app's migrations, `rails generate woods:pgvector && rails db:migrate` creates the same table (use `--dimensions` to match your embedding model). MySQL hosts pair with Qdrant (or another external vector store) instead — MySQL has no vector extension; see [BACKEND_MATRIX.md](BACKEND_MATRIX.md).
+
 ## 3. Extract
 
 Run a full extraction from your Rails app root:
