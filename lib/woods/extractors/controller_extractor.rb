@@ -28,8 +28,16 @@ module Woods
       include SharedDependencyScanner
       include RouteHelperResolver
 
+      # @return [Array<String>] Warnings collected during extraction
+      #   (concern-inlining fallbacks). Drained by the orchestrator, which
+      #   collects warnings from every extractor that exposes them.
+      attr_reader :warnings
+
       def initialize
         @routes_map = build_routes_map
+        @concern_cache = {}
+        @concern_module_cache = {}
+        @warnings = []
         build_route_helper_map
       end
 
@@ -97,8 +105,9 @@ module Woods
         source = source_path && File.exist?(source_path) ? File.read(source_path) : ''
 
         unit.namespace = extract_namespace(controller)
-        unit.source_code = build_composite_source(controller, source)
-        unit.metadata = extract_metadata(controller, source)
+        inlined_source, inlined_concerns = build_controller_source_with_concerns(controller, source)
+        unit.source_code = build_composite_source(controller, inlined_source)
+        unit.metadata = extract_metadata(controller, source, inlined_concerns: inlined_concerns)
         unit.dependencies = extract_dependencies(controller, source)
 
         # Controllers benefit from per-action chunks
@@ -192,13 +201,17 @@ module Woods
         resolve_source_location(controller, app_root: Rails.root.to_s, fallback: convention_path)
       end
 
-      # Build composite source with routes and filters as headers
+      # Build composite source with routes and filters as headers.
+      #
+      # Callers pass the already concern-inlined source (see
+      # {#build_controller_source_with_concerns}); the nil fallback reads
+      # from disk and inlines so both paths agree.
       def build_composite_source(controller, source = nil)
         if source.nil?
           source_path = source_file_for(controller)
           return '' unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source, = build_controller_source_with_concerns(controller, File.read(source_path))
         end
 
         # Prepend route information
@@ -270,11 +283,221 @@ module Woods
       end
 
       # ──────────────────────────────────────────────────────────────────────
+      # Concern Detection & Inlining
+      # ──────────────────────────────────────────────────────────────────────
+
+      # Modules included in the controller that are application-defined
+      # concerns.
+      #
+      # Detection is by membership, not name (#175): Rails does not
+      # namespace controller concerns — app/controllers/concerns/
+      # requires_author.rb defines top-level +RequiresAuthor+ — so the old
+      # name-substring check ('Concern'/'Concerns') never matched idiomatic
+      # controller concerns and +included_concerns+ came back empty while
+      # the concern's effects (filters) were captured.
+      #
+      # @param controller [Class] The controller class
+      # @return [Array<Module>] App-defined concern modules
+      def detect_included_concerns(controller)
+        controller.included_modules.select { |mod| app_concern_module?(mod) }
+      end
+
+      # Whether a module included in a controller is an application-defined
+      # concern.
+      #
+      # A module counts when it extends +ActiveSupport::Concern+ (the
+      # idiomatic case) OR its resolved source file sits under an
+      # app/**/concerns directory (a plain module mixed in from concerns/
+      # without the extend). Framework modules are excluded first: many gem
+      # modules extend +ActiveSupport::Concern+ too
+      # (ActionController::MimeResponds et al.), so any module whose source
+      # resolves outside the app ({SharedUtilityMethods#app_source?}) is
+      # rejected before either positive check runs. Verdicts are memoized
+      # per module name — ApplicationController's includes recur in every
+      # controller of the app.
+      #
+      # @param mod [Module] A module from the controller's included_modules
+      # @return [Boolean]
+      def app_concern_module?(mod)
+        return false unless mod.name
+
+        return @concern_module_cache[mod.name] if @concern_module_cache.key?(mod.name)
+
+        @concern_module_cache[mod.name] = compute_app_concern_module(mod)
+      end
+
+      # Uncached concern verdict for a named module (see
+      # {#app_concern_module?} for the detection rules).
+      #
+      # @param mod [Module] A named module
+      # @return [Boolean]
+      def compute_app_concern_module(mod)
+        path = module_source_path(mod)
+        return false if path && !app_source?(path, Rails.root.to_s)
+
+        activesupport_concern?(mod) || concerns_directory_path?(path)
+      end
+
+      # Resolve a module's defining source file via const_source_location.
+      #
+      # @param mod [Module] A named module
+      # @return [String, nil] Absolute path, or nil when unresolvable
+      def module_source_path(mod)
+        return nil unless Object.respond_to?(:const_source_location)
+
+        Object.const_source_location(mod.name)&.first
+      rescue StandardError
+        nil
+      end
+
+      # Whether a module extends ActiveSupport::Concern (the idiomatic
+      # concern marker). Membership lives on the singleton class.
+      #
+      # @param mod [Module] A module to test
+      # @return [Boolean]
+      def activesupport_concern?(mod)
+        return false unless defined?(ActiveSupport::Concern)
+
+        mod.singleton_class.include?(ActiveSupport::Concern)
+      end
+
+      # Whether a resolved source path sits under an app/**/concerns
+      # directory (e.g. app/controllers/concerns/, app/models/concerns/).
+      # Callers guarantee the path, when present, is app source.
+      #
+      # @param path [String, nil] Absolute path under Rails.root, or nil
+      # @return [Boolean]
+      def concerns_directory_path?(path)
+        return false unless path
+
+        relative = path.delete_prefix("#{Rails.root}/")
+        relative.match?(%r{\Aapp/(?:[^/]+/)*concerns/})
+      end
+
+      # Read controller source and inline all detected concerns, mirroring
+      # ModelExtractor's approach: concern code is inserted as '#'-prefixed
+      # comment lines right after the class declaration (nested or compact
+      # style), falling back to appending at end-of-source with a warning
+      # rather than silently dropping the block.
+      #
+      # An empty source (missing file) is returned untouched — inlining
+      # into nothing would fabricate source_code out of comments.
+      #
+      # @param controller [Class] The controller class
+      # @param source [String, nil] Pre-read controller source (read from
+      #   disk when nil)
+      # @return [Array(String, Array<String>)] The concern-inlined source
+      #   and the demodulized names of the concerns actually inlined into
+      #   it. Returning the pair keeps metadata[:inlined_concerns] truthful
+      #   — it is derived from the insertion result, never recomputed
+      #   independently of what the composite source carries.
+      def build_controller_source_with_concerns(controller, source = nil)
+        if source.nil?
+          source_path = source_file_for(controller)
+          return ['', []] unless source_path && File.exist?(source_path)
+
+          source = File.read(source_path)
+        end
+
+        return [source, []] if source.empty?
+
+        concern_sources = resolved_concern_sources(controller)
+        return [source, []] if concern_sources.empty?
+
+        [insert_concern_block(controller, source, build_concern_block(concern_sources)),
+         concern_sources.map { |name, _code| name.demodulize }]
+      end
+
+      # Resolve [name, code] pairs for every detected concern whose source
+      # file can be located.
+      #
+      # @param controller [Class] The controller class
+      # @return [Array<Array(String, String)>]
+      def resolved_concern_sources(controller)
+        detect_included_concerns(controller).filter_map { |mod| concern_source(mod) }
+      end
+
+      # Get the source code for a concern, with caching. Resolution reuses
+      # {#module_source_path} — the same location detection validated — so
+      # a concern detected purely by ActiveSupport::Concern membership with
+      # no resolvable file keeps its edge and metadata entry but is not
+      # inlined.
+      #
+      # @param mod [Module] A detected concern module
+      # @return [Array(String, String), nil] [name, code] or nil
+      def concern_source(mod)
+        return @concern_cache[mod.name] if @concern_cache.key?(mod.name)
+
+        path = module_source_path(mod)
+        return nil unless path && File.exist?(path)
+
+        @concern_cache[mod.name] = [mod.name, File.read(path)]
+      end
+
+      # Render concern sources as a '#'-commented display block showing
+      # what's mixed in (same display form as ModelExtractor).
+      #
+      # @param concern_sources [Array<Array(String, String)>] [name, code] pairs
+      # @return [String]
+      def build_concern_block(concern_sources)
+        concern_sources.map do |name, code|
+          indented = code.lines.map { |l| "  # #{l.rstrip}" }.join("\n")
+          <<~CONCERN
+            # ┌─────────────────────────────────────────────────────────────────────┐
+            # │ Included from: #{name.ljust(54)}│
+            # └─────────────────────────────────────────────────────────────────────┘
+            #{indented}
+            # ─────────────────────────── End #{name} ───────────────────────────
+          CONCERN
+        end.join("\n\n")
+      end
+
+      # Insert the concern block after the controller's class declaration
+      # line. Falls back to appending at end-of-source (recording a
+      # warning) when no declaration matches — dropping the block silently
+      # would leave source_code contradicting metadata[:inlined_concerns].
+      #
+      # @param controller [Class] The controller class
+      # @param source [String] The controller source
+      # @param concern_block [String] Commented concern block to insert
+      # @return [String]
+      def insert_concern_block(controller, source, concern_block)
+        pattern = class_declaration_pattern(controller)
+        return source.sub(pattern) { "#{::Regexp.last_match(1)}\n\n#{concern_block}" } if source.match?(pattern)
+
+        @warnings << "[#{controller.name}] No class declaration matched for concern inlining; " \
+                     'appending inlined concern block at end of source'
+        "#{source.chomp}\n\n#{concern_block}"
+      end
+
+      # Regexp matching the controller's class declaration in either nested
+      # (+class PostsController+) or compact
+      # (+class Admin::PostsController+) style. The word boundary stops
+      # +class PostsControllerError+ from claiming the block; the +(?!::)+
+      # lookahead stops a nested +class PostsController::Error+ from
+      # claiming it either.
+      #
+      # @param controller [Class] The controller class
+      # @return [Regexp]
+      def class_declaration_pattern(controller)
+        /(class\s+(?:[\w:]+::)?#{Regexp.escape(controller.name.demodulize)}\b(?!::).*$)/
+      end
+
+      # ──────────────────────────────────────────────────────────────────────
       # Metadata Extraction
       # ──────────────────────────────────────────────────────────────────────
 
       # Extract comprehensive metadata
-      def extract_metadata(controller, source = nil)
+      #
+      # @param controller [Class] The controller class
+      # @param source [String, nil] The raw controller source code
+      # @param inlined_concerns [Array<String>, nil] Demodulized names of
+      #   the concerns actually inlined into the unit's source_code (from
+      #   {#build_controller_source_with_concerns}). When nil, derived by
+      #   running the same inlining — the metadata must never claim a
+      #   concern the composite source does not carry.
+      # @return [Hash]
+      def extract_metadata(controller, source = nil, inlined_concerns: nil)
         own_methods = controller.instance_methods(false).to_set(&:to_s)
         actions = controller.action_methods.select { |m| own_methods.include?(m) }.to_a
 
@@ -293,8 +516,11 @@ module Woods
                                .map(&:name)
                                .compact,
 
-          # Concerns included
+          # Concerns included (detected by membership, not name — #175)
           included_concerns: extract_included_concerns(controller),
+
+          # Concerns actually inlined into source_code (demodulized)
+          inlined_concerns: inlined_concerns || build_controller_source_with_concerns(controller, source).last,
 
           # Response formats
           responds_to: extract_respond_formats(controller, source),
@@ -308,10 +534,13 @@ module Woods
         }
       end
 
+      # Names of the app-defined concerns included in the controller.
+      # Detection lives in {#detect_included_concerns} (#175).
+      #
+      # @param controller [Class] The controller class
+      # @return [Array<String>] Full module names
       def extract_included_concerns(controller)
-        controller.included_modules
-                  .select { |m| m.name&.include?('Concern') || m.name&.include?('Concerns') }
-                  .map(&:name)
+        detect_included_concerns(controller).map(&:name)
       end
 
       def extract_respond_formats(controller, source = nil)
@@ -358,7 +587,12 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_dependencies(controller, source = nil)
-        deps = []
+        # Included concerns add per-request behavior (filters, helpers).
+        # Same edge shape as ModelExtractor's concern edges so graph
+        # consumers see one format (#175).
+        deps = detect_included_concerns(controller).map do |mod|
+          { type: :concern, target: mod.name, via: :include }
+        end
 
         if source.nil?
           source_path = source_file_for(controller)
