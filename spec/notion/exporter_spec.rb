@@ -2,12 +2,23 @@
 
 require 'spec_helper'
 require 'securerandom'
+require 'tmpdir'
+require 'json'
 require 'woods/notion/exporter'
 
 RSpec.describe Woods::Notion::Exporter do
   subject(:exporter) { described_class.new(index_dir: index_dir, config: config, client: client, reader: reader) }
 
-  let(:index_dir) { '/tmp/test_woods' }
+  # The sync manifest (#207) persists under index_dir — keep it per-example
+  # so one example's warm manifest can never leak skips into another.
+  around do |example|
+    Dir.mktmpdir do |dir|
+      @index_dir = dir
+      example.run
+    end
+  end
+
+  let(:index_dir) { @index_dir }
   let(:client) { instance_double(Woods::Notion::Client) }
   let(:config) do
     double(
@@ -94,6 +105,76 @@ RSpec.describe Woods::Notion::Exporter do
     allow(client).to receive(:update_page).and_return({ 'id' => 'page-updated' })
   end
 
+  # An in-memory page registry standing in for the two Notion databases, so
+  # title collisions actually collide and page lookups find whatever an
+  # earlier upsert stored — exactly like the real databases do. Introduced
+  # for the #149 examples; the incremental-sync examples (#207) reuse it and
+  # add per-method API call counters, plus real-API 404 behavior on
+  # update_page for unknown page ids (what a deleted/archived page answers).
+  shared_context 'with an in-memory Notion page registry' do
+    let(:registry) { {} }
+    let(:api_calls) { Hash.new(0) }
+
+    before do
+      allow(client).to receive(:create_page) do |database_id:, properties:|
+        api_calls[:create_page] += 1
+        id = "page-#{registry.size + 1}"
+        registry[id] = { 'id' => id, db: database_id, properties: properties }
+        { 'id' => id }
+      end
+      allow(client).to receive(:update_page) do |page_id:, properties:|
+        api_calls[:update_page] += 1
+        page = registry[page_id]
+        raise Woods::Error, "Notion API error 404: Could not find page with ID: #{page_id}." unless page
+
+        page[:properties] = page[:properties].merge(properties)
+        { 'id' => page_id }
+      end
+      allow(client).to receive(:find_page_by_title) do |database_id:, title:|
+        api_calls[:find_page_by_title] += 1
+        pages_titled(database_id, title).first
+      end
+      allow(client).to receive(:query_database) do |database_id:, filter:|
+        api_calls[:query_database] += 1
+        { 'results' => apply_filter(database_id, filter) }
+      end
+    end
+
+    def seed_page(id, database_id, properties)
+      registry[id] = { 'id' => id, db: database_id, properties: properties }
+    end
+
+    def page_title(page)
+      title_prop = page[:properties].values.find { |v| v.is_a?(Hash) && v.key?(:title) }
+      title_prop&.dig(:title, 0, :text, :content)
+    end
+
+    def pages_titled(database_id, title)
+      registry.values.select { |page| page[:db] == database_id && page_title(page) == title }
+    end
+
+    def pages_in(database_id)
+      registry.values.select { |page| page[:db] == database_id }
+    end
+
+    # Interpret the two filter shapes the exporter produces: bare title
+    # equality, or title equality AND-ed with a `relation contains` clause.
+    def apply_filter(database_id, filter)
+      clauses = filter[:and] || [filter]
+      title_clause = clauses.find { |clause| clause[:title] }
+      relation_clause = clauses.find { |clause| clause[:relation] }
+      results = pages_titled(database_id, title_clause[:title][:equals])
+      return results unless relation_clause
+
+      results.select { |page| page_related_to?(page, relation_clause) }
+    end
+
+    def page_related_to?(page, relation_clause)
+      related = page[:properties].dig(relation_clause[:property], :relation) || []
+      related.any? { |ref| ref[:id] == relation_clause[:relation][:contains] }
+    end
+  end
+
   describe '#initialize' do
     it 'raises ConfigurationError when notion_api_token is missing' do
       # Ensure no ambient ENV token satisfies the (new) ENV-override path.
@@ -152,6 +233,11 @@ RSpec.describe Woods::Notion::Exporter do
       stats = exporter.sync_all
       # User has 2 columns, Post has 1 = 3 column pages
       expect(stats[:columns]).to eq(3)
+    end
+
+    it 'reports nothing skipped on a cold manifest' do
+      stats = exporter.sync_all
+      expect(stats[:skipped]).to eq(0)
     end
 
     it 'skips columns sync when database ID not configured' do
@@ -267,59 +353,7 @@ RSpec.describe Woods::Notion::Exporter do
     # instead of blanket find_page_by_title(nil) stubs, so title collisions
     # actually collide: a lookup finds whatever an earlier upsert stored,
     # exactly like the real Columns database does.
-    let(:registry) { {} }
-
-    before do
-      allow(client).to receive(:create_page) do |database_id:, properties:|
-        id = "page-#{registry.size + 1}"
-        registry[id] = { 'id' => id, db: database_id, properties: properties }
-        { 'id' => id }
-      end
-      allow(client).to receive(:update_page) do |page_id:, properties:|
-        registry.fetch(page_id)[:properties] = registry.fetch(page_id)[:properties].merge(properties)
-        { 'id' => page_id }
-      end
-      allow(client).to receive(:find_page_by_title) do |database_id:, title:|
-        pages_titled(database_id, title).first
-      end
-      allow(client).to receive(:query_database) do |database_id:, filter:|
-        { 'results' => apply_filter(database_id, filter) }
-      end
-    end
-
-    def seed_page(id, database_id, properties)
-      registry[id] = { 'id' => id, db: database_id, properties: properties }
-    end
-
-    def page_title(page)
-      title_prop = page[:properties].values.find { |v| v.is_a?(Hash) && v.key?(:title) }
-      title_prop&.dig(:title, 0, :text, :content)
-    end
-
-    def pages_titled(database_id, title)
-      registry.values.select { |page| page[:db] == database_id && page_title(page) == title }
-    end
-
-    def pages_in(database_id)
-      registry.values.select { |page| page[:db] == database_id }
-    end
-
-    # Interpret the two filter shapes the exporter produces: bare title
-    # equality, or title equality AND-ed with a `relation contains` clause.
-    def apply_filter(database_id, filter)
-      clauses = filter[:and] || [filter]
-      title_clause = clauses.find { |clause| clause[:title] }
-      relation_clause = clauses.find { |clause| clause[:relation] }
-      results = pages_titled(database_id, title_clause[:title][:equals])
-      return results unless relation_clause
-
-      results.select { |page| page_related_to?(page, relation_clause) }
-    end
-
-    def page_related_to?(page, relation_clause)
-      related = page[:properties].dig(relation_clause[:property], :relation) || []
-      related.any? { |ref| ref[:id] == relation_clause[:relation][:contains] }
-    end
+    include_context 'with an in-memory Notion page registry'
 
     context 'when two models share a column name' do
       let(:model_units) do
@@ -508,6 +542,178 @@ RSpec.describe Woods::Notion::Exporter do
           expect(pages_titled('db-models-uuid', 'users').size).to eq(2)
         end
       end
+    end
+  end
+
+  describe 'incremental sync via the manifest (#207 / B-095)' do
+    include_context 'with an in-memory Notion page registry'
+
+    def build_exporter(**overrides)
+      described_class.new(index_dir: index_dir, config: config, client: client, reader: reader, **overrides)
+    end
+
+    it 'issues zero API calls on an unchanged second sync' do
+      exporter.sync_all
+      cold_calls = api_calls.dup
+
+      stats = build_exporter.sync_all
+
+      expect(api_calls).to eq(cold_calls)
+      expect(stats).to include(data_models: 0, columns: 0, skipped: 5)
+      expect(stats[:errors]).to be_empty
+    end
+
+    it 'keeps the cold-manifest call pattern identical to the pre-manifest #149 path' do
+      # 2 models: title lookup + create each (unique tables, no legacy query).
+      # 3 columns: title lookup + legacy query + create each.
+      exporter.sync_all
+
+      expect(api_calls).to eq(find_page_by_title: 5, query_database: 3, create_page: 5)
+    end
+
+    it 'PATCHes a changed page by cached id with no title query' do
+      exporter.sync_all
+      user_page_id = pages_titled('db-models-uuid', 'users').first['id']
+      cold_calls = api_calls.dup
+
+      model_units[0]['metadata']['column_count'] = 5
+      build_exporter.sync_all
+
+      expect(api_calls).to eq(cold_calls.merge(update_page: cold_calls[:update_page] + 1))
+      expect(registry.fetch(user_page_id)[:properties]['Column Count']).to eq({ number: 5 })
+    end
+
+    it 'keeps column Table relations stable when the parent model page is skipped' do
+      exporter.sync_all
+      user_page_id = pages_titled('db-models-uuid', 'users').first['id']
+
+      model_units[0]['metadata']['columns'][1]['type'] = 'citext'
+      stats = build_exporter.sync_all
+
+      email_page = pages_titled('db-columns-uuid', 'users.email').first
+      expect(email_page[:properties]['Table']).to eq({ relation: [{ id: user_page_id }] })
+      expect(email_page[:properties]['Data Type']).to eq({ select: { name: 'citext' } })
+      expect(stats).to include(data_models: 0, columns: 1, skipped: 4)
+    end
+
+    it 'self-heals when a cached page was deleted in Notion behind the manifest' do
+      exporter.sync_all
+      doomed_id = pages_titled('db-models-uuid', 'users').first['id']
+      registry.delete(doomed_id)
+
+      model_units[0]['metadata']['column_count'] = 9
+      stats = nil
+      expect { stats = build_exporter.sync_all }
+        .to output(/cached page #{doomed_id}.*is gone.*recreating/m).to_stderr
+
+      recreated = pages_titled('db-models-uuid', 'users')
+      expect(recreated.size).to eq(1)
+      expect(recreated.first['id']).not_to eq(doomed_id)
+      expect(stats[:errors]).to be_empty
+    end
+
+    it 'settles back to zero API calls on the run after a self-heal' do
+      exporter.sync_all
+      registry.delete(pages_titled('db-models-uuid', 'users').first['id'])
+      model_units[0]['metadata']['column_count'] = 9
+      expect { build_exporter.sync_all }.to output(/is gone/m).to_stderr
+
+      calls_after_heal = api_calls.dup
+      stats = build_exporter.sync_all
+
+      expect(api_calls).to eq(calls_after_heal)
+      expect(stats[:skipped]).to eq(5)
+    end
+
+    it 'does not self-heal on unrelated API failures' do
+      exporter.sync_all
+      model_units[0]['metadata']['column_count'] = 9
+      allow(client).to receive(:update_page)
+        .and_raise(Woods::Error, 'Notion API error 500: Internal server error')
+
+      stats = build_exporter.sync_all
+
+      expect(stats[:errors]).to include(a_string_matching(/User: Notion API error 500/))
+      expect(api_calls[:create_page]).to eq(5) # no duplicate page created
+    end
+
+    it 'prunes manifest entries whose key vanished, leaving the Notion page alone' do
+      exporter.sync_all
+      post_page_id = pages_titled('db-models-uuid', 'posts').first['id']
+      cold_calls = api_calls.dup
+
+      allow(reader).to receive(:list_units).with(type: 'model').and_return([{ 'identifier' => 'User' }])
+      build_exporter.sync_all
+
+      expect(api_calls).to eq(cold_calls) # nothing re-checked, nothing deleted
+      expect(registry).to have_key(post_page_id)
+      manifest_data = JSON.parse(Woods::AtomicFile.read(File.join(index_dir, 'notion_sync_manifest.json')))
+      expect(manifest_data.dig('pages', 'data_models').keys).to contain_exactly('users')
+      expect(manifest_data.dig('pages', 'columns').keys).to contain_exactly('users.id', 'users.email')
+    end
+
+    it 'falls back to a full resync when the manifest file is corrupt, without crashing' do
+      exporter.sync_all
+      cold_calls = api_calls.dup
+
+      File.binwrite(File.join(index_dir, 'notion_sync_manifest.json'), "{ \xE2\x80\x94 not json".b)
+      second = nil
+      expect { second = build_exporter }.to output(/discarding notion sync manifest/i).to_stderr
+      stats = second.sync_all
+
+      # Every page re-checked by title (pages exist now, so updates not creates).
+      expect(api_calls[:find_page_by_title]).to eq(cold_calls[:find_page_by_title] * 2)
+      expect(api_calls[:update_page]).to eq(5)
+      expect(api_calls[:create_page]).to eq(cold_calls[:create_page])
+      expect(stats[:errors]).to be_empty
+    end
+
+    it 'ignores the manifest for one run when WOODS_NOTION_FORCE is set' do
+      exporter.sync_all
+      cold_calls = api_calls.dup
+
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('WOODS_NOTION_FORCE', '').and_return('1')
+      stats = build_exporter.sync_all
+
+      expect(api_calls[:find_page_by_title]).to eq(cold_calls[:find_page_by_title] * 2)
+      expect(api_calls[:update_page]).to eq(5)
+      expect(stats[:skipped]).to eq(0)
+    end
+
+    it 'does not treat WOODS_NOTION_FORCE=0 as force' do
+      exporter.sync_all
+      cold_calls = api_calls.dup
+
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('WOODS_NOTION_FORCE', '').and_return('0')
+      build_exporter.sync_all
+
+      expect(api_calls).to eq(cold_calls)
+    end
+
+    it 'accepts force_full: true as the programmatic escape hatch' do
+      exporter.sync_all
+      cold_calls = api_calls.dup
+
+      build_exporter(force_full: true).sync_all
+
+      expect(api_calls[:find_page_by_title]).to eq(cold_calls[:find_page_by_title] * 2)
+      expect(api_calls[:update_page]).to eq(5)
+    end
+
+    it 'still syncs (and warns) when the manifest cannot be persisted' do
+      manifest = Woods::Notion::SyncManifest.new(
+        path: File.join(index_dir, 'notion_sync_manifest.json'),
+        database_ids: config.notion_database_ids
+      )
+      allow(manifest).to receive(:save).and_raise(Errno::EACCES, 'disk says no')
+
+      stats = nil
+      expect { stats = build_exporter(manifest: manifest).sync_all }
+        .to output(/manifest not persisted/i).to_stderr
+      expect(stats[:data_models]).to eq(2)
+      expect(stats[:errors]).to be_empty
     end
   end
 end

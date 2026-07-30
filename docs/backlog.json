@@ -1321,7 +1321,7 @@
       "lib/woods/notion/exporter.rb"
     ],
     "description": "Unlike Unblocked (manifest skips unchanged) and Obsidian (idempotent writes), Notion sync_all unconditionally upserts every model and column page, each costing a find_page_by_title query plus create/update through the 3 req/sec limiter - a 300-model app pays ~12,600 calls (~70 min) per run including no-op runs. Fix: persist a Notion sync manifest (page_id + content hash) under index_dir, skip unchanged pages, use cached page_id instead of the per-upsert title query. Related: #149 (fix keying first so the manifest keys are correct). Tracked in GH #207.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
