@@ -106,17 +106,14 @@ RSpec.describe Woods::PathDispatcher do
     # The honest invariant is a subtraction, not a list: every unit type Woods
     # knows about must be reachable *somehow* — per file, wholesale, or by
     # runtime class discovery. Anything left over is un-indexable.
-    # `rails_source` is deliberately outside app-change dispatch: it extracts
-    # installed gem sources, which change when the Gemfile.lock does, not when
-    # app files do. It is driven by `woods:extract_framework` and is the one
-    # extraction mode that does not bump the generation.
-    let(:not_app_dispatched) { %i[rails_source] }
-
+    # `rails_source` used to sit outside app-change dispatch entirely (only
+    # `woods:extract_framework` wrote it, bypassing the pipeline); since #169
+    # it is a Gemfile.lock-triggered whole-app extractor, so the exemption
+    # list is empty and every unit type has a route.
     it 'leaves no unit type reachable by no route at all' do
       class_based = Woods::Extractor::CLASS_BASED_DISCOVERY.values.map { |spec| spec[:type] }
       unreachable = Woods::Extractor::TYPE_TO_EXTRACTOR_KEY.except(*class_based)
-                                                           .values.to_set - covered_extractor_keys -
-                    not_app_dispatched
+                                                           .values.to_set - covered_extractor_keys
 
       expect(unreachable).to(be_empty, "unit types with no dispatch route: #{unreachable.to_a.inspect}")
     end
@@ -189,6 +186,20 @@ RSpec.describe Woods::PathDispatcher do
 
     it 'triggers a factory re-run on a factory file' do
       expect(dispatcher.whole_app_keys_for('spec/factories/posts.rb')).to include(:factories)
+    end
+
+    # Framework/gem sources are a function of the installed dependency set, so
+    # the lockfile is their one honest trigger (#169). The
+    # `include_framework_sources` gate lives in the extractor, not in the
+    # rule — dispatch stays configuration-blind.
+    it 'triggers a rails_source re-run on Gemfile.lock, alongside engines and middleware' do
+      expect(dispatcher.whole_app_keys_for('Gemfile.lock'))
+        .to include(:rails_source, :engines, :middleware)
+    end
+
+    it 'does not trigger rails_source for app files or the Gemfile itself' do
+      expect(dispatcher.whole_app_keys_for('Gemfile')).not_to include(:rails_source)
+      expect(dispatcher.whole_app_keys_for('app/models/post.rb')).not_to include(:rails_source)
     end
 
     it 'triggers nothing for an unrelated path' do

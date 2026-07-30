@@ -18,8 +18,8 @@ module Woods
   #   pointed straight at the new path.
   # * {.whole_app_rules} — extractors with no per-file entry point (routes,
   #   middleware, engines, scheduled jobs, state machines, factories,
-  #   events). Their trigger paths map to a wholesale re-run of that
-  #   extractor, which is cheap in an already-booted process.
+  #   events, framework sources). Their trigger paths map to a wholesale
+  #   re-run of that extractor, which is cheap in an already-booted process.
   #
   # Class-based extractors (models, controllers, mailers, components,
   # channels) are deliberately *absent* here. They are reconciled against
@@ -187,7 +187,15 @@ module Woods
           whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
           # EventExtractor is a two-pass scan over all of app/ — any Ruby
           # change can add or remove a publish/subscribe site.
-          whole_app_rule(:events, Woods::Extractors::EventExtractor::APP_DIRECTORIES, extensions: %w[.rb])
+          whole_app_rule(:events, Woods::Extractors::EventExtractor::APP_DIRECTORIES, extensions: %w[.rb]),
+          # Framework/gem sources are a function of the installed dependency
+          # set, so the lockfile is their one honest trigger (#169). The
+          # `include_framework_sources` gate lives in the extractor
+          # (Extractor#skip_by_configuration?), not here: rules are memoized
+          # per-process while configuration can change, and `relevant?` is
+          # correct either way because Gemfile.lock already triggers
+          # :engines and :middleware.
+          whole_app_rule(:rails_source, [], exact_paths: %w[Gemfile.lock])
         ]
       end
 

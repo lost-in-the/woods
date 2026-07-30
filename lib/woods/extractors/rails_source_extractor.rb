@@ -13,6 +13,25 @@ module Woods
     #
     # Only high-value, frequently-referenced code is indexed to avoid bloat.
     #
+    # Emits TWO unit types — `:rails_source` (framework files) and
+    # `:gem_source` (configured gems) — both written under the `rails_source/`
+    # output directory. `Extractor::TYPE_TO_EXTRACTOR_KEY` maps both back to
+    # this extractor; keep that in sync if a type is ever added here.
+    #
+    # Unit `file_path`s are absolute installed-gem paths and stay
+    # environment-specific by design (#169): they are read from
+    # `Gem::Specification` in the extracting environment, there is no
+    # meaningful Rails.root-relative form for them, and rewriting them to some
+    # portable fiction would break the one thing they are for — opening the
+    # exact source the running app loads. An index read in a different
+    # environment simply cannot resolve them; `woods:validate` warns when
+    # that is the case rather than treating it as corruption.
+    #
+    # Kept current by the `Gemfile.lock` whole-app trigger (incremental runs),
+    # by full extraction when `include_framework_sources` is enabled (the
+    # default), and on demand via `woods:refresh[rails_source]` /
+    # `woods:extract_framework`.
+    #
     # @example
     #   extractor = RailsSourceExtractor.new
     #   units = extractor.extract_all

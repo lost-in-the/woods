@@ -173,6 +173,14 @@ module Woods
       factory: :factories,
       test_mapping: :test_mappings,
       rails_source: :rails_source,
+      # RailsSourceExtractor emits BOTH :rails_source and :gem_source units
+      # into the rails_source/ output directory. Without this entry the
+      # wholesale-replacement path could not prune a stale gem_source unit
+      # ({EXTRACTOR_KEY_TO_TYPES} would not list the type) and {#remove_unit}
+      # could not resolve its JSON file on disk (#169) — the GraphQL history
+      # in CLAUDE.md is the cautionary tale for an extractor whose emitted
+      # types are not all mapped.
+      gem_source: :rails_source,
       poro: :poros,
       lib: :libs
     }.freeze
@@ -278,9 +286,6 @@ module Woods
     # `config/routes.rb` still triggered one — the run rewrote the manifest,
     # zeroing the staleness clock, without updating the data.
     #
-    # `rails_source` is deliberately absent: framework sources change only on
-    # a dependency bump and have their own `woods:extract_framework` task.
-    #
     # @return [Hash{Symbol => Symbol}] extractor key => unit type
     WHOLE_APP_EXTRACTORS = {
       routes: :route,
@@ -294,7 +299,18 @@ module Woods
       # view, so its unit set is a function of the whole directory rather
       # than of each file independently: dispatching db/views/foo_v01.sql to
       # the per-file method would index a version a full extraction drops.
-      database_views: :database_view
+      database_views: :database_view,
+      # Framework/gem sources are a function of the installed dependency set,
+      # so `Gemfile.lock` is their trigger path (#169). Before this the only
+      # incremental writer was `woods:extract_framework`, which hand-wrote
+      # JSON around the whole pipeline — no AtomicFile, no _index.json, no
+      # manifest counts, no lock, no generation bump — and its output then
+      # sat stale forever. The value here names the primary unit type, like
+      # every other entry; the extractor also owns :gem_source, and
+      # {EXTRACTOR_KEY_TO_TYPES} (which wholesale replacement consults) lists
+      # both. Participation is gated by `include_framework_sources` — see
+      # {#skip_by_configuration?}.
+      rails_source: :rails_source
     }.freeze
 
     # Extractors whose output embeds the route table, and which therefore go
@@ -686,8 +702,36 @@ module Woods
     # Extraction Strategies
     # ──────────────────────────────────────────────────────────────────────
 
+    # Should this extractor be skipped under the current configuration?
+    #
+    # `include_framework_sources` (default: true — see
+    # docs/CONFIGURATION_REFERENCE.md) was documented and consumed by nothing
+    # (#169). It now gates both automatic paths at once: the full-run pass
+    # over {EXTRACTORS} and the `Gemfile.lock` whole-app trigger
+    # ({#rerun_whole_app_extractors}). The {PathDispatcher} rule itself stays
+    # ungated — rules are memoized per-process while configuration is not,
+    # and `relevant?` stays correct either way because `Gemfile.lock` already
+    # triggers :engines and :middleware — so the gate sits where the
+    # extractor would actually run. Gating only one side would either extract
+    # units a knob-off full run does not produce (a phantom `touched` cycle
+    # bumping the generation) or leave a knob-on host with framework sources
+    # that never refresh on a dependency bump.
+    #
+    # A by-name {#refresh} (and its `woods:extract_framework` alias) is
+    # deliberately NOT gated: the knob controls automatic participation, and
+    # the explicit refresh is the escape hatch for hosts that want framework
+    # sources on demand without paying for them every run.
+    #
+    # @param key [Symbol] key into {EXTRACTORS}
+    # @return [Boolean]
+    def skip_by_configuration?(key)
+      key == :rails_source && !Woods.configuration.include_framework_sources
+    end
+
     def extract_all_sequential
       EXTRACTORS.each do |type, extractor_class|
+        next if skip_by_configuration?(type)
+
         Rails.logger.info "[Woods] Extracting #{type}..."
         start_time = Time.current
 
@@ -726,7 +770,8 @@ module Woods
       ModelNameCache.short_names_regex if ModelNameCache.respond_to?(:short_names_regex)
 
       results_mutex = Mutex.new
-      threads = EXTRACTORS.map do |type, extractor_class|
+      active = EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }
+      threads = active.map do |type, extractor_class|
         Thread.new do
           Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
           start_time = Time.current
@@ -1739,6 +1784,11 @@ module Woods
     # @return [Set<String>] identifiers written or removed
     def rerun_whole_app_extractors(change_set, affected_types)
       keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
+      # The dispatch rules are configuration-blind (memoized per-process), so
+      # the configuration gate applies here — a knob-off host must not re-run
+      # an extractor whose units a full extraction of the same tree would not
+      # produce. See {#skip_by_configuration?}.
+      keys = keys.reject { |key| skip_by_configuration?(key) }.to_set
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)

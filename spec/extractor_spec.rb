@@ -881,6 +881,185 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── rails_source as a whole-app extractor (#169) ─────────────────────
+
+  # Framework sources were only ever written by `woods:extract_framework`,
+  # which bypassed the whole write pipeline. Making rails_source a
+  # Gemfile.lock-keyed whole-app extractor routes it through
+  # replace_type_wholesale like routes/middleware — which only works if
+  # EVERY type the extractor emits is mapped (the CLAUDE.md GraphQL history
+  # is what happens otherwise).
+  describe 'rails_source whole-app wiring (#169)' do
+    it 'maps both emitted unit types back to the rails_source extractor' do
+      expect(described_class::EXTRACTOR_KEY_TO_TYPES[:rails_source])
+        .to contain_exactly(:rails_source, :gem_source)
+    end
+
+    it 'registers rails_source among the whole-app extractors' do
+      expect(described_class::WHOLE_APP_EXTRACTORS).to have_key(:rails_source)
+    end
+  end
+
+  describe '#replace_type_wholesale for rails_source (#169)' do
+    let(:stale_gem_id) { 'gems/devise/lib/devise/models.rb' }
+    let(:fresh_unit) do
+      Woods::ExtractedUnit.new(
+        type: :rails_source, identifier: 'rails/activerecord/lib/active_record/enum.rb', file_path: nil
+      )
+    end
+    let(:fake_rails_source) { double('RailsSourceExtractor', extract_all: [fresh_unit]) }
+    let(:type_dir) { File.join(tmpdir, 'output', 'rails_source') }
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(type_dir)
+      extractor.instance_variable_set(:@incremental_extractors, { rails_source: fake_rails_source })
+
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :gem_source, identifier: stale_gem_id, file_path: nil)
+      )
+      # The stale unit's JSON, as a previous run wrote it into rails_source/
+      # (gem_source units share the extractor's directory).
+      File.write(
+        File.join(type_dir, extractor.send(:collision_safe_filename, stale_gem_id)),
+        JSON.generate(identifier: stale_gem_id)
+      )
+    end
+
+    after { Woods.configuration = @original_config }
+
+    # rails_source is NOT in CLASS_BASED_DISCOVERY — its extract_all globs
+    # installed gem files, not runtime descendants — so removal is
+    # unconditional regardless of @eager_load_complete, like routes.
+    it 'prunes a stale gem_source unit, JSON file included, when replacing the type' do
+      removed = extractor.send(:replace_type_wholesale, :rails_source, Set.new)
+
+      expect(removed).to include(stale_gem_id)
+      expect(extractor.dependency_graph.node_exists?(stale_gem_id)).to be(false)
+      expect(File.exist?(File.join(type_dir, extractor.send(:collision_safe_filename, stale_gem_id))))
+        .to be(false)
+    end
+
+    it 'writes the fresh units through the pipeline into the rails_source directory' do
+      extractor.send(:replace_type_wholesale, :rails_source, Set.new)
+
+      expect(extractor.dependency_graph.node_exists?(fresh_unit.identifier)).to be(true)
+      fresh_file = File.join(type_dir, extractor.send(:collision_safe_filename, fresh_unit.identifier))
+      expect(JSON.parse(File.read(fresh_file))['identifier']).to eq(fresh_unit.identifier)
+    end
+  end
+
+  describe '#rerun_whole_app_extractors include_framework_sources gate (#169)' do
+    let(:framework_unit) do
+      Woods::ExtractedUnit.new(
+        type: :rails_source, identifier: 'rails/activerecord/lib/active_record/enum.rb', file_path: nil
+      )
+    end
+    let(:fake_rails_source) { double('RailsSourceExtractor', extract_all: [framework_unit]) }
+    let(:fake_engines) { double('EngineExtractor', extract_all: []) }
+    let(:fake_middleware) { double('MiddlewareExtractor', extract_all: []) }
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(File.join(tmpdir, 'output'))
+      extractor.instance_variable_set(
+        :@incremental_extractors,
+        { rails_source: fake_rails_source, engines: fake_engines, middleware: fake_middleware }
+      )
+    end
+
+    after { Woods.configuration = @original_config }
+
+    def rerun(paths)
+      extractor.send(:rerun_whole_app_extractors,
+                     Woods::ChangeSet.new(paths: paths, root: rails_root),
+                     Set.new)
+    end
+
+    it 'replaces framework sources through the pipeline when Gemfile.lock changes' do
+      touched = rerun(['Gemfile.lock'])
+
+      expect(touched).to include(framework_unit.identifier)
+      expect(extractor.dependency_graph.node_exists?(framework_unit.identifier)).to be(true)
+      expect(Dir[File.join(tmpdir, 'output', 'rails_source', '*.json')]).not_to be_empty
+    end
+
+    # An ungated dispatch rule with a gated extractor must not manufacture a
+    # phantom `touched` cycle: with the knob off, a lockfile change re-runs
+    # everything Gemfile.lock legitimately triggers — except rails_source.
+    it 'does not re-run rails_source when include_framework_sources is off' do
+      Woods.configuration.include_framework_sources = false
+
+      touched = rerun(['Gemfile.lock'])
+
+      expect(fake_rails_source).not_to have_received(:extract_all)
+      expect(fake_engines).to have_received(:extract_all)
+      expect(fake_middleware).to have_received(:extract_all)
+      expect(touched).not_to include(framework_unit.identifier)
+    end
+  end
+
+  # The documented default for include_framework_sources is `true`
+  # (docs/CONFIGURATION_REFERENCE.md), so full runs keep extracting framework
+  # sources unless the host opts out — wiring the knob changes nothing for
+  # existing hosts.
+  describe 'full extraction include_framework_sources gate (#169)' do
+    let(:fake_extractor_class) do
+      Class.new do
+        def extract_all
+          []
+        end
+      end
+    end
+
+    before do
+      require 'woods'
+      require 'active_support/isolated_execution_state'
+      require 'active_support/core_ext/time'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      stub_const('Woods::Extractor::EXTRACTORS',
+                 { rails_source: fake_extractor_class, routes: fake_extractor_class })
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 'defaults to including framework sources — the documented default is true' do
+      expect(Woods::Configuration.new.include_framework_sources).to be(true)
+
+      extractor.send(:extract_all_sequential)
+
+      expect(extractor.instance_variable_get(:@results)).to have_key(:rails_source)
+    end
+
+    it 'skips the rails_source extractor when the knob is off (sequential)' do
+      Woods.configuration.include_framework_sources = false
+
+      extractor.send(:extract_all_sequential)
+
+      results = extractor.instance_variable_get(:@results)
+      expect(results).not_to have_key(:rails_source)
+      expect(results).to have_key(:routes)
+    end
+
+    it 'skips the rails_source extractor when the knob is off (concurrent)' do
+      Woods.configuration.include_framework_sources = false
+      model_name_cache = double('ModelNameCache')
+      allow(model_name_cache).to receive_messages(model_names: nil, model_names_regex: nil)
+      stub_const('Woods::ModelNameCache', model_name_cache)
+
+      extractor.send(:extract_all_concurrent)
+
+      results = extractor.instance_variable_get(:@results)
+      expect(results).not_to have_key(:rails_source)
+      expect(results).to have_key(:routes)
+    end
+  end
+
   # ── estimated_tokens_from ────────────────────────────────────────────
 
   # A full extraction indexes a unit's token estimate from the in-memory

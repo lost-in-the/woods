@@ -43,6 +43,15 @@ module Woods
       @pipeline_mutex = Mutex.new
       @pipeline_in_flight = {}
 
+      # Seconds `pipeline_extract` will wait for the on-disk extraction lock
+      # before reporting contention (#170). Deliberately short: the tool
+      # answers a live agent, and "another writer is mid-run, retry" is a
+      # better answer than a multi-minute stall (the rake writers wait
+      # `LOCK_STALE_TIMEOUT` because a human started them and asked them to
+      # finish). Module-level rather than inside `class << self`, so specs can
+      # stub it and lexical lookup from the tool definitions still finds it.
+      PIPELINE_LOCK_WAIT = 2.0
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -974,18 +983,54 @@ module Woods
               )
             end
 
+            # Cross-PROCESS serialization (#170). pipeline_start only guards
+            # this process; the rake writers and the watch daemon serialize on
+            # the on-disk PipelineLock, and an unlocked MCP extraction was the
+            # sixth writer — free to rewrite the dependency graph under any of
+            # them, with the loser's work silently discarded. The wait is
+            # short and the failure explicit: an MCP tool must not sit on a
+            # lock queue for minutes the way `woods:extract` does, so
+            # contention becomes a clear tool error the caller can retry.
+            #
+            # A nil/duck-typed configuration (no output_dir) yields no lock —
+            # there is no known lock domain, and the extraction below fails in
+            # the background exactly as it always has on an unconfigured host.
+            config = Woods.configuration
+            output_dir = config.output_dir if config.respond_to?(:output_dir)
+            lock = output_dir && Woods::MCP::Server.send(:build_extraction_lock, output_dir)
+            if lock && !Woods::MCP::Server.send(:acquire_lock_briefly, lock)
+              Woods::MCP::Server.send(:pipeline_finish, :extraction)
+              next respond_err.call(
+                'Another writer holds the extraction lock (a rake task or the watch daemon ' \
+                'is writing this index). Try again shortly.',
+                code: :locked,
+                tool: 'pipeline_extract'
+              )
+            end
+
             # Lock acquired — now it's safe to record the run.
             guard&.record!(:extraction)
 
-            Thread.new do
-              extractor = Woods::Extractor.new(
-                output_dir: Woods.configuration.output_dir
-              )
+            run_extraction = lambda do
+              extractor = Woods::Extractor.new(output_dir: output_dir)
               incremental ? extractor.extract_changed(files) : extractor.extract_all
+            end
+
+            Thread.new do
+              if lock
+                # Heartbeat, like the rake writers: a full extraction on a
+                # large host can outlive the lock's stale window, and an
+                # untouched lock would be retired by the next contender
+                # mid-run — recreating the two-writer clobber.
+                Woods::Coordination::LockHeartbeat.run(lock) { run_extraction.call }
+              else
+                run_extraction.call
+              end
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline extract failed: #{e.message}")
             ensure
+              lock&.release
               Woods::MCP::Server.send(:pipeline_finish, :extraction)
             end
 
@@ -994,6 +1039,40 @@ module Woods
                                                 message: 'Extraction pipeline started in background thread'
                                               }))
           end
+        end
+
+        # The same lock every other writer against this index uses —
+        # `woods:extract`/`incremental`/`refresh` and the watch daemon all
+        # build it from the daemon's constants (see CLAUDE.md, "writers
+        # serialize on PipelineLock").
+        #
+        # @param output_dir [String, Pathname] index directory
+        # @return [Woods::Coordination::PipelineLock]
+        def build_extraction_lock(output_dir)
+          require_relative '../coordination/pipeline_lock'
+          require_relative '../coordination/lock_heartbeat'
+          require_relative '../watch/daemon'
+
+          Woods::Coordination::PipelineLock.new(
+            lock_dir: output_dir.to_s,
+            name: Woods::Watch::Daemon::LOCK_NAME,
+            stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
+          )
+        end
+
+        # Poll for the lock until {PIPELINE_LOCK_WAIT} elapses. Monotonic, so
+        # a clock adjustment mid-wait cannot stretch or shrink the window.
+        #
+        # @param lock [Woods::Coordination::PipelineLock]
+        # @return [Boolean] whether the lock was acquired
+        def acquire_lock_briefly(lock)
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + PIPELINE_LOCK_WAIT
+          acquired = lock.acquire
+          until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+            sleep 0.1
+            acquired = lock.acquire
+          end
+          acquired
         end
 
         def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing)

@@ -913,7 +913,7 @@
       "lib/woods/extractors/rails_source_extractor.rb"
     ],
     "description": "rails_source and gem_source units are written only by an explicit woods:extract_framework. Nothing automatic runs it \u2014 not bin/woods-sync, not the watch daemon, not woods:incremental, and not woods:extract \u2014 so once written they persist unchanged forever. Confirmed on a real host: 140 units (116 rails_source, 24 gem_source) carry host-style paths from a different worktree that resolve nowhere in either host or container; they were also the only units left absolute after #166, the same symptom. The sharp edge is that bin/woods-sync flags a Gemfile.lock change as 'only takes effect with a full extraction' and tells the user to clear .sync_head and re-run, but a full extraction is exactly what does not refresh framework units \u2014 so a Rails upgrade worktree keeps describing the old framework internals. The exclusion from incremental is deliberate and correct (WHOLE_APP_EXTRACTORS documents it); the gap is that 'changes only on dependency changes' was never wired to anything detecting one. Options in the issue; leaning toward refreshing on a lockfile-digest mismatch during full extraction plus a woods:validate warning. woods:validate has no unresolvable-file_path check at all, which would have surfaced this unprompted. NOTE: bin/woods-sync is NOT in this repo \u2014 it lives in the consuming application's repo, so the message fix and its full-only filter land there, not here. Preferred fix per review: make rails_source a Gemfile.lock-keyed WHOLE_APP_EXTRACTORS member rather than calling woods:extract_framework more often, since that task bypasses normalize_file_paths, the type index, the manifest, publish_generation AND the extraction lock. Tracked in GH #169.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -927,7 +927,7 @@
       "lib/tasks/woods.rake"
     ],
     "description": "woods:clean is a bare FileUtils.rm_rf(output_dir) with no woods_with_extraction_lock. Run mid-cycle it removes the lock file itself, so the holder's release hits ENOENT (handled) and the next contender acquires immediately \u2014 two writers plus a daemon publishing into a deleted tree. Deliberate human action so frequency is low, but silent, and recovery is a full re-extraction. The fix is not simply 'take the lock', since the thing being deleted contains the lock: either delete everything except the lock file then release and remove it, or refuse to run while a daemon is alive the way woods:incremental stands down. woods:embed / woods:embed_incremental are also unlocked; arguably a separate concurrency domain since the daemon does not embed, but worth an explicit decision \u2014 PipelineGuard's cooldown reduces the window for full runs without serialising them, and incremental embeds are not rate-limited at all. Split out of #169, where the mechanism is unrelated and would have been closed alongside a fix that does not address it. Tracked in GH #170.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
