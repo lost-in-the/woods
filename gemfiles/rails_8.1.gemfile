@@ -1,0 +1,11 @@
+# frozen_string_literal: true
+
+# Hand-maintained Rails-version gemfile (appraisal can't generate from the
+# conditional base Gemfile). Inherits the base Gemfile's dev/test gems via
+# eval_gemfile and pins Rails. Keep the Rails pins in sync with ../Appraisals.
+
+source 'https://rubygems.org'
+
+eval_gemfile File.expand_path('../Gemfile', __dir__)
+
+gem 'rails', '~> 8.1.0'

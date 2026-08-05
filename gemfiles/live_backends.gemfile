@@ -1,0 +1,22 @@
+# frozen_string_literal: true
+
+# Gemfile for the CI `live-backends` job (#220).
+#
+# The unit suite drives every storage adapter through doubles, so a defect that
+# only a real server can produce is invisible to it — #181 (pgvector raising
+# PG::CardinalityViolation when one batch carried a duplicate id) shipped for
+# exactly that reason. This bundle adds the two gems the doubles stand in for:
+#
+# - `pg` + `activerecord`: the Pgvector adapter takes an ActiveRecord connection
+#   and calls #execute/#quote on it. Nothing in the base bundle provides one.
+# - Qdrant needs no gem — the adapter speaks HTTP via net/http — but its specs
+#   live in the same file, so they share this bundle.
+#
+# Keep in sync with ../Gemfile; this only adds, never re-pins.
+
+source 'https://rubygems.org'
+
+eval_gemfile File.expand_path('../Gemfile', __dir__)
+
+gem 'activerecord'
+gem 'pg', '~> 1.5'

@@ -1511,7 +1511,22 @@
       "Appraisals"
     ],
     "description": "pull_request-only trigger leaves merged main untested; the matrix omits Ruby 3.4 and Rails 8.1; every external protocol boundary is doubles-only \u2014 a services lane running the storage contract specs plus the offline embed->retrieve round trip closes the seam. Coordinate with woods-testbed#2. Tracked in GH #220.",
-    "status": "ready",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-108",
+    "slug": "durable-store-persistable-crash",
+    "title": "persistable? treats durable vector stores as dumpable, crashing every pgvector/Qdrant embed run",
+    "severity": "critical",
+    "category": "code-bug",
+    "layer": "embedding",
+    "files": [
+      "lib/woods/embedding/indexer.rb",
+      "lib/woods/storage/qdrant.rb"
+    ],
+    "description": "Indexer#persistable? asked vector_store.respond_to?(:each_entry), but Storage::VectorStore::Interface *defines* each_entry (a NotImplementedError raise) and bulk_load, and every adapter includes it \u2014 so pgvector and Qdrant answered true. persist_snapshot then drove Snapshotter::Vector.dump into the raise at the end of an otherwise-successful run, discarding the whole embed pass. Fixed by asking which module owns the method (implements_own?) instead of respond_to?. Found by the new live-backend CI lane (B-107). Also fixed alongside: Qdrant mutating point operations did not pass wait=true, so acknowledged-but-unapplied writes read back stale \u2014 delete-then-count and write-then-dump both observed pre-mutation state.",
+    "status": "resolved",
     "depends_on": []
   }
 ]

@@ -89,6 +89,18 @@ module Woods
         # silently doubled collection.
         POINT_ID_NAMESPACE = '7eb8ae2b-670b-55ee-a474-36bd1a8dc6b4'
 
+        # Query string appended to every mutating point operation.
+        #
+        # Qdrant defaults these endpoints to `wait=false`: the API returns
+        # `status: "acknowledged"` as soon as the change is queued, before it is
+        # readable. Every caller in this gem assumes otherwise — the embed
+        # pipeline writes vectors and then dumps/verifies, and the prune paths
+        # delete and then re-count — so an un-awaited mutation reads back as
+        # stale data (a deleted unit still answering searches, a fresh count
+        # showing the pre-write total). Correctness beats the throughput the
+        # async default buys.
+        WAIT_FOR_WRITE = '?wait=true'
+
         # Payload key holding the original Woods identifier for a point.
         #
         # Deliberately NOT `identifier`: the embedding Indexer already
@@ -255,7 +267,7 @@ module Woods
         def store(id, vector, metadata = {})
           validate_dimensions!(vector) if @dimensions
           body = { points: [build_point(id, vector, metadata)] }
-          request(:put, "/collections/#{@collection}/points", body)
+          request(:put, "/collections/#{@collection}/points#{WAIT_FOR_WRITE}", body)
         end
 
         # Store multiple vectors in a single batch upsert request.
@@ -281,7 +293,7 @@ module Woods
           body = {
             points: entries.map { |entry| build_point(entry[:id], entry[:vector], entry[:metadata] || {}) }
           }
-          request(:put, "/collections/#{@collection}/points", body)
+          request(:put, "/collections/#{@collection}/points#{WAIT_FOR_WRITE}", body)
         end
 
         # Search for similar vectors.
@@ -329,13 +341,13 @@ module Woods
         # @see Interface#delete
         def delete(id)
           body = { points: [self.class.point_id(id)] }
-          request(:post, "/collections/#{@collection}/points/delete", body)
+          request(:post, "/collections/#{@collection}/points/delete#{WAIT_FOR_WRITE}", body)
         end
 
         # @see Interface#delete_by_filter
         def delete_by_filter(filters)
           body = { filter: build_filter(filters) }
-          request(:post, "/collections/#{@collection}/points/delete", body)
+          request(:post, "/collections/#{@collection}/points/delete#{WAIT_FOR_WRITE}", body)
         end
 
         # @see Interface#count

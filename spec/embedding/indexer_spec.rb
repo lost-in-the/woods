@@ -1300,6 +1300,71 @@ RSpec.describe Woods::Embedding::Indexer do
     end
   end
 
+  # Regression: durable backends must not be treated as dumpable.
+  #
+  # `persistable?` asked `vector_store.respond_to?(:each_entry)`. Every adapter
+  # includes Storage::VectorStore::Interface, which *defines* `each_entry` as a
+  # NotImplementedError raise — so pgvector and Qdrant answered `true`,
+  # `persist_snapshot` ran, and `Snapshotter::Vector.dump` hit the raise at the
+  # very end of a successful embed, throwing away the whole run.
+  describe 'durable vector stores are not dumped' do
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+    end
+
+    # The real adapters, not doubles — the bug lived precisely in what the real
+    # classes inherit from the interface module.
+    {
+      'pgvector' => lambda {
+        require 'woods/storage/pgvector'
+        # A real object, not instance_double('ActiveRecord::...'): ActiveRecord
+        # is not loaded in the unit bundle, so a string-named double would
+        # verify nothing at all (see #219).
+        connection_class = Class.new do
+          def execute(_sql) = []
+          def quote(value) = "'#{value}'"
+        end
+        Woods::Storage::VectorStore::Pgvector.new(connection: connection_class.new, dimensions: 2)
+      },
+      'Qdrant' => lambda {
+        require 'woods/storage/qdrant'
+        store = Woods::Storage::VectorStore::Qdrant.new(
+          url: 'http://qdrant.example.com', collection: 'test', dimensions: 2
+        )
+        allow(store).to receive(:store_batch)
+        store
+      }
+    }.each do |backend, build_store|
+      context "with a #{backend} store" do
+        let(:vector_store) { instance_exec(&build_store) }
+
+        it 'inherits each_entry from the interface without implementing it' do
+          expect(vector_store).to respond_to(:each_entry)
+          expect { vector_store.each_entry { |*args| args } }.to raise_error(NotImplementedError)
+        end
+
+        it 'completes index_all without attempting a dump' do
+          stats = indexer.index_all
+
+          expect(stats[:errors]).to eq(0)
+          expect(stats[:processed]).to eq(1)
+          # The dump directory is the observable proof: persist_snapshot would
+          # have created it before reaching the raise.
+          expect(Dir.exist?(File.join(output_dir, 'dumps'))).to be(false)
+        end
+      end
+    end
+
+    it 'still dumps for an in-memory store, which genuinely implements each_entry' do
+      expect(Woods::Storage::VectorStore::InMemory.instance_method(:each_entry).owner)
+        .to eq(Woods::Storage::VectorStore::InMemory)
+
+      indexer.index_all
+
+      expect(Dir.exist?(File.join(output_dir, 'dumps'))).to be(true)
+    end
+  end
+
   describe 'dump_retention_count default' do
     it 'defaults to 3' do
       idx = described_class.new(

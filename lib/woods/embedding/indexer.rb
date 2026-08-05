@@ -15,8 +15,9 @@ module Woods
     # generates embeddings, and stores vectors. Supports full and incremental
     # modes with checkpoint-based resumability.
     #
-    # When the vector store is an in-memory adapter (responds to +#each_entry+
-    # and +#bulk_load+) and +output_dir+ is set, a successful run — full or
+    # When the vector store is an in-memory adapter (one that itself implements
+    # +#each_entry+, not merely inherits the interface stub) and +output_dir+ is
+    # set, a successful run — full or
     # incremental — persists the stores to disk via the Snapshotter pair and
     # atomically flips the +dumps/latest+ pointer. An incremental run hydrates
     # the store from the previous dump first, so the dump it writes is
@@ -575,13 +576,41 @@ module Woods
         AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
       end
 
-      # Returns true when the vector store is an in-memory adapter that supports
-      # the persistence seam (+#each_entry+ / +#bulk_load+) and output_dir is set.
-      # Persistent backends (pgvector, Qdrant) never respond to +#each_entry+.
+      # Returns true when the vector store can actually be dumped to
+      # +output_dir+ — that is, when it genuinely implements the persistence
+      # seam (+#each_entry+).
+      #
+      # +respond_to?+ is the wrong question, and asking it was a live crash.
+      # {Storage::VectorStore::Interface} *defines* +#each_entry+ (as a
+      # +NotImplementedError+ raise) and +#bulk_load+ (delegating to
+      # +#store_batch+), and every adapter includes the module — so pgvector
+      # and Qdrant answered +respond_to?(:each_entry)+ with +true+ despite
+      # implementing neither. +persistable?+ said yes, and {#persist_snapshot}
+      # drove +Snapshotter::Vector.dump+ into the interface's raise at the very
+      # end of an otherwise-successful run, discarding a whole embed pass
+      # (every vector already paid for) with a bare +NotImplementedError+.
+      #
+      # Ask who *owns* the method instead: an adapter that merely inherited the
+      # interface's stub has not implemented it. +bulk_load+ is deliberately not
+      # part of the test — its interface default is a working implementation, so
+      # it discriminates nothing.
       def persistable?
-        @output_dir &&
-          @vector_store.respond_to?(:each_entry) &&
-          @vector_store.respond_to?(:bulk_load)
+        return false unless @output_dir
+
+        implements_own?(@vector_store, :each_entry)
+      end
+
+      # Does +object+ define +method_name+ itself, rather than inheriting the
+      # vector-store interface's default stub?
+      #
+      # @param object [Object] the adapter under test
+      # @param method_name [Symbol]
+      # @return [Boolean]
+      def implements_own?(object, method_name)
+        return false unless object.respond_to?(method_name)
+        return true unless defined?(Storage::VectorStore::Interface)
+
+        object.method(method_name).owner != Storage::VectorStore::Interface
       end
 
       # Persist stores to a timestamped dump directory, write +woods.json+,

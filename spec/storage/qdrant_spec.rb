@@ -61,7 +61,11 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         expect(req).to be_a(Net::HTTP::Put)
-        expect(req.path).to eq('/collections/test_collection/points')
+        # ?wait=true is load-bearing, not cosmetic: Qdrant acknowledges an
+        # un-awaited write before it is readable, so the embed pipeline's
+        # write-then-dump and the prune paths' delete-then-count would both
+        # observe stale state without it.
+        expect(req.path).to eq("/collections/test_collection/points#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         point = body['points'].first
         expect(point['id']).to eq(described_class.point_id('doc1'))
@@ -94,7 +98,11 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request).once do |req|
         expect(req).to be_a(Net::HTTP::Put)
-        expect(req.path).to eq('/collections/test_collection/points')
+        # ?wait=true is load-bearing, not cosmetic: Qdrant acknowledges an
+        # un-awaited write before it is readable, so the embed pipeline's
+        # write-then-dump and the prune paths' delete-then-count would both
+        # observe stale state without it.
+        expect(req.path).to eq("/collections/test_collection/points#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         expect(body['points'].size).to eq(2)
         expect(body['points'][0]['id']).to eq(described_class.point_id('doc1'))
@@ -210,7 +218,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         expect(req).to be_a(Net::HTTP::Post)
-        expect(req.path).to eq('/collections/test_collection/points/delete')
+        expect(req.path).to eq("/collections/test_collection/points/delete#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         expect(body['points']).to eq([described_class.point_id('doc1')])
       end
@@ -247,7 +255,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         expect(req).to be_a(Net::HTTP::Post)
-        expect(req.path).to eq('/collections/test_collection/points/delete')
+        expect(req.path).to eq("/collections/test_collection/points/delete#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         expect(body['filter']['must']).to include({ 'key' => 'type', 'match' => { 'value' => 'model' } })
       end

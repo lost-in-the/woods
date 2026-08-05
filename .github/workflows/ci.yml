@@ -3,6 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Also run on the merged state of the default branch. Triggering on
+  # `pull_request` alone meant `main` itself was never tested: a bad merge
+  # resolution, or a direct push, went green purely by absence of a run (#220).
+  push:
+    branches: [main]
 
 # Least-privilege default: CI only needs to read the checkout.
 # Per-job blocks can opt into stronger scopes if they ever need to.
@@ -20,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ruby-version: ['3.0', '3.1', '3.2', '3.3', '4.0']
+        ruby-version: ['3.0', '3.1', '3.2', '3.3', '3.4', '4.0']
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
       - name: Set up Ruby ${{ matrix.ruby-version }}
@@ -40,7 +45,7 @@ jobs:
   # bundle-difference noise without real version coverage, and the booted spec
   # can't share a process with it (hence the :booted_app tag + the solo run here).
   # Pairs are explicit to exclude invalid Ruby x Rails combinations (e.g. Rails
-  # 6.0 only on Ruby 3.0; Rails 7.2 needs >= 3.1; Rails 8.0 needs >= 3.2).
+  # 6.0 only on Ruby 3.0; Rails 7.2 needs >= 3.1; Rails 8.0 and 8.1 need >= 3.2).
   rails-matrix:
     name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
@@ -54,7 +59,9 @@ jobs:
           - { ruby: '3.2', rails: '7.1' }
           - { ruby: '3.3', rails: '7.2' }
           - { ruby: '3.3', rails: '8.0' }
+          - { ruby: '3.4', rails: '8.1' }
           - { ruby: '4.0', rails: '8.0' }
+          - { ruby: '4.0', rails: '8.1' }
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
@@ -83,6 +90,61 @@ jobs:
       # Six worktrees, disjoint indexes, concurrent readers (#164 phase 4).
       - name: Run multi-worktree integration
         run: bundle exec rspec spec/integration/multi_worktree_spec.rb
+
+  # Storage adapters against REAL servers (#220). Every other storage spec uses
+  # doubles, which verify the SQL/HTTP the adapter builds but not what a server
+  # does with it — #181 (PG::CardinalityViolation on a duplicate id inside one
+  # batch) shipped because no lane ever sent a real batch to a real PostgreSQL.
+  live-backends:
+    name: Live backends (pgvector + Qdrant)
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: gemfiles/live_backends.gemfile
+      WOODS_RUN_LIVE_BACKENDS: '1'
+      WOODS_PG_URL: postgres://postgres:postgres@localhost:5432/woods_test
+      WOODS_QDRANT_URL: http://localhost:6333
+    services:
+      # pgvector's own image — the stock postgres image has no vector extension,
+      # so `CREATE EXTENSION vector` in ensure_schema! would fail.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: woods_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # No health-cmd: the Qdrant image ships no shell utilities to probe with,
+      # so readiness is waited on from the runner instead (step below).
+      qdrant:
+        image: qdrant/qdrant:v1.12.4
+        ports:
+          - 6333:6333
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:6333/readyz > /dev/null; then
+              echo "Qdrant ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Qdrant did not become ready within 30s"
+          exit 1
+      - name: Run live-backend contract specs
+        run: bundle exec rspec spec/integration/live_backends_spec.rb
 
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with

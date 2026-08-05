@@ -87,7 +87,7 @@ The gem supports `railties >= 6.0`. Coverage is split across two CI jobs:
   Gemfile rather than per Rails version.
 - The `rails-matrix` job runs the **booted-app extraction test**
   (`spec/integration/booted_extraction_spec.rb` against `spec/dummy`) under each
-  supported Rails — 6.0, 6.1, 7.0, 7.1, 7.2, 8.0 — using per-version gemfiles
+  supported Rails — 6.0, 6.1, 7.0, 7.1, 7.2, 8.0, 8.1 — using per-version gemfiles
   under `gemfiles/`. This is the version-sensitive gate: it boots a real Rails
   app in-process and runs an extraction. (The booted spec is tagged `:booted_app`
   and excluded from the default `rake spec`; `WOODS_RUN_BOOTED_APP=1` opts it in,
@@ -110,6 +110,34 @@ valid Ruby×Rails pair to the `rails-matrix` job in `.github/workflows/ci.yml`.
 their adapter at load time) and pin `concurrent-ruby '< 1.3.5'` (1.3.5 dropped
 the implicit `require "logger"` those releases rely on under Ruby 3.x) — copy an
 existing `gemfiles/rails_6.0.gemfile` as the template.
+
+### Live-backend lane
+
+Storage adapters are also exercised against **real** servers by the
+`live-backends` CI job (`spec/integration/live_backends_spec.rb`, tagged
+`:live_backends`). The rest of the storage specs use doubles: they verify the
+SQL and HTTP an adapter *builds*, but not what a server does with it — which is
+how #181 shipped, a `PG::CardinalityViolation` that only a real PostgreSQL
+could raise.
+
+Run it locally against containers:
+
+```bash
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=woods_test pgvector/pgvector:pg16
+docker run -d -p 6333:6333 qdrant/qdrant:v1.12.4
+
+BUNDLE_GEMFILE=gemfiles/live_backends.gemfile bundle install
+WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
+  bundle exec rspec spec/integration/live_backends_spec.rb
+```
+
+`gemfiles/live_backends.gemfile` adds `pg` and `activerecord` (the Pgvector
+adapter takes an ActiveRecord connection); Qdrant needs no gem. Override the
+endpoints with `WOODS_PG_URL` and `WOODS_QDRANT_URL`.
+
+**Any new behavior that only a real backend can exhibit belongs here** — batch
+conflict semantics, filter translation, delete addressing, extension setup.
 
 ## Code Style
 
