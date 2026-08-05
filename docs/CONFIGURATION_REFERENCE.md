@@ -353,7 +353,9 @@ deployment guide including defense layers.
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
 | `console_credential_defense_enabled` | Boolean | `true` | Layer 5 toggle for the CredentialScanner. Leave on unless you have a specific reason to disable. |
 | `console_credential_rotation_warning` | Boolean | `true` | Emit a structured log warning when any Rails credentials file is modified after process start. |
-| `console_unsafe_eval_enabled` | Boolean | `false` | Gate for `console_eval`. Off by default; no execution path is currently wired. |
+| `console_unsafe_eval_enabled` | Boolean | `nil` (falls back to `ENV['WOODS_CONSOLE_UNSAFE_EVAL'] == 'true'`) | Opt-in gate for `console_eval`. An explicit `true`/`false` wins over the env var in both directions. Off by default — the executor returns a hard `eval_disabled` refusal. When on, the server refuses to boot in production, emits a loud stderr banner elsewhere, and requires both `console_unsafe_eval_confirmation` and `console_unsafe_eval_audit_log_path` (boot raises `Woods::ConfigurationError` if either is missing). Enabled runs go through the five-control path: EvalGuard AST denylist → human confirmation → SafeContext rollback → timeout → audit log. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md#console_eval-opt-in-woods_console_unsafe_eval). |
+| `console_unsafe_eval_confirmation` | `Confirmation` | `nil` | Human-in-the-loop approval collaborator for `console_eval`. Required whenever the eval opt-in is on — the server fails at boot without it. |
+| `console_unsafe_eval_audit_log_path` | String/Pathname | `nil` | Path for the append-only audit log recording every `console_eval` attempt (refused, denied, or executed). Required whenever the eval opt-in is on — the server fails at boot without it. |
 
 ## Environment Variables
 

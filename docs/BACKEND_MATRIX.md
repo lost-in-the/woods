@@ -130,10 +130,17 @@ CREATE INDEX ON woods_embeddings
 
 **Configuration:**
 ```ruby
-config.vector_store = :qdrant
-config.vector_store_url = ENV.fetch("QDRANT_URL", "http://localhost:6333")
-config.vector_store_collection = "woods"
+config.vector_store         = :qdrant
+config.vector_store_options = {
+  url:        ENV.fetch("QDRANT_URL", "http://localhost:6333"),
+  collection: "woods",
+  api_key:    ENV["QDRANT_API_KEY"],  # optional; omit for unauthenticated local instances
+  dimensions: 1_536,                  # optional; pre-validates vector length client-side
+  allow_private_hosts: true           # required for localhost/RFC1918 URLs — the SSRF guard blocks them by default
+}
 ```
+
+The adapter constructor takes these as keyword arguments (`Woods::Storage::VectorStore::Qdrant`); `Builder#build_vector_store` splats `vector_store_options` straight into it. Works identically whether your application database is MySQL or PostgreSQL — Qdrant is a separate service either way.
 
 **Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point
 id, so the adapter cannot store a Woods identifier directly. It derives a

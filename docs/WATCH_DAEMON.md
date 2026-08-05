@@ -433,7 +433,7 @@ and a hook-triggered `woods:incremental`. They share the existing file-based
 | Situation | Behaviour |
 |---|---|
 | Daemon cycle while another writer holds the lock | Daemon yields, publishes a `contended` degraded status, and **carries its paths into the next cycle** so nothing is lost |
-| Manual `woods:extract` / `woods:incremental` | Waits up to 30 s for the lock, then proceeds with a warning — a daemon cycle is milliseconds, so a longer wait means something unusual, and hanging a terminal or a CI job is worse than an overlap the index survives |
+| Manual `woods:extract` / `woods:incremental` | Waits up to `LOCK_STALE_TIMEOUT` (600 s; override with `WOODS_LOCK_WAIT`) for the lock, then **exits non-zero** rather than proceeding unlocked — a storm-triggered `extract_all` can hold the lock for minutes on a large host, and two concurrent writers rewrite the dependency graph from divergent copies, so the loser's work is silently discarded under a generation that says "fresh" |
 | Hook sync on a tree a daemon is already watching | Skips entirely: the daemon has already seen those changes. `WOODS_IGNORE_WATCH=1` overrides |
 
 A hook can check cheaply:
