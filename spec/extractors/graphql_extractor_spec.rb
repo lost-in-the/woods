@@ -520,6 +520,57 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(unit.identifier).to eq('Mutations::Admin::CreateUser')
     end
 
+    # The identifier scan must track `end`s, not just declarations. The old
+    # end-blind scan prefixed EVERY module seen before the first class, so a
+    # sibling module that closed before the class opened still polluted the
+    # identifier: Helpers::Mutations::CreateUser instead of
+    # Mutations::CreateUser — the exact nesting shape SourceNesting (#174)
+    # exists to get right.
+    it 'ignores sibling modules that closed before the class opened' do
+      source = <<~RUBY
+        module Helpers
+          def self.sanitize(name)
+            name.strip
+          end
+        end
+
+        module Mutations
+          class CreateUser < BaseMutation
+            argument :name, String, required: true
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::CreateUser')
+      expect(unit.namespace).to eq('Mutations')
+    end
+
+    # Interfaces are modules, not classes — the identifier comes from the
+    # outer module chain when the file declares no class at all.
+    it 'keeps the identifier for a module-only interface file' do
+      source = <<~RUBY
+        module Types
+          module Timestampable
+            include GraphQL::Schema::Interface
+
+            field :created_at, String, null: false
+            field :updated_at, String, null: false
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/types/timestampable.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit).not_to be_nil
+      expect(unit.identifier).to eq('Types::Timestampable')
+    end
+
     it 'returns nil for non-GraphQL files' do
       source = <<~RUBY
         class PlainService

@@ -220,13 +220,43 @@ RSpec.describe Woods::MCP::ProviderProbe do
       end
     end
 
+    # --- Injected provider object (#178) ---
+
+    context 'with an injected provider object' do
+      # Builder#build_embedding_provider accepts an already-constructed
+      # object responding to #embed/#embed_batch. The probe used to fall
+      # through to the ArgumentError arm for those, crashing MCP boot for a
+      # host whose retrieval works fine — Bootstrapper only rescues
+      # ProviderUnreachable.
+      it 'is presumed reachable and returned as-is' do
+        injected = double('HostProvider', embed: [0.0], embed_batch: [[0.0]])
+
+        expect(described_class.reachable!(injected)).to be(injected)
+      end
+
+      it 'performs no network I/O' do
+        injected = double('HostProvider', embed: [0.0], embed_batch: [[0.0]])
+        expect(Net::HTTP).not_to receive(:new)
+
+        described_class.reachable!(injected)
+      end
+    end
+
     # --- Unknown provider ---
 
-    context 'with an unknown provider class' do
-      it 'raises ArgumentError' do
-        opaque = double('SomeFutureProvider')
+    context 'with an object that is not a provider at all' do
+      it 'raises ArgumentError naming the #embed/#embed_batch contract' do
+        opaque = Object.new
 
         expect { described_class.reachable!(opaque) }
+          .to raise_error(ArgumentError,
+                          /does not know how to probe Object.*must implement #embed and #embed_batch/m)
+      end
+
+      it 'raises ArgumentError when only #embed is implemented' do
+        half_provider = double('HalfProvider', embed: [0.0])
+
+        expect { described_class.reachable!(half_provider) }
           .to raise_error(ArgumentError, /does not know how to probe/)
       end
     end
@@ -245,6 +275,27 @@ RSpec.describe Woods::MCP::ProviderProbe do
           expect(e.message).to include(e.url).or include(e.reason)
         end
       end
+    end
+  end
+
+  # spec_helper loads the full gem, so an in-process example can never see a
+  # missing sibling require — same rationale as spec/load_order_spec.rb.
+  # The probe dispatches on Provider::OpenAI/Ollama/Fake at call time;
+  # requiring only fake.rb left Provider::OpenAI undefined for a standalone
+  # `require 'woods/mcp/provider_probe'`, so the first probe of an OpenAI
+  # provider raised NameError instead of probing.
+  describe 'standalone load' do
+    it 'defines every provider class the probe dispatches on' do
+      require 'open3'
+      stdout, status = Open3.capture2e(
+        'ruby', '-Ilib', '-rwoods/mcp/provider_probe',
+        '-e', 'exit(defined?(Woods::Embedding::Provider::OpenAI) && ' \
+              'defined?(Woods::Embedding::Provider::Ollama) && ' \
+              'defined?(Woods::Embedding::Provider::Fake) && ' \
+              'defined?(Woods::MCP::ProviderUnreachable) ? 0 : 1)'
+      )
+      expect(status).to be_success,
+                        "provider_probe did not self-load its dispatch constants:\n#{stdout}"
     end
   end
 end

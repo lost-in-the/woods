@@ -886,6 +886,98 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  # Embedding writes the checkpoint, dump directories and metadata into the
+  # same index directory the rake embed twins already lock — one lock domain
+  # per index (#170). An unlocked MCP embed was free to interleave with
+  # `woods:embed`, the rake extract writers, or the watch daemon.
+  describe 'tool: pipeline_embed lock contention (#170)' do
+    let(:guard) do
+      instance_double('Woods::Operator::PipelineGuard').tap do |g|
+        allow(g).to receive(:allow?).with(:embedding).and_return(true)
+        allow(g).to receive(:record!).with(:embedding)
+      end
+    end
+
+    let(:operator) { { pipeline_guard: guard } }
+
+    let(:server_with_operator) do
+      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+    end
+
+    let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-embed-lock') }
+
+    let(:mock_indexer) do
+      double('Indexer').tap { |i| allow(i).to receive(:index_all) }
+    end
+
+    before do
+      allow(Woods::Tasks).to receive(:build_embed_indexer).and_return(mock_indexer)
+      # Sitting out the real short wait on every contention example would
+      # slow the suite for nothing.
+      stub_const('Woods::MCP::Server::PIPELINE_LOCK_WAIT', 0)
+      Woods.configuration = Struct.new(:output_dir).new(tmp_output_dir)
+    end
+
+    after do
+      Woods.configuration = nil
+      FileUtils.rm_rf(tmp_output_dir)
+    end
+
+    # A fresh lock held by "another process" — same name and directory the
+    # rake writers and the daemon use.
+    def seed_foreign_lock!
+      require 'woods/coordination/pipeline_lock'
+      lock = Woods::Coordination::PipelineLock.new(
+        lock_dir: tmp_output_dir, name: 'extraction', stale_timeout: 600
+      )
+      raise 'could not seed foreign lock' unless lock.acquire
+    end
+
+    it 'reports contention as a tool error instead of embedding under another writer' do
+      seed_foreign_lock!
+
+      response = call_tool(server_with_operator, 'pipeline_embed')
+
+      expect(response_text(response)).to include('extraction lock')
+      expect(mock_indexer).not_to have_received(:index_all)
+    end
+
+    it 'does not record the run against the guard cooldown on contention' do
+      seed_foreign_lock!
+
+      call_tool(server_with_operator, 'pipeline_embed')
+
+      expect(guard).not_to have_received(:record!)
+    end
+
+    it 'releases the in-process pipeline flag on contention so the next attempt can run' do
+      seed_foreign_lock!
+
+      call_tool(server_with_operator, 'pipeline_embed')
+
+      expect(described_class.send(:pipeline_start, :embedding)).to be(true)
+      described_class.send(:pipeline_finish, :embedding)
+    end
+
+    it 'takes and releases the on-disk lock around a successful background run' do
+      wait_for_threads { call_tool(server_with_operator, 'pipeline_embed') }
+
+      expect(mock_indexer).to have_received(:index_all)
+      expect(Dir.children(tmp_output_dir).grep(/\.lock\z/)).to be_empty
+    end
+
+    it 'still runs on an unconfigured host (no output_dir, no lock domain)' do
+      Woods.configuration = nil
+
+      wait_for_threads do
+        response = call_tool(server_with_operator, 'pipeline_embed')
+        expect(parse_response(response)['status']).to eq('started')
+      end
+
+      expect(mock_indexer).to have_received(:index_all)
+    end
+  end
+
   describe 'tool: pipeline_embed incremental param' do
     let(:guard) do
       instance_double('Woods::Operator::PipelineGuard').tap do |g|

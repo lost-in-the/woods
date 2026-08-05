@@ -1107,9 +1107,34 @@ module Woods
               )
             end
 
+            # Cross-PROCESS serialization, mirroring pipeline_extract (#170):
+            # embedding writes the checkpoint, dumps and metadata into the
+            # same index directory, and the rake embed twins (`woods:embed`,
+            # `woods:embed_incremental`) already serialize on the on-disk
+            # PipelineLock — one lock domain per index. An unlocked MCP embed
+            # was free to interleave with any of them. Same short acquire:
+            # contention becomes a clear tool error the caller can retry.
+            #
+            # A nil/duck-typed configuration (no output_dir) yields no lock —
+            # there is no known lock domain, and the embed below fails in the
+            # background exactly as it always has on an unconfigured host.
+            config = Woods.configuration
+            output_dir = config.output_dir if config.respond_to?(:output_dir)
+            lock = output_dir && Woods::MCP::Server.send(:build_extraction_lock, output_dir)
+            if lock && !Woods::MCP::Server.send(:acquire_lock_briefly, lock)
+              Woods::MCP::Server.send(:pipeline_finish, :embedding)
+              next respond_err.call(
+                'Another writer holds the extraction lock (a rake task or the watch daemon ' \
+                'is writing this index). Try again shortly.',
+                code: :locked,
+                tool: 'pipeline_embed'
+              )
+            end
+
+            # Lock acquired — now it's safe to record the run.
             guard&.record!(:embedding)
 
-            Thread.new do
+            run_embed = lambda do
               # Share the rake-task wiring so the MCP path picks up the
               # provider-tuned TextPreparer + token-aware chunker. Without
               # this, MCP-triggered embedding still hit Ollama's "input
@@ -1117,10 +1142,23 @@ module Woods
               # was fixed in PR #70.
               indexer = Woods::Tasks.build_embed_indexer
               incremental ? indexer.index_incremental : indexer.index_all
+            end
+
+            Thread.new do
+              if lock
+                # Heartbeat, like the rake writers: a full embed on a large
+                # host can outlive the lock's stale window, and an untouched
+                # lock would be retired by the next contender mid-run —
+                # recreating the two-writer clobber.
+                Woods::Coordination::LockHeartbeat.run(lock) { run_embed.call }
+              else
+                run_embed.call
+              end
             rescue StandardError => e
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
               logger.error("[Woods] Pipeline embed failed: #{e.message}")
             ensure
+              lock&.release
               Woods::MCP::Server.send(:pipeline_finish, :embedding)
             end
 
