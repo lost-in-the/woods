@@ -1352,5 +1352,166 @@
     "description": "search(query, fields:) builds json_extract(data, '$.#{'{'}field{'}'}') LIKE ? by string interpolation; a crafted field name breaks out of the JSON-path literal (injection confirmed mechanically). No production caller currently passes fields, so latent - but Interface documents fields as public, and pgvector's build_where shows the house standard (validate + quote). LIKE metacharacters (%/_) from the query are also unescaped in both adapters, silently broadening matches. Fix: validate field names against a whitelist regex and escape LIKE metacharacters. Tracked in GH #209.",
     "status": "resolved",
     "depends_on": []
+  },
+  {
+    "id": "B-098",
+    "slug": "durable-backend-vector-pruning",
+    "title": "Durable vector backends never prune stale vectors or metadata; checkpoint trusted blindly on store switch",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/embedding/indexer.rb",
+      "lib/woods/storage/pgvector.rb",
+      "lib/woods/storage/qdrant.rb"
+    ],
+    "description": "Every staleness-removal mechanism is scoped to the in-memory/dump path \u2014 deleted units stay retrievable from pgvector/Qdrant even after a full woods:embed, and checkpoint_satisfied?'s hydrated-artifact check has no durable-backend equivalent (switching stores strands unchanged units unembedded). Extend vanished-unit reconciliation to durable deletes (Qdrant via .point_id) behind the #191 purge-guard thresholds; add a durable presence/identity check to the checkpoint. Tracked in GH #211.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-099",
+    "slug": "evaluation-harness-unrunnable",
+    "title": "Evaluation harness has no working entry point \u2014 retrieval quality unmeasured",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/tasks/woods_evaluation.rake",
+      "lib/woods/evaluation/"
+    ],
+    "description": "woods_evaluation.rake is never loaded and calls nonexistent accessors; nothing exercises the harness end-to-end, which is how the #185 ranking defects survived. Load it, fix the accessor surface against Builder, add an offline smoke via the :fake provider, and run before/after ranking changes. Tracked in GH #212.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-100",
+    "slug": "type-prefixed-identifiers-design",
+    "title": "B-062 root fix design: type-prefix identifiers for non-constant unit types",
+    "severity": "medium",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/",
+      "lib/woods/dependency_graph.rb",
+      "lib/woods/embedding/indexer.rb"
+    ],
+    "description": "Prefix identifiers of non-constant unit types (factory:reports, database_view:reports, ...) so same-named units stop collapsing across the graph, embed ids, checkpoint, metadata, and export names. Requires an index migration (schema/generation bump + full re-extract/re-embed) and changes MCP-visible identifier forms \u2014 maintainer decision. PR #210 fixed the adapter-level symptoms; this is the root cause. Tracked in GH #213.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-101",
+    "slug": "index-validator-wire-or-delete",
+    "title": "IndexValidator: no production caller and no dimension checking despite CLAUDE.md's claim",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "resilience",
+    "files": [
+      "lib/woods/resilience/index_validator.rb"
+    ],
+    "description": "Nothing calls it and it contains no dimension-mismatch detection, so both halves of CLAUDE.md's 'IndexValidator detects this' are false. Wire a real provider-dimensions vs store-dimensions check into the embed/boot paths, or delete the class and fix the doc. Tracked in GH #214.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-102",
+    "slug": "extractor-polish-batch",
+    "title": "Extractor polish: blockless factories, abstract-model phantom edges, private def visibility, Wisper false positives, manager capitalize",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/factory_extractor.rb",
+      "lib/woods/model_name_cache.rb",
+      "lib/woods/extractors/shared_utility_methods.rb",
+      "lib/woods/extractors/event_extractor.rb",
+      "lib/woods/extractors/manager_extractor.rb"
+    ],
+    "description": "Five independent small defects from the review's low list; fix + regression spec each. See the issue checklist. Tracked in GH #215.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-103",
+    "slug": "flow-graph-polish-batch",
+    "title": "Flow/graph polish: resolve_target cost, case-branch operations, domain_clusters order, WVF1 header model name",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/flow_assembler.rb",
+      "lib/woods/flow_analysis/operation_extractor.rb",
+      "lib/woods/graph_analyzer.rb",
+      "lib/woods/embedding/indexer.rb"
+    ],
+    "description": "Four small items from the review's low list; see the issue checklist. domain_clusters is the one analyzer output outside the determinism guarantee. Tracked in GH #216.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-104",
+    "slug": "export-client-hardening",
+    "title": "Export-client hardening: Unblocked budget/redaction, unbounded Retry-After, DocumentBuilder URIs, Notion auth fast-abort",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "export",
+    "files": [
+      "lib/woods/unblocked/rate_limiter.rb",
+      "lib/woods/unblocked/client.rb",
+      "lib/woods/retry_after.rb",
+      "lib/woods/unblocked/document_builder.rb",
+      "lib/woods/notion/exporter.rb"
+    ],
+    "description": "Five residual hardening items after the PR #210 idempotency/corruption/change-detection work; see the issue checklist. Tracked in GH #217.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-105",
+    "slug": "retrieval-observability-residuals",
+    "title": "Retrieval/observability residuals: adapter search-semantics divergence, QuerySet taxonomy, IndexReader LRU note, GapDetector counting, RedisStore recency",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/storage/metadata_store.rb",
+      "lib/woods/evaluation/query_set.rb",
+      "lib/woods/mcp/index_reader.rb",
+      "lib/woods/feedback/gap_detector.rb",
+      "lib/woods/session_tracer/redis_store.rb"
+    ],
+    "description": "Grouped low-severity residuals; the IndexReader item is the documented benign remainder of #150 item 1. See the issue checklist. Tracked in GH #218.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-106",
+    "slug": "test-hygiene-sweep",
+    "title": "Test hygiene: unverified string-named instance_doubles, Phlex coverage, fixture-spec standalone require",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/"
+    ],
+    "description": "String-named instance_doubles verify nothing (how #181's batch shape survived); PhlexExtractor is effectively untested; controller_extractor_fixture_spec fails standalone for want of require 'woods'. Tracked in GH #219.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-107",
+    "slug": "ci-gaps",
+    "title": "CI gaps: no main-push runs, no Ruby 3.4/Rails 8.1 rows, no live-backend lane",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "config",
+    "files": [
+      ".github/workflows/ci.yml",
+      "Appraisals"
+    ],
+    "description": "pull_request-only trigger leaves merged main untested; the matrix omits Ruby 3.4 and Rails 8.1; every external protocol boundary is doubles-only \u2014 a services lane running the storage contract specs plus the offline embed->retrieve round trip closes the seam. Coordinate with woods-testbed#2. Tracked in GH #220.",
+    "status": "ready",
+    "depends_on": []
   }
 ]
