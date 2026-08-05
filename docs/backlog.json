@@ -1365,8 +1365,8 @@
       "lib/woods/storage/pgvector.rb",
       "lib/woods/storage/qdrant.rb"
     ],
-    "description": "Every staleness-removal mechanism is scoped to the in-memory/dump path \u2014 deleted units stay retrievable from pgvector/Qdrant even after a full woods:embed, and checkpoint_satisfied?'s hydrated-artifact check has no durable-backend equivalent (switching stores strands unchanged units unembedded). Extend vanished-unit reconciliation to durable deletes (Qdrant via .point_id) behind the #191 purge-guard thresholds; add a durable presence/identity check to the checkpoint. Tracked in GH #211.",
-    "status": "ready",
+    "description": "Every staleness-removal mechanism is scoped to the in-memory/dump path \u2014 deleted units stay retrievable from pgvector/Qdrant even after a full woods:embed, and checkpoint_satisfied?'s hydrated-artifact check has no durable-backend equivalent (switching stores strands unchanged units unembedded). Extend vanished-unit reconciliation to durable deletes (Qdrant via .point_id) behind the #191 purge-guard thresholds; add a durable presence/identity check to the checkpoint. Tracked in GH #211. RESOLVED: added VectorStore::Interface#each_id (implemented by Pgvector via SELECT id, Qdrant via the paginated scroll API reverse-mapping point ids to Woods identifiers, and InMemory). Indexer#reconcile_durable_store deletes vectors for units the run never saw, on full and incremental runs alike, guarded by the same 30%/empty-load thresholds as #191. The same store read gives checkpoint_satisfied? a real presence check on durable backends, fixing the store-switch stranding. Proven against real pgvector and Qdrant in spec/integration/live_backends_spec.rb.",
+    "status": "resolved",
     "depends_on": []
   },
   {

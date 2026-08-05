@@ -257,6 +257,18 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
           'type' => 'controller', 'identifier' => 'UsersController',
           'file_path' => 'app/controllers/users_controller.rb',
           'source_code' => "class UsersController < ApplicationController\n  def index; end\nend\n"
+        },
+        # Five units, not three, so deleting one is 20% — under the 30% purge
+        # guard the reconciliation shares with the dump path (#191). At three
+        # units a single deletion is 33% and the guard correctly refuses,
+        # which makes for a confusing fixture rather than a useful one.
+        {
+          'type' => 'model', 'identifier' => 'Comment', 'file_path' => 'app/models/comment.rb',
+          'source_code' => "class Comment < ApplicationRecord\n  belongs_to :post\nend\n"
+        },
+        {
+          'type' => 'model', 'identifier' => 'Tag', 'file_path' => 'app/models/tag.rb',
+          'source_code' => "class Tag < ApplicationRecord\n  has_many :posts\nend\n"
         }
       ]
     end
@@ -310,6 +322,112 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       expect(stats[:processed]).to eq(0)
       expect(stats[:skipped]).to eq(unit_hashes.size)
       expect(vector_store.count).to eq(count_after_full)
+    end
+
+    # #211 / B-098, proven against a real server. Before the fix, the deleted
+    # unit's row survived both of these runs and kept answering searches.
+    context 'when a unit is deleted from the extraction output' do
+      def delete_unit_file(identifier, type)
+        File.delete(File.join(output_dir, "#{type}s", "#{identifier}.json"))
+      end
+
+      it 'removes its vector on a full re-embed' do
+        build_indexer.index_all
+        expect(vector_store.count).to eq(unit_hashes.size)
+
+        delete_unit_file('UsersController', 'controller')
+        build_indexer.index_all
+
+        expect(vector_store.count).to eq(unit_hashes.size - 1)
+        stale = vector_store.search(provider.embed('anything'), limit: 10).map(&:id)
+        expect(stale).not_to include('UsersController')
+      end
+
+      it 'removes its vector on an incremental re-embed' do
+        build_indexer.index_all
+
+        delete_unit_file('UsersController', 'controller')
+        build_indexer.index_incremental
+
+        expect(vector_store.count).to eq(unit_hashes.size - 1)
+      end
+    end
+
+    # The store-switch half of #211: same output_dir (so checkpoint.json is
+    # intact), fresh durable store. Every unit must be re-embedded, not
+    # stranded on a checkpoint describing a store that no longer holds them.
+    it 're-embeds everything when the checkpoint describes a store this one is not' do
+      build_indexer.index_all
+      expect(File.exist?(File.join(output_dir, 'checkpoint.json'))).to be(true)
+
+      # Wipe the store but keep the checkpoint — exactly what pointing
+      # vector_store at a fresh pgvector database looks like.
+      connection.execute("TRUNCATE #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+
+      stats = build_indexer.index_incremental
+
+      expect(stats[:skipped]).to eq(0)
+      expect(stats[:processed]).to eq(unit_hashes.size)
+      expect(vector_store.count).to eq(unit_hashes.size)
+    end
+  end
+
+  describe 'each_id against real backends' do
+    it 'enumerates pgvector ids without loading vectors' do
+      require 'active_record'
+      ActiveRecord::Base.establish_connection(
+        ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
+      )
+      connection = ActiveRecord::Base.connection
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3)
+      reset_pg_schema!(connection, store)
+
+      store.store_batch(
+        [
+          { id: 'User', vector: vec(1, 0, 0), metadata: {} },
+          { id: 'Post#chunk_0', vector: vec(0, 1, 0), metadata: {} }
+        ]
+      )
+
+      expect(store.each_id.to_a).to contain_exactly('User', 'Post#chunk_0')
+    end
+
+    # Qdrant point ids are UUIDv5, so each_id must reverse-map through the
+    # payload — otherwise reconciliation would compare UUIDs against Woods
+    # identifiers, conclude everything vanished, and delete the whole index.
+    it 'enumerates Qdrant ids as Woods identifiers, not point ids' do
+      collection = "woods_live_ids_#{ENV.fetch('GITHUB_RUN_ID', 'local')}"
+      store = Woods::Storage::VectorStore::Qdrant.new(
+        url: ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'),
+        collection: collection, dimensions: 3, allow_private_hosts: true
+      )
+      reset_qdrant_collection!(ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'), collection, 3, store)
+
+      store.store_batch(
+        [
+          { id: 'Billing::Payment', vector: vec(1, 0, 0), metadata: {} },
+          { id: 'Post#chunk_0', vector: vec(0, 1, 0), metadata: {} }
+        ]
+      )
+
+      expect(store.each_id.to_a).to contain_exactly('Billing::Payment', 'Post#chunk_0')
+    end
+
+    it 'pages through more than one scroll page' do
+      collection = "woods_live_paging_#{ENV.fetch('GITHUB_RUN_ID', 'local')}"
+      store = Woods::Storage::VectorStore::Qdrant.new(
+        url: ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'),
+        collection: collection, dimensions: 3, allow_private_hosts: true
+      )
+      reset_qdrant_collection!(ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'), collection, 3, store)
+
+      # One more than SCROLL_PAGE_SIZE would be 1001 points; that is slow for
+      # little extra signal, so shrink the page instead and assert the loop.
+      stub_const("#{Woods::Storage::VectorStore::Qdrant}::SCROLL_PAGE_SIZE", 10)
+      entries = Array.new(25) { |i| { id: "Unit#{i}", vector: vec(i, 0, 0), metadata: {} } }
+      store.store_batch(entries)
+
+      expect(store.each_id.to_a.size).to eq(25)
     end
   end
 end

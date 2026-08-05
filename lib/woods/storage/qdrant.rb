@@ -101,6 +101,11 @@ module Woods
         # async default buys.
         WAIT_FOR_WRITE = '?wait=true'
 
+        # Points per page when scrolling ids in {#each_id}. Large enough that a
+        # sizable index costs few round trips, small enough that one response
+        # stays comfortably in memory (ids and one payload key only).
+        SCROLL_PAGE_SIZE = 1_000
+
         # Payload key holding the original Woods identifier for a point.
         #
         # Deliberately NOT `identifier`: the embedding Indexer already
@@ -331,6 +336,30 @@ module Woods
           end
         end
 
+        # Iterate over every stored id, yielding the Woods identifier.
+        #
+        # Uses the scroll API with `with_vector: false` and only the identifier
+        # key requested, so reconciliation costs payload-sized pages rather
+        # than whole vectors. Yields the same value {#search} returns as `id`
+        # (the Woods identifier, reverse-mapped from the payload) so callers
+        # can compare against extraction output directly, and so any id yielded
+        # here can be handed straight back to {#delete}.
+        #
+        # Points written by something else — no {IDENTIFIER_KEY} in their
+        # payload — yield their raw point id, mirroring {#search}'s fallback.
+        #
+        # @see Interface#each_id
+        def each_id(&block)
+          return enum_for(:each_id) unless block
+
+          offset = nil
+          loop do
+            points, offset = scroll_page(offset)
+            points.each { |point| yield(identifier_for(point)) }
+            break if offset.nil?
+          end
+        end
+
         # Delete a single point by Woods identifier.
         #
         # Translates through {.point_id}, so it necessarily computes the
@@ -357,6 +386,28 @@ module Woods
         end
 
         private
+
+        # Fetch one page of the scroll cursor.
+        #
+        # @param offset [Object, nil] the cursor from the previous page
+        # @return [Array(Array<Hash>, Object)] the page's points and the next
+        #   offset (nil when the scroll is exhausted)
+        def scroll_page(offset)
+          body = { limit: SCROLL_PAGE_SIZE, with_payload: [IDENTIFIER_KEY], with_vector: false }
+          body[:offset] = offset if offset
+
+          result = request(:post, "/collections/#{@collection}/points/scroll", body)['result'] || {}
+          [result['points'] || [], result['next_page_offset']]
+        end
+
+        # The Woods identifier for a scrolled point, falling back to the raw
+        # point id for anything this adapter did not write.
+        #
+        # @param point [Hash] a scroll-result point
+        # @return [String, Integer]
+        def identifier_for(point)
+          (point['payload'] || {})[IDENTIFIER_KEY] || point['id']
+        end
 
         # Build one Qdrant point: UUIDv5 id, vector, and a payload carrying
         # the original Woods identifier alongside the caller's metadata.

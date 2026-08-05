@@ -52,6 +52,25 @@ module Woods
           raise NotImplementedError
         end
 
+        # Iterate over every stored id, yielding the raw embed id (which may
+        # carry a `#chunk_N` suffix). Vectors are NOT loaded.
+        #
+        # Reconciliation seam, and deliberately separate from {#each_entry}:
+        # the embed pipeline needs to know *what a durable store currently
+        # holds* so it can drop units the index no longer has, and pulling
+        # every vector back over the wire to answer a question about ids would
+        # be absurd. Durable adapters (pgvector, Qdrant) implement this one
+        # and not {#each_entry}.
+        #
+        # Adapters that do not implement it are simply not reconciled — see
+        # `Indexer#reconcilable?`.
+        #
+        # @yield [String] each stored id
+        # @return [Enumerator] when no block given
+        def each_id
+          raise NotImplementedError
+        end
+
         # Bulk-load pre-computed entries. Dual of {#each_entry} — the
         # Snapshotter hydrates a store by feeding this the dump contents.
         #
@@ -190,6 +209,17 @@ module Woods
 
             base = idx * @dim
             yield(id, @vectors_flat[base, @dim], @metadata[idx])
+          end
+        end
+
+        # @see Interface#each_id
+        def each_id(&block)
+          return enum_for(:each_id) unless block
+
+          @ids.each_with_index do |id, idx|
+            next if @tombstones.include?(idx)
+
+            yield(id)
           end
         end
 

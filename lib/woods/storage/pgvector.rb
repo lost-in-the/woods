@@ -136,6 +136,21 @@ module Woods
           rows.map { |row| row_to_result(row) }
         end
 
+        # Iterate over every stored id without loading vectors.
+        #
+        # One `SELECT id` — the embed pipeline uses this to reconcile the
+        # durable store against the units extraction still holds, and paying
+        # for the vector columns to answer a question about ids would be
+        # pointless IO.
+        #
+        # @see Interface#each_id
+        def each_id(&block)
+          return enum_for(:each_id) unless block
+
+          rows = @connection.execute("SELECT id FROM #{TABLE}")
+          rows.each { |row| yield(row['id']) }
+        end
+
         # @see Interface#delete
         def delete(id)
           quoted_id = @connection.quote(id)
