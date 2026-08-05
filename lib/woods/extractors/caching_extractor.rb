@@ -159,7 +159,12 @@ module Woods
 
       # Extract individual cache call entries from source.
       #
-      # Each entry has :type, :key_pattern, and :ttl.
+      # Each entry has :type, :key_pattern, and :ttl, parsed from that
+      # occurrence's own argument text (the remainder of its line) — not
+      # from the whole file. Matching against the whole source gave every
+      # entry the first call's key and the first `expires_in:` in the file
+      # (#201); a call without its own `expires_in:` gets a nil ttl rather
+      # than inheriting a neighbor's.
       #
       # @param source [String] Source code
       # @return [Array<Hash>] Cache call descriptors
@@ -167,36 +172,65 @@ module Woods
         calls = []
 
         CACHE_PATTERNS.each do |type, pattern|
-          source.scan(pattern) do
-            key = extract_key_pattern(source, type)
-            ttl = extract_ttl(source)
-            calls << { type: type, key_pattern: key, ttl: ttl }
+          each_occurrence(source, pattern) do |offset|
+            call_text = call_argument_text(source, offset)
+            calls << {
+              type: type,
+              key_pattern: extract_key_pattern(call_text, type),
+              ttl: extract_ttl(call_text)
+            }
           end
         end
 
         calls
       end
 
+      # Yield the start offset of every non-overlapping occurrence of a pattern.
+      #
+      # @param source [String] Source code
+      # @param pattern [Regexp] Pattern to scan for
+      # @yieldparam offset [Integer] Character offset where the occurrence begins
+      # @return [void]
+      def each_occurrence(source, pattern)
+        offset = 0
+        while (match = source.match(pattern, offset))
+          yield match.begin(0)
+          offset = [match.end(0), match.begin(0) + 1].max
+        end
+      end
+
+      # The argument text belonging to one cache call occurrence: the
+      # remainder of the line the call starts on. Bounding the slice to the
+      # line keeps key/TTL parsing from reading a neighboring call's options.
+      #
+      # @param source [String] Source code
+      # @param offset [Integer] Character offset where the occurrence begins
+      # @return [String] The call's own argument text
+      def call_argument_text(source, offset)
+        line_end = source.index("\n", offset) || source.length
+        source[offset...line_end]
+      end
+
       # Extract the key pattern for a Rails.cache call.
       #
       # Returns a simplified string representation of the first argument.
       #
-      # @param source [String] Source code
+      # @param call_text [String] The call's own argument text
       # @param type [Symbol] The cache call type
       # @return [String, nil] The key pattern or nil
-      def extract_key_pattern(source, type)
+      def extract_key_pattern(call_text, type)
         return nil unless %i[fetch read write delete exist].include?(type)
 
-        match = source.match(KEY_PATTERN)
+        match = call_text.match(KEY_PATTERN)
         match ? match[1].strip[0, 60] : nil
       end
 
-      # Extract TTL value from expires_in option.
+      # Extract TTL value from the call's own expires_in option.
       #
-      # @param source [String] Source code
+      # @param call_text [String] The call's own argument text
       # @return [String, nil] The TTL expression or nil
-      def extract_ttl(source)
-        match = source.match(TTL_PATTERN)
+      def extract_ttl(call_text)
+        match = call_text.match(TTL_PATTERN)
         match ? match[1].strip : nil
       end
 

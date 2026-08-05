@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -30,6 +31,7 @@ module Woods
     class GraphQLExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       # Standard directory for graphql-ruby applications
       GRAPHQL_DIRECTORY = 'app/graphql'
@@ -358,19 +360,25 @@ module Woods
 
       # Extract the fully-qualified class name from source or file path
       #
+      # The identifier is the *outermost* class: the first `class` declaration
+      # qualified by the modules actually open at that position, via the
+      # position-aware nesting scanner ({SourceNesting}, #174). Declarations
+      # after the first `class` are nested — joining every declaration in the
+      # file made a mutation with an inner `class InvalidInput < StandardError`
+      # identify as `Mutations::CreateUser::InvalidInput`, so the file-pass
+      # unit never deduped against the runtime unit in {#extract_all}:
+      # double-indexing with graphql-ruby loaded, dangling edges without it
+      # (#202). Tracking nesting by position also stops a sibling module that
+      # closed *before* the class opened from polluting the prefix — the old
+      # end-blind scan turned `module Helpers ... end; module Mutations; class
+      # CreateUser` into `Helpers::Mutations::CreateUser`. Module-only files
+      # (e.g. interfaces) keep their identifier via the outer module chain.
+      #
       # @param file_path [String]
       # @param source [String]
       # @return [String, nil]
       def extract_class_name(file_path, source)
-        # Build from nested module/class declarations
-        modules = source.scan(/^\s*(?:module|class)\s+([\w:]+)/).flatten
-        return nil if modules.empty?
-
-        # If first token is a fully-qualified name, use it directly
-        return modules.first if modules.first.include?('::')
-
-        # Otherwise join the nesting
-        modules.join('::')
+        qualified_first_class_name(source) || qualified_outer_module_name(source)
       rescue StandardError
         # Fall back to convention from file path
         return nil unless defined?(Rails)

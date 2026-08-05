@@ -25,6 +25,21 @@ module Woods
       MAX_RETRIES = 3
       DEFAULT_TIMEOUT = 30
 
+      # HTTP methods safe to retry after *any* transient network failure —
+      # repeating an idempotent request cannot double-apply an operation.
+      # POST and PATCH are deliberately absent: see {#execute_with_retry}.
+      IDEMPOTENT_METHODS = %i[get put delete head].freeze
+
+      # Network failures that provably occur before the server could have
+      # processed the request (the connection was never established), so a
+      # retry is safe even for non-idempotent verbs.
+      PRE_REQUEST_ERRORS = [Net::OpenTimeout, Errno::ECONNREFUSED].freeze
+
+      # Response codes retried for every verb: the server answered without
+      # committing the operation (429 = throttled before processing,
+      # 503 = refused service), so a retry cannot duplicate anything.
+      RETRYABLE_STATUS_CODES = %w[429 503].freeze
+
       # @param api_token [String] Notion integration API token
       # @param rate_limiter [RateLimiter] Rate limiter instance (default: 3 req/sec)
       # @raise [ArgumentError] if api_token is nil or empty
@@ -125,7 +140,7 @@ module Woods
       # @param path [String] API path (appended to BASE_URL)
       # @param body [Hash, nil] Request body
       # @return [Hash] Parsed JSON response
-      # @raise [Woods::Error] on non-success responses (after retries for 429)
+      # @raise [Woods::Error] on non-success responses (after retries for 429/503)
       def request(method, path, body = nil)
         retries = 0
 
@@ -134,7 +149,7 @@ module Woods
 
           return JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
 
-          if response.code == '429' && retries < MAX_RETRIES
+          if RETRYABLE_STATUS_CODES.include?(response.code) && retries < MAX_RETRIES
             retries += 1
             # Retry-After may be an HTTP-date, which .to_f would collapse to
             # 0.0 — honoring it as-is would hammer a throttling server.
@@ -147,20 +162,37 @@ module Woods
         end
       end
 
-      # Execute HTTP with rate limiting and network error retry.
+      # Execute HTTP with rate limiting and verb-aware network error retry.
+      #
+      # Retry classification depends on the verb. Idempotent verbs
+      # ({IDEMPOTENT_METHODS}) retry every transient failure. Non-idempotent
+      # verbs (POST, PATCH) retry only failures that provably happened before
+      # the server could have processed the request ({PRE_REQUEST_ERRORS});
+      # a mid-exchange failure (Net::ReadTimeout, ECONNRESET) raises instead,
+      # because the request may have been fully delivered and committed
+      # server-side before the connection died — retrying a phantom-committed
+      # POST creates a duplicate object. For pages the exporter's
+      # find-then-create upsert catches the duplicate on the *next* run and
+      # updates it in place, but a duplicated database has no such
+      # reconciliation, so a blind retry here is silent, permanent
+      # duplication in the workspace.
       #
       # Any message from an underlying network error is run through
       # {#redact_token} before being re-raised — a malformed reflected
       # URL or request dump from the stdlib must not leak the bearer
       # token into logs or backtraces.
       #
+      # @param method [Symbol] HTTP method, used to classify retryability
       # @return [Net::HTTPResponse]
-      # @raise [Woods::Error] on persistent network failures
+      # @raise [Woods::Error] on persistent network failures, or immediately
+      #   when a non-idempotent request fails ambiguously mid-exchange
       def execute_with_retry(method, path, body)
         attempts = 0
         begin
           @rate_limiter.throttle { execute_http(method, path, body) }
         rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
+          raise_ambiguous_network_error(method, e) unless safe_to_retry?(method, e)
+
           attempts += 1
           if attempts >= MAX_RETRIES
             raise Woods::Error,
@@ -170,6 +202,32 @@ module Woods
           sleep(2**attempts)
           retry
         end
+      end
+
+      # Whether a failed request may be retried without risking a
+      # double-apply: either the verb is idempotent, or the failure class
+      # proves the request never reached the server.
+      #
+      # @param method [Symbol] HTTP method
+      # @param error [Exception] the network failure
+      # @return [Boolean]
+      def safe_to_retry?(method, error)
+        IDEMPOTENT_METHODS.include?(method) || PRE_REQUEST_ERRORS.any? { |klass| error.is_a?(klass) }
+      end
+
+      # Raise for a non-idempotent request that failed mid-exchange. The
+      # request may have been committed server-side before the failure, so
+      # the operator must verify workspace state before re-running rather
+      # than have the client silently duplicate the write.
+      #
+      # @param method [Symbol] HTTP method
+      # @param error [Exception] the ambiguous network failure
+      # @raise [Woods::Error] always
+      def raise_ambiguous_network_error(method, error)
+        raise Woods::Error,
+              "#{method.to_s.upcase} request interrupted mid-exchange (#{error.class}); " \
+              'the operation may or may not have been applied server-side. ' \
+              "Not retrying automatically to avoid duplicates; verify before re-running: #{redact_token(error.message)}"
       end
 
       # Raise a descriptive error from a non-success Notion response.

@@ -160,7 +160,16 @@ module Woods
         # someone else's.
         case lock_ownership
         when :ours
-          FileUtils.touch(@lock_path)
+          # Refresh with `File.utime`, never `FileUtils.touch`: touch CREATES a
+          # missing file, and the lock can vanish between the ownership read
+          # and the refresh — a heartbeat racing its own process's `release` is
+          # the ordinary way. Recreating it leaves an empty 0-byte lock no
+          # process owns and no release will delete, blocking every writer for
+          # the full stale window. `utime` raises ENOENT instead, which the
+          # rescue below turns into the same plain false as any other vanished
+          # lock; the next acquire/release resolves it.
+          now = Time.now
+          File.utime(now, now, @lock_path)
           true
         when :foreign
           # Proven someone else's: stop believing we hold it, or `release` would

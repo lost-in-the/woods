@@ -57,8 +57,18 @@ step before it.
    there is no path-to-constant guessing.
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.
-6. **Prune vanished units** last, so anything steps 2–5 resurrected against a
+6. **Prune vanished units**, so anything steps 2–5 resurrected against a
    deleted file is swept in the same run rather than surviving as a ghost.
+7. **Reconcile class-based types once more**, because pruning can un-know a
+   class the first pass skipped: a class-based file moved between autoload
+   directories with its constant unchanged still looks known when step 4 runs,
+   so it is not re-extracted — and step 6 then removes it for its vanished old
+   path. This pass re-adds it in the same run instead of waiting for some later
+   run to notice. It skips everything step 6 pruned (`except:`), because
+   without a reload a constant outlives the file that defined it — otherwise
+   deleting `app/models/user.rb` would prune `User` only for this pass to find
+   it still in `ActiveRecord::Base.descendants` and re-register it against a
+   path nothing can ever remove again. Idempotent when nothing was pruned.
 
 Then the second pass: `dependents` and `metadata.git` are refreshed on every
 touched unit (the incremental equivalents of full extraction's phases 2 and 4),

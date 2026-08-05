@@ -147,5 +147,33 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
         expect(rules).to eq('None')
       end
     end
+
+    context 'with a table name qualifier (#149)' do
+      let(:result) do
+        mapper.map(string_column, model_identifier: 'User', table_name: 'users', validations: [])
+      end
+
+      it 'qualifies the title as table.column' do
+        expect(result['Column Name']).to eq({ title: [{ text: { content: 'users.email' } }] })
+      end
+
+      it 'leaves the remaining properties keyed on the bare column' do
+        expect(result['Data Type']).to eq({ select: { name: 'string' } })
+      end
+    end
+
+    context 'with a blank table name' do
+      it 'falls back to the bare column name' do
+        result = mapper.map(string_column, model_identifier: 'User', table_name: '', validations: [])
+        expect(result['Column Name']).to eq({ title: [{ text: { content: 'email' } }] })
+      end
+    end
+
+    context 'without a table name' do
+      it 'keeps the bare column name as title' do
+        result = mapper.map(string_column, model_identifier: 'User', validations: [])
+        expect(result['Column Name']).to eq({ title: [{ text: { content: 'email' } }] })
+      end
+    end
   end
 end

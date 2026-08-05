@@ -23,7 +23,7 @@ RSpec.describe 'lib/tasks/woods.rake requires' do
   let(:source) { File.read(File.expand_path('../../lib/tasks/woods.rake', __dir__), encoding: 'UTF-8') }
 
   # Task names whose bodies use Woods::Extractor behind an explicit require.
-  tasks_needing_extractor = %w[extract incremental watch refresh].freeze
+  tasks_needing_extractor = %w[extract incremental watch refresh extract_framework].freeze
 
   # From the `task <name>` line to the next task/desc at the same indent.
   def task_body(name)
@@ -92,6 +92,17 @@ RSpec.describe 'lib/tasks/woods.rake requires' do
 
     it 'requires the status class the coverage helper reads' do
       expect(helper_body('woods_daemon_coverage')).to include("require 'woods/watch/status'")
+    end
+
+    it 'requires the daemon whose lock name the clean helper reads' do
+      body = helper_body('woods_clean_index')
+      lines = body.lines
+
+      first_require = lines.index { |line| line.include?("require 'woods/watch/daemon'") }
+      first_use = lines.index { |line| line.include?('Woods::Watch::Daemon') && !line.include?('require') }
+
+      expect(first_require).not_to(be_nil, 'woods_clean_index must require the daemon it names')
+      expect(first_use).to be > first_require
     end
 
     # The text checks above encode *why* it broke; this one just runs it. The

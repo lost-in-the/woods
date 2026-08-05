@@ -78,10 +78,11 @@ module Woods
         # `config.console_unsafe_eval_enabled = true`. Explicit config wins
         # over the env var in both directions.
         #
-        # NOTE: returning true here does NOT enable eval execution. The
-        # execution path is deliberately unimplemented (backlog
-        # unsafe-eval-opt-in). This predicate only governs the boot-time
-        # banner and the production-environment refusal below.
+        # NOTE: returning true here does not by itself execute anything —
+        # this predicate gates whether Server.build_embedded wires the
+        # EmbeddedExecutor eval path (EvalGuard -> Confirmation ->
+        # SafeContext -> timeout -> AuditLogger), governs the boot-time
+        # banner, and drives the production-environment refusal below.
         #
         # @return [Boolean]
         def unsafe_eval_enabled?

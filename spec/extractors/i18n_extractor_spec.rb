@@ -146,6 +146,29 @@ RSpec.describe Woods::Extractors::I18nExtractor do
       expect(unit.dependencies).to eq([])
     end
 
+    # #203 — without aliases: true, Psych 4+ raises AliasesNotEnabled on any
+    # locale file using anchors, and the rescue silently dropped the file.
+    it 'extracts locale files that use YAML anchors and aliases' do
+      path = create_file('config/locales/en.yml', <<~YAML)
+        en:
+          defaults: &defaults
+            hello: "Hello"
+          formal:
+            <<: *defaults
+            goodbye: "Goodbye"
+      YAML
+
+      unit = described_class.new.extract_i18n_file(path)
+
+      expect(unit).not_to be_nil
+      expect(unit.metadata[:locale]).to eq('en')
+      expect(unit.metadata[:key_paths]).to include(
+        'defaults.hello',
+        'formal.hello',
+        'formal.goodbye'
+      )
+    end
+
     it 'returns nil for invalid YAML' do
       path = create_file('config/locales/bad.yml', 'not: valid: yaml: {{{}}}asd')
       described_class.new.extract_i18n_file(path)

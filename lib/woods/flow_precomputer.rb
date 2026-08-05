@@ -4,6 +4,7 @@ require 'json'
 require 'fileutils'
 require_relative 'filename_utils'
 require_relative 'flow_assembler'
+require_relative 'atomic_file'
 
 module Woods
   # Orchestrates pre-computation of request flow maps for all controller actions.
@@ -11,10 +12,20 @@ module Woods
   # After the dependency graph is built, FlowPrecomputer iterates controller units,
   # runs FlowAssembler for each action, and writes flow documents to disk.
   #
+  # All persisted path values — `flow_index.json` entries and each controller
+  # unit's `metadata[:flow_paths]` — are RELATIVE to the output dir
+  # (e.g. "flows/OrdersController_create.json"), matching the #166 portability
+  # contract: extraction inside a container must not bake `/app/...` prefixes
+  # into artifacts a host reads through a volume mount, and identical trees at
+  # different roots must produce identical bytes (which is also what keeps
+  # {#canonical_json}'s churn-avoidance honest). Readers join the relative
+  # value against their own index dir (see the MCP server's
+  # `load_precomputed_flow`).
+  #
   # @example
   #   precomputer = FlowPrecomputer.new(units: all_units, graph: dep_graph, output_dir: out)
   #   flow_map = precomputer.precompute
-  #   flow_map["OrdersController#create"] #=> "/tmp/woods/flows/OrdersController_create.json"
+  #   flow_map["OrdersController#create"] #=> "flows/OrdersController_create.json"
   #
   class FlowPrecomputer
     # Default maximum recursion depth for flow assembly
@@ -34,7 +45,8 @@ module Woods
 
     # Pre-compute flow documents for all controller actions.
     #
-    # @return [Hash{String => String}] Map of entry_point to flow file path
+    # @return [Hash{String => String}] Map of entry_point to output_dir-relative
+    #   flow file path (e.g. "flows/OrdersController_create.json")
     def precompute
       FileUtils.mkdir_p(@flows_dir)
 
@@ -73,31 +85,37 @@ module Woods
 
     # Assemble a flow for one entry point and write the JSON file.
     #
+    # Written via {Woods::AtomicFile} (temp + fsync + rename) like every
+    # other index artifact — a plain +File.write+ interrupted mid-write left
+    # a torn partial for the MCP read side to trip over.
+    #
     # @param assembler [FlowAssembler]
     # @param entry_point [String]
     # @param controller_id [String]
     # @param action [String]
-    # @return [String, nil] The written file path, or nil on failure
+    # @return [String, nil] The output_dir-relative path of the written file
+    #   (e.g. "flows/OrdersController_create.json"), or nil on failure
     def assemble_and_write(assembler, entry_point, controller_id, action)
       flow = assembler.assemble(entry_point, max_depth: @max_depth)
 
       filename = Woods::FilenameUtils.flow_filename(controller_id, action)
-      flow_path = File.join(@flows_dir, filename)
 
-      File.write(flow_path, canonical_json(flow.to_h))
+      Woods::AtomicFile.write(File.join(@flows_dir, filename), canonical_json(flow.to_h))
 
-      flow_path
+      # Relative — this value is persisted (flow_index.json and the unit's
+      # metadata[:flow_paths]), so it must not carry this machine's root.
+      File.join('flows', filename)
     rescue StandardError => e
       Rails.logger.error("[Woods] Flow precompute failed for #{entry_point}: #{e.message}")
       nil
     end
 
-    # Write the flow index mapping entry points to file paths.
+    # Write the flow index mapping entry points to output_dir-relative file paths.
     #
     # @param flow_map [Hash{String => String}]
     def write_flow_index(flow_map)
       index_path = File.join(@flows_dir, 'flow_index.json')
-      File.write(index_path, canonical_json(flow_map))
+      Woods::AtomicFile.write(index_path, canonical_json(flow_map))
     end
 
     # Emit deterministic pretty JSON — keys recursively sorted so two runs

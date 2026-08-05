@@ -222,12 +222,76 @@ RSpec.describe Woods::Builder do
       described_class.new(config).build_retriever
     end
 
-    it 'passes the embedding provider to Retriever' do
-      expect(Woods::Retriever).to receive(:new)
-        .with(hash_including(embedding_provider: fake_embedding_provider))
-        .and_return(fake_retriever)
+    # B-076 / #188 — the raw provider used to be handed straight to the
+    # Retriever, so a single 429/5xx from the provider aborted retrieval
+    # with no retry and no breaker.
+    it 'passes the embedding provider to Retriever wrapped in the resilience stack' do
+      expect(Woods::Retriever).to receive(:new) do |kwargs|
+        wrapped = kwargs[:embedding_provider]
+        expect(wrapped).to be_a(Woods::Resilience::RetryableProvider)
+        expect(wrapped.provider).to be(fake_embedding_provider)
+        fake_retriever
+      end
 
       described_class.new(config).build_retriever
+    end
+  end
+
+  # ── Builder#build_resilient_embedding_provider (#188 / B-076) ─────────
+
+  describe '#build_resilient_embedding_provider' do
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :in_memory
+        c.metadata_store = :sqlite
+        c.graph_store = :in_memory
+        c.embedding_provider = :ollama
+      end
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    before do
+      allow(Woods::Embedding::Provider::Ollama).to receive(:new).and_return(fake_embedding_provider)
+    end
+
+    it 'returns the provider wrapped in RetryableProvider' do
+      expect(builder.build_resilient_embedding_provider)
+        .to be_a(Woods::Resilience::RetryableProvider)
+    end
+
+    it 'wraps a freshly built provider from configuration by default' do
+      expect(builder.build_resilient_embedding_provider.provider).to be(fake_embedding_provider)
+    end
+
+    it 'wraps an explicitly passed provider without rebuilding' do
+      other = instance_double('OtherProvider')
+
+      wrapped = builder.build_resilient_embedding_provider(other)
+
+      expect(wrapped.provider).to be(other)
+      expect(Woods::Embedding::Provider::Ollama).not_to have_received(:new)
+    end
+
+    it 'attaches a circuit breaker to the wrapped provider' do
+      expect(builder.build_resilient_embedding_provider.circuit_breaker)
+        .to be_a(Woods::Resilience::CircuitBreaker)
+    end
+
+    # CLAUDE.md: breaker state is per-instance, never shared across
+    # unrelated components — two builds must not share breaker state.
+    it 'gives each wrapped provider its own breaker instance' do
+      first = builder.build_resilient_embedding_provider
+      second = builder.build_resilient_embedding_provider
+
+      expect(first.circuit_breaker).not_to be(second.circuit_breaker)
+    end
+
+    it 'does not share breakers across Builder instances either' do
+      other_builder = described_class.new(config)
+
+      expect(builder.build_resilient_embedding_provider.circuit_breaker)
+        .not_to be(other_builder.build_resilient_embedding_provider.circuit_breaker)
     end
   end
 
@@ -280,6 +344,47 @@ RSpec.describe Woods::Builder do
     it 'still builds a chunker when the budget leaves positive headroom' do
       reasonable = Woods::Embedding::Provider::Ollama.new(model: 'all-minilm')
       expect { builder.build_chunker(reasonable) }.not_to raise_error
+    end
+  end
+
+  # ── Builder#build_vector_store — :pgvector schema wiring (#187) ──────
+
+  describe '#build_vector_store with :pgvector (#187)' do
+    let(:fake_connection) { double('connection') }
+    let(:pg_store) { instance_double(Woods::Storage::VectorStore::Pgvector) }
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :pgvector
+        c.vector_store_options = { connection: fake_connection, dimensions: 3 }
+      end
+    end
+
+    before do
+      allow(Woods::Storage::VectorStore::Pgvector).to receive(:new)
+        .with(connection: fake_connection, dimensions: 3)
+        .and_return(pg_store)
+    end
+
+    it 'calls ensure_schema! after construction so the woods_vectors table exists' do
+      expect(pg_store).to receive(:ensure_schema!)
+
+      expect(described_class.new(config).build_vector_store).to eq(pg_store)
+    end
+
+    it 'wraps schema-setup failures in Woods::Error with a diagnosable message' do
+      allow(pg_store).to receive(:ensure_schema!)
+        .and_raise(StandardError, 'connection to server was lost')
+
+      expect { described_class.new(config).build_vector_store }
+        .to raise_error(Woods::Error, /pgvector schema setup failed.*connection to server was lost/)
+    end
+
+    it 'preserves the original error as the cause' do
+      allow(pg_store).to receive(:ensure_schema!)
+        .and_raise(StandardError, 'no pg_hba.conf entry')
+
+      expect { described_class.new(config).build_vector_store }
+        .to raise_error(Woods::Error) { |e| expect(e.cause.message).to eq('no pg_hba.conf entry') }
     end
   end
 
@@ -368,6 +473,140 @@ RSpec.describe Woods::Builder do
       expect { described_class.new(config).build_retriever }
         .to raise_error(ArgumentError, /Unknown embedding_provider: cohere/)
     end
+
+    # #178 — the error must teach the fix: name every valid option,
+    # including the offline :fake provider and the object-injection escape
+    # hatch.
+    it 'names the valid options including :fake in the error message' do
+      expect { described_class.new(config).build_retriever }
+        .to raise_error(ArgumentError, /:openai, :ollama, :fake.*#embed and #embed_batch/)
+    end
+  end
+
+  # ── Builder#build_embedding_provider — :fake (#178) ──────────────────
+
+  describe '#build_embedding_provider with :fake' do
+    let(:config) do
+      Woods::Configuration.new.tap { |c| c.embedding_provider = :fake }
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    it 'returns the promoted deterministic provider' do
+      expect(builder.build_embedding_provider).to be_a(Woods::Embedding::Provider::Fake)
+    end
+
+    it 'defaults to the provider default dimensionality' do
+      expect(builder.build_embedding_provider.dimensions)
+        .to eq(Woods::Embedding::Provider::Fake::DEFAULT_DIMS)
+    end
+
+    it 'honours embedding_options[:dims]' do
+      config.embedding_options = { dims: 64 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(64)
+    end
+
+    # The :dimension key is normally snapshot-only bookkeeping stripped by
+    # provider_kwargs — but it is also the key the MCP boot path restores
+    # from woods.json, so the fake honours it as a dims fallback.
+    it 'honours the snapshot-level embedding_options[:dimension] key' do
+      config.embedding_options = { dimension: 32 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(32)
+    end
+
+    it 'prefers :dims over :dimension when both are set' do
+      config.embedding_options = { dims: 64, dimension: 32 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(64)
+    end
+
+    it 'embeds without any network endpoint' do
+      vector = builder.build_embedding_provider.embed('class User < ApplicationRecord; end')
+
+      expect(vector.length).to eq(Woods::Embedding::Provider::Fake::DEFAULT_DIMS)
+    end
+
+    # #178 — the fake never 429s, so the wrap is a no-op, but it must still
+    # apply so every pipeline entry point treats providers uniformly.
+    it 'is wrapped in the resilience stack like the network providers' do
+      wrapped = builder.build_resilient_embedding_provider
+
+      expect(wrapped).to be_a(Woods::Resilience::RetryableProvider)
+      expect(wrapped.provider).to be_a(Woods::Embedding::Provider::Fake)
+      expect(wrapped.circuit_breaker).to be_a(Woods::Resilience::CircuitBreaker)
+    end
+
+    it 'embeds through the resilience wrapper transparently' do
+      wrapped = builder.build_resilient_embedding_provider
+
+      expect(wrapped.embed('some woods text').length)
+        .to eq(Woods::Embedding::Provider::Fake::DEFAULT_DIMS)
+    end
+  end
+
+  # ── Builder#build_embedding_provider — injected object (#178) ─────────
+
+  describe '#build_embedding_provider with an injected provider object' do
+    let(:injected) do
+      Class.new do
+        def embed(_text)
+          [1.0, 0.0]
+        end
+
+        def embed_batch(texts)
+          texts.map { [1.0, 0.0] }
+        end
+
+        def dimensions
+          2
+        end
+
+        def model_name
+          'host-custom'
+        end
+      end.new
+    end
+
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :in_memory
+        c.metadata_store = :in_memory
+        c.graph_store = :in_memory
+        c.embedding_provider = injected
+      end
+    end
+
+    let(:builder) { described_class.new(config) }
+
+    it 'uses the object as-is' do
+      expect(builder.build_embedding_provider).to be(injected)
+    end
+
+    it 'wraps the injected object in the resilience stack' do
+      wrapped = builder.build_resilient_embedding_provider
+
+      expect(wrapped).to be_a(Woods::Resilience::RetryableProvider)
+      expect(wrapped.provider).to be(injected)
+    end
+
+    it 'flows through build_retriever wrapped around the same object' do
+      expect(Woods::Retriever).to receive(:new) do |kwargs|
+        expect(kwargs[:embedding_provider]).to be_a(Woods::Resilience::RetryableProvider)
+        expect(kwargs[:embedding_provider].provider).to be(injected)
+        fake_retriever
+      end
+
+      expect(builder.build_retriever).to be(fake_retriever)
+    end
+
+    it 'rejects objects that do not implement the provider interface' do
+      config.embedding_provider = Object.new
+
+      expect { builder.build_embedding_provider }
+        .to raise_error(ArgumentError, /Unknown embedding_provider/)
+    end
   end
 
   # ── options hashes are passed through ────────────────────────────────
@@ -452,6 +691,17 @@ RSpec.describe Woods::Builder do
       preparer = builder.build_text_preparer(provider)
       expect(preparer.max_tokens).to eq(Woods::Embedding::TextPreparer::DEFAULT_MAX_TOKENS)
     end
+
+    # #188 — calibration must see through the resilience wrapper, or a
+    # wrapped Ollama silently gets OpenAI's 4.0 chars/token ratio.
+    it 'calibrates a resilience-wrapped Ollama exactly like the raw provider' do
+      wrapped = builder.build_resilient_embedding_provider(
+        Woods::Embedding::Provider::Ollama.new(num_ctx: 4096)
+      )
+      preparer = builder.build_text_preparer(wrapped)
+      expect(preparer.chars_per_token).to eq(1.5)
+      expect(preparer.max_tokens).to eq(4096)
+    end
   end
 
   describe '#build_chunker' do
@@ -498,6 +748,16 @@ RSpec.describe Woods::Builder do
       provider = Woods::Embedding::Provider::OpenAI.new(api_key: 'sk-test')
       chunker = builder.build_chunker(provider)
       expect(chunker.instance_variable_get(:@token_counter)).to be_nil
+    end
+
+    # #188 — same see-through requirement as build_text_preparer: a
+    # resilience-wrapped Ollama must still get its TokenCounter.
+    it 'wires a TokenCounter for a resilience-wrapped Ollama provider' do
+      wrapped = builder.build_resilient_embedding_provider(
+        Woods::Embedding::Provider::Ollama.new(num_ctx: 8192)
+      )
+      chunker = builder.build_chunker(wrapped)
+      expect(chunker.instance_variable_get(:@token_counter)).to be_a(Woods::Embedding::TokenCounter)
     end
   end
 end

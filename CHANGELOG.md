@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Full-gem review batch (2026-07-30): 30 defects fixed** (#183–#209 and pre-existing
+  #149, #150, #169, #170, #174–#178; see each issue for the full analysis). Highlights,
+  grouped by blast radius:
+  - *Host-app safety:* enabling the documented console-MCP mode no longer 401s the entire
+    host application (guards are path-scoped, enablement is decided at request time), and
+    the enable flags now work from `config/initializers/woods.rb` (#183).
+  - *Retrieval correctness:* type-filtered `codebase_retrieve` no longer returns empty on
+    every booted server (symbol-keyed vector metadata on boot and reload, #150); the
+    weighted ranking layer actually ranks (live keyword signal, normalized RRF, assembler
+    honors ranked order, PageRank memo invalidated on reload, #185); classifier-derived
+    target types no longer hard-filter vector search on common English words (#184);
+    framework units are no longer duplicated across context sections (#186).
+  - *Extraction fidelity:* concern inlining works for compact-style class declarations and
+    concern-defined callbacks now yield side effects, for models and (new) controllers
+    (#193, #175); a shared position-aware nesting parser fixes namespace derivation in five
+    source-parsing extractors (#174); polymorphic associations, ApplicationController
+    discovery, cache-call attribution, GraphQL inner classes, YAML anchors, Whenever
+    blocks, label-form rake tasks, and `RSpec.describe Klass, type:` test mapping all
+    parse correctly (#194, #199–#204, #176); full extraction sweeps orphaned unit files
+    so reused output dirs stop over-reporting (#177).
+  - *Pipeline integrity:* `rails_source`/`gem_source` route through the real write pipeline
+    as a Gemfile.lock-keyed whole-app extractor and `include_framework_sources` genuinely
+    gates it (#169); every index writer — `woods:clean`, the embed tasks, MCP
+    `pipeline_extract` — now takes the pipeline lock (#170); incremental extraction cannot
+    prune units on a failed extractor construction or a degraded eager-load boot (#198);
+    the write-skip optimization actually fires (#208).
+  - *Embedding durability:* a mis-pointed `woods:embed_incremental` can no longer wipe the
+    vector index (30% purge guard + empty-load refusal, #191); non-ASCII identifiers stop
+    re-embedding forever (WVF1 ids hydrate as UTF-8, #192); a single 429 no longer aborts
+    an embed run — providers are wrapped in the previously-unwired resilience layer with
+    Retry-After honored (#188); pgvector works via the documented setup path and dedupes
+    in-batch ids (#187, #181); PageRank keeps rank mass for duplicate/unresolvable edges
+    (#205); temporal snapshots stop leaking a unit set per same-SHA re-capture (#206).
+  - *Robustness:* the embed pipeline, Unblocked manifest, StatusReporter, and flow layer
+    survive `LANG=C` and torn files (`AtomicFile` everywhere, #189, #190); flow artifacts
+    are portable (relative paths, #190); a standing-down watch daemon no longer clobbers
+    the live daemon's status, and the lock heartbeat cannot resurrect a released lock
+    (#196, #197); Notion/Unblocked clients no longer retry non-idempotent POSTs on read
+    timeout (#150); Notion multi-model sync no longer corrupts the Columns database
+    (qualified `table.column` titles with legacy-page adoption, #149); metadata search
+    validates field names and escapes LIKE metacharacters (#209).
+
 - **`woods:embed_incremental` no longer discards the vectors it embeds** (B-059, #148). On the
   `:local` and `:shared_filesystem` presets the vector store is in-memory and the dump under
   `dumps/` is the *only* durable copy — but `Indexer#index_incremental` never called
@@ -205,6 +247,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     rather than reporting the index as freshly synced.
 
 ### Added
+
+- **`embedding_provider = :fake`** — the deterministic bag-of-words provider is now a
+  first-class citizen (promoted from spec support), and `Builder` also accepts an injected
+  provider object responding to `#embed`/`#embed_batch`. `woods:embed` → `woods:retrieve`
+  now runs fully offline; `woods:retrieve` resolves all four backends through the
+  configuration instead of hardcoding Ollama + in-memory stores (#178).
+- **Notion sync manifest** — unchanged pages cost zero API calls on re-sync; changed pages
+  update by cached page id without a title query; `WOODS_NOTION_FORCE=1` bypasses for one
+  run (#207).
+- **`woods:validate`** warns for units whose `file_path` resolves neither as written nor
+  under `Rails.root` (#169).
 
 - **`rake woods:watch` — a resident extraction daemon** (#164, phase 2). Watches the app and
   keeps the index current as files change, instead of as-fresh-as-the-last-explicit-run. One

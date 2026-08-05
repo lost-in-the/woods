@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -32,6 +33,7 @@ module Woods
     class LibExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       # Root directory to scan
       LIB_DIRECTORY = 'lib'
@@ -107,10 +109,14 @@ module Woods
 
       # Infer the primary constant name from source or fall back to file path.
       #
-      # For files with a class definition, combines outer module namespaces
-      # with the class name. For module-only files, uses the outermost module
-      # name (joined with inner modules). Falls back to path-based camelize
-      # when neither is present.
+      # For files with a class definition, the position-aware nesting scan
+      # (SourceNesting) qualifies the first `class` declaration with the
+      # modules actually open at that position — a helper module nested
+      # inside the class, or a sibling module that closed before the class
+      # opened, no longer pollutes the identifier (#174). For module-only
+      # files, uses the outer module chain (namespace wrappers joined),
+      # ignoring inner modules declared after body content. Falls back to
+      # path-based camelize when neither is present.
       #
       # @param file_path [String] Absolute path to the file
       # @param source [String] Ruby source code
@@ -118,19 +124,13 @@ module Woods
       def infer_class_name(file_path, source)
         return nil if source.strip.empty?
 
-        # Class definition — combine outer modules + class name
-        class_match = source.match(/^\s*class\s+([\w:]+)/)
-        if class_match
-          base = class_match[1]
-          return base if base.include?('::')
+        # Class definition — enclosing modules joined by position
+        qualified = qualified_first_class_name(source)
+        return qualified if qualified
 
-          namespaces = source.scan(/^\s*module\s+([\w:]+)/).flatten
-          return namespaces.any? ? "#{namespaces.join('::')}::#{base}" : base
-        end
-
-        # Module-only file — use the outermost module chain
-        modules = source.scan(/^\s*module\s+([\w:]+)/).flatten
-        return modules.join('::') if modules.any?
+        # Module-only file — the outer module chain
+        module_name = qualified_outer_module_name(source)
+        return module_name if module_name
 
         # Fall back to path-based naming
         path_based_class_name(file_path)

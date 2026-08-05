@@ -125,6 +125,74 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata[:subject_class]).to eq('User')
       end
 
+      # Regression: B-082 / #194 — the rspec-rails generator default
+      # `RSpec.describe User, type: :model do` has a comma after the constant.
+      # The old constant regex required whitespace, so the string fallback
+      # grabbed the first quoted describe anywhere (an inner 'validations')
+      # and minted a phantom graph node in place of the real coverage edge.
+      it 'detects subject class from generator-default describe with type metadata' do
+        path = create_file('spec/models/user_spec.rb', <<~RUBY)
+          RSpec.describe User, type: :model do
+            describe 'validations' do
+              it 'requires a name' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('User')
+      end
+
+      it 'links the type-metadata describe to the model, never the inner string describe' do
+        path = create_file('spec/models/user_spec.rb', <<~RUBY)
+          RSpec.describe User, type: :model do
+            describe 'validations' do
+              it 'requires a name' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.dependencies).to eq([{ type: :model, target: 'User', via: :test_coverage }])
+        targets = unit.dependencies.map { |dep| dep[:target] }
+        expect(targets).not_to include('validations')
+      end
+
+      it 'preserves namespaced constants in type-metadata describes' do
+        path = create_file('spec/policies/user_policy_spec.rb', <<~RUBY)
+          RSpec.describe Admin::UserPolicy, type: :policy do
+            it 'permits admins' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Admin::UserPolicy')
+      end
+
+      it 'captures the string subject from a string-only describe file' do
+        path = create_file('spec/tasks/cleanup_spec.rb', <<~RUBY)
+          RSpec.describe 'rake tasks' do
+            it 'runs cleanup' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('rake tasks')
+      end
+
+      it 'uses the first describe of a request spec even with type metadata after the string' do
+        path = create_file('spec/requests/users_spec.rb', <<~RUBY)
+          RSpec.describe 'GET /users', type: :request do
+            describe 'authentication' do
+              it 'requires login' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('GET /users')
+      end
+
       it 'counts it blocks as test_count' do
         path = create_file('spec/models/user_spec.rb', <<~RUBY)
           describe User do

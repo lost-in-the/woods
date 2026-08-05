@@ -28,6 +28,16 @@ module Woods
       RSPEC_GLOB = 'spec/**/*_spec.rb'
       MINITEST_GLOB = 'test/**/*_test.rb'
 
+      # Constant-form describe: `describe User do`, `RSpec.describe User, type: :model do`.
+      # The constant must start uppercase (quoted strings can't sneak in) and may be
+      # followed by whitespace OR a comma — the rspec-rails generator default is
+      # `RSpec.describe User, type: :model do` (B-082 / #194).
+      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+([A-Z][\w:]*)(?=[\s,]|$)/
+
+      # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`.
+      # The closing quote delimits the subject, so nothing is required after it.
+      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+['"]([^'"]+)['"]/
+
       def initialize
         @rails_root = Rails.root
       end
@@ -114,21 +124,28 @@ module Woods
         framework == :rspec ? extract_rspec_subject(source) : extract_minitest_subject(source)
       end
 
-      # Extract subject class from top-level describe in an RSpec file.
+      # Extract subject class from the first describe in an RSpec file.
       #
-      # Tries constant reference first (describe User do), then string/symbol
-      # form (describe 'User' do). Handles both RSpec.describe and bare describe.
+      # Scans line by line and takes the file's FIRST describe, whatever its
+      # form — constant reference (describe User do, RSpec.describe User,
+      # type: :model do) or string (describe 'User' do). An inner
+      # `describe 'validations'` nested under a constant-form outer describe
+      # must never become the subject: it would mint a phantom graph node and
+      # lose the real coverage edge. Handles both RSpec.describe and bare
+      # describe.
       #
       # @param source [String] RSpec file source code
       # @return [String, nil]
       def extract_rspec_subject(source)
-        # Constant reference: describe User do, RSpec.describe UsersController do
-        match = source.match(/^\s*(?:RSpec\.)?describe\s+([\w:]+)\s/)
-        return match[1] if match
+        source.each_line do |line|
+          constant = line.match(RSPEC_CONSTANT_DESCRIBE)
+          return constant[1] if constant
 
-        # String/symbol form: describe 'User' do
-        match = source.match(/^\s*(?:RSpec\.)?describe\s+['"]([^'"]+)['"]\s/)
-        match ? match[1] : nil
+          string = line.match(RSPEC_STRING_DESCRIBE)
+          return string[1] if string
+        end
+
+        nil
       end
 
       # Extract subject class from Minitest test class name.

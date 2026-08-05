@@ -93,7 +93,12 @@ module Woods
       # @return [Array<ExtractedUnit>]
       def extract_yaml_schedule(file_path, format)
         source = File.read(file_path)
-        data = YAML.safe_load(source, permitted_classes: [Symbol])
+        # aliases: true — schedule files commonly share defaults via anchors
+        # (`<<: *defaults`); without it Psych 4+ raises AliasesNotEnabled and
+        # the whole file is silently dropped (#203). Alias expansion only
+        # re-references the scalar/hash types already permitted, so it adds
+        # no deserialization risk.
+        data = YAML.safe_load(source, permitted_classes: [Symbol], aliases: true)
 
         return [] unless data.is_a?(Hash) && data.any?
 
@@ -188,12 +193,20 @@ module Woods
 
       # Parse `every ... do ... end` blocks from Whenever DSL.
       #
+      # The terminator is line-anchored (`^\s*end\s*$`), not the bare
+      # substring `end` — that substring also occurs inside identifiers
+      # (CalendarSyncJob, WeekendDigest), truncating the body so command
+      # detection failed (#204). A nested `do ... end` inside an `every`
+      # block still terminates the body at the nested block's own `end`
+      # line; commands appearing before the nested block are detected,
+      # anything after it is not.
+      #
       # @param source [String] Ruby source code
       # @return [Array<Hash>] Parsed block data
       def parse_whenever_blocks(source)
         blocks = []
-        # Match: every <frequency>[, options] do ... end
-        source.scan(/every\s+(.+?)\s+do\s*\n(.*?)end/m) do |frequency_str, body|
+        # Match: every <frequency>[, options] do ... end (end on its own line)
+        source.scan(/every\s+(.+?)\s+do\s*\n(.*?)^\s*end\s*$/m) do |frequency_str, body|
           # Clean up the frequency — strip trailing options like ", at: '...'"
           frequency = frequency_str.strip.sub(/,\s*at:.*\z/, '').strip
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'rack'
 require 'woods'
 require 'woods/console/rack_middleware'
 require 'woods/console/safe_context'
@@ -119,6 +120,79 @@ RSpec.describe Woods::Console::RackMiddleware do
       result = middleware.send(:build_model_introspection)
 
       expect(result[:registry]).not_to include('BadModel')
+    end
+  end
+
+  describe '#call' do
+    subject(:middleware) { described_class.new(app) }
+
+    let(:app_paths) { [] }
+    let(:app) do
+      paths = app_paths
+      lambda do |env|
+        paths << env['PATH_INFO']
+        [200, { 'content-type' => 'text/html' }, ['app']]
+      end
+    end
+
+    context 'when console_mcp_enabled is false (the default)' do
+      before do
+        Woods.configure # ensure a configuration exists regardless of spec order
+        allow(Woods.configuration).to receive(:console_mcp_enabled).and_return(false)
+      end
+
+      # Regression for #183: the railtie mounts this middleware
+      # unconditionally, so a host that never opted in must be completely
+      # unaffected — pass through, do not answer 410 at the mounted path.
+      it 'passes requests at the mounted path through to the app' do
+        status, _headers, body = middleware.call('PATH_INFO' => '/mcp/console')
+        expect(status).to eq(200)
+        expect(body).to eq(['app'])
+        expect(app_paths).to eq(['/mcp/console'])
+      end
+    end
+
+    context 'when console_mcp_enabled is true' do
+      before do
+        Woods.configure # ensure a configuration exists regardless of spec order
+        allow(Woods.configuration).to receive(:console_mcp_enabled).and_return(true)
+      end
+
+      it 'dispatches requests at the mounted path to the MCP transport' do
+        transport = double('transport', handle_request: [200, {}, ['console']])
+        allow(middleware).to receive(:ensure_transport).and_return(transport)
+
+        _status, _headers, body = middleware.call('REQUEST_METHOD' => 'POST', 'PATH_INFO' => '/mcp/console')
+        expect(body).to eq(['console'])
+      end
+
+      it 'passes non-matching paths through to the app' do
+        status, = middleware.call('PATH_INFO' => '/')
+        expect(status).to eq(200)
+        expect(app_paths).to eq(['/'])
+      end
+    end
+  end
+
+  describe 'deferred embedded_read_tools (#183)' do
+    it 'resolves a callable at server-build time, not construction time' do
+      flag = false
+      mw = described_class.new(->(_env) { [200, {}, []] }, embedded_read_tools: -> { flag })
+      flag = true # set after construction — simulates config/initializers
+
+      mw.send(:build_embedded_server)
+
+      expect(Woods::Console::Server).to have_received(:build_embedded)
+        .with(hash_including(read_tools_enabled: true))
+    end
+
+    it 'passes a plain boolean through unchanged' do
+      mw = described_class.new(->(_env) { [200, {}, []] }, embedded_read_tools: true)
+
+      mw.send(:build_embedded_server)
+
+      expect(Woods::Console::Server).to have_received(:build_embedded)
+        .with(hash_including(read_tools_enabled: true))
     end
   end
 

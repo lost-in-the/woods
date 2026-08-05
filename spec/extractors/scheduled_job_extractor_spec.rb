@@ -179,6 +179,26 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       expect(units.first.metadata[:job_class]).to eq('CleanupJob')
     end
 
+    # #203 — without aliases: true, Psych 4+ raises AliasesNotEnabled on any
+    # schedule file using anchors, and the rescue silently dropped the file.
+    it 'extracts schedule files that use YAML anchors and aliases' do
+      path = create_file('config/recurring.yml', <<~YAML)
+        defaults: &defaults
+          queue: maintenance
+        periodic_cleanup:
+          <<: *defaults
+          class: CleanupJob
+          schedule: every 6 hours
+      YAML
+
+      units = described_class.new.extract_scheduled_job_file(path, :solid_queue)
+      cleanup = units.find { |u| u.identifier == 'scheduled:periodic_cleanup' }
+
+      expect(cleanup).not_to be_nil
+      expect(cleanup.metadata[:job_class]).to eq('CleanupJob')
+      expect(cleanup.metadata[:queue]).to eq('maintenance')
+    end
+
     it 'sets file_path on each unit' do
       path = create_file('config/recurring.yml', <<~YAML)
         periodic_cleanup:
@@ -364,6 +384,46 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       expect(units[0].identifier).to start_with('scheduled:')
       expect(units[1].identifier).to start_with('scheduled:')
       expect(units[0].identifier).not_to eq(units[1].identifier)
+    end
+
+    # #204 — the block terminator matched the substring "end" inside
+    # identifiers (CalendarSyncJob, WeekendDigest), truncating the body so
+    # command detection failed: :unknown command_type, no job_class, no edge.
+    it 'parses a runner whose job class contains "end" in its name' do
+      path = create_file('config/schedule.rb', <<~RUBY)
+        every 1.day do
+          runner "CalendarSyncJob.perform_later"
+        end
+      RUBY
+
+      units = described_class.new.extract_scheduled_job_file(path, :whenever)
+      expect(units.size).to eq(1)
+
+      unit = units.first
+      expect(unit.metadata[:command_type]).to eq(:runner)
+      expect(unit.metadata[:job_class]).to eq('CalendarSyncJob')
+      expect(unit.dependencies).to contain_exactly(
+        { type: :job, target: 'CalendarSyncJob', via: :scheduled }
+      )
+    end
+
+    it 'parses multiple blocks with "end" mid-body in job names' do
+      path = create_file('config/schedule.rb', <<~RUBY)
+        every 1.week do
+          runner "WeekendDigestJob.perform_later"
+        end
+
+        every 1.day do
+          runner "CalendarSyncJob.perform_now"
+        end
+      RUBY
+
+      units = described_class.new.extract_scheduled_job_file(path, :whenever)
+      expect(units.size).to eq(2)
+      expect(units.map { |u| u.metadata[:job_class] }).to contain_exactly(
+        'WeekendDigestJob', 'CalendarSyncJob'
+      )
+      expect(units.map { |u| u.metadata[:command_type] }).to all(eq(:runner))
     end
 
     it 'extracts at option from every block' do

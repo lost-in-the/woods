@@ -48,6 +48,7 @@ module Woods
 
         source = File.read(file_path)
         tasks = parse_tasks(source)
+        Rails.logger.debug("Woods: no rake tasks parsed from #{file_path}") if tasks.empty?
 
         tasks.filter_map do |task_data|
           next if excluded_namespace?(task_data[:full_name])
@@ -86,6 +87,10 @@ module Woods
             if name
               namespace_stack.push(name)
               namespace_depths.push(depth)
+              depth += 1
+            elsif stripped.include?(' do')
+              # Unparseable namespace name (e.g. dynamic/interpolated) — still
+              # count its block so depth stays in sync with the closing `end`.
               depth += 1
             end
             next
@@ -128,11 +133,17 @@ module Woods
 
       # Extract the namespace name from a namespace declaration line.
       #
+      # Handles both the symbol form (`namespace :foo do`) and the string
+      # form (`namespace 'foo' do` / `namespace "foo" do`).
+      #
       # @param line [String] e.g. "namespace :foo do"
       # @return [String, nil] The namespace name
       def extract_namespace_name(line)
         match = line.match(/\Anamespace\s+:(\w+)/)
-        match ? match[1] : nil
+        return match[1] if match
+
+        match = line.match(/\Anamespace\s+(['"])(\w+)\1/)
+        match ? match[2] : nil
       end
 
       # Extract the description string from a desc line.
@@ -176,6 +187,8 @@ module Woods
       #   task :name => :dep
       #   task :name => [:dep1, :dep2]
       #   task :name, [:arg1, :arg2] => :dep
+      #   task name: :dep
+      #   task name: [:dep1, :dep2]
       #
       # @param line [String] The task line
       # @return [Array(String, Array<String>, Array<String>)] [name, deps, args]
@@ -197,6 +210,15 @@ module Woods
 
         # Task with hash-rocket deps: task :name => [:dep1, :dep2]
         if line.match(/\Atask\s+:(\w+)\s*=>\s*(.+?)(?:\s+do|\s*$)/)
+          name = ::Regexp.last_match(1)
+          deps = parse_dependency_list(::Regexp.last_match(2))
+          return [name, deps, []]
+        end
+
+        # Ruby 1.9 label form: task name: :dep / task name: [:dep1, :dep2]
+        # Ordered after the args branch so `task :name, [:args] => :dep`
+        # is never misread (the leading colon keeps it out of this regex).
+        if line.match(/\Atask\s+(\w+):\s*(.+?)(?:\s+do|\s*$)/)
           name = ::Regexp.last_match(1)
           deps = parse_dependency_list(::Regexp.last_match(2))
           return [name, deps, []]

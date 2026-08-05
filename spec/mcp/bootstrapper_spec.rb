@@ -686,13 +686,94 @@ RSpec.describe Woods::MCP::Bootstrapper do
         executor = retriever.instance_variable_get(:@executor)
         vs = executor.instance_variable_get(:@vector_store)
 
+        # The back-fill writes the SYMBOL-keyed filter subset the Indexer's
+        # live embed path writes ({ type:, identifier:, file_path: }) — not
+        # the raw string-keyed metadata record. See #150 item 5: the
+        # InMemory vector store probes meta[:type] for filter predicates.
         metadata_by_id = vs.each_entry.to_h { |id, _, meta| [id, meta] }
-        expect(metadata_by_id['User#chunk_0']).to include('type' => 'model',
-                                                          'file_path' => 'app/models/user.rb')
-        expect(metadata_by_id['User#chunk_1']).to include('type' => 'model',
-                                                          'file_path' => 'app/models/user.rb')
-        expect(metadata_by_id['Post']).to include('type' => 'model',
-                                                  'file_path' => 'app/models/post.rb')
+        expect(metadata_by_id['User#chunk_0']).to include(type: 'model',
+                                                          file_path: 'app/models/user.rb')
+        expect(metadata_by_id['User#chunk_1']).to include(type: 'model',
+                                                          file_path: 'app/models/user.rb')
+        expect(metadata_by_id['Post']).to include(type: 'model',
+                                                  file_path: 'app/models/post.rb')
+      end
+    end
+
+    # Regression — #150 item 5. Dump-hydrated vector metadata was back-filled
+    # as the metadata store's raw STRING-keyed record, but
+    # SearchExecutor#build_vector_filters builds SYMBOL-keyed filters and
+    # VectorStore::InMemory#gather_candidates probes meta[:type] directly —
+    # so every type-filtered codebase_retrieve returned EMPTY on a booted
+    # server. The live embed path (Indexer#store_vectors) writes symbol keys,
+    # which is why in-process specs never saw it.
+    it 'back-fills symbol-keyed metadata so a type-filtered vector search finds the unit' do
+      Dir.mktmpdir do |dir|
+        write_artifact(
+          dir,
+          vector_entries: [
+            ['User', [1.0, 0.0, 0.0, 0.0], {}],
+            ['PaymentsService', [0.0, 1.0, 0.0, 0.0], {}]
+          ],
+          metadata_entries: [
+            ['User', { 'type' => 'model', 'identifier' => 'User',
+                       'file_path' => 'app/models/user.rb' }],
+            ['PaymentsService', { 'type' => 'service', 'identifier' => 'PaymentsService',
+                                  'file_path' => 'app/services/payments_service.rb' }]
+          ]
+        )
+
+        retriever, = described_class.build_retriever(index_dir: dir)
+        results = retriever.vector_store.search([1.0, 0.0, 0.0, 0.0], limit: 5,
+                                                                      filters: { type: %w[model] })
+
+        expect(results.map(&:id)).to eq(%w[User])
+      end
+    end
+
+    it 're-runs the back-fill on reload so type-filtered search still works (reload path of #150)' do
+      # reload_stores! bulk-loads vectors from the WVF1 dump, which carries
+      # NO per-vector metadata — without a post-refill back-fill, a reload
+      # wiped the filter metadata the boot path had populated and every
+      # type-filtered search went empty until process restart.
+      Dir.mktmpdir do |dir|
+        write_artifact(
+          dir,
+          vector_entries: [['User', [1.0, 0.0, 0.0, 0.0], {}]],
+          metadata_entries: [
+            ['User', { 'type' => 'model', 'identifier' => 'User',
+                       'file_path' => 'app/models/user.rb' }]
+          ]
+        )
+
+        retriever, = described_class.build_retriever(index_dir: dir)
+        described_class.reload_stores!(retriever, index_dir: dir)
+
+        results = retriever.vector_store.search([1.0, 0.0, 0.0, 0.0], limit: 5,
+                                                                      filters: { type: %w[model] })
+        expect(results.map(&:id)).to eq(%w[User])
+      end
+    end
+
+    it 'invalidates the Ranker pagerank memo on reload (stale PageRank after replace_graph)' do
+      # reload_stores! swaps the graph inside the shared GraphStore wrapper
+      # via replace_graph; the Ranker's rank-percentile map is memoized from
+      # the OLD graph and must be dropped alongside the context cache.
+      Dir.mktmpdir do |dir|
+        write_artifact(
+          dir,
+          vector_entries: [['User', [1.0, 0.0, 0.0, 0.0], {}]],
+          metadata_entries: [['User', { 'type' => 'model' }]]
+        )
+
+        retriever, = described_class.build_retriever(index_dir: dir)
+        ranker = retriever.instance_variable_get(:@ranker)
+        expect(ranker).to be_a(Woods::Retrieval::Ranker)
+
+        allow(ranker).to receive(:invalidate_pagerank_cache!).and_call_original
+        described_class.reload_stores!(retriever, index_dir: dir)
+
+        expect(ranker).to have_received(:invalidate_pagerank_cache!)
       end
     end
 

@@ -8,6 +8,8 @@ require_relative 'storage/metadata_store'
 require_relative 'storage/graph_store'
 require_relative 'embedding/provider'
 require_relative 'embedding/openai'
+require_relative 'embedding/fake'
+require_relative 'resilience/retryable_provider'
 require_relative 'embedding/text_preparer'
 require_relative 'embedding/token_counter'
 require_relative 'token_utils'
@@ -107,7 +109,7 @@ module Woods
     #   on disk and passes the populated store here.
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
     def build_retriever(vector_store: nil, metadata_store: nil, graph_store: nil)
-      provider = build_embedding_provider
+      provider = build_resilient_embedding_provider
       cache = build_cache_store
 
       provider = wrap_with_embedding_cache(provider, cache) if cache
@@ -124,18 +126,31 @@ module Woods
 
     # Instantiate the vector store adapter specified by the configuration.
     #
+    # The :pgvector branch also ensures the adapter's own schema exists —
+    # see {#build_pgvector_store}.
+    #
     # @return [Storage::VectorStore::Interface] Vector store adapter instance
     # @raise [ArgumentError] if the configured type is not recognized
+    # @raise [Woods::Error] if the pgvector schema cannot be created
     def build_vector_store
       case @config.vector_store
       when :in_memory then Storage::VectorStore::InMemory.new
-      when :pgvector then Storage::VectorStore::Pgvector.new(**(@config.vector_store_options || {}))
+      when :pgvector then build_pgvector_store
       when :qdrant then Storage::VectorStore::Qdrant.new(**(@config.vector_store_options || {}))
       else raise ArgumentError, "Unknown vector_store: #{@config.vector_store}"
       end
     end
 
     # Instantiate the embedding provider specified by the configuration.
+    #
+    # `embedding_provider` accepts three shapes (#178):
+    # - +:openai+ / +:ollama+ — the network-backed adapters.
+    # - +:fake+ — {Embedding::Provider::Fake}: deterministic, offline, for
+    #   CI/smoke runs. See {#build_fake_provider} for dimension resolution.
+    # - an already-constructed provider *object* — anything responding to
+    #   +#embed+ and +#embed_batch+ is returned as-is, so hosts can plug in
+    #   their own implementation without patching the Builder. It flows
+    #   through {#build_resilient_embedding_provider} like the built-ins.
     #
     # Strips `embedding_options` keys that belong to the ResolvedConfig layer
     # (like `:dimension`) before splatting into the provider's constructor —
@@ -145,12 +160,48 @@ module Woods
     # @return [Embedding::Provider::Interface] Embedding provider instance
     # @raise [ArgumentError] if the configured type is not recognized
     def build_embedding_provider
+      configured = @config.embedding_provider
+      return configured if provider_object?(configured)
+
       opts = provider_kwargs
-      case @config.embedding_provider
+      case configured
       when :openai then Embedding::Provider::OpenAI.new(**opts)
       when :ollama then Embedding::Provider::Ollama.new(**opts)
-      else raise ArgumentError, "Unknown embedding_provider: #{@config.embedding_provider}"
+      when :fake then build_fake_provider
+      else
+        raise ArgumentError,
+              "Unknown embedding_provider: #{configured}. Valid: :openai, :ollama, :fake, " \
+              'or a provider object responding to #embed and #embed_batch'
       end
+    end
+
+    # Wrap an embedding provider in the resilience stack: retry with
+    # full-jitter exponential backoff (Retry-After aware) plus a dedicated
+    # {Resilience::CircuitBreaker}.
+    #
+    # This is the provider every pipeline entry point must hand to the
+    # Indexer or Retriever — with it, a transient 429/5xx burst degrades a
+    # run instead of aborting it (#188 / B-076). {#build_embedding_provider}
+    # deliberately keeps returning the *raw* provider: the MCP boot path
+    # ({MCP::ProviderProbe}) dispatches on the provider's concrete class and
+    # reads its internals, so the wrap happens here, one layer up.
+    #
+    # Each call constructs a fresh breaker — breaker state is per-instance
+    # and must never be shared across unrelated components.
+    #
+    # The wrap is harmless for providers that never raise transient
+    # failures ({Embedding::Provider::Fake}, most injected provider
+    # objects): nothing retryable ever fires, so the wrapper is a
+    # transparent pass-through.
+    #
+    # @param provider [Embedding::Provider::Interface] raw provider to wrap;
+    #   defaults to a freshly built one from the configuration
+    # @return [Resilience::RetryableProvider] the wrapped provider
+    def build_resilient_embedding_provider(provider = build_embedding_provider)
+      Resilience::RetryableProvider.new(
+        provider: provider,
+        circuit_breaker: Resilience::CircuitBreaker.new
+      )
     end
 
     # Kwargs accepted by embedding provider constructors — everything in
@@ -165,6 +216,39 @@ module Woods
       opts
     end
     private :provider_kwargs
+
+    # True when the configured `embedding_provider` is not a Symbol naming a
+    # built-in adapter but an already-constructed provider object (#178).
+    # Duck-typed on the two methods every pipeline consumer calls; the rest
+    # of {Embedding::Provider::Interface} (+#dimensions+, +#model_name+,
+    # +#max_input_tokens+) is probed with +respond_to?+ at each call site,
+    # so an object that omits them still works where they are optional.
+    #
+    # @param candidate [Object]
+    # @return [Boolean]
+    def provider_object?(candidate)
+      !candidate.is_a?(Symbol) && candidate.respond_to?(:embed) && candidate.respond_to?(:embed_batch)
+    end
+    private :provider_object?
+
+    # Build the deterministic fake provider (#178).
+    #
+    # Dimension resolution: `embedding_options[:dims]` maps directly onto
+    # the {Embedding::Provider::Fake} constructor; failing that, the
+    # ResolvedConfig-level `embedding_options[:dimension]` key — normally
+    # snapshot-only bookkeeping stripped by {#provider_kwargs} — is
+    # honoured, so hosts that declare their dimension there (and the MCP
+    # boot path, which restores exactly that key from woods.json) get
+    # vectors of the recorded dimension.
+    #
+    # @return [Embedding::Provider::Fake]
+    def build_fake_provider
+      opts = provider_kwargs
+      declared = (@config.embedding_options || {}).transform_keys(&:to_sym)[:dimension]
+      opts[:dims] ||= declared if declared
+      Embedding::Provider::Fake.new(**opts)
+    end
+    private :build_fake_provider
 
     # Build a {Embedding::TextPreparer} calibrated to a given provider.
     #
@@ -256,7 +340,7 @@ module Woods
     # @param provider [Embedding::Provider::Interface]
     # @return [Embedding::TokenCounter, nil]
     def token_counter_for(provider)
-      return unless provider.is_a?(Embedding::Provider::Ollama)
+      return unless unwrap_provider(provider).is_a?(Embedding::Provider::Ollama)
 
       Embedding::TokenCounter.new
     end
@@ -268,11 +352,23 @@ module Woods
     # @param provider [Embedding::Provider::Interface]
     # @return [Float]
     def chars_per_token_for(provider)
-      symbol = case provider
+      symbol = case unwrap_provider(provider)
                when Embedding::Provider::Ollama then :ollama
                else :openai
                end
       TokenUtils.chars_per_token_for(symbol)
+    end
+
+    # Reach the concrete provider through the resilience wrapper.
+    # Tokenizer calibration dispatches on the provider's real class, so a
+    # {Resilience::RetryableProvider} handed to {#build_text_preparer} or
+    # {#build_chunker} must calibrate exactly like its inner provider —
+    # without this, a wrapped Ollama silently got OpenAI ratios.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Embedding::Provider::Interface] the innermost provider
+    def unwrap_provider(provider)
+      provider.is_a?(Resilience::RetryableProvider) ? provider.provider : provider
     end
 
     # Diagnostic for the build_chunker budget guard.
@@ -309,6 +405,33 @@ module Woods
     end
 
     private
+
+    # Construct the pgvector adapter and ensure its schema exists.
+    #
+    # The adapter reads and writes its own `woods_vectors` table. The
+    # `woods:pgvector` generator can create it via a migration, but nothing
+    # guarantees that migration ran — so the builder calls the adapter's
+    # idempotent {Storage::VectorStore::Pgvector#ensure_schema!}
+    # (CREATE ... IF NOT EXISTS DDL) after construction. Without this, the
+    # first embed against a bare database fails with PG::UndefinedTable
+    # (#187 / B-075). Schema/connection failures are re-raised as
+    # {Woods::Error} with the original error preserved as the cause.
+    #
+    # @return [Storage::VectorStore::Pgvector]
+    # @raise [Woods::Error] when the schema cannot be created
+    def build_pgvector_store
+      store = Storage::VectorStore::Pgvector.new(**(@config.vector_store_options || {}))
+      begin
+        store.ensure_schema!
+      rescue StandardError => e
+        raise Woods::Error,
+              "pgvector schema setup failed (#{e.class}: #{e.message}). " \
+              'Verify vector_store_options[:connection] is a live PostgreSQL ' \
+              'connection and that the pgvector extension is available ' \
+              '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
+      end
+      store
+    end
 
     # Build a cache store from configuration, or nil if caching is disabled.
     #

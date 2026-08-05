@@ -298,6 +298,51 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       expect(fetch_call[:ttl]).to include('1.hour')
     end
 
+    # #201 — key/TTL parsing ran against the whole source, so every entry got
+    # the first call's key and the first expires_in in the file.
+    it 'attributes keys and TTLs to each call individually' do
+      path = create_file('app/models/report.rb', <<~RUBY)
+        class Report
+          def hourly
+            Rails.cache.fetch("report/hourly", expires_in: 1.hour) { compute_hourly }
+          end
+
+          def daily
+            Rails.cache.fetch("report/daily", expires_in: 12.hours) { compute_daily }
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_caching_file(path, :model)
+      fetch_calls = unit.metadata[:cache_calls].select { |c| c[:type] == :fetch }
+
+      expect(fetch_calls.size).to eq(2)
+      expect(fetch_calls).to contain_exactly(
+        { type: :fetch, key_pattern: '"report/hourly"', ttl: '1.hour' },
+        { type: :fetch, key_pattern: '"report/daily"', ttl: '12.hours' }
+      )
+    end
+
+    it 'does not give a call without expires_in a neighboring call TTL' do
+      path = create_file('app/models/report.rb', <<~RUBY)
+        class Report
+          def cached
+            Rails.cache.fetch("report/cached", expires_in: 1.hour) { compute }
+          end
+
+          def latest
+            Rails.cache.read("report/latest")
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_caching_file(path, :model)
+      read_call = unit.metadata[:cache_calls].find { |c| c[:type] == :read }
+
+      expect(read_call[:key_pattern]).to eq('"report/latest"')
+      expect(read_call[:ttl]).to be_nil
+    end
+
     it 'sets file_type correctly' do
       path = create_file('app/models/product.rb', <<~RUBY)
         class Product

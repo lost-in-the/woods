@@ -45,7 +45,12 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil on failure
       def extract_i18n_file(file_path)
         source = File.read(file_path)
-        data = YAML.safe_load(source, permitted_classes: [Symbol, Date, Time, Regexp])
+        # aliases: true — locale files commonly share defaults via anchors
+        # (`<<: *defaults`); without it Psych 4+ raises AliasesNotEnabled and
+        # the whole file is silently dropped (#203). Alias expansion only
+        # re-references the scalar/hash types already permitted, so it adds
+        # no deserialization risk.
+        data = YAML.safe_load(source, permitted_classes: [Symbol, Date, Time, Regexp], aliases: true)
 
         return nil unless data.is_a?(Hash) && data.any?
 

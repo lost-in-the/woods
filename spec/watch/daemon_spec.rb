@@ -566,6 +566,35 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = build(idle_timeout: 0.01)
       expect(daemon.run).not_to eq(:already_running)
     end
+
+    # Standing down must leave no trace. #run's ensure used to fire on the
+    # early return too, so the daemon that correctly refused to start still
+    # persisted an empty pending file over the live daemon's carried paths and
+    # published `stopped` under its own pid over the live `running` record —
+    # read as dead for up to HEARTBEAT_INTERVAL, long enough for a
+    # `watch_status || start` hook to boot a third daemon and for
+    # `woods:incremental` to stop standing down.
+    it 'leaves the live daemon record and its carried paths untouched when standing down' do
+      status_path = File.join(output_dir, Woods::Watch::Status::FILENAME)
+      pending_path = File.join(output_dir, 'watch_pending.json')
+      # A real record for a live foreign daemon: the parent process is alive by
+      # definition, on this host, and not this pid.
+      Woods::AtomicFile.write(status_path, JSON.generate(
+                                             'state' => 'running', 'reason' => nil, 'generation' => 3,
+                                             'pid' => Process.ppid,
+                                             'host' => Woods::Watch::Status.host_identity,
+                                             'updated_at' => Time.now.utc.iso8601
+                                           ))
+      Woods::AtomicFile.write(pending_path,
+                              JSON.generate([File.join(root, 'app/models/carried.rb')]))
+      status_before = File.binread(status_path)
+      pending_before = File.binread(pending_path)
+
+      expect(build.run).to eq(:already_running)
+
+      expect(File.binread(status_path)).to eq(status_before)
+      expect(File.binread(pending_path)).to eq(pending_before)
+    end
   end
 
   # Every cycle writes generation.json and status.json, so watching the output

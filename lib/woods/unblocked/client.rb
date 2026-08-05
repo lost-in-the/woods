@@ -51,6 +51,23 @@ module Woods
       # the API docs marking it optional), so a working default matters.
       DEFAULT_ICON_URL = 'https://raw.githubusercontent.com/lost-in-the/woods/main/assets/woods-mark-black.svg'
 
+      # HTTP methods safe to retry after *any* transient network failure —
+      # repeating an idempotent request cannot double-apply an operation.
+      # PUT belongs here because the documents endpoint is an upsert keyed
+      # on `uri`. POST (create_collection) is deliberately absent: see
+      # {#execute_http}.
+      IDEMPOTENT_METHODS = %i[get put delete head].freeze
+
+      # Network failures that provably occur before the server could have
+      # processed the request (the connection was never established), so a
+      # retry is safe even for non-idempotent verbs.
+      PRE_REQUEST_ERRORS = [Net::OpenTimeout, Errno::ECONNREFUSED].freeze
+
+      # Response codes retried for every verb: the server answered without
+      # committing the operation (429 = throttled before processing,
+      # 503 = refused service), so a retry cannot duplicate anything.
+      RETRYABLE_STATUS_CODES = %w[429 503].freeze
+
       # @param api_token [String] Unblocked API token (Personal or Team)
       # @param rate_limiter [RateLimiter] Rate limiter instance
       # @raise [ArgumentError] if api_token is nil or empty
@@ -174,7 +191,7 @@ module Woods
 
           return parse_response(response) if response.is_a?(Net::HTTPSuccess)
 
-          if response.code == '429' && retries < MAX_RETRIES
+          if RETRYABLE_STATUS_CODES.include?(response.code) && retries < MAX_RETRIES
             retries += 1
             # Retry-After may be an HTTP-date, which .to_f would collapse to
             # 0.0 — honoring it as-is would hammer a throttling server.
@@ -187,6 +204,18 @@ module Woods
         end
       end
 
+      # Perform the raw HTTP request with verb-aware network error retry.
+      #
+      # Idempotent verbs ({IDEMPOTENT_METHODS}) retry every transient
+      # failure. POST retries only failures that provably happened before
+      # the server could have processed the request ({PRE_REQUEST_ERRORS});
+      # a mid-exchange failure (Net::ReadTimeout, ECONNRESET) raises
+      # instead, because the request may have been fully delivered and
+      # committed server-side before the connection died. That matters here
+      # because the one live POST is create_collection: collections have no
+      # upsert key, so retrying a phantom-committed create mints a duplicate
+      # collection that no later sync reconciles (documents upsert by `uri`
+      # and are safe; collections are not).
       def execute_http(method, path, body)
         attempts = 0
         begin
@@ -199,12 +228,32 @@ module Woods
           req = build_request(method, uri, body)
           http.request(req)
         rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
+          raise_ambiguous_network_error(method, e) unless safe_to_retry?(method, e)
+
           attempts += 1
           raise Woods::Error, "Network error after #{attempts} retries: #{e.message}" if attempts > MAX_RETRIES
 
           sleep(2**attempts)
           retry
         end
+      end
+
+      # Whether a failed request may be retried without risking a
+      # double-apply: either the verb is idempotent, or the failure class
+      # proves the request never reached the server.
+      def safe_to_retry?(method, error)
+        IDEMPOTENT_METHODS.include?(method) || PRE_REQUEST_ERRORS.any? { |klass| error.is_a?(klass) }
+      end
+
+      # Raise for a non-idempotent request that failed mid-exchange. The
+      # request may have been committed server-side before the failure, so
+      # the operator must verify (e.g. list collections) before re-running
+      # rather than have the client silently duplicate the write.
+      def raise_ambiguous_network_error(method, error)
+        raise Woods::Error,
+              "#{method.to_s.upcase} request interrupted mid-exchange (#{error.class}); " \
+              'the operation may or may not have been applied server-side. ' \
+              "Not retrying automatically to avoid duplicates; verify before re-running: #{error.message}"
       end
 
       def build_request(method, uri, body)

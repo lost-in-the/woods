@@ -109,14 +109,7 @@ module Woods
         budgets = compute_section_budgets(effective_budget - tokens_used, classification)
 
         # 3. Primary, supporting, and framework sections
-        add_candidate_section(sections, sources, :primary,
-                              candidates.reject { |c| c.source == :graph_expansion }, budgets[:primary])
-        add_candidate_section(sections, sources, :supporting,
-                              candidates.select { |c| c.source == :graph_expansion }, budgets[:supporting])
-        if budgets[:framework].positive?
-          add_candidate_section(sections, sources, :framework,
-                                candidates.select { |c| framework_candidate?(c) }, budgets[:framework])
-        end
+        add_result_sections(sections, sources, candidates, budgets)
 
         build_result(sections, sources, effective_budget)
       end
@@ -159,7 +152,8 @@ module Woods
           identifier: new_identifier,
           score: candidate.score,
           source: candidate.source,
-          metadata: candidate.metadata
+          metadata: candidate.metadata,
+          matched_fields: candidate.matched_fields
         )
       end
 
@@ -173,6 +167,38 @@ module Woods
         text = truncate_to_budget(structural_context, budget)
         sections << { section: :structural, content: text }
         tokens_used + estimate_tokens(text)
+      end
+
+      # Partition candidates into the primary/supporting/framework sections
+      # and append each section's content.
+      #
+      # The three sections are a strict PARTITION, not overlapping selects.
+      # When the framework budget is active, framework-source candidates
+      # (rails_source / gem_source) are formatted ONLY in the framework
+      # section — previously a vector-sourced rails_source hit landed in
+      # primary AND framework, spending both budgets on the same source
+      # text (#186 / B-074). When the framework budget is zero (no
+      # framework context), framework candidates stay in their natural
+      # primary/supporting bucket, preserving the pre-fix behaviour.
+      #
+      # @param sections [Array<Hash>] Section accumulator (mutated)
+      # @param sources [Array<Hash>] Source-attribution accumulator (mutated)
+      # @param candidates [Array<Candidate>] Ranked, chunk-collapsed candidates
+      # @param budgets [Hash<Symbol, Integer>] Per-section token budgets
+      # @return [void]
+      def add_result_sections(sections, sources, candidates, budgets)
+        framework_active = budgets[:framework].positive?
+        framework, local = if framework_active
+                             candidates.partition { |c| framework_candidate?(c) }
+                           else
+                             [[], candidates]
+                           end
+
+        add_candidate_section(sections, sources, :primary,
+                              local.reject { |c| c.source == :graph_expansion }, budgets[:primary])
+        add_candidate_section(sections, sources, :supporting,
+                              local.select { |c| c.source == :graph_expansion }, budgets[:supporting])
+        add_candidate_section(sections, sources, :framework, framework, budgets[:framework]) if framework_active
       end
 
       # Add a candidate-based section if candidates produce content.

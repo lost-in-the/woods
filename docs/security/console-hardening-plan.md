@@ -243,6 +243,12 @@ before any MCP handshake. Re-enabling and restarting returns a clean
 `initialize` response with `serverInfo.name = "woods-console"`,
 `version = "1.2.0"`.
 
+> **Update (#183):** the validation above records v1.2.0 behavior. Since the
+> railtie hardening, a disabled console no longer answers `410` — the Rack
+> middleware passes the request through to the host app, so the console path
+> is indistinguishable from an unknown route while disabled. The fail-closed
+> property (no MCP handshake without the flag) is unchanged.
+
 **Layer 1 — Blocked tables.** `console_blocked_tables = %w[users audit.users]`.
 All 11 probes rejected with structured errors naming the table:
 

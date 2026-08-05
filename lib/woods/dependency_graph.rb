@@ -269,6 +269,15 @@ module Woods
     # with many dependents gets a higher score. This matches Aider's insight
     # that structural importance correlates with retrieval relevance.
     #
+    # Mass is conserved (#205): a source's out-degree counts only edges whose
+    # target is a registered node, **with multiplicity**. Two edges to one
+    # target (`:belongs_to` + `:code_reference` is documented normal — see
+    # {#dependents_detail}) deliver twice the share, and edges to unregistered
+    # targets (gem or framework constants) neither dilute the distribution nor
+    # swallow the source's mass. A node whose every edge is unresolvable is
+    # dangling, exactly like a node with no edges at all — its rank
+    # redistributes uniformly instead of vanishing.
+    #
     # @param damping [Float] Damping factor (default: 0.85)
     # @param iterations [Integer] Number of iterations (default: 20)
     # @return [Hash<String, Float>] Identifier => PageRank score
@@ -277,33 +286,71 @@ module Woods
       return {} if n.zero?
 
       node_ids = @nodes.keys
+      weights = resolvable_edge_weights
       base_score = 1.0 / n
       scores = node_ids.to_h { |id| [id, base_score] }
 
       iterations.times do
-        # Collect rank from dangling nodes (no outgoing edges) and redistribute
-        dangling_sum = node_ids.sum do |id|
-          @edges[id].nil? || @edges[id].empty? ? scores[id] : 0.0
-        end
-
-        new_scores = {}
-
-        node_ids.each do |id|
-          # Sum contributions from nodes that depend on this one
-          incoming = @reverse[id] || []
-          rank_sum = incoming.sum do |src|
-            out_degree = (@edges[src] || []).size
-            out_degree.positive? ? scores[src] / out_degree : 0.0
-          end
-
-          new_scores[id] = ((1.0 - damping) / n) + (damping * (rank_sum + (dangling_sum / n)))
-        end
-
-        scores = new_scores
+        scores = pagerank_step(node_ids, scores, weights, damping)
       end
 
       scores
     end
+
+    private
+
+    # One PageRank power iteration over precomputed resolvable-edge weights.
+    #
+    # Iteration order (node insertion order, reverse-Set insertion order) is
+    # the same stable order the pre-#205 implementation used, so two runs
+    # over the same graph produce identical floats.
+    #
+    # @param node_ids [Array<String>] All registered identifiers
+    # @param scores [Hash{String => Float}] Scores from the previous iteration
+    # @param weights [Hash{String => Array(Hash, Integer)}] See {#resolvable_edge_weights}
+    # @param damping [Float] Damping factor
+    # @return [Hash{String => Float}] Next iteration's scores
+    def pagerank_step(node_ids, scores, weights, damping)
+      n = node_ids.size
+      # Collect rank from dangling nodes (no *resolvable* outgoing edges) and redistribute
+      dangling_sum = node_ids.sum { |id| weights.key?(id) ? 0.0 : scores[id] }
+
+      node_ids.to_h do |id|
+        # Sum contributions from nodes that depend on this one
+        rank_sum = (@reverse[id] || []).sum do |src|
+          counts, out_degree = weights[src]
+          multiplicity = counts ? counts[id] : 0
+          multiplicity.positive? ? scores[src] * multiplicity / out_degree : 0.0
+        end
+
+        [id, ((1.0 - damping) / n) + (damping * (rank_sum + (dangling_sum / n)))]
+      end
+    end
+
+    # Per-source PageRank link weights over **resolvable** edges only — edges
+    # whose target is a registered node. Built once per {#pagerank} run in
+    # O(edges), so the per-iteration loops stay O(nodes + reverse edges).
+    #
+    # Each entry is `[target => multiplicity, resolvable out-degree]`; the
+    # out-degree is the multiplicity sum, so a duplicated edge weighs double
+    # rather than leaking. Sources with zero resolvable edges are absent,
+    # which is what marks them dangling in {#pagerank_step}.
+    #
+    # @return [Hash{String => Array(Hash{String => Integer}, Integer)}]
+    def resolvable_edge_weights
+      @edges.each_with_object({}) do |(src, edges), weights|
+        counts = nil
+        edges.each do |edge|
+          next unless @nodes.key?(edge[:target])
+
+          (counts ||= Hash.new(0))[edge[:target]] += 1
+        end
+
+        weights[src] = [counts, counts.each_value.sum] if counts
+      end
+    end
+
+    public
 
     # Serialize graph for persistence. Memoized — cache is invalidated on register.
     # Returns a dup so callers can't pollute the cached hash.

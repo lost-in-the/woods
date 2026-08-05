@@ -210,4 +210,19 @@ RSpec.describe Woods::Notion::Mappers::ModelMapper do
       end
     end
   end
+
+  describe '.table_name_for' do
+    it 'returns the extracted table_name when present' do
+      expect(described_class.table_name_for(full_unit_data)).to eq('users')
+    end
+
+    it 'falls back to a tableized identifier when metadata has no table_name' do
+      expect(described_class.table_name_for(minimal_unit_data)).to eq('settings')
+    end
+
+    it 'agrees with the Table Name title #map produces' do
+      title = mapper.map(full_unit_data)['Table Name'][:title].first[:text][:content]
+      expect(described_class.table_name_for(full_unit_data)).to eq(title)
+    end
+  end
 end

@@ -80,6 +80,13 @@ module Woods
       # Stores the manifest metadata and per-unit content hashes.
       # Computes diff stats vs. the most recent previous snapshot.
       #
+      # Re-capturing at an unchanged HEAD updates the snapshot row **in
+      # place** — the row id is stable across captures (#206), so the
+      # per-unit DELETE below genuinely clears the previous capture's unit
+      # set instead of leaking it. Unit rows orphaned by the pre-#206
+      # INSERT OR REPLACE (which minted a fresh id per capture) are swept
+      # on every capture so historical leaks self-heal.
+      #
       # @param manifest [Hash] The manifest data (string or symbol keys)
       # @param unit_hashes [Array<Hash>] Per-unit content hashes
       # @return [Hash] Snapshot record with diff stats
@@ -95,6 +102,7 @@ module Woods
 
         snapshot_id = fetch_snapshot_id(git_sha)
         @db.execute('DELETE FROM woods_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
+        prune_orphaned_units
         insert_unit_hashes(snapshot_id, unit_hashes)
 
         update_diff_stats(snapshot_id, previous)
@@ -212,7 +220,37 @@ module Woods
         hash[key] || hash[key.to_sym]
       end
 
-      # Insert or replace the snapshot row from manifest data.
+      # Upsert SQL for the snapshot row, keyed on UNIQUE(git_sha).
+      #
+      # Deliberately `ON CONFLICT ... DO UPDATE` (SQLite >= 3.24 — the same
+      # syntax `Storage::MetadataStore` already relies on), **not**
+      # `INSERT OR REPLACE`: REPLACE resolves the conflict by deleting the
+      # old row and inserting a fresh one with a new AUTOINCREMENT id, so
+      # {#capture}'s subsequent `DELETE ... WHERE snapshot_id = ?` matched
+      # nothing and every re-extraction at an unchanged HEAD leaked a full
+      # unit-hash set — unboundedly, since foreign keys are never enabled on
+      # this connection (#206).
+      UPSERT_SNAPSHOT_SQL = <<~SQL
+        INSERT INTO woods_snapshots
+          (git_sha, git_branch, extracted_at, rails_version, ruby_version,
+           total_units, unit_counts, gemfile_lock_sha, schema_sha)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(git_sha) DO UPDATE SET
+          git_branch = excluded.git_branch,
+          extracted_at = excluded.extracted_at,
+          rails_version = excluded.rails_version,
+          ruby_version = excluded.ruby_version,
+          total_units = excluded.total_units,
+          unit_counts = excluded.unit_counts,
+          gemfile_lock_sha = excluded.gemfile_lock_sha,
+          schema_sha = excluded.schema_sha
+      SQL
+
+      private_constant :UPSERT_SNAPSHOT_SQL
+
+      # Insert the snapshot row, or update it in place when this git SHA was
+      # captured before. The row id is preserved either way (see
+      # {UPSERT_SNAPSHOT_SQL}).
       #
       # @param manifest [Hash]
       # @param git_sha [String]
@@ -230,11 +268,22 @@ module Woods
           mget(manifest, 'gemfile_lock_sha'),
           mget(manifest, 'schema_sha')
         ]
-        @db.execute(<<~SQL, params)
-          INSERT OR REPLACE INTO woods_snapshots
-            (git_sha, git_branch, extracted_at, rails_version, ruby_version,
-             total_units, unit_counts, gemfile_lock_sha, schema_sha)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        @db.execute(UPSERT_SNAPSHOT_SQL, params)
+      end
+
+      # Delete unit rows whose snapshot row no longer exists.
+      #
+      # Before #206, every re-capture of an unchanged SHA stranded the
+      # previous capture's unit rows under a snapshot id REPLACE had deleted
+      # (foreign keys are never enabled on this connection, so nothing else
+      # cleans them up). One cheap sweep per capture lets databases that
+      # accumulated those leaks self-heal.
+      #
+      # @return [void]
+      def prune_orphaned_units
+        @db.execute(<<~SQL)
+          DELETE FROM woods_snapshot_units
+          WHERE snapshot_id NOT IN (SELECT id FROM woods_snapshots)
         SQL
       end
 

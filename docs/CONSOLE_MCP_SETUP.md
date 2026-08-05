@@ -291,13 +291,13 @@ CODEBASE_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
 }
 ```
 
-> **Tier support:** The bridge architecture supports all 31 tools across all 4 tiers. The embedded approach (Options A–C) supports only Tier 1 tools — see [Tool Support by Mode](#tool-support-by-mode).
+> **Tier support:** The bridge architecture supports all 31 tools across all 4 tiers. The embedded approach (Options A–C) supports Tier 1 unconditionally, plus the three Tier 4 guarded tools behind explicit opt-ins (`console_sql`/`console_query` via `embedded_read_tools`, `console_eval` via the fail-closed unsafe-eval opt-in); Tier 2–3 remain bridge-only — see [Tool Support by Mode](#tool-support-by-mode).
 
 ---
 
 ## Tool Support by Mode
 
-All 31 tools are registered and visible in the MCP server regardless of transport. However, **Tier 2–4 tools return an "unsupported in embedded mode" error** when called via Options A–C (embedded executor). Only the bridge architecture (Option D) supports those tiers.
+All 31 tools are registered and visible in the MCP server regardless of transport. However, **Tier 2–3 tools return an "unsupported in embedded mode" error** when called via Options A–C (embedded executor) — only the bridge architecture (Option D) supports those tiers. Tier 4 is opt-in in embedded mode: `console_sql`/`console_query` require `embedded_read_tools: true` (or `config.console_embedded_read_tools = true`), and `console_eval` requires the five-control unsafe-eval opt-in (see [`console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)](#console_eval-opt-in-woods_console_unsafe_eval)). Until opted in, the Tier 4 tools return actionable refusals naming the flag to set (`error_type: "unsupported"` for the read tools, `error_type: "eval_disabled"` for eval).
 
 ### Tier 1: Read-Only (9 tools) — Supported in all modes
 
@@ -342,13 +342,15 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 | `console_cache_stats` | Cache store statistics |
 | `console_channel_status` | ActionCable channel status |
 
-### Tier 4: Guarded (3 tools) — Bridge only
+### Tier 4: Guarded (3 tools) — Bridge, or embedded with explicit opt-in
 
 | Tool | Description |
 |------|-------------|
-| `console_eval` | Execute arbitrary Ruby code (requires confirmation, 10s timeout) |
+| `console_eval` | Execute arbitrary Ruby code (requires confirmation, 10s default timeout) |
 | `console_sql` | Execute read-only SQL — `SELECT` and `WITH...SELECT` only |
 | `console_query` | Enhanced query builder with joins, grouping, and HAVING |
+
+In embedded mode (Options A–C), `console_sql` and `console_query` unlock with `embedded_read_tools: true`; `console_eval` unlocks only via the [unsafe-eval opt-in](#console_eval-opt-in-woods_console_unsafe_eval) and otherwise returns `error_type: "eval_disabled"`.
 
 ---
 
@@ -360,9 +362,10 @@ Set these in your Rails initializer:
 Woods.configure do |config|
   # Master on/off switch for the Console MCP feature (Layer 0). Default: false.
   # Applies to every transport: stdio (rake / rails runner), bridge, and Rack.
-  # When false, entry points exit with a "disabled" notice (stdio) or return
-  # 410 Gone (Rack). Set to true only after configuring the layers below that
-  # match your threat model.
+  # When false, stdio entry points exit with a "disabled" notice and the Rack
+  # middleware passes the request through to the host app untouched (the
+  # console path is indistinguishable from an unknown route). Set to true only
+  # after configuring the layers below that match your threat model.
   config.console_mcp_enabled = true
 
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
@@ -423,7 +426,7 @@ end
 Until this flag is `true`, none of the transports route traffic:
 
 - `exe/woods-console-mcp` (bridge stdio) and `exe/woods-console` (embedded stdio) print a notice to stderr and exit 1. MCP clients see the process fail to start.
-- `Woods::Console::RackMiddleware` returns `410 Gone` with a JSON body pointing here. Non-matching paths pass through untouched.
+- `Woods::Console::RackMiddleware` passes the request through to the host app (typically its 404), so a disabled console path is indistinguishable from an unknown route. Non-matching paths always pass through untouched.
 
 Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment — e.g. in `config/environments/development.rb` or a staging-only initializer — once the layers below are configured for that environment's threat model.
 
@@ -563,8 +566,8 @@ A pattern is skipped silently when its `key_column` or `value_column` is absent 
 
 **Embedded mode** (Options A–C) lets you gate the Tier 4 read tools via
 `console_embedded_read_tools`. When that flag is `false` (the default),
-`console_sql` and `console_query` return `"unsupported_in_embedded"`
-without ever touching ActiveRecord.
+`console_sql` and `console_query` return an `error_type: "unsupported"`
+refusal without ever touching ActiveRecord.
 
 **Bridge mode** (Option D) does **not** respect `console_embedded_read_tools`.
 Those tools are part of the bridge's standard surface as soon as the
@@ -592,7 +595,7 @@ need the full 31-tool surface.
 
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
-By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `"unsupported_in_embedded"` error pointing at this section. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:
+By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `error_type: "unsupported"` refusal pointing at this flag. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:
 
 ```ruby
 # config/initializers/woods.rb
@@ -738,10 +741,11 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 
 ### Tier 2–4 tools return "unsupported in embedded mode"
 
-The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus, when opted in, the two Tier 4 read tools `console_sql` and `console_query`.
+The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus, when opted in, the three Tier 4 guarded tools.
 
 - For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
-- For everything else (`console_diagnose_model`, `console_eval`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
+- For `console_eval`: wire the [unsafe-eval opt-in](#console_eval-opt-in-woods_console_unsafe_eval) — until then it returns `error_type: "eval_disabled"`, not "unsupported".
+- For everything else (`console_diagnose_model`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
 
 ### `console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)
 

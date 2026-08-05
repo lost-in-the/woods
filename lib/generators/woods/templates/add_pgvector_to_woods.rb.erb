@@ -1,15 +1,35 @@
 class AddPgvectorToWoods < ActiveRecord::Migration[7.0]
-  def change
+  # Creates the `woods_vectors` table read and written by
+  # Woods::Storage::VectorStore::Pgvector. The DDL mirrors the adapter's own
+  # idempotent ensure_schema! (CREATE ... IF NOT EXISTS), so it is safe to run
+  # whether or not Woods has already created the table at embed time.
+  #
+  # Raw SQL is used deliberately: the pgvector `vector` column type is not a
+  # native Rails column type, and this keeps the migration byte-for-byte in
+  # agreement with the adapter. Note: the `vector` type does not round-trip
+  # through schema.rb; use `config.active_record.schema_format = :sql`
+  # (structure.sql) if you need the dump to reproduce this table.
+  def up
     enable_extension 'vector' unless extension_enabled?('vector')
 
-    add_column :woods_embeddings, :embedding_vector, :vector,
-               limit: <%= @dimensions || 1536 %>, null: true
+    execute <<~SQL
+      CREATE TABLE IF NOT EXISTS woods_vectors (
+        id TEXT PRIMARY KEY,
+        embedding vector(<%= @dimensions || 1536 %>),
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    SQL
 
     # HNSW index for fast approximate nearest neighbor search
-    # Using cosine distance operator (vector_cosine_ops)
-    add_index :woods_embeddings, :embedding_vector,
-              using: :hnsw,
-              opclass: :vector_cosine_ops,
-              name: 'idx_woods_embeddings_vector_hnsw'
+    # using the cosine distance operator (vector_cosine_ops).
+    execute <<~SQL
+      CREATE INDEX IF NOT EXISTS idx_woods_vectors_embedding_hnsw
+      ON woods_vectors USING hnsw (embedding vector_cosine_ops)
+    SQL
+  end
+
+  def down
+    drop_table :woods_vectors, if_exists: true
   end
 end

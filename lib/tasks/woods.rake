@@ -113,6 +113,75 @@ namespace :woods do
     :none
   end
 
+  # Delete the index without yanking it out from under another writer (#170).
+  #
+  # The old `woods:clean` body was a bare rm_rf. Run mid-daemon-cycle it
+  # deleted the daemon's own extraction lock, so the "writers serialize on
+  # PipelineLock" invariant evaporated at the exact moment a writer was
+  # mid-graph-rewrite. Now: refuse while a daemon is alive (same stand-down
+  # check as `woods:incremental`; WOODS_IGNORE_WATCH=1 overrides), then take
+  # the extraction lock like every other writer, delete everything EXCEPT the
+  # lock file itself, and let release remove the lock last.
+  #
+  # @param output_dir [Pathname, String] index directory
+  # @param wait [Numeric, nil] seconds to wait for the lock (default: the
+  #   shared writer wait; injectable so a spec need not sit out the window)
+  # @return [Symbol] `:cleaned`, or `:refused` when a live daemon is
+  #   maintaining this index
+  def woods_clean_index(output_dir, wait: nil)
+    require 'woods/watch/daemon'
+
+    output_dir = Pathname.new(output_dir)
+
+    unless woods_daemon_coverage(output_dir) == :none
+      warn 'ERROR: a watch daemon is maintaining this index — refusing to delete it out from under it.'
+      warn 'Stop the daemon first, or set WOODS_IGNORE_WATCH=1 to clean anyway.'
+      return :refused
+    end
+
+    woods_with_extraction_lock(output_dir, wait: wait) do
+      lock_file = output_dir.join("#{Woods::Watch::Daemon::LOCK_NAME}.lock")
+      output_dir.children.each do |entry|
+        next if entry == lock_file
+
+        FileUtils.rm_rf(entry)
+      end
+    end
+
+    # The lock was released (and its file removed) above, so the directory
+    # should now be empty. Another writer may legitimately have recreated
+    # content between release and here — a non-empty directory is left alone
+    # rather than forced.
+    begin
+      Dir.rmdir(output_dir)
+    rescue SystemCallError
+      nil
+    end
+
+    :cleaned
+  end
+
+  # Does a unit's recorded file_path point at anything in THIS environment?
+  #
+  # Framework units carry absolute gem paths — deliberately
+  # environment-specific, see RailsSourceExtractor — and those resolve fine
+  # in the environment that extracted them. What this catches is the #169
+  # failure class generally: units whose absolute path was written by a
+  # different environment (a container's /app/...) and whose relative form
+  # doesn't exist under Rails.root either — an index a reader can retrieve
+  # from but never open a source file for.
+  #
+  # For an absolute path `Rails.root.join` returns the path itself, so one
+  # expression covers both forms.
+  #
+  # @param file_path [String]
+  # @return [Boolean]
+  def woods_path_resolvable?(file_path)
+    File.exist?(file_path) || File.exist?(Rails.root.join(file_path))
+  rescue StandardError
+    false
+  end
+
   desc 'Full extraction of codebase for indexing'
   task extract: :environment do
     require 'woods/extractor'
@@ -329,7 +398,7 @@ namespace :woods do
 
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'
   task extract_framework: :environment do
-    require 'woods/extractors/rails_source_extractor'
+    require 'woods/extractor'
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
 
@@ -337,23 +406,20 @@ namespace :woods do
     puts "Rails version: #{Rails.version}"
     puts
 
-    extractor = Woods::Extractors::RailsSourceExtractor.new
-    units = extractor.extract_all
+    # Back-compat alias for `woods:refresh[rails_source]` (#169). The old body
+    # hand-wrote unit JSON with a bare File.write — no AtomicFile, no path
+    # normalization, no _index.json, no manifest counts, no PipelineLock, no
+    # generation bump — so the units it produced were invisible to
+    # generation-keyed readers and went stale forever. Routing through
+    # Extractor#refresh sends framework sources through the same write
+    # pipeline (and the same writer lock) as every other unit type. This runs
+    # regardless of `include_framework_sources` — an explicit invocation is
+    # the escape hatch the knob deliberately leaves open.
+    extractor = Woods::Extractor.new(output_dir: output_dir)
+    result = woods_with_extraction_lock(output_dir) { extractor.refresh(:rails_source) }
 
-    # Write output
-    framework_dir = Pathname.new(output_dir).join('rails_source')
-    FileUtils.mkdir_p(framework_dir)
-
-    units.each do |unit|
-      file_name = "#{unit.identifier.gsub('/', '__').gsub('::', '__')}.json"
-      File.write(
-        framework_dir.join(file_name),
-        JSON.pretty_generate(unit.to_h)
-      )
-    end
-
-    puts "Extracted #{units.size} framework source units."
-    puts "Output: #{framework_dir}"
+    puts "Extracted #{result[:touched].size} framework source unit(s)."
+    puts "Output: #{Pathname.new(output_dir).join('rails_source')}"
   end
 
   desc 'Validate extracted index integrity'
@@ -380,6 +446,7 @@ namespace :woods do
 
     errors = []
     warnings = []
+    unresolvable = Hash.new { |hash, key| hash[key] = [] }
 
     # Check each type directory
     manifest['counts'].each do |type, expected_count|
@@ -401,10 +468,22 @@ namespace :woods do
           data = JSON.parse(File.read(file))
           errors << "#{file}: missing identifier" unless data['identifier']
           errors << "#{file}: missing source_code" unless data['source_code']
+          # The #169 staleness class, caught generally: a file_path that
+          # resolves neither as written nor under Rails.root was recorded by
+          # a different environment (or its source has since vanished).
+          if data['file_path'] && !woods_path_resolvable?(data['file_path'])
+            unresolvable[type] << (data['identifier'] || File.basename(file))
+          end
         rescue JSON::ParserError => e
           errors << "#{file}: invalid JSON - #{e.message}"
         end
       end
+    end
+
+    unresolvable.each do |type, identifiers|
+      sample = identifiers.first(3).join(', ')
+      warnings << "#{type}: #{identifiers.size} unit(s) whose file_path resolves nowhere " \
+                  "(e.g. #{sample}) — extracted in a different environment? Re-run extraction."
     end
 
     # Check dependency graph
@@ -516,7 +595,7 @@ namespace :woods do
 
     if output_dir.exist?
       puts "Removing #{output_dir}..."
-      FileUtils.rm_rf(output_dir)
+      exit 1 unless woods_clean_index(output_dir) == :cleaned
       puts 'Done.'
     else
       puts 'Index directory does not exist.'
@@ -526,36 +605,38 @@ namespace :woods do
   desc 'Clear the brush — remove index (alias for clean)'
   task clear: :clean
 
+  # Resolve the configured retrieval stack and run one ad-hoc query (#178).
+  #
+  # Every backend — embedding provider, vector store, metadata store, graph
+  # store — is resolved through Woods::Builder from Woods.configuration,
+  # the same wiring `woods:embed` writes through
+  # (Woods::Tasks.build_embed_indexer). The old task body hardcoded
+  # Ollama + InMemory + SQLite + Memory, so on any other configured stack it
+  # queried backends the embed run never wrote to and silently returned
+  # nothing.
+  #
+  # In-memory stores start empty in a fresh process; hosts on the :local /
+  # :shared_filesystem presets should query through woods-mcp, which
+  # hydrates them from the dumps on disk.
+  #
+  # @param query [String] natural-language retrieval query
+  # @return [String] human-formatted retrieval output
+  def woods_run_retrieval(query)
+    require 'woods'
+    require 'woods/formatting/human_adapter'
+
+    config = Woods.configuration
+    retriever = Woods::Builder.new(config).build_retriever
+    result = retriever.retrieve(query, budget: config.max_context_tokens)
+
+    Woods::Formatting::HumanAdapter.new.format(result)
+  end
+
   # Internal debugging tool — hidden from `rails -T`
   task :retrieve, [:query] => :environment do |_t, args|
     query = args[:query] || raise('Usage: rake woods:retrieve[query]')
 
-    require 'woods'
-    require 'woods/retriever'
-    require 'woods/embedding/provider'
-    require 'woods/storage/vector_store'
-    require 'woods/storage/metadata_store'
-    require 'woods/storage/graph_store'
-    require 'woods/formatting/human_adapter'
-
-    config = Woods.configuration
-
-    provider = Woods::Embedding::Provider::Ollama.new
-    vector_store = Woods::Storage::VectorStore::InMemory.new
-    metadata_store = Woods::Storage::MetadataStore::SQLite.new
-    graph_store = Woods::Storage::GraphStore::Memory.new
-
-    retriever = Woods::Retriever.new(
-      vector_store: vector_store,
-      metadata_store: metadata_store,
-      graph_store: graph_store,
-      embedding_provider: provider
-    )
-
-    result = retriever.retrieve(query, budget: config.max_context_tokens)
-
-    formatter = Woods::Formatting::HumanAdapter.new
-    puts formatter.format(result)
+    puts woods_run_retrieval(query)
   end
 
   desc 'Embed all extracted units'
@@ -563,9 +644,19 @@ namespace :woods do
     require 'woods'
     require 'woods/tasks'
 
+    # Embedding writes dumps/, checkpoint.json and woods.json under the same
+    # output dir the extraction writers own — and `woods:clean` deletes them —
+    # so it serializes on the same PipelineLock (#170). One lock domain per
+    # index, deliberately coarse: an embed does block an extract it doesn't
+    # byte-conflict with, but the failure the lock prevents is a concurrent
+    # clean/extract silently clobbering a dump mid-promotion, and a second
+    # lock name would reintroduce exactly the unlocked-writer gap.
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+
     indexer = Woods::Tasks.build_embed_indexer
     puts 'Embedding all extracted units...'
-    Woods::Tasks.print_embed_stats(indexer.index_all, mode: :full)
+    stats = woods_with_extraction_lock(output_dir) { indexer.index_all }
+    Woods::Tasks.print_embed_stats(stats, mode: :full)
   end
 
   desc 'Nest the data — embed all units (alias for embed)'
@@ -576,9 +667,13 @@ namespace :woods do
     require 'woods'
     require 'woods/tasks'
 
+    # Same lock domain as woods:embed — see the comment there (#170).
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+
     indexer = Woods::Tasks.build_embed_indexer
     puts 'Embedding changed units (incremental)...'
-    Woods::Tasks.print_embed_stats(indexer.index_incremental, mode: :incremental)
+    stats = woods_with_extraction_lock(output_dir) { indexer.index_incremental }
+    Woods::Tasks.print_embed_stats(stats, mode: :incremental)
   end
 
   desc 'Hone the blade — incremental embedding (alias for embed_incremental)'

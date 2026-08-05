@@ -319,5 +319,26 @@ RSpec.describe Woods::ResolvedConfig do
 
       expect(resolved.dimension).to eq(0)
     end
+
+    # #178 — a :fake embed run must write a woods.json whose provider class
+    # round-trips through ConfigResolver.provider_symbol back to :fake at
+    # MCP boot, exactly like the Ollama/OpenAI class names do.
+    it 'records the fully-qualified Fake class for embedding_provider :fake' do
+      fake_config = instance_double(
+        Woods::Configuration,
+        embedding_provider: :fake,
+        embedding_model: 'fake-embedding-test',
+        embedding_options: { dims: 64 },
+        vector_store: :in_memory,
+        metadata_store: :in_memory,
+        graph_store: :in_memory
+      )
+      provider = Woods::Embedding::Provider::Fake.new(dims: 64)
+
+      resolved = described_class.from_configuration(fake_config, provider: provider)
+
+      expect(resolved.embedding_provider[:class]).to eq('Woods::Embedding::Provider::Fake')
+      expect(resolved.dimension).to eq(64)
+    end
   end
 end

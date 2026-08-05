@@ -2,6 +2,9 @@
 
 require 'spec_helper'
 require 'set'
+require 'tmpdir'
+require 'fileutils'
+require 'active_support/concern'
 require 'woods'
 require 'woods/extractors/controller_extractor'
 
@@ -415,6 +418,425 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       source = 'redirect_to @post'
       result = redirect_extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
       expect(result).to be_empty
+    end
+  end
+
+  # ── discoverable_classes (#200) ──────────────────────────────────────
+  #
+  # Discovery must start from the ActionController bases: Class#descendants
+  # excludes the receiver, so ApplicationController.descendants never
+  # yielded ApplicationController itself, and controllers inheriting
+  # straight from ActionController::Base were invisible. Framework-internal
+  # controllers (gem source) must stay out, and the set must equal what
+  # extract_controller accepts — it is the incremental class-reconciliation
+  # input (#164).
+
+  describe '#discoverable_classes' do
+    let(:tmp_dir) { Dir.mktmpdir }
+    let(:rails_root) { Pathname.new(tmp_dir) }
+
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', application: app_double, root: rails_root,
+                                          logger: double('Logger').as_null_object))
+      described_class.new
+    end
+
+    after { FileUtils.rm_rf(tmp_dir) }
+
+    # A named controller-like class exposing what extraction introspects.
+    # With no file under Rails.root, every resolvable source location points
+    # at this spec file — outside the app — so the extractor must reject it.
+    def named_controller_class(name)
+      klass = Class.new
+      klass.define_singleton_method(:name) { name }
+      klass.define_singleton_method(:action_methods) { Set.new }
+      klass.define_singleton_method(:_process_action_callbacks) { [] }
+      klass.define_singleton_method(:ancestors) { [] }
+      klass.define_singleton_method(:included_modules) { [] }
+      klass.define_singleton_method(:instance_methods) { |_inherit = true| [] }
+      klass
+    end
+
+    # An app-defined controller: named, with a source file at the
+    # convention path under Rails.root.
+    def app_controller_class(name)
+      relative = "app/controllers/#{name.underscore}.rb"
+      full_path = File.join(tmp_dir, relative)
+      FileUtils.mkdir_p(File.dirname(full_path))
+      File.write(full_path, "class #{name} < ActionController::Base\nend\n")
+      named_controller_class(name)
+    end
+
+    def stub_action_controller_base(*descendant_classes)
+      base = Class.new
+      base.define_singleton_method(:descendants) { descendant_classes }
+      stub_const('ActionController::Base', base)
+    end
+
+    def stub_action_controller_api(*descendant_classes)
+      api = Class.new
+      api.define_singleton_method(:descendants) { descendant_classes }
+      stub_const('ActionController::API', api)
+    end
+
+    it 'includes ApplicationController itself, which Class#descendants excludes' do
+      application_controller = app_controller_class('ApplicationController')
+      posts = app_controller_class('PostsController')
+      stub_action_controller_base(application_controller, posts)
+      # Mirror the real hierarchy: the old discovery read this constant's
+      # descendants, which never include the receiver.
+      stub_const('ApplicationController', application_controller)
+      application_controller.define_singleton_method(:descendants) { [posts] }
+
+      expect(extractor.discoverable_classes).to contain_exactly(application_controller, posts)
+    end
+
+    it 'includes controllers inheriting directly from ActionController::Base' do
+      application_controller = app_controller_class('ApplicationController')
+      legacy = app_controller_class('LegacyController')
+      stub_action_controller_base(application_controller, legacy)
+      stub_const('ApplicationController', application_controller)
+      application_controller.define_singleton_method(:descendants) { [] }
+
+      expect(extractor.discoverable_classes).to include(legacy)
+    end
+
+    it 'excludes framework-internal controllers whose source lives outside the app' do
+      posts = app_controller_class('PostsController')
+      framework = named_controller_class('Rails::InfoController')
+      stub_action_controller_base(posts, framework)
+
+      expect(extractor.discoverable_classes).to contain_exactly(posts)
+    end
+
+    it 'excludes anonymous controller classes' do
+      posts = app_controller_class('PostsController')
+      anonymous = Class.new
+      stub_action_controller_base(posts, anonymous)
+
+      expect(extractor.discoverable_classes).to contain_exactly(posts)
+    end
+
+    it 'finds API controllers without NameError when the host has no ApplicationController' do
+      api_controller = app_controller_class('Api::BaseController')
+      stub_action_controller_api(api_controller)
+
+      expect(extractor.discoverable_classes).to contain_exactly(api_controller)
+    end
+
+    it 'returns an empty array when neither ActionController base is defined' do
+      hide_const('ActionController') if defined?(ActionController)
+
+      expect(extractor.discoverable_classes).to eq([])
+    end
+
+    it 'deduplicates classes discovered through both bases' do
+      shared = app_controller_class('SharedController')
+      stub_action_controller_base(shared)
+      stub_action_controller_api(shared)
+
+      expect(extractor.discoverable_classes).to contain_exactly(shared)
+    end
+
+    it 'discovers exactly the set extract_controller accepts (reconciliation stability)' do
+      app_controller = app_controller_class('PagesController')
+      framework = named_controller_class('Rails::WelcomeController')
+      anonymous = Class.new
+      universe = [app_controller, framework, anonymous]
+      stub_action_controller_base(*universe)
+
+      accepted = universe.select { |klass| extractor.send(:extract_controller, klass) }
+
+      expect(accepted).to contain_exactly(app_controller)
+      expect(extractor.discoverable_classes).to match_array(accepted)
+    end
+  end
+
+  # ── concern detection, edges & inlining (#175) ───────────────────────
+  #
+  # Rails does not namespace controller concerns —
+  # app/controllers/concerns/requires_author.rb defines top-level
+  # RequiresAuthor — so the old name-substring check ('Concern') never
+  # matched idiomatic controller concerns: included_concerns came back
+  # empty and controllers recorded no :concern dependency edges at all,
+  # even while the concern's filters showed up in the filter chain.
+  # Detection is now by membership (extend ActiveSupport::Concern) or by
+  # the module's resolved source sitting under app/**/concerns/, with
+  # gem-sourced framework modules excluded; detected concerns emit the
+  # same {type: :concern, via: :include} edge shape as ModelExtractor and
+  # are inlined into source_code in the same commented display form.
+
+  describe 'concern detection and inlining (#175)' do
+    let(:tmp_dir) { Dir.mktmpdir }
+    let(:rails_root) { Pathname.new(tmp_dir) }
+
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', application: app_double, root: rails_root,
+                                          logger: double('Logger').as_null_object))
+      described_class.new
+    end
+
+    let(:concern_code) do
+      <<~RUBY
+        module RequiresAuthor
+          extend ActiveSupport::Concern
+
+          included do
+            before_action :require_author!
+          end
+
+          def require_author!
+            head :forbidden unless current_user&.author?
+          end
+        end
+      RUBY
+    end
+
+    before do
+      allow(Object).to receive(:const_source_location).and_call_original
+    end
+
+    after { FileUtils.rm_rf(tmp_dir) }
+
+    # Write a concern source file under app/controllers/concerns/ and
+    # return its absolute path.
+    def write_concern_file(name, code)
+      relative = "app/controllers/concerns/#{name.underscore}.rb"
+      full_path = File.join(tmp_dir, relative)
+      FileUtils.mkdir_p(File.dirname(full_path))
+      File.write(full_path, code)
+      full_path
+    end
+
+    # A real module (doubles cannot answer singleton-class ancestry) whose
+    # const_source_location resolves to +path+ (nil = unresolvable).
+    # idiomatic: true mirrors `extend ActiveSupport::Concern`.
+    def concern_module(name, path, idiomatic: true)
+      mod = Module.new
+      mod.extend(ActiveSupport::Concern) if idiomatic
+      stub_const(name, mod)
+      allow(Object).to receive(:const_source_location).with(name).and_return(path && [path, 1])
+      mod
+    end
+
+    def controller_double(name, *modules)
+      controller = double('Controller', name: name)
+      allow(controller).to receive(:included_modules).and_return(modules)
+      controller
+    end
+
+    describe '#extract_included_concerns' do
+      it 'detects an idiomatic top-level controller concern by ActiveSupport::Concern membership' do
+        path = write_concern_file('RequiresAuthor', concern_code)
+        mod = concern_module('RequiresAuthor', path)
+        controller = controller_double('PostsController', mod)
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq(['RequiresAuthor'])
+      end
+
+      it 'detects a plain module mixed in from a concerns/ directory without the extend' do
+        path = write_concern_file('Auditable', "module Auditable\nend\n")
+        mod = concern_module('Auditable', path, idiomatic: false)
+        controller = controller_double('PostsController', mod)
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq(['Auditable'])
+      end
+
+      it 'excludes framework modules resolving into gems even when they extend ActiveSupport::Concern' do
+        gem_path = '/gems/actionpack-8.0.0/lib/action_controller/metal/mime_responds.rb'
+        mod = concern_module('ActionController::MimeResponds', gem_path)
+        controller = controller_double('PostsController', mod)
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq([])
+      end
+
+      it 'excludes an app module that is neither a Concern nor under a concerns/ directory' do
+        helper_path = File.join(tmp_dir, 'app/helpers/formatting_helper.rb')
+        mod = concern_module('FormattingHelper', helper_path, idiomatic: false)
+        controller = controller_double('PostsController', mod)
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq([])
+      end
+
+      it 'keeps an ActiveSupport::Concern module whose source location cannot be resolved' do
+        mod = concern_module('DynamicallyDefined', nil)
+        controller = controller_double('PostsController', mod)
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq(['DynamicallyDefined'])
+      end
+
+      it 'excludes anonymous modules' do
+        controller = controller_double('PostsController', Module.new)
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq([])
+      end
+
+      it 'returns [] when the controller includes no concerns' do
+        controller = controller_double('PostsController')
+
+        expect(extractor.send(:extract_included_concerns, controller)).to eq([])
+      end
+    end
+
+    describe '#extract_dependencies (concern edges)' do
+      it 'records a :concern edge with via: :include, mirroring ModelExtractor' do
+        path = write_concern_file('RequiresAuthor', concern_code)
+        mod = concern_module('RequiresAuthor', path)
+        controller = controller_double('PostsController', mod)
+        source = "class PostsController < ApplicationController\nend\n"
+
+        deps = extractor.send(:extract_dependencies, controller, source)
+
+        expect(deps).to include(type: :concern, target: 'RequiresAuthor', via: :include)
+      end
+
+      it 'records no phantom :concern edges when no concerns are detected' do
+        gem_path = '/gems/actionpack-8.0.0/lib/action_controller/metal/mime_responds.rb'
+        mod = concern_module('ActionController::MimeResponds', gem_path)
+        controller = controller_double('BareController', mod)
+
+        deps = extractor.send(:extract_dependencies, controller, "class BareController\nend\n")
+
+        expect(deps.select { |d| d[:type] == :concern }).to be_empty
+      end
+    end
+
+    describe '#build_controller_source_with_concerns' do
+      it 'inlines the concern body as a commented display block after the class declaration' do
+        path = write_concern_file('RequiresAuthor', concern_code)
+        mod = concern_module('RequiresAuthor', path)
+        controller = controller_double('PostsController', mod)
+        source = <<~RUBY
+          class PostsController < ApplicationController
+            def index; end
+          end
+        RUBY
+
+        inlined, names = extractor.send(:build_controller_source_with_concerns, controller, source)
+
+        expect(names).to eq(['RequiresAuthor'])
+        expect(inlined).to match(/class PostsController < ApplicationController\n\n# ┌/)
+        expect(inlined).to include('# │ Included from: RequiresAuthor')
+        expect(inlined).to match(/# +before_action :require_author!/)
+        expect(inlined).to include('def index; end')
+      end
+
+      it 'inlines after a compact-style namespaced class declaration' do
+        path = write_concern_file('RequiresAuthor', concern_code)
+        mod = concern_module('RequiresAuthor', path)
+        controller = controller_double('Admin::PostsController', mod)
+        source = <<~RUBY
+          class Admin::PostsController < ApplicationController
+            def index; end
+          end
+        RUBY
+
+        inlined, names = extractor.send(:build_controller_source_with_concerns, controller, source)
+
+        expect(names).to eq(['RequiresAuthor'])
+        expect(inlined).to match(/class Admin::PostsController < ApplicationController\n\n# ┌/)
+      end
+
+      it 'appends the block and records a warning when no class declaration matches' do
+        path = write_concern_file('RequiresAuthor', concern_code)
+        mod = concern_module('RequiresAuthor', path)
+        controller = controller_double('PostsController', mod)
+        source = "# frozen_string_literal: true\nPostsController = Class.new(ApplicationController)\n"
+
+        inlined, names = extractor.send(:build_controller_source_with_concerns, controller, source)
+
+        expect(names).to eq(['RequiresAuthor'])
+        expect(inlined.index('Included from')).to be > inlined.index('PostsController =')
+        expect(extractor.warnings).to include(a_string_including('PostsController'))
+      end
+
+      it 'returns the source untouched when no concern resolves' do
+        controller = controller_double('PostsController')
+        source = "class PostsController\nend\n"
+
+        expect(extractor.send(:build_controller_source_with_concerns, controller, source)).to eq([source, []])
+      end
+    end
+
+    describe '#extract_metadata (concerns)' do
+      def metadata_controller(name, modules)
+        controller = double('Controller', name: name)
+        allow(controller).to receive_messages(
+          instance_methods: [],
+          action_methods: Set.new,
+          _process_action_callbacks: [],
+          ancestors: [],
+          included_modules: modules
+        )
+        controller
+      end
+
+      it 'lists detected concerns in included_concerns and inlined ones in inlined_concerns' do
+        path = write_concern_file('RequiresAuthor', concern_code)
+        mod = concern_module('RequiresAuthor', path)
+        controller = metadata_controller('PostsController', [mod])
+        source = "class PostsController < ApplicationController\nend\n"
+
+        metadata = extractor.send(:extract_metadata, controller, source)
+
+        expect(metadata[:included_concerns]).to eq(['RequiresAuthor'])
+        expect(metadata[:inlined_concerns]).to eq(['RequiresAuthor'])
+      end
+
+      it 'does not claim inlining for a detected concern whose source file cannot be read' do
+        mod = concern_module('DynamicallyDefined', nil)
+        controller = metadata_controller('PostsController', [mod])
+        source = "class PostsController\nend\n"
+
+        metadata = extractor.send(:extract_metadata, controller, source)
+
+        expect(metadata[:included_concerns]).to eq(['DynamicallyDefined'])
+        expect(metadata[:inlined_concerns]).to eq([])
+      end
+    end
+
+    describe '#extract_controller (concern end to end)' do
+      # An app-defined controller class with a real source file at the
+      # convention path, exposing what extraction introspects.
+      def app_controller_class(name, source, modules: [])
+        relative = "app/controllers/#{name.underscore}.rb"
+        full_path = File.join(tmp_dir, relative)
+        FileUtils.mkdir_p(File.dirname(full_path))
+        File.write(full_path, source)
+
+        klass = Class.new
+        klass.define_singleton_method(:name) { name }
+        klass.define_singleton_method(:action_methods) { Set.new }
+        klass.define_singleton_method(:_process_action_callbacks) { [] }
+        klass.define_singleton_method(:ancestors) { [] }
+        klass.define_singleton_method(:included_modules) { modules }
+        klass.define_singleton_method(:instance_methods) { |_inherit = true| [] }
+        klass
+      end
+
+      it 'carries the inlined concern, its metadata, and the :concern edge on the unit' do
+        concern_path = write_concern_file('RequiresAuthor', concern_code)
+        concern_module('RequiresAuthor', concern_path)
+        source = <<~RUBY
+          class PostsController < ApplicationController
+            def index; end
+          end
+        RUBY
+        controller = app_controller_class('PostsController', source, modules: [RequiresAuthor])
+
+        unit = extractor.extract_controller(controller)
+
+        expect(unit).not_to be_nil
+        expect(unit.source_code).to include('# │ Included from: RequiresAuthor')
+        expect(unit.source_code).to match(/# +before_action :require_author!/)
+        expect(unit.metadata[:included_concerns]).to eq(['RequiresAuthor'])
+        expect(unit.metadata[:inlined_concerns]).to eq(['RequiresAuthor'])
+        expect(unit.dependencies).to include(type: :concern, target: 'RequiresAuthor', via: :include)
+      end
     end
   end
 end

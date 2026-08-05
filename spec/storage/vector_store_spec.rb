@@ -113,6 +113,20 @@ RSpec.describe Woods::Storage::VectorStore do
         expect(results).to be_empty
       end
 
+      it 'matches string-keyed filters against symbol-keyed metadata (#150)' do
+        results = store.search([1.0, 0.0, 0.0], filters: { 'type' => 'model' })
+
+        expect(results.map(&:id)).to contain_exactly('model_user', 'model_order')
+      end
+
+      it 'matches symbol-keyed filters against string-keyed metadata (#150)' do
+        store.store('legacy_hydrated', [0.9, 0.1, 0.0], { 'type' => 'model' })
+
+        results = store.search([1.0, 0.0, 0.0], filters: { type: 'model' })
+
+        expect(results.map(&:id)).to include('legacy_hydrated')
+      end
+
       it 'returns empty array for empty store' do
         empty_store = described_class.new
 

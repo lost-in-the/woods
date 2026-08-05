@@ -110,7 +110,7 @@ Starting from any unit, traverse forward dependencies ("what does Order depend o
 Git-aware incremental extraction (`woods:incremental`) re-extracts only changed files, using content hashing to skip unchanged units. This supports CI integration where the index is updated on every merge.
 
 **E2. Embedding Pipeline Management**
-`pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, and `pipeline_repair` MCP tools provide full pipeline lifecycle management. `PipelineGuard` rate-limits operations (5-minute cooldown). `CircuitBreaker` protects against embedding provider failures.
+`pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, and `pipeline_repair` MCP tools provide full pipeline lifecycle management. `PipelineGuard` rate-limits operations (5-minute cooldown). Embedding provider calls run through `RetryableProvider` — exponential backoff with `Retry-After` support and a per-instance `CircuitBreaker` — so a 429/5xx burst degrades a run instead of crashing it. (The resilience classes existed earlier but nothing routed embedding calls through them until #188 wired them into `Builder` and the embed rake path.)
 
 **E3. Retrieval Quality Evaluation**
 The evaluation harness (`Evaluator`, `QuerySet`, `BaselineRunner`, `Metrics`) measures retrieval quality: precision@k, recall, MRR, context completeness, and token efficiency. This supports tuning the retrieval pipeline and comparing against baselines (grep, random, file-level).

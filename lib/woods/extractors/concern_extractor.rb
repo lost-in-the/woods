@@ -2,6 +2,7 @@
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -25,6 +26,7 @@ module Woods
     class ConcernExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       # Canonical concern directories (used as fallback if glob finds nothing).
       CONCERN_DIRECTORIES = %w[
@@ -89,13 +91,20 @@ module Woods
 
       # Extract the module name from source or infer from file path.
       #
+      # A concern file defines one concern module, possibly wrapped in
+      # namespace modules. The position-aware scan names the concern by its
+      # outer module chain — `module Gateway; module Stripe; module
+      # Refundable` yields +Gateway::Stripe::Refundable+ — and never by an
+      # inner mixin module: `module Trackable; module ClassMethods` yields
+      # +Trackable+, where the old innermost-declaration scan yielded
+      # +ClassMethods+ (#174).
+      #
       # @param file_path [String] Path to the concern file
       # @param source [String] Ruby source code
       # @return [String, nil] The module name
       def extract_module_name(file_path, source)
-        # Try to find the outermost module definition
-        modules = source.scan(/^\s*module\s+([\w:]+)/).flatten
-        return modules.last if modules.any?
+        qualified = qualified_outer_module_name(source)
+        return qualified if qualified
 
         # Infer from file path — strip everything up to and including the first concerns/ dir.
         # Handles canonical (app/models/concerns/) and nested (app/models/foo/concerns/) paths.

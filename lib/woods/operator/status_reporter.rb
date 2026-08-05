@@ -3,6 +3,8 @@
 require 'json'
 require 'time'
 
+require_relative '../atomic_file'
+
 module Woods
   module Operator
     # Reports pipeline status by reading extraction output metadata.
@@ -43,13 +45,19 @@ module Woods
 
       private
 
+      # Read manifest.json via AtomicFile.read (a bare File.read tags the bytes
+      # with the process's default external encoding — US-ASCII under LANG=C —
+      # so a non-ASCII branch name raised EncodingError out of JSON.parse). An
+      # unparseable or unreadable manifest degrades to nil, the same as a
+      # missing one: the report becomes :not_extracted rather than an error.
+      #
       # @return [Hash, nil]
       def read_manifest
         path = File.join(@output_dir, 'manifest.json')
         return nil unless File.exist?(path)
 
-        JSON.parse(File.read(path))
-      rescue JSON::ParserError
+        JSON.parse(AtomicFile.read(path))
+      rescue JSON::ParserError, EncodingError, SystemCallError
         nil
       end
 

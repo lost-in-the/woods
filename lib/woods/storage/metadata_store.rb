@@ -23,6 +23,15 @@ module Woods
     #   store.find("User")
     #
     module MetadataStore
+      # Conservative whitelist for caller-supplied search field names —
+      # mirrors the filter-key standard in {Woods::Storage::Pgvector#build_where}.
+      # The SQLite adapter interpolates field names into a
+      # `json_extract(data, '$.<field>')` JSON-path literal, so anything
+      # outside this charset must be rejected before any SQL is built: a
+      # crafted field name (quotes, parens, `--`) can otherwise break out of
+      # the string literal and alter the query shape.
+      SEARCH_FIELD_NAME = /\A[a-zA-Z_][a-zA-Z0-9_]*\z/
+
       # Interface that all metadata store adapters must implement.
       module Interface
         # Store or update metadata for a unit.
@@ -91,6 +100,30 @@ module Woods
         def count
           raise NotImplementedError
         end
+
+        private
+
+        # Validate caller-supplied search field names against
+        # {SEARCH_FIELD_NAME}, stringifying as it goes (symbol fields were
+        # always accepted). Every adapter's {#search} must run its `fields:`
+        # through this BEFORE touching its backing store, so a hostile field
+        # name raises the same {ArgumentError} everywhere — including
+        # adapters (InMemory) where the name is not an injection vector,
+        # keeping the adapters substitutable.
+        #
+        # @param fields [Array<String, Symbol>, nil] Field names, or nil for "all fields"
+        # @return [Array<String>, nil] Stringified field names, or nil if fields was nil
+        # @raise [ArgumentError] if any field name fails the whitelist
+        def validate_search_fields!(fields)
+          return nil if fields.nil?
+
+          fields.map do |field|
+            field_s = field.to_s
+            raise ArgumentError, "Invalid search field: #{field_s.inspect}" unless field_s.match?(SEARCH_FIELD_NAME)
+
+            field_s
+          end
+        end
       end
 
       # Pure-Ruby metadata store backed by a hash. No external dependencies,
@@ -143,10 +176,19 @@ module Woods
         end
 
         # @see Interface#search
+        #
+        # Matching is literal substring inclusion — `%` and `_` in the query
+        # have no special meaning here, and the SQLite adapter escapes them
+        # so the two adapters agree. (Known, deliberate divergence: this
+        # adapter is case-sensitive while SQLite's LIKE is ASCII
+        # case-insensitive — not widened, not fixed here.)
+        #
+        # @raise [ArgumentError] if a field name fails {SEARCH_FIELD_NAME}
         def search(query, fields: nil)
+          fields = validate_search_fields!(fields)
           needle = query.to_s
           @data.each_with_object([]) do |(id, record), out|
-            haystacks = fields ? fields.map { |f| record[f.to_s] } : [JSON.generate(record)]
+            haystacks = fields ? fields.map { |f| record[f] } : [JSON.generate(record)]
             next unless haystacks.compact.any? { |h| h.to_s.include?(needle) }
 
             out << record.except('updated_at').merge('id' => id)
@@ -272,13 +314,25 @@ module Woods
         end
 
         # @see Interface#search
+        #
+        # Field names are interpolated into a `json_extract` JSON-path
+        # literal, so they are validated against {SEARCH_FIELD_NAME} first —
+        # a crafted name could otherwise break out of the literal and alter
+        # the SQL shape. LIKE metacharacters (`%`, `_`, `\`) in the query are
+        # escaped (with an explicit ESCAPE clause) so they match literally,
+        # aligning with the InMemory adapter's substring semantics instead of
+        # silently broadening matches.
+        #
+        # @raise [ArgumentError] if a field name fails the whitelist
         def search(query, fields: nil)
+          fields = validate_search_fields!(fields)
+          pattern = "%#{escape_like(query)}%"
           if fields
-            conditions = fields.map { "json_extract(data, '$.#{_1}') LIKE ?" }.join(' OR ')
-            params = fields.map { "%#{query}%" }
+            conditions = fields.map { "json_extract(data, '$.#{_1}') LIKE ? ESCAPE '\\'" }.join(' OR ')
+            params = Array.new(fields.size, pattern)
             rows = @db.execute("SELECT id, data FROM units WHERE #{conditions}", params)
           else
-            rows = @db.execute('SELECT id, data FROM units WHERE data LIKE ?', ["%#{query}%"])
+            rows = @db.execute("SELECT id, data FROM units WHERE data LIKE ? ESCAPE '\\'", [pattern])
           end
 
           rows.map { |row| parse_row(row) }
@@ -295,6 +349,17 @@ module Woods
         end
 
         private
+
+        # Escape SQL LIKE metacharacters in a user query so they match
+        # literally under the `ESCAPE '\'` clause {#search} emits. Without
+        # this, `%` and `_` in a query act as wildcards and silently broaden
+        # matches (`"user_name"` would match `"userXname"`).
+        #
+        # @param query [String] Raw search query
+        # @return [String] Query safe for embedding in a LIKE pattern
+        def escape_like(query)
+          query.to_s.gsub(/[\\%_]/) { |ch| "\\#{ch}" }
+        end
 
         # Parse a database row into a metadata hash with the id field injected.
         #

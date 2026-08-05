@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'woods/retrieval/search_executor'
 require 'woods/retrieval/query_classifier'
 require 'woods/retrieval/ranker'
+require 'woods/retrieval/context_assembler'
 require 'woods/storage/metadata_store'
 require 'woods/storage/graph_store'
 
@@ -13,12 +14,13 @@ RSpec.describe Woods::Retrieval::Ranker do
   let(:classifier) { Woods::Retrieval::QueryClassifier.new }
 
   # Helper to build Candidate structs
-  def candidate(identifier:, score:, source: :vector, metadata: {})
+  def candidate(identifier:, score:, source: :vector, metadata: {}, matched_fields: nil)
     Woods::Retrieval::SearchExecutor::Candidate.new(
       identifier: identifier,
       score: score,
       source: source,
-      metadata: metadata
+      metadata: metadata,
+      matched_fields: matched_fields
     )
   end
 
@@ -132,6 +134,135 @@ RSpec.describe Woods::Retrieval::Ranker do
       popular_idx = result.index { |c| c.identifier == 'Popular' }
       one_source_idx = result.index { |c| c.identifier == 'OneSource' }
       expect(popular_idx).to be < one_source_idx
+    end
+
+    # B-073 / #185 — raw RRF values live on a ~1/(k+1) ≈ 0.016 scale while
+    # every other signal is 0.0–1.0. Fed raw into the weighted sum, the 0.40
+    # semantic weight contributed at most ~0.02, so the recency spread alone
+    # (0.7 * 0.15 = 0.105) out-voted RRF consensus on every fused query.
+    describe 'RRF score normalization (B-073)' do
+      it 'lets multi-source consensus outrank a recency advantage after fusion' do
+        dormant_meta = { 'metadata' => { 'git' => { 'change_frequency' => 'dormant' } } }
+        hot_meta = { 'metadata' => { 'git' => { 'change_frequency' => 'hot' } } }
+        allow(metadata_store).to receive(:find).with('FusedDormant').and_return(dormant_meta)
+        allow(metadata_store).to receive(:find).with('SingleHot').and_return(hot_meta)
+
+        candidates = [
+          candidate(identifier: 'FusedDormant', score: 0.9, source: :vector),
+          candidate(identifier: 'FusedDormant', score: 0.9, source: :keyword),
+          candidate(identifier: 'SingleHot', score: 0.8, source: :vector)
+        ]
+
+        result = ranker.rank(candidates, classification: classification)
+
+        # Pre-fix, SingleHot won on recency because the fused semantic
+        # signal was numerically irrelevant (~0.013 vs ~0.006).
+        expect(result.first.identifier).to eq('FusedDormant')
+      end
+
+      it 'min-max normalizes fused scores across the merged candidate list' do
+        candidates = [
+          candidate(identifier: 'Both', score: 0.9, source: :vector),
+          candidate(identifier: 'Both', score: 0.9, source: :keyword),
+          candidate(identifier: 'VectorOnly', score: 0.5, source: :vector),
+          candidate(identifier: 'KeywordOnly', score: 0.4, source: :keyword)
+        ]
+
+        fused = ranker.send(:apply_rrf, candidates)
+        scores = fused.to_h { |c| [c.identifier, c.score] }
+
+        expect(scores['Both']).to eq(1.0)
+        expect(scores.values.min).to eq(0.0)
+        expect(scores.values).to all(be_between(0.0, 1.0))
+      end
+
+      it 'maps the degenerate all-equal case to 1.0, not 0.0' do
+        # A top-ranked in vector, B top-ranked in keyword — identical RRF
+        # sums. Zero spread must read as full-strength agreement.
+        candidates = [
+          candidate(identifier: 'A', score: 0.9, source: :vector),
+          candidate(identifier: 'B', score: 0.8, source: :keyword)
+        ]
+
+        fused = ranker.send(:apply_rrf, candidates)
+
+        expect(fused.map(&:score)).to all(eq(1.0))
+      end
+
+      it 'carries matched_fields through the RRF merge so the keyword signal survives fusion' do
+        candidates = [
+          candidate(identifier: 'NoFields', score: 0.9, source: :vector),
+          candidate(identifier: 'WithFields', score: 0.9, source: :keyword,
+                    matched_fields: %w[identifier description])
+        ]
+
+        result = ranker.rank(candidates, classification: classification)
+
+        # Equal RRF (both top of their source) — the preserved keyword
+        # signal is the only discriminator.
+        expect(result.first.identifier).to eq('WithFields')
+        expect(result.first.matched_fields).to eq(%w[identifier description])
+      end
+    end
+  end
+
+  # ── Keyword signal (B-073) ─────────────────────────────────────────
+
+  describe 'keyword score' do
+    it 'ranks a candidate with matched fields above one without, all else equal' do
+      with_fields = candidate(identifier: 'Matched', score: 0.5, source: :keyword,
+                              matched_fields: %w[identifier file_path])
+      without_fields = candidate(identifier: 'Unmatched', score: 0.5, source: :keyword)
+
+      result = ranker.rank([without_fields, with_fields], classification: classification)
+
+      expect(result.first.identifier).to eq('Matched')
+    end
+
+    it 'caps the keyword signal at 1.0 (four or more matched fields)' do
+      many = candidate(identifier: 'Many', score: 0.5, source: :keyword,
+                       matched_fields: %w[a b c d e f])
+      four = candidate(identifier: 'Four', score: 0.5, source: :keyword,
+                       matched_fields: %w[a b c d])
+
+      result = ranker.rank([many, four], classification: classification)
+      scores = result.to_h { |c| [c.identifier, c.score] }
+
+      expect(scores['Many']).to eq(scores['Four'])
+    end
+  end
+
+  # ── Score rewriting (B-073) ────────────────────────────────────────
+
+  describe 'weighted score rewriting' do
+    it 'rewrites each candidate score to its weighted score so downstream sorts agree' do
+      result = ranker.rank([candidate(identifier: 'User', score: 0.8)], classification: classification)
+
+      # semantic 0.8*0.40 + keyword 0.0*0.20 + recency 0.5*0.15 +
+      # importance 0.5*0.10 + type_match 0.5*0.10 + diversity 1.0*0.05
+      expect(result.first.score).to be_within(1e-9).of(0.545)
+    end
+
+    it 'returns candidates with scores in descending ranked order' do
+      hot_meta = { 'metadata' => { 'git' => { 'change_frequency' => 'hot' } } }
+      dormant_meta = { 'metadata' => { 'git' => { 'change_frequency' => 'dormant' } } }
+      allow(metadata_store).to receive(:find).with('Hot').and_return(hot_meta)
+      allow(metadata_store).to receive(:find).with('Dormant').and_return(dormant_meta)
+
+      result = ranker.rank(
+        [candidate(identifier: 'Dormant', score: 0.9), candidate(identifier: 'Hot', score: 0.5)],
+        classification: classification
+      )
+
+      expect(result.map(&:score)).to eq(result.map(&:score).sort.reverse)
+    end
+
+    it 'does not mutate the caller-supplied candidate structs' do
+      original = candidate(identifier: 'User', score: 0.8)
+
+      ranker.rank([original], classification: classification)
+
+      expect(original.score).to eq(0.8)
     end
   end
 
@@ -324,6 +455,30 @@ RSpec.describe Woods::Retrieval::Ranker do
         ranker.rank([candidate(identifier: 'A', score: 0.5)], classification: classification)
       end
     end
+
+    # B-073 / #185 — the memo was never invalidated, so after the MCP
+    # reload tool swapped a fresh graph into the shared store wrapper
+    # (Bootstrapper.reload_stores! → replace_graph), importance kept
+    # scoring against the pre-reload PageRank for the process lifetime.
+    describe '#invalidate_pagerank_cache!' do
+      it 'recomputes importance from the current graph after invalidation' do
+        # First call: A dominates. Second call (post-swap): B dominates.
+        allow(graph_store).to receive(:pagerank).and_return(
+          { 'A' => 0.9, 'B' => 0.1 },
+          { 'A' => 0.01, 'B' => 0.99 }
+        )
+        allow(metadata_store).to receive(:find).and_return(nil)
+        candidates = [candidate(identifier: 'A', score: 0.5), candidate(identifier: 'B', score: 0.5)]
+
+        first = ranker.rank(candidates, classification: classification)
+        expect(first.first.identifier).to eq('A')
+
+        ranker.invalidate_pagerank_cache!
+
+        second = ranker.rank(candidates, classification: classification)
+        expect(second.first.identifier).to eq('B')
+      end
+    end
   end
 
   describe 'ranker without graph_store (backwards compat)' do
@@ -500,6 +655,40 @@ RSpec.describe Woods::Retrieval::Ranker do
       result = ranker.rank(candidates, classification: cls)
 
       expect(result.first.identifier).to eq('User')
+    end
+  end
+
+  # ── Ranked order survives context assembly (B-073) ─────────────────
+
+  describe 'ranked order flows through ContextAssembler' do
+    # Regression — the ranker used to return candidates in weighted order
+    # but with their ORIGINAL retrieval scores; ContextAssembler's
+    # assemble_section re-sorts by score, so recency/importance/type_match/
+    # diversity never influenced section content or budget truncation.
+    it 'places a ranker-demoted candidate after a promoted one even when its raw score was higher' do
+      allow(metadata_store).to receive(:find).with('Demoted').and_return(
+        'identifier' => 'Demoted', 'type' => 'model', 'file_path' => 'app/models/demoted.rb',
+        'source_code' => 'DEMOTED_CONTENT',
+        'metadata' => { 'git' => { 'change_frequency' => 'dormant' } }
+      )
+      allow(metadata_store).to receive(:find).with('Promoted').and_return(
+        'identifier' => 'Promoted', 'type' => 'model', 'file_path' => 'app/models/promoted.rb',
+        'source_code' => 'PROMOTED_CONTENT',
+        'metadata' => { 'git' => { 'change_frequency' => 'hot' } }
+      )
+
+      demoted = candidate(identifier: 'Demoted', score: 0.9)   # higher raw retrieval score, dormant
+      promoted = candidate(identifier: 'Promoted', score: 0.8) # hot recency wins the weighted rank
+
+      ranked = ranker.rank([demoted, promoted], classification: classification)
+      expect(ranked.map(&:identifier)).to eq(%w[Promoted Demoted])
+
+      assembler = Woods::Retrieval::ContextAssembler.new(metadata_store: metadata_store)
+      result = assembler.assemble(candidates: ranked, classification: classification)
+
+      promoted_pos = result.context.index('PROMOTED_CONTENT')
+      demoted_pos = result.context.index('DEMOTED_CONTENT')
+      expect(promoted_pos).to be < demoted_pos
     end
   end
 end

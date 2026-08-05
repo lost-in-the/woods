@@ -3,6 +3,11 @@
 require 'net/http'
 require 'uri'
 
+require_relative 'errors'
+require_relative '../embedding/provider'
+require_relative '../embedding/openai'
+require_relative '../embedding/fake'
+
 module Woods
   module MCP
     # Probes an embedding provider's HTTP endpoint to confirm it is reachable
@@ -39,27 +44,61 @@ module Woods
       #   with +reason: "unauthorized"+ because an invalid key means the
       #   provider cannot be used; network failures raise with the appropriate
       #   reason string.
-      # - Any other class → raises +ArgumentError+.
+      # - {Woods::Embedding::Provider::Fake} → trivially reachable (#178).
+      #   The provider is deterministic and in-process; there is no endpoint
+      #   to probe, so the probe succeeds without any network I/O.
+      # - Any other object responding to +#embed+ and +#embed_batch+ — an
+      #   injected provider object, the third shape
+      #   {Woods::Builder#build_embedding_provider} accepts (#178) — is
+      #   presumed reachable. An arbitrary host-supplied implementation has
+      #   no endpoint contract this probe could exercise, so the probe
+      #   succeeds without any network I/O and the provider's first real
+      #   call surfaces connectivity or credential errors.
+      # - Anything else → raises +ArgumentError+.
       #
       # @param provider [Woods::Embedding::Provider::Ollama,
-      #   Woods::Embedding::Provider::OpenAI] a concrete embedding provider
+      #   Woods::Embedding::Provider::OpenAI,
+      #   Woods::Embedding::Provider::Fake, Object] a concrete embedding
+      #   provider, or an injected object implementing +#embed+/+#embed_batch+
       # @return [Object] the same +provider+ if reachable
       # @raise [Woods::MCP::ProviderUnreachable] if the endpoint is unreachable,
       #   times out, returns 5xx, or (for OpenAI) returns 401
-      # @raise [ArgumentError] if +provider+ is not a recognised provider class
+      # @raise [ArgumentError] if +provider+ is neither a recognised provider
+      #   class nor an object implementing +#embed+ and +#embed_batch+
       def self.reachable!(provider)
         case provider
         when Woods::Embedding::Provider::Ollama
           probe_ollama!(provider)
         when Woods::Embedding::Provider::OpenAI
           probe_openai!(provider)
+        when Woods::Embedding::Provider::Fake
+          # In-process, no endpoint: nothing to probe (#178). The case arm
+          # is deliberately empty — the method returns +provider+ below.
+          nil
         else
-          raise ArgumentError,
-                "#{self}.reachable! does not know how to probe #{provider.class} — " \
-                'add a provider-specific probe method or implement #probe_url'
+          unless provider_object?(provider)
+            raise ArgumentError,
+                  "#{self}.reachable! does not know how to probe #{provider.class} — " \
+                  'the object must implement #embed and #embed_batch, or be a known ' \
+                  'provider class (OpenAI, Ollama, Fake)'
+          end
+          # Injected provider object: presumed reachable (see above). The
+          # arm deliberately performs no network I/O — the method returns
+          # +provider+ below, like the Fake arm.
+          nil
         end
         provider
       end
+
+      # Duck-type check for an injected provider object — the same two-method
+      # contract {Woods::Builder#provider_object?} accepts (#178).
+      #
+      # @param provider [Object]
+      # @return [Boolean]
+      def self.provider_object?(provider)
+        provider.respond_to?(:embed) && provider.respond_to?(:embed_batch)
+      end
+      private_class_method :provider_object?
 
       # Probe the Ollama instance backing +provider+.
       #

@@ -44,16 +44,32 @@ module Woods
         exploratory: /\b(related|around|near|similar|like|associated)\b/i
       }.freeze
 
-      # Target type patterns
+      # Target type patterns.
+      #
+      # Deliberately conservative (#184): +target_type+ is a heuristic that
+      # feeds the Ranker's soft +type_match+ signal, so every word here
+      # nudges the ranking of any query that contains it. Ordinary
+      # conversational words — bare HTTP verbs (get/post/put/patch/delete),
+      # "query", "type", "field", "email", "perform" — are not type signals
+      # on their own; they only count with disambiguating context (an
+      # uppercase HTTP verb, "notification email", "perform_later"). Add
+      # new words only when they are genuinely discriminative.
       TARGET_PATTERNS = {
         model: /\b(model|activerecord|association|schema|table|column|scope|validation)\b/i,
         controller: /\b(controller|action|route|endpoint|api|request|response|filter|callback)\b/i,
         service: /\b(service|interactor|operation|command|use.?case|business.?logic)\b/i,
-        job: /\b(job|worker|background|async|sidekiq|queue|perform)\b/i,
-        mailer: /\b(mailer|email|notification|send.?mail)\b/i,
-        graphql: /\b(graphql|mutation|query|type|resolver|field|argument|schema)\b/i,
+        job: /\b(job|worker|background|async|sidekiq|queue|perform.?(later|now|async))\b/i,
+        # rubocop:disable Layout/LineLength
+        mailer: /\b(mailer|mail|send.?mail|deliver.?(later|now)|notification\s+email|email\s+(template|notification|deliver\w*)|send\w*\s+(an\s+)?email)\b/i,
+        # rubocop:enable Layout/LineLength
+        graphql: /\b(graphql|mutation|resolver)\b/i,
         concern: /\b(concern|mixin|module|included|extend)\b/i,
-        route: /\b(route|path|url|endpoint|uri|http|get|post|put|patch|delete)\b/i,
+        # Lowercase get/post/put/patch/delete are ordinary verbs ("how do we
+        # get the current user?") — only the unambiguous uppercase HTTP form
+        # counts. Verb-plus-context phrases ("GET request", "delete
+        # endpoint") already classify :controller via that pattern's
+        # request/endpoint/route words, which run first.
+        route: Regexp.union(/\b(route|path|url|uri|http)\b/i, /\b(GET|POST|PUT|PATCH|DELETE)\b/),
         middleware: /\b(middleware|rack|request.?pipeline|before.?action)\b/i,
         i18n: /\b(i18n|translation|locale|internationalization|t\(|translate)\b/i,
         pundit_policy: /\b(pundit|authorize|policy|allowed|permitted)\b/i,

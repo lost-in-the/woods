@@ -5,6 +5,7 @@ require 'digest'
 require 'fileutils'
 require 'set'
 
+require_relative '../atomic_file'
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
 
@@ -88,12 +89,17 @@ module Woods
         Dir.glob(File.join(@output_dir, '**', '*.json')).filter_map do |path|
           next if File.basename(path) == 'checkpoint.json'
 
-          data = JSON.parse(File.read(path))
+          # AtomicFile.read, not File.read: a bare read tags the bytes with the
+          # process's default external encoding (US-ASCII under LANG=C), so a
+          # single multibyte character in one unit raised EncodingError out of
+          # JSON.parse and aborted the whole embed run.
+          data = JSON.parse(AtomicFile.read(path))
           # Extraction output also contains index listings (_index.json arrays) and
           # summary files (manifest.json, dependency_graph.json, graph_analysis.json)
           # that live alongside per-unit JSON. Filter to the unit shape.
           data if data.is_a?(Hash) && data.key?('type') && data.key?('identifier')
-        rescue JSON::ParserError
+        rescue JSON::ParserError, EncodingError => e
+          warn "[woods] skipping unreadable unit file #{path} (#{e.class}: #{e.message})"
           nil
         end
       end
@@ -177,6 +183,13 @@ module Woods
         stats[:processed].positive? || vanished.positive?
       end
 
+      # Fraction of the persisted units the vanished-unit sweep may remove
+      # without an explicit override. Mirrors the 30% purge guard on the
+      # gem's other destructive sweeps (Obsidian VaultExporter, Unblocked
+      # Exporter — see their PURGE_GUARD_FRACTION).
+      VANISHED_PRUNE_MAX_RATIO = 0.3
+      private_constant :VANISHED_PRUNE_MAX_RATIO
+
       # Delete vectors the promoted dump holds for units the index no longer has.
       #
       # Detecting staleness is not enough on its own: `hydrate_persisted_vectors`
@@ -189,17 +202,77 @@ module Woods
       # this costs no IO) and `@current_identifiers` is what this run saw.
       # Pruning with an empty fresh-id list removes every chunk of the unit.
       #
+      # Guarded by {#vanished_prune_permitted?} (B-079 / #191) — a refused
+      # prune returns 0, which reads as "nothing vanished" to
+      # {#snapshot_worth_writing?}, so a run that also embedded nothing writes
+      # no dump and the retention window is not rotated over the good dumps.
+      # The warn precedes the deletes: if the prune raises partway, the
+      # operator still learns what it was doing.
+      #
       # @return [Integer] how many units were dropped
       def drop_vanished_units
         return 0 if @persisted_ids.nil? || @persisted_ids.empty?
 
         vanished = @persisted_ids.keys.reject { |identifier| @current_identifiers.include?(identifier) }
         return 0 if vanished.empty?
+        return 0 unless vanished_prune_permitted?(vanished)
 
-        vanished.each { |identifier| prune_identifier(identifier, []) }
-        warn "[woods] dropped #{vanished.size} unit(s) from the vector index that the " \
+        warn "[woods] dropping #{vanished.size} unit(s) from the vector index that the " \
              'extraction no longer holds; rewriting the dump.'
+        vanished.each { |identifier| prune_identifier(identifier, []) }
         vanished.size
+      end
+
+      # Guard rail on the vanished-unit sweep (B-079 / #191).
+      #
+      # "Vanished" is computed as persisted-minus-current, so a run that
+      # loaded *nothing* — a mismatched WOODS_OUTPUT between shells, deleted
+      # extraction output, a glob failure — reads as "every unit vanished"
+      # and would prune the whole store; with retention 3, two more such runs
+      # then evict every dump that held real data. Two refusals, both
+      # overridable with WOODS_ALLOW_PURGE=1:
+      #
+      # - nothing loaded at all while the dump holds vectors: almost
+      #   certainly a wrong output dir, never a real mass deletion;
+      # - vanished > {VANISHED_PRUNE_MAX_RATIO} of what the dump holds:
+      #   suspicious enough to require an explicit override (or a full
+      #   +woods:embed+, which rebuilds rather than prunes).
+      #
+      # Refusal never loses data: the stale vectors stay hydrated in the
+      # store, so any dump this run does write (for freshly embedded work)
+      # still carries them. Full runs never reach this guard —
+      # +drop_vanished_units+ runs only on the incremental path, and a full
+      # run's empty store is genuinely empty and must be dumped as such.
+      #
+      # @param vanished [Array<String>] identifiers about to be pruned
+      # @return [Boolean] true when the prune may proceed
+      def vanished_prune_permitted?(vanished)
+        return true if purge_override?
+
+        if @current_identifiers.empty?
+          warn_empty_load_refusal
+          return false
+        end
+
+        ratio = vanished.size.fdiv(@persisted_ids.size)
+        return true if ratio <= VANISHED_PRUNE_MAX_RATIO
+
+        warn "[woods] refusing to prune #{vanished.size} of #{@persisted_ids.size} persisted " \
+             "vector unit(s) (#{(ratio * 100).round}% > #{(VANISHED_PRUNE_MAX_RATIO * 100).round}% " \
+             'purge guard). If this mass deletion is intentional, set WOODS_ALLOW_PURGE=1 ' \
+             'or run a full woods:embed.'
+        false
+      end
+
+      def warn_empty_load_refusal
+        warn "[woods] nothing loaded from #{@output_dir} — likely a wrong or empty output dir — " \
+             "refusing to prune #{@persisted_ids.size} persisted vector unit(s) and leaving the " \
+             'promoted dump untouched. Set WOODS_ALLOW_PURGE=1 to override.'
+      end
+
+      # @return [Boolean] true when WOODS_ALLOW_PURGE=1 bypasses the guard
+      def purge_override?
+        ENV.fetch('WOODS_ALLOW_PURGE', nil) == '1'
       end
 
       # Per-run state. An Indexer instance may be reused across runs, and
@@ -482,17 +555,24 @@ module Woods
         @persisted_ids[identifier] = fresh_ids
       end
 
+      # A checkpoint that cannot be parsed *or read* degrades to "no
+      # checkpoint" — every unit reads as changed and is re-embedded, the same
+      # self-healing outcome as a corrupt checkpoint. AtomicFile.read keeps a
+      # non-ASCII identifier from raising EncodingError here in the first place.
       def load_checkpoint
         path = File.join(@output_dir, 'checkpoint.json')
         return {} unless File.exist?(path)
 
-        JSON.parse(File.read(path))
-      rescue JSON::ParserError
+        JSON.parse(AtomicFile.read(path))
+      rescue JSON::ParserError, EncodingError
         {}
       end
 
+      # AtomicFile.write, not File.write: a crash mid-write must leave the old
+      # checkpoint intact, never a torn partial — a truncated checkpoint reads
+      # as "no checkpoint" and silently re-embeds everything.
       def save_checkpoint(checkpoint)
-        File.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+        AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
       end
 
       # Returns true when the vector store is an in-memory adapter that supports

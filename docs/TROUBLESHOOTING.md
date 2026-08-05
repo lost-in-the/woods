@@ -651,7 +651,7 @@ config.notion_database_ids = {
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
 | HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
-| HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ORIGINS="https://example.com"` |
+| HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ALLOWED_ORIGINS="https://example.com"` (comma-separated; default is loopback-only) |
 | Tool returns `error_code: :not_configured` | Feature flag or credential not set | Check `config_key` in `_meta` and the linked `doc_link` |
 | Tool returns `error_code: :rate_limited` | `PipelineGuard` 5-min cooldown hit | Wait `retry_after_seconds` from `_meta`, then retry |
 

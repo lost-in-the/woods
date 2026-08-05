@@ -79,7 +79,7 @@ Columns:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `embedding_provider` | Symbol | — | Embedding backend: `:openai` or `:ollama` |
+| `embedding_provider` | Symbol or Object | — | Embedding backend: `:openai`, `:ollama`, `:fake` (deterministic, offline — see below), or an already-constructed provider object responding to `#embed`/`#embed_batch` |
 | `embedding_model` | String | `'text-embedding-3-small'` | Model name for the embedding provider |
 | `embedding_options` | Hash | `nil` | Provider-specific options (see below) |
 
@@ -117,6 +117,23 @@ gem 'tokenizers', '~> 0.5'
 ```
 
 See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full model comparison and the procedure for adding a new model to the registry.
+
+### Fake Embeddings (CI / sandboxes / offline hosts)
+
+```ruby
+config.embedding_provider = :fake
+config.embedding_options = { dims: 128 }  # optional; default 128
+```
+
+`:fake` wires `Woods::Embedding::Provider::Fake` — a deterministic bag-of-words hashing provider that needs no network endpoint, so `rake woods:embed` and `rake woods:retrieve` run in CI, sandboxes, and offline hosts. Vectors are L2-normalized, so cosine similarity stays mechanically meaningful (texts sharing vocabulary rank closer), but they are **not semantically meaningful embeddings** — use `:fake` for pipeline smoke tests, never for production retrieval quality. It pairs with any configured store stack: `:in_memory` everywhere for a self-contained smoke run, or the same pgvector/Qdrant + SQLite stores a real provider would use (MySQL-backed hosts pair with Qdrant exactly as in the [backend matrix](BACKEND_MATRIX.md); the provider itself never touches the database).
+
+### Injecting a Provider Object
+
+Anything responding to `#embed` and `#embed_batch` can be assigned directly — it is used as-is and wrapped in the same retry/circuit-breaker resilience stack as the built-in adapters:
+
+```ruby
+config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
+```
 
 ## Storage Options
 
@@ -336,7 +353,9 @@ deployment guide including defense layers.
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
 | `console_credential_defense_enabled` | Boolean | `true` | Layer 5 toggle for the CredentialScanner. Leave on unless you have a specific reason to disable. |
 | `console_credential_rotation_warning` | Boolean | `true` | Emit a structured log warning when any Rails credentials file is modified after process start. |
-| `console_unsafe_eval_enabled` | Boolean | `false` | Gate for `console_eval`. Off by default; no execution path is currently wired. |
+| `console_unsafe_eval_enabled` | Boolean | `nil` (falls back to `ENV['WOODS_CONSOLE_UNSAFE_EVAL'] == 'true'`) | Opt-in gate for `console_eval`. An explicit `true`/`false` wins over the env var in both directions. Off by default — the executor returns a hard `eval_disabled` refusal. When on, the server refuses to boot in production, emits a loud stderr banner elsewhere, and requires both `console_unsafe_eval_confirmation` and `console_unsafe_eval_audit_log_path` (boot raises `Woods::ConfigurationError` if either is missing). Enabled runs go through the five-control path: EvalGuard AST denylist → human confirmation → SafeContext rollback → timeout → audit log. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md#console_eval-opt-in-woods_console_unsafe_eval). |
+| `console_unsafe_eval_confirmation` | `Confirmation` | `nil` | Human-in-the-loop approval collaborator for `console_eval`. Required whenever the eval opt-in is on — the server fails at boot without it. |
+| `console_unsafe_eval_audit_log_path` | String/Pathname | `nil` | Path for the append-only audit log recording every `console_eval` attempt (refused, denied, or executed). Required whenever the eval opt-in is on — the server fails at boot without it. |
 
 ## Environment Variables
 

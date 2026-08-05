@@ -7,8 +7,11 @@ module Woods
   module Generators
     # Rails generator that adds pgvector support to Woods.
     #
-    # Requires the pgvector PostgreSQL extension. Adds a native vector column
-    # and HNSW index to the woods_embeddings table.
+    # Requires the pgvector PostgreSQL extension. Creates the `woods_vectors`
+    # table (id, native vector column, JSONB metadata) plus an HNSW index —
+    # the schema read and written by Woods::Storage::VectorStore::Pgvector.
+    # The migration mirrors the adapter's idempotent ensure_schema! DDL, so
+    # it coexists with schema creation at embed time.
     #
     # Usage:
     #   rails generate woods:pgvector
@@ -19,7 +22,7 @@ module Woods
 
       source_root File.expand_path('templates', __dir__)
 
-      desc 'Adds pgvector native vector column and HNSW index to woods_embeddings'
+      desc 'Creates the woods_vectors table (pgvector column + HNSW index) used by the Woods vector store'
 
       class_option :dimensions, type: :numeric, default: 1536,
                                 desc: 'Vector dimensions (1536 for text-embedding-3-small, 3072 for large)'

@@ -456,6 +456,121 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(unit.source_code).to include('Fields:')
     end
 
+    # #202 — the identifier used to join EVERY module/class declaration in the
+    # file, so a nested error class extended it to
+    # Mutations::CreateUser::InvalidInput. That unit could never dedup against
+    # the runtime unit for the same type in extract_all: double-indexing with
+    # graphql-ruby loaded, dangling edges without it.
+    it 'derives the identifier from the outermost class, ignoring nested classes' do
+      source = <<~RUBY
+        module Mutations
+          class CreateUser < BaseMutation
+            class InvalidInput < StandardError; end
+
+            argument :name, String, required: true
+
+            def resolve(name:)
+              raise InvalidInput if name.empty?
+
+              User.create!(name: name)
+            end
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::CreateUser')
+      expect(unit.namespace).to eq('Mutations')
+    end
+
+    it 'derives the identifier from a compact class declaration' do
+      source = <<~RUBY
+        class Mutations::CreateUser < BaseMutation
+          class InvalidInput < StandardError; end
+
+          argument :name, String, required: true
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::CreateUser')
+    end
+
+    it 'handles mixed nesting with a compact inner class name' do
+      source = <<~RUBY
+        module Mutations
+          class Admin::CreateUser < BaseMutation
+            class InvalidInput < StandardError; end
+
+            argument :name, String, required: true
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/admin/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::Admin::CreateUser')
+    end
+
+    # The identifier scan must track `end`s, not just declarations. The old
+    # end-blind scan prefixed EVERY module seen before the first class, so a
+    # sibling module that closed before the class opened still polluted the
+    # identifier: Helpers::Mutations::CreateUser instead of
+    # Mutations::CreateUser — the exact nesting shape SourceNesting (#174)
+    # exists to get right.
+    it 'ignores sibling modules that closed before the class opened' do
+      source = <<~RUBY
+        module Helpers
+          def self.sanitize(name)
+            name.strip
+          end
+        end
+
+        module Mutations
+          class CreateUser < BaseMutation
+            argument :name, String, required: true
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/mutations/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.identifier).to eq('Mutations::CreateUser')
+      expect(unit.namespace).to eq('Mutations')
+    end
+
+    # Interfaces are modules, not classes — the identifier comes from the
+    # outer module chain when the file declares no class at all.
+    it 'keeps the identifier for a module-only interface file' do
+      source = <<~RUBY
+        module Types
+          module Timestampable
+            include GraphQL::Schema::Interface
+
+            field :created_at, String, null: false
+            field :updated_at, String, null: false
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/types/timestampable.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit).not_to be_nil
+      expect(unit.identifier).to eq('Types::Timestampable')
+    end
+
     it 'returns nil for non-GraphQL files' do
       source = <<~RUBY
         class PlainService

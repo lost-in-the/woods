@@ -446,15 +446,19 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       expect(loaded.each_entry.map { |id, _, _| id }).to include('Admin::User')
     end
 
-    it 'round-trips an id containing unicode characters (bytes preserved)' do
+    it 'round-trips an id containing unicode characters (encoding included)' do
       original_id = 'Ünïcödé::Modèl'
       store = make_store([[original_id, [1.0, 0.0, 0.0, 0.0]]])
       loaded = dump_and_load(store)
       expect(loaded.count).to eq(1)
-      # The idx format stores raw UTF-8 bytes; loaded ids may be ASCII-8BIT-encoded
-      # binary strings. Assert byte content equality rather than encoding equality.
+      # Regression — B-080 / #192. The idx format stores UTF-8 bytes, and
+      # parse_idx must tag them UTF-8 on load: an ASCII-8BIT id is not eql?
+      # to its UTF-8 twin, so every hash lookup keyed on a hydrated id missed
+      # (perpetual re-embeds, duplicate live store entries). Assert full
+      # equality — encoding included — not just byte content.
       loaded_id = loaded.each_entry.map { |id, _, _| id }.first
-      expect(loaded_id.b).to eq(original_id.b)
+      expect(loaded_id).to eq(original_id)
+      expect(loaded_id.encoding).to eq(Encoding::UTF_8)
     end
 
     it 'round-trips multiple ids with varying lengths' do

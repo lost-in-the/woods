@@ -408,4 +408,159 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(stale.namespace).to eq('data:cleanup')
     end
   end
+
+  # ── Task signature forms (#176) ─────────────────────────────────────
+
+  describe 'task signature forms' do
+    it 'extracts all four task forms from one file' do
+      path = create_file('lib/tasks/forms.rake', <<~RAKE)
+        task :report => :environment do
+          puts "report"
+        end
+
+        task archive_stale: :environment do
+          puts "archiving"
+        end
+
+        task :plain do
+          puts "plain"
+        end
+
+        task :with_args, [:id] => :environment do |t, args|
+          puts args[:id]
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.map(&:identifier)).to contain_exactly('report', 'archive_stale', 'plain', 'with_args')
+
+      report = units.find { |u| u.identifier == 'report' }
+      archive = units.find { |u| u.identifier == 'archive_stale' }
+      plain = units.find { |u| u.identifier == 'plain' }
+      with_args = units.find { |u| u.identifier == 'with_args' }
+
+      expect(report.metadata[:task_dependencies]).to eq(['environment'])
+      expect(archive.metadata[:task_dependencies]).to eq(['environment'])
+      expect(archive.metadata[:has_environment_dependency]).to be true
+      expect(plain.metadata[:task_dependencies]).to eq([])
+      expect(with_args.metadata[:task_dependencies]).to eq(['environment'])
+      expect(with_args.metadata[:arguments]).to eq(['id'])
+    end
+
+    it 'extracts a modern label-form task (task name: :environment)' do
+      path = create_file('lib/tasks/modern.rake', <<~RAKE)
+        task archive_stale: :environment do
+          puts "archiving"
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.size).to eq(1)
+      expect(units.first.identifier).to eq('archive_stale')
+      expect(units.first.metadata[:task_dependencies]).to eq(['environment'])
+    end
+
+    it 'extracts label-form array dependencies (task name: [:dep1, :dep2])' do
+      path = create_file('lib/tasks/modern.rake', <<~RAKE)
+        task compile: [:environment, :setup] do
+          puts "compiling"
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.first.metadata[:task_dependencies]).to contain_exactly('environment', 'setup')
+    end
+
+    it 'extracts a label-form task without a do block' do
+      path = create_file('lib/tasks/modern.rake', <<~RAKE)
+        task setup: :environment
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.size).to eq(1)
+      expect(units.first.identifier).to eq('setup')
+      expect(units.first.metadata[:task_dependencies]).to eq(['environment'])
+    end
+  end
+
+  # ── String-form namespaces (#176) ───────────────────────────────────
+
+  describe 'string-form namespaces' do
+    it 'qualifies tasks inside a single-quoted namespace' do
+      path = create_file('lib/tasks/admin.rake', <<~RAKE)
+        namespace 'admin' do
+          task cleanup: :environment do
+            puts "cleaning"
+          end
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.size).to eq(1)
+      expect(units.first.identifier).to eq('admin:cleanup')
+      expect(units.first.namespace).to eq('admin')
+    end
+
+    it 'qualifies tasks inside a double-quoted namespace' do
+      path = create_file('lib/tasks/admin.rake', <<~RAKE)
+        namespace "admin" do
+          task :cleanup do
+            puts "cleaning"
+          end
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.first.identifier).to eq('admin:cleanup')
+    end
+
+    it 'keeps depth tracking in sync across nested namespaces mixing forms' do
+      path = create_file('lib/tasks/mixed.rake', <<~RAKE)
+        namespace :admin do
+          namespace 'reports' do
+            task generate: :environment do
+              puts "generating"
+            end
+          end
+
+          task :cleanup do
+            puts "cleaning"
+          end
+        end
+
+        task :outer do
+          puts "outer"
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      identifiers = units.map(&:identifier)
+      expect(identifiers).to contain_exactly('admin:reports:generate', 'admin:cleanup', 'outer')
+
+      generate = units.find { |u| u.identifier == 'admin:reports:generate' }
+      expect(generate.namespace).to eq('admin:reports')
+    end
+  end
+
+  # ── Zero-task diagnostic (#176) ─────────────────────────────────────
+
+  describe 'zero-task diagnostic' do
+    it 'logs a debug line naming the file when no tasks are parsed' do
+      path = create_file('lib/tasks/none.rake', "# only comments here\n")
+
+      expect(logger).to receive(:debug).with(a_string_including('none.rake'))
+      described_class.new.extract_rake_file(path)
+    end
+
+    it 'does not log the diagnostic when tasks are parsed' do
+      path = create_file('lib/tasks/some.rake', <<~RAKE)
+        task :cleanup do
+          puts "cleaning"
+        end
+      RAKE
+
+      expect(logger).not_to receive(:debug)
+      described_class.new.extract_rake_file(path)
+    end
+  end
 end

@@ -134,6 +134,51 @@ RSpec.describe Woods::Unblocked::SyncManifest do
     end
   end
 
+  describe 'manifest file containing non-ASCII bytes' do
+    # Regression — B-077 / #189. #load read the manifest with a bare
+    # File.read, which tags the bytes with the process's default external
+    # encoding — US-ASCII under LANG=C, which is how this suite runs — so a
+    # non-ASCII document URI raised Encoding::InvalidByteSequenceError out of
+    # JSON.parse. Only JSON::ParserError was rescued, so the documented
+    # "missing or corrupt degrades to everything is new" contract was broken
+    # by the one failure mode a plain Docker container hits by default.
+    before do
+      Woods::AtomicFile.write(path, JSON.generate(
+                                      'version' => described_class::VERSION,
+                                      'collection_id' => collection_id,
+                                      'documents' => {
+                                        'docs/café.md' => { 'hash' => 'h-1', 'document_id' => 'doc-1' }
+                                      }
+                                    ))
+    end
+
+    it 'loads the recorded documents instead of raising' do
+      expect(manifest.unchanged?('docs/café.md', 'h-1')).to be(true)
+      expect(manifest.document_id_for('docs/café.md')).to eq('doc-1')
+    end
+  end
+
+  describe 'unreadable manifest file' do
+    # A read failure (permissions, I/O error) must take the same discard path
+    # as a corrupt file — the manifest is a cache, and "everything is new" is
+    # always a correct answer.
+    before do
+      File.write(path, '{}')
+      allow(Woods::AtomicFile).to receive(:read).and_raise(Errno::EACCES, path)
+    end
+
+    it 'starts empty rather than raising' do
+      empty = nil
+      expect { empty = manifest.empty? }.to output(/unreadable/i).to_stderr
+      expect(empty).to be(true)
+    end
+
+    it 'warns to stderr so the resulting full re-push is explainable' do
+      expect { described_class.new(path: path, collection_id: collection_id) }
+        .to output(/discarding sync manifest.*unreadable file/im).to_stderr
+    end
+  end
+
   describe 'version guard' do
     it 'discards a manifest written by a future schema version' do
       File.write(path, JSON.generate(

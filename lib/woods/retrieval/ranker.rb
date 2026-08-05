@@ -44,9 +44,16 @@ module Woods
 
       # Rank candidates by weighted signal scoring with diversity adjustment.
       #
+      # Returned candidates carry their final weighted score (0.0–1.0) in
+      # +score+ — NOT the raw retrieval score they arrived with. Downstream
+      # consumers ({ContextAssembler#assemble_section} re-sorts by +score+;
+      # source attributions report it) must agree with the ranked order, so
+      # the ranker rewrites the score the same way {#apply_rrf} always has.
+      #
       # @param candidates [Array<Candidate>] Search candidates from executor
       # @param classification [QueryClassifier::Classification] Query classification
-      # @return [Array<Candidate>] Re-ranked candidates (best first)
+      # @return [Array<Candidate>] Re-ranked candidates (best first), scores
+      #   rewritten to the final weighted score
       def rank(candidates, classification:)
         return [] if candidates.empty?
 
@@ -57,10 +64,48 @@ module Woods
         sorted = sorted_by_weighted_score(scored)
         apply_diversity_penalty(sorted)
 
-        sorted.map { |item| item[:candidate] }
+        finalize_ranked(sorted)
+      end
+
+      # Drop the memoized PageRank rank-percentile map so the next {#rank}
+      # call recomputes it from the graph store.
+      #
+      # The map is memoized per Ranker instance ({#pagerank_importance_map})
+      # and the graph store wrapper is shared by reference across the whole
+      # pipeline — when {Woods::MCP::Bootstrapper.reload_stores!} swaps a
+      # fresh {DependencyGraph} into that wrapper via +replace_graph+, the
+      # memo would keep serving the OLD graph's importance scores for the
+      # life of the process. The bootstrapper calls this right after the
+      # swap, next to the context-cache invalidation.
+      #
+      # @return [void]
+      def invalidate_pagerank_cache!
+        @pagerank_importance_map = nil
       end
 
       private
+
+      # Rebuild each ranked candidate with its final weighted score.
+      #
+      # Mirrors {#rebuild_rrf_candidates}: a fresh Candidate is built rather
+      # than mutating the executor's structs in place, so callers holding
+      # the pre-rank candidate list (e.g. RetrievalTrace consumers) keep
+      # their original scores.
+      #
+      # @param sorted [Array<Hash>] Scored items sorted by weighted_score
+      # @return [Array<Candidate>]
+      def finalize_ranked(sorted)
+        sorted.map do |item|
+          candidate = item[:candidate]
+          build_candidate(
+            identifier: candidate.identifier,
+            score: item[:weighted_score],
+            source: candidate.source,
+            metadata: candidate.metadata,
+            matched_fields: candidate.matched_fields
+          )
+        end
+      end
 
       # Check if candidates come from multiple retrieval sources.
       #
@@ -76,19 +121,34 @@ module Woods
       # Each source's candidates are ranked independently, then RRF
       # merges ranks into a single score.
       #
+      # Raw RRF values live on a tiny scale (~1/(k+1) ≈ 0.016 per source),
+      # while every other ranking signal is 0.0–1.0 — feeding them straight
+      # into the weighted sum as +semantic+ made the 0.40 weight contribute
+      # at most ~0.02 and let recency/importance spreads dominate any fused
+      # query. Min-max normalizing across the merged list restores the
+      # 0.0–1.0 scale (see {#normalize_scores}); the single-source path is
+      # untouched because provider similarity scores already arrive 0–1.
+      #
       # @param candidates [Array<Candidate>]
-      # @return [Array<Candidate>] Merged candidates with RRF scores
+      # @return [Array<Candidate>] Merged candidates with normalized RRF scores
       def apply_rrf(candidates)
-        rrf_scores, metadata_map = compute_rrf_scores(candidates)
-        rebuild_rrf_candidates(candidates, rrf_scores, metadata_map)
+        rrf_scores, metadata_map, matched_fields_map = compute_rrf_scores(candidates)
+        rebuild_rrf_candidates(candidates, normalize_scores(rrf_scores), metadata_map, matched_fields_map)
       end
 
       # Compute RRF scores across all sources.
       #
-      # @return [Array(Hash, Hash)] [rrf_scores, metadata_map]
+      # Also accumulates per-identifier metadata (first non-nil wins) and
+      # matched fields (union across sources) so the merged candidate keeps
+      # the keyword signal — dropping +matched_fields+ here would kill
+      # {#keyword_score} on exactly the multi-source (hybrid) path where
+      # keyword evidence matters most.
+      #
+      # @return [Array(Hash, Hash, Hash)] [rrf_scores, metadata_map, matched_fields_map]
       def compute_rrf_scores(candidates)
         rrf_scores = Hash.new(0.0)
         metadata_map = {}
+        matched_fields_map = {}
 
         candidates.group_by(&:source).each_value do |source_candidates|
           ranked = source_candidates.sort_by { |c| -c.score }
@@ -96,16 +156,45 @@ module Woods
             # RRF is 1-based (Cormack et al., 2009): top-ranked doc uses rank 1, not 0.
             rrf_scores[candidate.identifier] += 1.0 / (RRF_K + idx + 1)
             metadata_map[candidate.identifier] ||= candidate.metadata
+            merge_matched_fields(matched_fields_map, candidate)
           end
         end
 
-        [rrf_scores, metadata_map]
+        [rrf_scores, metadata_map, matched_fields_map]
       end
 
-      # Rebuild candidates with merged RRF scores.
+      # Union a candidate's matched fields into the per-identifier map.
+      #
+      # @param matched_fields_map [Hash{String => Array<String>}] Accumulator (mutated)
+      # @param candidate [Candidate]
+      # @return [void]
+      def merge_matched_fields(matched_fields_map, candidate)
+        fields = candidate.respond_to?(:matched_fields) ? candidate.matched_fields : nil
+        return unless fields
+
+        matched_fields_map[candidate.identifier] = (matched_fields_map[candidate.identifier] || []) | fields
+      end
+
+      # Min-max normalize a score map to the 0.0–1.0 range.
+      #
+      # The degenerate all-equal case (including a single candidate) maps
+      # everything to 1.0 — an identifier every source agreed on is a full-
+      # strength semantic match, not a zero.
+      #
+      # @param scores [Hash{String => Float}]
+      # @return [Hash{String => Float}]
+      def normalize_scores(scores)
+        min, max = scores.values.minmax
+        spread = max - min
+        return scores.transform_values { 1.0 } if spread.zero?
+
+        scores.transform_values { |score| (score - min) / spread }
+      end
+
+      # Rebuild candidates with merged (normalized) RRF scores.
       #
       # @return [Array<Candidate>]
-      def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map)
+      def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map, matched_fields_map)
         # Plain-Ruby `index_by` substitute — the ActiveSupport version
         # isn't loaded when the gem runs outside a Rails boot. Preserve
         # last-wins semantics to match ActiveSupport's `Enumerable#index_by`
@@ -120,7 +209,8 @@ module Woods
             identifier: identifier,
             score: score,
             source: original&.source || :rrf,
-            metadata: metadata_map[identifier]
+            metadata: metadata_map[identifier],
+            matched_fields: matched_fields_map[identifier]
           )
         end
       end
@@ -351,12 +441,13 @@ module Woods
       # Build a Candidate struct compatible with SearchExecutor::Candidate.
       #
       # @return [Candidate-like Struct]
-      def build_candidate(identifier:, score:, source:, metadata:)
+      def build_candidate(identifier:, score:, source:, metadata:, matched_fields: nil)
         SearchExecutor::Candidate.new(
           identifier: identifier,
           score: score,
           source: source,
-          metadata: metadata
+          metadata: metadata,
+          matched_fields: matched_fields
         )
       end
     end

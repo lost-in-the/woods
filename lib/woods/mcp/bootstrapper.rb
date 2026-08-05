@@ -170,6 +170,19 @@ module Woods
         metadata_count = refill_in_memory_metadata_store(retriever, config, resolved, artifact)
         graph_count = refill_in_memory_graph_store(retriever, config, artifact)
 
+        # Re-run the vector-metadata back-fill against the refreshed live
+        # stores. The WVF1 dump persists id + floats only, so the vectors
+        # just bulk-loaded carry EMPTY metadata hashes — without this,
+        # every type-filtered search returns nothing until the process
+        # restarts (the boot path back-fills; reload must too). Runs after
+        # BOTH refills so the lookup hits the fresh metadata, not the old.
+        populate_reloaded_vector_metadata(retriever)
+
+        # The Ranker memoizes a rank-percentile map computed from the graph
+        # store's PageRank; replace_graph swapped the graph underneath it,
+        # so drop the memo alongside the context cache.
+        invalidate_ranker_pagerank!(retriever)
+
         # Context-cache entries from the previous embed run no longer agree
         # with the refreshed stores. Drop them so the next codebase_retrieve
         # call goes through the full pipeline with the new data. Embedding
@@ -179,6 +192,54 @@ module Woods
 
         { vectors: vectors_count, metadata: metadata_count, graph: graph_count }
       end
+
+      # Back-fill filter metadata on the retriever's LIVE stores after a
+      # reload. Same contract as the boot-path call in
+      # {.build_retriever_from_config} — no-op unless both stores are
+      # in-memory shapes ({.populate_vector_metadata} guards the interfaces).
+      #
+      # @param retriever [Woods::Retriever, Cache::CachedRetriever]
+      # @return [void]
+      def self.populate_reloaded_vector_metadata(retriever)
+        vs = retriever.respond_to?(:vector_store) ? retriever.vector_store : nil
+        ms = retriever.respond_to?(:metadata_store) ? retriever.metadata_store : nil
+        populate_vector_metadata(vs, ms) if vs && ms
+      end
+      private_class_method :populate_reloaded_vector_metadata
+
+      # Reach the Ranker inside the (possibly cache-wrapped) retriever and
+      # drop its memoized PageRank map ({Retrieval::Ranker#invalidate_pagerank_cache!}).
+      #
+      # Neither Retriever nor CachedRetriever exposes a public +ranker+
+      # reader today, so this prefers one when present (future-proofing)
+      # and otherwise walks the known ivar layout: +@retriever+ on the
+      # cache wrapper, +@ranker+ on the retriever. Every probe is guarded —
+      # an unknown retriever shape degrades to a no-op rather than raising
+      # mid-reload.
+      #
+      # @param retriever [Woods::Retriever, Cache::CachedRetriever]
+      # @return [void]
+      def self.invalidate_ranker_pagerank!(retriever)
+        ranker = extract_ranker(retriever)
+        ranker.invalidate_pagerank_cache! if ranker.respond_to?(:invalidate_pagerank_cache!)
+      end
+      private_class_method :invalidate_ranker_pagerank!
+
+      # Resolve the Ranker instance from a retriever or cache wrapper.
+      #
+      # @param target [Object]
+      # @return [Retrieval::Ranker, nil]
+      def self.extract_ranker(target)
+        return nil if target.nil?
+        return target.ranker if target.respond_to?(:ranker)
+
+        if target.instance_variable_defined?(:@retriever)
+          return extract_ranker(target.instance_variable_get(:@retriever))
+        end
+
+        target.instance_variable_defined?(:@ranker) ? target.instance_variable_get(:@ranker) : nil
+      end
+      private_class_method :extract_ranker
 
       # Retriever (and CachedRetriever) expose public +vector_store+ /
       # +metadata_store+ / +graph_store+ readers so this helper never pokes
@@ -365,10 +426,39 @@ module Woods
           meta = metadata_store.find(id.to_s.sub(CHUNK_SUFFIX_PATTERN, ''))
           next if meta.nil? || (meta.respond_to?(:empty?) && meta.empty?)
 
-          vector_store.store(id, vec, meta)
+          vector_store.store(id, vec, vector_filter_metadata(meta))
         end
       end
       private_class_method :populate_vector_metadata
+
+      # Reduce a metadata-store record to the SYMBOL-keyed subset the live
+      # embed path writes per vector — see
+      # {Embedding::Indexer#store_vectors}: +{ type:, identifier:, file_path: }+
+      # — plus +namespace:+, which only the backfill can supply (the store
+      # carries it per unit) and which namespace-filtered search after a
+      # dump/reload depends on.
+      #
+      # The metadata store returns STRING-keyed records on every real
+      # backend (SQLite round-trips through JSON.parse; InMemory stringifies
+      # on store), while {Retrieval::SearchExecutor#build_vector_filters}
+      # builds symbol-keyed filters and +VectorStore::InMemory#gather_candidates+
+      # probes +meta[:type]+ directly. Back-filling the raw string-keyed
+      # record therefore made every type-filtered +codebase_retrieve+ return
+      # EMPTY on a dump-hydrated server (#150 item 5) — the live embed path
+      # writes symbol keys, which is why in-process specs never saw it.
+      # Nil fields are dropped rather than stored.
+      #
+      # @param meta [Hash] Metadata record (string- or symbol-keyed)
+      # @return [Hash{Symbol => Object}] Symbol-keyed filter subset
+      def self.vector_filter_metadata(meta)
+        {
+          type: meta['type'] || meta[:type],
+          identifier: meta['identifier'] || meta[:identifier],
+          file_path: meta['file_path'] || meta[:file_path],
+          namespace: meta['namespace'] || meta[:namespace]
+        }.compact
+      end
+      private_class_method :vector_filter_metadata
 
       # Return a hydrated InMemory vector store when Shape 2 applies
       # (in-memory configured + artifact on disk + resolved config) —
