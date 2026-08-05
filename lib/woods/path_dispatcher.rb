@@ -224,8 +224,9 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Symbol>]
     def whole_app_keys_for(relative_path)
-      self.class.whole_app_rules.select { |rule| rule.matches?(relative_path) }
-                                .map(&:extractor_key).uniq
+      self.class.whole_app_rules
+          .select { |rule| rule.matches?(relative_path) }
+          .map(&:extractor_key).uniq
     end
 
     # Does this path imply any extraction work at all?
