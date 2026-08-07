@@ -94,6 +94,77 @@ RSpec.describe Woods::Tasks do
     ensure
       ENV.delete('WOODS_OUTPUT')
     end
+
+    # #214 / B-101. Six documents claimed IndexValidator detected dimension
+    # mismatches; it never did, and nothing checked provider-vs-store width on
+    # a durable backend at all. Switching embedding_model left the old table or
+    # collection in place (both ensure_* calls are idempotent), so the run
+    # embedded everything and only then failed per-row with a server error
+    # naming no remedy.
+    describe 'dimension pre-flight' do
+      # A real Pgvector, not a double: the error message interpolates
+      # `vector_store.class`, and a double would report its own class and
+      # quietly make the assertion meaningless.
+      let(:durable_store) do
+        connection_class = Class.new do
+          def execute(_sql) = []
+          def quote(value) = "'#{value}'"
+        end
+        store = Woods::Storage::VectorStore::Pgvector.new(connection: connection_class.new, dimensions: 768)
+        allow(store).to receive(:stored_dimensions).and_return(stored_dimensions)
+        store
+      end
+      let(:stored_dimensions) { 384 }
+
+      before do
+        allow(fake_provider).to receive(:dimensions).and_return(768)
+        allow_any_instance_of(Woods::Builder).to receive(:build_vector_store).and_return(durable_store)
+      end
+
+      it 'refuses before building the indexer when the widths disagree' do
+        expect { described_class.build_embed_indexer }
+          .to raise_error(Woods::MCP::DimensionMismatch, /holds 384-dimension vectors.*produces 768/m)
+      end
+
+      it 'names both dimensions and the store in the error details' do
+        described_class.build_embed_indexer
+      rescue Woods::MCP::DimensionMismatch => e
+        expect(e.details).to include(stored_dimension: 384, provider_dimension: 768)
+        expect(e.details[:store]).to match(/Pgvector/)
+      end
+
+      it 'gives the remedy, not just the discrepancy' do
+        described_class.build_embed_indexer
+      rescue Woods::MCP::DimensionMismatch => e
+        expect(e.message).to match(/woods:extract && woods:embed/)
+      end
+
+      context 'when the widths agree' do
+        let(:stored_dimensions) { 768 }
+
+        it 'builds the indexer' do
+          expect { described_class.build_embed_indexer }.not_to raise_error
+        end
+      end
+
+      # A store that does not exist yet reports nil. That is the first-ever
+      # embed, not a mismatch.
+      context 'when the store cannot report a width' do
+        let(:stored_dimensions) { nil }
+
+        it 'builds the indexer' do
+          expect { described_class.build_embed_indexer }.not_to raise_error
+        end
+      end
+
+      # The in-memory store has no stored_dimensions at all; the dump path
+      # carries its own check in Snapshotter::Vector.
+      it 'skips stores that do not implement stored_dimensions' do
+        allow_any_instance_of(Woods::Builder).to receive(:build_vector_store).and_return(fake_vector_store)
+
+        expect { described_class.build_embed_indexer }.not_to raise_error
+      end
+    end
   end
 
   describe '.print_embed_stats' do

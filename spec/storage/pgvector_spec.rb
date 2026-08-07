@@ -311,9 +311,56 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
     end
   end
 
+  describe '#each_id' do
+    it 'selects ids without loading vectors' do
+      allow(connection).to receive(:execute).and_return([{ 'id' => 'User' }, { 'id' => 'Post#chunk_0' }])
+
+      expect(store.each_id.to_a).to eq(['User', 'Post#chunk_0'])
+      expect(connection).to have_received(:execute).with(/SELECT id FROM woods_vectors/)
+      expect(connection).not_to have_received(:execute).with(/embedding/)
+    end
+  end
+
+  describe '#stored_dimensions' do
+    # For pgvector's `vector` type, atttypmod carries the dimension directly.
+    it 'reads the width the column was created with' do
+      allow(connection).to receive(:execute).and_return([{ 'dimension' => 384 }])
+
+      expect(store.stored_dimensions).to eq(384)
+    end
+
+    it 'returns nil when the table does not exist' do
+      allow(connection).to receive(:execute).and_return([])
+
+      expect(store.stored_dimensions).to be_nil
+    end
+
+    it 'returns nil when the column reports no width' do
+      allow(connection).to receive(:execute).and_return([{ 'dimension' => -1 }])
+
+      expect(store.stored_dimensions).to be_nil
+    end
+
+    # A diagnostic must never break the pipeline it is diagnosing.
+    it 'returns nil rather than raising when the query fails' do
+      allow(connection).to receive(:execute).and_raise(StandardError, 'connection lost')
+
+      expect(store.stored_dimensions).to be_nil
+    end
+  end
+
   describe 'Interface compliance' do
     it 'includes VectorStore::Interface' do
       expect(described_class.ancestors).to include(Woods::Storage::VectorStore::Interface)
+    end
+
+    # #211 / B-108: the interface defines each_entry, so respond_to? is true
+    # for every adapter. Only the owner check distinguishes a real
+    # implementation — Indexer#persistable? depends on this being so.
+    it 'implements each_id but not each_entry' do
+      expect(described_class.instance_method(:each_id).owner).to eq(described_class)
+      expect(described_class.instance_method(:each_entry).owner)
+        .to eq(Woods::Storage::VectorStore::Interface)
     end
   end
 

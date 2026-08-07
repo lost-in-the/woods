@@ -336,6 +336,28 @@ module Woods
           end
         end
 
+        # The vector width the collection was actually created with.
+        #
+        # `ensure_collection!` is a PUT that Qdrant treats as idempotent, so an
+        # existing collection keeps whatever width it was built with; a
+        # dimension change then surfaces as a 400 on every upsert. Reading it
+        # back lets the pipeline refuse up front with a re-index remedy (#214).
+        #
+        # @return [Integer, nil] the collection's vector size, or nil when the
+        #   collection does not exist or the shape is unrecognized (named
+        #   vectors, for instance, which this adapter does not write)
+        def stored_dimensions
+          config = request(:get, "/collections/#{@collection}")
+                   .dig('result', 'config', 'params', 'vectors')
+          return nil unless config.is_a?(Hash)
+
+          size = config['size']
+          size.is_a?(Integer) && size.positive? ? size : nil
+        rescue StandardError
+          # Never let a diagnostic query break the pipeline it is diagnosing.
+          nil
+        end
+
         # Iterate over every stored id, yielding the Woods identifier.
         #
         # Uses the scroll API with `with_vector: false` and only the identifier

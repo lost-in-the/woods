@@ -139,7 +139,10 @@ bundle exec rake woods:extract   # re-extract to reset unit files
 bundle exec rake woods:embed     # re-embed all units
 ```
 
-`IndexValidator` will detect dimension mismatches and log an error on startup.
+Woods raises `Woods::MCP::DimensionMismatch` on a dimension mismatch — `rake
+woods:embed` refuses before embedding anything, and the MCP server refuses at
+boot. The message names the stored dimension, the provider dimension, and the
+remedy.
 
 ---
 

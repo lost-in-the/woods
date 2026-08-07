@@ -49,15 +49,56 @@ module Woods
       #
       # metadata_store and resolved_config are nil-safe — hosts that don't
       # configure metadata or that pre-date the persistence arc still work.
+      vector_store = builder.build_vector_store
+      verify_store_dimensions!(vector_store, provider)
+
       Embedding::Indexer.new(
         provider: resilient_provider,
         text_preparer: builder.build_text_preparer(provider),
-        vector_store: builder.build_vector_store,
+        vector_store: vector_store,
         metadata_store: config.metadata_store ? builder.build_metadata_store : nil,
         resolved_config: build_resolved_config(config, provider: provider),
         chunker: builder.build_chunker(provider),
         dump_retention_count: config.dump_retention_count,
         output_dir: ENV.fetch('WOODS_OUTPUT', config.output_dir)
+      )
+    end
+
+    # Refuse to embed into a store built for a different vector width (#214).
+    #
+    # Durable stores are created once and reused: pgvector's `ensure_schema!`
+    # is `CREATE TABLE IF NOT EXISTS` and Qdrant treats its collection PUT as
+    # idempotent, so changing `embedding_model` leaves the old width in place.
+    # Without this check the run embedded everything first and only then hit a
+    # per-row server error — `PG::DataException: expected 384 dimensions, not
+    # 768`, or a Qdrant 400 — naming no remedy.
+    #
+    # The dump path has had this check since the persistence arc
+    # ({Storage::Snapshotter::Vector} validates the WVF1 header against
+    # `resolved_config.dimension`); this extends the same guarantee to the
+    # durable backends, which had none. It is a *pre-flight* check: adapters
+    # that cannot report a width, and stores that do not exist yet, return nil
+    # and are simply not checked.
+    #
+    # @param vector_store [Object] the configured store
+    # @param provider [#dimensions] the raw (unwrapped) embedding provider
+    # @raise [Woods::MCP::DimensionMismatch] when the widths disagree
+    # @return [void]
+    def verify_store_dimensions!(vector_store, provider)
+      return unless vector_store.respond_to?(:stored_dimensions)
+      return unless provider.respond_to?(:dimensions)
+
+      stored = vector_store.stored_dimensions
+      expected = provider.dimensions
+      return if stored.nil? || expected.nil? || stored == expected
+
+      require_relative 'mcp/errors'
+      raise Woods::MCP::DimensionMismatch.new(
+        "#{vector_store.class} holds #{stored}-dimension vectors but the configured provider " \
+        "produces #{expected}. Embedding into it would fail per-row. Re-index from scratch: " \
+        'drop the vector store (woods_vectors table / Qdrant collection), then run ' \
+        'woods:extract && woods:embed.',
+        details: { stored_dimension: stored, provider_dimension: expected, store: vector_store.class.to_s }
       )
     end
 

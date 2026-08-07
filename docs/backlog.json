@@ -1410,8 +1410,8 @@
     "files": [
       "lib/woods/resilience/index_validator.rb"
     ],
-    "description": "Nothing calls it and it contains no dimension-mismatch detection, so both halves of CLAUDE.md's 'IndexValidator detects this' are false. Wire a real provider-dimensions vs store-dimensions check into the embed/boot paths, or delete the class and fix the doc. Tracked in GH #214.",
-    "status": "ready",
+    "description": "Nothing calls it and it contains no dimension-mismatch detection, so both halves of CLAUDE.md's 'IndexValidator detects this' are false. Wire a real provider-dimensions vs store-dimensions check into the embed/boot paths, or delete the class and fix the doc. Tracked in GH #214. RESOLVED: the false claim appeared in six documents (CLAUDE.md, AGENT_GUIDE, FAQ, TROUBLESHOOTING, RETRIEVAL_GUIDE, EMBEDDING_MODELS) plus the woods-diagnose skill; all corrected. IndexValidator is kept \u2014 it validates extraction-output integrity and is the oracle in multi_worktree_spec \u2014 with a class comment stating it knows nothing about vectors. The real check now exists: Pgvector#stored_dimensions (atttypmod) and Qdrant#stored_dimensions (collection config), compared against the provider by Tasks.verify_store_dimensions! before woods:embed builds an indexer, raising Woods::MCP::DimensionMismatch with the re-index remedy. Closes the durable-backend gap; the dump path already had this via Snapshotter::Vector.",
+    "status": "resolved",
     "depends_on": []
   },
   {

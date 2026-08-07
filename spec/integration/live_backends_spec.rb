@@ -372,6 +372,64 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
   end
 
+  # #214 / B-101. The pre-flight check is only worth anything if the widths it
+  # reads are the widths the servers actually enforce.
+  describe 'stored_dimensions against real backends' do
+    it 'reports the width pgvector created the column with' do
+      require 'active_record'
+      ActiveRecord::Base.establish_connection(
+        ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
+      )
+      connection = ActiveRecord::Base.connection
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384)
+      connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+      store.ensure_schema!
+
+      expect(store.stored_dimensions).to eq(384)
+
+      # The mismatch this exists to catch: ensure_schema! is CREATE TABLE IF
+      # NOT EXISTS, so a differently-configured store leaves the old width in
+      # place rather than migrating it.
+      wider = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 768)
+      wider.ensure_schema!
+
+      expect(wider.stored_dimensions).to eq(384)
+      expect { wider.store('X', Array.new(768, 0.1), {}) }.to raise_error(StandardError)
+    end
+
+    it 'returns nil when the pgvector table does not exist' do
+      require 'active_record'
+      ActiveRecord::Base.establish_connection(
+        ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
+      )
+      connection = ActiveRecord::Base.connection
+      connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384)
+
+      expect(store.stored_dimensions).to be_nil
+    end
+
+    it 'reports the width the Qdrant collection was created with' do
+      url = ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333')
+      collection = "woods_live_dims_#{ENV.fetch('GITHUB_RUN_ID', 'local')}"
+      store = Woods::Storage::VectorStore::Qdrant.new(
+        url: url, collection: collection, dimensions: 384, allow_private_hosts: true
+      )
+      reset_qdrant_collection!(url, collection, 384, store)
+
+      expect(store.stored_dimensions).to eq(384)
+    end
+
+    it 'returns nil for a Qdrant collection that does not exist' do
+      store = Woods::Storage::VectorStore::Qdrant.new(
+        url: ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'),
+        collection: 'woods_live_definitely_absent', dimensions: 3, allow_private_hosts: true
+      )
+
+      expect(store.stored_dimensions).to be_nil
+    end
+  end
+
   describe 'each_id against real backends' do
     it 'enumerates pgvector ids without loading vectors' do
       require 'active_record'

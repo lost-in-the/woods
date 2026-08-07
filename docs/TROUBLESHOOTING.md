@@ -356,7 +356,9 @@ bundle exec rake woods:extract
 bundle exec rake woods:embed
 ```
 
-`IndexValidator` detects the dimension mismatch and will warn you before queries fail. If you see the warning, re-index before the mismatch causes runtime errors.
+Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` rather than letting it become a runtime error: `rake woods:embed` refuses before embedding anything (comparing the provider's dimension against the width the `woods_vectors` table or Qdrant collection was created with), and the MCP server refuses at boot (comparing against the dump's WVF1 header). The message names both dimensions and the remedy — drop the vector store and re-index.
+
+**A dimension mismatch is never silently tolerated.** If you are getting poor results without seeing this error, the cause is something else.
 
 ---
 

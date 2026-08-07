@@ -364,8 +364,8 @@ module Woods
       # persistent shared backend (Redis/SolidCache) returns the previous
       # model's vector after a model switch or upgrade — different dimensions
       # error mid-batch, same dimensions silently corrupt similarity scores
-      # (which IndexValidator can't detect, since it checks provider-vs-store
-      # dims, not cache contents).
+      # (which the provider-vs-store dimension check can't detect, since it
+      # compares declared widths, not cache contents).
       #
       # model_name (a plain attribute) is used rather than dimensions on
       # purpose: for every supported provider the model uniquely determines
