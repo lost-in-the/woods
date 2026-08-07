@@ -1445,8 +1445,8 @@
       "lib/woods/graph_analyzer.rb",
       "lib/woods/embedding/indexer.rb"
     ],
-    "description": "Four small items from the review's low list; see the issue checklist. domain_clusters is the one analyzer output outside the determinism guarantee. Tracked in GH #216.",
-    "status": "ready",
+    "description": "Four small items from the review's low list; see the issue checklist. domain_clusters is the one analyzer output outside the determinism guarantee. Tracked in GH #216. RESOLVED: find_node_by_suffix is now backed by a memoized index on DependencyGraph (invalidated wherever @to_h is), replacing a per-operation linear scan and making a tied short name resolve deterministically; handle_case walks only the branches and reports the predicate as the condition; domain_clusters tie-breaks every max_by/min_by on identifier and sorts members/entry_points/boundary_edges, guarded by a new registration-order rotation spec (it sits outside analyze(), so the existing rotation guard could not see it); Indexer#persist_snapshot passes resolved_config so the WVF1 header records the model name.",
+    "status": "resolved",
     "depends_on": []
   },
   {

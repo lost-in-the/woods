@@ -330,5 +330,58 @@ RSpec.describe Woods::GraphAnalyzer do
 
       expect(analysis_for(units.reverse)).to eq(forward)
     end
+
+    # #216 / B-103. domain_clusters is not part of analyze(), so the rotation
+    # above could never see it — and it was the one analyzer output still
+    # decided by registration order: max_by/min_by tie-breaks picked whichever
+    # equal-scoring cluster the hash happened to enumerate first, and members,
+    # entry points and boundary edges were emitted in graph order.
+    describe 'domain_clusters' do
+      # Deliberately tie-heavy: two same-size namespaces whose members have
+      # identical connectivity, so every tie-break in the path is exercised.
+      let(:cluster_units) do
+        [
+          { type: :model, identifier: 'Billing::Invoice', dependencies: [{ type: :model, target: 'Shared::Money' }] },
+          { type: :model, identifier: 'Billing::Payment', dependencies: [{ type: :model, target: 'Shared::Money' }] },
+          { type: :model, identifier: 'Billing::Refund', dependencies: [{ type: :model, target: 'Shared::Money' }] },
+          { type: :model, identifier: 'Catalog::Item', dependencies: [{ type: :model, target: 'Shared::Money' }] },
+          { type: :model, identifier: 'Catalog::Price', dependencies: [{ type: :model, target: 'Shared::Money' }] },
+          { type: :model, identifier: 'Catalog::Stock', dependencies: [{ type: :model, target: 'Shared::Money' }] },
+          { type: :model, identifier: 'Shared::Money' },
+          { type: :model, identifier: 'Shared::Currency' },
+          { type: :model, identifier: 'Shared::Rate' }
+        ]
+      end
+
+      def clusters_for(units)
+        built = Woods::DependencyGraph.new
+        units.each { |attrs| built.register(make_unit(**attrs)) }
+        described_class.new(built).domain_clusters(min_size: 2)
+      end
+
+      it 'produces identical clusters whatever order units were registered in' do
+        forward = clusters_for(cluster_units)
+
+        expect(forward).not_to be_empty
+
+        cluster_units.each_index do |offset|
+          expect(clusters_for(cluster_units.rotate(offset))).to(
+            eq(forward),
+            "registering from index #{offset} changed the clusters — they are not a pure function of graph content"
+          )
+        end
+
+        expect(clusters_for(cluster_units.reverse)).to eq(forward)
+      end
+
+      it 'sorts members, entry points and boundary edges' do
+        clusters_for(cluster_units).each do |cluster|
+          expect(cluster[:members]).to eq(cluster[:members].sort)
+          expect(cluster[:entry_points]).to eq(cluster[:entry_points].sort)
+          boundary_keys = cluster[:boundary_edges].map { |e| [e[:from].to_s, e[:to].to_s] }
+          expect(boundary_keys).to eq(boundary_keys.sort)
+        end
+      end
+    end
   end
 end

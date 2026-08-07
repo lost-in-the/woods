@@ -33,6 +33,7 @@ module Woods
       @parser = Ast::Parser.new
       @method_extractor = Ast::MethodExtractor.new(parser: @parser)
       @operation_extractor = FlowAnalysis::OperationExtractor.new
+      @resolved_targets = {}
     end
 
     # Assemble an execution flow from the given entry point.
@@ -229,7 +230,19 @@ module Woods
     #
     # @param target [String] The call target name to resolve
     # @return [String, nil] The resolved unit identifier, or nil if not found
+    # Memoized per assembler instance, and negative results are cached too
+    # (`nil` is a real answer — most call targets are not units). Resolution
+    # used to run a linear suffix scan over every graph node *and*, on a miss,
+    # a set of disk globs, once per operation encountered. A flow touching a
+    # few hundred operations on a host with tens of thousands of nodes paid
+    # that every time, including for the same target repeatedly.
     def resolve_target(target)
+      return @resolved_targets[target] if @resolved_targets.key?(target)
+
+      @resolved_targets[target] = compute_resolved_target(target)
+    end
+
+    def compute_resolved_target(target)
       # Tier 1: Graph-wide lookup
       return target if @graph.node_exists?(target)
 

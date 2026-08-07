@@ -154,6 +154,53 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       expect(cond[:else_ops].size).to be >= 1
     end
 
+    # #216 / B-103. `handle_case` walked every child, so a call in the
+    # predicate — the thing being switched *on* — was reported as an operation
+    # performed inside a branch, and the condition was the entire multi-line
+    # case statement rather than the one expression.
+    describe 'case statements' do
+      let(:case_source) do
+        <<~RUBY
+          def route
+            case Classifier.classify(payload)
+            when :urgent
+              UrgentWorker.perform_async(payload.id)
+            when :normal
+              NormalWorker.perform_async(payload.id)
+            else
+              render_unprocessable_entity(payload)
+            end
+          end
+        RUBY
+      end
+
+      it 'records the predicate as the condition, not the whole statement' do
+        cond = extract_method_ops(case_source, 'route').find { |o| o[:type] == :conditional }
+
+        expect(cond[:kind]).to eq('case')
+        # `to_source` renders the receiver and method, not the arguments —
+        # same shape handle_conditional produces for an `if`.
+        expect(cond[:condition]).to eq('Classifier.classify')
+        # The point of the fix: one expression, not the whole case statement.
+        expect(cond[:condition].lines.size).to eq(1)
+        expect(cond[:condition]).not_to include('when')
+      end
+
+      it 'does not count the predicate call as a branch operation' do
+        cond = extract_method_ops(case_source, 'route').find { |o| o[:type] == :conditional }
+        branch_targets = cond[:then_ops].map { |o| o[:target] }
+
+        expect(branch_targets).to include('UrgentWorker', 'NormalWorker')
+        expect(branch_targets).not_to include('Classifier')
+      end
+
+      it 'still extracts the branch operations themselves' do
+        cond = extract_method_ops(case_source, 'route').find { |o| o[:type] == :conditional }
+
+        expect(cond[:then_ops].map { |o| o[:type] }).to include(:async, :response)
+      end
+    end
+
     it 'skips conditionals with no significant ops' do
       source = <<~RUBY
         def show

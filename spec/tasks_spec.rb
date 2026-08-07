@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
 require 'woods'
 require 'woods/tasks'
 
@@ -12,13 +13,25 @@ RSpec.describe Woods::Tasks do
     let(:fake_chunker) { instance_double(Woods::Chunking::SemanticChunker) }
     let(:captured) { {} }
 
-    # Guard against random-seed ordering: this spec file mocks at the
-    # Builder level, which needs Woods.configuration to be non-nil when
-    # build_embed_indexer runs. Other specs in the suite happen to call
-    # Woods.configure, but we cannot rely on order — Ruby 3.1 CI already
-    # tripped on this under a different seed.
+    # These examples mutate the *global* Woods.configuration, so they restore
+    # it. Without that, `output_dir` leaked into every spec that ran afterwards
+    # in the same process — and `spec/mcp/server_spec.rb` mkdirs that path for
+    # its pipeline lock, so under some random seeds it tried to create a
+    # hardcoded /tmp directory and cascaded five failures out of an unrelated
+    # file. The paths below are under Dir.tmpdir for the same reason: a
+    # hardcoded /tmp is not writable everywhere the suite runs.
+    around do |example|
+      previous = Woods.configuration
+      example.run
+    ensure
+      Woods.configuration = previous
+    end
+
     before do
-      Woods.configure { |c| c.output_dir ||= '/tmp/woods-tasks-default' }
+      # This file mocks at the Builder level, which needs Woods.configuration
+      # to be non-nil when build_embed_indexer runs. Other specs happen to call
+      # Woods.configure, but order is random — Ruby 3.1 CI tripped on this once.
+      Woods.configure { |c| c.output_dir ||= File.join(Dir.tmpdir, 'woods-tasks-default') }
 
       allow_any_instance_of(Woods::Builder).to receive(:build_embedding_provider).and_return(fake_provider)
       allow_any_instance_of(Woods::Builder).to receive(:build_vector_store).and_return(fake_vector_store)
@@ -77,20 +90,22 @@ RSpec.describe Woods::Tasks do
     end
 
     it 'uses config.output_dir by default' do
-      Woods.configure { |c| c.output_dir = '/tmp/woods-tasks-spec' }
+      configured = File.join(Dir.tmpdir, 'woods-tasks-spec')
+      Woods.configure { |c| c.output_dir = configured }
 
       described_class.build_embed_indexer
 
-      expect(captured[:output_dir]).to eq('/tmp/woods-tasks-spec')
+      expect(captured[:output_dir]).to eq(configured)
     end
 
     it 'prefers WOODS_OUTPUT env var over config.output_dir' do
-      Woods.configure { |c| c.output_dir = '/tmp/config-output' }
-      ENV['WOODS_OUTPUT'] = '/tmp/env-output'
+      Woods.configure { |c| c.output_dir = File.join(Dir.tmpdir, 'woods-config-output') }
+      env_output = File.join(Dir.tmpdir, 'woods-env-output')
+      ENV['WOODS_OUTPUT'] = env_output
 
       described_class.build_embed_indexer
 
-      expect(captured[:output_dir]).to eq('/tmp/env-output')
+      expect(captured[:output_dir]).to eq(env_output)
     ensure
       ENV.delete('WOODS_OUTPUT')
     end

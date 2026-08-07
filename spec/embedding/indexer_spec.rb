@@ -701,6 +701,21 @@ RSpec.describe Woods::Embedding::Indexer do
       persistent_indexer.index_all
     end
 
+    # #216 / B-103. The dump signature takes resolved_config so the WVF1 header
+    # can record which model produced the vectors; the Indexer never passed it,
+    # so every dump on disk carried an empty model name and could not
+    # self-describe.
+    it 'passes resolved_config through so the dump header records the model' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+
+      expect(vector_snapshotter).to receive(:dump) do |_store, _artifact, _dump_dir, **kwargs|
+        expect(kwargs[:resolved_config]).to be(resolved_config)
+      end
+
+      persistent_indexer.index_all
+    end
+
     it 'writes woods.json to output_dir after a successful run' do
       stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
       stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)

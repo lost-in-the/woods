@@ -139,16 +139,10 @@ module Woods
 
         return if then_ops.empty? && else_ops.empty?
 
-        condition_text = if children[0].is_a?(Ast::Node)
-                           children[0].to_source
-                         elsif children[0].is_a?(String)
-                           children[0]
-                         end
-
         operations << {
           type: :conditional,
           kind: 'if',
-          condition: condition_text || node.source,
+          condition: condition_source(children[0]) || node.source,
           line: node.line,
           then_ops: then_ops,
           else_ops: else_ops
@@ -156,21 +150,39 @@ module Woods
       end
 
       # Handle :case nodes as a conditional variant.
+      #
+      # A case node is `(case predicate when… else)`, so children[0] is the
+      # predicate and the branches follow it. Walking *all* children counted
+      # any call in the predicate — `case user.role` — as an operation
+      # performed inside a branch, and reporting `node.source` as the condition
+      # meant the whole multi-line statement stood in for the one expression
+      # being switched on. Mirrors {#handle_conditional}.
       def handle_case(node, operations)
-        # Treat case as a conditional - extract ops from all branches
+        children = node.children || []
         branch_ops = []
-        walk_children(node, branch_ops)
+        children.drop(1).each { |child| walk(child, branch_ops) if child.is_a?(Ast::Node) }
 
         return if branch_ops.empty?
 
         operations << {
           type: :conditional,
           kind: 'case',
-          condition: node.source,
+          condition: condition_source(children[0]) || node.source,
           line: node.line,
           then_ops: branch_ops,
           else_ops: []
         }
+      end
+
+      # Source text for a conditional's predicate child, which the parser may
+      # hand back as a node or as an already-rendered string.
+      #
+      # @param child [Ast::Node, String, nil]
+      # @return [String, nil]
+      def condition_source(child)
+        return child.to_source if child.is_a?(Ast::Node)
+
+        child if child.is_a?(String)
       end
 
       # Detect transaction/with_lock calls.

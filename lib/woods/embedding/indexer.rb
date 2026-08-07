@@ -766,7 +766,11 @@ module Woods
         artifact = IndexArtifact.new(@output_dir)
         dump_dir = unique_dump_dir(artifact)
 
-        Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir)
+        # Pass resolved_config: the WVF1 header carries a model_name field, and
+        # omitting it wrote an empty string into every dump — so the artifact
+        # could not say which model produced it, and any check that wants to
+        # compare a dump against the configured provider has nothing to read.
+        Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir, resolved_config: @resolved_config)
 
         if @metadata_store.respond_to?(:each_entry) && @metadata_store.respond_to?(:bulk_load)
           Storage::Snapshotter::Metadata.dump(@metadata_store, artifact, dump_dir)

@@ -212,7 +212,7 @@ module Woods
       # Sort by member count descending
       clusters.values
               .select { |c| c[:members].any? }
-              .sort_by { |c| -c[:member_count] }
+              .sort_by { |c| [-c[:member_count], c[:name].to_s] }
     end
 
     # Full analysis report combining all structural metrics.
@@ -307,7 +307,10 @@ module Woods
 
       return nil if connections.empty?
 
-      connections.max_by { |_, count| count }.first
+      # Tie-break on cluster name. `max_by` alone returns whichever equal-count
+      # cluster the hash happened to enumerate first, which is registration
+      # order — the one determinism hole left in this class.
+      connections.max_by { |name, count| [count, name] }.first
     end
 
     # Merge clusters smaller than min_size into their most-connected neighbor.
@@ -317,7 +320,7 @@ module Woods
         break if small.empty?
 
         # Merge the smallest cluster first
-        name, cluster = small.min_by { |_, c| c[:members].size }
+        name, cluster = small.min_by { |cluster_name, c| [c[:members].size, cluster_name] }
 
         # Find which other cluster this one connects to most
         target = find_merge_target(cluster, clusters, name)
@@ -346,17 +349,26 @@ module Woods
 
       return nil if connections.empty?
 
-      connections.max_by { |_, count| count }.first
+      # Tie-break on cluster name. `max_by` alone returns whichever equal-count
+      # cluster the hash happened to enumerate first, which is registration
+      # order — the one determinism hole left in this class.
+      connections.max_by { |name, count| [count, name] }.first
     end
 
     # Enrich clusters with hub, entry points, boundary edges, and type breakdown.
     def enrich_clusters(clusters, nodes, pagerank_scores)
       clusters.each_value do |cluster|
-        members = cluster[:members]
+        # Sorted, like orphans/dead_ends/hubs. Members accumulate in graph
+        # registration order, and an incremental run appends where a full
+        # extraction interleaves by extractor — so an unsorted list publishes
+        # a different cluster for an identical graph. Everything derived below
+        # (entry points, boundary edges) inherits this order too.
+        members = cluster[:members].sort
+        cluster[:members] = members
         member_set = cluster[:member_set]
 
         # Hub: highest PageRank within the cluster
-        hub_id = members.max_by { |id| pagerank_scores[id] || 0 }
+        hub_id = members.max_by { |id| [pagerank_scores[id] || 0, id] }
         cluster[:hub] = hub_id
 
         # Entry points: controllers and GraphQL resolvers in the cluster's dependents
@@ -368,7 +380,7 @@ module Woods
             entry_points.add(dep) if meta && entry_types.include?(meta[:type].to_s)
           end
         end
-        cluster[:entry_points] = entry_points.to_a
+        cluster[:entry_points] = entry_points.to_a.sort
 
         # Boundary edges: connections that cross cluster boundaries
         boundary = []
@@ -392,7 +404,8 @@ module Woods
           end
         end
         # Deduplicate and limit boundary edges
-        cluster[:boundary_edges] = boundary.uniq { |e| [e[:from], e[:to]] }.first(20)
+        cluster[:boundary_edges] = boundary.uniq { |e| [e[:from], e[:to]] }
+                                           .sort_by { |e| [e[:from].to_s, e[:to].to_s] }.first(20)
 
         # Type breakdown
         type_counts = members.each_with_object(Hash.new(0)) do |id, counts|
