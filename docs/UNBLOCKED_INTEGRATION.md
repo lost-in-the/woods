@@ -256,8 +256,14 @@ pushes only the documents whose content actually changed.
 
 ## Troubleshooting
 
-**"daily budget exhausted"** — You've hit the 1,000 call/day limit. Wait until
-midnight PST or use a Team Access Token if higher limits are available.
+**"call budget exhausted for this run"** — The per-run cap
+(`UNBLOCKED_DAILY_BUDGET`, default 1000) stopped the sync. This is a guard rail
+against one run spending the whole allowance; it is **not** a reading of what
+your token has left. The real 1,000 call/day limit is enforced server-side and
+resets at midnight PST, so a fresh run starts the local counter at zero
+regardless of what earlier runs (or other machines sharing the token) consumed.
+Raise the cap if a legitimate cold sync needs more, or use a Team Access Token
+if higher server-side limits are available.
 
 **"Unblocked API error 401"** — Check your API token. Personal tokens are scoped
 to your account; Team tokens access all team data.

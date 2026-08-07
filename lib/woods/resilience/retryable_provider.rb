@@ -172,7 +172,7 @@ module Woods
         header = error.respond_to?(:retry_after) ? error.retry_after : nil
         return fallback if header.nil?
 
-        [RetryAfter.seconds(header, fallback: fallback), MAX_RETRY_AFTER_SECONDS].min
+        RetryAfter.seconds(header, fallback: fallback, max: MAX_RETRY_AFTER_SECONDS)
       end
 
       # Full-jitter exponential backoff with a hard cap. See "Exponential

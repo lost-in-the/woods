@@ -1463,8 +1463,8 @@
       "lib/woods/unblocked/document_builder.rb",
       "lib/woods/notion/exporter.rb"
     ],
-    "description": "Five residual hardening items after the PR #210 idempotency/corruption/change-detection work; see the issue checklist. Tracked in GH #217.",
-    "status": "ready",
+    "description": "Five residual hardening items after the PR #210 idempotency/corruption/change-detection work; see the issue checklist. Tracked in GH #217. RESOLVED: the Unblocked budget is now honestly documented as a per-run cap (the real limit is server-side against a token shared across machines, so a persisted local counter would be wrong in both directions while looking authoritative); the Unblocked client redacts its bearer token on all three error paths, matching Notion; RetryAfter owns a 120s cap so every caller including both export clients gets it; DocumentBuilder cites the ref from the index manifest instead of a hardcoded main and percent-encodes path segments; Notion raises a typed AuthenticationError on 401/403 which the exporter re-raises instead of collecting per unit.",
+    "status": "resolved",
     "depends_on": []
   },
   {

@@ -9,6 +9,16 @@ require_relative 'rate_limiter'
 
 module Woods
   module Notion
+    # Raised on a 401/403 from the Notion API.
+    #
+    # A distinct class because authentication failure is not a per-unit
+    # problem: a bad or unshared token dooms every remaining call in the run.
+    # Without it the exporter's per-unit rescue recorded one error per unit and
+    # kept going, so a wrong token spent the entire cold sync at Notion's 3
+    # req/sec before reporting failure for everything. Subclasses
+    # {Woods::Error}, so existing `rescue Woods::Error` sites are unaffected.
+    class AuthenticationError < Woods::Error; end
+
     # Thin wrapper around the Notion REST API (v2022-06-28).
     #
     # Uses Net::HTTP (stdlib) for zero external dependencies. All requests are
@@ -24,6 +34,11 @@ module Woods
       NOTION_VERSION = '2022-06-28'
       MAX_RETRIES = 3
       DEFAULT_TIMEOUT = 30
+
+      # Statuses that mean the credential itself is the problem, so no later
+      # request in this run can succeed either. Response codes arrive as
+      # strings from Net::HTTP.
+      AUTH_STATUS_CODES = %w[401 403].freeze
 
       # HTTP methods safe to retry after *any* transient network failure —
       # repeating an idempotent request cannot double-apply an operation.
@@ -243,7 +258,8 @@ module Woods
           { 'message' => "Unparseable response body: #{response.body&.slice(0, 200)}" }
         end
         message = parsed['message'] || 'Unknown error'
-        raise Woods::Error,
+        error_class = AUTH_STATUS_CODES.include?(response.code) ? AuthenticationError : Woods::Error
+        raise error_class,
               "Notion API error #{response.code}: #{redact_token(message)}"
       end
 

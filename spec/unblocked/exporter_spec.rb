@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'woods'
 require 'woods/unblocked/exporter'
+require 'woods/mcp/index_reader'
 
 RSpec.describe Woods::Unblocked::Exporter do
   around do |example|
@@ -15,16 +16,20 @@ RSpec.describe Woods::Unblocked::Exporter do
 
   let(:stub_config) do
     instance_double(
-      'Woods::Configuration',
+      Woods::Configuration,
       unblocked_collection_id: 'col-1',
       unblocked_repo_url: 'https://github.com/org/repo',
       unblocked_api_token: 'ubk_token'
     )
   end
 
+  # Verifying doubles against the real constants, not string names: a
+  # string-named double verifies nothing at all, which is how a collaborator
+  # can grow a method the spec never models (#219).
   let(:reader) do
-    instance_double('Woods::MCP::IndexReader').tap do |r|
+    instance_double(Woods::MCP::IndexReader).tap do |r|
       allow(r).to receive(:list_units).and_return([])
+      allow(r).to receive(:manifest).and_return({ 'git_branch' => 'main' })
     end
   end
 

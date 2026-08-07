@@ -294,6 +294,25 @@ RSpec.describe Woods::Notion::Exporter do
       expect(stats[:errors].first).to include('User')
     end
 
+    # #217 / B-104. An authentication failure is not a per-unit problem: a bad
+    # or unshared token dooms every remaining call. Collecting it per unit meant
+    # a wrong token spent the entire cold sync at Notion's 3 req/sec before
+    # reporting failure for everything.
+    it 'aborts the run on an authentication failure instead of collecting it per unit' do
+      allow(client).to receive(:find_page_by_title)
+        .and_raise(Woods::Notion::AuthenticationError, 'Notion API error 401: API token is invalid.')
+
+      expect { exporter.sync_data_models }.to raise_error(Woods::Notion::AuthenticationError, /401/)
+    end
+
+    it 'stops after the first unit rather than trying the rest' do
+      allow(client).to receive(:find_page_by_title)
+        .and_raise(Woods::Notion::AuthenticationError, 'Notion API error 401: API token is invalid.')
+
+      expect { exporter.sync_data_models }.to raise_error(Woods::Notion::AuthenticationError)
+      expect(client).to have_received(:find_page_by_title).once
+    end
+
     it 'enriches models with migration dates' do
       created_properties = []
       allow(client).to receive(:create_page) do |args|

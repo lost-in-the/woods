@@ -942,7 +942,11 @@ namespace :woods do
       # post-merge pipelines (a dead token would otherwise stay green forever).
       # Exception: budget exhaustion *with* partial progress is the expected
       # cold-start shape; it converges on the next run.
-      budget_only = stats[:errors].all? { |e| e.include?('daily budget exhausted') }
+      # Matched on the message because errors reach here as strings, not
+      # exceptions. `budget exhausted` is the stable part of
+      # BudgetExhaustedError's message — spec/unblocked/rate_limiter_spec.rb
+      # pins it so this branch cannot be silently broken by a rewording.
+      budget_only = stats[:errors].all? { |e| e.include?('budget exhausted') }
       unless budget_only && stats[:synced].positive?
         puts
         puts 'Sync completed with errors — failing so CI surfaces it.'

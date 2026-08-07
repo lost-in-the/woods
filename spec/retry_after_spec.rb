@@ -44,4 +44,39 @@ RSpec.describe Woods::RetryAfter do
       expect(described_class.seconds('soon-ish', fallback: 9)).to eq(9.0)
     end
   end
+
+  # #217 / B-104. The header is server-controlled and nothing stops it saying
+  # `86400`. An export client that slept for exactly as long as it was told
+  # would sit in `sleep` for a day, so a buggy or hostile 429 could park a sync
+  # indefinitely. The embedding providers already capped at 120s (#188); the
+  # cap now lives here so every caller gets it.
+  describe 'capping' do
+    it 'caps an absurd delta-seconds value at MAX_SECONDS' do
+      expect(described_class.seconds('86400', fallback: 1)).to eq(described_class::MAX_SECONDS)
+    end
+
+    it 'caps an absurd HTTP-date value' do
+      now = Time.utc(2026, 1, 1, 0, 0, 0)
+      next_week = (now + (7 * 24 * 60 * 60)).httpdate
+
+      expect(described_class.seconds(next_week, fallback: 1, now: now))
+        .to eq(described_class::MAX_SECONDS)
+    end
+
+    it 'leaves a reasonable value untouched' do
+      expect(described_class.seconds('30', fallback: 1)).to eq(30.0)
+    end
+
+    it 'caps the fallback too, so a caller cannot smuggle a huge wait past it' do
+      expect(described_class.seconds(nil, fallback: 100_000)).to eq(described_class::MAX_SECONDS)
+    end
+
+    it 'honours the header uncapped when explicitly asked' do
+      expect(described_class.seconds('86400', fallback: 1, max: Float::INFINITY)).to eq(86_400.0)
+    end
+
+    it 'exposes the uncapped value via raw_seconds' do
+      expect(described_class.raw_seconds('86400', fallback: 1)).to eq(86_400.0)
+    end
+  end
 end
