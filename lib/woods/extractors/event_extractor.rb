@@ -102,9 +102,30 @@ module Woods
           end
         end
 
+        # `.on(:sym)` is far too common a shape to treat as evidence on its own:
+        # `socket.on(:message)`, `emitter.on(:close)`, and every other
+        # callback-registration API in the ecosystem match it, each minting a
+        # phantom event unit and its edges. Publishers were already gated on
+        # Wisper context in the file; subscribers were not. Require the file to
+        # mention Wisper somewhere before believing a bare `.on`.
+        return unless wisper_context?(source)
+
         source.scan(/\.on\s*\(\s*:(\w+)/) do |m|
           register_subscriber(event_map, m[0], file_path, :wisper)
         end
+      end
+
+      # Does this file give any indication it is using Wisper?
+      #
+      # Deliberately broader than the publisher gate's `include Wisper` —
+      # subscribers commonly live in files that reference Wisper without
+      # including it (`Wisper.subscribe(listener)`, `extend
+      # Wisper::Publisher`, a global-listener initializer).
+      #
+      # @param source [String] Ruby source code
+      # @return [Boolean]
+      def wisper_context?(source)
+        source.match?(/\bWisper\b/)
       end
 
       # ──────────────────────────────────────────────────────────────────────

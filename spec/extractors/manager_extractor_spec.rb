@@ -100,6 +100,37 @@ RSpec.describe Woods::Extractors::ManagerExtractor do
       expect(unit.metadata[:public_methods]).not_to include('calculate_subtotal')
     end
 
+    # #215 / B-102. String#capitalize upcases the first character and downcases
+    # the rest, so `order_item` became `Order_item` — a constant no model has,
+    # leaving a dangling dependency edge instead of one to OrderItem.
+    it 'camelizes a multi-word constructor param into the wrapped model' do
+      path = create_file('app/managers/order_item_manager.rb', <<~RUBY)
+        class OrderItemManager < SimpleDelegator
+          def initialize(order_item)
+            @order_item = order_item
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_manager_file(path)
+
+      expect(unit.metadata[:wrapped_model]).to eq('OrderItem')
+    end
+
+    it 'camelizes a multi-word super() argument into the wrapped model' do
+      path = create_file('app/managers/line_item_manager.rb', <<~RUBY)
+        class LineItemManager < SimpleDelegator
+          def initialize(line_item)
+            super(line_item)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_manager_file(path)
+
+      expect(unit.metadata[:wrapped_model]).to eq('LineItem')
+    end
+
     it 'extracts DelegateClass metadata' do
       path = create_file('app/managers/user_manager.rb', <<~RUBY)
         class UserManager < DelegateClass(User)

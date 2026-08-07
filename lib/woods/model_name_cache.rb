@@ -77,10 +77,28 @@ module Woods
 
       private
 
+      # Abstract models are excluded. `ApplicationRecord` is a descendant of
+      # `ActiveRecord::Base` and its name appears in virtually every model file
+      # (`class User < ApplicationRecord`), so including it in the scan regex
+      # wired a `:code_reference` edge from nearly every model to it — graph
+      # noise that also inflated its PageRank into the top ranks, where it
+      # displaced real hubs in retrieval ranking.
+      #
+      # `abstract_class?` is guarded: a descendant that raises on it (a
+      # half-loaded class under the NameError fallback) is kept rather than
+      # dropped, since a phantom edge is a smaller error than a missing model.
       def compute_model_names
         return [] unless defined?(ActiveRecord::Base)
 
-        ActiveRecord::Base.descendants.filter_map(&:name).uniq
+        ActiveRecord::Base.descendants.reject { |klass| abstract_model?(klass) }.filter_map(&:name).uniq
+      end
+
+      # @param klass [Class]
+      # @return [Boolean] true when the class is an abstract AR base class
+      def abstract_model?(klass)
+        klass.respond_to?(:abstract_class?) && klass.abstract_class?
+      rescue StandardError
+        false
       end
 
       def build_regex

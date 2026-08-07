@@ -215,9 +215,11 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(units.first.identifier).to eq('order_completed')
     end
 
-    it 'detects .on(:event_name) as subscribers' do
+    it 'detects .on(:event_name) as subscribers in a file with Wisper context' do
       create_file('app/controllers/orders_controller.rb', <<~RUBY)
         class OrdersController < ApplicationController
+          include Wisper::Publisher
+
           def create
             order_service.on(:order_created) { |order| redirect_to order }
             order_service.call
@@ -228,6 +230,37 @@ RSpec.describe Woods::Extractors::EventExtractor do
       units = described_class.new.extract_all
       expect(units.size).to eq(1)
       expect(units.first.identifier).to eq('order_created')
+    end
+
+    # #215 / B-102. `.on(:sym)` is a generic callback-registration shape —
+    # sockets, emitters, pub/sub clients all use it. Registering every match as
+    # a Wisper subscriber minted phantom event units and their edges. Publishers
+    # were already gated on Wisper context; subscribers were not.
+    it 'ignores .on(:symbol) in a file with no Wisper context' do
+      create_file('app/services/socket_client.rb', <<~RUBY)
+        class SocketClient
+          def connect
+            socket.on(:message) { |payload| handle(payload) }
+            socket.on(:close) { reconnect }
+          end
+        end
+      RUBY
+
+      expect(described_class.new.extract_all).to be_empty
+    end
+
+    it 'accepts Wisper context expressed without include' do
+      create_file('app/listeners/order_listener.rb', <<~RUBY)
+        class OrderListener
+          def self.register(publisher)
+            Wisper.subscribe(new)
+            publisher.on(:order_created) { |o| track(o) }
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to eq(['order_created'])
     end
 
     it 'does not detect publish without Wisper context' do
@@ -273,6 +306,7 @@ RSpec.describe Woods::Extractors::EventExtractor do
 
     it 'records subscriber file paths in metadata for Wisper' do
       subscriber_path = create_file('app/controllers/orders_controller.rb', <<~RUBY)
+        include Wisper::Publisher
         order_service.on(:order_created) { |o| }
       RUBY
 

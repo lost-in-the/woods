@@ -76,10 +76,19 @@ module Woods
         source.lines.each_with_index do |line, index|
           stripped = line.strip
 
-          # Factory definition — push new factory onto stack
+          # Factory definition. A factory with a block goes on the stack and is
+          # completed when its `end` brings depth back; a blockless one —
+          # `factory :admin, parent: :user` — has nothing to wait for and is
+          # complete as soon as it is parsed. Requiring a block used to drop
+          # those silently, which is the very shape the parent-inheritance
+          # parsing below exists to support.
           if (factory_data = match_factory(stripped, depth, index + 1))
-            factory_stack.push(factory_data)
-            depth += 1
+            if opens_block?(stripped)
+              factory_stack.push(factory_data)
+              depth += 1
+            else
+              completed << factory_data
+            end
             next
           end
 
@@ -150,13 +159,17 @@ module Woods
       #   factory :name, class: ClassName do
       #   factory :name, class: 'ClassName' do
       #   factory :name, parent: :other do
+      #   factory :name, parent: :other        # blockless
+      #
+      # Whether the line opens a block is the caller's concern — see
+      # {#parse_factories}.
       #
       # @param line [String] Stripped source line
       # @param depth [Integer] Current block depth when factory would be opened
       # @param line_number [Integer] 1-based line number
       # @return [Hash, nil] Initialized factory data or nil if not a factory line
       def match_factory(line, depth, line_number)
-        return nil unless line.match?(/\Afactory\s+:/) && line.match?(/\bdo\b/)
+        return nil unless line.match?(/\Afactory\s+:/)
 
         name_match = line.match(/\Afactory\s+:(\w+)/)
         return nil unless name_match
@@ -192,6 +205,19 @@ module Woods
       # @return [String] CamelCase class name (e.g., "AdminUser")
       def classify(name)
         name.split('_').map(&:capitalize).join
+      end
+
+      # Does this factory line open a `do` block?
+      #
+      # Separate from {#block_opener?}, which deliberately excludes factory
+      # lines so they can carry their own depth bookkeeping. A factory without
+      # a block (`factory :admin, parent: :user`) is complete on the line it
+      # appears and must not push a frame nothing will pop.
+      #
+      # @param stripped [String] Stripped line content
+      # @return [Boolean]
+      def opens_block?(stripped)
+        stripped.match?(/\bdo\b/)
       end
 
       # Check if a stripped line opens a new block.

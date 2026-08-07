@@ -1428,8 +1428,8 @@
       "lib/woods/extractors/event_extractor.rb",
       "lib/woods/extractors/manager_extractor.rb"
     ],
-    "description": "Five independent small defects from the review's low list; fix + regression spec each. See the issue checklist. Tracked in GH #215.",
-    "status": "ready",
+    "description": "Five independent small defects from the review's low list; fix + regression spec each. See the issue checklist. Tracked in GH #215. RESOLVED: all five fixed with regression specs (blockless factories now parse without pushing an unmatched depth frame; ModelNameCache rejects abstract_class? models; extract_public_methods skips `private def`/`protected def` without disturbing section state; Wisper subscriber scanning is gated on the file mentioning Wisper at all, so socket.on(:message) no longer mints phantom events; manager wrapped-model derivation camelizes instead of capitalizing).",
+    "status": "resolved",
     "depends_on": []
   },
   {
