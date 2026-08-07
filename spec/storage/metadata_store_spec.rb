@@ -4,12 +4,16 @@ require 'spec_helper'
 require 'woods/storage/metadata_store'
 
 RSpec.describe Woods::Storage::MetadataStore do
-  # B-097 / #209 — hardened #search: field names are whitelist-validated
-  # (the SQLite adapter interpolates them into a json_extract JSON-path
-  # literal) and LIKE metacharacters in the query match literally. Both
-  # adapters must agree on these observable behaviors so Builder can swap
-  # them freely. (Known, deliberate divergence NOT covered here: InMemory is
-  # case-sensitive while SQLite LIKE is ASCII case-insensitive.)
+  # The #search contract every adapter must honour — see the doc comment on
+  # MetadataStore::Interface#search. Builder swaps these adapters freely, so a
+  # behavioural difference means the same query returns different results
+  # depending on which backend a host configured.
+  #
+  # B-097 / #209 covered field-name validation and LIKE metacharacters.
+  # #218 / B-105 closed the remaining divergence: InMemory was case-sensitive
+  # (String#include?) while SQLite was ASCII case-insensitive (LIKE). Both are
+  # case-insensitive now, and the whole contract is pinned here rather than
+  # documented as a known difference.
   shared_examples 'hardened search' do
     describe 'search hardening (B-097 / #209)' do
       before do
@@ -52,6 +56,42 @@ RSpec.describe Woods::Storage::MetadataStore do
       it 'treats metacharacters literally on the all-fields path too' do
         ids = store.search('user_name').map { |r| r['id'] }
         expect(ids).to eq(['Snake'])
+      end
+    end
+
+    describe 'search semantics (#218 / B-105)' do
+      before do
+        store.store('Invoice', { type: 'model', description: 'Handles Billing And Payments' })
+      end
+
+      it 'matches case-insensitively when the query is lowercase' do
+        ids = store.search('billing', fields: ['description']).map { |r| r['id'] }
+        expect(ids).to eq(['Invoice'])
+      end
+
+      it 'matches case-insensitively when the stored value differs in case' do
+        ids = store.search('HANDLES', fields: ['description']).map { |r| r['id'] }
+        expect(ids).to eq(['Invoice'])
+      end
+
+      it 'matches case-insensitively on the all-fields path' do
+        ids = store.search('bILLing').map { |r| r['id'] }
+        expect(ids).to eq(['Invoice'])
+      end
+
+      it 'matches a substring rather than requiring a whole word' do
+        ids = store.search('ayment', fields: ['description']).map { |r| r['id'] }
+        expect(ids).to eq(['Invoice'])
+      end
+
+      # fields: nil serializes the record, so keys are part of the haystack.
+      it 'can match a field name on the all-fields path' do
+        ids = store.search('description').map { |r| r['id'] }
+        expect(ids).to eq(['Invoice'])
+      end
+
+      it 'returns nothing when the query matches no record' do
+        expect(store.search('nonexistent-token', fields: ['description'])).to be_empty
       end
     end
   end

@@ -53,15 +53,21 @@ module Woods
         end
       end
 
-      # Count keyword occurrences across low-scoring query texts.
+      # Count how many low-scoring *queries* mention each keyword.
+      #
+      # Deliberately one vote per query, not per occurrence: counting
+      # occurrences let a single query reading "user user user user" clear a
+      # threshold of four on its own, and made every reported count larger
+      # than the number of queries it summarized — which is what the
+      # description string claims to be reporting.
       #
       # @param ratings [Array<Hash>] Low-score rating entries
-      # @return [Hash<String, Integer>] Keyword => occurrence count
+      # @return [Hash<String, Integer>] Keyword => number of queries mentioning it
       def count_keywords(ratings)
         counts = Hash.new(0)
         ratings.each do |rating|
           words = rating['query'].to_s.downcase.split(/\W+/).reject { |w| w.length < 3 }
-          words.each { |w| counts[w] += 1 }
+          words.uniq.each { |w| counts[w] += 1 }
         end
         counts
       end

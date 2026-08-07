@@ -1481,7 +1481,7 @@
       "lib/woods/feedback/gap_detector.rb",
       "lib/woods/session_tracer/redis_store.rb"
     ],
-    "description": "Grouped low-severity residuals; the IndexReader item is the documented benign remainder of #150 item 1. See the issue checklist. Tracked in GH #218.",
+    "description": "Grouped low-severity residuals; the IndexReader item is the documented benign remainder of #150 item 1. See the issue checklist. Tracked in GH #218. PARTIAL (#218): ranker chunk-suffix, metadata search-semantics contract, IndexReader LRU synchronization, GapDetector query counting and RedisStore recency all fixed. The QuerySet intent/scope taxonomy item is handled with B-099/#212, which is where the harness that consumes it lives.",
     "status": "ready",
     "depends_on": []
   },

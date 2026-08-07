@@ -77,6 +77,28 @@ module Woods
 
         # Search metadata by text query across specified fields.
         #
+        # **Contract every adapter must honour** (pinned by the
+        # `'hardened search'` shared examples in
+        # spec/storage/metadata_store_spec.rb, which run against every
+        # adapter — they were substitutable in name only until the semantics
+        # were written down):
+        #
+        # - **Substring match**, not word or prefix match.
+        # - **Case-insensitive.** InMemory used a case-sensitive
+        #   `String#include?` while SQLite used `LIKE`, so the same query
+        #   returned different results depending on the configured backend.
+        #   Case-insensitive is both the search-like expectation and what the
+        #   durable adapter already did. (SQLite's `LIKE` folds ASCII only, so
+        #   non-ASCII case folding remains backend-specific — do not rely on
+        #   it either way.)
+        # - **`fields: nil` searches the whole record**, including keys, as
+        #   serialized JSON. A query can therefore match a field *name*.
+        # - **LIKE metacharacters are literal.** `%` and `_` in a query match
+        #   themselves rather than acting as wildcards.
+        # - Field names are validated against {SEARCH_FIELD_NAME} by every
+        #   adapter, so a hostile name raises the same ArgumentError
+        #   everywhere.
+        #
         # @param query [String] Text to search for
         # @param fields [Array<String>, nil] Specific fields to search (nil = all)
         # @return [Array<Hash>] Matching metadata records
@@ -186,10 +208,14 @@ module Woods
         # @raise [ArgumentError] if a field name fails {SEARCH_FIELD_NAME}
         def search(query, fields: nil)
           fields = validate_search_fields!(fields)
-          needle = query.to_s
+          # Case-insensitive, matching the SQLite adapter's `LIKE` (see the
+          # contract note on {Interface#search}). This used to be a
+          # case-sensitive `String#include?`, so the same query returned
+          # different results depending on which backend a host had configured.
+          needle = query.to_s.downcase
           @data.each_with_object([]) do |(id, record), out|
             haystacks = fields ? fields.map { |f| record[f] } : [JSON.generate(record)]
-            next unless haystacks.compact.any? { |h| h.to_s.include?(needle) }
+            next unless haystacks.compact.any? { |h| h.to_s.downcase.include?(needle) }
 
             out << record.except('updated_at').merge('id' => id)
           end

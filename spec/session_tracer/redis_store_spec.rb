@@ -115,6 +115,31 @@ RSpec.describe Woods::SessionTracer::RedisStore do
       3.times { |i| store.record("sess#{i}", request_data) }
       expect(store.sessions(limit: 2).size).to eq(2)
     end
+
+    # #218 / B-105. Redis sets are unordered, so `smembers.first(limit)`
+    # returned arbitrary members — a caller asking for recent sessions got a
+    # random sample, while the FileStore twin genuinely sorts by mtime.
+    describe 'ordering' do
+      before do
+        store.record('oldest', request_data.merge('timestamp' => '2026-02-13T10:00:00Z'))
+        store.record('newest', request_data.merge('timestamp' => '2026-02-13T12:00:00Z'))
+        store.record('middle', request_data.merge('timestamp' => '2026-02-13T11:00:00Z'))
+      end
+
+      it 'returns sessions most-recent first' do
+        expect(store.sessions.map { |s| s['session_id'] }).to eq(%w[newest middle oldest])
+      end
+
+      it 'truncates to the most recent when limited' do
+        expect(store.sessions(limit: 2).map { |s| s['session_id'] }).to eq(%w[newest middle])
+      end
+
+      it 'orders by the last request, not the first' do
+        store.record('oldest', request_data.merge('timestamp' => '2026-02-13T13:00:00Z'))
+
+        expect(store.sessions.first['session_id']).to eq('oldest')
+      end
+    end
   end
 
   describe '#clear' do

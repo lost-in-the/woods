@@ -71,9 +71,20 @@ module Woods
         expired = all_ids - active
         expired.each { |id| @redis.srem(SESSIONS_KEY, id) } if expired.any?
 
-        active.first(limit).map do |session_id|
-          session_summary(session_id, read(session_id))
-        end
+        # Redis sets are unordered, so `active.first(limit)` returned arbitrary
+        # members — callers asking for "recent sessions" got a random sample,
+        # while the FileStore twin genuinely sorts by mtime. Build the
+        # summaries, then order by last request descending so both stores
+        # answer the same question.
+        #
+        # This reads every active session rather than `limit` of them. That is
+        # the price of ordering a set; the alternative is a sorted set keyed on
+        # write time, which is a storage-format change this does not warrant.
+        active
+          .map { |session_id| session_summary(session_id, read(session_id)) }
+          .sort_by { |summary| recency_key(summary) }
+          .reverse
+          .first(limit)
       end
 
       # Remove all data for a single session.
@@ -100,6 +111,18 @@ module Woods
       # @return [String] Redis key for this session
       def session_key(session_id)
         "#{KEY_PREFIX}#{sanitize_session_id(session_id)}"
+      end
+
+      # Sort key for {#sessions}: most recent request first.
+      #
+      # Timestamps are ISO-8601 strings, which sort correctly as strings. A
+      # session with no requests (all entries expired mid-read) sorts last
+      # rather than raising on a nil comparison.
+      #
+      # @param summary [Hash]
+      # @return [String]
+      def recency_key(summary)
+        summary['last_request'].to_s
       end
     end
   end
