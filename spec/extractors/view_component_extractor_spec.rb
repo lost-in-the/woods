@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'set'
+require 'woods'
 require 'woods/extractors/view_component_extractor'
 
 RSpec.describe Woods::Extractors::ViewComponentExtractor do

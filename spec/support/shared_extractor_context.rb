@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'pathname'
+require 'woods/model_name_cache'
 
 RSpec.shared_context 'extractor setup' do
   let(:tmp_dir) { Dir.mktmpdir }

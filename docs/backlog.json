@@ -1528,5 +1528,21 @@
     "description": "Indexer#persistable? asked vector_store.respond_to?(:each_entry), but Storage::VectorStore::Interface *defines* each_entry (a NotImplementedError raise) and bulk_load, and every adapter includes it \u2014 so pgvector and Qdrant answered true. persist_snapshot then drove Snapshotter::Vector.dump into the raise at the end of an otherwise-successful run, discarding the whole embed pass. Fixed by asking which module owns the method (implements_own?) instead of respond_to?. Found by the new live-backend CI lane (B-107). Also fixed alongside: Qdrant mutating point operations did not pass wait=true, so acknowledged-but-unapplied writes read back stale \u2014 delete-then-count and write-then-dump both observed pre-mutation state.",
     "status": "resolved",
     "depends_on": []
+  },
+  {
+    "id": "B-109",
+    "slug": "standalone-spec-isolation",
+    "title": "Four extractor specs only pass in the company of the full suite",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/support/shared_extractor_context.rb",
+      "spec/extractors/mailer_extractor_spec.rb",
+      "spec/extractors/view_component_extractor_spec.rb"
+    ],
+    "description": "i18n (15/15), mailer (24/32), rails_source (33/33) and view_component (16/23) specs failed when run as a single file: the 'extractor setup' shared context referenced Woods::ModelNameCache without requiring it, and mailer/view_component called Woods.configuration without require 'woods' \u2014 so extraction raised, the rescue logged it, and every assertion hit a nil unit. All four passed in the full suite because earlier files loaded the constants first, which hides real breakage until someone bisects a single file. Found during the B-106 sweep (GH #219); verified pre-existing by stashing.",
+    "status": "resolved",
+    "depends_on": []
   }
 ]
