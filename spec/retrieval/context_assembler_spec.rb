@@ -585,7 +585,7 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
     end
 
     it 'uses the injected TokenCounter when present (exact counts)' do
-      counter = instance_double('Woods::Embedding::TokenCounter', count: 17, chars_per_token: 1.2)
+      counter = instance_double(Woods::Embedding::TokenCounter, count: 17, chars_per_token: 1.2)
       tc_assembler = described_class.new(metadata_store: metadata_store, token_counter: counter)
       expect(tc_assembler.send(:estimate_tokens, 'some text')).to eq(17)
     end

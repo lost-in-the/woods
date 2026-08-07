@@ -377,19 +377,19 @@ RSpec.describe 'Woods::Railtie session_tracer initializer' do
     end
 
     it 'records the skip so after_initialize does not re-warn' do
-      logger = instance_double('Logger', warn: nil)
+      logger = instance_double(Logger, warn: nil)
       run_initializer(Woods.configuration, rails_env: 'production', logger: logger)
       expect(Woods::RailtieSupport.session_tracer_state).to eq(:skipped_production)
     end
 
     it 'emits a warning to the provided logger' do
-      logger = instance_double('Logger')
+      logger = instance_double(Logger)
       expect(logger).to receive(:warn).with(a_string_including('session tracer disabled in production'))
       run_initializer(Woods.configuration, rails_env: 'production', logger: logger)
     end
 
     it 'emits the opt-in instruction in the warning' do
-      logger = instance_double('Logger')
+      logger = instance_double(Logger)
       expect(logger).to receive(:warn).with(a_string_including('session_tracer_allow_production = true'))
       run_initializer(Woods.configuration, rails_env: 'production', logger: logger)
     end

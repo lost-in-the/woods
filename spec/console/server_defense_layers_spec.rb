@@ -20,7 +20,7 @@ RSpec.describe 'Woods::Console::Server defense-in-depth wiring' do
   let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
   let(:model_tables) { { 'User' => 'users', 'Authorization' => 'authorizations' } }
   let(:safe_context) { instance_double(Woods::Console::SafeContext) }
-  let(:executor) { instance_double('Executor') }
+  let(:executor) { double('Executor') }
   # Stripe's documented test-key example — allowlisted by GitHub secret scanning
   # and still matches `CredentialScanner`'s `stripe_secret_key` pattern.
   let(:stripe_secret) { 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' }

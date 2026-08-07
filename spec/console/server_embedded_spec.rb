@@ -8,7 +8,7 @@ RSpec.describe 'Woods::Console::Server.build_embedded' do
     { 'User' => %w[id email name], 'Post' => %w[id title body] }
   end
   let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
-  let(:connection) { instance_double('Connection') }
+  let(:connection) { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
   before do
@@ -88,9 +88,9 @@ RSpec.describe 'Woods::Console::Server.build_embedded' do
     end
 
     let(:user_model) { class_double('User') }
-    let(:ordered) { instance_double('ActiveRecord::Relation', 'ordered') }
-    let(:limited) { instance_double('ActiveRecord::Relation', 'limited') }
-    let(:record) { instance_double('User', attributes: { 'id' => 1, 'email' => 'a@b.com' }) }
+    let(:ordered) { double('ordered') }
+    let(:limited) { double('limited') }
+    let(:record) { double('User', attributes: { 'id' => 1, 'email' => 'a@b.com' }) }
 
     before do
       stub_const('User', user_model)

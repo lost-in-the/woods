@@ -1508,7 +1508,7 @@ RSpec.describe Woods::Embedding::Indexer do
     {
       'pgvector' => lambda {
         require 'woods/storage/pgvector'
-        # A real object, not instance_double('ActiveRecord::...'): ActiveRecord
+        # A real object, not double('ActiveRecord::...'): ActiveRecord
         # is not loaded in the unit bundle, so a string-named double would
         # verify nothing at all (see #219).
         connection_class = Class.new do

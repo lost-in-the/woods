@@ -6,10 +6,10 @@ require 'woods/builder'
 
 RSpec.describe Woods::Builder do
   # Stub adapter constructors so we don't need real backends
-  let(:fake_vector_store) { instance_double('VectorStore') }
-  let(:fake_metadata_store) { instance_double('MetadataStore') }
-  let(:fake_graph_store) { instance_double('GraphStore') }
-  let(:fake_embedding_provider) { instance_double('EmbeddingProvider') }
+  let(:fake_vector_store) { double('VectorStore') }
+  let(:fake_metadata_store) { double('MetadataStore') }
+  let(:fake_graph_store) { double('GraphStore') }
+  let(:fake_embedding_provider) { double('EmbeddingProvider') }
   let(:fake_retriever) { instance_double(Woods::Retriever) }
 
   # ── Builder.preset_config ────────────────────────────────────────────
@@ -265,7 +265,7 @@ RSpec.describe Woods::Builder do
     end
 
     it 'wraps an explicitly passed provider without rebuilding' do
-      other = instance_double('OtherProvider')
+      other = double('OtherProvider')
 
       wrapped = builder.build_resilient_embedding_provider(other)
 

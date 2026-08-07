@@ -82,7 +82,7 @@ RSpec.describe Woods::Unblocked::Exporter do
 
   describe '#initialize' do
     it 'raises if unblocked_collection_id is missing' do
-      bad_config = instance_double('Woods::Configuration', unblocked_collection_id: nil)
+      bad_config = instance_double(Woods::Configuration, unblocked_collection_id: nil)
       expect { described_class.new(index_dir: '/tmp/x', config: bad_config) }
         .to raise_error(Woods::ConfigurationError, /unblocked_collection_id/)
     end

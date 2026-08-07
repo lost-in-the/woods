@@ -10,7 +10,7 @@ RSpec.describe Woods::Evaluation::BaselineRunner do
        SessionsController AuthService UserMailer OrderCreator]
   end
 
-  let(:metadata_store) { instance_double('MetadataStore') }
+  let(:metadata_store) { double('MetadataStore') }
 
   let(:runner) { described_class.new(metadata_store: metadata_store) }
 
@@ -118,7 +118,7 @@ RSpec.describe Woods::Evaluation::BaselineRunner do
 
   describe 'seeded random baseline (J-5)' do
     let(:store) do
-      instance_double('MetadataStore', all_identifiers: %w[A B C D E F G H I J])
+      double('MetadataStore', all_identifiers: %w[A B C D E F G H I J])
     end
 
     it 'produces the same sample twice when seeded' do

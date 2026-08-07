@@ -25,7 +25,7 @@ end
 # returns its own connection rather than pinning a single one for the
 # lifetime of the process.
 RSpec.describe Woods::Console::RackMiddleware do
-  let(:pool) { instance_double('ActiveRecord::ConnectionPool') }
+  let(:pool) { double('ActiveRecord::ConnectionPool') }
   let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
 
   subject(:middleware) { described_class.new(->(_env) { [200, {}, []] }) }
@@ -36,7 +36,7 @@ RSpec.describe Woods::Console::RackMiddleware do
 
     # Stub the heavy parts of server construction — we're only verifying the
     # connection-acquisition API surface, not the server wiring.
-    server_double = instance_double('MCP::Server')
+    server_double = instance_double(MCP::Server)
     allow(Woods::Console::Server).to receive(:build_embedded).and_return(server_double)
   end
 

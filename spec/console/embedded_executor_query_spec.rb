@@ -15,7 +15,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
     }
   end
   let(:validator)    { Woods::Console::ModelValidator.new(registry: registry) }
-  let(:connection)   { instance_double('Connection') }
+  let(:connection)   { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
   subject(:executor) do
@@ -51,7 +51,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
 
   # Helper: build a chainable relation double that accepts the calls we need.
   def order_relation_double(name = 'order_relation') # rubocop:disable Metrics/AbcSize
-    instance_double('ActiveRecord::Relation', name).tap do |rel|
+    double(name).tap do |rel|
       allow(rel).to receive(:select).and_return(rel)
       allow(rel).to receive(:joins).and_return(rel)
       allow(rel).to receive(:where).and_return(rel)
@@ -66,10 +66,10 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
   let(:order_model) { class_double('Order') }
   let(:relation)    { order_relation_double }
   let(:query_result) do
-    instance_double('ActiveRecord::Result',
-                    columns: %w[status total],
-                    rows: [['paid', 500], ['pending', 200]],
-                    count: 2)
+    double('ActiveRecord::Result',
+           columns: %w[status total],
+           rows: [['paid', 500], ['pending', 200]],
+           count: 2)
   end
 
   before do

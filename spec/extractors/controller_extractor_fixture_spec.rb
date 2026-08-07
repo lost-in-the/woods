@@ -5,6 +5,12 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
+# The extractor reads Woods.configuration, which only exists once the entry
+# point has been loaded. Requiring the extractor alone left this file passing
+# in the full suite (some other spec had required 'woods' first) and failing
+# whenever it was run on its own — the shape that hides real breakage until
+# someone bisects a single file.
+require 'woods'
 require 'woods/extractors/controller_extractor'
 
 RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do

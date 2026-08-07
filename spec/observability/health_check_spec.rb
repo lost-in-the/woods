@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'woods/observability/health_check'
 
 RSpec.describe Woods::Observability::HealthCheck do
-  let(:vector_store) { instance_double('VectorStore', count: 10) }
-  let(:metadata_store) { instance_double('MetadataStore', count: 20) }
-  let(:embedding_provider) { instance_double('EmbeddingProvider', embed: [0.1, 0.2, 0.3], dimensions: 1536) }
+  let(:vector_store) { double('VectorStore', count: 10) }
+  let(:metadata_store) { double('MetadataStore', count: 20) }
+  let(:embedding_provider) { double('EmbeddingProvider', embed: [0.1, 0.2, 0.3], dimensions: 1536) }
 
   describe '#run' do
     context 'when all components are healthy' do
@@ -34,7 +34,7 @@ RSpec.describe Woods::Observability::HealthCheck do
     end
 
     context 'when a component raises an error' do
-      let(:failing_store) { instance_double('VectorStore') }
+      let(:failing_store) { double('VectorStore') }
 
       before do
         allow(failing_store).to receive(:count).and_raise(StandardError, 'connection refused')
@@ -120,7 +120,7 @@ RSpec.describe Woods::Observability::HealthCheck do
       end
 
       it 'returns error when provider is missing required interface' do
-        bare_provider = instance_double('BareProvider', embed: [0.1])
+        bare_provider = double('BareProvider', embed: [0.1])
         # bare_provider does not respond to :dimensions
         health_check = described_class.new(embedding_provider: bare_provider)
         status = health_check.run

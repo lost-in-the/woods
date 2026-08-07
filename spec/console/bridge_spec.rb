@@ -11,7 +11,7 @@ RSpec.describe Woods::Console::StubBridge do
     }
   end
   let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
-  let(:connection) { instance_double('Connection') }
+  let(:connection) { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
   let(:input) { StringIO.new }
   let(:output) { StringIO.new }

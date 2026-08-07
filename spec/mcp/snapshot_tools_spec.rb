@@ -55,7 +55,7 @@ RSpec.describe 'Snapshot MCP tools' do
 
   describe 'with snapshot store configured' do
     let(:snapshot_store) do
-      instance_double('Woods::Temporal::SnapshotStore')
+      instance_double(Woods::Temporal::SnapshotStore)
     end
 
     let(:server) do

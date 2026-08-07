@@ -5,7 +5,7 @@ require 'woods/storage/vector_store'
 require 'woods/storage/pgvector'
 
 RSpec.describe Woods::Storage::VectorStore::Pgvector do
-  let(:connection) { instance_double('ActiveRecord::ConnectionAdapters::AbstractAdapter') }
+  let(:connection) { double('ActiveRecord::ConnectionAdapters::AbstractAdapter') }
   let(:store) { described_class.new(connection: connection, dimensions: 3) }
 
   describe '#initialize' do

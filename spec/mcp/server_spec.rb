@@ -584,7 +584,7 @@ RSpec.describe Woods::MCP::Server do
       end
 
       let(:retriever) do
-        instance_double('Woods::Retriever').tap do |r|
+        instance_double(Woods::Retriever).tap do |r|
           allow(r).to receive(:retrieve).and_return(mock_result)
         end
       end
@@ -645,7 +645,7 @@ RSpec.describe Woods::MCP::Server do
 
     context 'with operator configured' do
       let(:status_reporter) do
-        instance_double('Woods::Operator::StatusReporter').tap do |r|
+        instance_double(Woods::Operator::StatusReporter).tap do |r|
           allow(r).to receive(:report).and_return({
                                                     status: :ok,
                                                     extracted_at: '2026-02-15T10:00:00Z',
@@ -683,7 +683,7 @@ RSpec.describe Woods::MCP::Server do
 
     context 'with operator configured' do
       let(:guard) do
-        instance_double('Woods::Operator::PipelineGuard').tap do |g|
+        instance_double(Woods::Operator::PipelineGuard).tap do |g|
           allow(g).to receive(:allow?).with(:extraction).and_return(true)
           allow(g).to receive(:record!).with(:extraction)
         end
@@ -722,7 +722,7 @@ RSpec.describe Woods::MCP::Server do
 
     context 'with operator configured' do
       let(:guard) do
-        instance_double('Woods::Operator::PipelineGuard').tap do |g|
+        instance_double(Woods::Operator::PipelineGuard).tap do |g|
           allow(g).to receive(:allow?).with(:embedding).and_return(true)
           allow(g).to receive(:record!).with(:embedding)
         end
@@ -753,7 +753,7 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: pipeline_extract incremental param' do
     let(:guard) do
-      instance_double('Woods::Operator::PipelineGuard').tap do |g|
+      instance_double(Woods::Operator::PipelineGuard).tap do |g|
         allow(g).to receive(:allow?).with(:extraction).and_return(true)
         allow(g).to receive(:record!).with(:extraction)
       end
@@ -811,7 +811,7 @@ RSpec.describe Woods::MCP::Server do
   # under any of them (#170).
   describe 'tool: pipeline_extract lock contention (#170)' do
     let(:guard) do
-      instance_double('Woods::Operator::PipelineGuard').tap do |g|
+      instance_double(Woods::Operator::PipelineGuard).tap do |g|
         allow(g).to receive(:allow?).with(:extraction).and_return(true)
         allow(g).to receive(:record!).with(:extraction)
       end
@@ -892,7 +892,7 @@ RSpec.describe Woods::MCP::Server do
   # `woods:embed`, the rake extract writers, or the watch daemon.
   describe 'tool: pipeline_embed lock contention (#170)' do
     let(:guard) do
-      instance_double('Woods::Operator::PipelineGuard').tap do |g|
+      instance_double(Woods::Operator::PipelineGuard).tap do |g|
         allow(g).to receive(:allow?).with(:embedding).and_return(true)
         allow(g).to receive(:record!).with(:embedding)
       end
@@ -980,7 +980,7 @@ RSpec.describe Woods::MCP::Server do
 
   describe 'tool: pipeline_embed incremental param' do
     let(:guard) do
-      instance_double('Woods::Operator::PipelineGuard').tap do |g|
+      instance_double(Woods::Operator::PipelineGuard).tap do |g|
         allow(g).to receive(:allow?).with(:embedding).and_return(true)
         allow(g).to receive(:record!).with(:embedding)
       end
@@ -1036,7 +1036,7 @@ RSpec.describe Woods::MCP::Server do
     end
 
     let(:mock_assembler) do
-      instance_double('Woods::FlowAssembler').tap do |a|
+      instance_double(Woods::FlowAssembler).tap do |a|
         allow(a).to receive(:assemble).and_return(mock_flow_doc)
       end
     end
@@ -1395,7 +1395,7 @@ RSpec.describe Woods::MCP::Server do
 
     context 'with session store configured' do
       let(:mock_store) do
-        instance_double('Woods::SessionTracer::FileStore').tap do |s|
+        instance_double(Woods::SessionTracer::FileStore).tap do |s|
           allow(s).to receive(:read).with('sess1').and_return([
                                                                 {
                                                                   'method' => 'GET', 'path' => '/posts',
@@ -1419,7 +1419,7 @@ RSpec.describe Woods::MCP::Server do
       end
 
       let(:mock_assembler) do
-        instance_double('Woods::SessionTracer::SessionFlowAssembler').tap do |a|
+        instance_double(Woods::SessionTracer::SessionFlowAssembler).tap do |a|
           allow(a).to receive(:assemble).and_return(mock_doc)
         end
       end
@@ -1479,7 +1479,7 @@ RSpec.describe Woods::MCP::Server do
 
     context 'with feedback store configured' do
       let(:feedback_store) do
-        instance_double('Woods::Feedback::Store').tap do |s|
+        instance_double(Woods::Feedback::Store).tap do |s|
           allow(s).to receive(:record_rating)
         end
       end
@@ -1517,7 +1517,7 @@ RSpec.describe Woods::MCP::Server do
 
     context 'with feedback store configured' do
       let(:feedback_store) do
-        instance_double('Woods::Feedback::Store').tap do |s|
+        instance_double(Woods::Feedback::Store).tap do |s|
           allow(s).to receive(:ratings).and_return([
                                                      { 'query' => 'test', 'score' => 4,
                                                        'timestamp' => '2026-02-15T10:00:00Z' }
