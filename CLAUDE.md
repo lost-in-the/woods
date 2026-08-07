@@ -25,6 +25,8 @@ bundle exec rake woods:clean             # Remove index output
 bundle exec rake woods:embed             # Embed all extracted units
 bundle exec rake woods:embed_incremental # Embed changed units only
 bundle exec rake "woods:retrieve[query]" # Ad-hoc retrieval against the index
+bundle exec rake woods:evaluate          # Score retrieval against a ground-truth query set
+bundle exec rake "woods:evaluate:baseline[grep]" # Score a naive baseline for comparison
 bundle exec rake "woods:flow[entry]"     # Execution flow document for an entry point
 bundle exec rake woods:console           # Embedded Console MCP server (stdio)
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion

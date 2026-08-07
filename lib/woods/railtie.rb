@@ -28,6 +28,10 @@ module Woods
   class Railtie < Rails::Railtie
     rake_tasks do
       load File.expand_path('../tasks/woods.rake', __dir__)
+      # Loaded here too, or `woods:evaluate` exists on no host — the file
+      # shipped in the gem for its whole life without ever being loaded, so
+      # the retrieval-quality harness had no entry point at all (#212).
+      load File.expand_path('../tasks/woods_evaluation.rake', __dir__)
     end
 
     initializer 'woods.session_tracer' do |app|

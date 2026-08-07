@@ -12,22 +12,22 @@ RSpec.describe Woods::Evaluation::QuerySet do
       described_class::Query.new(
         query: 'How does the User model work?',
         expected_units: %w[User UserConcern],
-        intent: :lookup,
-        scope: :specific,
+        intent: :locate,
+        scope: :pinpoint,
         tags: %w[model auth]
       ),
       described_class::Query.new(
         query: 'Trace the order creation flow',
         expected_units: %w[Order OrdersController OrderCreator],
         intent: :trace,
-        scope: :bounded,
+        scope: :focused,
         tags: %w[flow orders]
       ),
       described_class::Query.new(
         query: 'Compare payment processing strategies',
         expected_units: %w[StripeProcessor PaypalProcessor],
         intent: :compare,
-        scope: :broad,
+        scope: :exploratory,
         tags: %w[payments]
       )
     ]
@@ -61,8 +61,8 @@ RSpec.describe Woods::Evaluation::QuerySet do
       new_query = described_class::Query.new(
         query: 'Explain the mailer system',
         expected_units: ['UserMailer'],
-        intent: :explain,
-        scope: :bounded,
+        intent: :understand,
+        scope: :focused,
         tags: %w[mailer]
       )
 
@@ -77,7 +77,7 @@ RSpec.describe Woods::Evaluation::QuerySet do
         query: 'test',
         expected_units: [],
         intent: :invalid,
-        scope: :specific,
+        scope: :pinpoint,
         tags: []
       )
 
@@ -88,7 +88,7 @@ RSpec.describe Woods::Evaluation::QuerySet do
       bad_query = described_class::Query.new(
         query: 'test',
         expected_units: [],
-        intent: :lookup,
+        intent: :locate,
         scope: :invalid,
         tags: []
       )
@@ -99,14 +99,14 @@ RSpec.describe Woods::Evaluation::QuerySet do
 
   describe '#filter' do
     it 'filters by intent' do
-      result = query_set.filter(intent: :lookup)
+      result = query_set.filter(intent: :locate)
 
       expect(result.size).to eq(1)
       expect(result.first.query).to eq('How does the User model work?')
     end
 
     it 'filters by scope' do
-      result = query_set.filter(scope: :bounded)
+      result = query_set.filter(scope: :focused)
 
       expect(result.size).to eq(1)
       expect(result.first.query).to eq('Trace the order creation flow')
@@ -120,7 +120,7 @@ RSpec.describe Woods::Evaluation::QuerySet do
     end
 
     it 'combines multiple filters' do
-      result = query_set.filter(intent: :lookup, scope: :specific)
+      result = query_set.filter(intent: :locate, scope: :pinpoint)
 
       expect(result.size).to eq(1)
     end
@@ -132,7 +132,7 @@ RSpec.describe Woods::Evaluation::QuerySet do
     end
 
     it 'returns empty array when no matches' do
-      result = query_set.filter(intent: :explain)
+      result = query_set.filter(intent: :understand)
 
       expect(result).to be_empty
     end
@@ -172,7 +172,7 @@ RSpec.describe Woods::Evaluation::QuerySet do
 
       expect(loaded.size).to eq(2)
       expect(loaded.queries.first.query).to eq('How does User model work?')
-      expect(loaded.queries.first.intent).to eq(:lookup)
+      expect(loaded.queries.first.intent).to eq(:locate)
       expect(loaded.queries.first.expected_units).to eq(%w[User])
     end
 
@@ -208,8 +208,10 @@ RSpec.describe Woods::Evaluation::QuerySet do
       loaded = described_class.load(json_path)
 
       expect(loaded.queries.first.expected_units).to eq([])
-      expect(loaded.queries.first.intent).to eq(:lookup)
-      expect(loaded.queries.first.scope).to eq(:specific)
+      # Defaults match the classifier's own defaults, so an unannotated query
+      # is annotated with what the pipeline would infer for it anyway.
+      expect(loaded.queries.first.intent).to eq(:understand)
+      expect(loaded.queries.first.scope).to eq(:focused)
       expect(loaded.queries.first.tags).to eq([])
     end
   end
@@ -219,28 +221,30 @@ RSpec.describe Woods::Evaluation::QuerySet do
       q = described_class::Query.new(
         query: 'test',
         expected_units: %w[A B],
-        intent: :lookup,
-        scope: :specific,
+        intent: :locate,
+        scope: :pinpoint,
         tags: %w[foo]
       )
 
       expect(q.query).to eq('test')
       expect(q.expected_units).to eq(%w[A B])
-      expect(q.intent).to eq(:lookup)
-      expect(q.scope).to eq(:specific)
+      expect(q.intent).to eq(:locate)
+      expect(q.scope).to eq(:pinpoint)
       expect(q.tags).to eq(%w[foo])
     end
   end
 
   describe 'VALID_INTENTS' do
-    it 'includes lookup, trace, explain, compare' do
-      expect(described_class::VALID_INTENTS).to contain_exactly(:lookup, :trace, :explain, :compare)
+    it 'matches the QueryClassifier intent vocabulary' do
+      # The point is that these ARE the classifier's lists, not a parallel
+      # invention that ground truth could never be compared against (#218).
+      expect(described_class::VALID_INTENTS).to eq(Woods::Retrieval::QueryClassifier::INTENTS)
     end
   end
 
   describe 'VALID_SCOPES' do
-    it 'includes specific, bounded, broad' do
-      expect(described_class::VALID_SCOPES).to contain_exactly(:specific, :bounded, :broad)
+    it 'matches the QueryClassifier scope vocabulary' do
+      expect(described_class::VALID_SCOPES).to eq(Woods::Retrieval::QueryClassifier::SCOPES)
     end
   end
 end

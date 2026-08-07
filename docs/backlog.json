@@ -1380,8 +1380,8 @@
       "lib/tasks/woods_evaluation.rake",
       "lib/woods/evaluation/"
     ],
-    "description": "woods_evaluation.rake is never loaded and calls nonexistent accessors; nothing exercises the harness end-to-end, which is how the #185 ranking defects survived. Load it, fix the accessor surface against Builder, add an offline smoke via the :fake provider, and run before/after ranking changes. Tracked in GH #212.",
-    "status": "ready",
+    "description": "woods_evaluation.rake is never loaded and calls nonexistent accessors; nothing exercises the harness end-to-end, which is how the #185 ranking defects survived. Load it, fix the accessor surface against Builder, add an offline smoke via the :fake provider, and run before/after ranking changes. Tracked in GH #212. RESOLVED: the railtie now loads woods_evaluation.rake alongside woods.rake; the rake bodies moved into a Woods::EvaluationTasks module (bare rake defs land on Object) and build stores through Woods::Builder instead of four Woods.* accessors that never existed; MetadataStore gained all_identifiers (Interface + both adapters), without which every BaselineRunner strategy raised NoMethodError; spec/integration/evaluation_harness_spec.rb drives QuerySet -> Retriever -> Evaluator -> Metrics offline via the :fake provider.",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1481,8 +1481,8 @@
       "lib/woods/feedback/gap_detector.rb",
       "lib/woods/session_tracer/redis_store.rb"
     ],
-    "description": "Grouped low-severity residuals; the IndexReader item is the documented benign remainder of #150 item 1. See the issue checklist. Tracked in GH #218. PARTIAL (#218): ranker chunk-suffix, metadata search-semantics contract, IndexReader LRU synchronization, GapDetector query counting and RedisStore recency all fixed. The QuerySet intent/scope taxonomy item is handled with B-099/#212, which is where the harness that consumes it lives.",
-    "status": "ready",
+    "description": "Grouped low-severity residuals; the IndexReader item is the documented benign remainder of #150 item 1. See the issue checklist. Tracked in GH #218. PARTIAL (#218): ranker chunk-suffix, metadata search-semantics contract, IndexReader LRU synchronization, GapDetector query counting and RedisStore recency all fixed. The QuerySet intent/scope taxonomy item is handled with B-099/#212, which is where the harness that consumes it lives. QuerySet taxonomy also done: VALID_INTENTS/VALID_SCOPES now ARE QueryClassifier::INTENTS/SCOPES, with a legacy mapping accepted on load, so ground-truth annotations are comparable with pipeline output.",
+    "status": "resolved",
     "depends_on": []
   },
   {

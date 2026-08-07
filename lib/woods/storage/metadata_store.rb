@@ -107,6 +107,21 @@ module Woods
           raise NotImplementedError
         end
 
+        # Every stored identifier.
+        #
+        # Used by the evaluation harness's {Woods::Evaluation::BaselineRunner}
+        # to build naive baselines (grep/random/file-level) to score the real
+        # retrieval pipeline against. It called this on the configured store
+        # while no adapter implemented it, so every baseline strategy raised
+        # NoMethodError — invisible because the harness had no working entry
+        # point either (#212).
+        #
+        # @return [Array<String>] All identifiers, order unspecified
+        # @raise [NotImplementedError] if not implemented by adapter
+        def all_identifiers
+          raise NotImplementedError
+        end
+
         # Delete a unit by ID.
         #
         # @param id [String] The identifier to delete
@@ -219,6 +234,11 @@ module Woods
 
             out << record.except('updated_at').merge('id' => id)
           end
+        end
+
+        # @see Interface#all_identifiers
+        def all_identifiers
+          @data.keys
         end
 
         # @see Interface#delete
@@ -362,6 +382,11 @@ module Woods
           end
 
           rows.map { |row| parse_row(row) }
+        end
+
+        # @see Interface#all_identifiers
+        def all_identifiers
+          @db.execute('SELECT id FROM units').map { |row| row['id'] }
         end
 
         # @see Interface#delete
