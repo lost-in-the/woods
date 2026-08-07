@@ -1496,7 +1496,7 @@
       "spec/"
     ],
     "description": "String-named instance_doubles verify nothing (how #181's batch shape survived); PhlexExtractor is effectively untested; controller_extractor_fixture_spec fails standalone for want of require 'woods'. Tracked in GH #219.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
