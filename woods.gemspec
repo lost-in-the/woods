@@ -44,7 +44,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   # Runtime dependencies
-  spec.add_dependency 'mcp', '>= 0.9.2', '< 1.0'
+  spec.add_dependency 'mcp', '>= 1.1', '< 2.0'
   spec.add_dependency 'msgpack', '>= 1.5'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects

@@ -14,6 +14,7 @@ require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
+require_relative 'protocol_policy'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -110,7 +111,8 @@ module Woods
             name: 'woods',
             version: Woods::VERSION,
             resources: resources,
-            resource_templates: resource_templates
+            resource_templates: resource_templates,
+            **ProtocolPolicy.cache_hints
           )
           # Rewrite "Tool not found" into version-aware update guidance for agents
           # running against an older gem than the skill they're following assumes.
@@ -151,7 +153,10 @@ module Woods
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
 
-          server
+          # Last, after every conditional registration above — the whole point is
+          # that a host with Notion wired advertises the same tool order as one
+          # without it.
+          ProtocolPolicy.sort_tools!(server)
         end
 
         private
