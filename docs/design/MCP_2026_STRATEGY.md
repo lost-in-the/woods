@@ -1,12 +1,40 @@
 # MCP 2026-07-28 Support Strategy
 
-Status: **proposal** — no code changed yet. Research completed 2026-08-11 against
-the [2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28)
-and the [`mcp` Ruby SDK](https://github.com/modelcontextprotocol/ruby-sdk) as of v1.1.0.
+Status: **largely implemented** (B-108, B-109, B-110, B-111-part). Research
+completed 2026-08-11 against the
+[2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28)
+and the [`mcp` Ruby SDK](https://github.com/modelcontextprotocol/ruby-sdk) v1.1.0.
 
 This document answers three questions: what actually changed in the protocol,
 what that means for Woods' two MCP servers and the people running them, and
 what we should build in what order.
+
+> ## What the SDK actually implements
+>
+> Written after the phases below shipped, because the plan assumed more of the
+> SDK than turned out to be there, and the gap changed two of the four phases.
+>
+> **mcp 1.1.0 gives us:** `server/discover`; stateless operation (the server
+> never required `initialize`, so a handshake-free request already worked);
+> `stateless: true` on `StreamableHTTPTransport`; `ttl_ms` / `cache_scope`;
+> and `2026-07-28` in `SUPPORTED_STABLE_PROTOCOL_VERSIONS` alongside every
+> legacy revision, which is what makes the server dual-era.
+>
+> **It does not give us:**
+>
+> * **Per-request envelope validation.** `MCP::RequestEnvelope` is defined and
+>   autoloaded, but nothing in the SDK references it. A request carrying
+>   `protocolVersion: "1900-01-01"` is served rather than refused with
+>   `UnsupportedProtocolVersionError`, and `clientCapabilities` never reaches
+>   the server object. Woods therefore reads the envelope itself where it needs
+>   it — see `Tasks::RequestCapture`.
+> * **`resultType` on results.** Ordinary results ship without it. Harmless in
+>   practice: the spec tells clients to treat an absent `resultType` as
+>   `"complete"`.
+> * **The Tasks extension.** No `tasks/*` methods. Woods implements them on
+>   `define_custom_method` — see phase 3.
+> * **`subscriptions/listen`.** Not implemented, and this is what blocks the
+>   last piece of phase 4 — see below.
 
 ---
 
@@ -263,18 +291,35 @@ see the CLAUDE.md gotcha; unlocked writers are how #169/#170 happened.
   authorise shared intermediaries to cache it. This is a security-relevant
   default, not a tuning knob.
 
-**Subscriptions** are the natural pairing with the watch daemon. When the daemon
-bumps the generation, the index server pushes `notifications/resources/updated`
-(and `tools/list_changed` if wiring-conditional tools appeared) instead of
+**Subscriptions** were the natural pairing with the watch daemon: when the
+daemon bumps the generation, push `notifications/resources/updated` instead of
 waiting for the agent's next read to discover it via `ensure_fresh!`.
 
-Two caveats worth stating plainly. This needs a generation-watcher in the MCP
-server process — modest, but new concurrency in a component whose threading
-model is already load-bearing (refcounted pins, per-reader mutex, HTTP request
-threads). And client support for `subscriptions/listen` is not universal yet.
-So: gate it, ship it last, and keep `ensure_fresh!` as the correctness path with
-subscriptions as the optimisation — exactly the relationship the `reload` tool
-has today.
+**Not implemented — blocked, and worth being precise about why.** Two
+independent walls, either of which alone would be enough:
+
+1. **Stateless HTTP has no notification channel at all.** The SDK's
+   `send_notification` opens with `return false if @stateless`. There is no
+   session, no standalone GET stream, and nothing to push on. Having just made
+   statelessness the default in phase 2 — for a much larger and more certain
+   win — the push mechanism is unavailable on that transport by construction.
+2. **There is no opt-in channel, and the spec forbids pushing without one.**
+   `subscriptions/listen` is how a 2026-07-28 client subscribes, and the server
+   **MUST NOT** send notification types the client has not explicitly
+   requested. The SDK does not implement it, so there is no conforming way for
+   a client to ask. Pushing anyway would violate that MUST.
+
+Implementing it regardless would mean building a long-lived SSE response stream
+inside a transport explicitly built to hold none — forking SDK transport
+internals to re-add the thing the revision removed, in order to deliver an
+optimisation. Not worth it.
+
+The cost of not having it is small and bounded: `IndexReader#ensure_fresh!` is
+the *correctness* path and is untouched — it stats `generation.json` at the top
+of every read, so an agent never sees a stale index, it just learns about a
+change on its next call rather than immediately. That is precisely the
+relationship the `reload` tool already has. Revisit when the SDK ships
+`subscriptions/listen`; the generation signal it would hang off already exists.
 
 ### Explicitly out of scope
 
