@@ -43,6 +43,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | [UNBLOCKED_INTEGRATION.md](UNBLOCKED_INTEGRATION.md) | Sync extraction data to an Unblocked collection — incremental sync, CI setup, API quirks |
 | [OBSIDIAN_INTEGRATION.md](OBSIDIAN_INTEGRATION.md) | Export to a self-contained Obsidian vault — graph view, Bases, agent sidecar, safe re-runs |
 | [PG_QUERY_SPIKE.md](PG_QUERY_SPIKE.md) | Design doc — evaluation of optional `pg_query` AST identifier extraction for the Console MCP SQL scanner |
+| [design/MCP_2026_STRATEGY.md](design/MCP_2026_STRATEGY.md) | Proposal — adopting MCP 2026-07-28 (stateless, Tasks, cache hints, subscriptions), with the compatibility matrix for legacy clients and old Ruby |
 | [self-analysis/](self-analysis/) | Woods analyzed by itself — extraction output, quality audit |
 
 Historical design documents from the build phase are in [design/](design/) (see [design/README.md](design/README.md)).

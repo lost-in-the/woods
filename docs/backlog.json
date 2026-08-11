@@ -1513,5 +1513,68 @@
     "description": "pull_request-only trigger leaves merged main untested; the matrix omits Ruby 3.4 and Rails 8.1; every external protocol boundary is doubles-only \u2014 a services lane running the storage contract specs plus the offline embed->retrieve round trip closes the seam. Coordinate with woods-testbed#2. Tracked in GH #220.",
     "status": "ready",
     "depends_on": []
+  },
+  {
+    "id": "B-108",
+    "title": "Lift the mcp gem cap to 1.x and stop pinning the protocol version backwards",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "mcp",
+    "files": [
+      "woods.gemspec",
+      "exe/woods-mcp-start",
+      "exe/woods-mcp",
+      "exe/woods-mcp-http",
+      "exe/woods-console-mcp"
+    ],
+    "description": "The gemspec pins `mcp >= 0.9.2, < 1.0`, which holds Woods at SDK 0.25.0 \u2014 one minor release short of 1.1.0, the version that added MCP 2026-07-28 as its latest protocol. Separately, exe/woods-mcp-start hard-defaults MCP_PROTOCOL_VERSION=2024-11-05, the oldest protocol in existence, and it is the documented .mcp.json entry point \u2014 so every user following the setup docs is opted out of version negotiation, server/discover and cache hints. Lift the pin to `>= 1.1, < 2.0`; delete the protocol default from the wrapper while keeping the env var as an escape hatch for stubborn legacy clients. The APIs Woods calls (MCP::Server.new, define_tool, Tool::Response, both transports, MCP::Configuration) are unchanged across 0.9.2..1.1.0 \u2014 every SDK breaking change (0.10.0 notify_progress/handler overrides, 0.15.0 MCP::Transports) predates the current floor. Ruby floor is unaffected: mcp 1.1.0 needs >= 2.7.0, Woods declares >= 3.0.0, and the rails-6.0 testbed variant on Ruby 3.0 stays supported \u2014 assert this with a CI row rather than trusting it. Gates B-109, B-110 and B-111. Acceptance: a legacy client and a modern client both work against one unmodified woods-mcp process (the SDK server is dual-era, and NOT pinning a version is what keeps it that way); server/discover returns Woods' capabilities; no Ruby or Rails floor moves. See docs/design/MCP_2026_STRATEGY.md.",
+    "status": "ready"
+  },
+  {
+    "id": "B-109",
+    "title": "Stateless Streamable HTTP \u2014 a woods-mcp-http restart should be invisible to clients",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "exe/woods-mcp-http",
+      "docs/MCP_HTTP_TRANSPORT.md"
+    ],
+    "depends_on": [
+      "B-108"
+    ],
+    "description": "exe/woods-mcp-http builds StreamableHTTPTransport.new(server) with no `stateless:` flag, so it mints Mcp-Session-Id, tracks sessions server-side and serves the GET SSE endpoint. Restarting the server therefore invalidates every client session \u2014 a routine event (gem update, machine sleep, worktree rebuild) that currently forces every connected client through a re-initialize. MCP 2026-07-28 removes protocol-level sessions entirely (SEP-2567), so `stateless: true` makes restart invisible and makes the HTTP server horizontally deployable for the first time: any POST can land on any instance, which matters for the Docker split architecture and multi-worktree setups reading one volume-mounted index. Gate on WOODS_MCP_HTTP_STATELESS defaulting to ON, keeping session mode for one deprecation window \u2014 the one real break is users relying on Mcp-Session-Id, since GET/DELETE start answering 405 and the header disappears from the documented CORS contract. The spec also removes SSE resumability (Last-Event-ID); that is near-free for Woods because every index tool is a short JSON read, and the only long operations (pipeline_extract/pipeline_embed) are already fire-and-forget and move to Tasks under B-110. Depends on B-108. See docs/design/MCP_2026_STRATEGY.md.",
+    "status": "ready"
+  },
+  {
+    "id": "B-110",
+    "title": "Adopt the Tasks extension for pipeline_extract/pipeline_embed, replacing the hand-rolled async protocol",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "depends_on": [
+      "B-108"
+    ],
+    "description": "pipeline_extract spawns Thread.new and returns {status: 'started'}; the agent never hears from it again and must poll pipeline_status to guess the outcome. If the MCP process dies mid-run the thread dies with it and no durable record survives. Around this sits a hand-rolled async job protocol: @pipeline_mutex, @pipeline_in_flight, pipeline_start/pipeline_finish, PIPELINE_LOCK_WAIT, acquire_lock_briefly, plus pipeline_status/diagnose/repair. The io.modelcontextprotocol/tasks extension standardises exactly this \u2014 advertise it, and when a client declares support return a CreateTaskResult with a durable taskId, ttlMs and pollIntervalMs, serving tasks/get, tasks/update and tasks/cancel. When the client does NOT declare support, fall back to today's behaviour verbatim: the spec forbids returning a task to a client that did not opt in, and that fallback IS the old-client compatibility story. Buys a real completion signal (success/failure with the error, not a poll-and-guess), disconnect survival (a task ID is durable \u2014 client restarts and resumes polling), cooperative cancellation against a LockHeartbeat-guarded run (inexpressible today), and deletion of the bespoke machinery, narrowing pipeline_status to reporting index state rather than doubling as a job-status endpoint. The durable task store must outlive the process to deliver the crash-resilience claim; the natural substrate is the index directory Woods already writes atomically \u2014 and any new writer against it MUST take PipelineLock (unlocked writers are how #169/#170 happened). Depends on B-108. See docs/design/MCP_2026_STRATEGY.md.",
+    "status": "ready"
+  },
+  {
+    "id": "B-111",
+    "title": "Cache hints, deterministic tool ordering, and generation-driven subscriptions",
+    "severity": "low",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb",
+      "lib/woods/mcp/index_reader.rb"
+    ],
+    "depends_on": [
+      "B-108"
+    ],
+    "description": "Three related wins from 2026-07-28. (1) Sort tools/list deterministically \u2014 the spec calls this out specifically for LLM prompt-cache hit rates, and today's order is a function of which of the 15 wiring-conditional tools happen to be configured alongside the 14 always-on ones. (2) Populate the now-required CacheableResult fields: ttlMs derived from Generation, which is already an exact 'the index changed' signal (bumped last, only on success), since tool and resource lists are stable between generations. cacheScope MUST be 'private' everywhere without exception \u2014 Woods' resources expose the user's own source code and dependency graph, so 'public' would authorise shared intermediaries to cache it; this is a security default, not a tuning knob. (3) subscriptions/listen pairs naturally with the watch daemon: when it bumps the generation, push notifications/resources/updated (and tools/list_changed if wiring-conditional tools appeared) instead of waiting for the agent's next read to discover it via ensure_fresh!. Two caveats for (3): it needs a generation-watcher thread in a component whose threading model is already load-bearing (refcounted pins, per-reader mutex, HTTP request threads), and client support for subscriptions/listen is not universal \u2014 so gate it, ship it last, and keep ensure_fresh! as the correctness path with subscriptions as the optimisation, exactly the relationship the reload tool has today. Depends on B-108. See docs/design/MCP_2026_STRATEGY.md.",
+    "status": "ready"
   }
 ]
