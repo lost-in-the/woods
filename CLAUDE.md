@@ -6,11 +6,19 @@ Ruby gem that extracts structured data from Rails applications for AI-assisted d
 
 ```bash
 # Development
+# Prefer the checked-in binstubs (bin/rake, bin/rspec, bin/rubocop). Under
+# Bundler 4 `bundle exec rake` / `bundle exec rspec` fail with "command not
+# found" — Bundler 4 no longer exposes gem binstubs. The binstubs work on both.
 bundle install
-bundle exec rake spec                            # Full test suite
-bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
-bundle exec rubocop -a                            # Lint + autofix
-bundle exec rubocop --auto-gen-config             # Update .rubocop_todo.yml
+bin/rake spec                                    # Full test suite
+bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
+bin/rubocop -a                                   # Lint + autofix
+bin/rubocop --auto-gen-config                    # Update .rubocop_todo.yml
+
+# Opt-in spec tags (excluded from the default suite)
+WOODS_RUN_HTTP_SERVER=1 bin/rspec spec/mcp/http_server_e2e_spec.rb   # boots exe/woods-mcp-http
+WOODS_RUN_BOOTED_APP=1  bin/rspec spec/integration/booted_extraction_spec.rb
+WOODS_RUN_PERF_SPECS=1  bin/rspec --tag perf
 
 # In a host Rails app (extraction requires Rails boot)
 bundle exec rake woods:extract           # Full extraction

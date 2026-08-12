@@ -1576,5 +1576,53 @@
     ],
     "description": "PARTIALLY RESOLVED. Done: (1) tools are sorted by name after all conditional registration, in both the index and console servers, via the shared Woods::MCP::ProtocolPolicy \u2014 so a host with Notion wired advertises the same order as one without, which is what the spec asks for to keep an LLM's prompt cache warm, and which also fixes cursor pagination (the SDK paginates by offset over that previously-unordered collection). (2) SEP-2549 cache hints: cacheScope is pinned to 'private' and deliberately not configurable, because every result describes the user's own codebase and the SDK's fallback when only ttl_ms is set is 'public' \u2014 so setting a ttl and leaving the scope alone is exactly the combination that would let a shared proxy re-serve one user's source to another; ttlMs defaults to 10s (WOODS_MCP_CACHE_TTL_MS) chosen to be safe for the most volatile result the SDK applies it to, and a malformed override falls back rather than raising. BLOCKED: the generation-driven push. Two independent walls. (a) Stateless HTTP has no notification channel at all -- the SDK's send_notification opens with `return false if @stateless` -- so having made statelessness the default in B-109 there is nothing to push on. (b) subscriptions/listen is the 2026-07-28 opt-in mechanism and the SDK does not implement it, while the spec says a server MUST NOT send notification types the client has not explicitly requested -- so there is no conforming way for a client to ask, and pushing anyway would violate that MUST. Implementing it would mean building a long-lived SSE response stream inside a transport built to hold none. Cost of waiting is bounded: IndexReader#ensure_fresh! is the correctness path and is untouched, so an agent never reads a stale index -- it just learns of a change on its next call rather than immediately, exactly the relationship the reload tool already has. Revisit when the SDK ships subscriptions/listen.",
     "status": "open"
+  },
+  {
+    "id": "B-112",
+    "title": "Validate the per-request modern envelope (reject unsupported protocol versions)",
+    "severity": "medium",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "MCP 2026-07-28 requires a server to reject a request whose protocolVersion it does not support with UnsupportedProtocolVersionError (-32022) and a `supported` list. Woods serves it instead: mcp 1.1.0 defines MCP::RequestEnvelope but nothing references it, so RequestEnvelope#parse! -- and the UnsupportedProtocolVersionError it raises -- are dead code on the server path. Reproduce by sending protocolVersion '1900-01-01' in _meta and watching a normal tools/list come back. Fix with a prepend on the built server alongside VersionAwareToolDispatch and Tasks::RequestCapture: when RequestEnvelope.modern?(params) call parse! and let it raise. Gate on modern? so a legacy client sending no envelope is untouched, and exempt server/discover -- it is the backward-compatibility probe, used precisely when the client does not yet know which versions you support, so rejecting it on version grounds breaks the negotiation it exists to enable. Consider filing upstream first (see B-115): this is SDK work Woods is compensating for. See docs/design/MCP_2026_NEXT_STEPS.md 3.1.",
+    "status": "ready"
+  },
+  {
+    "id": "B-113",
+    "title": "Emit resultType on results for strict 2026-07-28 conformance",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "The revision makes `resultType` required on every result; mcp 1.1.0 defines MCP::ResultType but references it only in client.rb, so the server emits none. Benign in practice -- the spec tells clients to treat an absent resultType as 'complete' -- so this is conformance-only and low priority. If done, stamp on the way out via the same prepend seam as B-112, and do not clobber a result that already carries one: the Tasks path sets resultType explicitly ('task' on a CreateTaskResult, 'complete' on tasks/get). See docs/design/MCP_2026_NEXT_STEPS.md 3.2.",
+    "status": "ready"
+  },
+  {
+    "id": "B-114",
+    "title": "Validate the MCP 2026-07-28 protocol work against a booted Rails host",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "mcp",
+    "files": [
+      "spec/mcp/tasks/pipeline_tasks_spec.rb"
+    ],
+    "description": "None of B-108/109/110/111 has been exercised against a booted Rails app -- the authoring environment had the Docker binary but no daemon, so woods-testbed was unusable. Two things the unit suite cannot reach. (1) pipeline_extract against a REAL extraction: every task-lifecycle spec stubs Woods::Extractor, so nothing has watched a genuine multi-second run move a task working -> completed, nor confirmed the LockHeartbeat and task-completion interleaving under real timing. (2) The task store on a real index directory alongside a live watch daemon and genuine PipelineLock contention -- the argument that task records need no lock (one file per task, no cross-file consistency) is reasoned in the code and unit-tested but never observed under concurrency. Also worth confirming the store degrades correctly when the index dir is a read-only mount, which is a real Docker split-architecture setup. Put the smoke script in woods-testbed scripts/ so it runs unchanged against rails-6.0/7.2/8.0. See docs/design/MCP_2026_NEXT_STEPS.md 4.1.",
+    "status": "ready"
+  },
+  {
+    "id": "B-115",
+    "title": "Upstream the mcp gem's server-side 2026-07-28 gaps",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/tasks/extension.rb"
+    ],
+    "description": "mcp 1.1.0's client half is well along and its server half largely is not: RequestEnvelope is defined but unreferenced, ResultType is client-only, ErrorCodes::HEADER_MISMATCH is a constant nothing raises, Mcp-Method/Mcp-Name/x-mcp-header are client-only, and neither the Tasks extension nor subscriptions/listen exists. Woods now compensates for two of these locally. Filing issues or PRs against modelcontextprotocol/ruby-sdk fixes it for every Ruby MCP server and lets Woods DELETE code rather than add it -- Tasks::Extension was written to be deletable for exactly this reason, so when the SDK ships native tasks `install` goes away and the durable Store (the part that buys crash resilience) is unaffected. subscriptions/listen is the one that actually unblocks a feature (B-111). See docs/design/MCP_2026_NEXT_STEPS.md 3.5.",
+    "status": "ready"
   }
 ]

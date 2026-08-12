@@ -8,7 +8,8 @@ These were written during the early architecture phase before all subsystems wer
 
 | Document | Status | What's Useful |
 |----------|--------|--------------|
-| **MCP_2026_STRATEGY.md** | Proposal (Aug 2026) | **Not historical.** Live proposal for adopting MCP 2026-07-28: what changed in the spec, why the `mcp < 1.0` gemspec cap is the only blocker, four phased workstreams (B-108–B-111), and the compatibility matrix for legacy clients / old Ruby / Docker / worktrees. |
+| **MCP_2026_NEXT_STEPS.md** | Handoff (Aug 2026) | **Not historical.** Start here to continue the MCP work: state of play, the SDK's server-side gaps with a ten-second reproduction, what is blocked and why, and what booted-Rails validation would cover. |
+| **MCP_2026_STRATEGY.md** | Implemented (Aug 2026) | **Not historical.** Live proposal for adopting MCP 2026-07-28: what changed in the spec, why the `mcp < 1.0` gemspec cap is the only blocker, four phased workstreams (B-108–B-111), and the compatibility matrix for legacy clients / old Ruby / Docker / worktrees. |
 | **OPTIMIZATION_BACKLOG.md** | 39/43 resolved | 43 items with severity ratings. Remaining: #6 (fixture specs), #18 (intentional), #21 (tiktoken), #40 (Amplitude). |
 | **REVIEW_FINDINGS.md** | All critical/high resolved | Code audit: 13 bugs (B-001 to B-013), doc accuracy, cross-doc contradictions. B-007 partially addressed, B-011 deferred by design. |
 | **AGENTIC_STRATEGY.md** | Reference | How AI agents should use Woods: task-type to retrieval-pattern mapping, budget awareness, tool-use interface. |
