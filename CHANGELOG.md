@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP 2026-07-28 support** (B-108–B-111). The gemspec now requires `mcp >= 1.1, < 2.0`,
+  the release that added the 2026-07-28 protocol revision.
+  - **Stateless Streamable HTTP by default.** `woods-mcp-http` no longer mints
+    `Mcp-Session-Id`, so restarting it (gem upgrade, machine sleep, worktree rebuild) is
+    invisible to connected clients instead of invalidating every session, and several
+    instances can serve one volume-mounted index without sticky routing. Set
+    `WOODS_MCP_HTTP_STATELESS=0` for a client that still needs sessions, the GET SSE
+    stream, or DELETE teardown — a transitional escape hatch, since all three are gone
+    from the specification.
+  - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
+    `pipeline_embed` return a durable task handle to clients that declare the extension:
+    poll with `tasks/get`, cancel with `tasks/cancel`. Records live on disk under
+    `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
+    mid-run can reconnect — even to a restarted server — and collect the result, and a
+    task whose owning process died resolves to `failed` instead of leaving an agent
+    polling forever. Clients that do not declare the extension get the previous
+    fire-and-forget behaviour, unchanged.
+  - **Cache hints and deterministic tool ordering.** List and read results carry
+    `ttlMs` (default 10s, `WOODS_MCP_CACHE_TTL_MS`) and `cacheScope: "private"`, and tools
+    are advertised in sorted order so a host with optional integrations wired presents the
+    same tool block as one without.
+  - **`server/discover`** is answered, advertising supported versions, capabilities and
+    the Tasks extension.
+
+### Changed
+
+- **`woods-mcp-start` no longer pins the MCP protocol version.** It defaulted
+  `MCP_PROTOCOL_VERSION` to `2024-11-05` — the oldest revision there is — which silently
+  opted every user out of four protocol revisions. The SDK server is dual-era, answering
+  `initialize` for legacy clients while serving `server/discover` and per-request metadata
+  for modern ones, so the unpinned server is the *more* compatible one. The variable
+  remains as an escape hatch and now announces itself on stderr when set.
+  **No action required:** legacy clients keep working, and no re-extraction or re-embedding
+  is implied — no on-disk artifact format changed.
+
 ### Fixed
 
 - **Full-gem review batch (2026-07-30): 30 defects fixed** (#183–#209 and pre-existing
