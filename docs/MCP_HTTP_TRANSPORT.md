@@ -2,15 +2,15 @@
 
 ## Current State
 
-- **mcp gem version**: 0.6.0 (pinned `~> 0.6` in gemspec)
+- **mcp gem version**: `>= 1.2, < 2.0`
 - **Available transports**:
   - `MCP::Server::Transports::StdioTransport` — stdin/stdout JSON-RPC (current default)
   - `MCP::Server::Transports::StreamableHTTPTransport` — HTTP POST/GET with optional SSE streaming
-- **MCP protocol version**: 2025-03-26 (Streamable HTTP is the standard remote transport)
+- **MCP protocol version**: 2026-07-28 by default, with legacy `initialize` still served by the SDK
 
 ## HTTP/SSE Transport Support
 
-**Native support: YES.** The `mcp` gem v0.6.0 ships `StreamableHTTPTransport` with full Rack compatibility.
+**Native support: YES.** The `mcp` gem v1.2.0 ships `StreamableHTTPTransport` with Rack compatibility, stateless mode, cache hints, header validation, `server/discover`, and modern request-envelope validation.
 
 ### What's Available Out of the Box
 
@@ -59,7 +59,7 @@ The gem includes example servers (`examples/http_server.rb`, `examples/streamabl
 ```ruby
 # Build the MCP server (same as stdio)
 server = Woods::MCP::Server.build(index_dir: index_dir)
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true)
 server.transport = transport
 
 # Wrap in a Rack app
@@ -99,7 +99,11 @@ Add `exe/woods-mcp-http` alongside the existing stdio executable:
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "rackup"
+begin
+  require "rackup"
+rescue LoadError
+  require "rack"
+end
 require_relative "../lib/woods"
 require_relative "../lib/woods/mcp/server"
 # ... other requires ...
@@ -108,7 +112,7 @@ index_dir = ARGV[0] || ENV["WOODS_DIR"] || Dir.pwd
 port = (ENV["PORT"] || 9292).to_i
 
 server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever)
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true)
 server.transport = transport
 
 app = proc { |env| transport.handle_request(Rack::Request.new(env)) }
@@ -132,7 +136,7 @@ module Woods
         @app = app
         @path = path
         server = Server.build(index_dir: index_dir)
-        @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server)
+        @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true)
         server.transport = @transport
       end
 
@@ -179,9 +183,9 @@ woods-mcp --http --port 8080  # HTTP on custom port
 
 ### MCP Ecosystem Context
 
-- The MCP specification (2025-03-26) designates Streamable HTTP as the standard remote transport, replacing the earlier SSE-only transport
-- The next spec release (~June 2026) is expected to further formalize stateless transport patterns for horizontal scaling
-- The `mcp` gem tracks the spec closely; v0.6.0 already implements the full Streamable HTTP spec including stateless mode
+- The MCP specification (2026-07-28) removes protocol-level sessions and keeps Streamable HTTP as the standard remote transport
+- The `mcp` gem tracks the core lifecycle closely; v1.2.0 implements stateless Streamable HTTP, request envelopes, `resultType`, `server/discover`, and HTTP header validation
+- The remaining missing SDK surface is extension-level: Woods implements `io.modelcontextprotocol/tasks` locally, while `subscriptions/listen` is still unavailable
 
 ## Security
 

@@ -19,13 +19,13 @@ without re-deriving the research.
 | B-113 Tasks extension | ✅ shipped (Woods-side implementation) |
 | B-114 deterministic tool order + cache hints | ✅ shipped |
 | B-114 generation-driven change notifications | ⛔ **blocked on the SDK** |
-| Strict per-request envelope validation | ⚠️ **not conformant** — see §3.1 |
-| `resultType` on results | ⚠️ **not conformant** — see §3.2 |
-| Booted-Rails validation of any of it | ❌ **never run** — see §4.1 |
+| Strict per-request envelope validation | ✅ resolved upstream in `mcp` 1.2.0 |
+| `resultType` on results | ✅ resolved upstream in `mcp` 1.2.0 |
+| Booted-Rails validation | ✅ covered by the CI booted extraction matrix |
 
-Everything shipped is covered by unit specs plus a real-subprocess HTTP
-end-to-end spec. Nothing has been validated against a booted Rails host,
-because the environment that produced it had no Docker daemon.
+Everything shipped is covered by unit specs, a real-subprocess HTTP end-to-end
+spec, live pgvector/Qdrant storage specs, and the Ruby/Rails booted extraction
+matrix in CI.
 
 ---
 
@@ -137,20 +137,17 @@ reason — when the SDK ships native tasks, `install` goes away and the durable
 
 ---
 
-## 4. What a local development environment unlocks
+## 4. What deeper local validation could still unlock
 
-This is the part that needs someone with a working local setup. None of it is
-blocked on design — it is blocked on infrastructure the authoring environment
-did not have.
+The CI matrix now validates the ordinary booted extraction paths. What remains
+here is deeper interactive validation: real clients, long-running task timing,
+and watch-daemon contention.
 
-### 4.1 Booted-Rails validation — **the biggest gap**
+### 4.1 Long-running task validation against a booted app
 
-**Nothing in this work has been exercised against a booted Rails app.** The
-authoring environment had the Docker binary but no daemon
-(`/var/run/docker.sock` absent), so `woods-testbed` was unusable.
-
-The unit suite covers the protocol behaviour well, but two things it cannot
-reach:
+The CI booted extraction matrix covers extraction across supported Ruby/Rails
+variants, and the unit suite covers the protocol behaviour well. Two timing
+edges are still better suited to a local smoke:
 
 - **`pipeline_extract` against a real extraction.** Every task-lifecycle spec
   stubs `Woods::Extractor`. Nothing has watched a genuine multi-second
@@ -161,13 +158,8 @@ reach:
   that task records need no lock is argued in the code and unit-tested, but not
   observed under concurrency.
 
-```bash
-cd woods-testbed && docker compose up -d rails-8.0
-docker exec woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails woods:extract'
-```
-
-Then point an MCP client (or a hand-rolled JSON-RPC driver) at the index and
-run a real `pipeline_extract` with the tasks capability declared.
+Point an MCP client (or a hand-rolled JSON-RPC driver) at a booted app's index
+and run a real `pipeline_extract` with the tasks capability declared.
 
 **Suggested addition:** a smoke script in the testbed's `scripts/` — that
 directory is mounted read-only into every variant, so one script validates

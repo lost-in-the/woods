@@ -7,7 +7,7 @@ and the [`mcp` Ruby SDK](https://github.com/modelcontextprotocol/ruby-sdk) v1.2.
 
 This document answers three questions: what actually changed in the protocol,
 what that means for Woods' two MCP servers and the people running them, and
-what we should build in what order.
+what the shipped implementation changed.
 
 > ## What the SDK actually implements
 >
@@ -31,11 +31,13 @@ what we should build in what order.
 
 ## 1. The headline
 
-Woods writes **no protocol code**. Both servers — `Woods::MCP::Server` (index,
-29 tools) and `Woods::Console::Server` (console, 31 tools) — are `MCP::Server`
-instances from the official `mcp` gem, driven by `StdioTransport` or
-`StreamableHTTPTransport`. Lifecycle, framing, capability negotiation, error
-codes and version headers are all the SDK's.
+Woods writes very little protocol code. Both servers — `Woods::MCP::Server`
+(index, 29 tools) and `Woods::Console::Server` (console, 31 tools) — are
+`MCP::Server` instances from the official `mcp` gem, driven by
+`StdioTransport` or `StreamableHTTPTransport`. Lifecycle, framing, capability
+negotiation, error codes and version headers are the SDK's. The local protocol
+surface is limited to extension work the SDK does not yet provide, primarily
+`io.modelcontextprotocol/tasks`.
 
 That means the migration is not "implement a new protocol". It is:
 
@@ -128,56 +130,37 @@ is a genuinely clean position — the deprecation window costs us nothing.
 
 ---
 
-## 3. Where Woods stands today
+## 3. What this branch changed
 
-### 3.1 The protocol pin is backwards
+### 3.1 The protocol pin was removed
 
-```bash
-# exe/woods-mcp-start, line 54
-export MCP_PROTOCOL_VERSION="${MCP_PROTOCOL_VERSION:-2024-11-05}"
-```
+`woods-mcp-start` no longer defaults `MCP_PROTOCOL_VERSION` to `2024-11-05`.
+Both stdio entry points now inherit the SDK default unless the operator sets the
+environment variable deliberately. The variable remains as an escape hatch for a
+stubborn legacy client and is announced on stderr when set.
 
-`woods-mcp-start` is the **documented `.mcp.json` entry point** — the self-healing
-wrapper users are told to register. It pins the *oldest* protocol version in
-existence, four revisions behind. `exe/woods-mcp` is better (it only sets
-`MCP::Configuration` when the env var is present, otherwise inheriting the SDK
-default), but anyone following the setup docs goes through the wrapper.
+### 3.2 The HTTP server is stateless by default
 
-The comment says "for Claude Code compatibility". That was true when it was
-written. Today it means every Woods user is opted out of protocol version
-negotiation, cache hints, `server/discover`, and everything else, by default.
+`exe/woods-mcp-http` constructs `StreamableHTTPTransport.new(server, stateless:
+true)` unless `WOODS_MCP_HTTP_STATELESS=0` asks for legacy session mode. In
+stateless mode it never issues or requires `Mcp-Session-Id`, ignores stale
+session headers before the SDK transport sees them, and no longer exposes the
+session header in CORS.
 
-### 3.2 The HTTP server is session-bound
+Practical consequence: restarting `woods-mcp-http` is invisible to clients
+instead of invalidating every session. The SDK currently answers stateless
+DELETE with `200 {"success": true}` rather than the spec's suggested `405`;
+there is no session to terminate either way, so Woods documents this as an SDK
+quirk rather than overriding it.
 
-`exe/woods-mcp-http` constructs `StreamableHTTPTransport.new(server)` with no
-`stateless:` flag, so it mints `Mcp-Session-Id`, tracks sessions server-side,
-honours DELETE for teardown, and serves the GET SSE endpoint.
-`docs/MCP_HTTP_TRANSPORT.md` documents `Access-Control-Expose-Headers: Mcp-Session-Id`
-as part of the CORS contract.
+### 3.3 `pipeline_extract` and `pipeline_embed` support Tasks
 
-Practical consequence: **restarting `woods-mcp-http` invalidates every client
-session.** Given the index server gets restarted whenever the gem updates, the
-machine sleeps, or a worktree is rebuilt, that is a routine event that currently
-forces every connected client through a re-initialize.
-
-### 3.3 `pipeline_extract` is a fire-and-forget thread
-
-```ruby
-Thread.new do
-  ... Woods::Coordination::LockHeartbeat.run(lock) { run_extraction.call } ...
-end
-respond.call(JSON.pretty_generate({ status: 'started', ... }))
-```
-
-The tool returns `{status: "started"}` and the agent never hears from it again.
-To find out what happened it must poll `pipeline_status`. If the MCP server
-process dies mid-run, the thread dies with it and there is no durable record
-that the extraction was ever attempted. Around this sit `@pipeline_mutex`,
-`@pipeline_in_flight`, `pipeline_start`/`pipeline_finish`, `PIPELINE_LOCK_WAIT`,
-`acquire_lock_briefly`, and the `pipeline_status`/`pipeline_diagnose`/`pipeline_repair`
-tool trio — a hand-rolled async job protocol.
-
-This is precisely what the Tasks extension standardises.
+Clients that declare `io.modelcontextprotocol/tasks` now get a durable task
+handle for long-running pipeline tools. They poll with `tasks/get` and can send
+cooperative cancellation with `tasks/cancel`. Records live on disk under
+`<index_dir>/tasks/`, so completion/failure survives disconnects and can be
+read by a restarted server. Clients that do not declare the extension keep the
+old fire-and-forget response.
 
 ### 3.4 Freshness is pull-only
 
@@ -189,10 +172,10 @@ agent finds out at its next tool call.
 
 ---
 
-## 4. What we should build
+## 4. What shipped
 
-Four workstreams, ordered by ratio of payoff to risk. Each maps to at least one
-of the acceptance axes in the brief.
+Four workstreams shipped, ordered here by the ratio of payoff to risk. Each
+maps to at least one of the acceptance axes in the brief.
 
 ### Phase 1 — Unblock and stop pinning backwards
 *Axes: disconnect/reconnect, performance, features (all of them are gated on this)*
@@ -221,9 +204,9 @@ no Ruby or Rails floor moves.
 - Pass `stateless: true` to `StreamableHTTPTransport` in `exe/woods-mcp-http`,
   behind `WOODS_MCP_HTTP_STATELESS` defaulting to **on**, with session mode
   available for one deprecation window.
-- Update `docs/MCP_HTTP_TRANSPORT.md`: drop `Mcp-Session-Id` from the documented
-  CORS contract, document that GET/DELETE now answer `405`, and document that
-  streams are not resumable.
+- Update `docs/MCP_HTTP_TRANSPORT.md`: drop `Mcp-Session-Id` from the default
+  CORS contract, document that GET answers `405`, document the SDK's stateless
+  DELETE `200` no-op, and document that streams are not resumable.
 
 What this buys: a restart of `woods-mcp-http` becomes **invisible to clients**.
 No session to invalidate, no re-initialize, no 404-then-reconnect dance. It also
@@ -352,7 +335,7 @@ into a single-era one.
 | stdio users (`woods-mcp`, `woods-console-mcp`) | Unaffected mechanically; gain faster restart recovery — no handshake to redo. |
 | Docker split architecture (host reads volume-mounted output) | Unaffected; benefits from stateless HTTP if using the HTTP server. |
 | Multi-worktree setups | Benefit. Stateless HTTP means a restarted server does not invalidate other worktrees' clients. |
-| `woods-mcp-http` users relying on `Mcp-Session-Id` | **The one real break.** GET/DELETE become `405`; the header disappears. Mitigated by keeping session mode behind a flag for a deprecation window. |
+| `woods-mcp-http` users relying on `Mcp-Session-Id` | **The one real break.** GET becomes `405`, DELETE is a stateless no-op, and the header disappears by default. Mitigated by keeping session mode behind a flag for a deprecation window. |
 | Clients relying on SSE `Last-Event-ID` resumability | Removed by the spec, not by us. Low impact — Woods tool calls are short; long operations move to Tasks. |
 
 Two things worth being explicit about, because they are easy to assume away:
