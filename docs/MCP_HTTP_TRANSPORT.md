@@ -117,7 +117,7 @@ Rackup::Handler.get("puma").run(app, Port: port, Host: "localhost")
 
 **Complexity**: Low — ~30 lines, mirrors the existing exe structure.
 
-**Dependencies**: Requires `rackup` gem + a Rack server (e.g., `puma`). The gemspec already has `puma` as a dev dependency. For production use, `rackup` would need to be added as an optional dependency or documented as a user-provided requirement.
+**Dependencies**: Requires a Rack server (e.g., `puma`). `woods-mcp-http` uses the `rackup` gem when it is present, and falls back to Rack 2's handler registry for older Rails hosts that cannot resolve Rack 3.
 
 ### Option B: Rack Middleware (for embedding in host Rails apps)
 
@@ -168,7 +168,7 @@ woods-mcp --http --port 8080  # HTTP on custom port
 
 1. **Zero risk to existing users** — the stdio exe is untouched
 2. **Minimal code** — the `mcp` gem already provides the full transport; we just need a thin wrapper
-3. **No new gem dependencies** — `rackup`/`puma` are already dev dependencies; users wanting HTTP would install them
+3. **No new runtime gem dependencies** — users wanting HTTP install a Rack server; `rackup` is optional and only needed in Rack 3-style bundles
 4. **Natural upgrade path** — Option B (middleware) can be added later if Rails embedding demand appears
 
 ### Implementation Effort
@@ -272,4 +272,3 @@ Bind `woods-mcp-http` to `HOST=127.0.0.1` when a proxy handles the public surfac
 - **No rotation primitive.** There is one static token. Rotating it requires restarting the server and updating clients. A rotation story is tracked separately and will likely arrive with a broader OAuth-shaped design.
 - **No per-client identity.** Every valid request is equally trusted; there are no scopes or audit trails. Treat the token as a shared secret for a trust boundary you already control.
 - **No in-process TLS.** TLS is a reverse-proxy concern — Caddy/nginx/Cloudflare handle certs, HSTS, and cipher policy better than a Rack-level implementation would.
-

@@ -9,7 +9,8 @@
 #
 # Reads JSON files from the extraction output directory and exposes
 # them via the Model Context Protocol (Streamable HTTP transport).
-# Requires the `rackup` gem and a Rack-compatible server (e.g., puma).
+# Requires a Rack-compatible server (e.g., puma). Uses `rackup` when available
+# and falls back to Rack 2's bundled handler registry for older Rails hosts.
 
 # Suppress json-schema MultiJSON deprecation before any require chain that
 # could transitively load json-schema. See exe/woods-mcp for the full rationale.
@@ -20,7 +21,11 @@ rescue LoadError
   # json-schema isn't in every bundle.
 end
 
-require 'rackup'
+begin
+  require 'rackup'
+rescue LoadError
+  require 'rack'
+end
 require_relative '../lib/woods'
 require_relative '../lib/woods/dependency_graph'
 require_relative '../lib/woods/graph_analyzer'
@@ -96,4 +101,9 @@ auth_mode = token ? 'bearer' : 'none'
 session_mode = stateless ? 'stateless' : 'sessions (deprecated)'
 warn "Woods MCP HTTP server starting on http://#{host}:#{port} " \
      "(auth: #{auth_mode}, origins: #{origin_summary}, mode: #{session_mode})"
-Rackup::Handler.default.run(app, Port: port, Host: host)
+handler = if defined?(Rackup::Handler)
+            Rackup::Handler.default
+          else
+            Rack::Handler.default
+          end
+handler.run(app, Port: port, Host: host)

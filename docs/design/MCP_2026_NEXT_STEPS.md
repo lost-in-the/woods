@@ -205,8 +205,8 @@ Things that cost time in the authoring environment; fix or be aware.
   work fine. Note that `CLAUDE.md`'s Commands section still says
   `bundle exec rake spec`; that is correct under Bundler 2.x and wrong under 4.
 - **`puma` is now in the dev/test group** (added by this branch) so
-  `exe/woods-mcp-http` can boot. Before this it could not — `Rackup::Handler.default`
-  raised `LoadError`, which is why the executable had no end-to-end coverage.
+  `exe/woods-mcp-http` can boot in CI. The executable uses `rackup` when
+  available and falls back to Rack 2's handler registry for older Rails hosts.
 - **Opt-in spec tags:**
   ```bash
   bin/rspec                                             # default unit suite

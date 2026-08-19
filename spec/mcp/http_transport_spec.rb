@@ -67,6 +67,15 @@ RSpec.describe 'MCP HTTP Transport' do
     end
   end
 
+  describe 'handler compatibility' do
+    let(:source) { File.read(executable_path, encoding: Encoding::UTF_8) }
+
+    it 'falls back to Rack 2 handler lookup when rackup is unavailable' do
+      expect(source).to include("rescue LoadError\n  require 'rack'")
+      expect(source).to include('Rack::Handler.default')
+    end
+  end
+
   describe 'the stateless escape hatch parsing' do
     # Mirrors the expression in exe/woods-mcp-http. Extracted here because the
     # executable runs a Rack server on load and cannot be required in-process.
@@ -97,12 +106,11 @@ RSpec.describe 'MCP HTTP Transport' do
       expect(content).to include('woods-mcp-http')
     end
 
-    it 'declares rackup as a runtime dependency' do
+    it 'does not force Rack 3 via rackup on older Rails hosts' do
       spec = Gem::Specification.load(gemspec_path)
       rackup = spec.dependencies.find { |dependency| dependency.name == 'rackup' }
 
-      expect(rackup).not_to be_nil
-      expect(rackup.type).to eq(:runtime)
+      expect(rackup).to be_nil
     end
   end
 end
