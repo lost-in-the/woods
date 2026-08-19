@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "ledger_policy": {
+    "update_mode": "serial",
+    "rule": "Apply and verify one finding update at a time before the next update."
+  },
+  "findings": [
+    {
+      "id": "V2-REL-001",
+      "severity": "P1",
+      "affected_public_behavior": "The release workflow can publish after its reduced gate without proof that the full CI surface passed for the exact release SHA.",
+      "evidence_paths": [
+        ".github/workflows/release.yml:31",
+        ".github/workflows/ci.yml:1"
+      ],
+      "reproduction_command": "rg -n 'needs: test|workflow_run|gem build' .github/workflows/release.yml .github/workflows/ci.yml",
+      "owner": "release-v2-02",
+      "status": "confirmed",
+      "release_blocking": true
+    },
+    {
+      "id": "V2-REL-002",
+      "severity": "P1",
+      "affected_public_behavior": "Documentation targets intended for installed gems are not all proven present in the packaged artifact.",
+      "evidence_paths": [
+        "woods.gemspec:31",
+        "README.md:1"
+      ],
+      "reproduction_command": "gem build woods.gemspec && gem contents woods-*.gem | sort",
+      "owner": "release-v2-02",
+      "status": "confirmed",
+      "release_blocking": true
+    },
+    {
+      "id": "V2-CONSOLE-001",
+      "severity": "P1",
+      "affected_public_behavior": "Console bridge capability is advertised through the executable and server surface although the bridge implementation remains a stub or has weaker safety coverage than embedded execution.",
+      "evidence_paths": [
+        "exe/woods-console-mcp:10",
+        "lib/woods/console/bridge.rb:13",
+        "lib/woods/console/server.rb:129"
+      ],
+      "reproduction_command": "bundle exec rspec spec/console/tool_specs_spec.rb spec/console/bridge_spec.rb",
+      "owner": "release-v2-03",
+      "status": "confirmed",
+      "release_blocking": true
+    },
+    {
+      "id": "V2-MCP-001",
+      "severity": "P1",
+      "affected_public_behavior": "The advertised MCP task cancellation endpoint records cancellation intent without stopping the associated pipeline work or protecting publication.",
+      "evidence_paths": [
+        "lib/woods/mcp/tasks/extension.rb:99",
+        "lib/woods/mcp/server.rb:949"
+      ],
+      "reproduction_command": "bundle exec rspec spec/mcp/tasks/extension_spec.rb spec/mcp/server_spec.rb",
+      "owner": "release-v2-04",
+      "status": "confirmed",
+      "release_blocking": true
+    },
+    {
+      "id": "V2-CONFIG-001",
+      "severity": "P1",
+      "affected_public_behavior": "Preset and adapter configuration can disagree with the provider, storage, and persistence behavior used by the build and serving paths.",
+      "evidence_paths": [
+        "lib/woods/builder.rb:34",
+        "lib/woods/resolved_config.rb:54",
+        "lib/woods/storage/metadata_store.rb:1"
+      ],
+      "reproduction_command": "bundle exec rspec spec/builder_spec.rb spec/resolved_config_spec.rb spec/storage",
+      "owner": "release-v2-05",
+      "status": "confirmed",
+      "release_blocking": true
+    }
+  ]
+}

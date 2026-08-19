@@ -158,6 +158,8 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
+      - name: Verify release-v2 public-surface inventory
+        run: bundle exec rake release_v2:verify_surface_inventory
       - name: Run linter
         run: bundle exec rubocop
 

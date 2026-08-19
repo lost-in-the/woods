@@ -1,0 +1,744 @@
+{
+  "schema_version": 1,
+  "generation": {
+    "command": "bundle exec rake release_v2:write_surface_inventory",
+    "verification_command": "bundle exec rake release_v2:verify_surface_inventory",
+    "serial_ledger_updates_required": true
+  },
+  "configuration_attributes": [
+    "add_gem",
+    "cache_enabled",
+    "cache_enabled=",
+    "cache_options",
+    "cache_options=",
+    "cache_store",
+    "cache_store=",
+    "concurrent_extraction",
+    "concurrent_extraction=",
+    "console_blocked_tables",
+    "console_blocked_tables=",
+    "console_credential_defense_enabled",
+    "console_credential_defense_enabled=",
+    "console_credential_rotation_warning",
+    "console_credential_rotation_warning=",
+    "console_disabled_scanner_patterns",
+    "console_disabled_scanner_patterns=",
+    "console_embedded_read_tools",
+    "console_embedded_read_tools=",
+    "console_mcp_allowed_origins",
+    "console_mcp_allowed_origins=",
+    "console_mcp_enabled",
+    "console_mcp_enabled=",
+    "console_mcp_path",
+    "console_mcp_path=",
+    "console_mcp_token",
+    "console_mcp_token=",
+    "console_redacted_columns",
+    "console_redacted_columns=",
+    "console_redacted_key_values",
+    "console_redacted_key_values=",
+    "console_unsafe_eval_audit_log_path",
+    "console_unsafe_eval_audit_log_path=",
+    "console_unsafe_eval_confirmation",
+    "console_unsafe_eval_confirmation=",
+    "console_unsafe_eval_enabled",
+    "console_unsafe_eval_enabled=",
+    "context_format",
+    "context_format=",
+    "dump_retention_count",
+    "dump_retention_count=",
+    "embedding_model",
+    "embedding_model=",
+    "embedding_options",
+    "embedding_options=",
+    "embedding_provider",
+    "embedding_provider=",
+    "enable_snapshots",
+    "enable_snapshots=",
+    "extract_navigation_edges",
+    "extract_navigation_edges=",
+    "extractors",
+    "extractors=",
+    "gem_configs",
+    "gem_configs=",
+    "graph_store",
+    "graph_store=",
+    "include_framework_sources",
+    "include_framework_sources=",
+    "log_level",
+    "log_level=",
+    "max_context_tokens",
+    "max_context_tokens=",
+    "metadata_store",
+    "metadata_store=",
+    "metadata_store_options",
+    "metadata_store_options=",
+    "notion_api_token",
+    "notion_api_token=",
+    "notion_database_ids",
+    "notion_database_ids=",
+    "output_dir",
+    "output_dir=",
+    "precompute_flows",
+    "precompute_flows=",
+    "pretty_json",
+    "pretty_json=",
+    "session_exclude_paths",
+    "session_exclude_paths=",
+    "session_id_proc",
+    "session_id_proc=",
+    "session_store",
+    "session_store=",
+    "session_tracer_allow_production",
+    "session_tracer_allow_production=",
+    "session_tracer_enabled",
+    "session_tracer_enabled=",
+    "similarity_threshold",
+    "similarity_threshold=",
+    "unblocked_api_token",
+    "unblocked_api_token=",
+    "unblocked_collection_id",
+    "unblocked_collection_id=",
+    "unblocked_repo_url",
+    "unblocked_repo_url=",
+    "vector_store",
+    "vector_store=",
+    "vector_store_options",
+    "vector_store_options="
+  ],
+  "presets": {
+    "local": {
+      "vector_store": "in_memory",
+      "metadata_store": "sqlite",
+      "graph_store": "in_memory",
+      "embedding_provider": "ollama"
+    },
+    "postgresql": {
+      "vector_store": "pgvector",
+      "metadata_store": "sqlite",
+      "graph_store": "in_memory",
+      "embedding_provider": "openai"
+    },
+    "production": {
+      "vector_store": "qdrant",
+      "metadata_store": "sqlite",
+      "graph_store": "in_memory",
+      "embedding_provider": "openai"
+    },
+    "shared_filesystem": {
+      "vector_store": "in_memory",
+      "metadata_store": "in_memory",
+      "graph_store": "in_memory",
+      "embedding_provider": "ollama"
+    }
+  },
+  "extractor_registrations": [
+    "action_cable_channels",
+    "caching",
+    "components",
+    "concerns",
+    "configurations",
+    "controllers",
+    "database_views",
+    "decorators",
+    "engines",
+    "events",
+    "factories",
+    "graphql",
+    "i18n",
+    "jobs",
+    "libs",
+    "mailers",
+    "managers",
+    "middleware",
+    "migrations",
+    "models",
+    "policies",
+    "poros",
+    "pundit_policies",
+    "rails_source",
+    "rake_tasks",
+    "routes",
+    "scheduled_jobs",
+    "serializers",
+    "services",
+    "state_machines",
+    "test_mappings",
+    "validators",
+    "view_components",
+    "view_templates"
+  ],
+  "rake_tasks": [
+    {
+      "name": "woods:clean",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:clear",
+      "arguments": [],
+      "prerequisites": [
+        "clean"
+      ]
+    },
+    {
+      "name": "woods:console",
+      "arguments": [],
+      "prerequisites": []
+    },
+    {
+      "name": "woods:embed",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:embed_incremental",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:evaluate",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:evaluate:baseline",
+      "arguments": [
+        "strategy"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:extract",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:extract_framework",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:flow",
+      "arguments": [
+        "entry_point"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:generate_token",
+      "arguments": [],
+      "prerequisites": []
+    },
+    {
+      "name": "woods:guard",
+      "arguments": [],
+      "prerequisites": [
+        "watch"
+      ]
+    },
+    {
+      "name": "woods:hone",
+      "arguments": [],
+      "prerequisites": [
+        "embed_incremental"
+      ]
+    },
+    {
+      "name": "woods:incremental",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:look",
+      "arguments": [],
+      "prerequisites": [
+        "stats"
+      ]
+    },
+    {
+      "name": "woods:nest",
+      "arguments": [],
+      "prerequisites": [
+        "embed"
+      ]
+    },
+    {
+      "name": "woods:notion_sync",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:obsidian",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:refresh",
+      "arguments": [
+        "extractor"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:relay",
+      "arguments": [],
+      "prerequisites": [
+        "unblocked_sync"
+      ]
+    },
+    {
+      "name": "woods:retrieve",
+      "arguments": [
+        "query"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:scan",
+      "arguments": [],
+      "prerequisites": [
+        "extract"
+      ]
+    },
+    {
+      "name": "woods:self_analyze",
+      "arguments": [],
+      "prerequisites": []
+    },
+    {
+      "name": "woods:send",
+      "arguments": [],
+      "prerequisites": [
+        "notion_sync"
+      ]
+    },
+    {
+      "name": "woods:stats",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:tend",
+      "arguments": [],
+      "prerequisites": [
+        "incremental"
+      ]
+    },
+    {
+      "name": "woods:unblocked_sync",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:validate",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:vault",
+      "arguments": [],
+      "prerequisites": [
+        "obsidian"
+      ]
+    },
+    {
+      "name": "woods:vet",
+      "arguments": [],
+      "prerequisites": [
+        "validate"
+      ]
+    },
+    {
+      "name": "woods:watch",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:watch_status",
+      "arguments": [],
+      "prerequisites": []
+    }
+  ],
+  "executables": [
+    "woods-console",
+    "woods-console-mcp",
+    "woods-mcp",
+    "woods-mcp-http",
+    "woods-mcp-start"
+  ],
+  "index_mcp": {
+    "tools": [
+      {
+        "name": "codebase_retrieve",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "dependencies",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "dependents",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "domain_clusters",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "framework",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "graph_analysis",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "list_snapshots",
+        "registration_condition": "snapshot_store is provided"
+      },
+      {
+        "name": "lookup",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "notion_sync",
+        "registration_condition": "a resolved Notion token and non-empty database IDs are configured"
+      },
+      {
+        "name": "pagerank",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "pipeline_diagnose",
+        "registration_condition": "operator is provided"
+      },
+      {
+        "name": "pipeline_embed",
+        "registration_condition": "operator is provided"
+      },
+      {
+        "name": "pipeline_extract",
+        "registration_condition": "operator is provided"
+      },
+      {
+        "name": "pipeline_repair",
+        "registration_condition": "operator is provided"
+      },
+      {
+        "name": "pipeline_status",
+        "registration_condition": "operator is provided"
+      },
+      {
+        "name": "recent_changes",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "reload",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "retrieval_explain",
+        "registration_condition": "feedback_store is provided"
+      },
+      {
+        "name": "retrieval_rate",
+        "registration_condition": "feedback_store is provided"
+      },
+      {
+        "name": "retrieval_report_gap",
+        "registration_condition": "feedback_store is provided"
+      },
+      {
+        "name": "retrieval_suggest",
+        "registration_condition": "feedback_store is provided"
+      },
+      {
+        "name": "search",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "session_trace",
+        "registration_condition": "Woods.configuration.session_store is configured"
+      },
+      {
+        "name": "snapshot_detail",
+        "registration_condition": "snapshot_store is provided"
+      },
+      {
+        "name": "snapshot_diff",
+        "registration_condition": "snapshot_store is provided"
+      },
+      {
+        "name": "structure",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "trace_flow",
+        "registration_condition": "always registered"
+      },
+      {
+        "name": "unit_history",
+        "registration_condition": "snapshot_store is provided"
+      },
+      {
+        "name": "woods_status",
+        "registration_condition": "always registered"
+      }
+    ],
+    "resources": [
+      {
+        "name": "dependency-graph",
+        "uri": "codebase://graph"
+      },
+      {
+        "name": "manifest",
+        "uri": "codebase://manifest"
+      }
+    ],
+    "resource_templates": [
+      {
+        "name": "unit",
+        "uri_template": "codebase://unit/{identifier}"
+      },
+      {
+        "name": "units-by-type",
+        "uri_template": "codebase://type/{type}"
+      }
+    ]
+  },
+  "console_mcp": {
+    "schemas": [
+      {
+        "name": "console_aggregate",
+        "tier": 1
+      },
+      {
+        "name": "console_association_count",
+        "tier": 1
+      },
+      {
+        "name": "console_cache_stats",
+        "tier": 3
+      },
+      {
+        "name": "console_channel_status",
+        "tier": 3
+      },
+      {
+        "name": "console_check_eligibility",
+        "tier": 2
+      },
+      {
+        "name": "console_check_policy",
+        "tier": 2
+      },
+      {
+        "name": "console_check_setting",
+        "tier": 2
+      },
+      {
+        "name": "console_count",
+        "tier": 1
+      },
+      {
+        "name": "console_data_snapshot",
+        "tier": 2
+      },
+      {
+        "name": "console_decorate",
+        "tier": 2
+      },
+      {
+        "name": "console_diagnose_model",
+        "tier": 2
+      },
+      {
+        "name": "console_error_rates",
+        "tier": 3
+      },
+      {
+        "name": "console_eval",
+        "tier": 4
+      },
+      {
+        "name": "console_find",
+        "tier": 1
+      },
+      {
+        "name": "console_job_failures",
+        "tier": 3
+      },
+      {
+        "name": "console_job_find",
+        "tier": 3
+      },
+      {
+        "name": "console_job_queues",
+        "tier": 3
+      },
+      {
+        "name": "console_job_schedule",
+        "tier": 3
+      },
+      {
+        "name": "console_pluck",
+        "tier": 1
+      },
+      {
+        "name": "console_query",
+        "tier": 4
+      },
+      {
+        "name": "console_recent",
+        "tier": 1
+      },
+      {
+        "name": "console_redis_info",
+        "tier": 3
+      },
+      {
+        "name": "console_sample",
+        "tier": 1
+      },
+      {
+        "name": "console_schema",
+        "tier": 1
+      },
+      {
+        "name": "console_slow_endpoints",
+        "tier": 3
+      },
+      {
+        "name": "console_sql",
+        "tier": 4
+      },
+      {
+        "name": "console_status",
+        "tier": 1
+      },
+      {
+        "name": "console_throughput",
+        "tier": 3
+      },
+      {
+        "name": "console_update_setting",
+        "tier": 2
+      },
+      {
+        "name": "console_validate_record",
+        "tier": 2
+      },
+      {
+        "name": "console_validate_with",
+        "tier": 2
+      }
+    ],
+    "tiers": {
+      "1": 9,
+      "2": 9,
+      "3": 10,
+      "4": 3
+    }
+  },
+  "tasks_methods": [
+    "build_embed_indexer",
+    "build_resolved_config",
+    "print_embed_stats",
+    "verify_store_dimensions!"
+  ],
+  "adapters": {
+    "embedding_providers": [
+      "fake",
+      "ollama",
+      "openai"
+    ],
+    "vector_stores": [
+      "in_memory",
+      "pgvector",
+      "qdrant"
+    ],
+    "metadata_stores": [
+      "in_memory",
+      "sqlite"
+    ],
+    "graph_stores": [
+      "in_memory"
+    ],
+    "exporters": [
+      {
+        "name": "notion",
+        "class": "Woods::Notion::Exporter",
+        "path": "lib/woods/notion/exporter.rb"
+      },
+      {
+        "name": "obsidian",
+        "class": "Woods::Obsidian::VaultExporter",
+        "path": "lib/woods/obsidian/vault_exporter.rb"
+      },
+      {
+        "name": "unblocked",
+        "class": "Woods::Unblocked::Exporter",
+        "path": "lib/woods/unblocked/exporter.rb"
+      }
+    ]
+  },
+  "public_woods_methods": [
+    "build_retriever",
+    "configuration",
+    "configuration=",
+    "configure",
+    "configure_with_preset",
+    "extract!",
+    "extract_changed!",
+    "resolve_notion_token",
+    "retrieve"
+  ],
+  "counts": {
+    "configuration_attributes": 99,
+    "console_mcp_schemas": 31,
+    "executables": 5,
+    "extractor_registrations": 34,
+    "index_mcp_resource_templates": 2,
+    "index_mcp_resources": 2,
+    "index_mcp_tools": 29,
+    "presets": 4,
+    "public_woods_methods": 9,
+    "rake_tasks": 32,
+    "tasks_methods": 4
+  }
+}
