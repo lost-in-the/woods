@@ -9,10 +9,6 @@ permissions:
   actions: read
   contents: read
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
   release-context:
     if: >-
@@ -115,9 +111,12 @@ jobs:
     if: needs.release-context.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     environment: release
+    concurrency:
+      group: release-${{ needs.release-context.outputs.tag }}
+      cancel-in-progress: false
     permissions:
       actions: read
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
@@ -153,18 +152,7 @@ jobs:
         run: |
           script/verify-release-tag
           gem push "dist/${GEM_NAME}"
-      - name: Revalidate the current remote tag before creating the release
-        env:
-          RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
-          RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
-        run: script/verify-release-tag
-      - name: Create GitHub release from the same bytes
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          tag_name: ${{ needs.release-context.outputs.tag }}
-          target_commitish: ${{ needs.release-context.outputs.release-sha }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            dist/${{ needs.release-context.outputs.gem-name }}
-            dist/${{ needs.release-context.outputs.gem-name }}.sha256
+
+      # GitHub Release creation is intentionally separate from gem publication.
+      # The API cannot atomically bind an existing tag to an expected commit;
+      # create a release only after the tag's immutability is independently assured.

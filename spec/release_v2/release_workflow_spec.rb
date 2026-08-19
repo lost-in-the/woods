@@ -102,17 +102,34 @@ RSpec.describe 'release workflow contract' do
     expect(commands).not_to match(/gem push .+\*/)
   end
 
-  it 'serializes releases and revalidates the current remote tag before both publication actions' do
+  it 'publishes only the gem because GitHub Release creation cannot close the existing-tag race' do
     publish = release.fetch('jobs').fetch('publish')
     commands = run_commands(publish)
 
-    expect(release.fetch('concurrency')).to eq('group' => 'release', 'cancel-in-progress' => false)
-    expect(commands.scan('script/verify-release-tag').length).to eq(2)
+    expect(publish.dig('permissions', 'contents')).to eq('read')
+    expect(commands.scan('script/verify-release-tag').length).to eq(1)
     expect(commands.index('script/verify-release-tag')).to be < commands.index('gem push')
-    release_step_index = steps(publish).index do |step|
-      step.fetch('uses', '').start_with?('softprops/action-gh-release@')
+    release_actions = steps(publish).select do |step|
+      step.fetch('uses', '').include?('action-gh-release') || step.fetch('run', '').match?(/gh release/)
     end
-    prior_step = steps(publish).fetch(release_step_index - 1)
-    expect(prior_step.fetch('run')).to include('script/verify-release-tag')
+    expect(release_actions).to be_empty
+  end
+
+  it 'serializes only validated publish candidates using the validated tag' do
+    jobs = release.fetch('jobs')
+    publish = jobs.fetch('publish')
+
+    expect(release).not_to have_key('concurrency')
+    expect(publish.fetch('concurrency')).to eq(
+      'group' => 'release-${{ needs.release-context.outputs.tag }}',
+      'cancel-in-progress' => false
+    )
+    expect(publish.fetch('if')).to eq("needs.release-context.outputs.should-release == 'true'")
+    expect(jobs.except('publish').values).to all(satisfy { |job| !job.key?('concurrency') })
+
+    context_gate = jobs.fetch('release-context').fetch('if')
+    expect(context_gate).to include("workflow_run.conclusion == 'success'")
+    expect(context_gate).to include("workflow_run.event == 'push'")
+    expect(context_gate).to include('workflow_run.head_repository.full_name == github.repository')
   end
 end
