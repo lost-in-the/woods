@@ -98,12 +98,16 @@ RSpec.describe 'lib/tasks/woods_evaluation.rake' do
       metadata_store = Woods::Storage::MetadataStore::InMemory.new
       metadata_store.store('PaymentService', 'type' => 'service', 'source_code' => 'class PaymentService; end')
       retriever = instance_double(Woods::Retriever, metadata_store: metadata_store)
+      previous_config = Woods.configuration
 
       allow(Woods::Evaluation::QuerySet).to receive(:load).and_return(query_set)
       allow(Woods::MCP::Bootstrapper).to receive(:build_retriever).and_return([retriever, nil])
+      Woods.configuration = nil
 
       expect { Woods::EvaluationTasks.run_baseline(strategy: 'grep') }
         .to output(/Mean Recall: 1\.0000/).to_stdout
+    ensure
+      Woods.configuration = previous_config
     end
   end
 

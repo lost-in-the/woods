@@ -17,6 +17,8 @@
 #
 # Offline runs need no API key — set `embedding_provider = :fake` (#178).
 
+require 'woods'
+
 namespace :woods do
   desc 'Run evaluation queries against the retrieval pipeline'
   task evaluate: :environment do
@@ -109,7 +111,8 @@ module Woods
     #
     # @return [Woods::Retriever]
     def build_eval_retriever
-      retriever, _state = MCP::Bootstrapper.build_retriever(index_dir: Woods.configuration.output_dir)
+      config = Woods.configuration || Woods.configure
+      retriever, _state = MCP::Bootstrapper.build_retriever(index_dir: config.output_dir)
       retriever || raise(Woods::Error, 'Evaluation requires an embedded Woods index with a configured provider.')
     end
 
