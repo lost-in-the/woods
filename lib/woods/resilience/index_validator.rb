@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'set'
 require_relative '../filename_utils'
 
 module Woods
@@ -12,6 +13,17 @@ module Woods
     # - All files referenced in the index exist on disk
     # - Content hashes (source_hash) match the actual source_code
     # - No stale unit files exist that aren't listed in the index
+    #
+    # **This class knows nothing about vectors or embedding dimensions.** Six
+    # documents used to credit it with detecting dimension mismatches; it never
+    # did (#214). That check is {Woods::MCP::DimensionMismatch}, raised by
+    # `Tasks.verify_store_dimensions!` before a durable embed run and by
+    # {Woods::Storage::Snapshotter::Vector} at MCP boot.
+    #
+    # Consumed by `spec/integration/multi_worktree_spec.rb` as a per-worktree
+    # integrity oracle. The `woods:validate` rake task performs an overlapping
+    # check inline rather than calling this — deliberate duplication left alone
+    # for now, since the task's output format is user-facing.
     #
     # @example
     #   validator = IndexValidator.new(index_dir: "tmp/woods")

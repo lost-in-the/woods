@@ -245,6 +245,14 @@ module Woods
           in_private = false if stripped == 'public'
           in_protected = false if stripped == 'public'
 
+          # `private def foo` / `protected def foo` mark one method without
+          # opening a visibility section. Matching only the bare keyword lines
+          # above meant the inline form was invisible, so the `def` that
+          # follows on the same line was collected as public — and a method
+          # reported public can be misclassified downstream as a decision
+          # method. Skip the line without touching section state.
+          next if stripped.match?(/\A(?:private|protected)\s+def\b/)
+
           if !in_private && !in_protected && stripped =~ /def\s+((?:self\.)?\w+[?!=]?)/
             method_name = ::Regexp.last_match(1)
             methods << method_name unless method_name.start_with?('_')

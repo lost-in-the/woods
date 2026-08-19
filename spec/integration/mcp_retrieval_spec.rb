@@ -192,7 +192,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
     end
 
     let(:mock_assembler) do
-      instance_double('Woods::FlowAssembler').tap do |a|
+      instance_double(Woods::FlowAssembler).tap do |a|
         allow(a).to receive(:assemble).and_return(mock_flow_doc)
       end
     end
@@ -256,7 +256,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
     end
 
     let(:mock_assembler) do
-      instance_double('Woods::FlowAssembler').tap do |a|
+      instance_double(Woods::FlowAssembler).tap do |a|
         allow(a).to receive(:assemble).and_return(mock_flow_doc)
       end
     end

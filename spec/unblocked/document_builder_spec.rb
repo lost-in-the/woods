@@ -85,6 +85,50 @@ RSpec.describe Woods::Unblocked::DocumentBuilder do
       unit = { 'type' => 'model', 'identifier' => 'Order', 'file_path' => 'app/models/order.rb' }
       expect(builder.uri_for(unit)).to eq(builder.build(unit)[:uri])
     end
+
+    # #217 / B-104. The ref was hardcoded to `main`, so every citation on a
+    # repo whose default branch is `master` (or a release branch, or a tag)
+    # pointed at a ref that need not contain the file at all.
+    describe 'ref handling' do
+      it 'cites the ref it was given' do
+        on_master = described_class.new(repo_url: 'https://github.com/org/repo', ref: 'master')
+
+        expect(on_master.uri_for({ 'file_path' => 'app/models/order.rb' }))
+          .to eq('https://github.com/org/repo/blob/master/app/models/order.rb')
+      end
+
+      it 'falls back to main when no ref is given' do
+        expect(builder.uri_for({ 'file_path' => 'a.rb' }))
+          .to eq('https://github.com/org/repo/blob/main/a.rb')
+      end
+
+      # GitProvenance reports "unknown" when it cannot resolve a ref — citing
+      # a branch literally named `unknown` would be worse than the default.
+      ['unknown', '', '   ', nil].each do |unresolved|
+        it "falls back to main for #{unresolved.inspect}" do
+          fallback = described_class.new(repo_url: 'https://github.com/org/repo', ref: unresolved)
+
+          expect(fallback.uri_for({ 'file_path' => 'a.rb' }))
+            .to eq('https://github.com/org/repo/blob/main/a.rb')
+        end
+      end
+    end
+
+    # Paths were interpolated raw. A `#` turns the rest of the path into a URL
+    # fragment, so the link silently pointed at the directory above the file.
+    describe 'path encoding' do
+      it 'percent-encodes characters that would break the URL' do
+        uri = builder.uri_for({ 'file_path' => 'app/models/order item#2.rb' })
+
+        expect(uri).to eq('https://github.com/org/repo/blob/main/app/models/order%20item%232.rb')
+      end
+
+      it 'leaves path separators alone' do
+        uri = builder.uri_for({ 'file_path' => 'app/models/concerns/orderable.rb' })
+
+        expect(uri).to eq('https://github.com/org/repo/blob/main/app/models/concerns/orderable.rb')
+      end
+    end
   end
 
   # The skip-if-unchanged mechanism in the exporter hashes the built body.

@@ -30,6 +30,13 @@ module Woods
         diversity: 0.05
       }.freeze
 
+      # Chunked units embed as `Identifier#chunk_N`; metadata and the graph are
+      # keyed on the bare identifier. Mirrors the same constant in Retriever,
+      # Bootstrapper, ContextAssembler and Indexer — kept local to each, as
+      # they are, rather than introducing a shared home in a patch release.
+      CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
+      private_constant :CHUNK_SUFFIX_PATTERN
+
       # RRF constant — balances rank position vs. absolute score.
       # Standard value from the original RRF paper (Cormack et al., 2009).
       RRF_K = 60
@@ -221,11 +228,20 @@ module Woods
       # @param classification [QueryClassifier::Classification]
       # @return [Array<Hash>]
       def score_candidates(candidates, classification)
-        # Batch-fetch all metadata in one query instead of per-candidate lookups
-        unit_map = @metadata_store.find_batch(candidates.map(&:identifier))
+        # Look up by *base* identifier. A chunked unit's vector ids carry a
+        # `#chunk_N` suffix, but the metadata store and the PageRank map are
+        # both keyed on the unit — so passing the raw identifier missed every
+        # chunk, and recency, importance, type_match and diversity all fell
+        # back to their neutral values precisely on chunked corpora
+        # (rails_source-heavy hosts), leaving semantic+keyword to decide alone.
+        # The bootstrapper and the assembler already strip; the ranker was the
+        # one consumer that did neither.
+        base_ids = candidates.to_h { |candidate| [candidate.identifier, base_identifier(candidate.identifier)] }
+        unit_map = @metadata_store.find_batch(base_ids.values.uniq)
 
         candidates.map do |candidate|
-          unit = unit_map[candidate.identifier]
+          base_id = base_ids[candidate.identifier]
+          unit = unit_map[base_id]
 
           {
             candidate: candidate,
@@ -234,7 +250,7 @@ module Woods
               semantic: candidate.score.to_f,
               keyword: keyword_score(candidate),
               recency: recency_score(unit),
-              importance: importance_score(unit, candidate.identifier),
+              importance: importance_score(unit, base_id),
               type_match: type_match_score(unit, classification),
               diversity: 1.0 # Adjusted after initial sort
             }
@@ -293,6 +309,14 @@ module Woods
       # @param unit [Hash, nil] Unit metadata from store
       # @param identifier [String] Candidate identifier (matched against PageRank keys)
       # @return [Float] 0.0 to 1.0
+      # The unit identifier behind a possibly chunk-suffixed candidate id.
+      #
+      # @param identifier [String]
+      # @return [String]
+      def base_identifier(identifier)
+        identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
+      end
+
       def importance_score(unit, identifier)
         pagerank = pagerank_importance_map[identifier]
         return pagerank if pagerank

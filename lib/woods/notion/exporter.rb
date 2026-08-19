@@ -196,6 +196,12 @@ module Woods
                                         properties: properties, legacy: legacy)
             @page_id_cache[entry['identifier']] = page_id
             stats[status] += 1
+          rescue AuthenticationError
+            # Not a per-unit failure: the token is wrong or the integration is
+            # not shared with this database, so every remaining call in the run
+            # would fail too — at Notion's 3 req/sec. Abort instead of spending
+            # the whole sync proving it.
+            raise
           rescue StandardError => e
             stats[:errors] << "#{entry['identifier']}: #{e.message}"
           end
@@ -247,6 +253,8 @@ module Woods
           status, = sync_page(scope: SCOPE_COLUMNS, database_id: database_id, title_value: title_value,
                               properties: properties, legacy: column_legacy_descriptor(column, parent_page_id))
           stats[status] += 1
+        rescue AuthenticationError
+          raise # see sync_units — an auth failure dooms the whole run
         rescue StandardError => e
           stats[:errors] << "#{entry['identifier']}.#{column['name']}: #{e.message}"
         end

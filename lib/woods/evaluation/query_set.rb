@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'json'
+require_relative '../retrieval/query_classifier'
+
 module Woods
   module Evaluation
     # Manages a set of evaluation queries with expected results.
@@ -21,15 +24,32 @@ module Woods
       # @!attribute [r] expected_units
       #   @return [Array<String>] Expected unit identifiers (ground truth)
       # @!attribute [r] intent
-      #   @return [Symbol] Query intent (:lookup, :trace, :explain, :compare)
+      #   @return [Symbol] Query intent — one of {VALID_INTENTS}, the same
+      #     vocabulary {Woods::Retrieval::QueryClassifier} produces
       # @!attribute [r] scope
-      #   @return [Symbol] Query scope (:specific, :bounded, :broad)
+      #   @return [Symbol] Query scope — one of {VALID_SCOPES}, the same
+      #     vocabulary {Woods::Retrieval::QueryClassifier} produces
       # @!attribute [r] tags
       #   @return [Array<String>] Tags for filtering queries
       Query = Struct.new(:query, :expected_units, :intent, :scope, :tags, keyword_init: true)
 
-      VALID_INTENTS = %i[lookup trace explain compare].freeze
-      VALID_SCOPES = %i[specific bounded broad].freeze
+      # The annotation vocabulary is the *classifier's* vocabulary (#218 /
+      # B-105). These lists used to be a parallel invention — intents
+      # `lookup/trace/explain/compare` against the classifier's
+      # `understand/locate/trace/debug/implement/reference/compare/framework`,
+      # and scopes `specific/bounded/broad` against
+      # `pinpoint/focused/exploratory/comprehensive`, which share nothing at
+      # all. A ground-truth annotation could therefore never be compared with
+      # what the pipeline actually classified a query as, so the harness could
+      # measure retrieval hits but never classification accuracy.
+      VALID_INTENTS = Woods::Retrieval::QueryClassifier::INTENTS
+      VALID_SCOPES = Woods::Retrieval::QueryClassifier::SCOPES
+
+      # Old annotation values, accepted on load and translated. No shipped
+      # query set uses them (the harness had no working entry point until
+      # #212), but a hand-written file might.
+      LEGACY_INTENTS = { lookup: :locate, explain: :understand }.freeze
+      LEGACY_SCOPES = { specific: :pinpoint, bounded: :focused, broad: :exploratory }.freeze
 
       # @return [Array<Query>] The queries in this set
       attr_reader :queries
@@ -108,8 +128,8 @@ module Woods
         Query.new(
           query: hash.fetch('query'),
           expected_units: hash.fetch('expected_units', []),
-          intent: hash.fetch('intent', 'lookup').to_sym,
-          scope: hash.fetch('scope', 'specific').to_sym,
+          intent: LEGACY_INTENTS.fetch(hash.fetch('intent', 'understand').to_sym) { |v| v },
+          scope: LEGACY_SCOPES.fetch(hash.fetch('scope', 'focused').to_sym) { |v| v },
           tags: hash.fetch('tags', [])
         )
       end

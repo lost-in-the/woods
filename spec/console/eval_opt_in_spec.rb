@@ -7,7 +7,7 @@ require 'woods/console/server'
 RSpec.describe 'console_eval opt-in safety contract' do
   let(:registry) { { 'User' => %w[id email] } }
   let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
-  let(:connection) { instance_double('Connection') }
+  let(:connection) { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
   before do
@@ -117,7 +117,7 @@ RSpec.describe 'console_eval opt-in safety contract' do
       before do
         ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'
         rails = class_double('Rails').as_stubbed_const
-        env = instance_double('Rails::Env', production?: true)
+        env = double('Rails::Env', production?: true)
         allow(rails).to receive(:env).and_return(env)
       end
 

@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'digest'
 require 'active_support/core_ext/object/blank'
+require 'woods'
 require 'woods/extractors/mailer_extractor'
 
 RSpec.describe Woods::Extractors::MailerExtractor do

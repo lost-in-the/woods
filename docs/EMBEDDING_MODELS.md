@@ -49,8 +49,9 @@ ollama pull bge-m3
 
 If you switch models on an existing install, drop your vector index before
 re-indexing — the embedding dimension change is incompatible with existing
-vectors. `Woods::Resilience::IndexValidator` will catch this and raise at
-startup if you miss it.
+vectors. Woods raises `Woods::MCP::DimensionMismatch` if you miss it:
+`rake woods:embed` refuses up front on pgvector/Qdrant, and the MCP server
+refuses at boot when a dump's recorded dimension disagrees with the provider.
 
 ## Why `num_ctx` isn't enough
 

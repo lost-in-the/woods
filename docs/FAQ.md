@@ -390,7 +390,7 @@ Start with `:local` for zero-dependency development and upgrade to `:postgresql`
 
 ### What happens if I change my embedding model after indexing?
 
-Switching embedding models requires a full re-index. The new model produces vectors with different dimensions or a different embedding space, making old and new vectors incompatible for similarity search. `IndexValidator` detects dimension mismatches before queries fail and logs a warning. Re-index with:
+Switching embedding models requires a full re-index. The new model produces vectors with different dimensions or a different embedding space, making old and new vectors incompatible for similarity search. Woods detects a dimension change and raises `Woods::MCP::DimensionMismatch` — `rake woods:embed` refuses before embedding anything, and the MCP server refuses at boot — so you get an actionable error rather than silently wrong results. Re-index with:
 
 ```bash
 bundle exec rake woods:extract

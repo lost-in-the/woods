@@ -51,8 +51,21 @@ if ! bundle check > /dev/null 2>&1; then
   echo "Dependencies installed." >&2
 fi
 
-# --- Pin MCP protocol version for Claude Code compatibility ---
-export MCP_PROTOCOL_VERSION="${MCP_PROTOCOL_VERSION:-2024-11-05}"
+# --- MCP protocol version: negotiate, do not pin ---
+# This wrapper used to default MCP_PROTOCOL_VERSION to 2024-11-05, the oldest
+# protocol revision there is. It was written when that was the widest-compatible
+# choice, but it is now actively harmful: the mcp gem's server is dual-era —
+# it answers `initialize` for legacy clients AND serves `server/discover` plus
+# per-request metadata for modern ones — and pinning is the single action that
+# collapses it to one era. An unpinned server is the MORE compatible one.
+#
+# The variable remains an escape hatch for a client that mis-negotiates; export
+# it yourself (in .mcp.json `env`, or the surrounding shell) to force a version.
+# See docs/design/MCP_2026_STRATEGY.md §5.
+if [[ -n "${MCP_PROTOCOL_VERSION:-}" ]]; then
+  echo "Pinning MCP protocol version to ${MCP_PROTOCOL_VERSION} (unset it to negotiate)." >&2
+  export MCP_PROTOCOL_VERSION
+fi
 
 # --- Start the MCP server ---
 exec bundle exec ruby "${GEM_DIR}/exe/woods-mcp" "$INDEX_DIR"

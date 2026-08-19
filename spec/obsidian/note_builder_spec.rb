@@ -4,6 +4,9 @@ require 'spec_helper'
 require 'yaml'
 require 'woods/obsidian/name_mapper'
 require 'woods/obsidian/note_builder'
+# instance_double(Woods::Console::CredentialScanner) only verifies when the
+# constant is loaded; require it here so the spec passes standalone.
+require 'woods/console/credential_scanner'
 require_relative '../fixtures/unblocked/golden_units'
 
 RSpec.describe Woods::Obsidian::NoteBuilder do
@@ -157,7 +160,7 @@ RSpec.describe Woods::Obsidian::NoteBuilder do
     # returns [scrubbed, counts]. Keeps the test independent of which exact
     # patterns the real scanner ships.
     let(:scanner) do
-      instance_double('Woods::Console::CredentialScanner').tap do |s|
+      instance_double(Woods::Console::CredentialScanner).tap do |s|
         allow(s).to receive(:scan) { |v| [v.gsub('SECRET', '[REDACTED]'), {}] }
       end
     end
@@ -181,7 +184,7 @@ RSpec.describe Woods::Obsidian::NoteBuilder do
     end
 
     it 'omits the source section when the scrub raises — never ships unscrubbed source' do
-      raising = instance_double('Woods::Console::CredentialScanner')
+      raising = instance_double(Woods::Console::CredentialScanner)
       allow(raising).to receive(:scan).and_raise(StandardError, 'scanner boom')
       note = build_with_source(scanner: raising, source: "class User\n  KEY = 'SECRET'\nend")
       expect(note).not_to be_nil

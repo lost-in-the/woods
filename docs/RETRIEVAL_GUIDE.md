@@ -206,7 +206,7 @@ config.context_format = :xml  # For GPT-family prompts that prefer XML structure
 
 ### Switching embedding models
 
-The embedding model must match between `rake woods:embed` and retrieval. Different models produce vectors with different dimensionalities — `IndexValidator` detects mismatches and logs a warning. After changing `embedding_model`, re-run full extraction and embedding:
+The embedding model must match between `rake woods:embed` and retrieval. Different models produce vectors with different dimensionalities — Woods raises `Woods::MCP::DimensionMismatch` when they disagree, at embed time for durable stores and at MCP boot for dumps. After changing `embedding_model`, drop the vector store and re-run full extraction and embedding:
 
 ```bash
 bundle exec rake woods:extract

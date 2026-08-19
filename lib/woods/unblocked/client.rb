@@ -231,7 +231,9 @@ module Woods
           raise_ambiguous_network_error(method, e) unless safe_to_retry?(method, e)
 
           attempts += 1
-          raise Woods::Error, "Network error after #{attempts} retries: #{e.message}" if attempts > MAX_RETRIES
+          if attempts > MAX_RETRIES
+            raise Woods::Error, "Network error after #{attempts} retries: #{redact_token(e.message)}"
+          end
 
           sleep(2**attempts)
           retry
@@ -253,7 +255,25 @@ module Woods
         raise Woods::Error,
               "#{method.to_s.upcase} request interrupted mid-exchange (#{error.class}); " \
               'the operation may or may not have been applied server-side. ' \
-              "Not retrying automatically to avoid duplicates; verify before re-running: #{error.message}"
+              'Not retrying automatically to avoid duplicates; verify before re-running: ' \
+              "#{redact_token(error.message)}"
+      end
+
+      # Strip the bearer token out of anything derived from an underlying
+      # network error before it reaches a log or a backtrace.
+      #
+      # The stdlib can echo a reflected URL or a request dump into an
+      # exception message, and this client sends the token in an Authorization
+      # header on every request. The Notion client has done this since its
+      # audit; this one had not, so the same class of leak was still open here.
+      #
+      # @param message [String, nil]
+      # @return [String, nil]
+      def redact_token(message)
+        return message if message.nil? || message.empty?
+        return message if @api_token.nil? || @api_token.empty?
+
+        message.to_s.gsub(@api_token, '[REDACTED]')
       end
 
       def build_request(method, uri, body)
@@ -289,7 +309,8 @@ module Woods
         # The Unblocked API returns RFC7807-style bodies ({ status, title, detail });
         # older/other paths use message/error. Check all so failures stay legible.
         message = parsed['message'] || parsed['error'] || parsed['detail'] || parsed['title'] || 'Unknown error'
-        raise ApiError.new("Unblocked API error #{response.code}: #{message}", status: response.code.to_i)
+        raise ApiError.new("Unblocked API error #{response.code}: #{redact_token(message)}",
+                           status: response.code.to_i)
       end
     end
   end

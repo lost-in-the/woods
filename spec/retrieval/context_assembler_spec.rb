@@ -5,6 +5,9 @@ require 'woods/retrieval/search_executor'
 require 'woods/retrieval/query_classifier'
 require 'woods/retrieval/context_assembler'
 require 'woods/storage/metadata_store'
+# instance_double(Woods::Embedding::TokenCounter) only verifies when the
+# constant is loaded; require it here so the spec passes standalone.
+require 'woods/embedding/token_counter'
 
 RSpec.describe Woods::Retrieval::ContextAssembler do
   let(:metadata_store) { instance_double(Woods::Storage::MetadataStore::Interface) }
@@ -585,7 +588,7 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
     end
 
     it 'uses the injected TokenCounter when present (exact counts)' do
-      counter = instance_double('Woods::Embedding::TokenCounter', count: 17, chars_per_token: 1.2)
+      counter = instance_double(Woods::Embedding::TokenCounter, count: 17, chars_per_token: 1.2)
       tc_assembler = described_class.new(metadata_store: metadata_store, token_counter: counter)
       expect(tc_assembler.send(:estimate_tokens, 'some text')).to eq(17)
     end

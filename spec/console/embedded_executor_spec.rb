@@ -13,7 +13,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     }
   end
   let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
-  let(:connection) { instance_double('Connection') }
+  let(:connection) { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
   subject(:executor) do
@@ -346,8 +346,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
     # must pick that up rather than re-leasing or calling the deprecated
     # method.
     context 'connection resolution (no injected connection)' do
-      let(:pool) { instance_double('ActiveRecord::ConnectionPool') }
-      let(:leased_conn) { instance_double('LeasedConnection') }
+      let(:pool) { double('ActiveRecord::ConnectionPool') }
+      let(:leased_conn) { double('LeasedConnection') }
       let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
       let(:safe_context) { Woods::Console::SafeContext.new(pool: pool) }
 
@@ -383,7 +383,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'count tool' do
       let(:user_model) { class_double('User') }
-      let(:relation) { instance_double('ActiveRecord::Relation') }
+      let(:relation) { double('ActiveRecord::Relation') }
 
       before do
         stub_const('User', user_model)
@@ -602,9 +602,9 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'sample tool' do
       let(:user_model) { class_double('User') }
-      let(:ordered) { instance_double('ActiveRecord::Relation', 'ordered') }
-      let(:limited) { instance_double('ActiveRecord::Relation', 'limited') }
-      let(:record) { instance_double('User', attributes: { 'id' => 1, 'email' => 'a@b.com', 'name' => 'Alice' }) }
+      let(:ordered) { double('ordered') }
+      let(:limited) { double('limited') }
+      let(:record) { double('User', attributes: { 'id' => 1, 'email' => 'a@b.com', 'name' => 'Alice' }) }
 
       before do
         stub_const('User', user_model)
@@ -647,7 +647,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'find tool' do
       let(:user_model) { class_double('User') }
-      let(:record) { instance_double('User', attributes: { 'id' => 1, 'email' => 'a@b.com' }) }
+      let(:record) { double('User', attributes: { 'id' => 1, 'email' => 'a@b.com' }) }
 
       before do
         stub_const('User', user_model)
@@ -692,7 +692,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'pluck tool' do
       let(:user_model) { class_double('User') }
-      let(:limited) { instance_double('ActiveRecord::Relation', 'limited') }
+      let(:limited) { double('limited') }
 
       before do
         stub_const('User', user_model)
@@ -711,7 +711,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
 
       it 'supports distinct option' do
-        distinct_rel = instance_double('ActiveRecord::Relation', 'distinct')
+        distinct_rel = double('distinct')
         allow(user_model).to receive(:distinct).and_return(distinct_rel)
         allow(distinct_rel).to receive(:limit).and_return(limited)
 
@@ -754,7 +754,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
 
       it 'applies scope to aggregate' do
-        scoped = instance_double('ActiveRecord::Relation')
+        scoped = double('ActiveRecord::Relation')
         allow(user_model).to receive(:where).with({ 'name' => 'Alice' }).and_return(scoped)
         allow(scoped).to receive(:average).with(:id).and_return(5.5)
 
@@ -818,8 +818,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'association_count tool' do
       let(:user_model) { class_double('User') }
-      let(:record) { instance_double('User') }
-      let(:assoc_relation) { instance_double('ActiveRecord::Relation') }
+      let(:record) { double('User') }
+      let(:assoc_relation) { double('ActiveRecord::Relation') }
 
       before do
         stub_const('User', user_model)
@@ -854,8 +854,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'schema tool' do
       let(:user_model) { class_double('User') }
-      let(:id_col) { instance_double('Column', type: :integer, null: false, default: nil) }
-      let(:email_col) { instance_double('Column', type: :string, null: false, default: nil) }
+      let(:id_col) { double('Column', type: :integer, null: false, default: nil) }
+      let(:email_col) { double('Column', type: :string, null: false, default: nil) }
 
       before do
         stub_const('User', user_model)
@@ -878,7 +878,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
 
       it 'includes indexes when requested' do
-        index = instance_double('Index', name: 'idx_email', columns: ['email'], unique: true)
+        index = double('Index', name: 'idx_email', columns: ['email'], unique: true)
         allow(connection).to receive(:indexes).with('users').and_return([index])
 
         response = executor.send_request({
@@ -905,9 +905,9 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'recent tool' do
       let(:post_model) { class_double('Post') }
-      let(:ordered) { instance_double('ActiveRecord::Relation', 'ordered') }
-      let(:limited) { instance_double('ActiveRecord::Relation', 'limited') }
-      let(:record) { instance_double('Post', attributes: { 'id' => 1, 'title' => 'Hello' }) }
+      let(:ordered) { double('ordered') }
+      let(:limited) { double('limited') }
+      let(:record) { double('Post', attributes: { 'id' => 1, 'title' => 'Hello' }) }
 
       before do
         stub_const('Post', post_model)
@@ -961,10 +961,10 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'predicate-suffix scope' do
       let(:user_model) { class_double('User') }
-      let(:arel_table) { instance_double('Arel::Table') }
-      let(:arel_col)   { instance_double('Arel::Attributes::Attribute') }
-      let(:arel_node)  { instance_double('Arel::Nodes::GreaterThan') }
-      let(:scoped)     { instance_double('ActiveRecord::Relation') }
+      let(:arel_table) { double('Arel::Table') }
+      let(:arel_col)   { double('Arel::Attributes::Attribute') }
+      let(:arel_node)  { double('Arel::Nodes::GreaterThan') }
+      let(:scoped)     { double('ActiveRecord::Relation') }
 
       before do
         stub_const('User', user_model)
@@ -1000,7 +1000,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
     context 'array-form scope' do
       let(:user_model) { class_double('User') }
-      let(:scoped) { instance_double('ActiveRecord::Relation') }
+      let(:scoped) { double('ActiveRecord::Relation') }
 
       before do
         stub_const('User', user_model)
@@ -1100,7 +1100,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
       context 'sql tool' do
         let(:select_result) do
-          instance_double('ActiveRecord::Result', columns: %w[id], rows: [[1], [2]], count: 2)
+          double('ActiveRecord::Result', columns: %w[id], rows: [[1], [2]], count: 2)
         end
 
         it 'executes valid SELECT statement' do
@@ -1156,9 +1156,9 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
       context 'query tool' do
         let(:user_model) { class_double('User') }
-        let(:relation) { instance_double('ActiveRecord::Relation') }
+        let(:relation) { double('ActiveRecord::Relation') }
         let(:query_result) do
-          instance_double('ActiveRecord::Result', columns: %w[id email], rows: [[1, 'a@b.com']], count: 1)
+          double('ActiveRecord::Result', columns: %w[id email], rows: [[1, 'a@b.com']], count: 1)
         end
 
         before do

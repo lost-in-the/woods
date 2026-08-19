@@ -296,6 +296,66 @@ RSpec.describe Woods::Unblocked::Client do
     end
   end
 
+  # #217 / B-104. The Notion client has redacted its bearer token in error
+  # paths since its audit; this one had not, so the same class of leak was
+  # still open — the stdlib can echo a reflected URL or request dump into an
+  # exception message, and every request here carries the token.
+  describe 'bearer-token redaction' do
+    # The retry ladder is 2+4+8s of real sleeping; none of it is what these
+    # examples are testing.
+    before { allow(client).to receive(:sleep) }
+
+    def stub_http_raising(error)
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:request).and_raise(error)
+      http
+    end
+
+    it 'redacts the token from a persistent network error on an idempotent verb' do
+      stub_http_raising(Errno::ECONNREFUSED.new("connecting to https://user:#{api_token}@api.example"))
+
+      expect { client.all_documents(collection_id: 'col-uuid') }
+        .to raise_error(Woods::Error) { |e|
+          expect(e.message).not_to include(api_token)
+          expect(e.message).to include('[REDACTED]')
+        }
+    end
+
+    it 'redacts the token from an ambiguous mid-exchange failure' do
+      stub_http_raising(Net::ReadTimeout.new("timeout for Bearer #{api_token}"))
+
+      expect do
+        client.put_document(collection_id: 'c', title: 't', body: 'b', uri: 'u')
+      end.to raise_error(Woods::Error) { |e| expect(e.message).not_to include(api_token) }
+    end
+
+    it 'redacts the token reflected back in an API error body' do
+      failure = instance_double(
+        Net::HTTPBadRequest,
+        body: JSON.generate({ 'message' => "bad token #{api_token}" }),
+        code: '400'
+      )
+      allow(failure).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:request).and_return(failure)
+
+      expect { client.put_document(collection_id: 'c', title: 't', body: 'b', uri: 'u') }
+        .to raise_error(Woods::Unblocked::ApiError) { |e|
+          expect(e.message).not_to include(api_token)
+          expect(e.message).to include('[REDACTED]')
+        }
+    end
+  end
+
   describe '#list_collections' do
     it 'returns a bare-array response as-is (live API shape)' do
       paths = stub_http_sequence([{ 'id' => 'c1', 'name' => 'Woods' }])

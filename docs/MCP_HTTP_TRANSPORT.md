@@ -2,26 +2,55 @@
 
 ## Current State
 
-- **mcp gem version**: 0.6.0 (pinned `~> 0.6` in gemspec)
+- **mcp gem version**: `>= 1.2, < 2.0`
 - **Available transports**:
   - `MCP::Server::Transports::StdioTransport` — stdin/stdout JSON-RPC (current default)
   - `MCP::Server::Transports::StreamableHTTPTransport` — HTTP POST/GET with optional SSE streaming
-- **MCP protocol version**: 2025-03-26 (Streamable HTTP is the standard remote transport)
+- **MCP protocol version**: 2026-07-28 by default, with legacy `initialize` still served by the SDK
 
 ## HTTP/SSE Transport Support
 
-**Native support: YES.** The `mcp` gem v0.6.0 ships `StreamableHTTPTransport` with full Rack compatibility.
+**Native support: YES.** The `mcp` gem v1.2.0 ships `StreamableHTTPTransport` with Rack compatibility, stateless mode, cache hints, header validation, `server/discover`, and modern request-envelope validation.
 
 ### What's Available Out of the Box
 
 The transport (`lib/mcp/server/transports/streamable_http_transport.rb`) provides:
 
 - **Rack-compatible request handler**: `transport.handle_request(rack_request)` returns `[status, headers, body]`
-- **Session management**: Assigns `Mcp-Session-Id` header on initialization, tracks sessions server-side
-- **Stateless mode**: `StreamableHTTPTransport.new(server, stateless: true)` for multi-node deployments
-- **SSE streaming**: GET requests establish SSE connections with keepalive pings (30s interval)
-- **Server-to-client notifications**: `transport.send_notification(method, params, session_id:)` pushes events to connected SSE streams
-- **Session cleanup**: DELETE requests terminate sessions and close SSE streams
+- **Stateless mode** (Woods default since MCP 2026-07-28): each POST is self-contained, no session is issued or required
+- **Session management** (legacy, opt-in): assigns `Mcp-Session-Id` on initialization, tracks sessions server-side, DELETE terminates
+- **SSE streaming**: per-request response streams; the standalone GET stream is session-mode only
+
+## Statelessness
+
+MCP 2026-07-28 ([SEP-2567](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2567)) removes protocol-level sessions, and `woods-mcp-http` runs stateless by default.
+
+For this server the session was never carrying anything: the index lives on disk, `IndexReader` self-refreshes off the published generation, and no tool holds per-client state. What the session *did* do was tie every client to one server process — so restarting the server (gem upgrade, machine sleep, worktree rebuild) invalidated every session and forced each client through a re-initialize. Stateless makes a restart invisible, and lets several instances serve one volume-mounted index without sticky routing.
+
+```bash
+woods-mcp-http                          # stateless (default)
+WOODS_MCP_HTTP_STATELESS=0 woods-mcp-http   # legacy session mode
+```
+
+What changes in stateless mode:
+
+| Behaviour | Stateless (default) | Session mode (`=0`) |
+|---|---|---|
+| `Mcp-Session-Id` | never issued or required | issued on `initialize`, required after |
+| `GET` on the MCP endpoint | `405 Method Not Allowed` | opens a standalone SSE stream |
+| `DELETE` on the MCP endpoint | `200` no-op (see note) | terminates the session |
+| A request carrying a stale `Mcp-Session-Id` | ignored, served normally | `404` — client must re-initialize |
+| Server-initiated notifications | **not delivered** — there is no stream to push on | delivered to the session's SSE stream |
+| Server restart | invisible to clients | every client must re-initialize |
+| Horizontal scaling | any POST may hit any instance | requires sticky routing |
+
+> **`Mcp-Session-Id` and CORS.** In stateless mode the header is neither read nor emitted, so it is absent from `Access-Control-Expose-Headers`. A client that depends on it needs `WOODS_MCP_HTTP_STATELESS=0` — a transitional escape hatch, since the header is gone from the specification.
+
+> **DELETE returns 200, not 405.** The specification says a server supporting only this revision *should* answer `405` to DELETE; the `mcp` gem instead answers `200 {"success": true}` in stateless mode. This is the SDK's call, not Woods', and it is benign — there is no session to terminate either way, so the request is a no-op whichever status it carries, and a legacy client tearing down a session it thinks it has gets a success rather than a confusing error. Noted here because the two disagree, not because it needs fixing.
+
+The last row is the one that matters in practice: a client holding a session id from *before* a restart is simply served, rather than getting a `404` and having to re-initialize. That is the disconnect/reconnect improvement, and it is why stateless is the default.
+
+> **Stream resumability.** MCP 2026-07-28 also removes `Last-Event-ID` resumability. A broken response stream loses the in-flight request and the client must re-issue it with a new request id. Woods' index tools are short reads, so this is near-free; the long-running `pipeline_extract` / `pipeline_embed` return a durable task handle instead (see [MCP_SERVERS.md](MCP_SERVERS.md#long-running-tools-and-the-tasks-extension)), which survives a dropped connection better than a resumable stream did.
 
 ### Usage Pattern
 
@@ -30,7 +59,7 @@ The gem includes example servers (`examples/http_server.rb`, `examples/streamabl
 ```ruby
 # Build the MCP server (same as stdio)
 server = Woods::MCP::Server.build(index_dir: index_dir)
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true)
 server.transport = transport
 
 # Wrap in a Rack app
@@ -70,7 +99,11 @@ Add `exe/woods-mcp-http` alongside the existing stdio executable:
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "rackup"
+begin
+  require "rackup"
+rescue LoadError
+  require "rack"
+end
 require_relative "../lib/woods"
 require_relative "../lib/woods/mcp/server"
 # ... other requires ...
@@ -79,7 +112,7 @@ index_dir = ARGV[0] || ENV["WOODS_DIR"] || Dir.pwd
 port = (ENV["PORT"] || 9292).to_i
 
 server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever)
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true)
 server.transport = transport
 
 app = proc { |env| transport.handle_request(Rack::Request.new(env)) }
@@ -88,7 +121,7 @@ Rackup::Handler.get("puma").run(app, Port: port, Host: "localhost")
 
 **Complexity**: Low — ~30 lines, mirrors the existing exe structure.
 
-**Dependencies**: Requires `rackup` gem + a Rack server (e.g., `puma`). The gemspec already has `puma` as a dev dependency. For production use, `rackup` would need to be added as an optional dependency or documented as a user-provided requirement.
+**Dependencies**: Requires a Rack server (e.g., `puma`). `woods-mcp-http` uses the `rackup` gem when it is present, and falls back to Rack 2's handler registry for older Rails hosts that cannot resolve Rack 3.
 
 ### Option B: Rack Middleware (for embedding in host Rails apps)
 
@@ -103,7 +136,7 @@ module Woods
         @app = app
         @path = path
         server = Server.build(index_dir: index_dir)
-        @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server)
+        @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: true)
         server.transport = @transport
       end
 
@@ -139,7 +172,7 @@ woods-mcp --http --port 8080  # HTTP on custom port
 
 1. **Zero risk to existing users** — the stdio exe is untouched
 2. **Minimal code** — the `mcp` gem already provides the full transport; we just need a thin wrapper
-3. **No new gem dependencies** — `rackup`/`puma` are already dev dependencies; users wanting HTTP would install them
+3. **No new runtime gem dependencies** — users wanting HTTP install a Rack server; `rackup` is optional and only needed in Rack 3-style bundles
 4. **Natural upgrade path** — Option B (middleware) can be added later if Rails embedding demand appears
 
 ### Implementation Effort
@@ -150,9 +183,9 @@ woods-mcp --http --port 8080  # HTTP on custom port
 
 ### MCP Ecosystem Context
 
-- The MCP specification (2025-03-26) designates Streamable HTTP as the standard remote transport, replacing the earlier SSE-only transport
-- The next spec release (~June 2026) is expected to further formalize stateless transport patterns for horizontal scaling
-- The `mcp` gem tracks the spec closely; v0.6.0 already implements the full Streamable HTTP spec including stateless mode
+- The MCP specification (2026-07-28) removes protocol-level sessions and keeps Streamable HTTP as the standard remote transport
+- The `mcp` gem tracks the core lifecycle closely; v1.2.0 implements stateless Streamable HTTP, request envelopes, `resultType`, `server/discover`, and HTTP header validation
+- The remaining missing SDK surface is extension-level: Woods implements `io.modelcontextprotocol/tasks` locally, while `subscriptions/listen` is still unavailable
 
 ## Security
 
@@ -195,7 +228,7 @@ A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` 
 | explicit list                    | `https://app.example.com`          | exactly `https://app.example.com` — loopback no longer allowed |
 | multiple origins                 | `https://a.example,https://b.example` | each listed origin                                    |
 
-`OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin`, `Access-Control-Expose-Headers: Mcp-Session-Id`, and `Vary: Origin`.
+`OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin` and `Vary: Origin`. `Access-Control-Expose-Headers: Mcp-Session-Id` appears only in legacy session mode (`WOODS_MCP_HTTP_STATELESS=0`) — see [Statelessness](#statelessness).
 
 ### TLS termination
 
@@ -243,4 +276,3 @@ Bind `woods-mcp-http` to `HOST=127.0.0.1` when a proxy handles the public surfac
 - **No rotation primitive.** There is one static token. Rotating it requires restarting the server and updating clients. A rotation story is tracked separately and will likely arrive with a broader OAuth-shaped design.
 - **No per-client identity.** Every valid request is equally trusted; there are no scopes or audit trails. Treat the token as a shared secret for a trust boundary you already control.
 - **No in-process TLS.** TLS is a reverse-proxy concern — Caddy/nginx/Cloudflare handle certs, HSTS, and cipher policy better than a Rack-level implementation would.
-

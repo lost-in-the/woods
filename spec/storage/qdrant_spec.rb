@@ -61,7 +61,11 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         expect(req).to be_a(Net::HTTP::Put)
-        expect(req.path).to eq('/collections/test_collection/points')
+        # ?wait=true is load-bearing, not cosmetic: Qdrant acknowledges an
+        # un-awaited write before it is readable, so the embed pipeline's
+        # write-then-dump and the prune paths' delete-then-count would both
+        # observe stale state without it.
+        expect(req.path).to eq("/collections/test_collection/points#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         point = body['points'].first
         expect(point['id']).to eq(described_class.point_id('doc1'))
@@ -94,7 +98,11 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request).once do |req|
         expect(req).to be_a(Net::HTTP::Put)
-        expect(req.path).to eq('/collections/test_collection/points')
+        # ?wait=true is load-bearing, not cosmetic: Qdrant acknowledges an
+        # un-awaited write before it is readable, so the embed pipeline's
+        # write-then-dump and the prune paths' delete-then-count would both
+        # observe stale state without it.
+        expect(req.path).to eq("/collections/test_collection/points#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         expect(body['points'].size).to eq(2)
         expect(body['points'][0]['id']).to eq(described_class.point_id('doc1'))
@@ -210,7 +218,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         expect(req).to be_a(Net::HTTP::Post)
-        expect(req.path).to eq('/collections/test_collection/points/delete')
+        expect(req.path).to eq("/collections/test_collection/points/delete#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         expect(body['points']).to eq([described_class.point_id('doc1')])
       end
@@ -247,7 +255,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
       expect(http).to have_received(:request) do |req|
         expect(req).to be_a(Net::HTTP::Post)
-        expect(req.path).to eq('/collections/test_collection/points/delete')
+        expect(req.path).to eq("/collections/test_collection/points/delete#{described_class::WAIT_FOR_WRITE}")
         body = JSON.parse(req.body)
         expect(body['filter']['must']).to include({ 'key' => 'type', 'match' => { 'value' => 'model' } })
       end
@@ -261,6 +269,94 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       allow(http).to receive(:request).and_return(response)
 
       expect(store.count).to eq(42)
+    end
+  end
+
+  describe '#each_id' do
+    def success(body)
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      response
+    end
+
+    # Point ids on the wire are UUIDv5. Yielding those instead of the Woods
+    # identifiers would make reconciliation compare UUIDs against extraction
+    # output, conclude every unit had vanished, and delete the whole index.
+    it 'yields Woods identifiers, not point ids' do
+      body = {
+        result: {
+          points: [
+            { id: described_class.point_id('User'), payload: { woods_identifier: 'User' } },
+            { id: described_class.point_id('Post#chunk_0'), payload: { woods_identifier: 'Post#chunk_0' } }
+          ],
+          next_page_offset: nil
+        }
+      }.to_json
+      allow(http).to receive(:request).and_return(success(body))
+
+      expect(store.each_id.to_a).to eq(['User', 'Post#chunk_0'])
+    end
+
+    it 'requests only the identifier payload and no vectors' do
+      allow(http).to receive(:request)
+        .and_return(success('{"result":{"points":[],"next_page_offset":null}}'))
+
+      store.each_id.to_a
+
+      expect(http).to have_received(:request) do |req|
+        expect(req.path).to eq('/collections/test_collection/points/scroll')
+        body = JSON.parse(req.body)
+        expect(body['with_vector']).to be(false)
+        expect(body['with_payload']).to eq(['woods_identifier'])
+      end
+    end
+
+    it 'follows next_page_offset until the scroll is exhausted' do
+      page1 = success({ result: { points: [{ id: 1, payload: { woods_identifier: 'A' } }],
+                                  next_page_offset: 'cursor-2' } }.to_json)
+      page2 = success({ result: { points: [{ id: 2, payload: { woods_identifier: 'B' } }],
+                                  next_page_offset: nil } }.to_json)
+      allow(http).to receive(:request).and_return(page1, page2)
+
+      expect(store.each_id.to_a).to eq(%w[A B])
+      expect(http).to have_received(:request).twice
+    end
+
+    it 'falls back to the raw point id for points this adapter did not write' do
+      body = { result: { points: [{ id: 'foreign-id', payload: {} }], next_page_offset: nil } }.to_json
+      allow(http).to receive(:request).and_return(success(body))
+
+      expect(store.each_id.to_a).to eq(['foreign-id'])
+    end
+  end
+
+  describe '#stored_dimensions' do
+    it 'reads the collection vector size' do
+      body = { result: { config: { params: { vectors: { size: 384, distance: 'Cosine' } } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      expect(store.stored_dimensions).to eq(384)
+    end
+
+    it 'returns nil rather than raising when the collection is absent' do
+      response = instance_double(Net::HTTPNotFound, code: '404', body: '{"status":"not found"}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(http).to receive(:request).and_return(response)
+
+      expect(store.stored_dimensions).to be_nil
+    end
+
+    # Named vectors produce a different shape; this adapter never writes them,
+    # so the honest answer is "unknown" rather than a wrong number.
+    it 'returns nil for an unrecognized vectors shape' do
+      body = { result: { config: { params: { vectors: { 'text' => { 'size' => 384 } } } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      expect(store.stored_dimensions).to be_nil
     end
   end
 

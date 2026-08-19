@@ -17,10 +17,11 @@ Confirm which Woods version is installed and diagnose only against it:
 bundle info woods        # installed version + path
 ```
 
-This workflow targets **Woods ≥ 1.5.0**. Tool counts and behaviors below (29-tool index
-server, 31-tool console) assume a current gem. If the installed version is older, some tools
-or flags mentioned here may not exist — before treating their absence as a bug, check the
-installed version and, if outdated, advise the user to update (`bundle update woods`).
+This workflow targets **Woods ≥ 2.0.0**. Tool counts and behaviors below (29-tool index
+server, 31-tool console, embedding dimension preflight) assume a current gem. If the
+installed version is older, some tools, flags, or diagnostics mentioned here may not
+exist — before treating their absence as a bug, check the installed version and, if
+outdated, advise the user to update (`bundle update woods`).
 
 ---
 
@@ -139,7 +140,10 @@ bundle exec rake woods:extract   # re-extract to reset unit files
 bundle exec rake woods:embed     # re-embed all units
 ```
 
-`IndexValidator` will detect dimension mismatches and log an error on startup.
+Woods raises `Woods::MCP::DimensionMismatch` on a dimension mismatch — `rake
+woods:embed` refuses before embedding anything, and the MCP server refuses at
+boot. The message names the stored dimension, the provider dimension, and the
+remedy.
 
 ---
 

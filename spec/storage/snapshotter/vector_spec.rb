@@ -663,6 +663,25 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       end.not_to raise_error
     end
 
+    # The header reserves a model_name field precisely so a dump can say which
+    # model produced it. Nothing asserted it was ever populated, which is how
+    # the Indexer came to omit resolved_config from its dump call entirely
+    # (#216) and every dump on disk carried an empty name.
+    it 'writes the model name into the WVF1 header' do
+      store = make_store([['id1', Array.new(dim, 0.5)]])
+      dump_dir = artifact.new_dump_dir
+      artifact.promote(dump_dir)
+      described_class.dump(store, artifact, dump_dir, resolved_config: config)
+
+      bin = File.binread(dump_dir.join('vectors.bin').to_s)
+      gem_version_length = bin.byteslice(20, 4).unpack1('L<')
+      model_name_offset = 24 + gem_version_length
+      model_name_length = bin.byteslice(model_name_offset, 4).unpack1('L<')
+      model_name = bin.byteslice(model_name_offset + 4, model_name_length)
+
+      expect(model_name).to eq('nomic-embed-text')
+    end
+
     it 'round-trips with resolved_config on both sides' do
       store = make_store([['id1', [0.1, 0.2, 0.3, 0.4]],
                           ['id2', [0.9, 0.8, 0.7, 0.6]]])

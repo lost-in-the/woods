@@ -59,6 +59,10 @@ module Woods
         @auto_refresh = auto_refresh
         @pin_depth = 0
         @freshness_mutex = Mutex.new
+        # Separate from @freshness_mutex: the LRU bookkeeping must not
+        # serialize behind a generation check, and a reader that took the
+        # freshness lock must be able to touch the caches without deadlocking.
+        @cache_mutex = Mutex.new
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
         @loaded_token = nil
@@ -681,29 +685,48 @@ module Woods
       end
 
       # Load a unit JSON file with LRU cache eviction.
+      #
+      # The bookkeeping runs under {@cache_mutex}; the file read deliberately
+      # does not, so concurrent readers still parse different units in
+      # parallel. `woods-mcp-http` executes tool handlers on its Rack server's
+      # request threads, and unsynchronized bookkeeping drifts: two threads
+      # can both observe `size >= MAX_UNIT_CACHE` and both evict, or both push
+      # the same key so the order array accumulates a duplicate. A duplicate
+      # for a key never read again is never cleaned up (only a cache *hit*
+      # dedupes it), so `shift` starts evicting keys that are no longer in the
+      # cache and the cache creeps past its cap — a slow leak rather than a
+      # wrong answer, but a leak.
+      #
+      # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
 
-        if @unit_cache.key?(cache_key)
-          # Move to end (most recently used)
-          @unit_cache_order.delete(cache_key)
-          @unit_cache_order.push(cache_key)
-          return @unit_cache[cache_key]
+        cached = @cache_mutex.synchronize do
+          if @unit_cache.key?(cache_key)
+            # Move to end (most recently used)
+            @unit_cache_order.delete(cache_key)
+            @unit_cache_order.push(cache_key)
+            @unit_cache[cache_key]
+          end
         end
+        return cached if cached
 
         path = @index_dir.join(type_dir, filename)
         return nil unless path.file?
 
         data = JSON.parse(path.read)
 
-        # Evict oldest if at capacity
-        if @unit_cache.size >= MAX_UNIT_CACHE
-          oldest = @unit_cache_order.shift
-          @unit_cache.delete(oldest)
-        end
+        @cache_mutex.synchronize do
+          # Evict oldest if at capacity
+          if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
+            oldest = @unit_cache_order.shift
+            @unit_cache.delete(oldest)
+          end
 
-        @unit_cache[cache_key] = data
-        @unit_cache_order.push(cache_key)
+          @unit_cache[cache_key] = data
+          @unit_cache_order.delete(cache_key)
+          @unit_cache_order.push(cache_key)
+        end
         data
       end
 

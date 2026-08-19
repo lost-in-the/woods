@@ -5,9 +5,125 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-08-19
+
+### Upgrade Notes
+
+This is a major release: the full-gem review (#210) corrected how several extractors
+derive unit identifiers, which changes the index format's observable contract.
+
+- **Unit identifiers have changed shape.** Namespaces are now derived correctly by a
+  position-aware nesting parser (#174), abstract-model and mixin-module artifacts no
+  longer leak into names, and GraphQL inner classes are no longer folded into
+  identifiers (#194). Concretely: a state machine that indexed as `Payment::aasm` is now
+  `Billing::Payment::aasm`; a service that indexed as bare `IssueInvoice` is now
+  `Billing::IssueInvoice`; concern units are no longer misnamed `ClassMethods`.
+  **Anything that cached the old identifiers will miss**: saved retrieval queries,
+  external notes, exported Notion pages and Unblocked documents, MCP clients holding
+  identifier lists.
+- **The remedy is one clean re-index**: `woods:clean` followed by `woods:extract`
+  (then `woods:embed` if you embed, and a re-export if you sync Notion/Obsidian/
+  Unblocked — the exporters reconcile renamed units as delete-plus-add).
+- **Durable vector stores are now reconciled against extraction output** (#211). The
+  first `woods:embed` / `woods:embed_incremental` after upgrading will **delete** vectors
+  for units the extraction no longer produces — including every unit the identifier
+  renames moved. Deleting more than 30% of the store (or purging into an empty load) is
+  refused with an explanation; `WOODS_ALLOW_PURGE=1` overrides after you've confirmed the
+  deletion is intentional. On a rename-heavy index, expect to need it once.
+- **An embedding-dimension mismatch now refuses to embed up front** (#214).
+  `woods:embed` compares the provider's dimension against what the store actually holds
+  (pgvector's column type, Qdrant's collection config) before embedding anything, raising
+  `Woods::MCP::DimensionMismatch` with both widths — instead of embedding everything and
+  failing per-row on insert. If you changed `embedding_model` at some point and it
+  "worked", this check may now surface the latent mismatch; the remedy is a full re-embed
+  into a store created at the new width.
+- **New environment variables**: `WOODS_ALLOW_PURGE` (override the vector purge guard,
+  above) and `WOODS_NOTION_FORCE` (bypass the Notion sync manifest for one run, forcing
+  a full re-push).
+
+### Added
+
+- **MCP 2026-07-28 support** (B-111–B-114). The gemspec now requires `mcp >= 1.2, < 2.0`,
+  the release that added the 2026-07-28 protocol revision.
+  - **Stateless Streamable HTTP by default.** `woods-mcp-http` no longer mints
+    `Mcp-Session-Id`, so restarting it (gem upgrade, machine sleep, worktree rebuild) is
+    invisible to connected clients instead of invalidating every session, and several
+    instances can serve one volume-mounted index without sticky routing. Set
+    `WOODS_MCP_HTTP_STATELESS=0` for a client that still needs sessions, the GET SSE
+    stream, or DELETE teardown — a transitional escape hatch, since all three are gone
+    from the specification.
+  - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
+    `pipeline_embed` return a durable task handle to clients that declare the extension:
+    poll with `tasks/get`, cancel with `tasks/cancel`. Records live on disk under
+    `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
+    mid-run can reconnect — even to a restarted server — and collect the result, and a
+    task whose owning process died resolves to `failed` instead of leaving an agent
+    polling forever. Clients that do not declare the extension get the previous
+    fire-and-forget behaviour, unchanged.
+  - **Cache hints and deterministic tool ordering.** List and read results carry
+    `ttlMs` (default 10s, `WOODS_MCP_CACHE_TTL_MS`) and `cacheScope: "private"`, and tools
+    are advertised in sorted order so a host with optional integrations wired presents the
+    same tool block as one without.
+  - **`server/discover`** is answered, advertising supported versions, capabilities and
+    the Tasks extension.
+
+### Changed
+
+- **`woods-mcp-start` no longer pins the MCP protocol version.** It defaulted
+  `MCP_PROTOCOL_VERSION` to `2024-11-05` — the oldest revision there is — which silently
+  opted every user out of four protocol revisions. The SDK server is dual-era, answering
+  `initialize` for legacy clients while serving `server/discover` and per-request metadata
+  for modern ones, so the unpinned server is the *more* compatible one. The variable
+  remains as an escape hatch and now announces itself on stderr when set.
+  **No action required:** legacy clients keep working, and no re-extraction or re-embedding
+  is implied — no on-disk artifact format changed.
 
 ### Fixed
+
+- **Release-hardening batch (2026-08-07, #211–#218, #220):**
+  - *Embedding durability:* every pgvector/Qdrant embed run crashed at the very end and
+    discarded its work — `Indexer#persistable?` asked `respond_to?(:each_entry)`, which
+    the storage interface answers true for by definition; it now asks which module owns
+    the method (B-108, #220). Durable stores are reconciled against extraction output on
+    full and incremental runs, with the purge guard shared with the dump path (#211).
+    Checkpoint hits on durable backends are verified against the store, so switching
+    `vector_store` from `:local` to pgvector/Qdrant no longer strands unchanged units
+    (#211). Qdrant mutating point operations pass `wait=true`, so a delete is readable
+    as deleted (#220). Dimension mismatches are detected before embedding, not per-row
+    after (#214).
+  - *Extraction fidelity:* blockless factories (`factory :admin, parent: :user`) are
+    extracted; abstract models no longer enter the model-name scan (which inflated
+    `ApplicationRecord`'s PageRank); `private def` methods are no longer reported
+    public; `EventExtractor` no longer mints phantom events from non-Wisper `.on(:sym)`
+    calls; `ManagerExtractor` resolves multi-word models (`order_item` → `OrderItem`,
+    not `Order_item`) (#215).
+  - *Flow/graph determinism:* `find_node_by_suffix` is memoized (was a full-graph scan
+    per call) and resolves ambiguous short names deterministically; `case` predicates
+    are no longer misattributed as branch operations; `domain_clusters` output no longer
+    depends on registration order; vector dumps record the embedding model in the WVF1
+    header (#216).
+  - *Export hardening:* the Unblocked client redacts its bearer token in error paths and
+    describes its per-run (not "daily") budget honestly; `Retry-After` is capped at 120s
+    in both export clients; Unblocked citations use the ref recorded in the manifest
+    rather than hardcoded `blob/main`, with path segments percent-encoded; Notion aborts
+    fast on 401/403 instead of spending the whole cold sync failing per-unit (#217).
+  - *Retrieval/observability residuals:* ranking signals no longer go neutral on chunked
+    corpora (the ranker now strips chunk suffixes like every other consumer); metadata
+    keyword search is case-insensitive on both adapters with the contract pinned by
+    shared examples; `IndexReader`'s LRU is thread-safe under the HTTP transport;
+    `GapDetector` counts queries, not keyword occurrences; `RedisStore#sessions` returns
+    recent sessions rather than arbitrary ones (#218).
+  - *MCP:* the `pipeline_extract` tool loads the extractor lazily, so it works in a
+    standalone `woods-mcp` process instead of dying in the background with
+    `NameError: uninitialized constant Woods::Extractor` (B-110).
+- **The evaluation harness is runnable** (#212). `woods:evaluate` existed on no host (its
+  rake file was never loaded by the railtie), called accessors that had never existed, and
+  no adapter implemented `all_identifiers` for the baselines. It now loads, builds stores
+  through the MCP bootstrapper so evaluation reads the same persisted index that semantic
+  search serves, and ships an offline end-to-end smoke on the `:fake` provider. The
+  ground-truth taxonomy now *is*
+  `QueryClassifier::INTENTS`/`SCOPES`, so annotations compare against what the pipeline
+  actually classified (#218's open item, closed here).
 
 - **Full-gem review batch (2026-07-30): 30 defects fixed** (#183–#209 and pre-existing
   #149, #150, #169, #170, #174–#178; see each issue for the full analysis). Highlights,
@@ -348,6 +464,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GraphAnalyzer` output is now a pure function of graph content. `hubs` breaks ties on
   identifier instead of graph-insertion order, and `bridges` samples from a sorted node list,
   so two extractions of the same tree publish the same analysis.
+
+### Testing
+
+- The verifying-double sweep: 102 string-named `instance_double`s — which verify nothing
+  when the constant isn't loaded — now either reference the real constant (26) or are
+  honest plain doubles (76) (#219). `PhlexExtractor` went from 3 examples/~38% line
+  coverage to 39 examples/99% (#219). Every spec directory now passes standalone; nine
+  spec files only passed in the company of the full suite because earlier files loaded
+  their constants first (B-109). Two order-dependent flakes fixed: `wait_for_threads`
+  now fails loudly on a hung thread, and `tasks_spec` no longer leaks a mutated global
+  configuration (#215, #216).
+- **CI** (#220): workflows run on pushes to `main` as well as PRs (a bad merge previously
+  went green by absence of a run); the unit axis adds Ruby 3.4 and the booted matrix adds
+  Rails 8.1 rows; a new `live-backends` lane runs storage-adapter contract specs against
+  real PostgreSQL+pgvector and Qdrant service containers plus an offline embed→retrieve
+  round trip — every other storage spec drives doubles, which is how #181 shipped. The
+  lane found B-108 on its first run.
 
 ## [1.6.1] - 2026-07-22
 

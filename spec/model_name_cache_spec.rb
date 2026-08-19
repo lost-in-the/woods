@@ -21,6 +21,39 @@ RSpec.describe Woods::ModelNameCache do
       # ActiveRecord::Base is not defined in the spec environment
       expect(described_class.model_names).to eq([])
     end
+
+    # #215 / B-102. ApplicationRecord is an ActiveRecord::Base descendant and
+    # its name appears in nearly every model file (`class User <
+    # ApplicationRecord`), so including it in the scan regex wired a
+    # :code_reference edge from almost every model to it — noise that inflated
+    # its PageRank into ranks real hubs should hold.
+    it 'excludes abstract models' do
+      stub_const(
+        'ActiveRecord::Base',
+        double('AR::Base', descendants: [
+                 double(name: 'ApplicationRecord', abstract_class?: true),
+                 double(name: 'User', abstract_class?: false),
+                 double(name: 'Post', abstract_class?: false)
+               ])
+      )
+
+      expect(described_class.model_names).to eq(%w[User Post])
+    end
+
+    it 'keeps a descendant whose abstract_class? raises' do
+      raising = double('Half::Loaded', name: 'HalfLoaded')
+      allow(raising).to receive(:abstract_class?).and_raise(StandardError, 'not loaded')
+      stub_const('ActiveRecord::Base', double('AR::Base', descendants: [raising]))
+
+      # A phantom edge is a smaller error than a missing model.
+      expect(described_class.model_names).to eq(['HalfLoaded'])
+    end
+
+    it 'keeps classes that do not respond to abstract_class? at all' do
+      stub_const('ActiveRecord::Base', double('AR::Base', descendants: [double(name: 'User')]))
+
+      expect(described_class.model_names).to eq(['User'])
+    end
   end
 
   describe '.model_names_regex' do

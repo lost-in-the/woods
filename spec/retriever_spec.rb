@@ -5,10 +5,10 @@ require 'woods'
 require 'woods/retriever'
 
 RSpec.describe Woods::Retriever do
-  let(:vector_store) { instance_double('VectorStore') }
-  let(:metadata_store) { instance_double('MetadataStore') }
-  let(:graph_store) { instance_double('GraphStore') }
-  let(:embedding_provider) { instance_double('EmbeddingProvider') }
+  let(:vector_store) { double('VectorStore') }
+  let(:metadata_store) { double('MetadataStore') }
+  let(:graph_store) { double('GraphStore') }
+  let(:embedding_provider) { double('EmbeddingProvider') }
   let(:formatter) { nil }
 
   let(:classifier_double) { instance_double(Woods::Retrieval::QueryClassifier) }

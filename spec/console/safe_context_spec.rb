@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'woods/console/safe_context'
 
 RSpec.describe Woods::Console::SafeContext do
-  let(:connection) { instance_double('Connection') }
+  let(:connection) { double('Connection') }
 
   before do
     # Simulate ActiveRecord transaction behavior: yields, catches Rollback
@@ -47,7 +47,7 @@ RSpec.describe Woods::Console::SafeContext do
   describe '#set_timeout (adapter detection)' do
     context 'with a MySQL adapter' do
       let(:mysql_connection) do
-        instance_double('MysqlConnection').tap do |conn|
+        double('MysqlConnection').tap do |conn|
           allow(conn).to receive(:adapter_name).and_return('Mysql2')
           allow(conn).to receive(:execute)
           allow(conn).to receive(:transaction) do |&block|
@@ -87,7 +87,7 @@ RSpec.describe Woods::Console::SafeContext do
 
   describe '#execute with pool:' do
     let(:pool_connection) do
-      instance_double('PooledConnection').tap do |conn|
+      double('PooledConnection').tap do |conn|
         allow(conn).to receive(:adapter_name).and_return('PostgreSQL')
         allow(conn).to receive(:execute)
         allow(conn).to receive(:transaction) do |&block|
@@ -99,7 +99,7 @@ RSpec.describe Woods::Console::SafeContext do
     end
 
     let(:pool) do
-      instance_double('ConnectionPool').tap do |p|
+      double('ConnectionPool').tap do |p|
         allow(p).to receive(:with_connection).and_yield(pool_connection)
       end
     end
@@ -173,7 +173,7 @@ RSpec.describe Woods::Console::SafeContext do
     # writes unprotected by the rollback.
 
     let(:shard_connection) do
-      instance_double('ShardConnection').tap do |conn|
+      double('ShardConnection').tap do |conn|
         allow(conn).to receive(:adapter_name).and_return('PostgreSQL')
         allow(conn).to receive(:execute)
         allow(conn).to receive(:transaction) do |&block|
@@ -185,7 +185,7 @@ RSpec.describe Woods::Console::SafeContext do
     end
 
     let(:shard_pool) do
-      instance_double('ShardPool').tap do |p|
+      double('ShardPool').tap do |p|
         allow(p).to receive(:with_connection).and_yield(shard_connection)
       end
     end
@@ -224,7 +224,7 @@ RSpec.describe Woods::Console::SafeContext do
 
     context 'connection: form (legacy / test fixtures)' do
       let(:fixed_conn) do
-        instance_double('FixedConnection').tap do |conn|
+        double('FixedConnection').tap do |conn|
           allow(conn).to receive(:adapter_name).and_return('PostgreSQL')
           allow(conn).to receive(:execute)
           allow(conn).to receive(:transaction) do |&block|

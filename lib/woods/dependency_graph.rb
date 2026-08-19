@@ -29,6 +29,7 @@ module Woods
       @file_map = {}   # file_path => Set of identifiers (one file can define many units)
       @type_index = {} # type => Set of identifiers
       @to_h = nil
+      @suffix_index = nil
     end
 
     # Register a unit in the graph.
@@ -42,6 +43,7 @@ module Woods
     # @param unit [ExtractedUnit] The unit to register
     def register(unit)
       @to_h = nil
+      @suffix_index = nil
 
       unregister(unit.identifier) if @nodes.key?(unit.identifier)
 
@@ -120,6 +122,7 @@ module Woods
       return nil unless @nodes.key?(identifier)
 
       @to_h = nil
+      @suffix_index = nil
       unregister(identifier)
       @edges.delete(identifier)
       @nodes.delete(identifier)
@@ -200,9 +203,22 @@ module Woods
     #
     # @param suffix [String] The suffix to match against
     # @return [String, nil] The first matching identifier, or nil
+    # Find a namespaced node by its unqualified short name.
+    #
+    # Backed by a memoized index rather than a scan. This is called once per
+    # operation while assembling an execution flow, so on a host with tens of
+    # thousands of nodes a single flow paid a linear pass over all of them for
+    # every call target it encountered.
+    #
+    # The index also makes the answer deterministic where several namespaced
+    # identifiers share a short name: the first in sorted order wins, whereas
+    # the scan returned whichever was registered first — so the same flow could
+    # resolve differently after an incremental run than after a full one.
+    #
+    # @param suffix [String] unqualified name, e.g. "Payment"
+    # @return [String, nil] the full identifier, e.g. "Billing::Payment"
     def find_node_by_suffix(suffix)
-      target_suffix = "::#{suffix}"
-      @nodes.keys.find { |id| id.end_with?(target_suffix) }
+      suffix_index[suffix]
     end
 
     # Get direct dependencies of a unit
@@ -298,6 +314,23 @@ module Woods
     end
 
     private
+
+    # short name => full identifier, for {#find_node_by_suffix}.
+    #
+    # Only namespaced identifiers contribute — an unnamespaced `User` is found
+    # by {#node_exists?} before the suffix tier is reached. Sorted so a short
+    # name claimed by several namespaces resolves to the same one every time.
+    # Invalidated wherever `@to_h` is, since both derive from `@nodes`.
+    #
+    # @return [Hash{String => String}]
+    def suffix_index
+      @suffix_index ||= @nodes.keys.sort.each_with_object({}) do |identifier, index|
+        short = identifier.split('::').last
+        next if short == identifier
+
+        index[short] ||= identifier
+      end
+    end
 
     # One PageRank power iteration over precomputed resolvable-edge weights.
     #

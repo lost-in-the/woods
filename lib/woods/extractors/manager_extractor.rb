@@ -126,12 +126,12 @@ module Woods
         return ::Regexp.last_match(1) if source =~ /< DelegateClass\((\w+)\)/
 
         # super(model) in initialize
-        return ::Regexp.last_match(1).capitalize if source =~ /super\((\w+)\)/
+        return constant_name_for(::Regexp.last_match(1)) if source =~ /super\((\w+)\)/
 
         # @model = model; super(model) — look for param name
         if source =~ /def\s+initialize\s*\((\w+)/
           param = ::Regexp.last_match(1)
-          return param.capitalize unless %w[args options params attributes].include?(param)
+          return constant_name_for(param) unless %w[args options params attributes].include?(param)
         end
 
         # Infer from class name: OrderManager -> Order
@@ -141,6 +141,23 @@ module Woods
         return nil if inferred == stripped || inferred.empty?
 
         inferred
+      end
+
+      # Turn a local variable / parameter name into the model constant it
+      # stands for.
+      #
+      # `String#capitalize` only upcases the first character and downcases the
+      # rest, so `order_item` became `Order_item` — a constant no model has,
+      # producing a dangling dependency edge instead of one to `OrderItem`.
+      #
+      # Falls back to `capitalize` only when ActiveSupport's `camelize` is
+      # unavailable, which it never is in a booted host but can be in an
+      # isolated unit spec.
+      #
+      # @param name [String] a snake_case variable or parameter name
+      # @return [String] the camelized constant name
+      def constant_name_for(name)
+        name.respond_to?(:camelize) ? name.camelize : name.split('_').map(&:capitalize).join
       end
 
       def detect_delegation_type(source)

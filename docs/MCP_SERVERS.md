@@ -192,6 +192,34 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 | `codebase://unit/{identifier}` | Look up a single unit by identifier |
 | `codebase://type/{type}` | List all units of a given type |
 
+### Long-running tools and the Tasks extension
+
+`pipeline_extract` and `pipeline_embed` can take minutes on a large host, so they answer immediately and finish on a background thread. What that answer looks like depends on the client.
+
+**Clients that declare `io.modelcontextprotocol/tasks`** get a durable task handle:
+
+```jsonc
+{ "resultType": "task",
+  "taskId": "9f2c…",
+  "status": "working",
+  "createdAt": "2026-08-19T20:30:00Z",
+  "lastUpdatedAt": "2026-08-19T20:30:00Z",
+  "ttlMs": 3600000,
+  "pollIntervalMs": 2000 }
+```
+
+Poll it with `tasks/get`; cancel with `tasks/cancel`. The record lives in `<index_dir>/tasks/` — on disk, not in the process — which is what makes three things work that did not before:
+
+- **A real completion signal.** The task reaches `completed` or `failed`, and a failure carries its error. Previously the tool reported `started` and the error only reached a log the agent cannot read.
+- **Disconnect survival.** The handle outlives the connection *and* the process. A client that drops mid-run can reconnect — even to a restarted server — and still collect the result.
+- **Crash detection.** A record still marked `working` whose owning process is gone resolves to `failed` with an explanation, instead of leaving an agent polling a run that no longer exists.
+
+**Clients that do not declare the extension** get exactly the previous behaviour — `{"status": "started"}` and nothing else. This is required, not a courtesy: a client that does not understand a task handle would read it as the final result and report a run that had not happened.
+
+Both tools keep their existing rate limiting (`PipelineGuard`), in-process serialization, and cross-process `PipelineLock` acquisition regardless of which path is taken.
+
+> The task store writes to the index directory. If that directory is read-only — a legitimate setup for a host-side reader on a mounted volume — task creation is skipped with a warning on stderr and the tool falls back to fire-and-forget rather than failing.
+
 ---
 
 ## Console Server

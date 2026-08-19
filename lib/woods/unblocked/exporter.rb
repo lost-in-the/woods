@@ -75,7 +75,10 @@ module Woods
 
         @client = client || Client.new(api_token: api_token, rate_limiter: limiter)
         @reader = reader || build_reader(index_dir)
-        @builder = DocumentBuilder.new(repo_url: repo_url)
+        # Cite the ref the index was actually extracted from. `main` was
+        # hardcoded, so citations on a `master`-default repo pointed at a
+        # branch that need not exist.
+        @builder = DocumentBuilder.new(repo_url: repo_url, ref: extracted_ref)
         @manifest = manifest || build_manifest(index_dir)
         @force_full = force_full
         @force_purge = force_purge
@@ -430,6 +433,18 @@ module Woods
       def build_reader(index_dir)
         require_relative '../mcp/index_reader'
         Woods::MCP::IndexReader.new(index_dir)
+      end
+
+      # The git ref recorded in the index manifest, for citation URLs.
+      #
+      # Nil on any failure — a missing or unreadable manifest must not stop a
+      # sync, and DocumentBuilder falls back to its default ref.
+      #
+      # @return [String, nil]
+      def extracted_ref
+        @reader.manifest['git_branch']
+      rescue StandardError
+        nil
       end
 
       # Persist the manifest, downgrading failures to a warning: losing the

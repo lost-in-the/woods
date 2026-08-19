@@ -36,6 +36,11 @@ group :development, :test do
   gem 'rubocop-rspec', '~> 3.9'
   gem 'simplecov', '~> 0.22', require: false
   gem 'sqlite3', *sqlite3_requirement
+  # A Rack handler so `exe/woods-mcp-http` can actually boot. The HTTP transport
+  # is optional and users pick their own server, but the suite needs one to
+  # exercise the binary. Opt in with
+  # WOODS_RUN_HTTP_SERVER=1 (see spec/mcp/http_server_e2e_spec.rb).
+  gem 'puma', '>= 6.0'
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'

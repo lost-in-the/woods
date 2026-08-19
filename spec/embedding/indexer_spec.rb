@@ -701,6 +701,21 @@ RSpec.describe Woods::Embedding::Indexer do
       persistent_indexer.index_all
     end
 
+    # #216 / B-103. The dump signature takes resolved_config so the WVF1 header
+    # can record which model produced the vectors; the Indexer never passed it,
+    # so every dump on disk carried an empty model name and could not
+    # self-describe.
+    it 'passes resolved_config through so the dump header records the model' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+
+      expect(vector_snapshotter).to receive(:dump) do |_store, _artifact, _dump_dir, **kwargs|
+        expect(kwargs[:resolved_config]).to be(resolved_config)
+      end
+
+      persistent_indexer.index_all
+    end
+
     it 'writes woods.json to output_dir after a successful run' do
       stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
       stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
@@ -1297,6 +1312,282 @@ RSpec.describe Woods::Embedding::Indexer do
 
         expect(persisted_vector_ids).to be_empty
       end
+    end
+  end
+
+  # #211 / B-098. A durable backend keeps whatever was written to it, so unless
+  # the pipeline deletes stale vectors nothing ever will — a unit removed from
+  # the codebase stayed retrievable forever, including after a full woods:embed.
+  describe 'durable-store reconciliation' do
+    # A durable store: implements #each_id and #delete, but NOT #each_entry, so
+    # it is reconcilable? and not persistable? — the shape pgvector and Qdrant
+    # present to the Indexer.
+    let(:durable_store_class) do
+      Class.new do
+        attr_reader :entries, :deleted
+
+        def initialize(seed = {})
+          @entries = seed.dup
+          @deleted = []
+        end
+
+        def store_batch(items)
+          items.each { |item| @entries[item[:id]] = item[:vector] }
+        end
+
+        def each_id(&block)
+          return enum_for(:each_id) unless block
+
+          @entries.keys.each(&block)
+        end
+
+        def delete(id)
+          @deleted << id
+          @entries.delete(id)
+        end
+
+        def count = @entries.size
+      end
+    end
+
+    let(:vector_store) { durable_store_class.new(seed) }
+    let(:seed) { {} }
+
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+    end
+
+    it 'is reconcilable but not persistable' do
+      expect(indexer.send(:reconcilable?)).to be(true)
+      expect(indexer.send(:persistable?)).to be(false)
+    end
+
+    context 'when the store holds a unit the extraction no longer has' do
+      # 4 survivors + 1 vanished keeps the sweep under the 30% purge guard.
+      let(:seed) do
+        {
+          'User' => [0.1, 0.2], 'Keep1' => [0.1, 0.2], 'Keep2' => [0.1, 0.2],
+          'Keep3' => [0.1, 0.2], 'DeletedModel' => [0.9, 0.9]
+        }
+      end
+
+      before do
+        %w[Keep1 Keep2 Keep3].each do |identifier|
+          File.write(
+            File.join(output_dir, "#{identifier.downcase}.json"),
+            JSON.generate(unit_data.merge('identifier' => identifier, 'source_hash' => "hash-#{identifier}"))
+          )
+        end
+      end
+
+      it 'deletes the stale vector on a full run' do
+        indexer.index_all
+
+        expect(vector_store.deleted).to eq(['DeletedModel'])
+        expect(vector_store.entries.keys).not_to include('DeletedModel')
+      end
+
+      it 'deletes the stale vector on an incremental run' do
+        indexer.index_incremental
+
+        expect(vector_store.deleted).to eq(['DeletedModel'])
+      end
+
+      it 'keeps units the run only skipped' do
+        # Everything unchanged: all four survivors are skipped, not embedded.
+        # A skipped unit must never read as vanished.
+        checkpoint = { 'User' => 'abc123' }
+        %w[Keep1 Keep2 Keep3].each { |i| checkpoint[i] = "hash-#{i}" }
+        File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+
+        stats = indexer.index_incremental
+
+        expect(stats[:skipped]).to eq(4)
+        expect(vector_store.deleted).to eq(['DeletedModel'])
+      end
+
+      it 'deletes every chunk of a vanished unit' do
+        vector_store.entries.delete('DeletedModel')
+        vector_store.entries['Chunked#chunk_0'] = [0.9, 0.9]
+        vector_store.entries['Chunked#chunk_1'] = [0.9, 0.9]
+
+        indexer.index_all
+
+        expect(vector_store.deleted).to contain_exactly('Chunked#chunk_0', 'Chunked#chunk_1')
+      end
+
+      context 'when a still-present unit now has fewer chunks' do
+        let(:chunked_user) do
+          unit_data.merge(
+            'source_hash' => 'new-shape',
+            'chunks' => [
+              { 'chunk_index' => 0, 'content' => 'new chunk one' },
+              { 'chunk_index' => 1, 'content' => 'new chunk two' }
+            ]
+          )
+        end
+
+        before do
+          vector_store.entries['User#chunk_0'] = [0.9, 0.9]
+          vector_store.entries['User#chunk_1'] = [0.9, 0.9]
+          vector_store.entries['User#chunk_2'] = [0.9, 0.9]
+          File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked_user))
+        end
+
+        it 'deletes the superseded durable chunk on a full run' do
+          indexer.index_all
+
+          expect(vector_store.deleted).to include('User#chunk_2')
+          expect(vector_store.entries.keys).to include('User#chunk_0', 'User#chunk_1')
+          expect(vector_store.entries.keys).not_to include('User#chunk_2')
+        end
+
+        it 'deletes the superseded durable chunk on an incremental run' do
+          File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate({ 'User' => 'old-shape' }))
+
+          indexer.index_incremental
+
+          expect(vector_store.deleted).to include('User#chunk_2')
+        end
+      end
+    end
+
+    context 'when the sweep would exceed the purge guard' do
+      let(:seed) { { 'User' => [0.1, 0.2], 'Gone1' => [0.9, 0.9], 'Gone2' => [0.9, 0.9] } }
+
+      it 'refuses to delete and says why' do
+        expect { indexer.index_all }
+          .to output(/refusing to delete 2 of 3 unit\(s\)/).to_stderr
+
+        expect(vector_store.deleted).to be_empty
+      end
+
+      it 'proceeds when WOODS_ALLOW_PURGE=1' do
+        allow(ENV).to receive(:fetch).and_call_original
+        allow(ENV).to receive(:fetch).with('WOODS_ALLOW_PURGE', nil).and_return('1')
+
+        indexer.index_all
+
+        expect(vector_store.deleted).to contain_exactly('Gone1', 'Gone2')
+      end
+    end
+
+    context 'when the extraction output loaded nothing' do
+      let(:seed) { { 'Gone1' => [0.9, 0.9], 'Gone2' => [0.9, 0.9] } }
+
+      it 'refuses rather than emptying the store' do
+        File.delete(File.join(output_dir, 'user.json'))
+
+        expect { indexer.index_all }.to output(/refusing to delete 2 unit\(s\)/).to_stderr
+
+        expect(vector_store.deleted).to be_empty
+      end
+    end
+
+    # The store-switch half of #211: checkpoint.json says "embedded", but the
+    # durable store it describes is not the one now configured.
+    context 'when the checkpoint describes vectors this store does not hold' do
+      let(:seed) { {} }
+
+      before do
+        File.write(
+          File.join(output_dir, 'checkpoint.json'),
+          JSON.generate({ 'User' => unit_data['source_hash'] })
+        )
+      end
+
+      it 're-embeds instead of trusting the checkpoint' do
+        stats = indexer.index_incremental
+
+        expect(stats[:skipped]).to eq(0)
+        expect(stats[:processed]).to eq(1)
+        expect(vector_store.entries).to have_key('User')
+      end
+
+      it 'reports the miss' do
+        expect { indexer.index_incremental }
+          .to output(/re-embedding 1 unit\(s\) that checkpoint\.json marked as done/).to_stderr
+      end
+    end
+
+    context 'when the store cannot be enumerated' do
+      let(:vector_store) do
+        store = durable_store_class.new
+        allow(store).to receive(:each_id).and_raise(StandardError, 'connection refused')
+        store
+      end
+
+      it 'warns and completes the run without reconciling' do
+        expect { indexer.index_all }
+          .to output(/could not read existing ids.*skipping durable-store reconciliation/m).to_stderr
+
+        expect(vector_store.deleted).to be_empty
+      end
+    end
+  end
+
+  # Regression: durable backends must not be treated as dumpable.
+  #
+  # `persistable?` asked `vector_store.respond_to?(:each_entry)`. Every adapter
+  # includes Storage::VectorStore::Interface, which *defines* `each_entry` as a
+  # NotImplementedError raise — so pgvector and Qdrant answered `true`,
+  # `persist_snapshot` ran, and `Snapshotter::Vector.dump` hit the raise at the
+  # very end of a successful embed, throwing away the whole run.
+  describe 'durable vector stores are not dumped' do
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+    end
+
+    # The real adapters, not doubles — the bug lived precisely in what the real
+    # classes inherit from the interface module.
+    {
+      'pgvector' => lambda {
+        require 'woods/storage/pgvector'
+        # A real object, not double('ActiveRecord::...'): ActiveRecord
+        # is not loaded in the unit bundle, so a string-named double would
+        # verify nothing at all (see #219).
+        connection_class = Class.new do
+          def execute(_sql) = []
+          def quote(value) = "'#{value}'"
+        end
+        Woods::Storage::VectorStore::Pgvector.new(connection: connection_class.new, dimensions: 2)
+      },
+      'Qdrant' => lambda {
+        require 'woods/storage/qdrant'
+        store = Woods::Storage::VectorStore::Qdrant.new(
+          url: 'http://qdrant.example.com', collection: 'test', dimensions: 2
+        )
+        allow(store).to receive(:store_batch)
+        store
+      }
+    }.each do |backend, build_store|
+      context "with a #{backend} store" do
+        let(:vector_store) { instance_exec(&build_store) }
+
+        it 'inherits each_entry from the interface without implementing it' do
+          expect(vector_store).to respond_to(:each_entry)
+          expect { vector_store.each_entry { |*args| args } }.to raise_error(NotImplementedError)
+        end
+
+        it 'completes index_all without attempting a dump' do
+          stats = indexer.index_all
+
+          expect(stats[:errors]).to eq(0)
+          expect(stats[:processed]).to eq(1)
+          # The dump directory is the observable proof: persist_snapshot would
+          # have created it before reaching the raise.
+          expect(Dir.exist?(File.join(output_dir, 'dumps'))).to be(false)
+        end
+      end
+    end
+
+    it 'still dumps for an in-memory store, which genuinely implements each_entry' do
+      expect(Woods::Storage::VectorStore::InMemory.instance_method(:each_entry).owner)
+        .to eq(Woods::Storage::VectorStore::InMemory)
+
+      indexer.index_all
+
+      expect(Dir.exist?(File.join(output_dir, 'dumps'))).to be(true)
     end
   end
 

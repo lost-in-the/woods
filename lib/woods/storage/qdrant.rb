@@ -89,6 +89,23 @@ module Woods
         # silently doubled collection.
         POINT_ID_NAMESPACE = '7eb8ae2b-670b-55ee-a474-36bd1a8dc6b4'
 
+        # Query string appended to every mutating point operation.
+        #
+        # Qdrant defaults these endpoints to `wait=false`: the API returns
+        # `status: "acknowledged"` as soon as the change is queued, before it is
+        # readable. Every caller in this gem assumes otherwise — the embed
+        # pipeline writes vectors and then dumps/verifies, and the prune paths
+        # delete and then re-count — so an un-awaited mutation reads back as
+        # stale data (a deleted unit still answering searches, a fresh count
+        # showing the pre-write total). Correctness beats the throughput the
+        # async default buys.
+        WAIT_FOR_WRITE = '?wait=true'
+
+        # Points per page when scrolling ids in {#each_id}. Large enough that a
+        # sizable index costs few round trips, small enough that one response
+        # stays comfortably in memory (ids and one payload key only).
+        SCROLL_PAGE_SIZE = 1_000
+
         # Payload key holding the original Woods identifier for a point.
         #
         # Deliberately NOT `identifier`: the embedding Indexer already
@@ -255,7 +272,7 @@ module Woods
         def store(id, vector, metadata = {})
           validate_dimensions!(vector) if @dimensions
           body = { points: [build_point(id, vector, metadata)] }
-          request(:put, "/collections/#{@collection}/points", body)
+          request(:put, "/collections/#{@collection}/points#{WAIT_FOR_WRITE}", body)
         end
 
         # Store multiple vectors in a single batch upsert request.
@@ -281,7 +298,7 @@ module Woods
           body = {
             points: entries.map { |entry| build_point(entry[:id], entry[:vector], entry[:metadata] || {}) }
           }
-          request(:put, "/collections/#{@collection}/points", body)
+          request(:put, "/collections/#{@collection}/points#{WAIT_FOR_WRITE}", body)
         end
 
         # Search for similar vectors.
@@ -319,6 +336,52 @@ module Woods
           end
         end
 
+        # The vector width the collection was actually created with.
+        #
+        # `ensure_collection!` is a PUT that Qdrant treats as idempotent, so an
+        # existing collection keeps whatever width it was built with; a
+        # dimension change then surfaces as a 400 on every upsert. Reading it
+        # back lets the pipeline refuse up front with a re-index remedy (#214).
+        #
+        # @return [Integer, nil] the collection's vector size, or nil when the
+        #   collection does not exist or the shape is unrecognized (named
+        #   vectors, for instance, which this adapter does not write)
+        def stored_dimensions
+          config = request(:get, "/collections/#{@collection}")
+                   .dig('result', 'config', 'params', 'vectors')
+          return nil unless config.is_a?(Hash)
+
+          size = config['size']
+          size.is_a?(Integer) && size.positive? ? size : nil
+        rescue StandardError
+          # Never let a diagnostic query break the pipeline it is diagnosing.
+          nil
+        end
+
+        # Iterate over every stored id, yielding the Woods identifier.
+        #
+        # Uses the scroll API with `with_vector: false` and only the identifier
+        # key requested, so reconciliation costs payload-sized pages rather
+        # than whole vectors. Yields the same value {#search} returns as `id`
+        # (the Woods identifier, reverse-mapped from the payload) so callers
+        # can compare against extraction output directly, and so any id yielded
+        # here can be handed straight back to {#delete}.
+        #
+        # Points written by something else — no {IDENTIFIER_KEY} in their
+        # payload — yield their raw point id, mirroring {#search}'s fallback.
+        #
+        # @see Interface#each_id
+        def each_id(&block)
+          return enum_for(:each_id) unless block
+
+          offset = nil
+          loop do
+            points, offset = scroll_page(offset)
+            points.each { |point| yield(identifier_for(point)) }
+            break if offset.nil?
+          end
+        end
+
         # Delete a single point by Woods identifier.
         #
         # Translates through {.point_id}, so it necessarily computes the
@@ -329,13 +392,13 @@ module Woods
         # @see Interface#delete
         def delete(id)
           body = { points: [self.class.point_id(id)] }
-          request(:post, "/collections/#{@collection}/points/delete", body)
+          request(:post, "/collections/#{@collection}/points/delete#{WAIT_FOR_WRITE}", body)
         end
 
         # @see Interface#delete_by_filter
         def delete_by_filter(filters)
           body = { filter: build_filter(filters) }
-          request(:post, "/collections/#{@collection}/points/delete", body)
+          request(:post, "/collections/#{@collection}/points/delete#{WAIT_FOR_WRITE}", body)
         end
 
         # @see Interface#count
@@ -345,6 +408,28 @@ module Woods
         end
 
         private
+
+        # Fetch one page of the scroll cursor.
+        #
+        # @param offset [Object, nil] the cursor from the previous page
+        # @return [Array(Array<Hash>, Object)] the page's points and the next
+        #   offset (nil when the scroll is exhausted)
+        def scroll_page(offset)
+          body = { limit: SCROLL_PAGE_SIZE, with_payload: [IDENTIFIER_KEY], with_vector: false }
+          body[:offset] = offset if offset
+
+          result = request(:post, "/collections/#{@collection}/points/scroll", body)['result'] || {}
+          [result['points'] || [], result['next_page_offset']]
+        end
+
+        # The Woods identifier for a scrolled point, falling back to the raw
+        # point id for anything this adapter did not write.
+        #
+        # @param point [Hash] a scroll-result point
+        # @return [String, Integer]
+        def identifier_for(point)
+          (point['payload'] || {})[IDENTIFIER_KEY] || point['id']
+        end
 
         # Build one Qdrant point: UUIDv5 id, vector, and a payload carrying
         # the original Woods identifier alongside the caller's metadata.

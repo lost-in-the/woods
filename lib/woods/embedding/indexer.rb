@@ -15,8 +15,9 @@ module Woods
     # generates embeddings, and stores vectors. Supports full and incremental
     # modes with checkpoint-based resumability.
     #
-    # When the vector store is an in-memory adapter (responds to +#each_entry+
-    # and +#bulk_load+) and +output_dir+ is set, a successful run — full or
+    # When the vector store is an in-memory adapter (one that itself implements
+    # +#each_entry+, not merely inherits the interface stub) and +output_dir+ is
+    # set, a successful run — full or
     # incremental — persists the stores to disk via the Snapshotter pair and
     # atomically flips the +dumps/latest+ pointer. An incremental run hydrates
     # the store from the previous dump first, so the dump it writes is
@@ -56,6 +57,7 @@ module Woods
         @resolved_config = resolved_config
         @dump_retention_count = dump_retention_count
         @persisted_ids = {}
+        @durable_ids = nil
         @checkpoint_misses = 0
       end
 
@@ -136,6 +138,11 @@ module Woods
         report_checkpoint_misses
         vanished = incremental && persistable? ? drop_vanished_units : 0
         persist_snapshot if persistable? && snapshot_worth_writing?(stats, vanished, incremental: incremental)
+        # Durable backends have no dump to rewrite, so staleness has to be
+        # removed from the store itself — on full runs too, since a full run
+        # against pgvector/Qdrant does not start from an empty store the way
+        # the in-memory path does (#211).
+        reconcile_durable_store if reconcilable?
         save_checkpoint(checkpoint)
 
         stats
@@ -275,14 +282,141 @@ module Woods
         ENV.fetch('WOODS_ALLOW_PURGE', nil) == '1'
       end
 
+      # Delete vectors a durable store holds for units the index no longer has.
+      #
+      # The dump-backed path gets staleness removal for free: the dump is
+      # rewritten from the live store each run, so a dropped unit simply stops
+      # being written. A durable backend has no such rewrite — rows in
+      # `woods_vectors` and points in Qdrant survive until something deletes
+      # them, which nothing did. A unit deleted from the codebase therefore
+      # stayed retrievable through `codebase_retrieve` indefinitely, *including
+      # after a full `woods:embed`*, because a full run against a durable store
+      # does not begin from an empty store (#211).
+      #
+      # Runs on full and incremental alike, and reconciles against
+      # `@current_identifiers` — every unit this run saw, embedded or skipped —
+      # so a skipped-because-unchanged unit is never mistaken for a vanished one.
+      #
+      # Guarded by {#durable_prune_permitted?}, the same 30%-plus-empty-load
+      # thresholds as the dump path (#191): the failure mode being defended
+      # against is identical, and worse here, since a durable delete has no
+      # dump to restore from.
+      #
+      # @return [Integer] how many units were dropped
+      def reconcile_durable_store
+        vanished = vanished_durable_identifiers
+        return 0 if vanished.empty?
+        return 0 unless durable_prune_permitted?(vanished)
+
+        delete_durable_identifiers(vanished)
+      end
+
+      # Identifiers the durable store holds that this run did not see.
+      #
+      # @return [Array<String>]
+      def vanished_durable_identifiers
+        return [] if @durable_ids.nil?
+
+        @durable_ids.keys.reject { |identifier| @current_identifiers.include?(identifier) }
+      end
+
+      # Delete every stored id belonging to the given identifiers.
+      #
+      # The warn precedes the deletes so an operator still learns what was
+      # happening if one of them raises partway through.
+      #
+      # @param identifiers [Array<String>]
+      # @return [Integer] how many units were dropped
+      def delete_durable_identifiers(identifiers)
+        stale_ids = identifiers.flat_map { |identifier| @durable_ids[identifier] }
+        warn "[woods] deleting #{stale_ids.size} stale vector(s) for #{identifiers.size} unit(s) " \
+             "from #{@vector_store.class} that the extraction no longer holds."
+        stale_ids.each { |id| @vector_store.delete(id) }
+        identifiers.each { |identifier| @durable_ids.delete(identifier) }
+        identifiers.size
+      end
+
+      # Guard rail on the durable-store sweep. Mirrors
+      # {#vanished_prune_permitted?}; the counts come from the store rather
+      # than from a dump, and a refusal here leaves the stale vectors in place
+      # (retrievable, but present) rather than risking a mass deletion that no
+      # dump can undo.
+      #
+      # @param vanished [Array<String>] identifiers about to be deleted
+      # @return [Boolean] true when the delete may proceed
+      def durable_prune_permitted?(vanished)
+        return true if purge_override?
+
+        if @current_identifiers.empty?
+          warn "[woods] nothing loaded from #{@output_dir} — likely a wrong or empty output dir — " \
+               "refusing to delete #{@durable_ids.size} unit(s) from #{@vector_store.class}. " \
+               'Set WOODS_ALLOW_PURGE=1 to override.'
+          return false
+        end
+
+        ratio = vanished.size.fdiv(@durable_ids.size)
+        return true if ratio <= VANISHED_PRUNE_MAX_RATIO
+
+        warn "[woods] refusing to delete #{vanished.size} of #{@durable_ids.size} unit(s) from " \
+             "#{@vector_store.class} (#{(ratio * 100).round}% > " \
+             "#{(VANISHED_PRUNE_MAX_RATIO * 100).round}% purge guard). If this mass deletion is " \
+             'intentional, set WOODS_ALLOW_PURGE=1.'
+        false
+      end
+
       # Per-run state. An Indexer instance may be reused across runs, and
       # neither the hydrated id index nor the miss counter may leak between
       # them.
       def prepare_run(incremental:)
         @persisted_ids = {}
         @current_identifiers = Set.new
+        @durable_ids = nil
         @checkpoint_misses = 0
         hydrate_persisted_vectors if incremental && persistable?
+        load_durable_store_ids if reconcilable?
+      end
+
+      # Read back what the durable store currently holds, as base identifiers.
+      #
+      # One enumeration serves both halves of #211:
+      #
+      # - {#checkpoint_satisfied?} can verify a checkpoint hit against the
+      #   store instead of trusting it. Previously that verification existed
+      #   only on the dump path, so switching `vector_store` from `:local` to
+      #   pgvector/Qdrant left every unchanged unit stranded: the checkpoint
+      #   said "done", the new store held nothing, and no run ever embedded it.
+      # - {#reconcile_durable_store} can delete what extraction no longer has.
+      #
+      # Stored ids may carry a `#chunk_N` suffix; the map keeps every raw id
+      # per base identifier so a delete can name each chunk exactly.
+      def load_durable_store_ids
+        @durable_ids = Hash.new { |hash, key| hash[key] = [] }
+        @vector_store.each_id { |id| @durable_ids[base_identifier(id)] << id }
+      rescue StandardError => e
+        # A store that cannot be enumerated must not take the embed run down
+        # with it. Reconciliation and the presence check both degrade to their
+        # pre-#211 behaviour (skip, and trust the checkpoint).
+        warn "[woods] could not read existing ids from #{@vector_store.class} " \
+             "(#{e.class}: #{e.message}) — skipping durable-store reconciliation this run."
+        @durable_ids = nil
+      end
+
+      # Strip the embedding-side chunk suffix to recover the unit identifier.
+      # `collect_embed_items` writes "User#chunk_0" for chunked units; the
+      # index only ever knows "User".
+      def base_identifier(id)
+        id.to_s.sub(/#chunk_\d+\z/, '')
+      end
+
+      # Can this run reconcile the vector store against extraction output?
+      #
+      # True for durable adapters that genuinely implement +#each_id+ — as with
+      # {#persistable?}, +respond_to?+ is not the question, since the interface
+      # defines the method for every adapter. The dump-backed path is excluded:
+      # it already reconciles via {#drop_vanished_units} plus the dump rewrite,
+      # and doing both would be redundant work on the same store.
+      def reconcilable?
+        !persistable? && implements_own?(@vector_store, :each_id)
       end
 
       def embed_batches(units, checkpoint, stats, incremental:)
@@ -301,8 +435,8 @@ module Woods
         return if @checkpoint_misses.zero?
 
         warn "[woods] re-embedding #{@checkpoint_misses} unit(s) that checkpoint.json " \
-             'marked as done but the latest dump does not contain — the checkpoint had ' \
-             'advanced past the durable artifact.'
+             'marked as done but the vector store does not hold — the checkpoint had ' \
+             'advanced past the durable artifact, or it describes a different store.'
       end
 
       # Interval checkpoints only make sense when each batch's +store_batch+
@@ -335,14 +469,25 @@ module Woods
       # unit_data JSON — so key ordering or whitespace in the _index.json
       # does not invalidate checkpoints across Ruby-minor upgrades.
       #
-      # A matching hash is necessary but not sufficient: on the dump-backed
-      # path the vector must also be present in what we hydrated, or the
-      # checkpoint is describing a vector nothing holds.
+      # A matching hash is necessary but not sufficient: the vector must also
+      # actually exist. On the dump-backed path that means present in what we
+      # hydrated; on a durable backend, present in what the store reported.
+      #
+      # The durable half is #211's second bug. Before it, a checkpoint hit was
+      # trusted outright on pgvector/Qdrant — so pointing `vector_store` at a
+      # fresh durable store while keeping `output_dir` (the `:local` ->
+      # `:postgresql` migration the docs recommend) stranded every unchanged
+      # unit permanently: checkpoint.json said "embedded", the new store held
+      # nothing, and no subsequent incremental run ever disagreed.
       def checkpoint_satisfied?(unit_data, checkpoint)
         return false unless checkpoint[unit_data['identifier']] == unit_data['source_hash']
-        return true unless persistable?
 
-        return true if @persisted_ids.key?(unit_data['identifier'])
+        known_ids = persistable? ? @persisted_ids : @durable_ids
+        # No durable view to check against (an adapter with no #each_id, or an
+        # enumeration that failed) — fall back to trusting the checkpoint.
+        return true if known_ids.nil?
+
+        return true if known_ids.key?(unit_data['identifier'])
 
         @checkpoint_misses += 1
         false
@@ -475,6 +620,7 @@ module Woods
 
         @vector_store.store_batch(entries)
         prune_superseded_vectors(items)
+        prune_superseded_durable_vectors(items)
 
         items.each do |item|
           checkpoint[item[:identifier]] = item[:source_hash]
@@ -555,6 +701,26 @@ module Woods
         @persisted_ids[identifier] = fresh_ids
       end
 
+      # Durable stores do not get rewritten from a complete dump after each
+      # run. If a still-present unit is re-embedded with fewer chunks, remove
+      # the old chunk rows/points that no current embed item rewrote.
+      def prune_superseded_durable_vectors(items)
+        return if @durable_ids.nil?
+        return unless @vector_store.respond_to?(:delete)
+
+        items.group_by { |item| item[:identifier] }.each do |identifier, group|
+          prune_durable_identifier(identifier, group.map { |item| item[:id] })
+        end
+      end
+
+      def prune_durable_identifier(identifier, fresh_ids)
+        previous = @durable_ids[identifier]
+        return unless previous
+
+        (previous - fresh_ids).each { |id| @vector_store.delete(id) }
+        @durable_ids[identifier] = fresh_ids
+      end
+
       # A checkpoint that cannot be parsed *or read* degrades to "no
       # checkpoint" — every unit reads as changed and is re-embedded, the same
       # self-healing outcome as a corrupt checkpoint. AtomicFile.read keeps a
@@ -575,13 +741,41 @@ module Woods
         AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
       end
 
-      # Returns true when the vector store is an in-memory adapter that supports
-      # the persistence seam (+#each_entry+ / +#bulk_load+) and output_dir is set.
-      # Persistent backends (pgvector, Qdrant) never respond to +#each_entry+.
+      # Returns true when the vector store can actually be dumped to
+      # +output_dir+ — that is, when it genuinely implements the persistence
+      # seam (+#each_entry+).
+      #
+      # +respond_to?+ is the wrong question, and asking it was a live crash.
+      # {Storage::VectorStore::Interface} *defines* +#each_entry+ (as a
+      # +NotImplementedError+ raise) and +#bulk_load+ (delegating to
+      # +#store_batch+), and every adapter includes the module — so pgvector
+      # and Qdrant answered +respond_to?(:each_entry)+ with +true+ despite
+      # implementing neither. +persistable?+ said yes, and {#persist_snapshot}
+      # drove +Snapshotter::Vector.dump+ into the interface's raise at the very
+      # end of an otherwise-successful run, discarding a whole embed pass
+      # (every vector already paid for) with a bare +NotImplementedError+.
+      #
+      # Ask who *owns* the method instead: an adapter that merely inherited the
+      # interface's stub has not implemented it. +bulk_load+ is deliberately not
+      # part of the test — its interface default is a working implementation, so
+      # it discriminates nothing.
       def persistable?
-        @output_dir &&
-          @vector_store.respond_to?(:each_entry) &&
-          @vector_store.respond_to?(:bulk_load)
+        return false unless @output_dir
+
+        implements_own?(@vector_store, :each_entry)
+      end
+
+      # Does +object+ define +method_name+ itself, rather than inheriting the
+      # vector-store interface's default stub?
+      #
+      # @param object [Object] the adapter under test
+      # @param method_name [Symbol]
+      # @return [Boolean]
+      def implements_own?(object, method_name)
+        return false unless object.respond_to?(method_name)
+        return true unless defined?(Storage::VectorStore::Interface)
+
+        object.method(method_name).owner != Storage::VectorStore::Interface
       end
 
       # Persist stores to a timestamped dump directory, write +woods.json+,
@@ -593,7 +787,11 @@ module Woods
         artifact = IndexArtifact.new(@output_dir)
         dump_dir = unique_dump_dir(artifact)
 
-        Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir)
+        # Pass resolved_config: the WVF1 header carries a model_name field, and
+        # omitting it wrote an empty string into every dump — so the artifact
+        # could not say which model produced it, and any check that wants to
+        # compare a dump against the configured provider has nothing to read.
+        Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir, resolved_config: @resolved_config)
 
         if @metadata_store.respond_to?(:each_entry) && @metadata_store.respond_to?(:bulk_load)
           Storage::Snapshotter::Metadata.dump(@metadata_store, artifact, dump_dir)

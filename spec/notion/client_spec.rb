@@ -228,9 +228,36 @@ RSpec.describe Woods::Notion::Client do
         status: 401, body: { 'message' => 'API token is invalid', 'code' => 'unauthorized' }
       )
 
+      # Typed, so the exporter can abort the run rather than recording one
+      # error per unit and grinding through the whole sync at 3 req/sec
+      # (#217). Still a Woods::Error, so existing rescues are unaffected.
       expect do
         client.create_page(database_id: 'db', properties: {})
-      end.to raise_error(Woods::Error, /401/)
+      end.to raise_error(Woods::Notion::AuthenticationError, /401/)
+    end
+
+    it 'raises AuthenticationError on 403 Forbidden' do
+      stub_notion_request(
+        method: :post, path: 'pages',
+        status: 403, body: { 'message' => 'Integration lacks access', 'code' => 'restricted_resource' }
+      )
+
+      expect do
+        client.create_page(database_id: 'db', properties: {})
+      end.to raise_error(Woods::Notion::AuthenticationError, /403/)
+    end
+
+    it 'raises a plain Woods::Error for non-auth statuses' do
+      stub_notion_request(
+        method: :post, path: 'pages',
+        status: 400, body: { 'message' => 'Invalid request' }
+      )
+
+      expect do
+        client.create_page(database_id: 'db', properties: {})
+      end.to raise_error(Woods::Error) { |e|
+        expect(e).not_to be_a(Woods::Notion::AuthenticationError)
+      }
     end
 
     it 'retries on 429 Too Many Requests' do

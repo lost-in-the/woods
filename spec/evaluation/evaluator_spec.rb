@@ -6,7 +6,7 @@ require 'woods/evaluation/query_set'
 require 'woods/evaluation/evaluator'
 
 RSpec.describe Woods::Evaluation::Evaluator do
-  let(:retriever) { instance_double('Woods::Retriever') }
+  let(:retriever) { instance_double(Woods::Retriever) }
 
   let(:queries) do
     [

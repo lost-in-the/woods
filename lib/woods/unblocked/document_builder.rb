@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'erb' # ERB::Util.url_encode
 require 'woods/export/unit_facts'
 
 module Woods
@@ -18,9 +19,20 @@ module Woods
     #
     class DocumentBuilder
       # @param repo_url [String] GitHub repo base URL for citation URIs
-      def initialize(repo_url:)
+      # @param repo_url [String] Repository web URL, e.g. https://github.com/acme/app
+      # @param ref [String, nil] Branch/tag/SHA the index was extracted from.
+      #   Defaults to +DEFAULT_REF+ when nil, empty, or "unknown" — which is
+      #   what {Woods::GitProvenance} reports when it cannot resolve a ref.
+      def initialize(repo_url:, ref: nil)
         @repo_url = repo_url.chomp('/')
+        @ref = normalize_ref(ref)
       end
+
+      # Ref used when the index does not say which one it came from.
+      DEFAULT_REF = 'main'
+
+      # Refs that mean "no answer" rather than an actual ref name.
+      UNRESOLVED_REFS = ['', 'unknown'].freeze
 
       # Build a document hash from a unit's extracted data.
       #
@@ -48,10 +60,30 @@ module Woods
         file_path = unit_data['file_path']
         return @repo_url unless file_path
 
-        "#{@repo_url}/blob/main/#{file_path}"
+        "#{@repo_url}/blob/#{@ref}/#{encode_path(file_path)}"
       end
 
       private
+
+      # `main` was hardcoded, so every citation on a repo whose default branch
+      # is `master` (or a release branch, or a tag) pointed at a ref that may
+      # not contain the file at all.
+      def normalize_ref(ref)
+        candidate = ref.to_s.strip
+        return DEFAULT_REF if UNRESOLVED_REFS.include?(candidate.downcase)
+
+        candidate
+      end
+
+      # Percent-encode each path segment, leaving the separators alone.
+      #
+      # Paths were interpolated raw, so a space or `#` in a filename produced a
+      # URL that silently truncated or 404'd — `#` in particular turns the rest
+      # of the path into a fragment. Encoding per segment rather than whole
+      # keeps `/` meaningful.
+      def encode_path(file_path)
+        file_path.to_s.split('/').map { |segment| ERB::Util.url_encode(segment) }.join('/')
+      end
 
       def build_body(unit_data)
         type = unit_data['type']

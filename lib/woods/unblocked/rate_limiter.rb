@@ -10,11 +10,23 @@ module Woods
     # matching the message string.
     class BudgetExhaustedError < Woods::Error; end
 
-    # Daily budget-based rate limiter for the Unblocked API (1000 calls/day).
+    # Call-count budget for the Unblocked API, enforced **per run**.
     #
-    # Unlike Notion's per-second throttling, Unblocked limits by daily call count.
-    # Tracks usage against a configurable budget, warns when approaching the limit,
-    # and raises when exhausted.
+    # Unlike Notion's per-second throttling, Unblocked limits by daily call
+    # count (1000/day). This limiter is a guard rail against a single run
+    # burning that allowance, not a reimplementation of it: the counter lives
+    # in the process and starts at zero every run.
+    #
+    # That is deliberate rather than an oversight. The real budget is enforced
+    # server-side against the token, and the token is typically shared across
+    # developer machines and CI runners with no common disk — so a persisted
+    # local counter would be wrong in both directions (blocking a fresh run
+    # that had allowance left, and permitting a run after the allowance was
+    # spent elsewhere) while looking authoritative. A per-run cap gives the
+    # useful half of the guarantee honestly.
+    #
+    # Messages therefore say "per run", and the operator is pointed at the
+    # server-side limit for the real answer.
     #
     # @example
     #   limiter = RateLimiter.new(daily_budget: 1000)
@@ -50,8 +62,10 @@ module Woods
         @mutex.synchronize do
           if @calls_today >= @daily_budget
             raise BudgetExhaustedError,
-                  "Unblocked API daily budget exhausted (#{@daily_budget} calls). " \
-                  'Budget resets at midnight PST. Use UNBLOCKED_DAILY_BUDGET to adjust.'
+                  "Unblocked API call budget exhausted for this run (#{@daily_budget} calls). " \
+                  'This is a per-run cap, not a reading of your remaining daily allowance — ' \
+                  'the 1000/day limit is enforced server-side against your token and resets ' \
+                  'at midnight PST. Raise or lower the per-run cap with UNBLOCKED_DAILY_BUDGET.'
           end
 
           @calls_today += 1
@@ -61,7 +75,7 @@ module Woods
         yield
       end
 
-      # Number of API calls remaining in the daily budget.
+      # Number of API calls remaining in this run's budget.
       #
       # @return [Integer]
       def remaining
@@ -93,8 +107,8 @@ module Woods
 
         @warned = true
         @warn_io&.puts(
-          "WARNING: Unblocked API usage at #{@calls_today}/#{@daily_budget} " \
-          "(#{remaining} calls remaining)"
+          "WARNING: Unblocked API usage at #{@calls_today}/#{@daily_budget} for this run " \
+          "(#{remaining} calls remaining in the per-run cap)"
         )
       end
     end

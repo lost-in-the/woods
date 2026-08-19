@@ -18,10 +18,10 @@ RSpec.describe Woods::Console::ScopePredicateParser do
   # ── Arel table / relation helpers ──────────────────────────────────────────
 
   # Minimal Arel double that records which predicates were built.
-  let(:arel_col)   { instance_double('Arel::Attributes::Attribute') }
-  let(:arel_node)  { instance_double('Arel::Nodes::Equality', 'arel_node') }
-  let(:arel_table) { instance_double('Arel::Table') }
-  let(:relation)   { instance_double('ActiveRecord::Relation') }
+  let(:arel_col)   { double('Arel::Attributes::Attribute') }
+  let(:arel_node)  { double('arel_node') }
+  let(:arel_table) { double('Arel::Table') }
+  let(:relation)   { double('ActiveRecord::Relation') }
 
   before do
     allow(relation).to receive(:arel_table).and_return(arel_table)
@@ -183,7 +183,7 @@ RSpec.describe Woods::Console::ScopePredicateParser do
   describe '_present suffix' do
     it 'builds NOT NULL AND != empty-string when true' do
       allow(arel_table).to receive(:[]).with('notes').and_return(arel_col)
-      not_null_node = instance_double('Arel::Nodes::NotEqual', 'not_null')
+      not_null_node = double('not_null')
       allow(arel_col).to receive(:not_eq).with(nil).and_return(not_null_node)
       allow(not_null_node).to receive(:and).and_return(arel_node)
 
@@ -194,7 +194,7 @@ RSpec.describe Woods::Console::ScopePredicateParser do
 
     it 'builds NULL OR empty-string when false' do
       allow(arel_table).to receive(:[]).with('notes').and_return(arel_col)
-      null_node = instance_double('Arel::Nodes::Equality', 'null')
+      null_node = double('null')
       allow(arel_col).to receive(:eq).with(nil).and_return(null_node)
       allow(null_node).to receive(:or).and_return(arel_node)
 
@@ -207,7 +207,7 @@ RSpec.describe Woods::Console::ScopePredicateParser do
   describe '_blank suffix' do
     it 'builds NULL OR empty-string when true' do
       allow(arel_table).to receive(:[]).with('notes').and_return(arel_col)
-      null_node = instance_double('Arel::Nodes::Equality', 'null')
+      null_node = double('null')
       allow(arel_col).to receive(:eq).with(nil).and_return(null_node)
       allow(null_node).to receive(:or).and_return(arel_node)
 

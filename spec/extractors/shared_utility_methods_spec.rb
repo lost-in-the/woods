@@ -211,6 +211,45 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
       expect(utility.extract_public_methods(source)).to include('greet', 'farewell')
     end
 
+    # #215 / B-102. Only the bare `private` keyword line was recognized, so the
+    # inline form left visibility untouched and the `def` on the same line was
+    # collected as public — and a method reported public can be misclassified
+    # downstream as a decision method.
+    it 'skips methods marked with the inline `private def` form' do
+      source = <<~RUBY
+        class Foo
+          def public_method
+          end
+
+          private def secret
+          end
+
+          protected def semi_secret
+          end
+        end
+      RUBY
+      result = utility.extract_public_methods(source)
+
+      expect(result).to include('public_method')
+      expect(result).not_to include('secret', 'semi_secret')
+    end
+
+    it 'does not let an inline private def hide the methods after it' do
+      source = <<~RUBY
+        class Foo
+          private def secret
+          end
+
+          def still_public
+          end
+        end
+      RUBY
+      result = utility.extract_public_methods(source)
+
+      expect(result).to include('still_public')
+      expect(result).not_to include('secret')
+    end
+
     it 'skips private methods' do
       source = <<~RUBY
         class Foo

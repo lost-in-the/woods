@@ -136,6 +136,52 @@ module Woods
           rows.map { |row| row_to_result(row) }
         end
 
+        # The vector width the table was actually created with.
+        #
+        # `ensure_schema!` is `CREATE TABLE IF NOT EXISTS`, so a table built by
+        # an earlier run at a different width is left exactly as it was — and
+        # the mismatch only surfaces later, as a PG::DataException on the first
+        # insert ("expected 384 dimensions, not 768"), after the run has already
+        # paid to embed everything. Reading it back lets the pipeline refuse up
+        # front with a re-index remedy (#214).
+        #
+        # For pgvector's `vector` type, `atttypmod` carries the dimension
+        # directly (unlike varchar, which offsets it).
+        #
+        # @return [Integer, nil] the column's dimension, or nil when the table
+        #   does not exist yet or the width cannot be determined
+        def stored_dimensions
+          rows = @connection.execute(<<~SQL)
+            SELECT a.atttypmod AS dimension
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            WHERE c.relname = '#{TABLE}' AND a.attname = 'embedding' AND a.attnum > 0
+          SQL
+          row = rows.first
+          return nil unless row
+
+          dimension = row['dimension'].to_i
+          dimension.positive? ? dimension : nil
+        rescue StandardError
+          # Never let a diagnostic query break the pipeline it is diagnosing.
+          nil
+        end
+
+        # Iterate over every stored id without loading vectors.
+        #
+        # One `SELECT id` — the embed pipeline uses this to reconcile the
+        # durable store against the units extraction still holds, and paying
+        # for the vector columns to answer a question about ids would be
+        # pointless IO.
+        #
+        # @see Interface#each_id
+        def each_id(&block)
+          return enum_for(:each_id) unless block
+
+          rows = @connection.execute("SELECT id FROM #{TABLE}")
+          rows.each { |row| yield(row['id']) }
+        end
+
         # @see Interface#delete
         def delete(id)
           quoted_id = @connection.quote(id)

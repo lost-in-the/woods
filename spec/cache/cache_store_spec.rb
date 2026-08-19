@@ -247,9 +247,9 @@ end
 RSpec.describe Woods::Cache::CachedEmbeddingProvider do
   let(:cache_store) { Woods::Cache::InMemory.new }
   let(:provider) do
-    instance_double('EmbeddingProvider',
-                    dimensions: 768,
-                    model_name: 'test-model')
+    double('EmbeddingProvider',
+           dimensions: 768,
+           model_name: 'test-model')
   end
   let(:cached_provider) do
     described_class.new(provider: provider, cache_store: cache_store, ttl: 3600)
@@ -291,7 +291,7 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
       allow(provider).to receive(:embed).with('hello').and_return([0.1, 0.2])
       cached_provider.embed('hello')
 
-      other_provider = instance_double('EmbeddingProvider', dimensions: 1536, model_name: 'other-model')
+      other_provider = double('EmbeddingProvider', dimensions: 1536, model_name: 'other-model')
       allow(other_provider).to receive(:embed).with('hello').and_return([0.9, 0.8, 0.7])
       other_cached = described_class.new(provider: other_provider, cache_store: cache_store, ttl: 3600)
 
@@ -305,7 +305,7 @@ RSpec.describe Woods::Cache::CachedEmbeddingProvider do
       # For Ollama, #dimensions performs a live embed('test'); keying on it
       # made every cache hit depend on the backend being reachable. The key
       # must use model_name (a plain attribute) only.
-      probing_provider = instance_double('EmbeddingProvider', model_name: 'test-model')
+      probing_provider = double('EmbeddingProvider', model_name: 'test-model')
       allow(probing_provider).to receive(:dimensions).and_raise('network down')
       allow(probing_provider).to receive(:embed).with('hello').and_return([0.1, 0.2])
       cached = described_class.new(provider: probing_provider, cache_store: cache_store, ttl: 3600)
@@ -978,7 +978,7 @@ end
 # ── SolidCacheStore ───────────────────────────────────────────────────
 
 RSpec.describe Woods::Cache::SolidCacheStore do
-  let(:cache_double) { instance_double('ActiveSupport::Cache::Store') }
+  let(:cache_double) { double('ActiveSupport::Cache::Store') }
   let(:store) { described_class.new(cache: cache_double) }
 
   describe 'JSON round-trip' do

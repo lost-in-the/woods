@@ -51,7 +51,7 @@ RSpec.describe 'Woods::Console::Server leak scenarios (fixture-driven)' do
     { 'User' => 'users', 'Authorization' => 'authorizations', 'Setting' => 'settings' }
   end
   let(:safe_context) { instance_double(Woods::Console::SafeContext) }
-  let(:executor) { instance_double('Executor') }
+  let(:executor) { double('Executor') }
   let(:log_output) { StringIO.new }
   let(:captured_lines) { log_output.string.each_line.map { |line| JSON.parse(line) } }
 

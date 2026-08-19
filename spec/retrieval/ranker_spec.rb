@@ -321,6 +321,66 @@ RSpec.describe Woods::Retrieval::Ranker do
     end
   end
 
+  # #218 / B-105. Chunked units embed as `Identifier#chunk_N`, but metadata
+  # and the graph are keyed on the bare identifier — so passing the raw
+  # candidate id to find_batch missed every chunk and recency, importance,
+  # type_match and diversity all collapsed to their neutral values, leaving
+  # semantic+keyword to rank alone. Precisely on chunked corpora, which is
+  # where ranking matters most. The bootstrapper and the assembler already
+  # strip the suffix; the ranker was the one consumer that did not.
+  describe 'chunk-suffixed candidates' do
+    it 'looks metadata up by base identifier' do
+      allow(metadata_store).to receive(:find).with('User').and_return({
+                                                                        'metadata' => { 'importance' => 'high' }
+                                                                      })
+
+      result = ranker.rank([candidate(identifier: 'User#chunk_3', score: 0.5)],
+                           classification: classification)
+
+      expect(metadata_store).to have_received(:find).with('User')
+      expect(result.first.identifier).to eq('User#chunk_3')
+    end
+
+    it 'scores a chunk the same as its unchunked twin' do
+      meta = { 'metadata' => { 'importance' => 'high' } }
+      allow(metadata_store).to receive(:find).with('User').and_return(meta)
+
+      chunked = ranker.rank([candidate(identifier: 'User#chunk_0', score: 0.5)],
+                            classification: classification).first.score
+      whole = ranker.rank([candidate(identifier: 'User', score: 0.5)],
+                          classification: classification).first.score
+
+      expect(chunked).to be_within(0.0001).of(whole)
+    end
+
+    # The failure this prevents: a high-importance chunked unit losing to a
+    # low-importance unchunked one purely because its metadata was missed.
+    it 'ranks an important chunked unit above an unimportant whole one' do
+      allow(metadata_store).to receive(:find).with('Important')
+                                             .and_return({ 'metadata' => { 'importance' => 'high' } })
+      allow(metadata_store).to receive(:find).with('Trivial')
+                                             .and_return({ 'metadata' => { 'importance' => 'low' } })
+
+      result = ranker.rank(
+        [candidate(identifier: 'Trivial', score: 0.5), candidate(identifier: 'Important#chunk_1', score: 0.5)],
+        classification: classification
+      )
+
+      expect(result.first.identifier).to eq('Important#chunk_1')
+    end
+
+    it 'de-duplicates the batch lookup across chunks of one unit' do
+      allow(metadata_store).to receive(:find).with('User').and_return({ 'metadata' => {} })
+
+      ranker.rank(
+        [candidate(identifier: 'User#chunk_0', score: 0.5), candidate(identifier: 'User#chunk_1', score: 0.4)],
+        classification: classification
+      )
+
+      expect(metadata_store).to have_received(:find_batch).with(['User'])
+    end
+  end
+
   # The metadata store returns STRING keys on every real backend (SQLite
   # via JSON.parse, InMemory via stringify_keys). These specs use that
   # shape — with symbol-only key access, all four metadata signals scored

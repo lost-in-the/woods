@@ -7,6 +7,9 @@ require 'yaml'
 require 'pathname'
 require 'stringio'
 require 'woods/obsidian/vault_exporter'
+# instance_double(Woods::MCP::IndexReader) only verifies when the constant
+# is loaded; require it here so the spec passes standalone.
+require 'woods/mcp/index_reader'
 
 RSpec.describe Woods::Obsidian::VaultExporter do
   around do |example|
@@ -55,7 +58,7 @@ RSpec.describe Woods::Obsidian::VaultExporter do
   let(:index_entries) { units.keys.map { |id| { 'identifier' => id } } }
 
   let(:reader) do
-    instance_double('Woods::MCP::IndexReader').tap do |r|
+    instance_double(Woods::MCP::IndexReader).tap do |r|
       allow(r).to receive(:raw_graph_data).and_return(graph)
       allow(r).to receive(:graph_analysis).and_return(analysis)
       allow(r).to receive(:list_units).and_return(index_entries)

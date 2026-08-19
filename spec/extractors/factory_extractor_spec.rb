@@ -187,6 +187,67 @@ RSpec.describe Woods::Extractors::FactoryExtractor do
       expect(units.first.metadata[:parent_factory]).to eq('user')
     end
 
+    # #215 / B-102. `match_factory` required a `do` on the line, so a factory
+    # that only inherits — the shape the parent: parsing exists to serve — was
+    # dropped entirely.
+    it 'extracts a blockless factory' do
+      path = create_file('spec/factories/users.rb', <<~RUBY)
+        factory :admin, parent: :user
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.map(&:identifier)).to eq(['admin'])
+      expect(units.first.metadata[:parent_factory]).to eq('user')
+    end
+
+    it 'extracts blockless and block factories from the same file' do
+      path = create_file('spec/factories/users.rb', <<~RUBY)
+        factory :user do
+          name { "John" }
+        end
+
+        factory :admin, parent: :user
+        factory :guest, parent: :user
+
+        factory :moderator do
+          role { "mod" }
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('user', 'admin', 'guest', 'moderator')
+    end
+
+    # A blockless factory must not push a frame nothing will pop — if it did,
+    # the next `end` would close it and every later factory would nest wrongly.
+    it 'does not disturb depth tracking for factories that follow' do
+      path = create_file('spec/factories/users.rb', <<~RUBY)
+        factory :admin, parent: :user
+        factory :user do
+          name { "John" }
+          association :account
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+      user = units.find { |unit| unit.identifier == 'user' }
+
+      expect(user.metadata[:associations]).to eq(['account'])
+    end
+
+    it 'records a parent dependency edge for a blockless factory' do
+      path = create_file('spec/factories/users.rb', <<~RUBY)
+        factory :admin, parent: :user
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.first.dependencies)
+        .to include(hash_including(type: :factory, target: 'user', via: :factory_parent))
+    end
+
     it 'captures transient attributes' do
       path = create_file('spec/factories/users.rb', <<~RUBY)
         factory :user do
