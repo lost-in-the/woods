@@ -20,7 +20,32 @@ module Woods
       INVENTORY_PATH = ROOT.join('.Codex/release-v2/surface-inventory.json').freeze
       INDEX_SERVER_PATH = ROOT.join('lib/woods/mcp/server.rb').freeze
       BUILDER_PATH = ROOT.join('lib/woods/builder.rb').freeze
-      PUBLIC_DOCUMENTATION_PATHS = [ROOT.join('docs/README.md')].freeze
+      PUBLIC_DOCUMENTATION_EXCLUSIONS = [ROOT.join('docs/COVERAGE_GAP_ANALYSIS.md')].freeze
+      DOCUMENTATION_SURFACE_CLAIM_PATTERNS = [
+        { surface: 'extractor_registrations', pattern: /(?<count>\d+) extractors\b/i },
+        { surface: 'index_mcp_tools', pattern: /\b(?:MCP )?Index Server\b[^\n]{0,40}?\b(?<count>\d+) tools\b/i },
+        { surface: 'index_mcp_tools', pattern: /\b(?<count>\d+) tools, 2 resources, 2 templates\b/i },
+        { surface: 'index_mcp_tools', pattern: /\b(?<count>\d+)-tool index server\b/i },
+        { surface: 'index_mcp_tools', pattern: /\b(?<count>\d+) tools for code lookup, dependency traversal\b/i },
+        {
+          surface: 'index_mcp_tools',
+          pattern: /\bprovides (?<count>\d+) tools for querying extracted codebase structure\b/i
+        },
+        { surface: 'index_mcp_tools', pattern: /\bTools\s*\(\s*(?<count>\d+)\s*[—-]/i },
+        { surface: 'console_mcp_schemas', pattern: /\bConsole Server(?:\*{2})?\s*\(\s*(?<count>\d+) tools\b/i },
+        { surface: 'console_mcp_schemas', pattern: /\bConsole Server\b[^\n]{0,120}?\bprovides (?<count>\d+) tools\b/i },
+        { surface: 'console_mcp_schemas', pattern: /\b(?<count>\d+)-tool console server\b/i },
+        { surface: 'console_mcp_schemas', pattern: /\b(?<count>\d+) tools for querying real database records\b/i },
+        {
+          surface: 'console_mcp_schemas',
+          pattern: /\b(?:all|for all) (?<count>\d+) tools(?:,| across all 4 tiers| require)/i
+        },
+        { surface: 'console_mcp_schemas', pattern: /\bfull (?<count>\d+)-tool surface\b/i },
+        { surface: 'console_mcp_schemas', pattern: /\bBridge \((?<count>\d+) tools\)/i },
+        { surface: 'console_mcp_schemas', pattern: /\b(?<count>\d+) tools, live Rails\b/i },
+        { surface: 'index_mcp_resources', pattern: /(?<count>\d+) resources\b/i },
+        { surface: 'index_mcp_resource_templates', pattern: /(?<count>\d+) templates\b/i }
+      ].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
         def inventory
@@ -119,36 +144,68 @@ module Woods
             next unless match
 
             helper, condition = match.captures
-            tool_names_for_helper(source, helper).map do |name|
-              { 'name' => name, 'registration_condition' => condition || 'always registered' }
+            tool_registrations_for_helper(source, helper).map do |registration|
+              condition_contract = registration_condition(source, condition, registration.fetch('internal_guards'))
+              registration.merge('registration_condition' => condition_contract)
             end
           end
-          traversal_registrations(build_source)
+          traversal_registrations(source, build_source)
             .concat(helper_registrations.flatten)
             .sort_by { |tool| tool.fetch('name') }
         end
 
-        def traversal_registrations(build_source)
+        def traversal_registrations(source, build_source)
           build_source.each_line.each_cons(5).filter_map do |lines|
             next unless lines.first.include?('define_traversal_tool(server')
 
             name = lines.join[/name:\s*'([^']+)'/, 1]
-            { 'name' => name, 'registration_condition' => 'always registered' } if name
+            next unless name
+
+            {
+              'name' => name,
+              'internal_guards' => [],
+              'registration_condition' => registration_condition(source, nil, [])
+            }
           end
         end
 
-        def tool_names_for_helper(source, helper)
+        def tool_registrations_for_helper(source, helper)
           helper_source = method_source(source, helper)
           names = helper_source.scan(/server\.define_tool\(\s*name:\s*'([^']+)'/m).flatten
-          return names unless names.empty?
+          return names.map { |name| { 'name' => name, 'internal_guards' => [] } } unless names.empty?
 
-          helper_source.scan(/\b(define_[a-z_]+_tool)\(/).flatten
-                       .flat_map { |nested_helper| tool_names_for_helper(source, nested_helper) }
-                       .uniq
+          registrations = helper_source.each_line.filter_map do |line|
+            match = line.match(/^\s*(define_[a-z_]+_tool)\(.*?\)(?:\s+if\s+(.+))?$/)
+            next unless match
+
+            nested_helper, guard = match.captures
+            tool_registrations_for_helper(source, nested_helper).map do |registration|
+              registration.merge('internal_guards' => registration.fetch('internal_guards') + Array(guard))
+            end
+          end.flatten
+          registrations.uniq { |registration| registration.fetch('name') }
+        end
+
+        def registration_condition(source, call_site_guard, internal_guards)
+          {
+            'call_site_guard' => call_site_guard || 'always registered',
+            'predicate_logic' => predicate_logic(source, call_site_guard),
+            'internal_guards' => internal_guards
+          }
+        end
+
+        def predicate_logic(source, guard)
+          return nil unless guard&.match?(/\A[a-z_]+\?\z/)
+
+          normalize_logic(method_source(source, guard))
+        end
+
+        def normalize_logic(source)
+          source.each_line.reject { |line| line.strip.start_with?('#') }.join.gsub(/\s+/, ' ').strip
         end
 
         def method_source(source, name)
-          source[/^\s*def #{Regexp.escape(name)}\b.*?(?=^\s*(?:def |private\b)|\z)/m].to_s
+          source[/^\s*def #{Regexp.escape(name)}(?![A-Za-z0-9_]).*?(?=^\s*def |\z)/m].to_s
         end
 
         def resources(source)
@@ -223,27 +280,40 @@ module Woods
         end
 
         def documentation_claims
-          PUBLIC_DOCUMENTATION_PATHS.to_h do |path|
-            source = path.read
-            claims = {
-              'extractor_registrations' => documented_count(source, /(\d+) extractors/),
-              'index_mcp_tools' => documented_count(source, /(\d+)-tool index server/),
-              'console_mcp_schemas' => documented_count(source, /(\d+)-tool console server/)
-            }
-            [path.relative_path_from(ROOT).to_s, claims]
+          current_public_documentation_paths.to_h do |path|
+            [path.relative_path_from(ROOT).to_s, documented_surface_claims(path.read)]
           end
         end
 
-        def documented_count(source, pattern)
-          match = source.match(pattern)
-          raise DriftError, "Current public documentation is missing #{pattern.inspect}." unless match
+        def current_public_documentation_paths
+          ([ROOT.join('README.md')] + ROOT.join('docs').glob('*.md')).sort - PUBLIC_DOCUMENTATION_EXCLUSIONS
+        end
 
-          match[1].to_i
+        def documented_surface_claims(source)
+          paired_server_claims(source) + DOCUMENTATION_SURFACE_CLAIM_PATTERNS.flat_map do |rule|
+            source.scan(rule.fetch(:pattern)).map do |match|
+              { 'surface' => rule.fetch(:surface), 'count' => match.first.to_i }
+            end
+          end
+        end
+
+        def paired_server_claims(source)
+          paired_counts = source.scan(/both MCP servers\s*\(\s*(?<index>\d+)\s*\+\s*(?<console>\d+) tools\)/i)
+          paired_counts += source.scan(/\|\s+\*\*Tools\*\*\s+\|\s+(?<index>\d+)\s+\([^|]+\|\s+(?<console>\d+)\s+\(/)
+
+          paired_counts.flat_map do |match|
+            [
+              { 'surface' => 'index_mcp_tools', 'count' => match[0].to_i },
+              { 'surface' => 'console_mcp_schemas', 'count' => match[1].to_i }
+            ]
+          end
         end
 
         def verify_documentation_claims!(actual)
           actual.fetch('documentation_claims').each do |path, claims|
-            claims.each do |surface, documented_count|
+            claims.each do |claim|
+              surface = claim.fetch('surface')
+              documented_count = claim.fetch('count')
               code_derived_count = actual.fetch('counts').fetch(surface)
               next if documented_count == code_derived_count
 

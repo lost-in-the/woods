@@ -41,6 +41,20 @@ RSpec.describe 'release-v2 public-surface inventory' do
     File.write(documentation_path, original) if original
   end
 
+  it 'rejects a drifted Index MCP count in the current guide' do
+    documentation_path = File.join(root, 'docs/USE_CASES_AND_FEATURE_GAPS.md')
+    original = File.read(documentation_path)
+    changed = original.sub('29 + 31 tools', '28 + 31 tools')
+    expect(changed).not_to eq(original)
+
+    File.write(documentation_path, changed)
+
+    expect { surface_inventory.verify! }
+      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /USE_CASES_AND_FEATURE_GAPS\.md/)
+  ensure
+    File.write(documentation_path, original) if original
+  end
+
   it 'derives a conditional tool registration from the server implementation' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
     original = File.read(server_path)
@@ -53,7 +67,42 @@ RSpec.describe 'release-v2 public-surface inventory' do
                                  .find { |tool| tool.fetch('name') == 'pipeline_extract' }
                                  .fetch('registration_condition')
 
-    expect(condition).to eq('audit_operator')
+    expect(condition.fetch('call_site_guard')).to eq('audit_operator')
+  ensure
+    File.write(server_path, original) if original
+  end
+
+  it 'derives predicate logic from the server implementation' do
+    server_path = File.join(root, 'lib/woods/mcp/server.rb')
+    original = File.read(server_path)
+    changed = original.sub('!token.nil? && ids && !ids.empty?', '!token.nil? && ids && ids.any?')
+    expect(changed).not_to eq(original)
+
+    File.write(server_path, changed)
+
+    condition = surface_inventory.inventory.fetch('index_mcp').fetch('tools')
+                                 .find { |tool| tool.fetch('name') == 'notion_sync' }
+                                 .fetch('registration_condition')
+
+    expect(condition.fetch('predicate_logic')).to include('ids.any?')
+  ensure
+    File.write(server_path, original) if original
+  end
+
+  it 'derives internal registration guards from the server implementation' do
+    server_path = File.join(root, 'lib/woods/mcp/server.rb')
+    original = File.read(server_path)
+    registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)'
+    changed = original.sub(registration, "#{registration} if pipeline_enabled?")
+    expect(changed).not_to eq(original)
+
+    File.write(server_path, changed)
+
+    condition = surface_inventory.inventory.fetch('index_mcp').fetch('tools')
+                                 .find { |tool| tool.fetch('name') == 'pipeline_extract' }
+                                 .fetch('registration_condition')
+
+    expect(condition.fetch('internal_guards')).to include('pipeline_enabled?')
   ensure
     File.write(server_path, original) if original
   end

@@ -405,119 +405,264 @@
     "tools": [
       {
         "name": "codebase_retrieve",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "dependencies",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "dependents",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "domain_clusters",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "framework",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "graph_analysis",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "list_snapshots",
-        "registration_condition": "snapshot_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "lookup",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "notion_sync",
-        "registration_condition": "notion_wired?"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "notion_wired?",
+          "predicate_logic": "def notion_wired? config = Woods.configuration return false unless config token = Woods.resolve_notion_token(config) ids = config.respond_to?(:notion_database_ids) ? config.notion_database_ids : nil !token.nil? && ids && !ids.empty? end",
+          "internal_guards": []
+        }
       },
       {
         "name": "pagerank",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "pipeline_diagnose",
-        "registration_condition": "operator"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "pipeline_embed",
-        "registration_condition": "operator"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "pipeline_extract",
-        "registration_condition": "operator"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "pipeline_repair",
-        "registration_condition": "operator"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "pipeline_status",
-        "registration_condition": "operator"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "recent_changes",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "reload",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "retrieval_explain",
-        "registration_condition": "feedback_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "retrieval_rate",
-        "registration_condition": "feedback_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "retrieval_report_gap",
-        "registration_condition": "feedback_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "retrieval_suggest",
-        "registration_condition": "feedback_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "search",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "session_trace",
-        "registration_condition": "session_tracer_wired?"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "session_tracer_wired?",
+          "predicate_logic": "def session_tracer_wired? config = Woods.configuration return false unless config return false unless config.respond_to?(:session_store) store = config.session_store return false if store.nil? %i[read sessions].all? { |m| store.respond_to?(m) } end",
+          "internal_guards": []
+        }
       },
       {
         "name": "snapshot_detail",
-        "registration_condition": "snapshot_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "snapshot_diff",
-        "registration_condition": "snapshot_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "structure",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "trace_flow",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "unit_history",
-        "registration_condition": "snapshot_store"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       },
       {
         "name": "woods_status",
-        "registration_condition": "always registered"
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "internal_guards": []
+        }
       }
     ],
     "resources": [
@@ -742,10 +887,217 @@
     "tasks_methods": 4
   },
   "documentation_claims": {
-    "docs/README.md": {
-      "extractor_registrations": 34,
-      "index_mcp_tools": 29,
-      "console_mcp_schemas": 31
-    }
+    "README.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/AGENT_GUIDE.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/ARCHITECTURE.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "index_mcp_resources",
+        "count": 2
+      },
+      {
+        "surface": "index_mcp_resource_templates",
+        "count": 2
+      }
+    ],
+    "docs/BACKEND_MATRIX.md": [],
+    "docs/CONFIGURATION_REFERENCE.md": [],
+    "docs/CONSOLE_MCP_SETUP.md": [
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/DOCKER_SETUP.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/EMBEDDING_MODELS.md": [],
+    "docs/EXTRACTOR_REFERENCE.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      }
+    ],
+    "docs/FAQ.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/GETTING_STARTED.md": [],
+    "docs/INCREMENTAL_EXTRACTION.md": [],
+    "docs/MCP_HTTP_TRANSPORT.md": [],
+    "docs/MCP_SERVERS.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      }
+    ],
+    "docs/MCP_TOOL_COOKBOOK.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      }
+    ],
+    "docs/MCP_WORKTREE_SETUP.md": [],
+    "docs/NOTION_INTEGRATION.md": [],
+    "docs/OBSIDIAN_INTEGRATION.md": [],
+    "docs/PG_QUERY_SPIKE.md": [],
+    "docs/README.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/RETRIEVAL_GUIDE.md": [],
+    "docs/TOKEN_BENCHMARK.md": [],
+    "docs/TROUBLESHOOTING.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      }
+    ],
+    "docs/UNBLOCKED_INTEGRATION.md": [],
+    "docs/USE_CASES_AND_FEATURE_GAPS.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      }
+    ],
+    "docs/WATCH_DAEMON.md": [],
+    "docs/WHY_WOODS.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ]
   }
 }
