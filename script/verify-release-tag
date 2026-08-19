@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'open3'
+
+class ReleaseTagVerificationError < StandardError; end
+
+def fail_verification(message)
+  raise ReleaseTagVerificationError, message
+end
+
+def git(*args)
+  output, status = Open3.capture2e('git', *args)
+  fail_verification("git #{args.join(' ')} failed: #{output.strip}") unless status.success?
+
+  output.strip
+end
+
+begin
+  tag = ENV.fetch('RELEASE_TAG')
+  release_sha = ENV.fetch('RELEASE_SHA')
+  remote = ENV.fetch('RELEASE_REMOTE', 'origin')
+  unless release_sha.match?(/\A[0-9a-f]{40}\z/)
+    fail_verification("release SHA #{release_sha.inspect} is not a full Git SHA")
+  end
+
+  head_sha = git('rev-parse', 'HEAD')
+  unless head_sha == release_sha
+    fail_verification("checked-out HEAD #{head_sha} does not equal release SHA #{release_sha}")
+  end
+
+  verification_ref = "refs/release-validation/#{tag}"
+  git('check-ref-format', verification_ref)
+  system('git', 'update-ref', '-d', verification_ref, out: File::NULL, err: File::NULL)
+  git('fetch', '--no-tags', remote, "refs/tags/#{tag}:#{verification_ref}")
+  tag_sha = git('rev-parse', "#{verification_ref}^{commit}")
+  fail_verification("#{tag} resolves to #{tag_sha}, not release SHA #{release_sha}") unless tag_sha == release_sha
+
+  puts "Verified current remote tag #{tag} at #{release_sha}"
+rescue KeyError, ReleaseTagVerificationError => e
+  warn "Release tag verification failed: #{e.message}"
+  exit 1
+end

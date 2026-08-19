@@ -8,6 +8,7 @@ require 'tmpdir'
 
 RSpec.describe 'release validation' do
   let(:validator) { File.expand_path('../../script/validate-release', __dir__) }
+  let(:tag_verifier) { File.expand_path('../../script/verify-release-tag', __dir__) }
 
   def git(*args, chdir:)
     output, status = Open3.capture2e('git', *args, chdir: chdir)
@@ -26,7 +27,7 @@ RSpec.describe 'release validation' do
     File.write(File.join(repository, 'CHANGELOG.md'), changelog)
   end
 
-  def build_repository(changelog: "## [2.0.0] - 2026-08-19\n")
+  def build_repository(changelog: "## [2.0.0] - 2026-08-19\n", tag_type: :lightweight)
     Dir.mktmpdir('woods-release-validator') do |repository|
       git('init', '-b', 'main', chdir: repository)
       git('config', 'user.email', 'release-test@example.invalid', chdir: repository)
@@ -35,9 +36,17 @@ RSpec.describe 'release validation' do
       git('add', '.', chdir: repository)
       git('commit', '-m', 'release candidate', chdir: repository)
       git('update-ref', 'refs/remotes/origin/main', 'HEAD', chdir: repository)
-      git('tag', 'v2.0.0', chdir: repository)
+      tag_args = tag_type == :annotated ? ['-a', 'v2.0.0', '-m', 'release v2.0.0'] : ['v2.0.0']
+      git('tag', *tag_args, chdir: repository)
       yield repository
     end
+  end
+
+  def add_origin(repository)
+    remote = File.join(repository, '.git', 'release-origin.git')
+    git('init', '--bare', remote, chdir: repository)
+    git('remote', 'add', 'origin', remote, chdir: repository)
+    git('push', 'origin', 'main', 'refs/tags/v2.0.0', chdir: repository)
   end
 
   def validate(repository, tag: 'v2.0.0', sha: nil, published_versions: [])
@@ -50,6 +59,16 @@ RSpec.describe 'release validation' do
     }
 
     Open3.capture3(env, validator, chdir: repository)
+  end
+
+  def verify_remote_tag(repository, sha:)
+    env = {
+      'RELEASE_REMOTE' => 'origin',
+      'RELEASE_SHA' => sha,
+      'RELEASE_TAG' => 'v2.0.0'
+    }
+
+    Open3.capture3(env, 'ruby', tag_verifier, chdir: repository)
   end
 
   it 'accepts v2.0.0 at the exact main-reachable SHA with its dated changelog entry' do
@@ -103,6 +122,56 @@ RSpec.describe 'release validation' do
 
       expect(status).not_to be_success
       expect(stderr).to include('already published')
+    end
+  end
+
+  it 'accepts current lightweight and annotated remote tags at the tested SHA' do
+    %i[lightweight annotated].each do |tag_type|
+      build_repository(tag_type: tag_type) do |repository|
+        add_origin(repository)
+        release_sha = git('rev-parse', 'HEAD', chdir: repository)
+
+        stdout, stderr, status = verify_remote_tag(repository, sha: release_sha)
+
+        expect(status).to be_success, "#{tag_type}: #{stderr}"
+        expect(stdout).to include("v2.0.0 at #{release_sha}")
+      end
+    end
+  end
+
+  it 'blocks publication when the remote tag moves after initial validation' do
+    build_repository(tag_type: :annotated) do |repository|
+      add_origin(repository)
+      release_sha = git('rev-parse', 'HEAD', chdir: repository)
+      _stdout, initial_stderr, initial_status = validate(repository, sha: release_sha)
+      expect(initial_status).to be_success, initial_stderr
+
+      git('commit', '--allow-empty', '-m', 'later commit', chdir: repository)
+      moved_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('push', 'origin', ':refs/tags/v2.0.0', chdir: repository)
+      git('tag', '-d', 'v2.0.0', chdir: repository)
+      git('tag', 'v2.0.0', chdir: repository)
+      git('push', 'origin', 'refs/tags/v2.0.0', chdir: repository)
+      git('checkout', '--detach', release_sha, chdir: repository)
+
+      _stdout, stderr, status = verify_remote_tag(repository, sha: release_sha)
+
+      expect(status).not_to be_success
+      expect(stderr).to include("v2.0.0 resolves to #{moved_sha}, not release SHA #{release_sha}")
+    end
+  end
+
+  it 'blocks publication when the checkout is not the tested SHA' do
+    build_repository do |repository|
+      add_origin(repository)
+      release_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('commit', '--allow-empty', '-m', 'different checkout', chdir: repository)
+      head_sha = git('rev-parse', 'HEAD', chdir: repository)
+
+      _stdout, stderr, status = verify_remote_tag(repository, sha: release_sha)
+
+      expect(status).not_to be_success
+      expect(stderr).to include("checked-out HEAD #{head_sha} does not equal release SHA #{release_sha}")
     end
   end
 end

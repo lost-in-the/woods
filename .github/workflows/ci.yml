@@ -214,5 +214,25 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Build gem
-        run: gem build --strict woods.gemspec
+      - name: Build the release artifact once
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(ruby -Ilib -rwoods/version -e 'print Woods::VERSION')"
+          GEM_NAME="woods-${VERSION}.gem"
+          ARTIFACT_NAME="woods-release-${GITHUB_SHA}"
+          mkdir -p dist
+          gem build --strict --output "dist/${GEM_NAME}" woods.gemspec
+          (cd dist && sha256sum "$GEM_NAME" > "${GEM_NAME}.sha256")
+          echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+          echo "gem-name=${GEM_NAME}" >> "$GITHUB_OUTPUT"
+      - name: Store the gem and SHA-256 manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.artifact-name }}
+          path: |
+            dist/${{ steps.artifact.outputs.gem-name }}
+            dist/${{ steps.artifact.outputs.gem-name }}.sha256
+          if-no-files-found: error
+          retention-days: 7

@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.workflow_run.head_sha }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -24,6 +24,8 @@ jobs:
       should-release: ${{ steps.context.outputs.should-release }}
       release-sha: ${{ steps.context.outputs.release-sha }}
       tag: ${{ steps.context.outputs.tag }}
+      artifact-name: ${{ steps.context.outputs.artifact-name }}
+      gem-name: ${{ steps.context.outputs.gem-name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
         with:
@@ -45,6 +47,8 @@ jobs:
           TAG_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
           echo "release-sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=woods-release-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "gem-name=woods-${VERSION}.gem" >> "$GITHUB_OUTPUT"
           if [[ "$TAG_SHA" == "$SHA" ]]; then
             echo "should-release=true" >> "$GITHUB_OUTPUT"
           else
@@ -58,46 +62,8 @@ jobs:
           RELEASE_TAG: ${{ steps.context.outputs.tag }}
         run: script/validate-release
 
-  build:
-    needs: release-context
-    if: needs.release-context.outputs.should-release == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      artifact-name: ${{ steps.artifact.outputs.artifact-name }}
-      gem-name: ${{ steps.artifact.outputs.gem-name }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
-        with:
-          ref: ${{ needs.release-context.outputs.release-sha }}
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
-        with:
-          ruby-version: '3.3'
-      - name: Build the release artifact once
-        id: artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(ruby -Ilib -rwoods/version -e 'print Woods::VERSION')"
-          GEM_NAME="woods-${VERSION}.gem"
-          ARTIFACT_NAME="woods-release-${{ needs.release-context.outputs.release-sha }}"
-          mkdir -p dist
-          gem build --strict --output "dist/${GEM_NAME}" woods.gemspec
-          (cd dist && sha256sum "$GEM_NAME" > "${GEM_NAME}.sha256")
-          echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
-          echo "gem-name=${GEM_NAME}" >> "$GITHUB_OUTPUT"
-      - name: Store the gem and SHA-256 manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ steps.artifact.outputs.artifact-name }}
-          path: |
-            dist/${{ steps.artifact.outputs.gem-name }}
-            dist/${{ steps.artifact.outputs.gem-name }}.sha256
-          if-no-files-found: error
-          retention-days: 7
-
   package-test:
-    needs: [release-context, build]
+    needs: release-context
     if: needs.release-context.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -121,28 +87,31 @@ jobs:
       - name: Download the exact release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ needs.build.outputs.artifact-name }}
+          name: ${{ needs.release-context.outputs.artifact-name }}
           path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
       - name: Verify artifact SHA-256
         env:
-          GEM_NAME: ${{ needs.build.outputs.gem-name }}
+          GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
         run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
       - name: Install package-test dependencies
         run: |
           gem install --no-document rspec -v '~> 3.13'
           gem install --no-document rails -v '${{ matrix.rails }}'
           gem install --no-document sqlite3 -v '${{ matrix.sqlite3 }}'
-          gem install --no-document "dist/${{ needs.build.outputs.gem-name }}"
+          gem install --no-document "dist/${{ needs.release-context.outputs.gem-name }}"
       - name: Test the installed artifact outside the repository load path
         env:
-          WOODS_GEM_PATH: ${{ github.workspace }}/dist/${{ needs.build.outputs.gem-name }}
+          WOODS_GEM_PATH: ${{ github.workspace }}/dist/${{ needs.release-context.outputs.gem-name }}
           WOODS_RUN_PACKAGE_SMOKE: '1'
         run: >-
           ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' --
           spec/integration/packaged_gem_spec.rb
 
   publish:
-    needs: [release-context, build, package-test]
+    needs: [release-context, package-test]
     if: needs.release-context.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     environment: release
@@ -151,6 +120,10 @@ jobs:
       contents: write
       id-token: write
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+        with:
+          ref: ${{ needs.release-context.outputs.release-sha }}
+          fetch-depth: 0
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
@@ -158,11 +131,14 @@ jobs:
       - name: Download the tested release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ needs.build.outputs.artifact-name }}
+          name: ${{ needs.release-context.outputs.artifact-name }}
           path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
       - name: Verify artifact SHA-256
         env:
-          GEM_NAME: ${{ needs.build.outputs.gem-name }}
+          GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
         run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
       - name: Configure RubyGems credentials
         uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
@@ -171,8 +147,17 @@ jobs:
           audience: rubygems.org
       - name: Push the tested gem bytes to RubyGems
         env:
-          GEM_NAME: ${{ needs.build.outputs.gem-name }}
-        run: gem push "dist/${GEM_NAME}"
+          GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
+          RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
+          RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
+        run: |
+          script/verify-release-tag
+          gem push "dist/${GEM_NAME}"
+      - name: Revalidate the current remote tag before creating the release
+        env:
+          RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
+          RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
+        run: script/verify-release-tag
       - name: Create GitHub release from the same bytes
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
@@ -181,5 +166,5 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/${{ needs.build.outputs.gem-name }}
-            dist/${{ needs.build.outputs.gem-name }}.sha256
+            dist/${{ needs.release-context.outputs.gem-name }}
+            dist/${{ needs.release-context.outputs.gem-name }}.sha256
