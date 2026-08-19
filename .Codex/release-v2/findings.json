@@ -10,8 +10,9 @@
       "severity": "P1",
       "affected_public_behavior": "The release workflow can publish after its reduced gate without proof that the full CI surface passed for the exact release SHA.",
       "evidence_paths": [
-        ".github/workflows/release.yml:3",
-        ".github/workflows/ci.yml:6",
+        ".github/workflows/ci.yml:208",
+        ".github/workflows/release.yml:12",
+        "script/verify-release-tag:1",
         "spec/release_v2/release_workflow_spec.rb:1",
         "spec/release_v2/release_validator_spec.rb:1"
       ],
@@ -26,7 +27,8 @@
       "severity": "P1",
       "affected_public_behavior": "Documentation targets intended for installed gems are not all proven present in the packaged artifact.",
       "evidence_paths": [
-        "woods.gemspec:24",
+        "README.md:2",
+        "woods.gemspec:33",
         "spec/integration/packaged_gem_spec.rb:1"
       ],
       "reproduction_command": "bin/rspec spec/integration/packaged_gem_spec.rb --tag '~packaged_gem'",
