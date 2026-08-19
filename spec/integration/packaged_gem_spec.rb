@@ -2,10 +2,12 @@
 
 require 'spec_helper'
 require 'fileutils'
+require 'nokogiri'
 require 'open3'
 require 'pathname'
 require 'rubygems/package'
 require 'tmpdir'
+require 'uri'
 
 module PackagedGemSpec
   ROOT = File.expand_path('../..', __dir__)
@@ -47,10 +49,28 @@ RSpec.describe 'packaged gem' do
     @package.spec.files.sort
   end
 
-  def relative_readme_targets
+  def local_readme_targets
     readme = File.read(File.join(@unpacked, 'README.md'))
-    targets = readme.scan(/\[[^\]]+\]\(([^)#]+)(?:#[^)]+)?\)/).flatten.uniq
-    targets.grep_v(/\A(?:[a-z][a-z0-9+.-]*:|#)/i)
+    markdown_targets = readme.scan(/\[[^\]]+\]\(([^)]+)\)/).flatten
+    html_targets = Nokogiri::HTML.fragment(readme).css('[src], [href]').flat_map do |node|
+      %w[src href].filter_map { |attribute| node[attribute] }
+    end
+
+    targets = (markdown_targets + html_targets).uniq
+    targets.grep_v(%r{\A(?:[a-z][a-z0-9+.-]*:|#|//)}i)
+           .map { |target| URI::DEFAULT_PARSER.unescape(target.sub(/[?#].*\z/, '')) }
+           .reject(&:empty?)
+  end
+
+  def invalid_local_readme_targets
+    package_root = File.expand_path(@unpacked)
+
+    local_readme_targets.filter_map do |target|
+      resolved = File.expand_path(target, package_root)
+      within_package = resolved.start_with?("#{package_root}#{File::SEPARATOR}")
+      next "#{target} (escapes package)" unless within_package
+      next "#{target} (missing)" unless File.exist?(resolved)
+    end
   end
 
   it 'contains every runtime file and the exact five executables' do
@@ -70,10 +90,18 @@ RSpec.describe 'packaged gem' do
     expect(package_files).to include(*PackagedGemSpec::COMMUNITY_FILES)
   end
 
-  it 'keeps every relative README target valid in the unpacked gem' do
-    missing = relative_readme_targets.reject { |target| File.exist?(File.join(@unpacked, target)) }
+  it 'keeps every local Markdown and HTML README target inside the unpacked gem' do
+    expect(invalid_local_readme_targets).to be_empty
+  end
 
-    expect(missing).to be_empty
+  it 'rejects a local HTML target that escapes the unpacked gem' do
+    readme_path = File.join(@unpacked, 'README.md')
+    original = File.read(readme_path)
+    File.write(readme_path, "#{original}\n<img src=\"../outside.png\">\n")
+
+    expect(invalid_local_readme_targets).to include('../outside.png (escapes package)')
+  ensure
+    File.write(readme_path, original) if original
   end
 
   it 'uses immutable v2.0.0 source, changelog, and documentation metadata' do

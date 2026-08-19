@@ -36,6 +36,7 @@ Gem::Specification.new do |spec|
     'docs/**/*',
     'plugin/**/*',
     'plugin/.claude-plugin/plugin.json',
+    'assets/woods-wordmark-white-with-bg.png',
     'LICENSE.txt',
     'README.md',
     'CHANGELOG.md',
