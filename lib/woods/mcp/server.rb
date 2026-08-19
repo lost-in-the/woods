@@ -14,6 +14,10 @@ require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
+require_relative 'protocol_policy'
+require_relative 'tasks/extension'
+require_relative 'tasks/request_capture'
+require_relative 'tasks/store'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -110,11 +114,23 @@ module Woods
             name: 'woods',
             version: Woods::VERSION,
             resources: resources,
-            resource_templates: resource_templates
+            resource_templates: resource_templates,
+            **ProtocolPolicy.cache_hints
           )
           # Rewrite "Tool not found" into version-aware update guidance for agents
           # running against an older gem than the skill they're following assumes.
           server.singleton_class.prepend(VersionAwareToolDispatch)
+          # Make the per-request Tasks opt-in reachable from a tool handler,
+          # which otherwise only sees `arguments`.
+          server.singleton_class.prepend(Tasks::RequestCapture)
+
+          # The Tasks extension backs the two long-running tools. Registered
+          # unconditionally rather than only alongside `operator`, because
+          # `tasks/get` must keep answering for a handle minted by a *previous*
+          # process — the crash-resilience case is precisely the one where this
+          # server was restarted and may come up wired differently.
+          task_store = Tasks::Store.new(index_dir)
+          Tasks::Extension.install(server, store: task_store)
 
           define_lookup_tool(server, reader, respond, respond_err, renderer)
           define_search_tool(server, reader, respond, respond_err, renderer)
@@ -144,14 +160,17 @@ module Woods
           # try tools guaranteed to fail. Only register when the collaborator
           # is wired, so tools/list reflects what the server can actually do.
           define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired?
-          define_operator_tools(server, operator, respond, respond_err, op_missing) if operator
+          define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator
           define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
           define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired?
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
 
-          server
+          # Last, after every conditional registration above — the whole point is
+          # that a host with Notion wired advertises the same tool order as one
+          # without it.
+          ProtocolPolicy.sort_tools!(server)
         end
 
         private
@@ -912,9 +931,9 @@ module Woods
           end
         end
 
-        def define_operator_tools(server, operator, respond, respond_err, op_missing)
-          define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing)
-          define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing)
+        def define_operator_tools(server, operator, respond, respond_err, op_missing, task_store)
+          define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)
+          define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store)
           define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)
           define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing)
           define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing)
@@ -927,7 +946,7 @@ module Woods
           define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing)
         end
 
-        def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing)
+        def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)
           server.define_tool(
             name: 'pipeline_extract',
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
@@ -1017,33 +1036,17 @@ module Woods
               # process. Resolve it here, the same lazy require Woods.extract!
               # uses — otherwise every pipeline_extract run dies in the
               # background with NameError.
-              require_relative '../extractor'
+              require_relative '../extractor' unless defined?(Woods::Extractor)
               extractor = Woods::Extractor.new(output_dir: output_dir)
               incremental ? extractor.extract_changed(files) : extractor.extract_all
             end
 
-            Thread.new do
-              if lock
-                # Heartbeat, like the rake writers: a full extraction on a
-                # large host can outlive the lock's stale window, and an
-                # untouched lock would be retired by the next contender
-                # mid-run — recreating the two-writer clobber.
-                Woods::Coordination::LockHeartbeat.run(lock) { run_extraction.call }
-              else
-                run_extraction.call
-              end
-            rescue StandardError => e
-              logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-              logger.error("[Woods] Pipeline extract failed: #{e.message}")
-            ensure
-              lock&.release
-              Woods::MCP::Server.send(:pipeline_finish, :extraction)
-            end
-
-            respond.call(JSON.pretty_generate({
-                                                status: 'started',
-                                                message: 'Extraction pipeline started in background thread'
-                                              }))
+            next Woods::MCP::Server.send(
+              :run_pipeline_in_background,
+              kind: :extraction, tool: 'pipeline_extract', lock: lock,
+              task_store: task_store, respond: respond, runner: run_extraction,
+              started_message: 'Extraction pipeline started in background thread'
+            )
           end
         end
 
@@ -1081,7 +1084,7 @@ module Woods
           acquired
         end
 
-        def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing)
+        def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store)
           server.define_tool(
             name: 'pipeline_embed',
             description: 'Trigger embedding generation for extracted units. Checks rate limits before proceeding.',
@@ -1150,29 +1153,100 @@ module Woods
               incremental ? indexer.index_incremental : indexer.index_all
             end
 
-            Thread.new do
-              if lock
-                # Heartbeat, like the rake writers: a full embed on a large
-                # host can outlive the lock's stale window, and an untouched
-                # lock would be retired by the next contender mid-run —
-                # recreating the two-writer clobber.
-                Woods::Coordination::LockHeartbeat.run(lock) { run_embed.call }
-              else
-                run_embed.call
-              end
-            rescue StandardError => e
-              logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-              logger.error("[Woods] Pipeline embed failed: #{e.message}")
-            ensure
-              lock&.release
-              Woods::MCP::Server.send(:pipeline_finish, :embedding)
-            end
-
-            respond.call(JSON.pretty_generate({
-                                                status: 'started',
-                                                message: 'Embedding pipeline started in background thread'
-                                              }))
+            next Woods::MCP::Server.send(
+              :run_pipeline_in_background,
+              kind: :embedding, tool: 'pipeline_embed', lock: lock,
+              task_store: task_store, respond: respond, runner: run_embed,
+              started_message: 'Embedding pipeline started in background thread'
+            )
           end
+        end
+
+        # Run a pipeline on a background thread and answer the caller.
+        #
+        # Both pipeline tools reached this point with the same shape: a lock
+        # they may or may not hold, a runner lambda, and the need to answer
+        # immediately because a full run takes minutes. What differs now is
+        # *how* they answer.
+        #
+        # When the client declared the Tasks extension, the answer is a durable
+        # `CreateTaskResult`. That is the whole point of the extension here: the
+        # handle outlives this process, so a client that disconnects mid-run can
+        # reconnect and still learn whether extraction succeeded — and if the
+        # process dies, {Tasks::Store} resolves the orphaned record to `failed`
+        # instead of leaving an agent polling a run that no longer exists.
+        #
+        # When it did not, the answer is exactly what it always was. The spec is
+        # explicit that a task must never go to a client that did not opt in:
+        # such a client would read the handle as the final result and report a
+        # completed run that had not started.
+        #
+        # @param kind [Symbol] :extraction or :embedding, for the in-process lock
+        # @param tool [String] tool name, for the task record and error text
+        # @param lock [Woods::Coordination::PipelineLock, nil]
+        # @param task_store [Tasks::Store, nil] nil disables the task path
+        # @param respond [Method] the text-response builder
+        # @param runner [Proc] the actual work
+        # @param started_message [String] legacy fire-and-forget message
+        # @return [Hash, MCP::Tool::Response]
+        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, runner:, started_message:)
+          task = create_pipeline_task(task_store, tool)
+
+          Thread.new do
+            # Heartbeat, like the rake writers: a full run on a large host can
+            # outlive the lock's stale window, and an untouched lock would be
+            # retired by the next contender mid-run — recreating the two-writer
+            # clobber.
+            if lock
+              Woods::Coordination::LockHeartbeat.run(lock) { runner.call }
+            else
+              runner.call
+            end
+            task_store&.complete!(task.id, result: pipeline_task_result(tool)) if task
+          rescue StandardError => e
+            logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+            logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
+            # Recording the failure is the half that was missing: previously the
+            # error reached a log the agent cannot read, and the tool had
+            # already reported success.
+            task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+          ensure
+            lock&.release
+            Woods::MCP::Server.send(:pipeline_finish, kind)
+          end
+
+          return Tasks::Extension.create_task_result(task) if task
+
+          respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
+        end
+
+        # Mint a task record, or return nil to take the legacy path.
+        #
+        # Nil for the ordinary reason (the client did not opt in) and also when
+        # the record cannot be written: the index directory can legitimately be
+        # a read-only mount for a host-side reader, and a durable handle is an
+        # improvement to the answer, not a precondition for running the
+        # pipeline. Degrading to fire-and-forget keeps the tool working where
+        # raising would turn a read-only mount into a broken tool.
+        #
+        # @return [Tasks::Store::Task, nil]
+        def create_pipeline_task(task_store, tool)
+          return nil unless task_store && Tasks::RequestCapture.tasks_requested?
+
+          task_store.create!(tool: tool)
+        rescue SystemCallError, IOError => e
+          warn "[woods-mcp] could not record a task handle (#{e.class}); " \
+               'falling back to fire-and-forget for this run.'
+          nil
+        end
+
+        # What `tasks/get` hands back on success — shaped like the synchronous
+        # tool result the caller would have received had it waited.
+        def pipeline_task_result(tool)
+          {
+            'content' => [{ 'type' => 'text', 'text' => "#{tool} completed successfully." }],
+            'isError' => false
+          }
         end
 
         # Acquire a pipeline-kind lock atomically. Returns false when

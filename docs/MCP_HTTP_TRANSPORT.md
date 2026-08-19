@@ -17,11 +17,40 @@
 The transport (`lib/mcp/server/transports/streamable_http_transport.rb`) provides:
 
 - **Rack-compatible request handler**: `transport.handle_request(rack_request)` returns `[status, headers, body]`
-- **Session management**: Assigns `Mcp-Session-Id` header on initialization, tracks sessions server-side
-- **Stateless mode**: `StreamableHTTPTransport.new(server, stateless: true)` for multi-node deployments
-- **SSE streaming**: GET requests establish SSE connections with keepalive pings (30s interval)
-- **Server-to-client notifications**: `transport.send_notification(method, params, session_id:)` pushes events to connected SSE streams
-- **Session cleanup**: DELETE requests terminate sessions and close SSE streams
+- **Stateless mode** (Woods default since MCP 2026-07-28): each POST is self-contained, no session is issued or required
+- **Session management** (legacy, opt-in): assigns `Mcp-Session-Id` on initialization, tracks sessions server-side, DELETE terminates
+- **SSE streaming**: per-request response streams; the standalone GET stream is session-mode only
+
+## Statelessness
+
+MCP 2026-07-28 ([SEP-2567](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2567)) removes protocol-level sessions, and `woods-mcp-http` runs stateless by default.
+
+For this server the session was never carrying anything: the index lives on disk, `IndexReader` self-refreshes off the published generation, and no tool holds per-client state. What the session *did* do was tie every client to one server process — so restarting the server (gem upgrade, machine sleep, worktree rebuild) invalidated every session and forced each client through a re-initialize. Stateless makes a restart invisible, and lets several instances serve one volume-mounted index without sticky routing.
+
+```bash
+woods-mcp-http                          # stateless (default)
+WOODS_MCP_HTTP_STATELESS=0 woods-mcp-http   # legacy session mode
+```
+
+What changes in stateless mode:
+
+| Behaviour | Stateless (default) | Session mode (`=0`) |
+|---|---|---|
+| `Mcp-Session-Id` | never issued or required | issued on `initialize`, required after |
+| `GET` on the MCP endpoint | `405 Method Not Allowed` | opens a standalone SSE stream |
+| `DELETE` on the MCP endpoint | `200` no-op (see note) | terminates the session |
+| A request carrying a stale `Mcp-Session-Id` | ignored, served normally | `404` — client must re-initialize |
+| Server-initiated notifications | **not delivered** — there is no stream to push on | delivered to the session's SSE stream |
+| Server restart | invisible to clients | every client must re-initialize |
+| Horizontal scaling | any POST may hit any instance | requires sticky routing |
+
+> **`Mcp-Session-Id` and CORS.** In stateless mode the header is neither read nor emitted, so it is absent from `Access-Control-Expose-Headers`. A client that depends on it needs `WOODS_MCP_HTTP_STATELESS=0` — a transitional escape hatch, since the header is gone from the specification.
+
+> **DELETE returns 200, not 405.** The specification says a server supporting only this revision *should* answer `405` to DELETE; the `mcp` gem instead answers `200 {"success": true}` in stateless mode. This is the SDK's call, not Woods', and it is benign — there is no session to terminate either way, so the request is a no-op whichever status it carries, and a legacy client tearing down a session it thinks it has gets a success rather than a confusing error. Noted here because the two disagree, not because it needs fixing.
+
+The last row is the one that matters in practice: a client holding a session id from *before* a restart is simply served, rather than getting a `404` and having to re-initialize. That is the disconnect/reconnect improvement, and it is why stateless is the default.
+
+> **Stream resumability.** MCP 2026-07-28 also removes `Last-Event-ID` resumability. A broken response stream loses the in-flight request and the client must re-issue it with a new request id. Woods' index tools are short reads, so this is near-free; the long-running `pipeline_extract` / `pipeline_embed` return a durable task handle instead (see [MCP_SERVERS.md](MCP_SERVERS.md#long-running-tools-and-the-tasks-extension)), which survives a dropped connection better than a resumable stream did.
 
 ### Usage Pattern
 
@@ -195,7 +224,7 @@ A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` 
 | explicit list                    | `https://app.example.com`          | exactly `https://app.example.com` — loopback no longer allowed |
 | multiple origins                 | `https://a.example,https://b.example` | each listed origin                                    |
 
-`OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin`, `Access-Control-Expose-Headers: Mcp-Session-Id`, and `Vary: Origin`.
+`OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin` and `Vary: Origin`. `Access-Control-Expose-Headers: Mcp-Session-Id` appears only in legacy session mode (`WOODS_MCP_HTTP_STATELESS=0`) — see [Statelessness](#statelessness).
 
 ### TLS termination
 

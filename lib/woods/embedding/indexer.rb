@@ -709,13 +709,16 @@ module Woods
         return unless @vector_store.respond_to?(:delete)
 
         items.group_by { |item| item[:identifier] }.each do |identifier, group|
-          previous = @durable_ids[identifier]
-          next unless previous
-
-          fresh_ids = group.map { |item| item[:id] }
-          (previous - fresh_ids).each { |id| @vector_store.delete(id) }
-          @durable_ids[identifier] = fresh_ids
+          prune_durable_identifier(identifier, group.map { |item| item[:id] })
         end
+      end
+
+      def prune_durable_identifier(identifier, fresh_ids)
+        previous = @durable_ids[identifier]
+        return unless previous
+
+        (previous - fresh_ids).each { |id| @vector_store.delete(id) }
+        @durable_ids[identifier] = fresh_ids
       end
 
       # A checkpoint that cannot be parsed *or read* degrades to "no

@@ -53,6 +53,11 @@ RSpec.configure do |config|
   # WOODS_RUN_LIVE_BACKENDS with service containers and gemfiles/live_backends.gemfile.
   config.filter_run_excluding(live_backends: true) unless ENV['WOODS_RUN_LIVE_BACKENDS']
 
+  # HTTP end-to-end specs boot `exe/woods-mcp-http` as a real subprocess and
+  # bind a port, so they need a Rack handler bundled and a free port. Excluded
+  # from the default suite; opt in with WOODS_RUN_HTTP_SERVER=1.
+  config.filter_run_excluding(http_server: true) unless ENV['WOODS_RUN_HTTP_SERVER']
+
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
   end

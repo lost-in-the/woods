@@ -161,6 +161,23 @@ jobs:
       - name: Run linter
         run: bundle exec rubocop
 
+  # Boots exe/woods-mcp-http as a real subprocess and drives it over a socket.
+  # Its own job because it binds a port and shells out, and because the failure
+  # it exists to catch — the binary not booting at all — is invisible to every
+  # in-process transport spec.
+  http-transport:
+    name: HTTP transport (end to end)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run HTTP end-to-end specs
+        run: WOODS_RUN_HTTP_SERVER=1 bundle exec rspec spec/mcp/http_server_e2e_spec.rb
+
   coverage:
     runs-on: ubuntu-latest
     steps:

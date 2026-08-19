@@ -395,7 +395,7 @@
     "files": [
       "lib/woods/embedding/indexer.rb"
     ],
-    "description": "Reads ExtractedUnit JSON \u2192 prepares text \u2192 embeds \u2192 stores. Full + incremental modes via content_hash. Rake tasks: woods:embed, woods:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
+    "description": "Reads ExtractedUnit JSON → prepares text → embeds → stores. Full + incremental modes via content_hash. Rake tasks: woods:embed, woods:embed_incremental. Includes checkpoint/resumability for mid-batch failures. Depends on: B-028, B-031, B-032.",
     "status": "resolved",
     "depends_on": [
       "B-028",
@@ -424,7 +424,7 @@
     "files": [
       "lib/woods/retrieval/search_executor.rb"
     ],
-    "description": "Maps classification \u2192 strategy (vector, keyword, graph, hybrid, direct). Executes against storage backends. Depends on: B-028, B-029, B-030, B-034.",
+    "description": "Maps classification → strategy (vector, keyword, graph, hybrid, direct). Executes against storage backends. Depends on: B-028, B-029, B-030, B-034.",
     "status": "resolved",
     "depends_on": [
       "B-028",
@@ -473,7 +473,7 @@
       "lib/woods/retriever.rb",
       "spec/retriever_spec.rb"
     ],
-    "description": "Top-level Retriever class wiring classify \u2192 search \u2192 rank \u2192 assemble \u2192 format pipeline. Includes RetrievalResult struct and StructuralContextBuilder for 10% structural token budget.",
+    "description": "Top-level Retriever class wiring classify → search → rank → assemble → format pipeline. Includes RetrievalResult struct and StructuralContextBuilder for 10% structural token budget.",
     "status": "resolved"
   },
   {
@@ -593,7 +593,7 @@
       "lib/woods/resilience/circuit_breaker.rb",
       "spec/resilience/circuit_breaker_spec.rb"
     ],
-    "description": "Three-state pattern (closed \u2192 open \u2192 half_open) protecting external service calls. Configurable threshold and reset_timeout. Raises CircuitOpenError when open.",
+    "description": "Three-state pattern (closed → open → half_open) protecting external service calls. Configurable threshold and reset_timeout. Raises CircuitOpenError when open.",
     "status": "resolved",
     "depends_on": [
       "B-038"
@@ -685,7 +685,7 @@
       "lib/woods/console/server.rb",
       "docs/CONSOLE_MCP_SETUP.md"
     ],
-    "description": "Embedded-mode console_eval is hard-refused at dispatch (EmbeddedExecutor#refusal_for), so EvalGuard is unreachable on the shipped path. The refusal message already advertises WOODS_CONSOLE_UNSAFE_EVAL + a Rails.env.production? rejection as the opt-in contract, but the execution wiring is not implemented. Deliver the full contract before running any Ruby: (1) gate on both config.console_unsafe_eval_enabled AND ENV['WOODS_CONSOLE_UNSAFE_EVAL']; (2) refuse unconditionally when Rails.env.production?; (3) run EvalGuard.check! before dispatch; (4) require Confirmation approval; (5) record the run in AuditLogger. Partial wiring is worse than the current refusal \u2014 ship all five or none. Tracked in issue #87 (option 2 deferral). RESOLVED: EmbeddedExecutor#handle_eval now runs all five controls (guard \u2192 confirmation \u2192 SafeContext \u2192 Timeout \u2192 audit). Server.build_embedded fails closed at boot when the flag is on but a Confirmation or audit-log path is missing.",
+    "description": "Embedded-mode console_eval is hard-refused at dispatch (EmbeddedExecutor#refusal_for), so EvalGuard is unreachable on the shipped path. The refusal message already advertises WOODS_CONSOLE_UNSAFE_EVAL + a Rails.env.production? rejection as the opt-in contract, but the execution wiring is not implemented. Deliver the full contract before running any Ruby: (1) gate on both config.console_unsafe_eval_enabled AND ENV['WOODS_CONSOLE_UNSAFE_EVAL']; (2) refuse unconditionally when Rails.env.production?; (3) run EvalGuard.check! before dispatch; (4) require Confirmation approval; (5) record the run in AuditLogger. Partial wiring is worse than the current refusal — ship all five or none. Tracked in issue #87 (option 2 deferral). RESOLVED: EmbeddedExecutor#handle_eval now runs all five controls (guard → confirmation → SafeContext → Timeout → audit). Server.build_embedded fails closed at boot when the flag is on but a Confirmation or audit-log path is missing.",
     "status": "resolved",
     "depends_on": []
   },
@@ -700,7 +700,7 @@
       "lib/woods/console/bridge.rb",
       "lib/woods/console/embedded_executor.rb"
     ],
-    "description": "Issue #82 renamed Woods::Console::Bridge to StubBridge so the scaffold status is obvious. The downstream smell \u2014 flagged by both reviewers \u2014 is that the canonical protocol contract (SUPPORTED_TOOLS, TIER1_TOOLS, TOOL_HANDLERS) still lives on the stub class. EmbeddedExecutor::TIER1_TOOLS = StubBridge::TIER1_TOOLS reads as 'the real executor borrows constants from the stub', which is backwards. Extract a Woods::Console::BridgeProtocol module owning the three constants; have StubBridge include or reference it; update EmbeddedExecutor to read from BridgeProtocol directly. When the real bridge-process implementation lands it can claim the Bridge class name without the protocol contract migrating with it. Pre-existing doc-rot in docs/design/CONSOLE_SERVER.md (sections 107/118/130 still describe rails runner lib/woods/console/bridge.rb as if it works) is in scope for the same PR. RESOLVED: new lib/woods/console/bridge_protocol.rb owns SUPPORTED_TOOLS / TIER1_TOOLS / TOOL_HANDLERS. StubBridge references BridgeProtocol (top-level aliases keep StubBridge::SUPPORTED_TOOLS working for existing callers). EmbeddedExecutor reads TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS and no longer imports bridge.rb. CONSOLE_SERVER.md Connection Modes section carries a callout that the three rails-runner configs describe the target bridge-process architecture, not the shipping state.",
+    "description": "Issue #82 renamed Woods::Console::Bridge to StubBridge so the scaffold status is obvious. The downstream smell — flagged by both reviewers — is that the canonical protocol contract (SUPPORTED_TOOLS, TIER1_TOOLS, TOOL_HANDLERS) still lives on the stub class. EmbeddedExecutor::TIER1_TOOLS = StubBridge::TIER1_TOOLS reads as 'the real executor borrows constants from the stub', which is backwards. Extract a Woods::Console::BridgeProtocol module owning the three constants; have StubBridge include or reference it; update EmbeddedExecutor to read from BridgeProtocol directly. When the real bridge-process implementation lands it can claim the Bridge class name without the protocol contract migrating with it. Pre-existing doc-rot in docs/design/CONSOLE_SERVER.md (sections 107/118/130 still describe rails runner lib/woods/console/bridge.rb as if it works) is in scope for the same PR. RESOLVED: new lib/woods/console/bridge_protocol.rb owns SUPPORTED_TOOLS / TIER1_TOOLS / TOOL_HANDLERS. StubBridge references BridgeProtocol (top-level aliases keep StubBridge::SUPPORTED_TOOLS working for existing callers). EmbeddedExecutor reads TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS and no longer imports bridge.rb. CONSOLE_SERVER.md Connection Modes section carries a callout that the three rails-runner configs describe the target bridge-process architecture, not the shipping state.",
     "status": "resolved",
     "depends_on": []
   },
@@ -716,7 +716,7 @@
       "lib/woods/storage/graph_store.rb",
       "lib/woods/mcp/bootstrapper.rb"
     ],
-    "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md \u00a73.5. Do NOT design a speculative write API before the concrete adapter exists \u2014 bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
+    "description": "The boot-time hydration path (Bootstrapper.hydrated_graph_store) now raises Woods::Storage::InapplicableBackend when the configured graph_store reports durable? => true, mirroring the Snapshotter::Vector pattern for pgvector/Qdrant. This is a tripwire, not a solution: it loudly refuses to rebuild a durable store from dependency_graph.json at boot, but leaves the durable store empty because nothing populates it. When the first durable GraphStore adapter lands (:mysql, :pgvector_graph, Neo4j, etc.), that PR must also wire an extraction-side write path: graph edges are produced by Extractor, not Indexer, so the write hook belongs at the same seam that writes dependency_graph.json (see Extractor#extract_all around output_dir.join('dependency_graph.json')). The contract being honored is documented in lib/woods/storage/graph_store.rb Interface#durable? YARD, Bootstrapper.hydrated_graph_store YARD, and docs/design/PERSISTENCE_AND_BOOTSTRAP.md §3.5. Do NOT design a speculative write API before the concrete adapter exists — bulk-load semantics differ too much across backends (Postgres COPY vs MySQL batched INSERT vs Neo4j UNWIND+MERGE) and a speculative API will get rewritten.",
     "status": "open",
     "depends_on": []
   },
@@ -762,7 +762,7 @@
   {
     "id": "B-058",
     "slug": "qdrant-point-id-uuid-mapping",
-    "title": "Qdrant adapter sends Woods identifiers as point IDs \u2014 every upsert 400s",
+    "title": "Qdrant adapter sends Woods identifiers as point IDs — every upsert 400s",
     "severity": "high",
     "category": "code-bug",
     "layer": "storage",
@@ -770,7 +770,7 @@
       "lib/woods/storage/qdrant.rb",
       "lib/woods/util/uuid5.rb"
     ],
-    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passed Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path was non-functional. Fixed: point ids are now UUIDv5 over a pinned namespace (Qdrant::POINT_ID_NAMESPACE), the identifier rides in the payload under `woods_identifier`, and search reverse-maps while delete translates through the same Qdrant.point_id so it can't compute a different id than the upsert did. Translation is confined to the adapter \u2014 pgvector and the in-memory store are untouched, and the Indexer needed no change. UUIDv5 is implemented in Woods::Util::UUID5 and unit-tested against the published DNS-namespace vectors for python.org and www.example.com. STILL UNVALIDATED AGAINST A LIVE QDRANT: that a real server accepts these upserts, that a re-embed of an unchanged unit replaces rather than duplicates, and that delete actually removes the point. All current coverage is against a mocked Net::HTTP. Tracked in GH #147.",
+    "description": "Qdrant only accepts uint/UUID point IDs but the adapter passed Woods identifiers (\"User\", \"User#chunk_0\") straight through, so every upsert 400s and the Qdrant path was non-functional. Fixed: point ids are now UUIDv5 over a pinned namespace (Qdrant::POINT_ID_NAMESPACE), the identifier rides in the payload under `woods_identifier`, and search reverse-maps while delete translates through the same Qdrant.point_id so it can't compute a different id than the upsert did. Translation is confined to the adapter — pgvector and the in-memory store are untouched, and the Indexer needed no change. UUIDv5 is implemented in Woods::Util::UUID5 and unit-tested against the published DNS-namespace vectors for python.org and www.example.com. STILL UNVALIDATED AGAINST A LIVE QDRANT: that a real server accepts these upserts, that a re-embed of an unchanged unit replaces rather than duplicates, and that delete actually removes the point. All current coverage is against a mocked Net::HTTP. Tracked in GH #147.",
     "status": "resolved",
     "depends_on": []
   },
@@ -784,7 +784,7 @@
     "files": [
       "lib/woods/embedding/indexer.rb"
     ],
-    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run \u2014 unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148. RESOLVED: an incremental run now hydrates the in-memory vector store from dumps/latest and dumps again, the checkpoint is written only after the dump is promoted (interval saves suppressed on that path), and a checkpoint hit is honoured only when the dump actually holds a vector for that unit \u2014 so a checkpoint that ran ahead of its artifact self-heals into a re-embed instead of stranding the unit.",
+    "description": "index_incremental never persist_snapshots and process_units always advances checkpoint.json, so on :local/:shared_filesystem presets changed units embed into a throwaway store, nothing is written to dumps/, and the checkpoint skips them next run — unrecoverable without full re-embed. Fix: hydrate+persist in incremental mode, or do not advance checkpoint when unpersisted. Tracked in GH #148. RESOLVED: an incremental run now hydrates the in-memory vector store from dumps/latest and dumps again, the checkpoint is written only after the dump is promoted (interval saves suppressed on that path), and a checkpoint hit is honoured only when the dump actually holds a vector for that unit — so a checkpoint that ran ahead of its artifact self-heals into a re-embed instead of stranding the unit.",
     "status": "resolved",
     "depends_on": []
   },
@@ -799,7 +799,7 @@
       "lib/woods/notion/exporter.rb",
       "lib/woods/notion/mappers/column_mapper.rb"
     ],
-    "description": "Column pages are upserted by bare column name and found by title equality across the whole DB, so shared columns (id/created_at/updated_at) overwrite each other across models \u2014 the Columns DB collapses to one page per distinct name. Fix: qualify title (users.id) or filter lookup by Table relation. Tracked in GH #149.",
+    "description": "Column pages are upserted by bare column name and found by title equality across the whole DB, so shared columns (id/created_at/updated_at) overwrite each other across models — the Columns DB collapses to one page per distinct name. Fix: qualify title (users.id) or filter lookup by Table relation. Tracked in GH #149.",
     "status": "resolved",
     "depends_on": []
   },
@@ -832,7 +832,7 @@
       "lib/woods/dependency_graph.rb",
       "lib/woods/extractor.rb"
     ],
-    "description": "DependencyGraph keys nodes on the bare identifier, so two units of different types that share one (a Scenic view `reports` from db/views/reports_v01.sql and a factory `reports` from spec/factories/reports.rb) collapse onto a single node \u2014 last registration wins, and the loser also loses its type-index entry. Both unit JSON files are still written, so the index and the graph disagree. deduplicate_results only dedupes within a type. Surfaced by the #164 differential harness, which works around it by giving each generated artifact family its own name prefix. Fix likely means keying the graph on (type, identifier) or namespacing identifiers per type, which touches every graph consumer (MCP tools, Obsidian, retrieval).",
+    "description": "DependencyGraph keys nodes on the bare identifier, so two units of different types that share one (a Scenic view `reports` from db/views/reports_v01.sql and a factory `reports` from spec/factories/reports.rb) collapse onto a single node — last registration wins, and the loser also loses its type-index entry. Both unit JSON files are still written, so the index and the graph disagree. deduplicate_results only dedupes within a type. Surfaced by the #164 differential harness, which works around it by giving each generated artifact family its own name prefix. Fix likely means keying the graph on (type, identifier) or namespacing identifiers per type, which touches every graph consumer (MCP tools, Obsidian, retrieval).",
     "status": "open",
     "depends_on": []
   },
@@ -862,7 +862,7 @@
       "lib/woods/change_set.rb",
       "lib/woods/mcp/index_reader.rb"
     ],
-    "description": "Follow-on work from #164 now that phase 0 (incremental correctness + differential harness) has landed. Phase 1: a public API to re-run a single whole-app extractor against a booted app (WHOLE_APP_EXTRACTORS already does this internally). Phase 2: a resident file-watching daemon (woods:watch) \u2014 placement decision, restart triggers, storm handling, degraded status. Phase 3: a generation token IndexReader checks per request, plus working-tree staleness in woods_status. Phase 4: multi-worktree operation with per-daemon idle TTL. Each phase needs measurements against the success criteria in #164. RESOLVED: all four phases landed on claude/woods-issue-164-uu6tc0 (PR #165). Phase 1 = Extractor#refresh + woods:refresh + ReloadPolicy; phase 2 = Woods::Watch daemon + woods:watch; phase 3 = Woods::Generation + IndexReader self-refresh + woods_status freshness fields; phase 4 = PipelineLock write serialization, daemon deference for hook syncs, idle TTL, six-worktree spec. Outstanding and documented in docs/WATCH_DAEMON.md rather than tracked here: large-host-app latency, bind-mount event latency, and per-daemon memory at six-worktree scale \u2014 all three need a real host app.",
+    "description": "Follow-on work from #164 now that phase 0 (incremental correctness + differential harness) has landed. Phase 1: a public API to re-run a single whole-app extractor against a booted app (WHOLE_APP_EXTRACTORS already does this internally). Phase 2: a resident file-watching daemon (woods:watch) — placement decision, restart triggers, storm handling, degraded status. Phase 3: a generation token IndexReader checks per request, plus working-tree staleness in woods_status. Phase 4: multi-worktree operation with per-daemon idle TTL. Each phase needs measurements against the success criteria in #164. RESOLVED: all four phases landed on claude/woods-issue-164-uu6tc0 (PR #165). Phase 1 = Extractor#refresh + woods:refresh + ReloadPolicy; phase 2 = Woods::Watch daemon + woods:watch; phase 3 = Woods::Generation + IndexReader self-refresh + woods_status freshness fields; phase 4 = PipelineLock write serialization, daemon deference for hook syncs, idle TTL, six-worktree spec. Outstanding and documented in docs/WATCH_DAEMON.md rather than tracked here: large-host-app latency, bind-mount event latency, and per-daemon memory at six-worktree scale — all three need a real host app.",
     "status": "resolved",
     "depends_on": []
   },
@@ -879,7 +879,7 @@
       "lib/woods/change_set.rb",
       "lib/woods/mcp/index_reader.rb"
     ],
-    "description": "dependency_graph.json stores absolute paths (file_map keys and nodes[].file_path) while every per-unit JSON stores relative ones. Ordering, not intent: extract_all rebuilds the graph at phase 1.6 and normalize_file_paths runs at phase 4.5, so registration captures the absolute string and the later reassignment of unit.file_path never reaches the copies in @nodes/@file_map. register_and_write has the same order, so full and incremental agree \u2014 this is not an equivalence bug and the #164 harness is right not to flag it. It matters for the documented Docker deployment (extraction inside the container, Index Server on the host reading the volume mount): the graph carries /app/... paths, so affected_by, identifiers_for_path and the prune sweep match nothing host-side, and a host-run woods:incremental computes an empty blast radius silently. A moved or renamed checkout has the same effect. Fix: normalize before registration and relativize at the lookup boundary. Needs a from_h migration for absolute-keyed graphs already on disk \u2014 same shape as normalize_edges and normalize_file_map, which handle pre-#164 formats without a rebuild. Surfaced by the #164 review (finding 17); deferred from PR #165 as too large for it. Tracked in GH #166.",
+    "description": "dependency_graph.json stores absolute paths (file_map keys and nodes[].file_path) while every per-unit JSON stores relative ones. Ordering, not intent: extract_all rebuilds the graph at phase 1.6 and normalize_file_paths runs at phase 4.5, so registration captures the absolute string and the later reassignment of unit.file_path never reaches the copies in @nodes/@file_map. register_and_write has the same order, so full and incremental agree — this is not an equivalence bug and the #164 harness is right not to flag it. It matters for the documented Docker deployment (extraction inside the container, Index Server on the host reading the volume mount): the graph carries /app/... paths, so affected_by, identifiers_for_path and the prune sweep match nothing host-side, and a host-run woods:incremental computes an empty blast radius silently. A moved or renamed checkout has the same effect. Fix: normalize before registration and relativize at the lookup boundary. Needs a from_h migration for absolute-keyed graphs already on disk — same shape as normalize_edges and normalize_file_map, which handle pre-#164 formats without a rebuild. Surfaced by the #164 review (finding 17); deferred from PR #165 as too large for it. Tracked in GH #166.",
     "status": "resolved",
     "depends_on": []
   },
@@ -895,7 +895,7 @@
       "lib/woods/extractor.rb",
       "lib/woods/path_dispatcher.rb"
     ],
-    "description": "GraphQLExtractor#extract_all runs a static file pass and a runtime pass (extract_from_runtime_type). PR #165 made the file pass unconditional, fixing the divergence visible without graphql-ruby loaded (the per-file path indexed types a full run dropped). Remaining: with the gem loaded, the runtime pass can emit units the file pass cannot reach \u2014 dynamically defined types, schema-builder/DSL types, anything whose constant exists only after the schema is constructed. Those units have no source file, so no changed path dispatches to them and an incremental run cannot recreate them. Fix is probably a discoverable_classes equivalent so the incremental path reconciles the runtime set in both directions like class-based types, provided the schema type map is exact by construction; otherwise move GraphQL to WHOLE_APP_EXTRACTORS. Either way needs gem 'graphql' in the version gemfiles as a dev/test dependency plus a harness template exercising a dynamic type \u2014 which is why it was left out of #165. Tracked in GH #167.",
+    "description": "GraphQLExtractor#extract_all runs a static file pass and a runtime pass (extract_from_runtime_type). PR #165 made the file pass unconditional, fixing the divergence visible without graphql-ruby loaded (the per-file path indexed types a full run dropped). Remaining: with the gem loaded, the runtime pass can emit units the file pass cannot reach — dynamically defined types, schema-builder/DSL types, anything whose constant exists only after the schema is constructed. Those units have no source file, so no changed path dispatches to them and an incremental run cannot recreate them. Fix is probably a discoverable_classes equivalent so the incremental path reconciles the runtime set in both directions like class-based types, provided the schema type map is exact by construction; otherwise move GraphQL to WHOLE_APP_EXTRACTORS. Either way needs gem 'graphql' in the version gemfiles as a dev/test dependency plus a harness template exercising a dynamic type — which is why it was left out of #165. Tracked in GH #167.",
     "status": "resolved",
     "depends_on": []
   },
@@ -912,7 +912,7 @@
       "lib/tasks/woods.rake",
       "lib/woods/extractors/rails_source_extractor.rb"
     ],
-    "description": "rails_source and gem_source units are written only by an explicit woods:extract_framework. Nothing automatic runs it \u2014 not bin/woods-sync, not the watch daemon, not woods:incremental, and not woods:extract \u2014 so once written they persist unchanged forever. Confirmed on a real host: 140 units (116 rails_source, 24 gem_source) carry host-style paths from a different worktree that resolve nowhere in either host or container; they were also the only units left absolute after #166, the same symptom. The sharp edge is that bin/woods-sync flags a Gemfile.lock change as 'only takes effect with a full extraction' and tells the user to clear .sync_head and re-run, but a full extraction is exactly what does not refresh framework units \u2014 so a Rails upgrade worktree keeps describing the old framework internals. The exclusion from incremental is deliberate and correct (WHOLE_APP_EXTRACTORS documents it); the gap is that 'changes only on dependency changes' was never wired to anything detecting one. Options in the issue; leaning toward refreshing on a lockfile-digest mismatch during full extraction plus a woods:validate warning. woods:validate has no unresolvable-file_path check at all, which would have surfaced this unprompted. NOTE: bin/woods-sync is NOT in this repo \u2014 it lives in the consuming application's repo, so the message fix and its full-only filter land there, not here. Preferred fix per review: make rails_source a Gemfile.lock-keyed WHOLE_APP_EXTRACTORS member rather than calling woods:extract_framework more often, since that task bypasses normalize_file_paths, the type index, the manifest, publish_generation AND the extraction lock. Tracked in GH #169.",
+    "description": "rails_source and gem_source units are written only by an explicit woods:extract_framework. Nothing automatic runs it — not bin/woods-sync, not the watch daemon, not woods:incremental, and not woods:extract — so once written they persist unchanged forever. Confirmed on a real host: 140 units (116 rails_source, 24 gem_source) carry host-style paths from a different worktree that resolve nowhere in either host or container; they were also the only units left absolute after #166, the same symptom. The sharp edge is that bin/woods-sync flags a Gemfile.lock change as 'only takes effect with a full extraction' and tells the user to clear .sync_head and re-run, but a full extraction is exactly what does not refresh framework units — so a Rails upgrade worktree keeps describing the old framework internals. The exclusion from incremental is deliberate and correct (WHOLE_APP_EXTRACTORS documents it); the gap is that 'changes only on dependency changes' was never wired to anything detecting one. Options in the issue; leaning toward refreshing on a lockfile-digest mismatch during full extraction plus a woods:validate warning. woods:validate has no unresolvable-file_path check at all, which would have surfaced this unprompted. NOTE: bin/woods-sync is NOT in this repo — it lives in the consuming application's repo, so the message fix and its full-only filter land there, not here. Preferred fix per review: make rails_source a Gemfile.lock-keyed WHOLE_APP_EXTRACTORS member rather than calling woods:extract_framework more often, since that task bypasses normalize_file_paths, the type index, the manifest, publish_generation AND the extraction lock. Tracked in GH #169.",
     "status": "resolved",
     "depends_on": []
   },
@@ -926,7 +926,7 @@
     "files": [
       "lib/tasks/woods.rake"
     ],
-    "description": "woods:clean is a bare FileUtils.rm_rf(output_dir) with no woods_with_extraction_lock. Run mid-cycle it removes the lock file itself, so the holder's release hits ENOENT (handled) and the next contender acquires immediately \u2014 two writers plus a daemon publishing into a deleted tree. Deliberate human action so frequency is low, but silent, and recovery is a full re-extraction. The fix is not simply 'take the lock', since the thing being deleted contains the lock: either delete everything except the lock file then release and remove it, or refuse to run while a daemon is alive the way woods:incremental stands down. woods:embed / woods:embed_incremental are also unlocked; arguably a separate concurrency domain since the daemon does not embed, but worth an explicit decision \u2014 PipelineGuard's cooldown reduces the window for full runs without serialising them, and incremental embeds are not rate-limited at all. Split out of #169, where the mechanism is unrelated and would have been closed alongside a fix that does not address it. Tracked in GH #170.",
+    "description": "woods:clean is a bare FileUtils.rm_rf(output_dir) with no woods_with_extraction_lock. Run mid-cycle it removes the lock file itself, so the holder's release hits ENOENT (handled) and the next contender acquires immediately — two writers plus a daemon publishing into a deleted tree. Deliberate human action so frequency is low, but silent, and recovery is a full re-extraction. The fix is not simply 'take the lock', since the thing being deleted contains the lock: either delete everything except the lock file then release and remove it, or refuse to run while a daemon is alive the way woods:incremental stands down. woods:embed / woods:embed_incremental are also unlocked; arguably a separate concurrency domain since the daemon does not embed, but worth an explicit decision — PipelineGuard's cooldown reduces the window for full runs without serialising them, and incremental embeds are not rate-limited at all. Split out of #169, where the mechanism is unrelated and would have been closed alongside a fix that does not address it. Tracked in GH #170.",
     "status": "resolved",
     "depends_on": []
   },
@@ -940,7 +940,7 @@
     "files": [
       "lib/woods/embedding/indexer.rb"
     ],
-    "description": "snapshot_worth_writing? gates persist_snapshot on stats[:processed], reasoning only about the vector store \u2014 sound for vectors (prune_superseded_vectors is reachable only from store_vectors) but persist_snapshot also writes metadata.msgpack, and persist_unit_metadata runs over load_units, which for index_incremental is every unit. So a zero-processed run rebuilds the metadata store and discards it. Delete a model, run woods:incremental then woods:embed_incremental: no source_hash changed so processed==0, and pre-fix metadata.msgpack was rewritten without the unit, making the stale vector inert (ContextAssembler#find_batch missed it). Post-fix both vector and metadata survive, so codebase_retrieve can return a deleted model as a live hit \u2014 stale vectors went from latent to visible. The gate does prevent a worse bug: a failed hydrate calls clear! and pre-fix would dump the emptied store over latest. Options: split the gate so only the vector dump is skipped; widen it to consider whether the unit set changed; or accept and document. Tracked in GH #171.",
+    "description": "snapshot_worth_writing? gates persist_snapshot on stats[:processed], reasoning only about the vector store — sound for vectors (prune_superseded_vectors is reachable only from store_vectors) but persist_snapshot also writes metadata.msgpack, and persist_unit_metadata runs over load_units, which for index_incremental is every unit. So a zero-processed run rebuilds the metadata store and discards it. Delete a model, run woods:incremental then woods:embed_incremental: no source_hash changed so processed==0, and pre-fix metadata.msgpack was rewritten without the unit, making the stale vector inert (ContextAssembler#find_batch missed it). Post-fix both vector and metadata survive, so codebase_retrieve can return a deleted model as a live hit — stale vectors went from latent to visible. The gate does prevent a worse bug: a failed hydrate calls clear! and pre-fix would dump the emptied store over latest. Options: split the gate so only the vector dump is skipped; widen it to consider whether the unit set changed; or accept and document. Tracked in GH #171.",
     "status": "resolved",
     "depends_on": []
   },
@@ -1365,14 +1365,14 @@
       "lib/woods/storage/pgvector.rb",
       "lib/woods/storage/qdrant.rb"
     ],
-    "description": "Every staleness-removal mechanism is scoped to the in-memory/dump path \u2014 deleted units stay retrievable from pgvector/Qdrant even after a full woods:embed, and checkpoint_satisfied?'s hydrated-artifact check has no durable-backend equivalent (switching stores strands unchanged units unembedded). Extend vanished-unit reconciliation to durable deletes (Qdrant via .point_id) behind the #191 purge-guard thresholds; add a durable presence/identity check to the checkpoint. Tracked in GH #211. RESOLVED: added VectorStore::Interface#each_id (implemented by Pgvector via SELECT id, Qdrant via the paginated scroll API reverse-mapping point ids to Woods identifiers, and InMemory). Indexer#reconcile_durable_store deletes vectors for units the run never saw, on full and incremental runs alike, guarded by the same 30%/empty-load thresholds as #191. The same store read gives checkpoint_satisfied? a real presence check on durable backends, fixing the store-switch stranding. Proven against real pgvector and Qdrant in spec/integration/live_backends_spec.rb.",
+    "description": "Every staleness-removal mechanism is scoped to the in-memory/dump path — deleted units stay retrievable from pgvector/Qdrant even after a full woods:embed, and checkpoint_satisfied?'s hydrated-artifact check has no durable-backend equivalent (switching stores strands unchanged units unembedded). Extend vanished-unit reconciliation to durable deletes (Qdrant via .point_id) behind the #191 purge-guard thresholds; add a durable presence/identity check to the checkpoint. Tracked in GH #211. RESOLVED: added VectorStore::Interface#each_id (implemented by Pgvector via SELECT id, Qdrant via the paginated scroll API reverse-mapping point ids to Woods identifiers, and InMemory). Indexer#reconcile_durable_store deletes vectors for units the run never saw, on full and incremental runs alike, guarded by the same 30%/empty-load thresholds as #191. The same store read gives checkpoint_satisfied? a real presence check on durable backends, fixing the store-switch stranding. Proven against real pgvector and Qdrant in spec/integration/live_backends_spec.rb.",
     "status": "resolved",
     "depends_on": []
   },
   {
     "id": "B-099",
     "slug": "evaluation-harness-unrunnable",
-    "title": "Evaluation harness has no working entry point \u2014 retrieval quality unmeasured",
+    "title": "Evaluation harness has no working entry point — retrieval quality unmeasured",
     "severity": "high",
     "category": "code-bug",
     "layer": "retrieval",
@@ -1396,7 +1396,7 @@
       "lib/woods/dependency_graph.rb",
       "lib/woods/embedding/indexer.rb"
     ],
-    "description": "Prefix identifiers of non-constant unit types (factory:reports, database_view:reports, ...) so same-named units stop collapsing across the graph, embed ids, checkpoint, metadata, and export names. Requires an index migration (schema/generation bump + full re-extract/re-embed) and changes MCP-visible identifier forms \u2014 maintainer decision. PR #210 fixed the adapter-level symptoms; this is the root cause. Tracked in GH #213.",
+    "description": "Prefix identifiers of non-constant unit types (factory:reports, database_view:reports, ...) so same-named units stop collapsing across the graph, embed ids, checkpoint, metadata, and export names. Requires an index migration (schema/generation bump + full re-extract/re-embed) and changes MCP-visible identifier forms — maintainer decision. PR #210 fixed the adapter-level symptoms; this is the root cause. Tracked in GH #213.",
     "status": "ready",
     "depends_on": []
   },
@@ -1410,7 +1410,7 @@
     "files": [
       "lib/woods/resilience/index_validator.rb"
     ],
-    "description": "Nothing calls it and it contains no dimension-mismatch detection, so both halves of CLAUDE.md's 'IndexValidator detects this' are false. Wire a real provider-dimensions vs store-dimensions check into the embed/boot paths, or delete the class and fix the doc. Tracked in GH #214. RESOLVED: the false claim appeared in six documents (CLAUDE.md, AGENT_GUIDE, FAQ, TROUBLESHOOTING, RETRIEVAL_GUIDE, EMBEDDING_MODELS) plus the woods-diagnose skill; all corrected. IndexValidator is kept \u2014 it validates extraction-output integrity and is the oracle in multi_worktree_spec \u2014 with a class comment stating it knows nothing about vectors. The real check now exists: Pgvector#stored_dimensions (atttypmod) and Qdrant#stored_dimensions (collection config), compared against the provider by Tasks.verify_store_dimensions! before woods:embed builds an indexer, raising Woods::MCP::DimensionMismatch with the re-index remedy. Closes the durable-backend gap; the dump path already had this via Snapshotter::Vector.",
+    "description": "Nothing calls it and it contains no dimension-mismatch detection, so both halves of CLAUDE.md's 'IndexValidator detects this' are false. Wire a real provider-dimensions vs store-dimensions check into the embed/boot paths, or delete the class and fix the doc. Tracked in GH #214. RESOLVED: the false claim appeared in six documents (CLAUDE.md, AGENT_GUIDE, FAQ, TROUBLESHOOTING, RETRIEVAL_GUIDE, EMBEDDING_MODELS) plus the woods-diagnose skill; all corrected. IndexValidator is kept — it validates extraction-output integrity and is the oracle in multi_worktree_spec — with a class comment stating it knows nothing about vectors. The real check now exists: Pgvector#stored_dimensions (atttypmod) and Qdrant#stored_dimensions (collection config), compared against the provider by Tasks.verify_store_dimensions! before woods:embed builds an indexer, raising Woods::MCP::DimensionMismatch with the re-index remedy. Closes the durable-backend gap; the dump path already had this via Snapshotter::Vector.",
     "status": "resolved",
     "depends_on": []
   },
@@ -1510,7 +1510,7 @@
       ".github/workflows/ci.yml",
       "Appraisals"
     ],
-    "description": "pull_request-only trigger leaves merged main untested; the matrix omits Ruby 3.4 and Rails 8.1; every external protocol boundary is doubles-only \u2014 a services lane running the storage contract specs plus the offline embed->retrieve round trip closes the seam. Coordinate with woods-testbed#2. Tracked in GH #220.",
+    "description": "pull_request-only trigger leaves merged main untested; the matrix omits Ruby 3.4 and Rails 8.1; every external protocol boundary is doubles-only — a services lane running the storage contract specs plus the offline embed->retrieve round trip closes the seam. Coordinate with woods-testbed#2. Tracked in GH #220.",
     "status": "resolved",
     "depends_on": []
   },
@@ -1525,7 +1525,7 @@
       "lib/woods/embedding/indexer.rb",
       "lib/woods/storage/qdrant.rb"
     ],
-    "description": "Indexer#persistable? asked vector_store.respond_to?(:each_entry), but Storage::VectorStore::Interface *defines* each_entry (a NotImplementedError raise) and bulk_load, and every adapter includes it \u2014 so pgvector and Qdrant answered true. persist_snapshot then drove Snapshotter::Vector.dump into the raise at the end of an otherwise-successful run, discarding the whole embed pass. Fixed by asking which module owns the method (implements_own?) instead of respond_to?. Found by the new live-backend CI lane (B-107). Also fixed alongside: Qdrant mutating point operations did not pass wait=true, so acknowledged-but-unapplied writes read back stale \u2014 delete-then-count and write-then-dump both observed pre-mutation state.",
+    "description": "Indexer#persistable? asked vector_store.respond_to?(:each_entry), but Storage::VectorStore::Interface *defines* each_entry (a NotImplementedError raise) and bulk_load, and every adapter includes it — so pgvector and Qdrant answered true. persist_snapshot then drove Snapshotter::Vector.dump into the raise at the end of an otherwise-successful run, discarding the whole embed pass. Fixed by asking which module owns the method (implements_own?) instead of respond_to?. Found by the new live-backend CI lane (B-107). Also fixed alongside: Qdrant mutating point operations did not pass wait=true, so acknowledged-but-unapplied writes read back stale — delete-then-count and write-then-dump both observed pre-mutation state.",
     "status": "resolved",
     "depends_on": []
   },
@@ -1547,7 +1547,7 @@
       "spec/retrieval/context_assembler_spec.rb",
       "spec/git_provenance_spec.rb"
     ],
-    "description": "i18n (15/15), mailer (24/32), rails_source (33/33) and view_component (16/23) specs failed when run as a single file: the 'extractor setup' shared context referenced Woods::ModelNameCache without requiring it, and mailer/view_component called Woods.configuration without require 'woods' \u2014 so extraction raised, the rescue logged it, and every assertion hit a nil unit. All four passed in the full suite because earlier files loaded the constants first, which hides real breakage until someone bisects a single file. Found during the B-106 sweep (GH #219); verified pre-existing by stashing. A follow-up per-directory sweep found five more files in the same state \u2014 server_spec/snapshot_tools_spec (real-constant instance_doubles from the 98b9280 sweep), note_builder/vault_exporter/context_assembler (same) \u2014 all fixed by requiring the constants the doubles verify against. Same hermeticity class, different vector: git_provenance_spec's temp repos inherited the host's global commit.gpgsign, so a machine whose signer is unavailable (locked 1Password agent) hung or failed 3 examples; the repos now pin commit.gpgsign=false.",
+    "description": "i18n (15/15), mailer (24/32), rails_source (33/33) and view_component (16/23) specs failed when run as a single file: the 'extractor setup' shared context referenced Woods::ModelNameCache without requiring it, and mailer/view_component called Woods.configuration without require 'woods' — so extraction raised, the rescue logged it, and every assertion hit a nil unit. All four passed in the full suite because earlier files loaded the constants first, which hides real breakage until someone bisects a single file. Found during the B-106 sweep (GH #219); verified pre-existing by stashing. A follow-up per-directory sweep found five more files in the same state — server_spec/snapshot_tools_spec (real-constant instance_doubles from the 98b9280 sweep), note_builder/vault_exporter/context_assembler (same) — all fixed by requiring the constants the doubles verify against. Same hermeticity class, different vector: git_provenance_spec's temp repos inherited the host's global commit.gpgsign, so a machine whose signer is unavailable (locked 1Password agent) hung or failed 3 examples; the repos now pin commit.gpgsign=false.",
     "status": "resolved",
     "depends_on": []
   },
@@ -1561,8 +1561,119 @@
     "files": [
       "lib/woods/mcp/server.rb"
     ],
-    "description": "The pipeline_extract tool's background run called Woods::Extractor.new directly, but exe/woods-mcp deliberately loads no extraction machinery and lib/woods.rb only lazy-requires the extractor inside Woods.extract!. In a standalone index-server process every pipeline_extract invocation therefore failed in the background with NameError: uninitialized constant Woods::Extractor \u2014 rescued and logged, so the tool reported 'started' and nothing landed. Invisible to the in-suite operator specs because other spec files load the constant first; surfaced by the B-109 per-directory standalone sweep. Fixed with the same lazy require Woods.extract! uses, pinned by a subprocess regression spec (spec/mcp/pipeline_extract_standalone_spec.rb) proven to fail against the reverted code.",
+    "description": "The pipeline_extract tool's background run called Woods::Extractor.new directly, but exe/woods-mcp deliberately loads no extraction machinery and lib/woods.rb only lazy-requires the extractor inside Woods.extract!. In a standalone index-server process every pipeline_extract invocation therefore failed in the background with NameError: uninitialized constant Woods::Extractor — rescued and logged, so the tool reported 'started' and nothing landed. Invisible to the in-suite operator specs because other spec files load the constant first; surfaced by the B-109 per-directory standalone sweep. Fixed with the same lazy require Woods.extract! uses, pinned by a subprocess regression spec (spec/mcp/pipeline_extract_standalone_spec.rb) proven to fail against the reverted code.",
     "status": "resolved",
     "depends_on": []
+  },
+  {
+    "id": "B-111",
+    "title": "Lift the mcp gem cap to 1.x and stop pinning the protocol version backwards",
+    "severity": "high",
+    "category": "implementation",
+    "layer": "mcp",
+    "files": [
+      "woods.gemspec",
+      "exe/woods-mcp-start",
+      "exe/woods-mcp",
+      "exe/woods-mcp-http",
+      "exe/woods-console-mcp"
+    ],
+    "description": "The gemspec pins `mcp >= 0.9.2, < 1.0`, which holds Woods at SDK 0.25.0 — two minor releases short of 1.2.0, the version that completed the MCP 2026-07-28 server lifecycle Woods depends on. Separately, exe/woods-mcp-start hard-defaults MCP_PROTOCOL_VERSION=2024-11-05, the oldest protocol in existence, and it is the documented .mcp.json entry point — so every user following the setup docs is opted out of version negotiation, server/discover and cache hints. Lift the pin to `>= 1.2, < 2.0`; delete the protocol default from the wrapper while keeping the env var as an escape hatch for stubborn legacy clients. The APIs Woods calls (MCP::Server.new, define_tool, Tool::Response, both transports, MCP::Configuration) are unchanged across 0.9.2..1.2.0 — every SDK breaking change (0.10.0 notify_progress/handler overrides, 0.15.0 MCP::Transports) predates the current floor. Ruby floor is unaffected: mcp 1.2.0 needs >= 2.7.0, Woods declares >= 3.0.0, and the rails-6.0 testbed variant on Ruby 3.0 stays supported — assert this with a CI row rather than trusting it. Gates B-112, B-113 and B-114. Acceptance: a legacy client and a modern client both work against one unmodified woods-mcp process (the SDK server is dual-era, and NOT pinning a version is what keeps it that way); server/discover returns Woods' capabilities; no Ruby or Rails floor moves. See docs/design/MCP_2026_STRATEGY.md. RESOLVED: gemspec now `mcp >= 1.2, < 2.0`; the MCP slice passed after updating modern HTTP requests to send the required Mcp-Method header and reading serverInfo from discovery _meta. exe/woods-mcp-start no longer defaults MCP_PROTOCOL_VERSION and announces on stderr when an operator pins one. Verified dual-era against a real built server in spec/mcp/modern_lifecycle_spec.rb: server/discover answers, a handshake-free tools/call succeeds, and a legacy `initialize` is still served by the same process. Ruby floor unmoved (mcp 1.2.0 needs >= 2.7.0).",
+    "status": "resolved"
+  },
+  {
+    "id": "B-112",
+    "title": "Stateless Streamable HTTP — a woods-mcp-http restart should be invisible to clients",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "exe/woods-mcp-http",
+      "docs/MCP_HTTP_TRANSPORT.md"
+    ],
+    "depends_on": [
+      "B-111"
+    ],
+    "description": "exe/woods-mcp-http builds StreamableHTTPTransport.new(server) with no `stateless:` flag, so it mints Mcp-Session-Id, tracks sessions server-side and serves the GET SSE endpoint. Restarting the server therefore invalidates every client session — a routine event (gem update, machine sleep, worktree rebuild) that currently forces every connected client through a re-initialize. MCP 2026-07-28 removes protocol-level sessions entirely (SEP-2567), so `stateless: true` makes restart invisible and makes the HTTP server horizontally deployable for the first time: any POST can land on any instance, which matters for the Docker split architecture and multi-worktree setups reading one volume-mounted index. Gate on WOODS_MCP_HTTP_STATELESS defaulting to ON, keeping session mode for one deprecation window — the one real break is users relying on Mcp-Session-Id, since GET/DELETE start answering 405 and the header disappears from the documented CORS contract. The spec also removes SSE resumability (Last-Event-ID); that is near-free for Woods because every index tool is a short JSON read, and the only long operations (pipeline_extract/pipeline_embed) are already fire-and-forget and move to Tasks under B-113. Depends on B-111. See docs/design/MCP_2026_STRATEGY.md. RESOLVED: exe/woods-mcp-http passes `stateless: true` unless WOODS_MCP_HTTP_STATELESS is 0/false/no, and the startup banner names the mode. docs/MCP_HTTP_TRANSPORT.md gains a Statelessness section with a behaviour table (GET/DELETE -> 405, no Mcp-Session-Id, no server-initiated notifications) and drops Mcp-Session-Id from the documented CORS contract for the default mode.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-113",
+    "title": "Adopt the Tasks extension for pipeline_extract/pipeline_embed, replacing the hand-rolled async protocol",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "depends_on": [
+      "B-111"
+    ],
+    "description": "pipeline_extract spawns Thread.new and returns {status: 'started'}; the agent never hears from it again and must poll pipeline_status to guess the outcome. If the MCP process dies mid-run the thread dies with it and no durable record survives. Around this sits a hand-rolled async job protocol: @pipeline_mutex, @pipeline_in_flight, pipeline_start/pipeline_finish, PIPELINE_LOCK_WAIT, acquire_lock_briefly, plus pipeline_status/diagnose/repair. The io.modelcontextprotocol/tasks extension standardises exactly this — advertise it, and when a client declares support return a CreateTaskResult with a durable taskId, ttlMs and pollIntervalMs, serving tasks/get, tasks/update and tasks/cancel. When the client does NOT declare support, fall back to today's behaviour verbatim: the spec forbids returning a task to a client that did not opt in, and that fallback IS the old-client compatibility story. Buys a real completion signal (success/failure with the error, not a poll-and-guess), disconnect survival (a task ID is durable — client restarts and resumes polling), cooperative cancellation against a LockHeartbeat-guarded run (inexpressible today), and deletion of the bespoke machinery, narrowing pipeline_status to reporting index state rather than doubling as a job-status endpoint. The durable task store must outlive the process to deliver the crash-resilience claim; the natural substrate is the index directory Woods already writes atomically — and any new writer against it MUST take PipelineLock (unlocked writers are how #169/#170 happened). Depends on B-111. See docs/design/MCP_2026_STRATEGY.md. RESOLVED: the mcp gem does not implement the Tasks extension (no tasks/* methods), so Woods supplies the extension methods, durable store, and tool-handler opt-in bridge. New lib/woods/mcp/tasks/: Store (durable one-file-per-task registry under <index_dir>/tasks/, AtomicFile writes, terminal-state guard, ttl sweep, and orphan detection that resolves a `working` record whose owning pid is gone to `failed`), Extension (capability advertisement + tasks/get, tasks/cancel, tasks/update via define_custom_method), and RequestCapture (a call_tool prepend that reads the request _meta envelope and exposes the opt-in to tool handlers via a thread-local, cleared in an ensure because Puma reuses request threads). pipeline_extract and pipeline_embed now share run_pipeline_in_background, which returns a CreateTaskResult to an opted-in client and the previous {status: 'started'} to everyone else, and records completion OR failure on the task. NOT done as originally scoped: @pipeline_in_flight / pipeline_start / pipeline_finish are kept. The task registry replaces the status-reporting half but the in-process mutex still has a job (cheap same-process exclusion without a disk read per call), so removing it would trade correctness-neutral code for a slower guard. The store deliberately does NOT take PipelineLock: records are one-file-per-task with no cross-file consistency to protect, and taking it would deadlock, since pipeline_extract holds that lock for exactly the span its task record needs updating. Task creation failure (read-only index dir) degrades to fire-and-forget rather than failing the tool.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-114",
+    "title": "Generation-driven change notifications (blocked on SDK subscriptions/listen)",
+    "severity": "low",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb",
+      "lib/woods/mcp/protocol_policy.rb"
+    ],
+    "depends_on": [
+      "B-111"
+    ],
+    "description": "PARTIALLY RESOLVED. Done: (1) tools are sorted by name after all conditional registration, in both the index and console servers, via the shared Woods::MCP::ProtocolPolicy — so a host with Notion wired advertises the same order as one without, which is what the spec asks for to keep an LLM's prompt cache warm, and which also fixes cursor pagination (the SDK paginates by offset over that previously-unordered collection). (2) SEP-2549 cache hints: cacheScope is pinned to 'private' and deliberately not configurable, because every result describes the user's own codebase and the SDK's fallback when only ttl_ms is set is 'public' — so setting a ttl and leaving the scope alone is exactly the combination that would let a shared proxy re-serve one user's source to another; ttlMs defaults to 10s (WOODS_MCP_CACHE_TTL_MS) chosen to be safe for the most volatile result the SDK applies it to, and a malformed override falls back rather than raising. BLOCKED: the generation-driven push. Two independent walls. (a) Stateless HTTP has no notification channel at all -- the SDK's send_notification opens with `return false if @stateless` -- so having made statelessness the default in B-112 there is nothing to push on. (b) subscriptions/listen is the 2026-07-28 opt-in mechanism and the SDK does not implement it, while the spec says a server MUST NOT send notification types the client has not explicitly requested -- so there is no conforming way for a client to ask, and pushing anyway would violate that MUST. Implementing it would mean building a long-lived SSE response stream inside a transport built to hold none. Cost of waiting is bounded: IndexReader#ensure_fresh! is the correctness path and is untouched, so an agent never reads a stale index -- it just learns of a change on its next call rather than immediately, exactly the relationship the reload tool already has. Revisit when the SDK ships subscriptions/listen.",
+    "status": "open"
+  },
+  {
+    "id": "B-115",
+    "title": "Per-request modern envelope validation is handled by mcp 1.2.0",
+    "severity": "medium",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "RESOLVED UPSTREAM: MCP 2026-07-28 requires a server to reject a request whose protocolVersion it does not support with UnsupportedProtocolVersionError (-32022) and a supported list. mcp 1.2.0 now invokes RequestEnvelope.parse! on the server path, so Woods no longer needs a local prepend. Acceptance: a modern request with protocolVersion 1900-01-01 returns -32022, while legacy initialize and supported modern requests keep working.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-116",
+    "title": "resultType emission is handled by mcp 1.2.0",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "RESOLVED UPSTREAM: MCP 2026-07-28 requires resultType on every modern result. mcp 1.2.0 stamps ordinary modern results with resultType complete, and Woods Tasks results keep their explicit task/complete result types. No local response-stamping prepend is needed.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-117",
+    "title": "Validate the MCP 2026-07-28 protocol work against a booted Rails host",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "mcp",
+    "files": [
+      "spec/mcp/tasks/pipeline_tasks_spec.rb"
+    ],
+    "description": "None of B-111/112/113/114 has been exercised against a booted Rails app -- the authoring environment had the Docker binary but no daemon, so woods-testbed was unusable. Two things the unit suite cannot reach. (1) pipeline_extract against a REAL extraction: every task-lifecycle spec stubs Woods::Extractor, so nothing has watched a genuine multi-second run move a task working -> completed, nor confirmed the LockHeartbeat and task-completion interleaving under real timing. (2) The task store on a real index directory alongside a live watch daemon and genuine PipelineLock contention -- the argument that task records need no lock (one file per task, no cross-file consistency) is reasoned in the code and unit-tested but never observed under concurrency. Also worth confirming the store degrades correctly when the index dir is a read-only mount, which is a real Docker split-architecture setup. Put the smoke script in woods-testbed scripts/ so it runs unchanged against rails-6.0/7.2/8.0. See docs/design/MCP_2026_NEXT_STEPS.md 4.1.",
+    "status": "ready"
+  },
+  {
+    "id": "B-118",
+    "title": "Upstream remaining mcp gem extension gaps",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/tasks/extension.rb"
+    ],
+    "description": "mcp 1.2.0 now handles the core 2026-07-28 server lifecycle: RequestEnvelope validation, resultType, header mismatch errors, Mcp-Method/Mcp-Name validation, stateless HTTP and server/discover. The remaining gaps relevant to Woods are extension-level: no native Tasks extension and no subscriptions/listen. Woods compensates locally for Tasks with Tasks::Extension and a durable Store; subscriptions/listen still blocks generation-driven push notifications. Filing issues or PRs upstream would let Woods delete local protocol-extension code when native support lands.",
+    "status": "ready"
   }
 ]

@@ -63,16 +63,37 @@ server = Woods::MCP::Server.build(
   index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
   bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
 )
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
+# Stateless Streamable HTTP (MCP 2026-07-28, SEP-2567) is the default.
+#
+# Protocol-level sessions are gone from the spec, and for this server they were
+# never carrying anything: the index is on disk, `IndexReader` self-refreshes off
+# the published generation, and no tool holds per-client state. What the session
+# DID do was tie every client to one server process — so a restart (gem upgrade,
+# machine sleep, worktree rebuild) invalidated every session and forced a
+# re-initialize. Stateless makes a restart invisible, and lets several instances
+# serve one volume-mounted index without sticky routing.
+#
+# Set WOODS_MCP_HTTP_STATELESS=0 to restore session mode for a client that still
+# needs `Mcp-Session-Id`, the GET SSE stream, or DELETE teardown. That escape
+# hatch is transitional — the spec has removed all three. See
+# docs/MCP_HTTP_TRANSPORT.md#statelessness.
+stateless = !%w[0 false no].include?(ENV.fetch('WOODS_MCP_HTTP_STATELESS', '1').strip.downcase)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: stateless)
 server.transport = transport
 
 allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
 
-inner = proc { |env| transport.handle_request(Rack::Request.new(env)) }
+inner = proc do |env|
+  env = env.dup
+  env.delete('HTTP_MCP_SESSION_ID') if stateless
+  transport.handle_request(Rack::Request.new(env))
+end
 app = token ? Woods::MCP::BearerAuth.new(inner, token: token) : inner
 app = Woods::MCP::OriginGuard.new(app, allowed_origins: allowed_origins)
 
 origin_summary = allowed_origins.empty? ? 'loopback' : allowed_origins.join(',')
 auth_mode = token ? 'bearer' : 'none'
-warn "Woods MCP HTTP server starting on http://#{host}:#{port} (auth: #{auth_mode}, origins: #{origin_summary})"
+session_mode = stateless ? 'stateless' : 'sessions (deprecated)'
+warn "Woods MCP HTTP server starting on http://#{host}:#{port} " \
+     "(auth: #{auth_mode}, origins: #{origin_summary}, mode: #{session_mode})"
 Rackup::Handler.default.run(app, Port: port, Host: host)

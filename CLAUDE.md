@@ -6,11 +6,19 @@ Ruby gem that extracts structured data from Rails applications for AI-assisted d
 
 ```bash
 # Development
+# Prefer the checked-in binstubs (bin/rake, bin/rspec, bin/rubocop). Under
+# Bundler 4 `bundle exec rake` / `bundle exec rspec` fail with "command not
+# found" — Bundler 4 no longer exposes gem binstubs. The binstubs work on both.
 bundle install
-bundle exec rake spec                            # Full test suite
-bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
-bundle exec rubocop -a                            # Lint + autofix
-bundle exec rubocop --auto-gen-config             # Update .rubocop_todo.yml
+bin/rake spec                                    # Full test suite
+bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
+bin/rubocop -a                                   # Lint + autofix
+bin/rubocop --auto-gen-config                    # Update .rubocop_todo.yml
+
+# Opt-in spec tags (excluded from the default suite)
+WOODS_RUN_HTTP_SERVER=1 bin/rspec spec/mcp/http_server_e2e_spec.rb   # boots exe/woods-mcp-http
+WOODS_RUN_BOOTED_APP=1  bin/rspec spec/integration/booted_extraction_spec.rb
+WOODS_RUN_PERF_SPECS=1  bin/rspec --tag perf
 
 # In a host Rails app (extraction requires Rails boot)
 bundle exec rake woods:extract           # Full extraction
@@ -267,6 +275,11 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `extract_dependencies` in all extractors must include `:via` key — see model_extractor for reference values.
 - MCP server tool dispatch uses `Mutex` for thread safety — don't call tool handlers from multiple threads without going through the server's dispatch.
 - The Index Server (`woods-mcp`) boots in **pattern-only mode by default** when no `woods.json` is present and no embedding provider is configured (#138) — extract-only hosts get every always-on tool with no env var. `codebase_retrieve` (semantic search) activates only when a provider is configured. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot (raises `MissingArtifact`); `WOODS_ALLOW_AUTODETECT` is now a back-compat no-op. The strict-vs-default decision lives in `ConfigResolver.resolve_without_artifact`.
+- Both MCP servers are `MCP::Server` instances from the `mcp` gem (pinned `>= 1.2, < 2.0`) — Woods writes no protocol code. **Never pin `MCP_PROTOCOL_VERSION`.** The SDK server is dual-era (it answers `initialize` for legacy clients *and* serves `server/discover` plus per-request `_meta` for modern ones), and pinning is the single action that collapses it to one era — the unpinned server is the *more* compatible one. `exe/woods-mcp-start` shipped a `2024-11-05` default for a long time, which silently opted every user out of four protocol revisions. The env var survives as an escape hatch only.
+- mcp 1.2.0 completes the core 2026-07-28 server lifecycle Woods depends on: `server/discover`, stateless HTTP, modern request-envelope validation, `Mcp-Method`/`Mcp-Name` header checks, cache hints, and `resultType`. It still does not implement the Tasks extension or `subscriptions/listen`, so Woods supplies durable `tasks/*` support locally and leaves generation-driven push notifications blocked on upstream support.
+- `woods-mcp-http` is **stateless by default** (`WOODS_MCP_HTTP_STATELESS=0` restores sessions for one deprecation window). Stateless has no notification channel at all — the SDK's `send_notification` opens with `return false if @stateless` — so anything wanting to push to clients is unavailable on that transport, which is what blocks generation-driven change notifications (B-114). `IndexReader#ensure_fresh!` remains the correctness path for freshness; push was only ever the optimization.
+- `Woods::MCP::ProtocolPolicy` owns the two protocol decisions the SDK can't make for us. `cache_scope` is **pinned to `'private'` and must stay non-configurable** — every result describes the user's own codebase, and the SDK's fallback when only `ttl_ms` is set is `'public'`, so setting a ttl and leaving the scope alone is precisely the combination that authorises a shared proxy to re-serve one user's source to another. `sort_tools!` runs **after** every conditional registration (it reaches into `@tools` and no-ops if the SDK's internal shape changes): unsorted, a host with Notion wired advertises a different tool order than one without, which misses the LLM prompt cache and shifts the SDK's offset-based `tools/list` pagination.
+- `Woods::MCP::Tasks` (the protocol extension) is distinct from `Woods::Tasks` (rake helpers). Its `Store` writes one file per task under `<index_dir>/tasks/` and **deliberately does not take `PipelineLock`**, which is a real exception to the "every writer takes the lock" rule: the lock exists because the index artifacts are a *set* that must agree, while task records share nothing across files — and taking it would deadlock outright, since `pipeline_extract` holds that lock for exactly the span its own task record needs updating. Orphan detection (a `working` record whose recorded pid is gone → `failed`) is what makes a crashed server visible to an agent instead of leaving it polling forever. A task is returned **only** to a client that declared `io.modelcontextprotocol/tasks`; one that did not would read the handle as the final result and report a run that never happened. The opt-in is read from `_meta` by a `call_tool` prepend (`Tasks::RequestCapture`) into a thread-local cleared in an `ensure` — Puma reuses request threads, and a leaked flag hands a task to a client that cannot poll it.
 - Console bridge requires a booted Rails environment on the other end — it validates models against `ActiveRecord::Base.descendants` at startup.
 - Console `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. This is intentional defense-in-depth, not a bug.
 - `SqlValidator` rejects DML/DDL at the string level before any database interaction. Don't bypass it for "convenience."

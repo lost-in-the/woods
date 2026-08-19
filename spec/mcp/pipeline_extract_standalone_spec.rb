@@ -36,7 +36,9 @@ RSpec.describe 'pipeline_extract in a standalone index-server process' do
       )
       tool = server.instance_variable_get(:@tools).fetch('pipeline_extract')
       response = tool.call(server_context: {})
-      (Thread.list - [Thread.main]).each { |t| t.join(10) }
+      (Thread.list - [Thread.main]).each do |thread|
+        abort 'background pipeline thread did not finish' unless thread.join(10)
+      end
       puts response.content.first[:text]
     RUBY
 

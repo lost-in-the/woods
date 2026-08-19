@@ -57,6 +57,29 @@ RSpec.describe 'MCP CLI integration' do
         expect(utf8(err)).to match(/bundle exec rake woods:extract/)
       end
     end
+
+    # The wrapper used to default MCP_PROTOCOL_VERSION to 2024-11-05. The mcp
+    # gem's server is dual-era — it answers `initialize` for legacy clients and
+    # serves per-request metadata for modern ones — and pinning is the single
+    # action that collapses it to one era, so the unpinned server is the more
+    # compatible one. A regression here is silent: everything still works, just
+    # four protocol revisions behind.
+    describe 'protocol version handling' do
+      # Explicit UTF-8 — the suite runs under LANG=C and the wrapper's comments
+      # contain em dashes, so a bare File.read would tag them US-ASCII and make
+      # `match` raise instead of fail.
+      let(:source) { File.read(wrapper, encoding: Encoding::UTF_8) }
+
+      # `${MCP_PROTOCOL_VERSION:-}` is the presence check and is fine; what must
+      # never come back is a revision date as the default value.
+      it 'does not default MCP_PROTOCOL_VERSION to a pinned revision' do
+        expect(source).not_to match(/MCP_PROTOCOL_VERSION:-\s*\d{4}-\d{2}-\d{2}/)
+      end
+
+      it 'still exports MCP_PROTOCOL_VERSION when the operator sets one' do
+        expect(source).to match(/export MCP_PROTOCOL_VERSION/)
+      end
+    end
   end
 
   # ── exe/woods-mcp (Ruby entry point) ─────────────────────────────

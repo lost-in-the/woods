@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'mcp'
+require_relative '../mcp/protocol_policy'
 require_relative 'connection_manager'
 require_relative 'model_validator'
 require_relative 'safe_context'
@@ -473,7 +474,8 @@ module Woods
         def build_server(conn_mgr, ctx)
           server = ::MCP::Server.new(
             name: 'woods-console',
-            version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0'
+            version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0',
+            **Woods::MCP::ProtocolPolicy.cache_hints
           )
 
           renderer = build_console_renderer
@@ -482,7 +484,10 @@ module Woods
           register_tier2_tools(server, conn_mgr, ctx, renderer: renderer)
           register_tier3_tools(server, conn_mgr, ctx, renderer: renderer)
           register_tier4_tools(server, conn_mgr, ctx, renderer: renderer)
-          server
+          # Tier registration is conditional (embedded mode drops sql/query,
+          # tier 4 needs the unsafe-eval opt-in), so the advertised order moves
+          # with configuration unless it is sorted. See ProtocolPolicy.
+          Woods::MCP::ProtocolPolicy.sort_tools!(server)
         end
 
         # Loud multi-line banner surfaced to stderr when the opt-in flag is

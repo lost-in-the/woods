@@ -44,7 +44,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   # Runtime dependencies
-  spec.add_dependency 'mcp', '>= 0.9.2', '< 1.0'
+  spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
   spec.add_dependency 'msgpack', '>= 1.5'
   # woods-mcp-http requires rackup directly. Rails 6.x hosts do not guarantee
   # rackup is present transitively, but the executable is shipped with the gem.
