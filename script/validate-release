@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'date'
+require 'json'
+require 'net/http'
+require 'open3'
+require 'uri'
+
+class ReleaseValidationError < StandardError; end
+
+def fail_release(message)
+  raise ReleaseValidationError, message
+end
+
+def git(*args)
+  output, status = Open3.capture2e('git', *args)
+  fail_release("git #{args.join(' ')} failed: #{output.strip}") unless status.success?
+
+  output.strip
+end
+
+def published_versions
+  payload = ENV.fetch('RUBYGEMS_VERSIONS_JSON', nil)
+  return JSON.parse(payload) if payload
+
+  uri = URI(ENV.fetch('RUBYGEMS_API_URL', 'https://rubygems.org/api/v1/versions/woods.json'))
+  response = Net::HTTP.start(
+    uri.host,
+    uri.port,
+    use_ssl: uri.scheme == 'https',
+    open_timeout: 10,
+    read_timeout: 10
+  ) { |http| http.get(uri.request_uri) }
+  fail_release("RubyGems version check failed with HTTP #{response.code}") unless response.is_a?(Net::HTTPSuccess)
+
+  JSON.parse(response.body)
+rescue JSON::ParserError => e
+  fail_release("RubyGems version check returned invalid JSON: #{e.message}")
+rescue SocketError, SystemCallError, Timeout::Error, URI::InvalidURIError => e
+  fail_release("RubyGems version check failed: #{e.message}")
+end
+
+begin
+  require File.expand_path('lib/woods/version', Dir.pwd)
+
+  version = Woods::VERSION
+  expected_tag = "v#{version}"
+  tag = ENV.fetch('RELEASE_TAG')
+  release_sha = ENV.fetch('RELEASE_SHA')
+  main_ref = ENV.fetch('RELEASE_MAIN_REF', 'origin/main')
+
+  fail_release("release tag #{tag.inspect} must equal #{expected_tag}") unless tag == expected_tag
+  fail_release("release SHA #{release_sha.inspect} is not a full Git SHA") unless release_sha.match?(/\A[0-9a-f]{40}\z/)
+
+  tag_sha = git('rev-parse', "refs/tags/#{tag}^{commit}")
+  fail_release("#{tag} resolves to #{tag_sha}, not release SHA #{release_sha}") unless tag_sha == release_sha
+
+  head_sha = git('rev-parse', 'HEAD')
+  fail_release("checked-out HEAD #{head_sha} does not equal release SHA #{release_sha}") unless head_sha == release_sha
+
+  unless system('git', 'merge-base', '--is-ancestor', release_sha, main_ref, out: File::NULL, err: File::NULL)
+    fail_release("release SHA #{release_sha} is not reachable from #{main_ref}")
+  end
+
+  changelog = File.read('CHANGELOG.md')
+  heading = changelog.match(/^## \[#{Regexp.escape(version)}\] - (\d{4}-\d{2}-\d{2})$/)
+  fail_release("missing dated CHANGELOG.md section for #{version}") unless heading
+
+  release_date = Date.iso8601(heading[1])
+  fail_release("invalid CHANGELOG.md date for #{version}") unless release_date.iso8601 == heading[1]
+
+  if published_versions.any? { |entry| entry.fetch('number', entry['version']) == version }
+    fail_release("woods #{version} is already published")
+  end
+
+  puts "Validated #{tag} at #{release_sha} with CHANGELOG.md date #{release_date.iso8601}"
+rescue Date::Error, KeyError, ReleaseValidationError => e
+  warn "Release validation failed: #{e.message}"
+  exit 1
+end

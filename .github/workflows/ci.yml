@@ -8,6 +8,7 @@ on:
   # resolution, or a direct push, went green purely by absence of a run (#220).
   push:
     branches: [main]
+    tags: ['v*']
 
 # Least-privilege default: CI only needs to read the checkout.
 # Per-job blocks can opt into stronger scopes if they ever need to.
@@ -214,4 +215,4 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
       - name: Build gem
-        run: gem build woods.gemspec
+        run: gem build --strict woods.gemspec
