@@ -1,71 +1,31 @@
-#!/usr/bin/env bash
-# Self-healing wrapper for the Woods MCP server.
-# Ensures Ruby dependencies are installed, validates the index directory,
-# and starts the stdio MCP server.
-#
-# Usage (direct):
-#   woods-mcp-start /path/to/index_dir
-#
-# Usage (.mcp.json):
-#   {
-#     "command": "${HOME}/work/codebase_index/exe/woods-mcp-start",
-#     "args": ["${HOME}/my-rails-app/tmp/woods"]
-#   }
-#
-# All diagnostic output goes to stderr to keep stdio clean for MCP protocol.
+#!/usr/bin/env ruby
+# frozen_string_literal: true
 
-set -euo pipefail
+# Self-healing entry point for the Woods Index MCP server. RubyGems loads gem
+# executables as Ruby, so this wrapper must remain a Ruby program when packaged.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GEM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-INDEX_DIR="${1:-${WOODS_DIR:-}}"
+index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil)
 
-# --- Validate index directory ---
-if [[ -z "$INDEX_DIR" ]]; then
-  echo "Error: No index directory specified." >&2
-  echo "Usage: woods-mcp-start /path/to/index_dir" >&2
+if index_dir.nil? || index_dir.empty?
+  warn 'Error: No index directory specified.'
+  warn 'Usage: woods-mcp-start /path/to/index_dir'
   exit 1
-fi
+end
 
-if [[ ! -d "$INDEX_DIR" ]]; then
-  echo "Error: Index directory does not exist: $INDEX_DIR" >&2
-  echo "Run extraction first: bundle exec rake woods:extract" >&2
+unless File.directory?(index_dir)
+  warn "Error: Index directory does not exist: #{index_dir}"
+  warn 'Run extraction first: bundle exec rake woods:extract'
   exit 1
-fi
+end
 
-if [[ ! -f "$INDEX_DIR/manifest.json" ]]; then
-  echo "Error: No manifest.json in: $INDEX_DIR" >&2
-  echo "Run extraction first: bundle exec rake woods:extract" >&2
+unless File.file?(File.join(index_dir, 'manifest.json'))
+  warn "Error: No manifest.json in: #{index_dir}"
+  warn 'Run extraction first: bundle exec rake woods:extract'
   exit 1
-fi
+end
 
-# --- Ensure Ruby dependencies are installed ---
-export BUNDLE_GEMFILE="${GEM_DIR}/Gemfile"
+if ENV['MCP_PROTOCOL_VERSION'] && !ENV['MCP_PROTOCOL_VERSION'].empty?
+  warn "Pinning MCP protocol version to #{ENV.fetch('MCP_PROTOCOL_VERSION')} (unset it to negotiate)."
+end
 
-if ! bundle check > /dev/null 2>&1; then
-  echo "Installing woods dependencies..." >&2
-  if ! bundle install --quiet >&2 2>&1; then
-    echo "Error: bundle install failed. Check Ruby version and network." >&2
-    exit 1
-  fi
-  echo "Dependencies installed." >&2
-fi
-
-# --- MCP protocol version: negotiate, do not pin ---
-# This wrapper used to default MCP_PROTOCOL_VERSION to 2024-11-05, the oldest
-# protocol revision there is. It was written when that was the widest-compatible
-# choice, but it is now actively harmful: the mcp gem's server is dual-era —
-# it answers `initialize` for legacy clients AND serves `server/discover` plus
-# per-request metadata for modern ones — and pinning is the single action that
-# collapses it to one era. An unpinned server is the MORE compatible one.
-#
-# The variable remains an escape hatch for a client that mis-negotiates; export
-# it yourself (in .mcp.json `env`, or the surrounding shell) to force a version.
-# See docs/design/MCP_2026_STRATEGY.md §5.
-if [[ -n "${MCP_PROTOCOL_VERSION:-}" ]]; then
-  echo "Pinning MCP protocol version to ${MCP_PROTOCOL_VERSION} (unset it to negotiate)." >&2
-  export MCP_PROTOCOL_VERSION
-fi
-
-# --- Start the MCP server ---
-exec bundle exec ruby "${GEM_DIR}/exe/woods-mcp" "$INDEX_DIR"
+exec(File.expand_path('woods-mcp', __dir__), index_dir)

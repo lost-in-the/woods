@@ -38,6 +38,10 @@ RSpec.configure do |config|
   # against a predictable box.
   config.filter_run_excluding(perf: true) unless ENV['WOODS_RUN_PERF_SPECS']
 
+  # Packaged-gem specs install and boot the built artifact in an isolated gem
+  # home. Release CI opts in on the Ruby floor and latest lanes.
+  config.filter_run_excluding(packaged_gem: true) unless ENV['WOODS_RUN_PACKAGE_SMOKE']
+
   # Booted-app specs (spec/integration/booted_extraction_spec.rb) boot a real
   # Rails app in-process and require full Rails (activerecord + actionpack),
   # which the default unit Gemfile doesn't bundle. Excluded from the default

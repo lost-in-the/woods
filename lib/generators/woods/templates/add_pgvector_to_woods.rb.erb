@@ -1,4 +1,4 @@
-class AddPgvectorToWoods < ActiveRecord::Migration[7.0]
+class AddPgvectorToWoods < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   # Creates the `woods_vectors` table read and written by
   # Woods::Storage::VectorStore::Pgvector. The DDL mirrors the adapter's own
   # idempotent ensure_schema! (CREATE ... IF NOT EXISTS), so it is safe to run

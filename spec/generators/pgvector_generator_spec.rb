@@ -17,6 +17,12 @@ RSpec.describe 'Pgvector generator template' do
   # Render the template the way the generator does: @dimensions is the
   # generator's --dimensions option (default 1536).
   def render(dimensions = nil)
+    migration = Class.new do
+      def self.current_version
+        '8.1'
+      end
+    end
+    stub_const('ActiveRecord::Migration', migration)
     @dimensions = dimensions
     ERB.new(File.read(template_path, encoding: 'UTF-8')).result(binding)
   end
