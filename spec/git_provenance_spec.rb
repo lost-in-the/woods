@@ -12,6 +12,10 @@ RSpec.describe Woods::GitProvenance do
     run(dir, 'git', 'init', '--quiet', '--initial-branch', branch)
     run(dir, 'git', 'config', 'user.email', 'test@example.com')
     run(dir, 'git', 'config', 'user.name', 'Test')
+    # The host's global config leaks into these repos — a machine with
+    # commit.gpgsign=true and an unavailable signer (locked agent) hangs
+    # or fails every commit below. Pin the hermetic behaviour.
+    run(dir, 'git', 'config', 'commit.gpgsign', 'false')
     File.write(File.join(dir, 'README.md'), "hello\n")
     run(dir, 'git', 'add', '.')
     run(dir, 'git', 'commit', '--quiet', '-m', 'initial')

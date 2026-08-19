@@ -5,6 +5,9 @@ require 'woods/retrieval/search_executor'
 require 'woods/retrieval/query_classifier'
 require 'woods/retrieval/context_assembler'
 require 'woods/storage/metadata_store'
+# instance_double(Woods::Embedding::TokenCounter) only verifies when the
+# constant is loaded; require it here so the spec passes standalone.
+require 'woods/embedding/token_counter'
 
 RSpec.describe Woods::Retrieval::ContextAssembler do
   let(:metadata_store) { instance_double(Woods::Storage::MetadataStore::Interface) }

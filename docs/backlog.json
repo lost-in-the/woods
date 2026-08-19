@@ -1539,9 +1539,29 @@
     "files": [
       "spec/support/shared_extractor_context.rb",
       "spec/extractors/mailer_extractor_spec.rb",
-      "spec/extractors/view_component_extractor_spec.rb"
+      "spec/extractors/view_component_extractor_spec.rb",
+      "spec/mcp/server_spec.rb",
+      "spec/mcp/snapshot_tools_spec.rb",
+      "spec/obsidian/note_builder_spec.rb",
+      "spec/obsidian/vault_exporter_spec.rb",
+      "spec/retrieval/context_assembler_spec.rb",
+      "spec/git_provenance_spec.rb"
     ],
-    "description": "i18n (15/15), mailer (24/32), rails_source (33/33) and view_component (16/23) specs failed when run as a single file: the 'extractor setup' shared context referenced Woods::ModelNameCache without requiring it, and mailer/view_component called Woods.configuration without require 'woods' \u2014 so extraction raised, the rescue logged it, and every assertion hit a nil unit. All four passed in the full suite because earlier files loaded the constants first, which hides real breakage until someone bisects a single file. Found during the B-106 sweep (GH #219); verified pre-existing by stashing.",
+    "description": "i18n (15/15), mailer (24/32), rails_source (33/33) and view_component (16/23) specs failed when run as a single file: the 'extractor setup' shared context referenced Woods::ModelNameCache without requiring it, and mailer/view_component called Woods.configuration without require 'woods' \u2014 so extraction raised, the rescue logged it, and every assertion hit a nil unit. All four passed in the full suite because earlier files loaded the constants first, which hides real breakage until someone bisects a single file. Found during the B-106 sweep (GH #219); verified pre-existing by stashing. A follow-up per-directory sweep found five more files in the same state \u2014 server_spec/snapshot_tools_spec (real-constant instance_doubles from the 98b9280 sweep), note_builder/vault_exporter/context_assembler (same) \u2014 all fixed by requiring the constants the doubles verify against. Same hermeticity class, different vector: git_provenance_spec's temp repos inherited the host's global commit.gpgsign, so a machine whose signer is unavailable (locked 1Password agent) hung or failed 3 examples; the repos now pin commit.gpgsign=false.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-110",
+    "slug": "pipeline-extract-missing-require",
+    "title": "MCP pipeline_extract dies with NameError in a standalone woods-mcp process",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "The pipeline_extract tool's background run called Woods::Extractor.new directly, but exe/woods-mcp deliberately loads no extraction machinery and lib/woods.rb only lazy-requires the extractor inside Woods.extract!. In a standalone index-server process every pipeline_extract invocation therefore failed in the background with NameError: uninitialized constant Woods::Extractor \u2014 rescued and logged, so the tool reported 'started' and nothing landed. Invisible to the in-suite operator specs because other spec files load the constant first; surfaced by the B-109 per-directory standalone sweep. Fixed with the same lazy require Woods.extract! uses, pinned by a subprocess regression spec (spec/mcp/pipeline_extract_standalone_spec.rb) proven to fail against the reverted code.",
     "status": "resolved",
     "depends_on": []
   }

@@ -1012,6 +1012,12 @@ module Woods
             guard&.record!(:extraction)
 
             run_extraction = lambda do
+              # exe/woods-mcp deliberately loads no extraction machinery, so
+              # Woods::Extractor is not defined in a standalone index-server
+              # process. Resolve it here, the same lazy require Woods.extract!
+              # uses — otherwise every pipeline_extract run dies in the
+              # background with NameError.
+              require_relative '../extractor'
               extractor = Woods::Extractor.new(output_dir: output_dir)
               incremental ? extractor.extract_changed(files) : extractor.extract_all
             end

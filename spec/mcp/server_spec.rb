@@ -7,6 +7,14 @@ require 'woods'
 require 'woods/dependency_graph'
 require 'woods/flow_document'
 require 'woods/mcp/server'
+# The verifying doubles below reference these constants directly, so the
+# spec must load them itself — in the full suite other files load them
+# first, which hides the dependency until this file runs standalone.
+require 'woods/feedback/store'
+require 'woods/operator/pipeline_guard'
+require 'woods/operator/status_reporter'
+require 'woods/session_tracer/file_store'
+require 'woods/session_tracer/session_flow_assembler'
 
 RSpec.describe Woods::MCP::Server do
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }

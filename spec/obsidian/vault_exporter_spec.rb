@@ -7,6 +7,9 @@ require 'yaml'
 require 'pathname'
 require 'stringio'
 require 'woods/obsidian/vault_exporter'
+# instance_double(Woods::MCP::IndexReader) only verifies when the constant
+# is loaded; require it here so the spec passes standalone.
+require 'woods/mcp/index_reader'
 
 RSpec.describe Woods::Obsidian::VaultExporter do
   around do |example|

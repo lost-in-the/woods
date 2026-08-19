@@ -4,6 +4,9 @@ require 'spec_helper'
 require 'woods'
 require 'woods/dependency_graph'
 require 'woods/mcp/server'
+# instance_double(Woods::Temporal::SnapshotStore) only verifies when the
+# constant is loaded; require it here so the spec passes standalone.
+require 'woods/temporal/snapshot_store'
 
 RSpec.describe 'Snapshot MCP tools' do
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }

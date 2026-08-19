@@ -4,6 +4,9 @@ require 'spec_helper'
 require 'yaml'
 require 'woods/obsidian/name_mapper'
 require 'woods/obsidian/note_builder'
+# instance_double(Woods::Console::CredentialScanner) only verifies when the
+# constant is loaded; require it here so the spec passes standalone.
+require 'woods/console/credential_scanner'
 require_relative '../fixtures/unblocked/golden_units'
 
 RSpec.describe Woods::Obsidian::NoteBuilder do
