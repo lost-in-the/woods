@@ -8,7 +8,7 @@
   {
     "id": "release-v2-02",
     "title": "Close publishing and packaged-gem release blockers",
-    "status": "pending",
+    "status": "in_progress",
     "description": "Make the release workflow build, validate, test, and publish one immutable artifact from the exact approved SHA."
   },
   {
