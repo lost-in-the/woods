@@ -16,6 +16,7 @@
       "reproduction_command": "rg -n 'needs: test|workflow_run|gem build' .github/workflows/release.yml .github/workflows/ci.yml",
       "owner": "release-v2-02",
       "status": "confirmed",
+      "disposition": "deferred_with_issue",
       "release_blocking": true
     },
     {
@@ -29,6 +30,7 @@
       "reproduction_command": "gem build woods.gemspec && gem contents woods-*.gem | sort",
       "owner": "release-v2-02",
       "status": "confirmed",
+      "disposition": "deferred_with_issue",
       "release_blocking": true
     },
     {
@@ -43,6 +45,7 @@
       "reproduction_command": "bundle exec rspec spec/console/tool_specs_spec.rb spec/console/bridge_spec.rb",
       "owner": "release-v2-03",
       "status": "confirmed",
+      "disposition": "deferred_with_issue",
       "release_blocking": true
     },
     {
@@ -56,6 +59,7 @@
       "reproduction_command": "bundle exec rspec spec/mcp/tasks/extension_spec.rb spec/mcp/server_spec.rb",
       "owner": "release-v2-04",
       "status": "confirmed",
+      "disposition": "deferred_with_issue",
       "release_blocking": true
     },
     {
@@ -70,6 +74,7 @@
       "reproduction_command": "bundle exec rspec spec/builder_spec.rb spec/resolved_config_spec.rb spec/storage",
       "owner": "release-v2-05",
       "status": "confirmed",
+      "disposition": "deferred_with_issue",
       "release_blocking": true
     }
   ]

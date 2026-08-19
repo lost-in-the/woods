@@ -19,24 +19,8 @@ module Woods
       ROOT = Pathname.new(File.expand_path('../../..', __dir__)).freeze
       INVENTORY_PATH = ROOT.join('.Codex/release-v2/surface-inventory.json').freeze
       INDEX_SERVER_PATH = ROOT.join('lib/woods/mcp/server.rb').freeze
-
-      INDEX_TOOL_CONDITIONS = {
-        'session_trace' => 'Woods.configuration.session_store is configured',
-        'pipeline_extract' => 'operator is provided',
-        'pipeline_embed' => 'operator is provided',
-        'pipeline_status' => 'operator is provided',
-        'pipeline_diagnose' => 'operator is provided',
-        'pipeline_repair' => 'operator is provided',
-        'retrieval_rate' => 'feedback_store is provided',
-        'retrieval_report_gap' => 'feedback_store is provided',
-        'retrieval_explain' => 'feedback_store is provided',
-        'retrieval_suggest' => 'feedback_store is provided',
-        'list_snapshots' => 'snapshot_store is provided',
-        'snapshot_diff' => 'snapshot_store is provided',
-        'unit_history' => 'snapshot_store is provided',
-        'snapshot_detail' => 'snapshot_store is provided',
-        'notion_sync' => 'a resolved Notion token and non-empty database IDs are configured'
-      }.freeze
+      BUILDER_PATH = ROOT.join('lib/woods/builder.rb').freeze
+      PUBLIC_DOCUMENTATION_PATHS = [ROOT.join('docs/README.md')].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
         def inventory
@@ -57,7 +41,8 @@ module Woods
             'tasks_methods' => Woods::Tasks.singleton_methods(false).map(&:to_s).sort,
             'adapters' => adapters,
             'public_woods_methods' => public_woods_methods,
-            'counts' => counts
+            'counts' => counts,
+            'documentation_claims' => documentation_claims
           }
         end
 
@@ -67,8 +52,10 @@ module Woods
         end
 
         def verify!
-          expected = JSON.parse(INVENTORY_PATH.read)
           actual = inventory
+          verify_documentation_claims!(actual)
+
+          expected = JSON.parse(INVENTORY_PATH.read)
           return true if canonicalize(expected) == canonicalize(actual)
 
           raise DriftError,
@@ -105,11 +92,11 @@ module Woods
         end
 
         def load_release_rake_tasks
-          return if defined?(@release_rake_tasks_loaded) && @release_rake_tasks_loaded
+          return if defined?(@release_rake_application) && @release_rake_application.equal?(Rake.application)
 
-          load ROOT.join('lib/tasks/woods.rake')
-          load ROOT.join('lib/tasks/woods_evaluation.rake')
-          @release_rake_tasks_loaded = true
+          load ROOT.join('lib/tasks/woods.rake') unless Rake::Task.task_defined?('woods:extract')
+          load ROOT.join('lib/tasks/woods_evaluation.rake') unless Rake::Task.task_defined?('woods:evaluate')
+          @release_rake_application = Rake.application
         end
 
         def executables
@@ -119,22 +106,49 @@ module Woods
         def index_mcp
           source = INDEX_SERVER_PATH.read
           {
-            'tools' => index_tool_names(source).map do |name|
-              { 'name' => name, 'registration_condition' => INDEX_TOOL_CONDITIONS.fetch(name, 'always registered') }
-            end,
+            'tools' => index_tool_registrations(source),
             'resources' => resources(source),
             'resource_templates' => resource_templates(source)
           }
         end
 
-        def index_tool_names(source)
-          direct = source.scan(/server\.define_tool\(\s*name:\s*'([^']+)'/m).flatten
-          traversals = source.each_line.each_cons(5).filter_map do |lines|
+        def index_tool_registrations(source)
+          build_source = method_source(source, 'build')
+          helper_registrations = build_source.each_line.filter_map do |line|
+            match = line.match(/^\s*(define_[a-z_]+)\(.*?\)(?:\s+if\s+(.+))?$/)
+            next unless match
+
+            helper, condition = match.captures
+            tool_names_for_helper(source, helper).map do |name|
+              { 'name' => name, 'registration_condition' => condition || 'always registered' }
+            end
+          end
+          traversal_registrations(build_source)
+            .concat(helper_registrations.flatten)
+            .sort_by { |tool| tool.fetch('name') }
+        end
+
+        def traversal_registrations(build_source)
+          build_source.each_line.each_cons(5).filter_map do |lines|
             next unless lines.first.include?('define_traversal_tool(server')
 
-            lines.join[/name:\s*'([^']+)'/, 1]
+            name = lines.join[/name:\s*'([^']+)'/, 1]
+            { 'name' => name, 'registration_condition' => 'always registered' } if name
           end
-          (direct + traversals).sort
+        end
+
+        def tool_names_for_helper(source, helper)
+          helper_source = method_source(source, helper)
+          names = helper_source.scan(/server\.define_tool\(\s*name:\s*'([^']+)'/m).flatten
+          return names unless names.empty?
+
+          helper_source.scan(/\b(define_[a-z_]+_tool)\(/).flatten
+                       .flat_map { |nested_helper| tool_names_for_helper(source, nested_helper) }
+                       .uniq
+        end
+
+        def method_source(source, name)
+          source[/^\s*def #{Regexp.escape(name)}\b.*?(?=^\s*(?:def |private\b)|\z)/m].to_s
         end
 
         def resources(source)
@@ -163,18 +177,28 @@ module Woods
         end
 
         def adapters
+          builder_source = BUILDER_PATH.read
           {
-            'embedding_providers' => %w[fake ollama openai],
-            'vector_stores' => %w[in_memory pgvector qdrant],
-            'metadata_stores' => %w[in_memory sqlite],
-            'graph_stores' => ['in_memory'],
-            'exporters' => [
-              { 'name' => 'notion', 'class' => 'Woods::Notion::Exporter', 'path' => 'lib/woods/notion/exporter.rb' },
-              { 'name' => 'obsidian', 'class' => 'Woods::Obsidian::VaultExporter',
-                'path' => 'lib/woods/obsidian/vault_exporter.rb' },
-              { 'name' => 'unblocked', 'class' => 'Woods::Unblocked::Exporter', 'path' => 'lib/woods/unblocked/exporter.rb' }
-            ]
+            'embedding_providers' => adapter_keys(builder_source, 'build_embedding_provider'),
+            'vector_stores' => adapter_keys(builder_source, 'build_vector_store'),
+            'metadata_stores' => adapter_keys(builder_source, 'build_metadata_store'),
+            'graph_stores' => adapter_keys(builder_source, 'build_graph_store'),
+            'exporters' => exporter_implementations
           }
+        end
+
+        def adapter_keys(builder_source, method_name)
+          method_source(builder_source, method_name).scan(/when :([a-z_]+)/).flatten.sort
+        end
+
+        def exporter_implementations
+          ROOT.glob('lib/woods/**/*exporter.rb').sort.map do |path|
+            {
+              'name' => path.dirname.basename.to_s,
+              'class' => path.read.scan(/^\s*(?:module|class)\s+([A-Z][A-Za-z0-9_:]*)/).flatten.join('::'),
+              'path' => path.relative_path_from(ROOT).to_s
+            }
+          end
         end
 
         def public_woods_methods
@@ -196,6 +220,37 @@ module Woods
             'public_woods_methods' => public_woods_methods.count
           }
           current.sort.to_h
+        end
+
+        def documentation_claims
+          PUBLIC_DOCUMENTATION_PATHS.to_h do |path|
+            source = path.read
+            claims = {
+              'extractor_registrations' => documented_count(source, /(\d+) extractors/),
+              'index_mcp_tools' => documented_count(source, /(\d+)-tool index server/),
+              'console_mcp_schemas' => documented_count(source, /(\d+)-tool console server/)
+            }
+            [path.relative_path_from(ROOT).to_s, claims]
+          end
+        end
+
+        def documented_count(source, pattern)
+          match = source.match(pattern)
+          raise DriftError, "Current public documentation is missing #{pattern.inspect}." unless match
+
+          match[1].to_i
+        end
+
+        def verify_documentation_claims!(actual)
+          actual.fetch('documentation_claims').each do |path, claims|
+            claims.each do |surface, documented_count|
+              code_derived_count = actual.fetch('counts').fetch(surface)
+              next if documented_count == code_derived_count
+
+              raise DriftError,
+                    "#{path} claims #{documented_count} #{surface}, but code derives #{code_derived_count}."
+            end
+          end
         end
 
         def canonicalize(value)

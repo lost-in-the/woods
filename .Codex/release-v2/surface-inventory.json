@@ -429,7 +429,7 @@
       },
       {
         "name": "list_snapshots",
-        "registration_condition": "snapshot_store is provided"
+        "registration_condition": "snapshot_store"
       },
       {
         "name": "lookup",
@@ -437,7 +437,7 @@
       },
       {
         "name": "notion_sync",
-        "registration_condition": "a resolved Notion token and non-empty database IDs are configured"
+        "registration_condition": "notion_wired?"
       },
       {
         "name": "pagerank",
@@ -445,23 +445,23 @@
       },
       {
         "name": "pipeline_diagnose",
-        "registration_condition": "operator is provided"
+        "registration_condition": "operator"
       },
       {
         "name": "pipeline_embed",
-        "registration_condition": "operator is provided"
+        "registration_condition": "operator"
       },
       {
         "name": "pipeline_extract",
-        "registration_condition": "operator is provided"
+        "registration_condition": "operator"
       },
       {
         "name": "pipeline_repair",
-        "registration_condition": "operator is provided"
+        "registration_condition": "operator"
       },
       {
         "name": "pipeline_status",
-        "registration_condition": "operator is provided"
+        "registration_condition": "operator"
       },
       {
         "name": "recent_changes",
@@ -473,19 +473,19 @@
       },
       {
         "name": "retrieval_explain",
-        "registration_condition": "feedback_store is provided"
+        "registration_condition": "feedback_store"
       },
       {
         "name": "retrieval_rate",
-        "registration_condition": "feedback_store is provided"
+        "registration_condition": "feedback_store"
       },
       {
         "name": "retrieval_report_gap",
-        "registration_condition": "feedback_store is provided"
+        "registration_condition": "feedback_store"
       },
       {
         "name": "retrieval_suggest",
-        "registration_condition": "feedback_store is provided"
+        "registration_condition": "feedback_store"
       },
       {
         "name": "search",
@@ -493,15 +493,15 @@
       },
       {
         "name": "session_trace",
-        "registration_condition": "Woods.configuration.session_store is configured"
+        "registration_condition": "session_tracer_wired?"
       },
       {
         "name": "snapshot_detail",
-        "registration_condition": "snapshot_store is provided"
+        "registration_condition": "snapshot_store"
       },
       {
         "name": "snapshot_diff",
-        "registration_condition": "snapshot_store is provided"
+        "registration_condition": "snapshot_store"
       },
       {
         "name": "structure",
@@ -513,7 +513,7 @@
       },
       {
         "name": "unit_history",
-        "registration_condition": "snapshot_store is provided"
+        "registration_condition": "snapshot_store"
       },
       {
         "name": "woods_status",
@@ -740,5 +740,12 @@
     "public_woods_methods": 9,
     "rake_tasks": 32,
     "tasks_methods": 4
+  },
+  "documentation_claims": {
+    "docs/README.md": {
+      "extractor_registrations": 34,
+      "index_mcp_tools": 29,
+      "console_mcp_schemas": 31
+    }
   }
 }
