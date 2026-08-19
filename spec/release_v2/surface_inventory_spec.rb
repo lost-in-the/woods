@@ -146,19 +146,25 @@ RSpec.describe 'release-v2 public-surface inventory' do
     File.write(server_path, original) if original
   end
 
-  it 'derives callable predicate definitions from the server implementation' do
+  it 'captures callable predicate arguments in the registration condition contract' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
     original = File.read(server_path)
     changed = original.sub('if notion_wired?', 'if notion_wired?(strict: true)')
     expect(changed).not_to eq(original)
 
+    original_condition = surface_inventory.inventory.fetch('index_mcp').fetch('tools')
+                                          .find { |tool| tool.fetch('name') == 'notion_sync' }
+                                          .fetch('registration_condition')
+
     File.write(server_path, changed)
 
-    condition = surface_inventory.inventory.fetch('index_mcp').fetch('tools')
-                                 .find { |tool| tool.fetch('name') == 'notion_sync' }
-                                 .fetch('registration_condition')
+    changed_condition = surface_inventory.inventory.fetch('index_mcp').fetch('tools')
+                                         .find { |tool| tool.fetch('name') == 'notion_sync' }
+                                         .fetch('registration_condition')
 
-    expect(condition.fetch('predicate_definitions').fetch('notion_wired?')).to include('def notion_wired?')
+    expect(changed_condition).not_to eq(original_condition)
+    expect(changed_condition.fetch('call_site_guard')).to eq('notion_wired?(strict: true)')
+    expect(changed_condition.fetch('predicate_definitions').fetch('notion_wired?')).to include('def notion_wired?')
   ensure
     File.write(server_path, original) if original
   end
