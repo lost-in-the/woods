@@ -52,6 +52,10 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     allow(Woods.configuration).to receive(:output_dir).and_return(@index_dir)
   end
 
+  after do
+    drain_background_threads
+  end
+
   let(:fake_extractor) { double('Extractor') }
 
   def call(params, id: 1)
@@ -66,12 +70,24 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
   end
 
   let(:tasks_meta) do
-    { '_meta' => { 'io.modelcontextprotocol/clientCapabilities' =>
-      { 'extensions' => { 'io.modelcontextprotocol/tasks' => {} } } } }
+    { '_meta' => tasks_capability_meta }
+  end
+
+  let(:tasks_capability_meta) do
+    {
+      'io.modelcontextprotocol/protocolVersion' => MCP::Configuration::LATEST_MODERN_PROTOCOL_VERSION,
+      'io.modelcontextprotocol/clientCapabilities' => {
+        'extensions' => { 'io.modelcontextprotocol/tasks' => {} }
+      }
+    }
   end
 
   def extract_call(meta = {})
     call({ 'name' => 'pipeline_extract', 'arguments' => {} }.merge(meta))
+  end
+
+  def task_params(task_id, extra = {})
+    { 'taskId' => task_id, '_meta' => tasks_capability_meta }.merge(extra)
   end
 
   def settle
@@ -91,36 +107,41 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     end
 
     it 'gets a handle it can poll with' do
-      task_id = extract_call(tasks_meta).dig('result', 'task', 'taskId')
-      expect(rpc('tasks/get', { 'taskId' => task_id }).dig('result', 'task')).to be_a(Hash)
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      expect(rpc('tasks/get', task_params(task_id)).dig('result', 'taskId')).to eq(task_id)
     end
 
     it 'is told how often to poll' do
-      expect(extract_call(tasks_meta).dig('result', 'task', 'pollIntervalMs')).to be_positive
+      expect(extract_call(tasks_meta).dig('result', 'pollIntervalMs')).to be_positive
     end
 
     # The completion signal that did not exist before: previously the agent got
     # "started" and had to infer the outcome from pipeline_status.
     it 'sees the task reach completed once the run finishes' do
-      task_id = extract_call(tasks_meta).dig('result', 'task', 'taskId')
-      settle { rpc('tasks/get', { 'taskId' => task_id }).dig('result', 'task', 'status') == 'completed' }
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'completed' }
 
-      expect(rpc('tasks/get', { 'taskId' => task_id }).dig('result', 'task', 'status')).to eq('completed')
+      expect(rpc('tasks/get', task_params(task_id)).dig('result', 'status')).to eq('completed')
     end
   end
 
   describe 'when the run fails' do
-    before { allow(fake_extractor).to receive(:extract_all).and_raise(StandardError, 'disk on fire') }
+    before do
+      allow(Logger).to receive(:new).and_call_original
+      allow(Logger).to receive(:new).with($stderr).and_return(double('Logger', error: nil))
+      allow(fake_extractor).to receive(:extract_all).and_raise(StandardError, 'disk on fire')
+    end
 
     # Previously this error reached a log the agent cannot read, and the tool
     # had already reported success.
     it 'surfaces the failure through the task instead of only the log' do
-      task_id = extract_call(tasks_meta).dig('result', 'task', 'taskId')
-      settle { rpc('tasks/get', { 'taskId' => task_id }).dig('result', 'task', 'status') == 'failed' }
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'failed' }
 
-      task = rpc('tasks/get', { 'taskId' => task_id }).dig('result', 'task')
+      task = rpc('tasks/get', task_params(task_id)).fetch('result')
       expect(task['status']).to eq('failed')
       expect(task.dig('error', 'message')).to include('disk on fire')
+      expect(task.dig('error', 'code')).to eq(-32_603)
     end
   end
 
@@ -147,20 +168,20 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     # The disconnect-survival claim: the handle is on disk, so a *different*
     # server object — standing in for a restarted process — can still answer.
     it 'lets a freshly built server answer a handle minted by another' do
-      task_id = extract_call(tasks_meta).dig('result', 'task', 'taskId')
-      settle { rpc('tasks/get', { 'taskId' => task_id }).dig('result', 'task', 'status') == 'completed' }
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'completed' }
 
       other = Woods::MCP::Server.build(index_dir: @index_dir, warmup: false)
       raw = other.handle_json(
-        JSON.generate({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: { 'taskId' => task_id } })
+        JSON.generate({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: task_params(task_id) })
       )
-      expect(JSON.parse(raw).dig('result', 'task', 'status')).to eq('completed')
+      expect(JSON.parse(raw).dig('result', 'status')).to eq('completed')
     end
 
     it 'serves tasks/get even on a server built without the operator wiring' do
       lean = Woods::MCP::Server.build(index_dir: @index_dir, warmup: false)
       raw = lean.handle_json(
-        JSON.generate({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: { 'taskId' => 'f' * 32 } })
+        JSON.generate({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: task_params('f' * 32) })
       )
       # Unknown id, but the method itself must be served — a restarted process
       # may come up wired differently and still owes an answer for old handles.

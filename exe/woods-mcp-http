@@ -101,9 +101,25 @@ auth_mode = token ? 'bearer' : 'none'
 session_mode = stateless ? 'stateless' : 'sessions (deprecated)'
 warn "Woods MCP HTTP server starting on http://#{host}:#{port} " \
      "(auth: #{auth_mode}, origins: #{origin_summary}, mode: #{session_mode})"
-handler = if defined?(Rackup::Handler)
-            Rackup::Handler.default
-          else
-            Rack::Handler.default
-          end
-handler.run(app, Port: port, Host: host)
+begin
+  handler = if defined?(Rackup::Handler)
+              Rackup::Handler.default
+            else
+              Rack::Handler.default
+            end
+rescue LoadError => e
+  abort "[woods-mcp-http] No Rack server handler is available (#{e.message}). " \
+        'Add a Rack-compatible server such as puma to the host bundle, or run under an existing Rack server.'
+end
+
+unless handler.respond_to?(:run)
+  abort '[woods-mcp-http] No Rack server handler is available. ' \
+        'Add a Rack-compatible server such as puma to the host bundle, or run under an existing Rack server.'
+end
+
+begin
+  handler.run(app, Port: port, Host: host)
+rescue LoadError => e
+  abort "[woods-mcp-http] Rack server handler failed to load (#{e.message}). " \
+        'Add a Rack-compatible server such as puma to the host bundle, or run under an existing Rack server.'
+end

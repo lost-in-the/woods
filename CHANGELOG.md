@@ -119,8 +119,9 @@ derive unit identifiers, which changes the index format's observable contract.
 - **The evaluation harness is runnable** (#212). `woods:evaluate` existed on no host (its
   rake file was never loaded by the railtie), called accessors that had never existed, and
   no adapter implemented `all_identifiers` for the baselines. It now loads, builds stores
-  through `Woods::Builder` like every other entry point, and ships an offline end-to-end
-  smoke on the `:fake` provider. The ground-truth taxonomy now *is*
+  through the MCP bootstrapper so evaluation reads the same persisted index that semantic
+  search serves, and ships an offline end-to-end smoke on the `:fake` provider. The
+  ground-truth taxonomy now *is*
   `QueryClassifier::INTENTS`/`SCOPES`, so annotations compare against what the pipeline
   actually classified (#218's open item, closed here).
 

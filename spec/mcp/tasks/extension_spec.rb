@@ -68,7 +68,19 @@ RSpec.describe Woods::MCP::Tasks::Extension do
 
     it 'carries the task handle the client polls with' do
       task = store.create!(tool: 'pipeline_extract')
-      expect(described_class.create_task_result(task).dig(:task, :taskId)).to eq(task.id)
+      expect(described_class.create_task_result(task)[:taskId]).to eq(task.id)
+    end
+
+    it 'carries the complete task wire shape' do
+      task = store.create!(tool: 'pipeline_extract')
+      result = described_class.create_task_result(task)
+
+      expect(result).to include(
+        resultType: 'task',
+        taskId: task.id,
+        status: 'working',
+        lastUpdatedAt: task.updated_at
+      )
     end
   end
 
@@ -84,22 +96,42 @@ RSpec.describe Woods::MCP::Tasks::Extension do
       raw && JSON.parse(raw)
     end
 
+    def task_params(params = {})
+      params.merge(
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion' => MCP::Configuration::LATEST_MODERN_PROTOCOL_VERSION,
+          'io.modelcontextprotocol/clientCapabilities' => {
+            'extensions' => { described_class::EXTENSION_ID => {} }
+          }
+        }
+      )
+    end
+
     it 'serves tasks/get for a known task' do
       task = store.create!(tool: 'pipeline_extract')
-      expect(call('tasks/get', { taskId: task.id }).dig('result', 'task', 'status')).to eq('working')
+      expect(call('tasks/get', task_params(taskId: task.id)).dig('result', 'status')).to eq('working')
     end
 
     it 'returns the result once the task completes' do
       task = store.create!(tool: 'pipeline_extract')
       store.complete!(task.id, result: { 'content' => [{ 'type' => 'text', 'text' => 'done' }] })
 
-      got = call('tasks/get', { taskId: task.id }).dig('result', 'task')
+      got = call('tasks/get', task_params(taskId: task.id)).fetch('result')
       expect(got['status']).to eq('completed')
+      expect(got['resultType']).to eq('complete')
       expect(got.dig('result', 'content', 0, 'text')).to eq('done')
     end
 
+    it 'rejects tasks/get when the client did not declare the extension' do
+      task = store.create!(tool: 'pipeline_extract')
+
+      error = call('tasks/get', { taskId: task.id })['error']
+      expect(error['code']).to eq(MCP::ErrorCodes::MISSING_REQUIRED_CLIENT_CAPABILITY)
+      expect(error.dig('data', 'requiredCapabilities', 'extensions', described_class::EXTENSION_ID)).to eq({})
+    end
+
     it 'reports an unknown task as an error rather than a null task' do
-      error = call('tasks/get', { taskId: 'a' * 32 })['error']
+      error = call('tasks/get', task_params(taskId: 'a' * 32))['error']
       # JSON-RPC invalid params; the SDK carries the human detail in `data`.
       expect(error['code']).to eq(-32_602)
       expect(error['data']).to match(/Unknown or expired/)
@@ -107,7 +139,7 @@ RSpec.describe Woods::MCP::Tasks::Extension do
 
     it 'acknowledges tasks/cancel' do
       task = store.create!(tool: 'pipeline_extract')
-      call('tasks/cancel', { taskId: task.id })
+      call('tasks/cancel', task_params(taskId: task.id))
       expect(store.get(task.id).status).to eq('cancelled')
     end
 
@@ -116,7 +148,7 @@ RSpec.describe Woods::MCP::Tasks::Extension do
     it 'does not error when cancelling an already-completed task' do
       task = store.create!(tool: 'pipeline_extract')
       store.complete!(task.id, result: {})
-      expect(call('tasks/cancel', { taskId: task.id })['error']).to be_nil
+      expect(call('tasks/cancel', task_params(taskId: task.id))['error']).to be_nil
     end
 
     # Woods has no task that pauses for input, so `input_required` never occurs
@@ -124,7 +156,7 @@ RSpec.describe Woods::MCP::Tasks::Extension do
     # answer, because the extension advertises it.
     it 'answers tasks/update' do
       task = store.create!(tool: 'pipeline_extract')
-      expect(call('tasks/update', { taskId: task.id, inputResponses: {} })['error']).to be_nil
+      expect(call('tasks/update', task_params(taskId: task.id, inputResponses: {}))['error']).to be_nil
     end
 
     it 'advertises the extension in server capabilities' do

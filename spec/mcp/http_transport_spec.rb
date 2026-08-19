@@ -74,6 +74,11 @@ RSpec.describe 'MCP HTTP Transport' do
       expect(source).to include("rescue LoadError\n  require 'rack'")
       expect(source).to include('Rack::Handler.default')
     end
+
+    it 'prints an actionable error when no Rack server handler is available' do
+      expect(source).to include('No Rack server handler is available')
+      expect(source).to include('Add a Rack-compatible server such as puma')
+    end
   end
 
   describe 'the stateless escape hatch parsing' do

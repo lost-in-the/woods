@@ -90,6 +90,11 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get(task.id).error['message']).to eq('boom')
     end
 
+    it 'records a JSON-RPC error code for failures' do
+      store.fail!(task.id, message: 'boom')
+      expect(store.get(task.id).error['code']).to eq(described_class::JSON_RPC_INTERNAL_ERROR)
+    end
+
     it 'marks a failure as failed' do
       store.fail!(task.id, message: 'boom')
       expect(store.get(task.id).status).to eq('failed')
@@ -206,7 +211,12 @@ RSpec.describe Woods::MCP::Tasks::Store do
     it 'matches the CreateTaskResult fields the extension advertises' do
       task = store.create!(tool: 'pipeline_extract', ttl_ms: 1000, poll_interval_ms: 250)
       expect(task.to_h).to include(
-        taskId: task.id, status: 'working', ttlMs: 1000, pollIntervalMs: 250
+        taskId: task.id,
+        status: 'working',
+        ttlMs: 1000,
+        pollIntervalMs: 250,
+        createdAt: task.created_at,
+        lastUpdatedAt: task.updated_at
       )
     end
 

@@ -200,7 +200,12 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 
 ```jsonc
 { "resultType": "task",
-  "task": { "taskId": "9f2c…", "status": "working", "ttlMs": 3600000, "pollIntervalMs": 2000 } }
+  "taskId": "9f2c…",
+  "status": "working",
+  "createdAt": "2026-08-19T20:30:00Z",
+  "lastUpdatedAt": "2026-08-19T20:30:00Z",
+  "ttlMs": 3600000,
+  "pollIntervalMs": 2000 }
 ```
 
 Poll it with `tasks/get`; cancel with `tasks/cancel`. The record lives in `<index_dir>/tasks/` — on disk, not in the process — which is what makes three things work that did not before:

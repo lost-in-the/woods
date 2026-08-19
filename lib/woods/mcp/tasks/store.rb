@@ -40,6 +40,8 @@ module Woods
         # minutes, so a tight poll buys nothing but load.
         DEFAULT_POLL_INTERVAL_MS = 2_000
 
+        JSON_RPC_INTERNAL_ERROR = -32_603
+
         # Terminal states: "once reached, the task's state does not change".
         TERMINAL = %w[completed failed cancelled].freeze
 
@@ -67,6 +69,7 @@ module Woods
               ttlMs: ttl_ms,
               pollIntervalMs: poll_interval_ms,
               createdAt: created_at,
+              lastUpdatedAt: updated_at,
               statusMessage: status_message,
               result: result,
               error: error
@@ -128,7 +131,12 @@ module Woods
         # @param message [String]
         # @return [Task, nil] the updated record, or nil if it was already terminal
         def fail!(id, message:)
-          transition!(id, 'failed') { |t| t.error = { 'message' => message.to_s } }
+          transition!(id, 'failed') do |t|
+            t.error = {
+              'code' => JSON_RPC_INTERNAL_ERROR,
+              'message' => message.to_s
+            }
+          end
         end
 
         # Cancellation is cooperative: this records the intent and the runner
@@ -147,13 +155,15 @@ module Woods
         # @param message [String]
         # @return [Task, nil] the updated record, or nil if unknown/terminal
         def note_progress!(id, message)
-          task = read(id)
-          return nil if task.nil? || task.terminal?
+          with_task_lock(id) do
+            task = read(id)
+            return nil if task.nil? || task.terminal?
 
-          task.status_message = message.to_s
-          task.updated_at = Time.now.utc.iso8601
-          write(task)
-          task
+            task.status_message = message.to_s
+            task.updated_at = Time.now.utc.iso8601
+            write(task)
+            task
+          end
         end
 
         # Has a cancellation been recorded? Polled by a running task so
@@ -202,17 +212,30 @@ module Woods
         #   refused — returning the record rather than a bare boolean means a
         #   caller that wants the new state does not have to re-read it.
         def transition!(id, status, &block)
-          task = read(id)
-          return nil if task.nil?
-          # Terminal is terminal: a thread that finishes after the client
-          # cancelled must not overwrite the state the client already saw.
-          return nil if task.terminal?
+          with_task_lock(id) do
+            task = read(id)
+            return nil if task.nil?
+            # Terminal is terminal: a thread that finishes after the client
+            # cancelled must not overwrite the state the client already saw.
+            return nil if task.terminal?
 
-          task.status = status
-          task.updated_at = Time.now.utc.iso8601
-          block&.call(task)
-          write(task)
-          task
+            task.status = status
+            task.updated_at = Time.now.utc.iso8601
+            block&.call(task)
+            write(task)
+            task
+          end
+        end
+
+        def with_task_lock(id)
+          path = path_for(id)
+          return nil unless path
+
+          FileUtils.mkdir_p(@dir)
+          File.open("#{path}.lock", File::RDWR | File::CREAT, 0o600) do |file|
+            file.flock(File::LOCK_EX)
+            yield
+          end
         end
 
         # Only terminal records expire. An unfinished task must outlive its ttl
@@ -259,7 +282,10 @@ module Woods
           Dir.glob(File.join(@dir, '*.json')).each do |path|
             id = File.basename(path, '.json')
             task = read(id)
-            File.delete(path) if task.nil? || expired?(task)
+            next unless task.nil? || expired?(task)
+
+            File.delete(path)
+            FileUtils.rm_f("#{path}.lock")
           rescue SystemCallError
             # Another process swept it first; nothing to do.
             nil

@@ -3,6 +3,7 @@ AllCops:
   TargetRubyVersion: 3.0
   Exclude:
     - 'vendor/**/*'
+    - 'gemfiles/vendor/**/*'
     - 'tmp/**/*'
     - 'bench/**/*'
 

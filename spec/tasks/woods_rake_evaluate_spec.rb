@@ -39,11 +39,16 @@ RSpec.describe 'lib/tasks/woods_evaluation.rake' do
     # re-opens the module and Ruby warns about every already-initialized
     # constant — noise that would train the eye to ignore real warnings.
     it 'defines both evaluation tasks' do
+      previous_verbose = $VERBOSE
+      $VERBOSE = nil
       load rake_path
+      $VERBOSE = previous_verbose
 
       expect(Rake::Task.task_defined?('woods:evaluate')).to be(true)
       expect(Rake::Task.task_defined?('woods:evaluate:baseline')).to be(true)
       expect(Rake::Task['woods:evaluate:baseline'].arg_names).to eq([:strategy])
+    ensure
+      $VERBOSE = previous_verbose
     end
   end
 
@@ -64,12 +69,41 @@ RSpec.describe 'lib/tasks/woods_evaluation.rake' do
       end
     end
 
-    it 'builds the retriever through Builder, like every other entry point' do
-      expect(source).to include('build_retriever')
+    it 'builds the retriever through the MCP bootstrapper, like semantic search serving' do
+      expect(source).to include('MCP::Bootstrapper.build_retriever')
     end
 
-    it 'builds the metadata store through Builder for baselines' do
-      expect(source).to include('build_metadata_store')
+    it 'does not build fresh metadata stores for baselines' do
+      expect(code).not_to include('build_metadata_store')
+    end
+
+    it 'runs the baseline against the retriever hydrated by the bootstrapper' do
+      require 'woods/evaluation/query_set'
+      require 'woods/mcp/bootstrapper'
+      require 'woods/storage/metadata_store'
+
+      load rake_path unless defined?(Woods::EvaluationTasks)
+
+      query_set = Woods::Evaluation::QuerySet.new(
+        queries: [
+          Woods::Evaluation::QuerySet::Query.new(
+            query: 'payment service',
+            expected_units: ['PaymentService'],
+            intent: :understand,
+            scope: :focused,
+            tags: []
+          )
+        ]
+      )
+      metadata_store = Woods::Storage::MetadataStore::InMemory.new
+      metadata_store.store('PaymentService', 'type' => 'service', 'source_code' => 'class PaymentService; end')
+      retriever = instance_double(Woods::Retriever, metadata_store: metadata_store)
+
+      allow(Woods::Evaluation::QuerySet).to receive(:load).and_return(query_set)
+      allow(Woods::MCP::Bootstrapper).to receive(:build_retriever).and_return([retriever, nil])
+
+      expect { Woods::EvaluationTasks.run_baseline(strategy: 'grep') }
+        .to output(/Mean Recall: 1\.0000/).to_stdout
     end
   end
 

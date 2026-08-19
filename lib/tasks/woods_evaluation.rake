@@ -12,8 +12,8 @@
 # all, so neither task existed on any host — and the code below called
 # `Woods.vector_store` / `Woods.metadata_store` / `Woods.graph_store` /
 # `Woods.embedding_provider`, none of which have ever existed. Both halves are
-# fixed together (#212): stores now come from {Woods::Builder}, the same way
-# every other entry point builds them.
+# fixed together (#212): stores now come from the MCP bootstrapper, the same
+# path that hydrates persisted vector/metadata/graph artifacts for retrieval.
 #
 # Offline runs need no API key — set `embedding_provider = :fake` (#178).
 
@@ -48,7 +48,7 @@ module Woods
     #
     # @return [void]
     def run_evaluation
-      require 'woods/builder'
+      require 'woods/mcp/bootstrapper'
       require 'woods/evaluation/query_set'
       require 'woods/evaluation/evaluator'
       require 'woods/evaluation/report_generator'
@@ -76,7 +76,7 @@ module Woods
     # @param strategy [String, nil] grep, random, or file_level
     # @return [void]
     def run_baseline(strategy: nil)
-      require 'woods/builder'
+      require 'woods/mcp/bootstrapper'
       require 'woods/evaluation/query_set'
       require 'woods/evaluation/baseline_runner'
       require 'woods/evaluation/metrics'
@@ -89,7 +89,7 @@ module Woods
       query_set = Evaluation::QuerySet.load(query_set_path)
       puts "Running #{strategy} baseline (limit: #{limit})..."
 
-      runner = Evaluation::BaselineRunner.new(metadata_store: builder.build_metadata_store)
+      runner = Evaluation::BaselineRunner.new(metadata_store: build_eval_retriever.metadata_store)
       totals = compute_baseline_totals(query_set, runner, strategy, limit)
 
       print_baseline_report(strategy, query_set.size, totals)
@@ -104,17 +104,13 @@ module Woods
       end
     end
 
-    # The configured retrieval pipeline, built the same way the MCP server
-    # and the rake retrieve task build it.
+    # The configured retrieval pipeline, hydrated from persisted artifacts the
+    # same way the MCP server builds semantic search.
     #
     # @return [Woods::Retriever]
     def build_eval_retriever
-      builder.build_retriever
-    end
-
-    # @return [Woods::Builder]
-    def builder
-      Builder.new(Woods.configuration)
+      retriever, _state = MCP::Bootstrapper.build_retriever(index_dir: Woods.configuration.output_dir)
+      retriever || raise(Woods::Error, 'Evaluation requires an embedded Woods index with a configured provider.')
     end
 
     def print_eval_report(report, output_path)

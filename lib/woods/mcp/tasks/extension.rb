@@ -7,9 +7,9 @@ module Woods
     module Tasks
       # Wiring for the `io.modelcontextprotocol/tasks` extension.
       #
-      # The mcp gem does not implement this extension (as of 1.1.0 it defines
-      # neither the `tasks/*` methods nor `RequestEnvelope` consumption), so
-      # Woods supplies both halves itself:
+      # The mcp gem does not implement this extension (as of 1.2.0 it still
+      # defines neither the `tasks/*` methods nor native task result helpers), so
+      # Woods supplies the missing pieces itself:
       #
       # * capability detection, by reading the per-request `_meta` the SDK
       #   passes through untouched, and
@@ -56,7 +56,7 @@ module Woods
           # @param task [Store::Task]
           # @return [Hash]
           def create_task_result(task)
-            { resultType: 'task', task: task.to_h }
+            task.to_h.merge(resultType: 'task')
           end
 
           # Register the `tasks/*` RPCs and advertise the extension.
@@ -83,7 +83,8 @@ module Woods
           end
 
           def define_get(server, store)
-            server.define_custom_method(method_name: 'tasks/get') do |params|
+            server.define_custom_method(method_name: 'tasks/get') do |params, server_context:|
+              require_tasks_capability!(params, server_context)
               task = store.get(task_id_from(params))
               unless task
                 raise ::MCP::Server::RequestHandlerError.new(
@@ -91,12 +92,13 @@ module Woods
                 )
               end
 
-              { resultType: 'complete', task: task.to_h }
+              task.to_h.merge(resultType: 'complete')
             end
           end
 
           def define_cancel(server, store)
-            server.define_custom_method(method_name: 'tasks/cancel') do |params|
+            server.define_custom_method(method_name: 'tasks/cancel') do |params, server_context:|
+              require_tasks_capability!(params, server_context)
               # Cancellation is cooperative and idempotent: the server
               # acknowledges the intent, and a task that already finished simply
               # keeps its terminal state. Neither case is an error.
@@ -106,7 +108,8 @@ module Woods
           end
 
           def define_update(server, store)
-            server.define_custom_method(method_name: 'tasks/update') do |params|
+            server.define_custom_method(method_name: 'tasks/update') do |params, server_context:|
+              require_tasks_capability!(params, server_context)
               # No Woods task ever enters `input_required` — nothing in the
               # index pipeline pauses for user input — so there are never
               # outstanding `inputRequests` to satisfy and the spec's guidance
@@ -117,6 +120,23 @@ module Woods
               store.get(task_id_from(params))
               { resultType: 'complete' }
             end
+          end
+
+          def require_tasks_capability!(params, server_context)
+            return if server_context && client_capabilities_include_tasks?(server_context.client_capabilities)
+            return if client_opted_in?(params)
+
+            required = { extensions: { EXTENSION_ID => {} } }
+            raise ::MCP::Server::MissingRequiredClientCapabilityError.new(required, params)
+          end
+
+          def client_capabilities_include_tasks?(capabilities)
+            return false unless capabilities.is_a?(Hash)
+
+            extensions = capabilities[:extensions] || capabilities['extensions']
+            return false unless extensions.is_a?(Hash)
+
+            extensions.key?(EXTENSION_ID) || extensions.key?(EXTENSION_ID.to_sym)
           end
 
           # Custom-method blocks are instance-exec'd without access to module
