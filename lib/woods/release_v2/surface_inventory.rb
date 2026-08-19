@@ -20,7 +20,7 @@ module Woods
       INVENTORY_PATH = ROOT.join('.Codex/release-v2/surface-inventory.json').freeze
       INDEX_SERVER_PATH = ROOT.join('lib/woods/mcp/server.rb').freeze
       BUILDER_PATH = ROOT.join('lib/woods/builder.rb').freeze
-      PUBLIC_DOCUMENTATION_EXCLUSIONS = [ROOT.join('docs/COVERAGE_GAP_ANALYSIS.md')].freeze
+      DOCUMENTATION_INDEX_PATH = ROOT.join('docs/README.md').freeze
       DOCUMENTATION_SURFACE_CLAIM_PATTERNS = [
         { surface: 'extractor_registrations', pattern: /(?<count>\d+) extractors\b/i },
         { surface: 'index_mcp_tools', pattern: /\b(?:MCP )?Index Server\b[^\n]{0,40}?\b(?<count>\d+) tools\b/i },
@@ -32,6 +32,7 @@ module Woods
           pattern: /\bprovides (?<count>\d+) tools for querying extracted codebase structure\b/i
         },
         { surface: 'index_mcp_tools', pattern: /\bTools\s*\(\s*(?<count>\d+)\s*[—-]/i },
+        { surface: 'console_mcp_schemas', pattern: /\bTools\s*\(\s*(?<count>\d+)\s*\)\s*$/i },
         { surface: 'console_mcp_schemas', pattern: /\bConsole Server(?:\*{2})?\s*\(\s*(?<count>\d+) tools\b/i },
         { surface: 'console_mcp_schemas', pattern: /\bConsole Server\b[^\n]{0,120}?\bprovides (?<count>\d+) tools\b/i },
         { surface: 'console_mcp_schemas', pattern: /\b(?<count>\d+)-tool console server\b/i },
@@ -145,7 +146,13 @@ module Woods
 
             helper, condition = match.captures
             tool_registrations_for_helper(source, helper).map do |registration|
-              condition_contract = registration_condition(source, condition, registration.fetch('internal_guards'))
+              condition_contract = registration_condition(
+                source,
+                build_source,
+                helper,
+                condition,
+                registration.fetch('internal_guards')
+              )
               registration.merge('registration_condition' => condition_contract)
             end
           end
@@ -164,7 +171,7 @@ module Woods
             {
               'name' => name,
               'internal_guards' => [],
-              'registration_condition' => registration_condition(source, nil, [])
+              'registration_condition' => registration_condition(source, build_source, 'define_traversal_tool', nil, [])
             }
           end
         end
@@ -186,11 +193,13 @@ module Woods
           registrations.uniq { |registration| registration.fetch('name') }
         end
 
-        def registration_condition(source, call_site_guard, internal_guards)
+        def registration_condition(source, build_source, helper, call_site_guard, internal_guards)
           {
             'call_site_guard' => call_site_guard || 'always registered',
             'predicate_logic' => predicate_logic(source, call_site_guard),
-            'internal_guards' => internal_guards
+            'predicate_definitions' => predicate_definitions(source, call_site_guard),
+            'internal_guards' => internal_guards,
+            'registration_logic' => registration_logic(source, build_source, helper)
           }
         end
 
@@ -198,6 +207,18 @@ module Woods
           return nil unless guard&.match?(/\A[a-z_]+\?\z/)
 
           normalize_logic(method_source(source, guard))
+        end
+
+        def predicate_definitions(source, guard)
+          predicate_names = guard.to_s.scan(/\b([a-z_][a-z_0-9]*[!?])(?=\s*(?:\(|&&|\|\||\z))/).flatten.uniq
+          definitions = predicate_names.to_h do |name|
+            [name, normalize_logic(method_source(source, name))]
+          end
+          definitions.reject { |_name, logic| logic.empty? }
+        end
+
+        def registration_logic(source, build_source, helper)
+          [normalize_logic(build_source), normalize_logic(method_source(source, helper))].join("\n")
         end
 
         def normalize_logic(source)
@@ -286,7 +307,21 @@ module Woods
         end
 
         def current_public_documentation_paths
-          ([ROOT.join('README.md')] + ROOT.join('docs').glob('*.md')).sort - PUBLIC_DOCUMENTATION_EXCLUSIONS
+          ([ROOT.join('README.md'), DOCUMENTATION_INDEX_PATH] + indexed_current_guides).uniq.sort
+        end
+
+        def indexed_current_guides
+          DOCUMENTATION_INDEX_PATH.read.scan(/\]\(([^)#]+\.md)\)/).flatten.filter_map do |reference|
+            path = DOCUMENTATION_INDEX_PATH.dirname.join(reference).cleanpath
+            path if current_guide?(path)
+          end
+        end
+
+        def current_guide?(path)
+          return false unless path.file? && path.dirname == DOCUMENTATION_INDEX_PATH.dirname
+
+          heading = path.read.lines.first(4).join
+          !heading.match?(/\b(?:retrospective|design doc|spike)\b/i)
         end
 
         def documented_surface_claims(source)
