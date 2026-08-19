@@ -1,7 +1,14 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
+require 'open3'
+require 'tmpdir'
 require 'yaml'
+
+module ReleaseWorkflowSpec
+  Candidate = Struct.new(:tag, :sha, :artifact_sha256, keyword_init: true)
+end
 
 RSpec.describe 'release workflow contract' do
   let(:root) { File.expand_path('../..', __dir__) }
@@ -19,6 +26,23 @@ RSpec.describe 'release workflow contract' do
 
   def download_steps(job)
     steps(job).select { |step| step.fetch('uses', '').start_with?('actions/download-artifact@') }
+  end
+
+  def concurrency_group_for(candidate)
+    template = release.dig('jobs', 'publish', 'concurrency', 'group')
+    template.gsub('${{ needs.release-context.outputs.tag }}', candidate.tag)
+            .gsub('${{ needs.release-context.outputs.release-sha }}', candidate.sha)
+  end
+
+  def latest_pending_transition(running:, pending:, incoming:)
+    same_group = concurrency_group_for(pending) == concurrency_group_for(incoming)
+    return { running: running, pending: pending, replaced: nil } unless same_group
+
+    { running: running, pending: incoming, replaced: pending }
+  end
+
+  def pre_push_verifier_allows?(candidate, current_remote_tag_sha:)
+    candidate.sha == current_remote_tag_sha
   end
 
   it 'runs full CI for version tags before the release workflow can start' do
@@ -50,6 +74,32 @@ RSpec.describe 'release workflow contract' do
     expect(upload).to be_a(Hash)
     expect(upload.fetch('with').fetch('name')).to eq('${{ steps.artifact.outputs.artifact-name }}')
     expect(release.fetch('jobs')).not_to have_key('build')
+  end
+
+  it 'rebuilds identical artifact bytes for equivalent CI reruns of one SHA' do
+    ci_build = ci.fetch('jobs').fetch('build')
+    setup = steps(ci_build).find { |step| step.fetch('uses', '').start_with?('ruby/setup-ruby@') }
+    commands = run_commands(ci_build)
+
+    expect(setup.dig('with', 'ruby-version')).to eq('3.3.10')
+    expect(commands).to include('export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"')
+
+    Dir.mktmpdir('woods-reproducible-gem') do |directory|
+      epoch, status = Open3.capture2e('git', 'show', '-s', '--format=%ct', 'HEAD', chdir: root)
+      expect(status).to be_success, epoch
+      artifacts = %w[first.gem second.gem].map do |name|
+        path = File.join(directory, name)
+        output, build_status = Open3.capture2e(
+          { 'SOURCE_DATE_EPOCH' => epoch.strip },
+          'gem', 'build', '--strict', '--output', path, 'woods.gemspec', chdir: root
+        )
+        expect(build_status).to be_success, output
+        sleep 1
+        path
+      end
+
+      expect(artifacts.map { |path| Digest::SHA256.file(path).hexdigest }.uniq.length).to eq(1)
+    end
   end
 
   it 'downloads only the triggering CI run artifact identified by its run ID and SHA' do
@@ -115,7 +165,7 @@ RSpec.describe 'release workflow contract' do
     expect(release_actions).to be_empty
   end
 
-  it 'serializes only validated publish candidates using the validated tag' do
+  it 'scopes latest-pending replacement to validated publish candidates by tag' do
     jobs = release.fetch('jobs')
     publish = jobs.fetch('publish')
 
@@ -131,5 +181,33 @@ RSpec.describe 'release workflow contract' do
     expect(context_gate).to include("workflow_run.conclusion == 'success'")
     expect(context_gate).to include("workflow_run.event == 'push'")
     expect(context_gate).to include('workflow_run.head_repository.full_name == github.repository')
+  end
+
+  it 'models latest-pending replacement as a fail-closed tag contract' do
+    publish = release.fetch('jobs').fetch('publish')
+    sha_a = 'a' * 40
+    sha_b = 'b' * 40
+    running = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.0', sha: sha_a, artifact_sha256: 'artifact-a')
+    same_sha = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.0', sha: sha_a, artifact_sha256: 'artifact-a')
+    moved_tag = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.0', sha: sha_b, artifact_sha256: 'artifact-b')
+    unrelated = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.1', sha: sha_b, artifact_sha256: 'artifact-c')
+
+    expect(concurrency_group_for(running)).not_to eq(concurrency_group_for(unrelated))
+    expect(concurrency_group_for(running)).to eq(concurrency_group_for(moved_tag))
+
+    equivalent = latest_pending_transition(running: running, pending: running, incoming: same_sha)
+    expect(equivalent).to include(running: running, pending: same_sha, replaced: running)
+    expect(equivalent.fetch(:replaced).artifact_sha256).to eq(equivalent.fetch(:pending).artifact_sha256)
+
+    moved = latest_pending_transition(running: running, pending: same_sha, incoming: moved_tag)
+    expect(moved).to include(running: running, pending: moved_tag, replaced: same_sha)
+    expect(pre_push_verifier_allows?(moved.fetch(:replaced), current_remote_tag_sha: sha_b)).to be(false)
+    expect(pre_push_verifier_allows?(moved.fetch(:pending), current_remote_tag_sha: sha_b)).to be(true)
+
+    expect(publish.dig('concurrency', 'cancel-in-progress')).to be(false)
+    expect(moved.fetch(:running)).to equal(running)
+    expect(pre_push_verifier_allows?(running, current_remote_tag_sha: sha_b)).to be(false)
+    push_command = steps(publish).find { |step| step.fetch('run', '').include?('gem push') }.fetch('run')
+    expect(push_command.index('script/verify-release-tag')).to be < push_command.index('gem push')
   end
 end

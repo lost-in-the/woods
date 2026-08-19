@@ -111,6 +111,9 @@ jobs:
     if: needs.release-context.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     environment: release
+    # GitHub keeps one running and only the latest pending job per group. That
+    # replacement is deliberate here: same-SHA reruns build identical bytes;
+    # after a tag move, only the candidate matching the freshly peeled tag can push.
     concurrency:
       group: release-${{ needs.release-context.outputs.tag }}
       cancel-in-progress: false
