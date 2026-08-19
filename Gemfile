@@ -34,7 +34,7 @@ group :development, :test do
   gem 'rubocop', '~> 1.50'
   gem 'rubocop-rails', '~> 2.19'
   gem 'rubocop-rspec', '~> 3.9'
-  gem 'simplecov', '~> 0.22', require: false
+  gem 'simplecov', '~> 1.1', require: false
   gem 'sqlite3', *sqlite3_requirement
   # A Rack handler so `exe/woods-mcp-http` can actually boot. The HTTP transport
   # is optional and users pick their own server, but the suite needs one to
