@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'json'
 require 'rake'
+require 'woods/release_v2/surface_inventory'
 
 RSpec.describe 'release-v2 public-surface inventory' do
   let(:rakefile) { File.expand_path('../../Rakefile', __dir__) }
