@@ -46,6 +46,9 @@ Gem::Specification.new do |spec|
   # Runtime dependencies
   spec.add_dependency 'mcp', '>= 0.9.2', '< 1.0'
   spec.add_dependency 'msgpack', '>= 1.5'
+  # woods-mcp-http requires rackup directly. Rails 6.x hosts do not guarantee
+  # rackup is present transitively, but the executable is shipped with the gem.
+  spec.add_dependency 'rackup', '>= 2.2.0'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower

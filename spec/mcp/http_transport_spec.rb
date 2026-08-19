@@ -39,5 +39,13 @@ RSpec.describe 'MCP HTTP Transport' do
       content = File.read(gemspec_path)
       expect(content).to include('woods-mcp-http')
     end
+
+    it 'declares rackup as a runtime dependency' do
+      spec = Gem::Specification.load(gemspec_path)
+      rackup = spec.dependencies.find { |dependency| dependency.name == 'rackup' }
+
+      expect(rackup).not_to be_nil
+      expect(rackup.type).to eq(:runtime)
+    end
   end
 end

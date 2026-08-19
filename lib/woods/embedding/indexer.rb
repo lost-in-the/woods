@@ -620,6 +620,7 @@ module Woods
 
         @vector_store.store_batch(entries)
         prune_superseded_vectors(items)
+        prune_superseded_durable_vectors(items)
 
         items.each do |item|
           checkpoint[item[:identifier]] = item[:source_hash]
@@ -698,6 +699,23 @@ module Woods
 
         (previous - fresh_ids).each { |id| @vector_store.delete(id) }
         @persisted_ids[identifier] = fresh_ids
+      end
+
+      # Durable stores do not get rewritten from a complete dump after each
+      # run. If a still-present unit is re-embedded with fewer chunks, remove
+      # the old chunk rows/points that no current embed item rewrote.
+      def prune_superseded_durable_vectors(items)
+        return if @durable_ids.nil?
+        return unless @vector_store.respond_to?(:delete)
+
+        items.group_by { |item| item[:identifier] }.each do |identifier, group|
+          previous = @durable_ids[identifier]
+          next unless previous
+
+          fresh_ids = group.map { |item| item[:id] }
+          (previous - fresh_ids).each { |id| @vector_store.delete(id) }
+          @durable_ids[identifier] = fresh_ids
+        end
       end
 
       # A checkpoint that cannot be parsed *or read* degrades to "no

@@ -1415,6 +1415,41 @@ RSpec.describe Woods::Embedding::Indexer do
 
         expect(vector_store.deleted).to contain_exactly('Chunked#chunk_0', 'Chunked#chunk_1')
       end
+
+      context 'when a still-present unit now has fewer chunks' do
+        let(:chunked_user) do
+          unit_data.merge(
+            'source_hash' => 'new-shape',
+            'chunks' => [
+              { 'chunk_index' => 0, 'content' => 'new chunk one' },
+              { 'chunk_index' => 1, 'content' => 'new chunk two' }
+            ]
+          )
+        end
+
+        before do
+          vector_store.entries['User#chunk_0'] = [0.9, 0.9]
+          vector_store.entries['User#chunk_1'] = [0.9, 0.9]
+          vector_store.entries['User#chunk_2'] = [0.9, 0.9]
+          File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked_user))
+        end
+
+        it 'deletes the superseded durable chunk on a full run' do
+          indexer.index_all
+
+          expect(vector_store.deleted).to include('User#chunk_2')
+          expect(vector_store.entries.keys).to include('User#chunk_0', 'User#chunk_1')
+          expect(vector_store.entries.keys).not_to include('User#chunk_2')
+        end
+
+        it 'deletes the superseded durable chunk on an incremental run' do
+          File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate({ 'User' => 'old-shape' }))
+
+          indexer.index_incremental
+
+          expect(vector_store.deleted).to include('User#chunk_2')
+        end
+      end
     end
 
     context 'when the sweep would exceed the purge guard' do

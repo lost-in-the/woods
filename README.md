@@ -607,7 +607,7 @@ See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases
 - Ruby >= 3.0 (through Ruby 4.0)
 - Rails >= 6.0
 
-CI exercises Rails 6.0, 6.1, 7.0, 7.1, 7.2, and 8.0 across Ruby 3.0–4.0 — see the supported-version table in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+CI exercises Rails 6.0, 6.1, 7.0, 7.1, 7.2, 8.0, and 8.1 across Ruby 3.0–4.0 — see the supported-version table in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required for basic extraction — embedding and vector search are optional add-ons.
 
