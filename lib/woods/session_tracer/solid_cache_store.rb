@@ -2,6 +2,7 @@
 
 require 'json'
 require 'securerandom'
+require_relative 'solid_cache_coordination'
 require_relative 'store'
 
 module Woods
@@ -43,6 +44,7 @@ module Woods
         @expires_in = expires_in
         @max_sessions = positive_integer!(:max_sessions, max_sessions)
         @max_requests_per_session = positive_integer!(:max_requests_per_session, max_requests_per_session)
+        @backend = solid_cache_backend? ? SolidCacheCoordination.new(cache) : cache
       end
 
       # Admit the session, allocate a monotonic sequence, and publish one record.
@@ -63,7 +65,7 @@ module Woods
         end
 
         atomic_delete_if_equal(key, payload)
-        @cache.delete(activity_key(membership))
+        @backend.delete(activity_key(membership))
         nil
       end
 
@@ -77,7 +79,7 @@ module Woods
         return [] if first_sequence > sequence
 
         records = (first_sequence..sequence).filter_map do |expected|
-          parse_record(@cache.read(record_key(membership, expected)), membership, expected)
+          parse_record(@backend.read(record_key(membership, expected)), membership, expected)
         end
         return [] unless current_membership?(membership)
 
@@ -115,7 +117,7 @@ module Woods
 
       def increment!(key, amount = 1)
         atomic_write_if_absent(key, 0)
-        value = @cache.increment(key, amount)
+        value = @backend.increment(key, amount)
         return value if value.is_a?(Integer) && value.positive?
 
         message = "SolidCache backend atomic #increment failed for #{key.inspect}; " \
@@ -127,7 +129,7 @@ module Woods
       end
 
       def write!(key, value)
-        return if @cache.write(key, value, **write_options)
+        return if @backend.write(key, value, **write_options)
 
         raise BackendWriteError, "SolidCache backend failed to write #{key.inspect}"
       end
@@ -145,7 +147,7 @@ module Woods
 
       def write_newer_slot(key, sequence, value)
         RECORD_PUBLISH_ATTEMPTS.times do
-          raw = @cache.read(key)
+          raw = @backend.read(key)
           stored_sequence = payload_sequence(raw)
           return false if stored_sequence && stored_sequence >= sequence
 
@@ -161,20 +163,6 @@ module Woods
 
       def write_options
         @expires_in ? { expires_in: @expires_in } : {}
-      end
-
-      def sequence_window(sequence, size)
-        first = [sequence - size + 1, 1].max
-        first..sequence
-      end
-
-      def parse_slot(raw, expected_sequence, field)
-        return unless raw
-
-        payload = JSON.parse(raw)
-        payload[field] if payload['sequence'] == expected_sequence
-      rescue JSON::ParserError, TypeError
-        nil
       end
 
       def parse_record(raw, membership, expected_sequence)
@@ -199,7 +187,7 @@ module Woods
       end
 
       def counter_value(key)
-        Integer(@cache.read(key) || 0)
+        Integer(@backend.read(key) || 0)
       rescue ArgumentError, TypeError
         0
       end
@@ -286,7 +274,7 @@ module Woods
 
       def directory_slots
         @max_sessions.times.map do |slot|
-          raw = @cache.read(index_slot_key(slot))
+          raw = @backend.read(index_slot_key(slot))
           DirectorySlot.new(slot: slot, raw: raw, membership: parse_membership(raw, expected_slot: slot))
         end
       end
@@ -299,14 +287,14 @@ module Woods
       def active_membership(session_id)
         membership = stored_membership(session_id)
         return membership unless membership && @expires_in
-        return membership if @cache.read(activity_key(membership))
+        return membership if @backend.read(activity_key(membership))
 
         retire_membership(membership)
         nil
       end
 
       def stored_membership(session_id)
-        parse_membership(@cache.read(active_key(session_id)))
+        parse_membership(@backend.read(active_key(session_id)))
       end
 
       def parse_membership(raw, expected_slot: nil)
@@ -348,7 +336,7 @@ module Woods
       def retire_membership(membership)
         session_id = membership['session_id']
         atomic_delete_if_equal(active_key(session_id), serialized_membership(membership))
-        @cache.delete(activity_key(membership))
+        @backend.delete(activity_key(membership))
         cleanup_generation(session_id, membership['token'])
         release_directory_slot(membership)
       end
@@ -361,12 +349,12 @@ module Woods
 
       def cleanup_generation(session_id, generation)
         @max_requests_per_session.times do |slot|
-          @cache.delete(record_ring_key(session_id, generation, slot + 1))
+          @backend.delete(record_ring_key(session_id, generation, slot + 1))
         end
       end
 
       def indexed_membership?(membership)
-        raw = @cache.read(index_slot_key(membership['slot']))
+        raw = @backend.read(index_slot_key(membership['slot']))
         parse_membership(raw, expected_slot: membership['slot']) == membership
       end
 
@@ -375,52 +363,11 @@ module Woods
       end
 
       def atomic_delete_if_equal(key, expected)
-        if @cache.respond_to?(:delete_if_equal)
-          @cache.delete_if_equal(key, expected)
-        else
-          solid_cache_delete_if_equal(key, expected)
-        end
+        @backend.delete_if_equal(key, expected)
       end
 
       def atomic_write_if_absent(key, value, **options)
-        if @cache.respond_to?(:write_if_absent)
-          @cache.write_if_absent(key, value, **options)
-        else
-          solid_cache_write_if_absent?(key, value, **options)
-        end
-      end
-
-      def solid_cache_write_if_absent?(key, value, **write_options)
-        options = @cache.send(:merged_options, write_options)
-        normalized_key = @cache.send(:normalize_key, key, options)
-        entry_class = ::SolidCache::Entry
-        entry = ActiveSupport::Cache::Entry.new(value)
-        payload = @cache.send(:serialize_entry, entry, **options)
-        attributes = entry_class.send(:add_key_hash_and_byte_size, [{ key: normalized_key, value: payload }]).first
-
-        entry_class.insert_all([attributes], unique_by: entry_class.send(:upsert_unique_by))
-        stored = entry_class.read(normalized_key)
-        @cache.send(:deserialize_entry, stored, **options)&.value == value
-      end
-
-      def solid_cache_delete_if_equal(key, expected)
-        options = @cache.send(:merged_options, nil)
-        normalized_key = @cache.send(:normalize_key, key, options)
-        entry_class = ::SolidCache::Entry
-        key_hash = entry_class.send(:key_hash_for, normalized_key)
-        deleted = false
-
-        entry_class.transaction do
-          raw_key, raw_value = entry_class.lock.where(key_hash: key_hash).pick(:key, :value)
-          next unless raw_key == normalized_key
-
-          entry = @cache.send(:deserialize_entry, raw_value, **options)
-          next unless entry&.value == expected
-
-          @cache.delete(key)
-          deleted = true
-        end
-        deleted
+        @backend.write_if_absent(key, value, **options)
       end
 
       def solid_cache_backend?

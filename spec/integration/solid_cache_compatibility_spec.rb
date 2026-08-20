@@ -6,6 +6,7 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
   require 'rails'
   require 'active_record'
   require 'solid_cache'
+  require 'tmpdir'
   require 'woods/session_tracer/solid_cache_store'
 
   app_class = Class.new(Rails::Application) do
@@ -63,14 +64,24 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
     end
 
     around do |example|
-      ActiveRecord::Base.establish_connection(ENV.fetch('WOODS_PG_URL'))
-      create_solid_cache_schema(ActiveRecord::Base.connection)
-      example.run
+      if example.metadata[:postgresql]
+        ActiveRecord::Base.establish_connection(ENV.fetch('WOODS_PG_URL'))
+        create_solid_cache_schema(ActiveRecord::Base.connection)
+        example.run
+      else
+        Dir.mktmpdir('woods-solid-cache') do |dir|
+          ActiveRecord::Base.establish_connection(
+            adapter: 'sqlite3', database: File.join(dir, 'cache.sqlite3'), pool: 8
+          )
+          create_solid_cache_schema(ActiveRecord::Base.connection)
+          example.run
+        end
+      end
     ensure
       ActiveRecord::Base.connection_pool.disconnect! if ActiveRecord::Base.connected?
     end
 
-    it 'shares atomic session sequences across actual Solid Cache stores' do
+    it 'shares atomic session sequences across actual Solid Cache stores', :postgresql do
       cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
       first = Woods::SessionTracer::SolidCacheStore.new(cache: cache, max_requests_per_session: 32)
       second = Woods::SessionTracer::SolidCacheStore.new(
@@ -90,7 +101,7 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
       second.clear('shared')
       expect(first.read('shared')).to eq([])
     end
-    it 'keeps both records when PostgreSQL interleaves first increments on absent counters' do
+    it 'keeps both records when PostgreSQL interleaves first increments on absent counters', :postgresql do
       cache = FirstIncrementBarrierCache.new(max_age: nil, max_entries: 10_000)
       first = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
       second = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
@@ -103,6 +114,19 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
 
       expect(first.read('first-write').map { |entry| entry.fetch('action') })
         .to contain_exactly('action-0', 'action-1')
+    end
+
+    it 'keeps ownership coherent inside a real Solid Cache local-cache scope' do
+      cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
+      session_store = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
+
+      cache.with_local_cache do
+        expect(session_store.read('locally-cached')).to eq([])
+        session_store.record('locally-cached', { 'timestamp' => '2026-08-20T12:00:00Z' })
+
+        expect(session_store.read('locally-cached'))
+          .to contain_exactly('timestamp' => '2026-08-20T12:00:00Z')
+      end
     end
   end
 end
