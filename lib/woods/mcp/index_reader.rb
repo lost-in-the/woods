@@ -703,45 +703,48 @@ module Woods
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
         path = @index_dir.join(type_dir, filename)
-        raise Errno::ENOENT, path.to_s unless path.file?
+        open_unit(path.to_s) do |file|
+          signature = unit_file_signature(file.stat)
+          cached = @cache_mutex.synchronize do
+            if @unit_cache.key?(cache_key) && @unit_cache_signatures[cache_key] == signature
+              # Move to end (most recently used)
+              @unit_cache_order.delete(cache_key)
+              @unit_cache_order.push(cache_key)
+              @unit_cache[cache_key]
+            elsif @unit_cache.key?(cache_key)
+              @unit_cache.delete(cache_key)
+              @unit_cache_signatures.delete(cache_key)
+              @unit_cache_order.delete(cache_key)
+              nil
+            end
+          end
+          return cached if cached
 
-        signature = unit_file_signature(path)
+          data = JSON.parse(file.read)
 
-        cached = @cache_mutex.synchronize do
-          if @unit_cache.key?(cache_key) && @unit_cache_signatures[cache_key] == signature
-            # Move to end (most recently used)
+          @cache_mutex.synchronize do
+            # Evict oldest if at capacity
+            if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
+              oldest = @unit_cache_order.shift
+              @unit_cache.delete(oldest)
+              @unit_cache_signatures.delete(oldest)
+            end
+
+            @unit_cache[cache_key] = data
+            @unit_cache_signatures[cache_key] = signature
             @unit_cache_order.delete(cache_key)
             @unit_cache_order.push(cache_key)
-            @unit_cache[cache_key]
-          elsif @unit_cache.key?(cache_key)
-            @unit_cache.delete(cache_key)
-            @unit_cache_signatures.delete(cache_key)
-            @unit_cache_order.delete(cache_key)
           end
+          data
         end
-        return cached if cached
-
-        data = JSON.parse(path.read)
-
-        @cache_mutex.synchronize do
-          # Evict oldest if at capacity
-          if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
-            oldest = @unit_cache_order.shift
-            @unit_cache.delete(oldest)
-            @unit_cache_signatures.delete(oldest)
-          end
-
-          @unit_cache[cache_key] = data
-          @unit_cache_signatures[cache_key] = signature
-          @unit_cache_order.delete(cache_key)
-          @unit_cache_order.push(cache_key)
-        end
-        data
       end
 
-      def unit_file_signature(path)
-        stat = path.stat
-        [stat.ino, stat.size, stat.mtime.to_r]
+      def unit_file_signature(stat)
+        [stat.dev, stat.ino, stat.size, stat.mtime.to_r, stat.ctime.to_r]
+      end
+
+      def open_unit(path, &block)
+        File.open(path, 'rb', &block)
       end
 
       # Parse a JSON file relative to the index directory.

@@ -348,28 +348,46 @@ module Woods
 
         def linux_process_identity(pid)
           boot_id = File.read('/proc/sys/kernel/random/boot_id').strip
-          fields = File.read("/proc/#{pid}/stat").split
-          start_ticks = fields.fetch(21)
-          return if boot_id.empty? || start_ticks.empty?
+          start_ticks = linux_start_ticks(File.read("/proc/#{pid}/stat"))
+          return if boot_id.empty? || start_ticks.nil?
 
           "boot=#{boot_id};start_ticks=#{start_ticks}"
-        rescue Errno::ENOENT, IndexError
+        rescue Errno::ENOENT
           nil
+        end
+
+        def linux_start_ticks(stat)
+          boundary = stat.rindex(') ')
+          return unless boundary && stat.match?(/\A\d+ \(/)
+
+          start_ticks = stat[(boundary + 2)..].split[19]
+          start_ticks if start_ticks&.match?(/\A\d+\z/)
         end
 
         def darwin_process_identity(pid)
           environment = { 'LC_ALL' => 'C', 'LANG' => 'C', 'TZ' => 'UTC' }
           started, ps_status = Open3.capture2(environment, '/bin/ps', '-o', 'lstart=', '-p', pid.to_s)
-          booted, boot_status = Open3.capture2('/usr/sbin/sysctl', '-n', 'kern.boottime')
-          return unless ps_status.success? && boot_status.success?
+          return unless ps_status.success?
 
           start_epoch = DateTime.strptime(started.strip, '%a %b %e %H:%M:%S %Y').to_time.to_i
+          boot_identity = darwin_boot_identity
+          return unless boot_identity
+
+          "boot=#{boot_identity};start=#{start_epoch}"
+        rescue Date::Error
+          nil
+        end
+
+        def darwin_boot_identity
+          return @darwin_boot_identity if defined?(@darwin_boot_identity)
+
+          booted, status = Open3.capture2('/usr/sbin/sysctl', '-n', 'kern.boottime')
+          return unless status.success?
+
           boot_match = booted.match(/sec = (\d+), usec = (\d+)/)
           return unless boot_match
 
-          "boot=#{boot_match[1]}.#{boot_match[2]};start=#{start_epoch}"
-        rescue Date::Error
-          nil
+          @darwin_boot_identity = "#{boot_match[1]}.#{boot_match[2]}"
         end
 
         def sweep_expired!

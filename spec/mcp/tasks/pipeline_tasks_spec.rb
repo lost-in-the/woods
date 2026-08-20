@@ -220,6 +220,22 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
   end
 
   describe 'when opted-in task storage is read-only' do
+    it 'starts no record, cooldown, or work when producer identity is unavailable' do
+      guard = instance_double(Woods::Operator::PipelineGuard, allow?: true, record!: nil)
+      operator[:pipeline_guard] = guard
+      allow(fake_extractor).to receive(:extract_all).and_return(true)
+      allow_any_instance_of(Woods::MCP::Tasks::Store).to receive(:producer_identity_for).and_return(nil)
+
+      body = extract_call(tasks_meta)
+
+      expect(body.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
+      expect(Dir.glob(File.join(@index_dir, 'tasks', '*.json'))).to be_empty
+      expect(guard).not_to have_received(:record!)
+      expect(fake_extractor).not_to have_received(:extract_all)
+      in_flight = Woods::MCP::Server.instance_variable_get(:@pipeline_in_flight)
+      expect(in_flight).not_to have_key(:extraction)
+    end
+
     it 'fails closed without starting untrackable work' do
       allow(fake_extractor).to receive(:extract_all).and_return(true)
       allow(Woods.configuration).to receive(:output_dir).and_return(nil)

@@ -15,53 +15,136 @@ RSpec.describe 'Index MCP tool contracts' do
   let(:contract_oracle) do
     {
       'codebase_retrieve' => contract(:always, { 'query' => 'How does Post work?' }, ['Post'],
-                                      integers: %w[budget], strings: %w[query], arrays: %w[types exclude_types]),
+                                      required: %w[query], properties: {
+                                        'query' => string_contract(1, 10_000),
+                                        'budget' => integer_contract(1, 200_000),
+                                        'types' => array_contract(1_000, 10_000),
+                                        'exclude_types' => array_contract(1_000, 10_000)
+                                      }),
       'dependencies' => contract(:always, { 'identifier' => 'Comment' }, %w[Comment Post],
-                                 integers: %w[depth], strings: %w[identifier], arrays: %w[types], unions: %w[via]),
+                                 required: %w[identifier], properties: {
+                                   'identifier' => string_contract(1, 10_000),
+                                   'depth' => integer_contract(0, 20),
+                                   'types' => array_contract(1_000, 10_000),
+                                   'via' => union_contract
+                                 }),
       'dependents' => contract(:always, { 'identifier' => 'Post' }, %w[Post Comment],
-                               integers: %w[depth], strings: %w[identifier], arrays: %w[types], unions: %w[via]),
-      'domain_clusters' => contract(:always, {}, ['clusters'], integers: %w[min_size], arrays: %w[types]),
+                               required: %w[identifier], properties: {
+                                 'identifier' => string_contract(1, 10_000),
+                                 'depth' => integer_contract(0, 20),
+                                 'types' => array_contract(1_000, 10_000),
+                                 'via' => union_contract
+                               }),
+      'domain_clusters' => contract(:always, {}, %w[Billing PaymentService], properties: {
+                                      'min_size' => integer_contract(1, 100_000),
+                                      'types' => array_contract(1_000, 10_000)
+                                    }),
       'framework' => contract(:always, { 'keyword' => 'ActiveRecord' }, ['ActiveRecord'],
-                              integers: %w[limit], strings: %w[keyword]),
+                              required: %w[keyword], properties: {
+                                'keyword' => string_contract(1, 10_000),
+                                'limit' => integer_contract(1, 1_000)
+                              }),
       'graph_analysis' => contract(:always, { 'analysis' => 'orphans' }, %w[orphans PostsController],
-                                   integers: %w[limit offset], enums: %w[analysis]),
-      'list_snapshots' => contract(:snapshot, {}, %w[aaa111 snapshot_count],
-                                   integers: %w[limit], strings: %w[branch]),
+                                   properties: {
+                                     'analysis' => enum_contract(
+                                       %w[orphans dead_ends hubs cycles bridges all], nil, 10_000
+                                     ),
+                                     'limit' => integer_contract(1, 1_000),
+                                     'offset' => integer_contract(0, 1_000_000)
+                                   }),
+      'list_snapshots' => contract(:snapshot, {}, %w[aaa111 snapshot_count], properties: {
+                                     'limit' => integer_contract(1, 1_000),
+                                     'branch' => string_contract(nil, 10_000)
+                                   }),
       'lookup' => contract(:always, { 'identifier' => 'Post' }, %w[Post model],
-                           strings: %w[identifier name], arrays: %w[sections]),
+                           properties: {
+                             'identifier' => string_contract(nil, 10_000),
+                             'name' => string_contract(nil, 10_000),
+                             'include_source' => boolean_contract,
+                             'sections' => array_contract(1_000, 10_000)
+                           }),
       'notion_sync' => contract(:notion, {}, %w[synced data_models]),
-      'pagerank' => contract(:always, {}, %w[Post total_nodes], integers: %w[limit], arrays: %w[types]),
+      'pagerank' => contract(:always, {}, %w[Post total_nodes], properties: {
+                               'limit' => integer_contract(1, 1_000),
+                               'types' => array_contract(1_000, 10_000)
+                             }),
       'pipeline_diagnose' => contract(:operator, { 'error_class' => 'Timeout::Error', 'error_message' => 'timed out' },
-                                      %w[transient retryable], strings: %w[error_class error_message]),
-      'pipeline_embed' => contract(:operator, {}, %w[started Embedding]),
-      'pipeline_extract' => contract(:operator, {}, %w[started Extraction], arrays: %w[changed_files]),
+                                      %w[transient retryable], required: %w[error_class error_message], properties: {
+                                        'error_class' => string_contract(1, 10_000),
+                                        'error_message' => string_contract(1, 10_000)
+                                      }),
+      'pipeline_embed' => contract(:operator, {}, %w[started Embedding], properties: {
+                                     'incremental' => boolean_contract
+                                   }),
+      'pipeline_extract' => contract(:operator, {}, %w[started Extraction], properties: {
+                                       'incremental' => boolean_contract,
+                                       'changed_files' => array_contract(1_000, 10_000)
+                                     }),
       'pipeline_repair' => contract(:operator, { 'action' => 'reset_cooldowns' }, %w[repaired reset_cooldowns],
-                                    enums: %w[action]),
+                                    required: %w[action], properties: {
+                                      'action' => enum_contract(%w[clear_locks reset_cooldowns], 1, 10_000)
+                                    }),
       'pipeline_status' => contract(:operator, {}, %w[status ok]),
-      'recent_changes' => contract(:always, {}, %w[result_count Post], integers: %w[limit], arrays: %w[types]),
-      'reload' => contract(:always, {}, %w[reloaded true]),
+      'recent_changes' => contract(:always, {}, %w[result_count Post], properties: {
+                                     'limit' => integer_contract(1, 1_000),
+                                     'types' => array_contract(1_000, 10_000)
+                                   }),
+      'reload' => contract(:always, {}, %w[reloaded true total_units 9]),
       'retrieval_explain' => contract(:feedback, {}, %w[total_ratings average_score]),
       'retrieval_rate' => contract(:feedback, { 'query' => 'Post', 'score' => 4 }, %w[recorded rating],
-                                   integers: %w[score], strings: %w[query comment]),
+                                   required: %w[query score], properties: {
+                                     'query' => string_contract(1, 10_000),
+                                     'score' => integer_contract(1, 5),
+                                     'comment' => string_contract(nil, 10_000)
+                                   }),
       'retrieval_report_gap' => contract(:feedback,
                                          { 'query' => 'Post', 'missing_unit' => 'Post', 'unit_type' => 'model' },
-                                         %w[recorded gap], strings: %w[query missing_unit unit_type]),
+                                         %w[recorded gap], required: %w[query missing_unit unit_type], properties: {
+                                           'query' => string_contract(1, 10_000),
+                                           'missing_unit' => string_contract(1, 10_000),
+                                           'unit_type' => string_contract(1, 10_000)
+                                         }),
       'retrieval_suggest' => contract(:feedback, {}, %w[issues_found missing_unit]),
       'search' => contract(
         :always, { 'query' => 'Post' }, %w[Post match_field],
-        integers: %w[limit], strings: %w[query exact_prefix exact_suffix], arrays: %w[types fields]
+        properties: {
+          'query' => string_contract(nil, 10_000),
+          'types' => array_contract(1_000, 10_000),
+          'fields' => array_contract(1_000, 10_000),
+          'limit' => integer_contract(1, 1_000),
+          'exact_prefix' => string_contract(nil, 10_000),
+          'exact_suffix' => string_contract(nil, 10_000)
+        }
       ),
       'session_trace' => contract(:session, { 'session_id' => 'session-1' }, ['Session session-1'],
-                                  integers: %w[budget depth], strings: %w[session_id]),
-      'snapshot_detail' => contract(:snapshot, { 'git_sha' => 'aaa111' }, %w[aaa111 main], strings: %w[git_sha]),
+                                  required: %w[session_id], properties: {
+                                    'session_id' => string_contract(1, 10_000),
+                                    'budget' => integer_contract(1, 200_000),
+                                    'depth' => integer_contract(0, 20)
+                                  }),
+      'snapshot_detail' => contract(:snapshot, { 'git_sha' => 'aaa111' }, %w[aaa111 main],
+                                    required: %w[git_sha], properties: {
+                                      'git_sha' => string_contract(1, 10_000)
+                                    }),
       'snapshot_diff' => contract(:snapshot, { 'sha_a' => 'aaa111', 'sha_b' => 'bbb222' }, %w[aaa111 bbb222 Post],
-                                  strings: %w[sha_a sha_b]),
-      'structure' => contract(:always, {}, %w[manifest rails_version], enums: %w[detail]),
+                                  required: %w[sha_a sha_b], properties: {
+                                    'sha_a' => string_contract(1, 10_000),
+                                    'sha_b' => string_contract(1, 10_000)
+                                  }),
+      'structure' => contract(:always, {}, %w[manifest rails_version], properties: {
+                                'detail' => enum_contract(%w[summary full], nil, 10_000)
+                              }),
       'trace_flow' => contract(:always, { 'entry_point' => 'PostsController#create' },
                                %w[PostsController app/controllers/posts_controller.rb],
-                               integers: %w[depth], strings: %w[entry_point]),
+                               required: %w[entry_point], properties: {
+                                 'entry_point' => string_contract(1, 10_000),
+                                 'depth' => integer_contract(0, 20)
+                               }),
       'unit_history' => contract(:snapshot, { 'identifier' => 'Post' }, %w[Post versions],
-                                 integers: %w[limit], strings: %w[identifier]),
+                                 required: %w[identifier], properties: {
+                                   'identifier' => string_contract(1, 10_000),
+                                   'limit' => integer_contract(1, 1_000)
+                                 }),
       'woods_status' => contract(:always, {}, %w[ready index])
     }
   end
@@ -74,7 +157,6 @@ RSpec.describe 'Index MCP tool contracts' do
       'io.modelcontextprotocol/clientCapabilities' => {}
     }
   end
-  let(:valid_arguments) { contract_oracle.transform_values { |entry| entry.fetch(:arguments) } }
   let(:config) do
     Woods::Configuration.new.tap do |value|
       value.session_store = Class.new do
@@ -89,12 +171,13 @@ RSpec.describe 'Index MCP tool contracts' do
     double('retriever', retrieve: Struct.new(:context).new("## Post\nclass Post; end"))
   end
   let(:pipeline_guard) { double('pipeline guard', allow?: true, record!: nil) }
+  let(:pipeline_lock) { double('pipeline lock', release: nil) }
   let(:operator) do
     {
       status_reporter: double('status reporter', report: { status: 'ok', total_units: 5 }),
       error_escalator: double('error escalator', classify: { category: 'transient', retryable: true }),
       pipeline_guard: pipeline_guard,
-      pipeline_lock: double('pipeline lock', release: nil)
+      pipeline_lock: pipeline_lock
     }
   end
   let(:feedback_store) do
@@ -139,20 +222,53 @@ RSpec.describe 'Index MCP tool contracts' do
       .and_return(double(assemble: double(to_markdown: "## Session session-1\n1 request")))
     allow(Woods::Feedback::GapDetector).to receive(:new)
       .and_return(double(detect: [{ kind: 'missing_unit', count: 1 }]))
+    allow(Woods::GraphAnalyzer).to receive(:new).and_return(
+      double(domain_clusters: [{ name: 'Billing', member_count: 2, hub: 'PaymentService' }])
+    )
     allow(Woods::Notion::Exporter).to receive(:new)
       .and_return(notion_exporter)
   end
 
-  def contract(registration, arguments, facts, integers: [], strings: [], arrays: [], unions: [], enums: [])
+  def contract(registration, arguments, facts, required: [], properties: {})
     {
       registration: registration,
       arguments: arguments,
       facts: facts,
-      integers: integers,
-      strings: strings,
-      arrays: arrays,
-      unions: unions,
-      enums: enums
+      required: required,
+      properties: properties
+    }
+  end
+
+  def integer_contract(minimum, maximum)
+    { 'type' => 'integer', 'minimum' => minimum, 'maximum' => maximum }
+  end
+
+  def string_contract(minimum_length, maximum_length)
+    { 'type' => 'string', 'minLength' => minimum_length, 'maxLength' => maximum_length }.compact
+  end
+
+  def array_contract(maximum_items, maximum_item_length)
+    {
+      'type' => 'array',
+      'items' => { 'type' => 'string', 'maxLength' => maximum_item_length },
+      'maxItems' => maximum_items
+    }
+  end
+
+  def boolean_contract
+    { 'type' => 'boolean' }
+  end
+
+  def enum_contract(values, minimum_length, maximum_length)
+    string_contract(minimum_length, maximum_length).merge('enum' => values)
+  end
+
+  def union_contract
+    {
+      'anyOf' => [
+        string_contract(nil, 10_000),
+        array_contract(1_000, 10_000)
+      ]
     }
   end
 
@@ -162,6 +278,26 @@ RSpec.describe 'Index MCP tool contracts' do
 
   def assert_semantic_facts(name, contract, text)
     contract.fetch(:facts).each { |fact| expect(text).to include(fact), "#{name}: #{fact}" }
+  end
+
+  def assert_boundary_semantics(name, contract, text)
+    facts = {
+      'dependencies' => %w[root Comment found],
+      'dependents' => %w[root Post found],
+      'graph_analysis' => %w[stats orphan_count],
+      'recent_changes' => %w[result_count identifier]
+    }.fetch(name, contract.fetch(:facts))
+    facts.each { |fact| expect(text).to include(fact), "#{name} boundary: #{fact}" }
+  end
+
+  def assert_enum_semantics(name, value, text)
+    facts = case name
+            when 'graph_analysis' then value == 'all' ? %w[stats orphans] : [value, 'stats']
+            when 'pipeline_repair' then ['repaired', value]
+            when 'structure' then %w[manifest rails_version]
+            else raise "Missing enum semantic oracle for #{name}.#{value}"
+            end
+    facts.each { |fact| expect(text).to include(fact), "#{name}=#{value}: #{fact}" }
   end
 
   def rpc(server, method, params = {})
@@ -176,20 +312,6 @@ RSpec.describe 'Index MCP tool contracts' do
 
   def call_tool(server, name, arguments)
     rpc(server, 'tools/call', 'name' => name, 'arguments' => arguments)
-  end
-
-  def required_arguments(tool)
-    Array(tool.dig('inputSchema', 'required')).to_h do |name|
-      schema = tool.dig('inputSchema', 'properties', name)
-      value = if schema['enum']
-                schema.fetch('enum').first
-              elsif schema['type'] == 'integer'
-                schema.fetch('minimum')
-              else
-                'valid'
-              end
-      [name, value]
-    end
   end
 
   def wait_for_pipeline(tool_name)
@@ -211,6 +333,12 @@ RSpec.describe 'Index MCP tool contracts' do
       'integer' => 'one',
       'string' => false
     }.fetch(schema.fetch('type'))
+  end
+
+  def projected_schema(schema, expected)
+    schema.slice(*expected.keys).tap do |projected|
+      projected['anyOf'] = schema['anyOf'] if expected.key?('anyOf')
+    end
   end
 
   it 'keeps code-derived inventory as a separate drift input to the independent oracle' do
@@ -243,8 +371,12 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   it 'rejects a generic ok payload in the semantic harness' do
-    expect { assert_semantic_facts('lookup', contract_oracle.fetch('lookup'), '{"ok":true}') }
-      .to raise_error(RSpec::Expectations::ExpectationNotMetError, /lookup: Post/)
+    contract_oracle.each do |name, contract|
+      expect { assert_semantic_facts(name, contract, '{"ok":true}') }
+        .to raise_error(RSpec::Expectations::ExpectationNotMetError), name
+    end
+    expect { assert_semantic_facts('domain_clusters', contract_oracle.fetch('domain_clusters'), '{"clusters":[]}') }
+      .to raise_error(RSpec::Expectations::ExpectationNotMetError, /domain_clusters: Billing/)
   end
 
   it 'proves the explicit side effects for mutating and collaborator-backed tools' do
@@ -263,15 +395,47 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(snapshot_store).to have_received(:diff).with('aaa111', 'bbb222')
     expect(snapshot_store).to have_received(:unit_history).with('Post', limit: 20)
     expect(snapshot_store).to have_received(:find).with('aaa111')
+    call_tool(full_server, 'pipeline_repair', 'action' => 'clear_locks')
+    expect(pipeline_lock).to have_received(:release)
   end
 
-  it 'registers only always-on rows when collaborators are unavailable' do
-    lean_config = Woods::Configuration.new
-    allow(Woods).to receive(:configuration).and_return(lean_config)
-    lean = Woods::MCP::Server.build(index_dir: fixture_dir, response_format: :json, warmup: false)
-    expected = contract_oracle.filter_map { |name, contract| name if contract.fetch(:registration) == :always }
+  it 'exercises each explicit dependency class independently' do
+    dependency_servers = {
+      always: -> { Woods::MCP::Server.build(index_dir: fixture_dir, response_format: :json, warmup: false) },
+      operator: -> { Woods::MCP::Server.build(index_dir: fixture_dir, operator: operator, warmup: false) },
+      feedback: -> { Woods::MCP::Server.build(index_dir: fixture_dir, feedback_store: feedback_store, warmup: false) },
+      snapshot: -> { Woods::MCP::Server.build(index_dir: fixture_dir, snapshot_store: snapshot_store, warmup: false) }
+    }
 
-    expect(listed_tools(lean).map { |tool| tool.fetch('name') }).to contain_exactly(*expected)
+    aggregate_failures do
+      dependency_servers.each do |dependency, build|
+        allow(Woods).to receive(:configuration).and_return(Woods::Configuration.new)
+        expected = contract_oracle.filter_map do |name, entry|
+          name if %i[always].include?(entry.fetch(:registration)) || entry.fetch(:registration) == dependency
+        end
+        expect(listed_tools(build.call).map { |tool| tool.fetch('name') })
+          .to contain_exactly(*expected), dependency.to_s
+      end
+
+      session_config = Woods::Configuration.new
+      session_config.session_store = config.session_store
+      allow(Woods).to receive(:configuration).and_return(session_config)
+      session = Woods::MCP::Server.build(index_dir: fixture_dir, warmup: false)
+      expected_session = contract_oracle.filter_map do |name, entry|
+        name if %i[always session].include?(entry.fetch(:registration))
+      end
+      expect(listed_tools(session).map { |tool| tool.fetch('name') }).to contain_exactly(*expected_session)
+
+      notion_config = Woods::Configuration.new
+      notion_config.notion_api_token = 'test-token'
+      notion_config.notion_database_ids = { data_models: 'test-database' }
+      allow(Woods).to receive(:configuration).and_return(notion_config)
+      notion = Woods::MCP::Server.build(index_dir: fixture_dir, warmup: false)
+      expected_notion = contract_oracle.filter_map do |name, entry|
+        name if %i[always notion].include?(entry.fetch(:registration))
+      end
+      expect(listed_tools(notion).map { |tool| tool.fetch('name') }).to contain_exactly(*expected_notion)
+    end
   end
 
   it 'returns stable unavailability errors for every collaborator-gated row' do
@@ -347,30 +511,29 @@ RSpec.describe 'Index MCP tool contracts' do
     end
   end
 
-  it 'defines inclusive minimum and maximum bounds for every integer argument' do
-    integer_properties = listed_tools(full_server).flat_map do |tool|
-      tool.dig('inputSchema', 'properties').to_h.filter_map do |name, schema|
-        [tool.fetch('name'), name, schema] if schema['type'] == 'integer'
-      end
-    end
-
-    expect(integer_properties).not_to be_empty
+  it 'matches every runtime argument to the fully literal oracle' do
     aggregate_failures do
-      integer_properties.each do |tool_name, property, schema|
-        expect(schema['minimum']).to be_a(Integer), "#{tool_name}.#{property}"
-        expect(schema['maximum']).to be_a(Integer), "#{tool_name}.#{property}"
-        expect(schema['maximum']).to be >= schema['minimum'], "#{tool_name}.#{property}"
+      listed_tools(full_server).each do |tool|
+        expected = contract_oracle.fetch(tool.fetch('name'))
+        schema = tool.fetch('inputSchema')
+        expect(schema.fetch('required', [])).to eq(expected.fetch(:required)), tool.fetch('name')
+        expect(schema.fetch('properties').keys)
+          .to contain_exactly(*expected.fetch(:properties).keys), tool.fetch('name')
+        expected.fetch(:properties).each do |name, property|
+          expect(projected_schema(schema.fetch('properties').fetch(name), property))
+            .to eq(property), "#{tool.fetch('name')}.#{name}"
+        end
       end
     end
   end
 
   it 'rejects unknown arguments for every row with stable tool error metadata' do
     aggregate_failures do
-      listed_tools(full_server).each do |tool|
-        arguments = required_arguments(tool).merge('__unknown' => true)
-        result = call_tool(full_server, tool.fetch('name'), arguments).fetch('result')
-        expect(result['isError']).to be(true), tool.fetch('name')
-        expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), tool.fetch('name')
+      contract_oracle.each do |name, contract|
+        arguments = contract.fetch(:arguments).merge('__unknown' => true)
+        result = call_tool(full_server, name, arguments).fetch('result')
+        expect(result['isError']).to be(true), name
+        expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), name
       end
     end
   end
@@ -388,38 +551,39 @@ RSpec.describe 'Index MCP tool contracts' do
 
   it 'rejects every declared argument at the wrong JSON type with stable metadata' do
     aggregate_failures do
-      listed_tools(full_server).each do |tool|
-        tool.dig('inputSchema', 'properties').to_h.each do |name, schema|
-          arguments = valid_arguments.fetch(tool.fetch('name')).merge(name => wrong_value(schema))
-          result = call_tool(full_server, tool.fetch('name'), arguments).fetch('result')
+      contract_oracle.each do |tool_name, contract|
+        contract.fetch(:properties).each do |name, property|
+          arguments = contract.fetch(:arguments).merge(name => wrong_value(property))
+          result = call_tool(full_server, tool_name, arguments).fetch('result')
 
-          expect(result['isError']).to be(true), "#{tool.fetch('name')}.#{name}"
-          expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), "#{tool.fetch('name')}.#{name}"
+          expect(result['isError']).to be(true), "#{tool_name}.#{name}"
+          expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), "#{tool_name}.#{name}"
         end
       end
     end
   end
 
   it 'accepts inclusive integer boundaries and rejects values immediately outside them' do
-    tools = listed_tools(full_server).to_h { |tool| [tool.fetch('name'), tool] }
     aggregate_failures do
       contract_oracle.each do |tool_name, contract|
-        contract.fetch(:integers).each do |name|
-          schema = tools.fetch(tool_name).dig('inputSchema', 'properties', name)
+        contract.fetch(:properties).each do |name, property|
+          next unless property['type'] == 'integer'
 
-          [schema.fetch('minimum'), schema.fetch('maximum')].each do |value|
+          [property.fetch('minimum'), property.fetch('maximum')].each do |value|
             arguments = contract.fetch(:arguments).merge(name => value)
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
             expect(result['isError']).to be(false), label
+            assert_boundary_semantics(tool_name, contract, result.dig('content', 0, 'text'))
           end
 
-          [schema.fetch('minimum') - 1, schema.fetch('maximum') + 1].each do |value|
+          [property.fetch('minimum') - 1, property.fetch('maximum') + 1].each do |value|
             arguments = contract.fetch(:arguments).merge(name => value)
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
             expect(result['isError']).to be(true), label
             expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), label
+            expect(result.dig('content', 0, 'text')).to include(name), label
           end
         end
       end
@@ -427,15 +591,11 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   it 'declares and executes every documented string-or-array union' do
-    tools = listed_tools(full_server).to_h { |tool| [tool.fetch('name'), tool] }
-    expected_union = [{ 'type' => 'string', 'maxLength' => 10_000 },
-                      { 'type' => 'array', 'items' => { 'type' => 'string', 'maxLength' => 10_000 },
-                        'maxItems' => 1_000 }]
-
     aggregate_failures do
       contract_oracle.each do |tool_name, contract|
-        contract.fetch(:unions).each do |name|
-          expect(tools.fetch(tool_name).dig('inputSchema', 'properties', name, 'anyOf')).to eq(expected_union)
+        contract.fetch(:properties).each do |name, property|
+          next unless property['anyOf']
+
           string_result = call_tool(
             full_server, tool_name, contract.fetch(:arguments).merge(name => 'code_reference')
           )
@@ -446,23 +606,24 @@ RSpec.describe 'Index MCP tool contracts' do
           expect(array_result.dig('result', 'isError')).to be(false), "#{tool_name}.#{name} array"
           expect(string_result.dig('result', 'structuredContent', 'data'))
             .to eq(array_result.dig('result', 'structuredContent', 'data'))
+          assert_boundary_semantics(tool_name, contract, string_result.dig('result', 'content', 0, 'text'))
+          invalid = call_tool(full_server, tool_name, contract.fetch(:arguments).merge(name => false)).fetch('result')
+          expect(invalid['isError']).to be(true), "#{tool_name}.#{name} invalid"
+          expect(invalid.dig('_meta', 'error_code')).to eq('invalid_arguments'), "#{tool_name}.#{name} invalid"
+          expect(invalid.dig('content', 0, 'text')).to include(name), "#{tool_name}.#{name} invalid"
         end
       end
     end
   end
 
   it 'bounds every explicitly enumerated string and array argument' do
-    tools = listed_tools(full_server).to_h { |tool| [tool.fetch('name'), tool] }
-
     aggregate_failures do
       contract_oracle.each do |tool_name, contract|
-        properties = tools.fetch(tool_name).dig('inputSchema', 'properties')
-        contract.fetch(:strings).each do |name|
-          expect(properties.dig(name, 'maxLength')).to eq(10_000), "#{tool_name}.#{name}"
-        end
-        contract.fetch(:arrays).each do |name|
-          expect(properties.dig(name, 'maxItems')).to eq(1_000), "#{tool_name}.#{name}"
-          expect(properties.dig(name, 'items', 'maxLength')).to eq(10_000), "#{tool_name}.#{name} items"
+        contract.fetch(:properties).each do |name, property|
+          next unless %w[string array].include?(property['type'])
+
+          expected = property['type'] == 'string' ? property.fetch('maxLength') : property.fetch('maxItems')
+          expect(expected).to be_positive, "#{tool_name}.#{name}"
         end
       end
     end
@@ -474,75 +635,66 @@ RSpec.describe 'Index MCP tool contracts' do
     aggregate_failures do
       contract_oracle.each do |tool_name, contract|
         input = MCP::Tool::InputSchema.new(tools.fetch(tool_name).fetch('inputSchema'))
-        contract.fetch(:strings).each do |name|
-          valid = contract.fetch(:arguments).merge(name => 'x' * 10_000)
-          invalid = contract.fetch(:arguments).merge(name => 'x' * 10_001)
-          expect { input.validate_arguments(valid) }.not_to raise_error, "#{tool_name}.#{name}=10000"
-          expect { input.validate_arguments(invalid) }
-            .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name}=10001"
-        end
-        contract.fetch(:arrays).each do |name|
-          valid = contract.fetch(:arguments).merge(name => Array.new(1_000, 'x'))
-          too_many = contract.fetch(:arguments).merge(name => Array.new(1_001, 'x'))
-          long_item = contract.fetch(:arguments).merge(name => ['x' * 10_001])
-          expect { input.validate_arguments(valid) }.not_to raise_error, "#{tool_name}.#{name}=1000"
-          expect { input.validate_arguments(too_many) }
-            .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name}=1001"
-          expect { input.validate_arguments(long_item) }
-            .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name} item=10001"
+        contract.fetch(:properties).each do |name, property|
+          case property['type']
+          when 'string'
+            next if property['enum']
+
+            maximum = property.fetch('maxLength')
+            valid = contract.fetch(:arguments).merge(name => 'x' * maximum)
+            invalid = contract.fetch(:arguments).merge(name => 'x' * (maximum + 1))
+            expect { input.validate_arguments(valid) }.not_to raise_error, "#{tool_name}.#{name}=#{maximum}"
+            expect { input.validate_arguments(invalid) }
+              .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name}=#{maximum + 1}"
+          when 'array'
+            maximum = property.fetch('maxItems')
+            item_maximum = property.dig('items', 'maxLength')
+            valid = contract.fetch(:arguments).merge(name => Array.new(maximum, 'x'))
+            too_many = contract.fetch(:arguments).merge(name => Array.new(maximum + 1, 'x'))
+            long_item = contract.fetch(:arguments).merge(name => ['x' * (item_maximum + 1)])
+            expect { input.validate_arguments(valid) }.not_to raise_error, "#{tool_name}.#{name}=#{maximum}"
+            expect { input.validate_arguments(too_many) }
+              .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name}=#{maximum + 1}"
+            expect { input.validate_arguments(long_item) }
+              .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name} item=#{item_maximum + 1}"
+          end
         end
       end
     end
   end
 
   it 'accepts and rejects every explicitly enumerated value set' do
-    tools = listed_tools(full_server).to_h { |tool| [tool.fetch('name'), tool] }
-
     aggregate_failures do
       contract_oracle.each do |tool_name, contract|
-        input = MCP::Tool::InputSchema.new(tools.fetch(tool_name).fetch('inputSchema'))
-        contract.fetch(:enums).each do |name|
-          schema = tools.fetch(tool_name).dig('inputSchema', 'properties', name)
-          schema.fetch('enum').each do |value|
-            expect { input.validate_arguments(contract.fetch(:arguments).merge(name => value)) }
-              .not_to raise_error, "#{tool_name}.#{name}=#{value}"
-          end
-          expect { input.validate_arguments(contract.fetch(:arguments).merge(name => '__invalid__')) }
-            .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name}=invalid"
-        end
-      end
-    end
-  end
+        contract.fetch(:properties).each do |name, property|
+          next unless property['enum']
 
-  it 'has an explicit oracle entry for every declared integer, string, array, and union' do
-    aggregate_failures do
-      listed_tools(full_server).each do |tool|
-        contract = contract_oracle.fetch(tool.fetch('name'))
-        tool.dig('inputSchema', 'properties').to_h.each do |name, schema|
-          expected = if schema['enum']
-                       contract.fetch(:enums)
-                     else
-                       case schema['type']
-                       when 'integer' then contract.fetch(:integers)
-                       when 'string' then contract.fetch(:strings)
-                       when 'array' then contract.fetch(:arrays)
-                       else contract.fetch(:unions) if schema['anyOf']
-                       end
-                     end
-          expect(expected).to include(name), "#{tool.fetch('name')}.#{name}" if expected
+          property.fetch('enum').each do |value|
+            result = call_tool(
+              full_server, tool_name, contract.fetch(:arguments).merge(name => value)
+            ).fetch('result')
+            expect(result['isError']).to be(false), "#{tool_name}.#{name}=#{value}"
+            assert_enum_semantics(tool_name, value, result.dig('content', 0, 'text'))
+          end
+          result = call_tool(
+            full_server, tool_name, contract.fetch(:arguments).merge(name => '__invalid__')
+          ).fetch('result')
+          expect(result['isError']).to be(true), "#{tool_name}.#{name}=invalid"
+          expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), "#{tool_name}.#{name}=invalid"
+          expect(result.dig('content', 0, 'text')).to include(name), "#{tool_name}.#{name}=invalid"
         end
       end
     end
   end
 
   it 'rejects missing schema-required arguments with stable metadata' do
-    required = listed_tools(full_server).select { |tool| tool.dig('inputSchema', 'required')&.any? }
-
     aggregate_failures do
-      required.each do |tool|
-        result = call_tool(full_server, tool.fetch('name'), {}).fetch('result')
-        expect(result['isError']).to be(true), tool.fetch('name')
-        expect(result.dig('_meta', 'error_code')).to eq('missing_required_arguments'), tool.fetch('name')
+      contract_oracle.each do |name, contract|
+        next if contract.fetch(:required).empty?
+
+        result = call_tool(full_server, name, {}).fetch('result')
+        expect(result['isError']).to be(true), name
+        expect(result.dig('_meta', 'error_code')).to eq('missing_required_arguments'), name
       end
     end
   end

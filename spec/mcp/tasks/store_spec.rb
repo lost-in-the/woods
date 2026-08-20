@@ -51,9 +51,11 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
     it 'fails before persistence when the OS identity cannot be established' do
       allow(store).to receive(:producer_identity_for).and_return(nil)
+      allow(SecureRandom).to receive(:hex)
 
       expect { store.create!(tool: 'pipeline_extract') }
         .to raise_error(described_class::ProducerIdentityError)
+      expect(SecureRandom).not_to have_received(:hex)
       expect(Dir.glob(File.join(@index_dir, described_class::DIRNAME, '*.json'))).to be_empty
     end
 
@@ -66,6 +68,59 @@ RSpec.describe Woods::MCP::Tasks::Store do
     it 'writes nothing outside its own subdirectory' do
       task
       expect(Dir.children(@index_dir)).to contain_exactly(described_class::DIRNAME)
+    end
+  end
+
+  describe 'producer identity' do
+    def linux_stat(comm:, start_ticks: '987654')
+      stat_fields = ['S'] + (4..21).map(&:to_s)
+      "123 (#{comm}) #{(stat_fields + [start_ticks, '23']).join(' ')}"
+    end
+
+    it 'parses Linux starttime structurally after a comm containing spaces and a closing parenthesis' do
+      stat = linux_stat(comm: 'worker ) queue')
+
+      expect(store.send(:linux_start_ticks, stat)).to eq('987654')
+    end
+
+    it 'fails closed for malformed Linux stat content' do
+      malformed = [
+        '123 worker S 1 2 3',
+        '123 (worker) S 1 2 3',
+        linux_stat(comm: 'worker', start_ticks: 'not-an-integer')
+      ]
+
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to all(be_nil)
+    end
+
+    it 'reads the actual current Linux process identity when procfs is available' do
+      skip 'procfs is unavailable on this platform' unless File.readable?('/proc/sys/kernel/random/boot_id')
+
+      identity = store.send(:producer_identity_for, Process.pid)
+
+      expect(identity).to match(/\Aboot=[^;]+;start_ticks=\d+\z/)
+    end
+
+    it 'caches the invariant Darwin boot identity across repeated process checks' do
+      success = instance_double(Process::Status, success?: true)
+      sysctl_calls = 0
+      allow(Open3).to receive(:capture2) do |*arguments|
+        if arguments.first == '/usr/sbin/sysctl'
+          sysctl_calls += 1
+          ["{ sec = 1700000000, usec = 123456 } Thu Jan  1 00:00:00 1970\n", success]
+        else
+          ["Thu Aug 20 03:00:00 2026\n", success]
+        end
+      end
+
+      first = store.send(:darwin_process_identity, Process.pid)
+      second = store.send(:darwin_process_identity, Process.pid)
+
+      expect(second).to eq(first)
+      expect(sysctl_calls).to eq(1)
+      expect(Open3).to have_received(:capture2)
+        .with({ 'LC_ALL' => 'C', 'LANG' => 'C', 'TZ' => 'UTC' }, '/bin/ps', '-o', 'lstart=', '-p', Process.pid.to_s)
+        .twice
     end
   end
 

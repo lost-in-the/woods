@@ -139,6 +139,47 @@ RSpec.describe 'Index MCP resource contract' do
     expect_corrupt_artifact(read('codebase://unit/Post'), 'codebase://unit/Post')
   end
 
+  it 'invalidates a same-size corrupt write even when mtime is restored' do
+    path = File.join(index_dir, 'models/Post_a5554622.json')
+    expect(read('codebase://unit/Post').dig('result', 'contents')).not_to be_empty
+    original = File.stat(path)
+    corrupt = "{#{' ' * (original.size - 1)}"
+    File.binwrite(path, corrupt)
+    File.utime(original.atime, original.mtime, path)
+
+    expect(File.stat(path).size).to eq(original.size)
+    expect(File.stat(path).mtime).to eq(original.mtime)
+    expect_corrupt_artifact(read('codebase://unit/Post'), 'codebase://unit/Post')
+  end
+
+  it 'parses a changed unit from its retained descriptor across pathname replacement' do
+    path = File.join(index_dir, 'models/Post_a5554622.json')
+    replacement = "#{path}.replacement"
+    reader = Woods::MCP::IndexReader.new(index_dir, auto_refresh: false)
+    expect(reader.find_unit('Post').fetch('identifier')).to eq('Post')
+    changed = JSON.parse(File.binread(path)).merge('source_code' => 'class Post # descriptor-race-marker')
+    File.binwrite(path, JSON.generate(changed))
+    File.binwrite(replacement, '{replacement-is-corrupt')
+    raced = false
+
+    allow(reader).to receive(:open_unit) do |target, &read_from_descriptor|
+      File.open(target, 'rb') do |file|
+        unless raced
+          File.rename(replacement, path)
+          raced = true
+        end
+        read_from_descriptor.call(file)
+      end
+    end
+
+    response = reader.find_unit('Post')
+
+    expect(raced).to be(true)
+    expect(response).to be_a(Hash), response.inspect
+    expect(response.fetch('source_code')).to include('descriptor-race-marker')
+    expect { reader.find_unit('Post') }.to raise_error(JSON::ParserError)
+  end
+
   it 'rejects malformed resource URIs instead of returning text success' do
     uris = [
       'codebase://unit',
