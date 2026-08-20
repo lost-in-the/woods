@@ -28,13 +28,14 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
     end
   end
 
-  def start_process
+  def start_process(read_tools: true)
     environment = {
       'PATH' => ENV.fetch('PATH'),
       'BUNDLE_GEMFILE' => rails_gemfile,
       'HOME' => @tmpdir,
       'WOODS_CONSOLE_CONFIG' => @config,
       'WOODS_DUMMY_DB' => @database,
+      'WOODS_CONSOLE_READ_TOOLS' => read_tools ? '1' : '0',
       'RAILS_ENV' => 'test'
     }
     environment['BUNDLE_PATH'] = ENV['BUNDLE_PATH'] if ENV['BUNDLE_PATH']
@@ -105,6 +106,20 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
     @stdin.close
     status = Timeout.timeout(10) { @wait.value }
     expect(status).to be_success
+  end
+
+  it 'executes a real query through the default 9-tool mode' do
+    start_process(read_tools: false)
+    initialize_session
+
+    list = rpc('tools/list')
+    expect(list.dig('result', 'tools').map { |tool| tool['name'] }).to contain_exactly(
+      *Woods::Console::Server::EXECUTABLE_MODES.fetch(:embedded)
+    )
+    expect(call_tool('console_count', 'model' => 'Post')).to eq('**count:** 1')
+
+    @stdin.close
+    expect(Timeout.timeout(10) { @wait.value }).to be_success
   end
 
   it 'exits with the interrupt status when the client sends INT' do
