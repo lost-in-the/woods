@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require 'active_support/cache'
+require 'securerandom'
 
 module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module SessionTracer
     # Uncached, per-key routed coordination operations for Solid Cache 1.0.
     class SolidCacheCoordination # rubocop:disable Metrics/ClassLength
@@ -57,18 +60,31 @@ module Woods
 
       def write_if_absent(name, value, **options)
         with_operation(:write, name, options) do |key, merged_options, _event|
-          entry = cache_entry(name, value, merged_options)
+          entry = cache_entry(name, value, merged_options, version: "woods-cas:#{SecureRandom.hex(16)}")
           payload = @cache.send(:serialize_entry, entry, **merged_options)
           result = routed_write(key, :write_entry) do
             entry_class = ::SolidCache::Entry
-            attributes = entry_class.send(:add_key_hash_and_byte_size, [{ key: key, value: payload }])
-            entry_class.insert_all(attributes, unique_by: entry_class.send(:upsert_unique_by))
-            stored = entry_class.read(key)
-            written = @cache.send(:deserialize_entry, stored, **merged_options)&.value == value
-            @cache.send(:track_writes, 1) if written
-            written
+            insert_result = insert_entry(entry_class, key, payload)
+            inserted = inserted?(entry_class, insert_result, key, payload)
+            @cache.send(:track_writes, 1) if inserted
+            inserted
           end
           backend_result!(result, :write_if_absent, name)
+        end
+      end
+
+      def ensure_present(name, value, **options)
+        with_operation(:write, name, options) do |key, merged_options, _event|
+          entry = cache_entry(name, value, merged_options, version: "woods-ensure:#{SecureRandom.hex(16)}")
+          payload = @cache.send(:serialize_entry, entry, **merged_options)
+          result = routed_write(key, :write_entry) do
+            entry_class = ::SolidCache::Entry
+            insert_result = insert_entry(entry_class, key, payload)
+            @cache.send(:track_writes, 1) if inserted?(entry_class, insert_result, key, payload)
+            stored = @cache.send(:deserialize_entry, entry_class.read(key), **merged_options)
+            stored && !stored.expired?
+          end
+          backend_result!(result, :ensure_present, name)
         end
       end
 
@@ -106,9 +122,21 @@ module Woods
         end
       end
 
-      def cache_entry(name, value, options)
-        version = @cache.send(:normalize_version, name, options)
+      def cache_entry(name, value, options, version: @cache.send(:normalize_version, name, options))
         ActiveSupport::Cache::Entry.new(value, **options, version: version)
+      end
+
+      def insert_entry(entry_class, key, payload)
+        attributes = entry_class.send(:add_key_hash_and_byte_size, [{ key: key, value: payload }])
+        entry_class.insert_all(attributes, unique_by: entry_class.send(:upsert_unique_by))
+      end
+
+      def inserted?(entry_class, result, key, payload)
+        affected_rows = result.affected_rows if result.respond_to?(:affected_rows)
+        return affected_rows.positive? unless affected_rows.nil?
+        return result.rows.any? if entry_class.connection.supports_insert_returning?
+
+        entry_class.read(key) == payload
       end
 
       def routed_read(key, failsafe)

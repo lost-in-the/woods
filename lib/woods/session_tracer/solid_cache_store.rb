@@ -116,7 +116,7 @@ module Woods
       private
 
       def increment!(key, amount = 1)
-        atomic_write_if_absent(key, 0)
+        ensure_counter_present!(key)
         value = @backend.increment(key, amount)
         return value if value.is_a?(Integer) && value.positive?
 
@@ -126,6 +126,13 @@ module Woods
       rescue NotImplementedError, NoMethodError => e
         raise AtomicIncrementRequired,
               "SolidCacheStore requires a working backend atomic #increment (#{e.class}: #{e.message})"
+      end
+
+      def ensure_counter_present!(key)
+        return atomic_write_if_absent(key, 0) unless @backend.respond_to?(:ensure_present)
+        return if @backend.ensure_present(key, 0)
+
+        raise BackendWriteError, "SolidCache backend could not initialize counter #{key.inspect}"
       end
 
       def write!(key, value)

@@ -3,9 +3,13 @@
 require 'spec_helper'
 
 if ENV['WOODS_RUN_LIVE_BACKENDS']
+  require 'json'
+  require 'open3'
   require 'rails'
   require 'active_record'
+  require 'rbconfig'
   require 'solid_cache'
+  require 'timeout'
   require 'tmpdir'
   require 'woods/session_tracer/solid_cache_store'
 
@@ -17,31 +21,49 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
   Object.const_set(:WoodsSolidCacheCompatibilityApplication, app_class)
   WoodsSolidCacheCompatibilityApplication.initialize!
 
-  class FirstIncrementBarrierCache < SolidCache::Store
-    def initialize(**options)
-      super(options)
-      @arrivals = Hash.new(0)
+  class MissingEntryBarrier
+    attr_reader :absent_observations
+
+    def initialize(key, parties: 2, timeout: 5)
+      @key = key
+      @parties = parties
+      @timeout = timeout
+      @absent_observations = 0
       @mutex = Mutex.new
       @ready = ConditionVariable.new
     end
 
-    def increment(key, amount = 1, **options)
-      wait_for_competing_increment(key)
-      super
-    end
+    def observe(key, value)
+      return unless key == @key && value.nil?
 
-    private
-
-    def wait_for_competing_increment(key)
       @mutex.synchronize do
-        @arrivals[key] += 1
-        if @arrivals[key] == 2
+        @absent_observations += 1
+        if @absent_observations == @parties
           @ready.broadcast
         else
-          @ready.wait(@mutex) until @arrivals[key] == 2
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + @timeout
+          while @absent_observations < @parties
+            remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            raise Timeout::Error, 'missing-entry barrier timed out' unless remaining.positive?
+
+            @ready.wait(@mutex, remaining)
+          end
         end
       end
     end
+  end
+
+  module SolidCacheMissingEntryProbe
+    def lock_and_write(key, &block)
+      super do |value|
+        Thread.current[:woods_missing_entry_barrier]&.observe(key, value)
+        block.call(value)
+      end
+    end
+  end
+
+  unless SolidCache::Entry.singleton_class.ancestors.include?(SolidCacheMissingEntryProbe)
+    SolidCache::Entry.singleton_class.prepend(SolidCacheMissingEntryProbe)
   end
 
   # Run locally against PostgreSQL without the other live-lane services:
@@ -101,19 +123,40 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
       second.clear('shared')
       expect(first.read('shared')).to eq([])
     end
-    it 'keeps both records when PostgreSQL interleaves first increments on absent counters', :postgresql do
-      cache = FirstIncrementBarrierCache.new(max_age: nil, max_entries: 10_000)
-      first = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
-      second = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
-      writers = [first, second].each_with_index.map do |target, index|
+    it 'pre-creates counters before PostgreSQL increment transactions can observe absence', :postgresql do
+      cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
+      direct_key = 'woods:probe:direct-absent-counter'
+      direct_barrier = MissingEntryBarrier.new(direct_key)
+      direct_writers = 2.times.map do
         Thread.new do
-          target.record('first-write', { 'timestamp' => '2026-08-20T12:00:00Z', 'action' => "action-#{index}" })
+          Thread.current[:woods_missing_entry_barrier] = direct_barrier
+          cache.increment(direct_key)
+        ensure
+          Thread.current[:woods_missing_entry_barrier] = nil
         end
       end
-      writers.each(&:join)
+      direct_values = Timeout.timeout(10) { direct_writers.map(&:value) }
 
-      expect(first.read('first-write').map { |entry| entry.fetch('action') })
-        .to contain_exactly('action-0', 'action-1')
+      expect(direct_barrier.absent_observations).to eq(2)
+      expect(direct_values).to eq([1, 1])
+      expect(cache.read(direct_key)).to eq(1)
+
+      woods_key = 'woods:probe:initialized-counter'
+      woods_barrier = MissingEntryBarrier.new(woods_key)
+      stores = 2.times.map { Woods::SessionTracer::SolidCacheStore.new(cache: cache) }
+      woods_writers = stores.map do |session_store|
+        Thread.new do
+          Thread.current[:woods_missing_entry_barrier] = woods_barrier
+          session_store.send(:increment!, woods_key)
+        ensure
+          Thread.current[:woods_missing_entry_barrier] = nil
+        end
+      end
+      woods_values = Timeout.timeout(10) { woods_writers.map(&:value) }
+
+      expect(woods_barrier.absent_observations).to eq(0)
+      expect(woods_values).to contain_exactly(1, 2)
+      expect(cache.read(woods_key)).to eq(2)
     end
 
     it 'keeps ownership coherent inside a real Solid Cache local-cache scope' do
@@ -127,6 +170,121 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
         expect(session_store.read('locally-cached'))
           .to contain_exactly('timestamp' => '2026-08-20T12:00:00Z')
       end
+    end
+
+    it 'reports whether a same-value conditional write actually inserted' do
+      cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
+      coordination = Woods::SessionTracer::SolidCacheCoordination.new(cache)
+
+      expect(coordination.write_if_absent('same-value', 0)).to be(true)
+      expect(coordination.write_if_absent('same-value', 0)).to be(false)
+      expect(coordination.read('same-value')).to eq(0)
+    end
+
+    it 'routes every session key to its assigned Solid Cache shard' do
+      script = <<~'RUBY'
+        ENV['RAILS_ENV'] = 'test'
+
+        require 'json'
+        require 'rails'
+        require 'active_record'
+        require 'tmpdir'
+
+        Dir.mktmpdir('woods-solid-cache-shards') do |dir|
+          ActiveRecord::Base.configurations = {
+            'test' => {
+              'cache_one' => { 'adapter' => 'sqlite3', 'database' => File.join(dir, 'one.sqlite3') },
+              'cache_two' => { 'adapter' => 'sqlite3', 'database' => File.join(dir, 'two.sqlite3') }
+            }
+          }
+          connects_to = {
+            shards: {
+              one: { writing: :cache_one },
+              two: { writing: :cache_two }
+            }
+          }
+          require 'solid_cache'
+          SolidCache::Engine.config.solid_cache.connects_to = connects_to
+
+          app_class = Class.new(Rails::Application) do
+            config.eager_load = false
+            config.logger = Logger.new(IO::NULL)
+            config.secret_key_base = 'woods-solid-cache-shards'
+          end
+          Object.const_set(:WoodsSolidCacheShardsApplication, app_class)
+          WoodsSolidCacheShardsApplication.initialize!
+
+          require 'woods/session_tracer/solid_cache_store'
+
+          %i[one two].each do |shard|
+            SolidCache::Record.connected_to(role: :writing, shard: shard) do
+              connection = SolidCache::Record.connection
+              connection.create_table(:solid_cache_entries, force: true) do |table|
+                table.binary :key, limit: 1024, null: false
+                table.binary :value, limit: 536_870_912, null: false
+                table.datetime :created_at, null: false
+                table.integer :key_hash, limit: 8, null: false
+                table.integer :byte_size, limit: 4, null: false
+              end
+              connection.add_index(:solid_cache_entries, :key_hash, unique: true)
+            end
+          end
+          SolidCache::Entry.reset_column_information
+
+          cache = SolidCache::Store.new(shards: %i[one two], max_age: nil, max_entries: 10_000)
+          store = Woods::SessionTracer::SolidCacheStore.new(cache: cache, max_sessions: 1)
+          normalize = lambda do |key|
+            cache.send(:normalize_key, key, cache.send(:merged_options, nil))
+          end
+          assigned_shard = lambda do |key|
+            cache.connections.assign([normalize.call(key)]).keys.fetch(0)
+          end
+
+          fixed_shard = assigned_shard.call(store.send(:index_sequence_key))
+          other_shard = (%i[one two] - [fixed_shard]).fetch(0)
+          session_id = 1_000.times.map { |index| "sharded-#{index}" }.find do |candidate|
+            assigned_shard.call(store.send(:active_key, candidate)) == other_shard
+          end
+          raise 'could not select a cross-shard session key' unless session_id
+
+          record = { 'timestamp' => '2026-08-20T12:00:00Z', 'action' => 'routed' }
+          store.record(session_id, record)
+          raise 'session record was lost' unless store.read(session_id) == [record]
+
+          active_key = store.send(:active_key, session_id)
+          membership = JSON.parse(cache.read(active_key))
+          keys = [
+            store.send(:index_sequence_key),
+            store.send(:index_slot_key, membership.fetch('slot')),
+            store.send(:slot_sequence_key, membership.fetch('slot')),
+            active_key,
+            store.send(:record_key, membership, 1)
+          ]
+          placements = keys.to_h do |key|
+            normalized_key = normalize.call(key)
+            actual = %i[one two].select do |shard|
+              SolidCache::Record.connected_to(role: :writing, shard: shard) do
+                !SolidCache::Entry.read(normalized_key).nil?
+              end
+            end
+            [key, [assigned_shard.call(key), actual]]
+          end
+          raise "misrouted keys: #{placements.inspect}" unless placements.values.all? do |expected, actual|
+            actual == [expected]
+          end
+          raise "only one shard used: #{placements.inspect}" unless placements.values.map(&:first).uniq.size == 2
+
+          print 'ok'
+        ensure
+          SolidCache::Record.connection_handler.clear_all_connections!
+        end
+      RUBY
+      stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script
+      )
+
+      expect(status).to be_success, stderr
+      expect(stdout).to eq('ok')
     end
   end
 end
