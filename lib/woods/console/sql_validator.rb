@@ -23,7 +23,10 @@ module Woods
     #   validator.validate!('DELETE FROM users')            # raises SqlValidationError
     #   validator.valid?('SELECT 1')                       # => true
     #
-    class SqlValidator
+    # Metrics/ClassLength is disabled here for the same reason as tool_specs.rb:
+    # most of the length is declarative allowlist/denylist data (documented
+    # named constants), not imperative logic.
+    class SqlValidator # rubocop:disable Metrics/ClassLength
       # Forbidden statement prefixes (case-insensitive).
       #
       # Expanded beyond DML/DDL to cover:
@@ -63,6 +66,49 @@ module Woods
         pg_sleep lo_import lo_export pg_read_file pg_write_file
         load_file sleep benchmark
       ].freeze
+
+      # Enforceable read-only function policy for `console_sql`.
+      #
+      # The previous control was a denylist (DANGEROUS_FUNCTIONS above), which
+      # is provably incomplete: PostgreSQL ships side-effecting functions that
+      # are technically legal inside a SELECT list, e.g. `pg_terminate_backend`
+      # (kills another backend), `pg_advisory_lock`/`pg_advisory_unlock`
+      # (session-held locks that outlive the rolled-back transaction),
+      # `nextval`/`setval` (permanently mutate a sequence, DDL rollback does
+      # not undo it). Enumerating every such function is a losing race.
+      #
+      # Instead, `console_sql` allowlists a conservative set of pure/read
+      # functions and rejects everything else with a typed error naming the
+      # function. This is the authoritative, documented policy: extend it
+      # deliberately, not by discovering a false positive and reaching for
+      # DANGEROUS_FUNCTIONS instead.
+      ALLOWED_FUNCTIONS = %w[
+        count sum avg min max coalesce nullif
+        lower upper length char_length octet_length
+        substr substring trim ltrim rtrim btrim concat
+        abs round ceil ceiling floor mod power sqrt greatest least
+        cast convert
+        extract date_part date_trunc to_char to_date to_timestamp
+        now current_date current_time current_timestamp
+        json_extract_path json_extract_path_text
+        jsonb_extract_path jsonb_extract_path_text
+      ].freeze
+
+      # SQL keywords that are legitimately followed by `(` but are not
+      # function calls: a subquery predicate (`IN (SELECT ...)`), a
+      # parenthesized boolean group (`WHERE (a AND b)`), etc. Excluded from
+      # the function-allowlist scan so they are not misclassified as unknown
+      # function calls.
+      FUNCTION_SCAN_EXCLUDED_KEYWORDS = %w[
+        IN EXISTS NOT AND OR VALUES WHERE HAVING ON IS BETWEEN CASE WHEN
+        THEN ELSE END FROM JOIN USING WITH SELECT DISTINCT ALL ANY SOME
+        UNION INTERSECT EXCEPT ORDER GROUP BY ASC DESC LIMIT OFFSET AS INTO
+      ].freeze
+
+      # Matches an identifier immediately followed by `(`, the function-call
+      # shape. Runs against the noise-stripped SQL (comments and string
+      # literals removed) so literal content can't be misread as a call.
+      FUNCTION_CALL_PATTERN = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/
 
       # Allowed statement prefixes (case-insensitive).
       #
@@ -126,6 +172,11 @@ module Woods
 
         # After stripping comments, check again for forbidden keywords that might have been hidden
         check_forbidden_keywords_in_body!(normalized)
+
+        # Enforce the read-only function allowlist (replaces relying solely
+        # on DANGEROUS_FUNCTIONS, which cannot enumerate every side-effecting
+        # function).
+        check_function_allowlist!(normalized)
 
         # Must start with an allowed prefix
         return if normalized.match?(ALLOWED_PREFIXES)
@@ -193,6 +244,24 @@ module Woods
       def check_dangerous_functions!(sql)
         DANGEROUS_FUNCTION_REGEXES.each do |func, pattern|
           raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if sql.match?(pattern)
+        end
+      end
+
+      # Check every function-call-shaped identifier against ALLOWED_FUNCTIONS.
+      #
+      # @param sql [String]
+      # @raise [SqlValidationError] if a non-allowlisted function is called
+      def check_function_allowlist!(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql)
+
+        stripped.scan(FUNCTION_CALL_PATTERN) do
+          identifier = Regexp.last_match(1)
+          next if FUNCTION_SCAN_EXCLUDED_KEYWORDS.include?(identifier.upcase)
+          next if ALLOWED_FUNCTIONS.include?(identifier.downcase)
+
+          raise SqlValidationError,
+                "Rejected: function '#{identifier}' is not on the read-only function allowlist. " \
+                "Allowed: #{ALLOWED_FUNCTIONS.join(', ')}."
         end
       end
 
