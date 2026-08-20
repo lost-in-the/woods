@@ -207,6 +207,17 @@ jobs:
           bundler-cache: true
       - name: Run tests with coverage
         run: COVERAGE=true bundle exec rake spec
+      # Uploaded even when the coverage step above fails its minimum_coverage
+      # gate (spec/spec_helper.rb), so the HTML report is available to
+      # inspect which files/groups dropped, not just the pass/fail number.
+      - name: Publish SimpleCov report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: simplecov-report
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 7
 
   security:
     runs-on: ubuntu-latest
