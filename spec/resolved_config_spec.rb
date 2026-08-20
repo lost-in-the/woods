@@ -298,7 +298,8 @@ RSpec.describe Woods::ResolvedConfig do
         metadata_store: :in_memory,
         graph_store: :in_memory,
         vector_store_options: {
-          url: 'https://qdrant.example.test', collection: 'woods', distance: 'Dot',
+          url: 'https://user:path-sentinel@qdrant.example.test/endpoint-sentinel?token=query-sentinel',
+          collection: 'woods', distance: 'Dot',
           api_key: 'secret', connection: Object.new
         }, metadata_store_options: { database: '/host/path/metadata.sqlite3' }
       )
@@ -308,9 +309,10 @@ RSpec.describe Woods::ResolvedConfig do
       resolved = described_class.from_configuration(host_config)
 
       expect(resolved.store_options[:vector_store]).to eq(
-        url: 'https://qdrant.example.test', collection: 'woods', distance: 'Dot'
+        collection: 'woods', distance: 'Dot'
       )
-      expect(JSON.generate(resolved.to_snapshot_json)).not_to include('secret', '/host/path')
+      snapshot = JSON.generate(resolved.to_snapshot_json)
+      expect(snapshot).not_to include('secret', '/host/path', 'path-sentinel', 'endpoint-sentinel', 'query-sentinel')
     end
 
     it 'probes the live provider for its dimension when declared config omits it' do

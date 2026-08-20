@@ -595,7 +595,7 @@ module Woods
             retry if attempt == 1
 
             raise transport_error(e, ambiguous: false)
-          rescue Errno::ECONNRESET, Net::ReadTimeout, IOError => e
+          rescue Errno::ECONNRESET, Net::ReadTimeout, Net::WriteTimeout, IOError => e
             @http_client = nil
             retry if attempt == 1 && retry_safe?(method, path) && !write_request?(method, path)
 

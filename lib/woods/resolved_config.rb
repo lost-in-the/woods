@@ -294,7 +294,7 @@ module Woods
         }
       end
 
-      DURABLE_VECTOR_OPTION_KEYS = %i[url collection dimensions distance allow_private_hosts table schema].freeze
+      DURABLE_VECTOR_OPTION_KEYS = %i[collection dimensions distance allow_private_hosts table schema].freeze
       private_constant :DURABLE_VECTOR_OPTION_KEYS
 
       def durable_store_options(config)

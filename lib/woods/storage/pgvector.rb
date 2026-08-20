@@ -213,11 +213,8 @@ module Woods
         private
 
         def normalize_dimensions(value)
-          dimensions = value.is_a?(String) ? Integer(value, 10) : Integer(value)
-          return dimensions if dimensions.positive?
+          return value if value.is_a?(Integer) && value.positive?
 
-          raise ArgumentError, 'dimensions must be a positive Integer'
-        rescue TypeError, ArgumentError
           raise ArgumentError, 'dimensions must be a positive Integer'
         end
 

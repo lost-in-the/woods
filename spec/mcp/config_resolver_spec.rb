@@ -112,13 +112,12 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
-      it 'restores persisted Qdrant options and serve-time credentials' do
+      it 'restores persisted Qdrant options and serve-time endpoint credentials' do
         Dir.mktmpdir do |dir|
           qdrant = woods_json_hash.merge(
             'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant'),
             'store_options' => {
-              'vector_store' => { 'url' => 'https://stored.test', 'collection' => 'docs',
-                                  'dimensions' => 768, 'distance' => 'Dot' }
+              'vector_store' => { 'collection' => 'docs', 'dimensions' => 768, 'distance' => 'Dot' }
             }
           )
           write_woods_json(dir, qdrant)
@@ -134,6 +133,23 @@ RSpec.describe Woods::MCP::ConfigResolver do
           expect(config.vector_store_options).to include(
             url: 'https://served.test', collection: 'docs', dimensions: 768, distance: 'Dot', api_key: 'token'
           )
+        end
+      end
+
+
+      it 'uses WOODS_QDRANT_COLLECTION when the snapshot has no collection' do
+        Dir.mktmpdir do |dir|
+          write_woods_json(dir, woods_json_hash.merge(
+                                  'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant')
+                                ))
+
+          config, = described_class.resolve(
+            blank_config,
+            artifact: Woods::IndexArtifact.new(dir),
+            env: { 'WOODS_QDRANT_URL' => 'https://served.test', 'WOODS_QDRANT_COLLECTION' => 'served-docs' }
+          )
+
+          expect(config.vector_store_options).to include(url: 'https://served.test', collection: 'served-docs')
         end
       end
 

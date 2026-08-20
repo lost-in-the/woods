@@ -200,7 +200,11 @@ module Woods
         options = stored.store_options.fetch(:vector_store, {}).dup
         case config.vector_store
         when :qdrant
+          options.delete(:url)
           options[:url] = env['WOODS_QDRANT_URL'] unless env['WOODS_QDRANT_URL'].to_s.empty?
+          if options[:collection].to_s.empty? && !env['WOODS_QDRANT_COLLECTION'].to_s.empty?
+            options[:collection] = env['WOODS_QDRANT_COLLECTION']
+          end
           options[:api_key] = env['WOODS_QDRANT_API_KEY'] unless env['WOODS_QDRANT_API_KEY'].to_s.empty?
           require_store_setting!(options, :url, 'WOODS_QDRANT_URL', :qdrant)
           require_store_setting!(options, :collection, 'WOODS_QDRANT_COLLECTION', :qdrant)

@@ -487,6 +487,29 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(http).to have_received(:request).once
     end
 
+    it 'wraps a write timeout as ambiguous without retrying the write' do
+      allow(http).to receive(:request).and_raise(Net::WriteTimeout)
+
+      expect { store.store('doc1', [0.1, 0.2, 0.3], {}) }
+        .to raise_error(described_class::RequestError) do |error|
+          expect(error).to be_retryable
+          expect(error).to be_ambiguous
+        end
+      expect(http).to have_received(:request).once
+    end
+
+    it 'retries a read after a write timeout with non-ambiguous classification' do
+      allow(http).to receive(:request).and_raise(Net::WriteTimeout)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }
+        .to raise_error(described_class::RequestError) do |error|
+          expect(error).to be_retryable
+          expect(error).not_to be_ambiguous
+        end
+      expect(http).to have_received(:request).twice
+    end
+
     [Errno::ECONNREFUSED, SocketError].each do |error_class|
       it "wraps #{error_class} as retryable and non-ambiguous" do
         allow(http).to receive(:request).and_raise(error_class, 'unavailable')

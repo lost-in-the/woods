@@ -149,9 +149,10 @@ and dimensions come from the snapshot. Credentials and process-specific
 connections remain serve-time settings:
 
 - `OPENAI_API_KEY` supplies the embedding credential for OpenAI snapshots.
-- `WOODS_QDRANT_URL` overrides the stored Qdrant endpoint; `WOODS_QDRANT_API_KEY`
-  supplies its optional credential. Legacy snapshots without an endpoint must
-  set `WOODS_QDRANT_URL`.
+- Qdrant endpoint URLs and API keys are never stored in `woods.json`.
+  `WOODS_QDRANT_URL` is required when serving a Qdrant index;
+  `WOODS_QDRANT_API_KEY` is optional, and `WOODS_QDRANT_COLLECTION` supplies a
+  collection only when the snapshot does not record one.
 - `WOODS_PG_URL` is required to construct the Active Record connection for a
   pgvector snapshot outside its host application.
 
