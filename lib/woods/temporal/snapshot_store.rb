@@ -29,6 +29,7 @@ module Woods
       #   construct the store with a bare mock.
       def initialize(connection:, validate_schema: true)
         @db = connection
+        @db.busy_timeout = 5_000 if @db.respond_to?(:busy_timeout=)
         validate_schema! if validate_schema
       end
 
@@ -97,16 +98,20 @@ module Woods
         # collide a snapshot row. Mirrors JsonSnapshotStore's path validation.
         return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
-        previous = find_latest
-        upsert_snapshot(manifest, git_sha, unit_hashes.size)
+        captured = nil
+        @db.transaction do
+          previous = find_latest
+          upsert_snapshot(manifest, git_sha, unit_hashes.size)
 
-        snapshot_id = fetch_snapshot_id(git_sha)
-        @db.execute('DELETE FROM woods_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
-        prune_orphaned_units
-        insert_unit_hashes(snapshot_id, unit_hashes)
+          snapshot_id = fetch_snapshot_id(git_sha)
+          @db.execute('DELETE FROM woods_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
+          prune_orphaned_units
+          insert_unit_hashes(snapshot_id, unit_hashes)
 
-        update_diff_stats(snapshot_id, previous)
-        find(git_sha)
+          update_diff_stats(snapshot_id, previous)
+          captured = find(git_sha)
+        end
+        captured
       end
 
       # List snapshots, optionally filtered by branch.
@@ -330,20 +335,16 @@ module Woods
           VALUES (?, ?, ?, ?, ?, ?)
         SQL
 
-        # Wrap in a transaction to batch all inserts into a single commit,
-        # reducing per-row fsync overhead from O(n) to O(1).
-        @db.transaction do
-          unit_hashes.each do |uh|
-            params = [
-              snapshot_id,
-              mget(uh, 'identifier'),
-              mget(uh, 'type').to_s,
-              mget(uh, 'source_hash'),
-              mget(uh, 'metadata_hash'),
-              mget(uh, 'dependencies_hash')
-            ]
-            @db.execute(sql, params)
-          end
+        unit_hashes.each do |uh|
+          params = [
+            snapshot_id,
+            mget(uh, 'identifier'),
+            mget(uh, 'type').to_s,
+            mget(uh, 'source_hash'),
+            mget(uh, 'metadata_hash'),
+            mget(uh, 'dependencies_hash')
+          ]
+          @db.execute(sql, params)
         end
       end
 

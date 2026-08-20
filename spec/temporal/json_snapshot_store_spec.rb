@@ -3,6 +3,10 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
+require 'open3'
+require 'rbconfig'
+require 'woods/atomic_file'
 require 'woods/temporal/json_snapshot_store'
 
 RSpec.describe Woods::Temporal::JsonSnapshotStore do
@@ -110,6 +114,49 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
     it 'writes a JSON file to the snapshots directory' do
       store.capture(manifest_v1, units_v1)
       expect(File.exist?(File.join(tmpdir, 'snapshots', 'aaa1111.json'))).to be true
+    end
+
+    it 'writes snapshots through AtomicFile' do
+      allow(Woods::AtomicFile).to receive(:write).and_call_original
+
+      store.capture(manifest_v1, units_v1)
+
+      expect(Woods::AtomicFile).to have_received(:write)
+        .with(File.join(tmpdir, 'snapshots', 'aaa1111.json'), kind_of(String))
+    end
+
+    it 'leaves the previous valid snapshot intact when an atomic write is interrupted' do
+      store.capture(manifest_v1, units_v1)
+      allow(Woods::AtomicFile).to receive(:write).and_raise(IOError, 'simulated interruption')
+
+      expect { store.capture(manifest_v1, units_v2) }
+        .to raise_error(IOError, 'simulated interruption')
+
+      expect(store.diff(manifest_v1.fetch('git_sha'), manifest_v1.fetch('git_sha')))
+        .to eq(added: [], modified: [], deleted: [])
+      expect(store.unit_history('Post').first[:source_hash]).to eq('h2')
+    end
+
+    it 'reopens a Unicode snapshot from a clean Ruby process' do
+      unicode_units = units_v1.map(&:dup)
+      unicode_units.first[:identifier] = 'CaféOrder'
+      store.capture(manifest_v1, unicode_units)
+      script = <<~RUBY
+        require 'json'
+        require 'woods/temporal/json_snapshot_store'
+        store = Woods::Temporal::JsonSnapshotStore.new(dir: ARGV.fetch(0))
+        print JSON.generate(store.unit_history('CaféOrder'))
+      RUBY
+
+      stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby,
+        '-I', File.expand_path('../../lib', __dir__),
+        '-e', script,
+        tmpdir
+      )
+
+      expect(status).to be_success, stderr
+      expect(JSON.parse(stdout).first.fetch('source_hash')).to eq('h1')
     end
 
     it 'is idempotent — same git SHA overwrites cleanly' do

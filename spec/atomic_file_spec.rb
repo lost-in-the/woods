@@ -46,6 +46,39 @@ RSpec.describe Woods::AtomicFile do
       expect(leftovers).to be_empty
     end
 
+    it 'fsyncs the containing directory after the atomic rename' do
+      expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
+
+      described_class.write(File.join(@dir, 'note.md'), 'data')
+    end
+
+    it 'uses unique temporary names for concurrent writers' do
+      path = File.join(@dir, 'note.md')
+      temporary_paths = Queue.new
+      allow(Tempfile).to receive(:new).and_wrap_original do |original, *args|
+        original.call(*args).tap { |tempfile| temporary_paths << tempfile.path }
+      end
+
+      contents = ['a' * 10_000, 'b' * 20_000]
+      threads = contents.map { |content| Thread.new { described_class.write(path, content) } }
+      threads.each(&:join)
+
+      paths = 2.times.map { temporary_paths.pop }
+      expect(paths.uniq.length).to eq(2)
+      expect(contents).to include(File.read(path))
+      expect(Dir.children(@dir)).to eq(['note.md'])
+    end
+
+    it 'cleans up and preserves the target when temp-file fsync fails' do
+      path = File.join(@dir, 'note.md')
+      File.write(path, 'original')
+      allow_any_instance_of(Tempfile).to receive(:fsync).and_raise(IOError, 'disk failure')
+
+      expect { described_class.write(path, 'new') }.to raise_error(IOError, 'disk failure')
+      expect(File.read(path)).to eq('original')
+      expect(Dir.children(@dir)).to eq(['note.md'])
+    end
+
     it 'cleans up the temp file and re-raises if the rename fails, leaving the original intact' do
       path = File.join(@dir, 'note.md')
       File.write(path, 'original')

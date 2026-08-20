@@ -96,6 +96,28 @@ RSpec.describe Woods::Unblocked::SyncManifest do
       expect { m.save }.not_to raise_error
       expect(File.exist?(nested)).to be(true)
     end
+
+    it 'writes through AtomicFile' do
+      allow(Woods::AtomicFile).to receive(:write).and_call_original
+      manifest.record(uri: 'uri-a', hash: 'hash-1', document_id: 'doc-1')
+
+      manifest.save
+
+      expect(Woods::AtomicFile).to have_received(:write).with(path, kind_of(String))
+    end
+
+    it 'preserves the previous manifest when an atomic save is interrupted' do
+      manifest.record(uri: 'uri-a', hash: 'hash-1', document_id: 'doc-1')
+      manifest.save
+      manifest.record(uri: 'uri-a', hash: 'hash-2', document_id: 'doc-2')
+      allow(Woods::AtomicFile).to receive(:write).and_raise(IOError, 'simulated interruption')
+
+      expect { manifest.save }.to raise_error(IOError, 'simulated interruption')
+
+      reloaded = described_class.new(path: path, collection_id: collection_id)
+      expect(reloaded.unchanged?('uri-a', 'hash-1')).to be(true)
+      expect(reloaded.document_id_for('uri-a')).to eq('doc-1')
+    end
   end
 
   describe 'collection guard' do

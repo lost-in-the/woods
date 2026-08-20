@@ -91,15 +91,12 @@ module Woods
       # Persist the manifest atomically (temp file + rename) so an interrupted
       # write never leaves a torn file in the CI cache.
       def save
-        FileUtils.mkdir_p(File.dirname(@path))
         payload = JSON.generate(
           'version' => VERSION,
           'collection_id' => @collection_id,
           'documents' => @documents
         )
-        tmp = "#{@path}.tmp"
-        File.write(tmp, payload)
-        File.rename(tmp, @path)
+        AtomicFile.write(@path, payload)
       end
 
       private
