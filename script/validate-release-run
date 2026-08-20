@@ -6,6 +6,28 @@ require 'open3'
 
 class ReleaseRunValidationError < StandardError; end
 
+# The trusted default-branch CI contract this candidate run must have
+# actually executed. A CI run's `workflow_id` alone proves the run belongs
+# to *some* revision of .github/workflows/ci.yml at that path, not that the
+# revision tested on the candidate ref carried the full trusted job set - a
+# candidate branch/tag can edit ci.yml down to a handful of jobs without
+# changing its path or its GitHub-assigned workflow_id. Job *names* are
+# matched by prefix because a matrixed job (e.g. the Ruby version matrix)
+# reports one job per matrix cell, each suffixed with its cell's values.
+TRUSTED_CI_WORKFLOW_PATH = '.github/workflows/ci.yml'
+TRUSTED_CI_WORKFLOW_NAME = 'CI'
+REQUIRED_CI_JOBS = {
+  'test' => 'Unit specs (Ruby ',
+  'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache)',
+  'http-transport' => 'MCP transports (official clients)',
+  'coverage' => 'coverage',
+  'security' => 'security',
+  'lint' => 'lint',
+  'build' => 'build'
+}.freeze
+
+RELEASE_ENVIRONMENT = 'release'
+
 def fail_validation(message)
   raise ReleaseRunValidationError, message
 end
@@ -47,6 +69,40 @@ begin
   unless run['workflow_id'].to_s == workflow['id'].to_s
     fail_validation("CI run #{run_id} does not belong to .github/workflows/ci.yml")
   end
+
+  run_workflow_path = run['path'].to_s
+  unless run_workflow_path == TRUSTED_CI_WORKFLOW_PATH
+    fail_validation("CI run #{run_id} ran workflow #{run_workflow_path}, expected #{TRUSTED_CI_WORKFLOW_PATH}")
+  end
+  workflow_path = workflow['path'].to_s
+  if workflow_path != TRUSTED_CI_WORKFLOW_PATH
+    fail_validation("CI run #{run_id} workflow definition path is #{workflow_path}, " \
+                    "expected #{TRUSTED_CI_WORKFLOW_PATH}")
+  end
+  workflow_name = workflow['name'].to_s
+  if workflow_name != TRUSTED_CI_WORKFLOW_NAME
+    fail_validation("CI run #{run_id} workflow name is #{workflow_name.inspect}, " \
+                    "expected #{TRUSTED_CI_WORKFLOW_NAME.inspect}")
+  end
+
+  run_jobs = github_api("/repos/#{repository}/actions/runs/#{run_id}/jobs").fetch('jobs', [])
+  REQUIRED_CI_JOBS.each do |job_id, name_prefix|
+    matches = run_jobs.select { |job| job['name'].to_s.start_with?(name_prefix) }
+    if matches.empty?
+      fail_validation(
+        "CI run #{run_id} has no job matching required CI contract job #{job_id.inspect} " \
+        "(expected a job name starting with #{name_prefix.inspect})"
+      )
+    end
+    failed = matches.reject { |job| job['conclusion'] == 'success' }
+    next if failed.empty?
+
+    fail_validation(
+      "CI run #{run_id} job #{failed.first['name'].inspect} concluded #{failed.first['conclusion']}, " \
+      "expected success for required CI contract job #{job_id.inspect}"
+    )
+  end
+
   unless run['conclusion'] == 'success'
     fail_validation("CI run #{run_id} conclusion is #{run['conclusion']}, expected success")
   end
@@ -97,6 +153,26 @@ begin
     fail_validation(
       "artifact #{artifact_name} (id #{artifact_id}) in CI run #{run_id} has no digest in the GitHub API " \
       'response; refusing to fall back to the artifact-internal .sha256 file as the trust anchor'
+    )
+  end
+
+  # Fail closed rather than publish behind a gate that only looks locked: an
+  # environment with no protection rules approves every deployment the
+  # instant it is requested, and admin bypass lets one identity route around
+  # whatever rules do exist. Detection only - changing the live environment's
+  # settings is outside this script's authority.
+  release_environment = github_api("/repos/#{repository}/environments/#{RELEASE_ENVIRONMENT}")
+  if release_environment.fetch('protection_rules', []).empty?
+    fail_validation(
+      "live '#{RELEASE_ENVIRONMENT}' environment has no protection rules configured; add a required " \
+      'reviewers rule (or another protection rule) in the environment settings and request approval ' \
+      'before publishing'
+    )
+  end
+  if release_environment.fetch('can_admins_bypass', false)
+    fail_validation(
+      "live '#{RELEASE_ENVIRONMENT}' environment allows administrators to bypass protection rules; " \
+      'disable admin bypass in the environment settings and request approval before publishing'
     )
   end
 

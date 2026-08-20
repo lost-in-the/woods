@@ -19,6 +19,7 @@ RSpec.describe 'release artifact identity resolution' do
     {
       'id' => 12_345,
       'workflow_id' => 678,
+      'path' => '.github/workflows/ci.yml',
       'conclusion' => 'success',
       'event' => 'push',
       'head_branch' => 'v2.0.0',
@@ -26,6 +27,28 @@ RSpec.describe 'release artifact identity resolution' do
       'repository' => { 'full_name' => 'lost-in-the/woods' },
       'head_repository' => { 'full_name' => 'lost-in-the/woods' }
     }.merge(overrides)
+  end
+
+  # Trusted-CI-contract job set (Task 10 workflow/job contract) and a
+  # protected release environment. Additive defaults so artifact-resolution
+  # scenarios below, which never mention these two checks, keep exercising
+  # only artifact overrides.
+  def default_jobs_json
+    JSON.generate(
+      'jobs' => [
+        { 'name' => 'Unit specs (Ruby 4.0)', 'conclusion' => 'success' },
+        { 'name' => 'Live backends (pgvector + Qdrant + Solid Cache)', 'conclusion' => 'success' },
+        { 'name' => 'MCP transports (official clients)', 'conclusion' => 'success' },
+        { 'name' => 'coverage', 'conclusion' => 'success' },
+        { 'name' => 'security', 'conclusion' => 'success' },
+        { 'name' => 'lint', 'conclusion' => 'success' },
+        { 'name' => 'build', 'conclusion' => 'success' }
+      ]
+    )
+  end
+
+  def default_environment_json
+    JSON.generate('protection_rules' => [{ 'type' => 'required_reviewers' }], 'can_admins_bypass' => false)
   end
 
   def artifact(overrides = {})
@@ -46,8 +69,10 @@ RSpec.describe 'release artifact identity resolution' do
       File.open(ENV.fetch('GH_API_LOG'), 'a') { |file| file.puts(endpoint) }
       case endpoint
       when %r{/actions/runs/\d+/artifacts\z} then print ENV.fetch('GH_ARTIFACTS_JSON')
+      when %r{/actions/runs/\d+/jobs\z} then print ENV.fetch('GH_JOBS_JSON')
       when %r{/actions/runs/\d+\z} then print ENV.fetch('GH_RUN_JSON')
       when %r{/actions/workflows/ci\.yml\z} then print ENV.fetch('GH_WORKFLOW_JSON')
+      when %r{/environments/release\z} then print ENV.fetch('GH_ENVIRONMENT_JSON')
       else
         warn "unexpected endpoint: #{endpoint}"
         exit 1
@@ -57,7 +82,9 @@ RSpec.describe 'release artifact identity resolution' do
     fake_bin
   end
 
-  def validate_ci_run(run: ci_run, workflow: { 'id' => 678 }, artifacts: [artifact])
+  def validate_ci_run(run: ci_run,
+                      workflow: { 'id' => 678, 'path' => '.github/workflows/ci.yml', 'name' => 'CI' },
+                      artifacts: [artifact])
     Dir.mktmpdir('woods-artifact-resolution') do |directory|
       env = {
         'PATH' => "#{write_fake_gh(directory)}:#{ENV.fetch('PATH')}",
@@ -68,6 +95,8 @@ RSpec.describe 'release artifact identity resolution' do
         'GH_API_LOG' => File.join(directory, 'gh-api.log'),
         'GH_RUN_JSON' => JSON.generate(run),
         'GH_WORKFLOW_JSON' => JSON.generate(workflow),
+        'GH_JOBS_JSON' => default_jobs_json,
+        'GH_ENVIRONMENT_JSON' => default_environment_json,
         'GH_ARTIFACTS_JSON' => JSON.generate('artifacts' => artifacts)
       }
 

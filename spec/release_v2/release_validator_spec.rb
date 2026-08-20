@@ -83,6 +83,7 @@ RSpec.describe 'release validation' do
     {
       'id' => 12_345,
       'workflow_id' => 678,
+      'path' => '.github/workflows/ci.yml',
       'conclusion' => 'success',
       'event' => 'push',
       'head_branch' => 'v2.0.0',
@@ -90,6 +91,30 @@ RSpec.describe 'release validation' do
       'repository' => { 'full_name' => 'lost-in-the/woods' },
       'head_repository' => { 'full_name' => 'lost-in-the/woods' }
     }.merge(overrides)
+  end
+
+  # Trusted-CI-contract job set (Task 10 workflow/job contract) and a
+  # protected release environment. Additive defaults so every pre-existing
+  # scenario below, which never mentions these two checks, keeps exercising
+  # only the field it overrides.
+  def contract_job_names
+    {
+      'test' => 'Unit specs (Ruby 4.0)',
+      'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache)',
+      'http-transport' => 'MCP transports (official clients)',
+      'coverage' => 'coverage',
+      'security' => 'security',
+      'lint' => 'lint',
+      'build' => 'build'
+    }
+  end
+
+  def default_jobs_json
+    JSON.generate('jobs' => contract_job_names.values.map { |name| { 'name' => name, 'conclusion' => 'success' } })
+  end
+
+  def default_environment_json
+    JSON.generate('protection_rules' => [{ 'type' => 'required_reviewers' }], 'can_admins_bypass' => false)
   end
 
   def write_fake_gh(directory)
@@ -102,8 +127,10 @@ RSpec.describe 'release validation' do
       File.open(ENV.fetch('GH_API_LOG'), 'a') { |file| file.puts(endpoint) }
       case endpoint
       when %r{/actions/runs/\d+/artifacts\z} then print ENV.fetch('GH_ARTIFACTS_JSON')
+      when %r{/actions/runs/\d+/jobs\z} then print ENV.fetch('GH_JOBS_JSON')
       when %r{/actions/runs/\d+\z} then print ENV.fetch('GH_RUN_JSON')
       when %r{/actions/workflows/ci\.yml\z} then print ENV.fetch('GH_WORKFLOW_JSON')
+      when %r{/environments/release\z} then print ENV.fetch('GH_ENVIRONMENT_JSON')
       else
         warn "unexpected endpoint: #{endpoint}"
         exit 1
@@ -123,6 +150,8 @@ RSpec.describe 'release validation' do
       'GH_API_LOG' => File.join(directory, 'gh-api.log'),
       'GH_RUN_JSON' => JSON.generate(run),
       'GH_WORKFLOW_JSON' => JSON.generate(workflow),
+      'GH_JOBS_JSON' => default_jobs_json,
+      'GH_ENVIRONMENT_JSON' => default_environment_json,
       'GH_ARTIFACTS_JSON' => JSON.generate(
         'artifacts' => [
           { 'id' => 987_654_321, 'name' => "woods-release-#{run['head_sha']}",
@@ -132,7 +161,9 @@ RSpec.describe 'release validation' do
     }
   end
 
-  def validate_ci_run(run: ci_run, workflow: { 'id' => 678 }, env: {})
+  def validate_ci_run(run: ci_run,
+                      workflow: { 'id' => 678, 'path' => '.github/workflows/ci.yml', 'name' => 'CI' },
+                      env: {})
     Dir.mktmpdir('woods-release-run-validator') do |directory|
       command_env = ci_run_env(directory, write_fake_gh(directory), run, workflow).merge(env)
       command_env.delete_if { |_key, value| value.nil? }
@@ -152,7 +183,9 @@ RSpec.describe 'release validation' do
       %w[
         /repos/lost-in-the/woods/actions/runs/12345
         /repos/lost-in-the/woods/actions/workflows/ci.yml
+        /repos/lost-in-the/woods/actions/runs/12345/jobs
         /repos/lost-in-the/woods/actions/runs/12345/artifacts
+        /repos/lost-in-the/woods/environments/release
       ]
     )
     expect(outputs.lines(chomp: true)).to contain_exactly(
