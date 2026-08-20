@@ -1609,8 +1609,9 @@ RSpec.describe Woods::MCP::Server do
     end
 
     it 'returns not found for an invalid identifier' do
-      contents = read_resource(server, 'codebase://unit/NonExistent')
-      expect(contents.first[:text]).to include('not found')
+      expect do
+        read_resource(server, 'codebase://unit/NonExistent')
+      end.to raise_error(MCP::Server::ResourceNotFoundError)
     end
   end
 
@@ -1623,9 +1624,9 @@ RSpec.describe Woods::MCP::Server do
     end
 
     it 'returns empty array for unknown type' do
-      contents = read_resource(server, 'codebase://type/nonexistent')
-      data = JSON.parse(contents.first[:text])
-      expect(data).to eq([])
+      expect do
+        read_resource(server, 'codebase://type/nonexistent')
+      end.to raise_error(MCP::Server::ResourceNotFoundError)
     end
   end
 

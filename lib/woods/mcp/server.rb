@@ -7,6 +7,7 @@ require 'mcp'
 require 'open3'
 require 'time'
 require 'set'
+require 'uri'
 require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../tasks'
@@ -18,6 +19,7 @@ require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
 require_relative 'tasks/store'
+require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -166,6 +168,7 @@ module Woods
           define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired?
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
+          ToolContract.apply!(server)
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one
@@ -214,7 +217,17 @@ module Woods
         end
 
         def text_response(text)
-          ::MCP::Tool::Response.new([{ type: 'text', text: text }])
+          structured = { text: text }
+          structured[:data] = JSON.parse(text)
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: text }],
+            structured_content: structured
+          )
+        rescue JSON::ParserError
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: text }],
+            structured_content: structured
+          )
         end
 
         # Build a structured error response that carries machine-readable
@@ -235,6 +248,7 @@ module Woods
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: message }],
             error: true,
+            structured_content: { text: message },
             meta: meta
           )
         end
@@ -878,6 +892,14 @@ module Woods
             # surface it, rather than wrapping the error payload in a
             # successful response — consistent with session_trace and
             # codebase_retrieve.
+            if ToolContract.artifact_error?(e)
+              next respond_err.call(
+                'trace_flow could not read a required Index artifact.',
+                code: :corrupt_artifact,
+                tool: 'trace_flow'
+              )
+            end
+
             respond_err.call(
               "trace_flow failed: #{e.message}",
               code: :internal_error,
@@ -2002,27 +2024,73 @@ module Woods
         def register_resource_handler(server, reader)
           server.resources_read_handler do |params|
             uri = params[:uri]
-            case uri
-            when 'codebase://manifest'
-              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.manifest) }]
-            when 'codebase://graph'
-              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.raw_graph_data) }]
-            when %r{\Acodebase://unit/(.+)\z}
-              identifier = Regexp.last_match(1)
-              unit = reader.find_unit(identifier)
-              if unit
-                [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(unit) }]
-              else
-                [{ uri: uri, mimeType: 'text/plain', text: "Unit not found: #{identifier}" }]
-              end
-            when %r{\Acodebase://type/(.+)\z}
-              type = Regexp.last_match(1)
-              units = reader.list_units(type: type)
-              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(units) }]
-            else
-              [{ uri: uri, mimeType: 'text/plain', text: "Unknown resource: #{uri}" }]
+            kind, target = parse_resource_uri(uri)
+            raise ::MCP::Server::ResourceNotFoundError.new(uri, params) unless kind
+
+            payload = resource_payload(reader, kind, target)
+            raise ::MCP::Server::ResourceNotFoundError.new(uri, params) if payload.nil?
+
+            [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(payload) }]
+          rescue ::MCP::Server::ResourceNotFoundError
+            raise
+          rescue JSON::ParserError, SystemCallError, IOError, TypeError => e
+            raise corrupt_resource_error(uri, params, e)
+          end
+        end
+
+        def parse_resource_uri(uri)
+          return [:manifest, nil] if uri == 'codebase://manifest'
+          return [:graph, nil] if uri == 'codebase://graph'
+          return unless uri.is_a?(String)
+
+          parsed = URI.parse(uri)
+          return unless parsed.scheme == 'codebase'
+          return unless %w[unit type].include?(parsed.host)
+          return if parsed.userinfo || parsed.port || parsed.query || parsed.fragment || parsed.opaque
+
+          raw_target = parsed.path.to_s.delete_prefix('/')
+          return if raw_target.empty? || raw_target.include?('/')
+
+          target = URI::DEFAULT_PARSER.unescape(raw_target).force_encoding(Encoding::UTF_8)
+          return unless target.valid_encoding?
+          return if target.match?(%r{[%\\/\x00-\x1f\x7f]})
+          return if %w[. ..].include?(target)
+
+          [parsed.host.to_sym, target]
+        rescue URI::InvalidURIError
+          nil
+        end
+
+        def resource_payload(reader, kind, target)
+          case kind
+          when :manifest
+            reader.manifest.tap { |value| raise TypeError unless value.is_a?(Hash) }
+          when :graph
+            reader.raw_graph_data.tap do |value|
+              raise TypeError unless value.is_a?(Hash) && value['nodes'].is_a?(Hash) && value['edges'].is_a?(Hash)
+            end
+          when :unit
+            reader.find_unit(target).tap do |value|
+              raise TypeError if value && (!value.is_a?(Hash) || value['identifier'] != target)
+            end
+          when :type
+            return nil unless IndexReader::TYPE_TO_DIR.key?(target)
+
+            reader.list_units(type: target).tap do |value|
+              raise TypeError unless value.is_a?(Array) && value.all?(Hash)
             end
           end
+        end
+
+        def corrupt_resource_error(uri, params, original_error)
+          ::MCP::Server::RequestHandlerError.new(
+            'Resource artifact is unavailable or malformed.',
+            params,
+            error_type: :internal_error,
+            original_error: original_error,
+            error_code: ::JsonRpcHandler::ErrorCode::INTERNAL_ERROR,
+            error_data: { uri: uri, error_code: 'corrupt_artifact' }
+          )
         end
       end
     end

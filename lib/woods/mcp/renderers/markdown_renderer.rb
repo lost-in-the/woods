@@ -72,6 +72,14 @@ module Woods
             lines << line
           end
 
+          note = fetch_key(data, :note)
+          partial = fetch_key(data, :partial, false)
+          if partial || note
+            lines << ''
+            lines << '**partial:** true' if partial
+            lines << "**note:** #{note}" if note
+          end
+
           lines.join("\n").rstrip
         end
 
