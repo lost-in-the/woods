@@ -47,7 +47,7 @@ below). Back that up first if it holds anything you can't afford to lose:
 
 | Vector store | Applies to | Backup method |
 |---|---|---|
-| pgvector | PostgreSQL-only, in-database | `pg_dump` the table backing `vector_store_connection`, or a schema-level snapshot of that database |
+| pgvector | PostgreSQL-only, in-database | `pg_dump` the table backing the connection you pass as `vector_store_options[:connection]`, or a schema-level snapshot of that database |
 | Qdrant | Required for MySQL/MariaDB/Aurora MySQL stacks; also usable on PostgreSQL | Qdrant's own collection snapshot API |
 
 The `:local` and `:shared_filesystem` presets need no separate backup step —

@@ -375,7 +375,7 @@ Then re-run extraction.
 
 **Fix:** Add `-i` to keep stdin open:
 
-```json
+```text
 "args": ["compose", "exec", "-i", "app", ...]
 ```
 

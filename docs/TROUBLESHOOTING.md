@@ -560,8 +560,8 @@ Update the container name in your configuration to match exactly.
 
 **Fix:** Use the host path in `.mcp.json`. With a standard `.:/app` volume mount, the output is at `./tmp/woods` on the host:
 
-```json
-"args": ["./tmp/woods"]    ✓ host path
+```text
+"args": ["./tmp/woods"]     ✓ host path
 "args": ["/app/tmp/woods"]  ✗ container path — Index Server cannot read this
 ```
 

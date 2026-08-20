@@ -585,7 +585,8 @@ the same setting. When read tools are registered, these controls run:
 1. `SqlValidator` rejects DML/DDL and most administrative keywords
    (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`,
    `PREPARE`, transaction control, and `EXPLAIN ANALYZE`) at the string
-   level.
+   level, and enforces a read-only **function allowlist** — any function
+   not on `ALLOWED_FUNCTIONS` is rejected by name.
 2. `TableGate` refuses any SQL, model, or join that touches a
    `console_blocked_tables` entry.
 3. `SafeContext` wraps every request in a rolled-back transaction with
@@ -621,7 +622,7 @@ Security posture with the flag on:
 
 | Layer | What it enforces |
 |-------|------------------|
-| `SqlValidator` denylist | Rejects INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / REPLACE / UNION / multi-statement / comment-hidden injections before any DB interaction. Only `SELECT` and `WITH…SELECT` make it through. |
+| `SqlValidator` | Rejects write prefixes (INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / REPLACE), `UNION` / `INTO` / `COPY`, multi-statement, and comment-hidden injections before any DB interaction. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`) — anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass. |
 | `SafeContext` rollback | Every request runs inside a database transaction that is always rolled back, so even side-effecting reads (functions, settings) cannot persist. |
 | Per-request connection pooling | Each HTTP request draws a fresh connection from `ActiveRecord::Base`'s pool — no shared mutable state between requests. |
 
@@ -657,10 +658,12 @@ contract. Tier 2, Tier 3, and `console_eval` remain unregistered inventory.
 Every tool invocation runs inside a database transaction that is **always rolled back**:
 
 ```ruby
-@connection.transaction do
-  set_timeout          # statement timeout before any query
-  result = yield       # run the tool
-  raise ActiveRecord::Rollback  # always roll back
+def with_rolled_back_transaction
+  @connection.transaction do
+    set_timeout                   # statement timeout before any query
+    yield                         # run the tool
+    raise ActiveRecord::Rollback  # always roll back
+  end
 end
 ```
 
@@ -683,15 +686,17 @@ Each transaction sets a statement timeout before any query runs. The default is 
 
 `SqlValidator` rejects non-read-only SQL at the string level, before any database interaction:
 
-- **Allowed:** `SELECT`, `WITH...SELECT`, `EXPLAIN`
+- **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected — it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
 - **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`
 - **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`
-- **Rejected functions:** `pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`
+- **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS` — a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
 - **Rejected patterns:** multiple statements (semicolons), writable CTEs (`WITH ... AS (DELETE/UPDATE/INSERT ...)`), comment-hidden injections
 
 ### Model and Column Validation
 
 Before any query runs, the model name is checked against the registry built from `ActiveRecord::Base.descendants`. Unrecognized model names raise `ValidationError` without touching the database. Column names are validated against the model's `column_names` before pluck, aggregate, and recent operations.
+
+For `console_query`, a schema-qualified column reference such as `orders.total` is validated for **ownership**: the table side is gated through `TableGate` (a blocked table is refused) and the column must actually exist on that table, so a blocked-table column cannot be smuggled through `select`, `order`, or `having`. Bare columns validate against the active model.
 
 Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) — see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.
 
@@ -726,7 +731,8 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 `SqlValidator` is conservative by design. If a valid read-only query is rejected:
 
 - `UNION` in any position is blocked — use `console_query` with joins instead.
-- `EXPLAIN` is allowed; `EXPLAIN ANALYZE` runs the query and is also allowed.
+- Plain `EXPLAIN` is allowed; `EXPLAIN ANALYZE` is **rejected** because it executes the query rather than just planning it.
+- A function is rejected unless it is on the read-only allowlist (`ALLOWED_FUNCTIONS`). If a legitimate pure/read function is missing, that is the list to extend — deliberately.
 - Queries with semicolons are blocked even if the second statement is a comment — strip trailing semicolons.
 
 ### A tool from the 31-schema inventory is not listed

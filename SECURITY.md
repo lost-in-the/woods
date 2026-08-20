@@ -49,7 +49,7 @@ Extracted data is written to `tmp/woods/` by default. This directory contains yo
 
 ### Console Server
 
-The Console MCP Server provides live database access through a five-layer defense-in-depth stack (feature gate, blocked tables, credential scanner, column redaction, and SqlValidator + rolled-back transactions). Tier 4 tools additionally require confirmation and are recorded in an audit log. Despite these safeguards, the Console Server should only be used in development/staging environments, never in production. See [docs/CONSOLE_MCP_SETUP.md — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
+The Console MCP Server provides live database access through a five-layer defense-in-depth stack (feature gate, blocked tables, credential scanner, column redaction, and SqlValidator + rolled-back transactions). Only 9 read-only tools register by default; the optional Tier 4 read tools (`console_sql`, `console_query`) require explicit opt-in via `console_embedded_read_tools` and are constrained by `SqlValidator`'s read-only function allowlist plus rolled-back transactions. No executable tool requires confirmation or writes a privileged audit log — the confirmation/audit contracts belong to Tier 2/3 and `console_eval`, which are inventory-only and never registered. Rolled-back transactions do not undo async side effects (`perform_later`, `deliver_later`, HTTP egress), so treat the Console Server as an admin-trust boundary, not a sandbox: use it in development/staging only, never in production. See [docs/CONSOLE_MCP_SETUP.md — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
 
 ### MCP Transport
 

@@ -159,13 +159,13 @@ After extraction, each model is a self-contained JSON file with schema, associat
 Woods resolves the full callback chain in execution order and detects side-effects — which columns get written, which jobs get enqueued, which mailers fire:
 
 ```json
-"callbacks": [
+{ "callbacks": [
   { "type": "before_validation", "filter": "normalize_email", "kind": "before", "conditions": {} },
   { "type": "before_save", "filter": "set_slug", "kind": "before", "conditions": {},
     "side_effects": { "columns_written": ["slug"], "jobs_enqueued": [], "services_called": [], "mailers_triggered": [], "database_reads": [], "operations": [] } },
   { "type": "after_commit", "filter": "send_welcome", "kind": "after", "conditions": {},
     "side_effects": { "columns_written": [], "jobs_enqueued": ["WelcomeEmailJob"], "services_called": [], "mailers_triggered": ["UserMailer"], "database_reads": [], "operations": [] } }
-]
+] }
 ```
 
 Side-effects are detected by `CallbackAnalyzer`, which scans callback method bodies for patterns like `self.col =` (column writes), `perform_later` (job enqueues), and `deliver_later` (mailer triggers). This is the #1 thing AI tools get wrong about Rails models.
@@ -391,15 +391,23 @@ end
 
 For embedding and semantic search, use a preset to configure storage and embedding together:
 
+Presets set adapter *types* only. The `:postgresql` and `:production` presets still need you to supply the store connection and the embedding API key in the override block — otherwise the builder raises at wiring time.
+
 ```ruby
-# Local development — no external services needed
+# Local development — no external services needed (Ollama for embeddings)
 Woods.configure_with_preset(:local)
 
-# PostgreSQL — pgvector + OpenAI embeddings
-Woods.configure_with_preset(:postgresql)
+# PostgreSQL — pgvector + OpenAI. Supply a live PG connection and the API key:
+Woods.configure_with_preset(:postgresql) do |config|
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+  config.embedding_options    = { api_key: ENV.fetch('OPENAI_API_KEY') }
+end
 
-# Production scale — Qdrant + OpenAI embeddings
-Woods.configure_with_preset(:production)
+# Production scale — Qdrant + OpenAI. Supply the Qdrant URL/collection and key:
+Woods.configure_with_preset(:production) do |config|
+  config.vector_store_options = { url: ENV.fetch('QDRANT_URL'), collection: 'my_app' }
+  config.embedding_options    = { api_key: ENV.fetch('OPENAI_API_KEY') }
+end
 ```
 
 ### Backend Compatibility
@@ -600,7 +608,25 @@ See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases
 | [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) | Deep dive | What each of the 34 extractors captures |
 | [Architecture](docs/ARCHITECTURE.md) | Contributors | Pipeline stages, graph internals, retrieval |
 | [Backend Matrix](docs/BACKEND_MATRIX.md) | Infrastructure | Supported database, vector, and embedding combos |
+| [Console MCP Setup](docs/CONSOLE_MCP_SETUP.md) | Live queries | Transports, safety model, SQL/query opt-in |
 | [Why Woods?](docs/WHY_WOODS.md) | Evaluation | Detailed before/after comparisons |
+| [Upgrading to 2.0](docs/UPGRADING_TO_2.md) | Existing users | Breaking changes, clean re-index, store/dimension migration |
+
+---
+
+## Security & Trust Boundary
+
+Woods runs inside your Rails app, so treat its output and servers with the same sensitivity as your source code.
+
+- **Extraction output is source-equivalent.** `tmp/woods/` holds your source and schema as JSON — schema only, no database rows, no credentials. Keep it out of world-readable paths and public container images.
+- **The Index Server is read-only.** It serves pre-extracted JSON and has no write or execution path. The HTTP transport refuses a non-loopback bind without `WOODS_MCP_HTTP_TOKEN` and enforces an `Origin` allow-list.
+- **The Console Server is an admin-trust boundary, not a sandbox.** It runs live database reads inside rolled-back transactions behind a five-layer defense stack, exposing 9 read-only tools by default (raw `console_sql`/`console_query` are opt-in). Rollback does not undo async side effects (`perform_later`, `deliver_later`, HTTP egress). Keep `console_mcp_enabled = false` in production.
+
+See [SECURITY.md](SECURITY.md) for the full blast-radius analysis and [Console MCP Setup — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the layer-by-layer breakdown.
+
+## Upgrading from 1.x
+
+Woods 2.0 changes unit identifiers, requires a clean re-index, and updates MCP client requirements. See [Upgrading to 2.0](docs/UPGRADING_TO_2.md) for the breaking changes, re-index steps, store/dimension migration, and exporter reconciliation.
 
 ---
 

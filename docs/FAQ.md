@@ -270,12 +270,12 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker architecture guide.
 
 The Index Server is looking at the wrong path — specifically the container-internal path rather than the host-side path. The Index Server runs on the host and reads from the volume-mounted output directory.
 
-```json
+```jsonc
 {
   "mcpServers": {
     "codebase": {
       "command": "woods-mcp-start",
-      "args": ["./tmp/woods"]    ✓ host path
+      "args": ["./tmp/woods"]    // host path (NOT the container /app/tmp/woods)
     }
   }
 }
@@ -549,6 +549,6 @@ Quick links:
 
 - Extraction produces empty output → [Extraction Problems](TROUBLESHOOTING.md#extraction-produces-empty-or-incomplete-output)
 - "No manifest.json" error → [MCP Server Problems](TROUBLESHOOTING.md#no-manifestjson-error-when-starting-the-index-server)
-- Only 9 console tools visible → [MCP Server Problems](TROUBLESHOOTING.md#tier-2-4-console-tools-return-unsupported-in-embedded-mode)
+- Only 9 console tools visible → [MCP Server Problems](TROUBLESHOOTING.md#a-console-inventory-tool-is-not-listed)
 - Docker path confusion → [Docker Problems](TROUBLESHOOTING.md#path-confusion-index-server-uses-container-path)
 - Dimension mismatch on embeddings → [Embedding Problems](TROUBLESHOOTING.md#dimension-mismatch-error-when-querying-embeddings)

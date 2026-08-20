@@ -68,10 +68,20 @@ The vector store you can use depends on the primary database your Rails app uses
 **Configuration:**
 ```ruby
 config.vector_store = :pgvector
-config.vector_store_connection = ENV["DATABASE_URL"]
-# Or separate database:
-config.vector_store_connection = ENV["VECTOR_DATABASE_URL"]
+# pgvector needs a live PostgreSQL connection object (not a URL string).
+# When your app runs on PostgreSQL, reuse its connection:
+config.vector_store_options = { connection: ActiveRecord::Base.connection }
+
+# Dedicated vector database — e.g. a MySQL app pointing at a separate
+# PostgreSQL store — via an abstract class that owns its own connection:
+# class VectorDatabase < ActiveRecord::Base
+#   self.abstract_class = true
+#   establish_connection(ENV.fetch("VECTOR_DATABASE_URL"))
+# end
+# config.vector_store_options = { connection: VectorDatabase.connection }
 ```
+
+`vector_store_options` also accepts `:table` and `:schema` (both optional); `:dimensions` is inferred from the embedding provider. `Builder#build_pgvector_store` requires `vector_store_options[:connection]` and raises if it is missing.
 
 **Schema:**
 ```sql
@@ -246,6 +256,13 @@ config.vector_store_index = "woods"
 
 ### SQLite-vss / FAISS (Local)
 
+> **Status: planned, not yet implemented.** There is no `:sqlite_faiss`
+> adapter in the shipped gem — the only vector stores `Builder#build_vector_store`
+> accepts are `:in_memory`, `:pgvector`, and `:qdrant`. Setting
+> `config.vector_store = :sqlite_faiss` raises `ArgumentError: Unknown
+> vector_store`. For a zero-dependency local setup today, use `:in_memory`
+> (the `:local` preset). The section below documents the design target.
+
 **What it is:** File-based vector search using SQLite for metadata and FAISS for vector operations.
 
 **Best for:** Local development, zero-dependency setups, evaluation, single-developer use.
@@ -264,10 +281,10 @@ config.vector_store_index = "woods"
 - Limited filtering capabilities
 - No built-in persistence management for FAISS
 
-**Configuration:**
+**Configuration (design target — not runnable today):**
 ```ruby
-config.vector_store = :sqlite_faiss
-# Automatically uses output_dir for storage
+# Planned. Not accepted by the current Builder; use :in_memory instead.
+config.vector_store = :in_memory   # the shipped zero-dependency local store
 ```
 
 **When to use:** Getting started, local development, evaluation, CI testing.
