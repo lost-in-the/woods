@@ -180,6 +180,51 @@ RSpec.describe Woods::Retriever do
     end
   end
 
+  # ── Query validation boundary (P1) ────────────────────────────────
+  #
+  # Pre-fix, #retrieve performed no validation: a blank query surfaced as
+  # a raw provider ArgumentError only on the vector path (keyword/graph
+  # paths tolerated it silently), and an oversized query went to the
+  # embedding/metadata providers verbatim to fail as an opaque 400. This
+  # boundary runs first, before classify/execute/rank/assemble, so every
+  # strategy shares one typed, actionable failure mode.
+  describe 'query validation' do
+    it 'rejects a nil query' do
+      expect { retriever.retrieve(nil) }.to raise_error(Woods::InvalidQueryError, /string/i)
+    end
+
+    it 'rejects a non-String query' do
+      expect { retriever.retrieve(42) }.to raise_error(Woods::InvalidQueryError, /string/i)
+    end
+
+    it 'rejects a blank query' do
+      expect { retriever.retrieve('') }.to raise_error(Woods::InvalidQueryError, /blank/i)
+    end
+
+    it 'rejects a whitespace-only query' do
+      expect { retriever.retrieve("   \n\t  ") }.to raise_error(Woods::InvalidQueryError, /blank/i)
+    end
+
+    it 'rejects a query over the byte cap' do
+      oversized = 'a' * (Woods::Retriever::MAX_QUERY_BYTES + 1)
+      expect { retriever.retrieve(oversized) }.to raise_error(Woods::InvalidQueryError, /exceeds/i)
+    end
+
+    it 'does not raise for a normal query' do
+      expect { retriever.retrieve('How does the User model work?') }.not_to raise_error
+    end
+
+    it 'raises a stable error class that is a Woods::Error' do
+      expect(Woods::InvalidQueryError.ancestors).to include(Woods::Error)
+      expect { retriever.retrieve('') }.to raise_error(an_instance_of(Woods::InvalidQueryError))
+    end
+
+    it 'never reaches the classifier when the query fails validation' do
+      expect(classifier_double).not_to receive(:classify)
+      expect { retriever.retrieve('') }.to raise_error(Woods::InvalidQueryError)
+    end
+  end
+
   # ── Type filtering ──────────────────────────────────────────────
 
   describe 'type filtering' do
