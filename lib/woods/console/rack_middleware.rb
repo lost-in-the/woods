@@ -17,9 +17,8 @@ module Woods
     #
     #   config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
     #
-    # This mounts 31 console tools at /mcp/console. By default, console_sql and
-    # console_query are blocked in embedded mode and return an "unsupported" error
-    # pointing users to enable the flag.
+    # This mounts the 9 executable Tier 1 tools at /mcp/console. Explicit
+    # read-tool mode registers console_sql and console_query as well.
     #
     # == Enabling the feature
     #
@@ -63,31 +62,32 @@ module Woods
     #    ActiveRecord::Base's pool and returns it after the response. No shared
     #    mutable state leaks between requests.
     #
-    # These three layers make embedded_read_tools: true safe for read-only workloads.
-    # If your threat model requires stricter isolation, use the bridge mode instead
-    # (docs/CONSOLE_MCP_SETUP.md) which runs the executor in a separate process.
+    # These three layers define the supported read-tool posture. Keep read tools
+    # disabled when the host requires a narrower database capability.
     #
-    class RackMiddleware
+    class RackMiddleware # rubocop:disable Metrics/ClassLength
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the MCP endpoint (default: '/mcp/console')
       # @param embedded_read_tools [Boolean, #call] Enable sql/query tools in
       #   embedded mode (default: false). May be a callable resolved when the
       #   server is first built — the railtie passes one because middleware
       #   arguments are captured before config/initializers run (#183).
-      # @param unsafe_eval_confirmation [Confirmation, nil] Approval callback for the
-      #   `console_eval` opt-in. Required when `WOODS_CONSOLE_UNSAFE_EVAL=true` (or
-      #   `config.console_unsafe_eval_enabled = true`); the server refuses to boot
-      #   without it. Takes precedence over `config.console_unsafe_eval_confirmation`.
-      # @param unsafe_eval_audit_log_path [String, Pathname, nil] JSONL audit log
-      #   path for every `console_eval` run. Required on the opt-in path. Takes
-      #   precedence over `config.console_unsafe_eval_audit_log_path`.
-      def initialize(app, path: '/mcp/console', embedded_read_tools: false,
-                     unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil)
+      # @param stateless [Boolean, #call] Use modern stateless Streamable HTTP
+      #   semantics (default: true). Set false only for compatibility with a
+      #   client that still requires MCP session IDs.
+      # @param unsafe_eval_confirmation [Confirmation, nil] Legacy option retained
+      #   for compatibility. Passing it fails closed because console_eval is unavailable.
+      # @param unsafe_eval_audit_log_path [String, Pathname, nil] Legacy option retained
+      #   for compatibility. Passing it fails closed because console_eval is unavailable.
+      def initialize(app, path: '/mcp/console', embedded_read_tools: false, # rubocop:disable Metrics/ParameterLists
+                     unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil,
+                     stateless: true)
         @app = app
         @path = path
         @embedded_read_tools = embedded_read_tools
         @unsafe_eval_confirmation = unsafe_eval_confirmation
         @unsafe_eval_audit_log_path = unsafe_eval_audit_log_path
+        @stateless = stateless
         @mutex = Mutex.new
         @transport = nil
       end
@@ -108,7 +108,10 @@ module Woods
         return @app.call(env) unless env['PATH_INFO'].to_s.start_with?(@path)
         return @app.call(env) unless enabled?
 
-        ensure_transport.handle_request(Rack::Request.new(env))
+        transport = ensure_transport
+        request_env = env.dup
+        request_env.delete('HTTP_MCP_SESSION_ID') if @stateless_mode
+        transport.handle_request(Rack::Request.new(request_env))
       end
 
       private
@@ -135,7 +138,10 @@ module Woods
           Rails.application.eager_load!
 
           server = build_embedded_server
-          @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server)
+          @stateless_mode = resolve_deferred(@stateless)
+          @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(
+            server, stateless: @stateless_mode
+          )
           server.transport = @transport
           @transport
         end

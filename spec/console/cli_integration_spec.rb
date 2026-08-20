@@ -5,6 +5,7 @@ require 'open3'
 require 'rbconfig'
 require 'shellwords'
 require 'tmpdir'
+require 'timeout'
 require 'yaml'
 
 RSpec.describe 'woods-console-mcp executable' do
@@ -74,6 +75,35 @@ RSpec.describe 'woods-console-mcp executable' do
 
       expect(status.exitstatus).to eq(1)
       expect(stderr).to include('must contain a YAML mapping')
+    end
+  end
+
+  it 'replaces itself so TERM reaches a blocked child directly' do
+    Dir.mktmpdir('woods-console-cli') do |home|
+      path = File.join(home, 'console.yml')
+      child = <<~RUBY
+        STDOUT.sync = true
+        trap('TERM') { exit 42 }
+        puts Process.pid
+        sleep
+      RUBY
+      child_command = Shellwords.join([RbConfig.ruby, '-e', child])
+      File.write(path, YAML.dump('mode' => 'direct', 'command' => child_command))
+
+      stdin, stdout, stderr, wait = Open3.popen3(
+        { 'HOME' => home, 'WOODS_CONSOLE_CONFIG' => path }, executable
+      )
+      child_pid = Timeout.timeout(5) { Integer(stdout.gets, 10) }
+      expect(child_pid).to eq(wait.pid)
+
+      Process.kill('TERM', wait.pid)
+      status = Timeout.timeout(5) { wait.value }
+
+      expect(status.exitstatus).to eq(42)
+      expect(stderr.read).to be_empty
+    ensure
+      Process.kill('KILL', wait.pid) if wait&.alive?
+      [stdin, stdout, stderr].each { |io| io&.close unless io&.closed? }
     end
   end
 end

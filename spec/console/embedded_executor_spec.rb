@@ -41,14 +41,13 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
   describe '#send_request' do
     context 'unsupported tools' do
-      it 'points Tier 2+ tools at the bridge architecture' do
+      it 'states that Tier 2+ tools are unavailable in supported modes' do
         response = executor.send_request({ 'tool' => 'diagnose_model', 'params' => { 'model' => 'User' } })
 
         expect(response['ok']).to be false
         expect(response['error_type']).to eq('unsupported')
         expect(response['error']).to include('diagnose_model')
-        expect(response['error']).to include('bridge architecture')
-        expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
+        expect(response['error']).to include('not available in a supported Console MCP mode')
       end
 
       it 'returns an instructional eval_disabled payload instead of a bare unsupported error' do
@@ -58,12 +57,12 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error_type']).to eq('eval_disabled')
       end
 
-      it 'eval error explains why eval is disabled and names the query alternatives' do
+      it 'eval error explains that eval is unavailable and names the query alternatives' do
         response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
 
         error = response['error']
         expect(error).to include('console_eval')
-        expect(error).to include('disabled')
+        expect(error).to include('not available')
         expect(error).to include('console_query')
         expect(error).to include('console_sql')
       end
@@ -76,10 +75,11 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(error).to match(/first|manual/i)
       end
 
-      it 'eval error points operators at the WOODS_CONSOLE_UNSAFE_EVAL opt-in flag' do
+      it 'eval error states that the legacy unsafe-eval flag fails closed' do
         response = executor.send_request({ 'tool' => 'eval', 'params' => { 'code' => 'User.count' } })
 
         expect(response['error']).to include('WOODS_CONSOLE_UNSAFE_EVAL')
+        expect(response['error']).to include('fail closed')
       end
     end
 

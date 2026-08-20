@@ -153,20 +153,18 @@ module Woods
 
       # Self-describing error for tools the embedded executor cannot run.
       #
-      # `sql`/`query` are gated behind `embedded_read_tools: true` — point the
-      # caller at the flag. Everything else (Tier 2–4 domain/analytics tools)
-      # requires the bridge architecture.
+      # `sql`/`query` are gated behind `embedded_read_tools: true`. Everything
+      # else outside Tier 1 is unavailable through a supported server mode.
       #
       # @param tool [String] Tool name that was rejected
       # @return [String] Actionable error message
       def unsupported_message(tool)
         if EMBEDDED_READ_TOOLS.include?(tool)
           "Tool '#{tool}' requires embedded_read_tools: true on " \
-            'Woods::Console::RackMiddleware, or use the bridge (Option D). ' \
+            'Woods::Console::RackMiddleware. ' \
             'See docs/CONSOLE_MCP_SETUP.md.'
         else
-          "Tool '#{tool}' is not available in embedded mode — it requires the " \
-            'bridge architecture (Option D in docs/CONSOLE_MCP_SETUP.md).'
+          "Tool '#{tool}' is not available in a supported Console MCP mode."
         end
       end
 
@@ -185,16 +183,12 @@ module Woods
       # @return [String] Multi-line actionable message.
       def eval_disabled_message
         <<~MSG.strip
-          console_eval is disabled — the unsafe-eval opt-in is off by default.
+          console_eval is not available in a supported Console MCP mode.
           Use console_query (model + select + joins/group_by/having/order) or console_sql
           for anything you were about to run. Both already support aggregates and scoping.
           If you believe eval is still necessary, SHOW your proposed Ruby snippet to the
           user first and let them run it manually — do not retry console_eval automatically.
-          Operators: set WOODS_CONSOLE_UNSAFE_EVAL=true (or console_unsafe_eval_enabled = true)
-          AND wire console_unsafe_eval_confirmation + console_unsafe_eval_audit_log_path.
-          The server refuses to boot with the flag on in Rails.env.production?, and refuses
-          to boot with the flag on but any collaborator missing (fail-closed).
-          See docs/CONSOLE_MCP_SETUP.md "console_eval opt-in" for the full checklist.
+          WOODS_CONSOLE_UNSAFE_EVAL and the legacy collaborator options fail closed at boot.
         MSG
       end
 
