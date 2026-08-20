@@ -40,17 +40,19 @@
     {
       "id": "V2-CONSOLE-001",
       "severity": "P1",
-      "affected_public_behavior": "Console bridge capability is advertised through the executable and server surface although the bridge implementation remains a stub or has weaker safety coverage than embedded execution.",
+      "affected_public_behavior": "Console launchers advertise only executable embedded tools; the former static bridge fails closed and cannot return fabricated live data.",
       "evidence_paths": [
-        "exe/woods-console-mcp:10",
-        "lib/woods/console/bridge.rb:13",
-        "lib/woods/console/server.rb:129"
+        "exe/woods-console-mcp:7",
+        "lib/woods/console/bridge.rb:9",
+        "lib/woods/console/tool_specs.rb:564",
+        "spec/console/stdio_e2e_spec.rb:83",
+        "spec/console/http_e2e_spec.rb:109"
       ],
-      "reproduction_command": "bundle exec rspec spec/console/tool_specs_spec.rb spec/console/bridge_spec.rb",
+      "reproduction_command": "bundle exec rspec spec/console/tool_specs_spec.rb spec/console/bridge_spec.rb spec/console/cli_integration_spec.rb",
       "owner": "release-v2-03",
-      "status": "confirmed",
-      "disposition": "deferred_with_issue",
-      "release_blocking": true
+      "status": "resolved",
+      "disposition": "fixed",
+      "release_blocking": false
     },
     {
       "id": "V2-MCP-001",
