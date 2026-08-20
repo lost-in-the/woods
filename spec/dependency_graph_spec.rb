@@ -288,6 +288,30 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe '#find_all_by_suffix' do
+    before do
+      graph.register(make_unit(type: :service, identifier: 'Order::Update'))
+      graph.register(make_unit(type: :service, identifier: 'User::Update'))
+      graph.register(make_unit(type: :model, identifier: 'Product'))
+    end
+
+    it 'returns every namespaced identifier sharing the suffix' do
+      expect(graph.find_all_by_suffix('Update')).to contain_exactly('Order::Update', 'User::Update')
+    end
+
+    it 'returns an empty array when nothing matches' do
+      expect(graph.find_all_by_suffix('NonExistent')).to eq([])
+    end
+
+    it 'returns an empty array for an exact-match identifier (suffix requires a :: prefix)' do
+      expect(graph.find_all_by_suffix('Product')).to eq([])
+    end
+
+    it 'does not change find_node_by_suffix\'s existing single-result contract' do
+      expect(graph.find_node_by_suffix('Update')).to eq(graph.find_all_by_suffix('Update').min)
+    end
+  end
+
   describe '#dependencies_of with via filter' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User'))

@@ -36,6 +36,7 @@ RSpec.describe Woods::FlowAssembler do
   def stub_graph_defaults
     allow(graph).to receive(:node_exists?).and_return(false)
     allow(graph).to receive(:find_node_by_suffix).and_return(nil)
+    allow(graph).to receive(:find_all_by_suffix).and_return([])
   end
 
   describe '#assemble' do
@@ -496,8 +497,8 @@ RSpec.describe Woods::FlowAssembler do
         RUBY
 
         stub_graph_defaults
-        # Exact match misses, but suffix match finds Order::Update
-        allow(graph).to receive(:find_node_by_suffix).with('Update').and_return('Order::Update')
+        # Exact match misses, but suffix match finds a single Order::Update
+        allow(graph).to receive(:find_all_by_suffix).with('Update').and_return(['Order::Update'])
 
         assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
         flow = assembler.assemble('PostsController#create')
@@ -551,6 +552,102 @@ RSpec.describe Woods::FlowAssembler do
         # Only the controller step — NonExistentService is nowhere
         expect(flow.steps.size).to eq(1)
         expect(flow.steps[0][:unit]).to eq('PostsController#create')
+      end
+    end
+
+    # verified P1: expand_operation discarded op[:method], so the callee
+    # expanded with method_name nil and parsed its ENTIRE source — a call to
+    # one method pulled in every other method's operations too.
+    describe 'method-scoped expansion (verified P1)' do
+      it 'traces only the called method, not the whole callee unit' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              PostService.perform(params)
+            end
+          end
+        RUBY
+
+        write_unit('PostService', type: 'service', source_code: <<~RUBY)
+          class PostService
+            def perform
+              Post.create!
+            end
+
+            def cleanup
+              Cache.clear!
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+        allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        callee_targets = flow.steps[1][:operations].map { |op| op[:target] }
+        expect(callee_targets).to include('Post')
+        expect(callee_targets).not_to include('Cache')
+      end
+
+      it 'falls back to the whole unit when the callee does not define the called method' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              PostService.perform(params)
+            end
+          end
+        RUBY
+
+        # perform is not defined in source (inherited/dynamic) — extract_method
+        # finds nothing, so the callee must fall back to its whole source.
+        write_unit('PostService', type: 'service', source_code: <<~RUBY)
+          class PostService
+            def cleanup
+              Cache.clear!
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+        allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        callee_targets = flow.steps[1][:operations].map { |op| op[:target] }
+        expect(callee_targets).to include('Cache')
+      end
+    end
+
+    # verified P1: find_node_by_suffix picks the first match in sorted order
+    # when several namespaces share a short name — deterministic, but
+    # arbitrary. The assembler must surface the ambiguity rather than
+    # silently expanding whichever one won.
+    describe 'ambiguous suffix resolution (verified P1)' do
+      it 'marks the operation ambiguous instead of silently picking one candidate' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              Update.call(params)
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+        allow(graph).to receive(:find_all_by_suffix).with('Update').and_return(%w[Order::Update User::Update])
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        # No expansion step was appended for either candidate — an ambiguous
+        # target is not silently resolved.
+        expect(flow.steps.size).to eq(1)
+        expect(flow.steps.map { |s| s[:unit] }).not_to include('Order::Update', 'User::Update')
+
+        op = flow.steps[0][:operations].find { |o| o[:target] == 'Update' }
+        expect(op[:ambiguous_candidates]).to contain_exactly('Order::Update', 'User::Update')
       end
     end
   end

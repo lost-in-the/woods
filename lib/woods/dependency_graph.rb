@@ -29,7 +29,7 @@ module Woods
       @file_map = {}   # file_path => Set of identifiers (one file can define many units)
       @type_index = {} # type => Set of identifiers
       @to_h = nil
-      @suffix_index = nil
+      @suffix_groups = nil
     end
 
     # Register a unit in the graph.
@@ -43,7 +43,7 @@ module Woods
     # @param unit [ExtractedUnit] The unit to register
     def register(unit)
       @to_h = nil
-      @suffix_index = nil
+      @suffix_groups = nil
 
       unregister(unit.identifier) if @nodes.key?(unit.identifier)
 
@@ -122,7 +122,7 @@ module Woods
       return nil unless @nodes.key?(identifier)
 
       @to_h = nil
-      @suffix_index = nil
+      @suffix_groups = nil
       unregister(identifier)
       @edges.delete(identifier)
       @nodes.delete(identifier)
@@ -218,7 +218,25 @@ module Woods
     # @param suffix [String] unqualified name, e.g. "Payment"
     # @return [String, nil] the full identifier, e.g. "Billing::Payment"
     def find_node_by_suffix(suffix)
-      suffix_index[suffix]
+      suffix_groups[suffix]&.first
+    end
+
+    # Every namespaced identifier sharing +suffix+ as its unqualified short
+    # name — the full multiplicity {#find_node_by_suffix} collapses to its
+    # first (sorted) match.
+    #
+    # {#find_node_by_suffix}'s single-result contract stays exactly as it
+    # was for existing callers; this is additive, for a caller (the flow
+    # assembler) that needs to know whether a suffix resolution was
+    # ambiguous — several namespaces sharing one short name — instead of
+    # trusting whichever candidate the single-result method happened to
+    # pick.
+    #
+    # @param suffix [String] unqualified name, e.g. "Update"
+    # @return [Array<String>] every matching full identifier, sorted; empty
+    #   when nothing matches
+    def find_all_by_suffix(suffix)
+      suffix_groups.fetch(suffix, []).dup
     end
 
     # Get direct dependencies of a unit
@@ -315,21 +333,27 @@ module Woods
 
     private
 
-    # short name => full identifier, for {#find_node_by_suffix}.
+    # short name => every full identifier sharing it, for
+    # {#find_node_by_suffix} and {#find_all_by_suffix}.
     #
     # Only namespaced identifiers contribute — an unnamespaced `User` is found
-    # by {#node_exists?} before the suffix tier is reached. Sorted so a short
-    # name claimed by several namespaces resolves to the same one every time.
-    # Invalidated wherever `@to_h` is, since both derive from `@nodes`.
+    # by {#node_exists?} before the suffix tier is reached. Each bucket is
+    # sorted so a short name claimed by several namespaces resolves to the
+    # same first candidate every time. Invalidated wherever `@to_h` is, since
+    # both derive from `@nodes`.
     #
-    # @return [Hash{String => String}]
-    def suffix_index
-      @suffix_index ||= @nodes.keys.sort.each_with_object({}) do |identifier, index|
+    # @return [Hash{String => Array<String>}]
+    def suffix_groups
+      return @suffix_groups if @suffix_groups
+
+      groups = @nodes.keys.each_with_object({}) do |identifier, index|
         short = identifier.split('::').last
         next if short == identifier
 
-        index[short] ||= identifier
+        (index[short] ||= []) << identifier
       end
+      groups.each_value(&:sort!)
+      @suffix_groups = groups
     end
 
     # One PageRank power iteration over precomputed resolvable-edge weights.
