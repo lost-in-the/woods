@@ -93,6 +93,68 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
     end
   end
 
+  describe 'response validation (silent index corruption)' do
+    it 'raises a typed error when embed gets a short (empty) data array' do
+      empty_response = instance_double(Net::HTTPSuccess, body: { 'data' => [] }.to_json)
+      allow(empty_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(empty_response)
+
+      expect { provider.embed('hello world') }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse)
+    end
+
+    it 'raises a typed error when embed_batch gets fewer vectors than texts requested' do
+      short_response = instance_double(
+        Net::HTTPSuccess,
+        body: { 'data' => [{ 'embedding' => [0.1, 0.2], 'index' => 0 }] }.to_json
+      )
+      allow(short_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(short_response)
+
+      expect { provider.embed_batch(%w[text1 text2]) }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse)
+    end
+
+    it 'raises a typed error when embed_batch gets a duplicate response index' do
+      duplicate_index_response = instance_double(
+        Net::HTTPSuccess,
+        body: {
+          'data' => [
+            { 'embedding' => [0.1, 0.2], 'index' => 0 },
+            { 'embedding' => [0.3, 0.4], 'index' => 0 }
+          ]
+        }.to_json
+      )
+      allow(duplicate_index_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(duplicate_index_response)
+
+      expect { provider.embed_batch(%w[text1 text2]) }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse, /index/i)
+    end
+
+    it 'raises a typed error when a returned vector contains a null entry' do
+      # NaN/Infinity cannot round-trip through JSON at all (JSON.generate
+      # raises before the request is even sent), so `null` — a value the
+      # wire format genuinely allows — is what exercises this path for
+      # real. The full non-finite/non-numeric matrix is covered directly
+      # against the validator in vector_validation_spec.rb.
+      null_entry_response = instance_double(
+        Net::HTTPSuccess,
+        body: { 'data' => [{ 'embedding' => [0.1, nil], 'index' => 0 }] }.to_json
+      )
+      allow(null_entry_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(null_entry_response)
+
+      expect { provider.embed('hello world') }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse)
+    end
+
+    it 'does not raise for a well-formed batch response' do
+      allow(http_double).to receive(:request).and_return(batch_success_response)
+      expect { provider.embed_batch(%w[text1 text2]) }.not_to raise_error
+    end
+  end
+
   describe '#dimensions' do
     it 'returns known dimensions for text-embedding-3-small' do
       expect(provider.dimensions).to eq(1536)

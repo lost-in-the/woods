@@ -93,6 +93,102 @@ module Woods
         end
       end
 
+      # Raised when a provider's embedding response is malformed: wrong
+      # cardinality, missing/duplicate OpenAI response indexes, a
+      # non-finite/non-numeric or empty vector, or a vector whose dimension
+      # disagrees with the rest of the batch. Left unvalidated, any of
+      # these stores nil or mis-paired vectors and silently corrupts the
+      # vector store.
+      class InvalidEmbeddingResponse < Woods::Error
+        # @return [String] the provider label ("OpenAI", "Ollama")
+        attr_reader :provider
+
+        # @return [Integer] the number of texts in the request this response answers
+        attr_reader :batch_size
+
+        # @param message [String] what specifically was wrong with the response
+        # @param provider [String] provider label
+        # @param batch_size [Integer] number of texts requested
+        def initialize(message, provider:, batch_size:)
+          @provider = provider
+          @batch_size = batch_size
+          super("#{provider} embedding response invalid for batch of #{batch_size}: #{message}")
+        end
+      end
+
+      # Shared response-shape validation for embedding providers. A short
+      # or malformed provider response — fewer vectors than requested,
+      # duplicate/missing OpenAI response indexes, a NaN/Infinity/nil
+      # entry, or a dimension that drifts partway through a batch — would
+      # otherwise store nil or mis-paired vectors with no error at all,
+      # corrupting the index silently. Every provider's `embed`/
+      # `embed_batch` must call {.validate!} before returning.
+      module VectorValidation
+        module_function
+
+        # @param vectors [Array<Array<Numeric>>] vectors about to be returned/stored,
+        #   in whatever order the caller has them (order doesn't matter for these checks)
+        # @param expected_count [Integer] number of texts in the request
+        # @param provider [String] provider label used in the raised error's message
+        # @param indexes [Array<Integer>, nil] raw response `index` values, when the
+        #   provider's wire format carries them (OpenAI). Ollama has no index field —
+        #   its response order is positional — so callers pass nil there and this
+        #   check is skipped.
+        # @raise [InvalidEmbeddingResponse] on any violation
+        # @return [void]
+        def validate!(vectors, expected_count:, provider:, indexes: nil)
+          fail_with = lambda do |msg|
+            raise InvalidEmbeddingResponse.new(msg, provider: provider, batch_size: expected_count)
+          end
+
+          unless vectors.size == expected_count
+            fail_with.call("expected #{expected_count} vector(s), got #{vectors.size}")
+          end
+
+          validate_indexes!(indexes, expected_count, fail_with) if indexes
+
+          validate_vector_shapes!(vectors, fail_with)
+        end
+
+        # @api private
+        def validate_indexes!(indexes, expected_count, fail_with)
+          if indexes.any? { |i| !i.is_a?(Integer) }
+            fail_with.call("response indexes must all be integers, got #{indexes.inspect}")
+          end
+          fail_with.call("response indexes are not unique: #{indexes.sort}") if indexes.uniq.size != indexes.size
+
+          expected_indexes = (0...expected_count).to_a
+          return if indexes.sort == expected_indexes
+
+          fail_with.call("response indexes #{indexes.sort} do not cover 0..#{expected_count - 1}")
+        end
+        private_class_method :validate_indexes!
+
+        # @api private
+        def validate_vector_shapes!(vectors, fail_with)
+          dimension = nil
+          vectors.each_with_index do |vector, i|
+            check_vector_shape!(vector, i, fail_with)
+            dimension ||= vector.size
+            next if vector.size == dimension
+
+            fail_with.call("vector at position #{i} has dimension #{vector.size}, expected #{dimension}")
+          end
+        end
+        private_class_method :validate_vector_shapes!
+
+        # @api private
+        def check_vector_shape!(vector, index, fail_with)
+          unless vector.is_a?(Array) && !vector.empty?
+            fail_with.call("vector at position #{index} is not a non-empty array (got #{vector.class})")
+          end
+          return if vector.all? { |n| n.is_a?(Numeric) && n.finite? }
+
+          fail_with.call("vector at position #{index} contains a non-finite or non-numeric value")
+        end
+        private_class_method :check_vector_shape!
+      end
+
       # Ollama adapter for local embeddings via the Ollama HTTP API.
       #
       # Uses the `/api/embed` endpoint to generate embeddings. Requires a running
@@ -173,7 +269,9 @@ module Woods
           raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
 
           response = post_request(build_body(text))
-          response['embeddings'].first
+          vectors = Array(response['embeddings'])
+          VectorValidation.validate!(vectors, expected_count: 1, provider: 'Ollama')
+          vectors.first
         end
 
         # Embed multiple texts in a single request.
@@ -189,7 +287,9 @@ module Woods
           end
 
           response = post_request(build_body(texts))
-          response['embeddings']
+          vectors = Array(response['embeddings'])
+          VectorValidation.validate!(vectors, expected_count: texts.size, provider: 'Ollama')
+          vectors
         end
 
         # Return the dimensionality of vectors produced by this model.

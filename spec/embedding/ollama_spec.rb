@@ -107,6 +107,54 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
     end
   end
 
+  describe 'response validation (silent index corruption)' do
+    it 'raises a typed error when embed gets an empty embeddings array' do
+      empty_response = instance_double(Net::HTTPSuccess, body: { 'embeddings' => [] }.to_json)
+      allow(empty_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(empty_response)
+
+      expect { provider.embed('hello world') }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse)
+    end
+
+    it 'raises a typed error when embed_batch gets fewer vectors than texts requested' do
+      short_response = instance_double(Net::HTTPSuccess, body: { 'embeddings' => [single_embedding] }.to_json)
+      allow(short_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(short_response)
+
+      expect { provider.embed_batch(%w[text1 text2]) }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse)
+    end
+
+    it 'raises a typed error when a returned vector contains a null entry' do
+      # See the OpenAI spec for why null (not NaN/Infinity) is what's used
+      # to exercise this over-the-wire — NaN can't round-trip through JSON.
+      null_entry_response = instance_double(Net::HTTPSuccess, body: { 'embeddings' => [[0.1, nil, 0.3]] }.to_json)
+      allow(null_entry_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(null_entry_response)
+
+      expect { provider.embed('hello world') }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse)
+    end
+
+    it 'raises a typed error when batch vectors have inconsistent dimensions' do
+      drift_response = instance_double(
+        Net::HTTPSuccess,
+        body: { 'embeddings' => [[0.1, 0.2, 0.3], [0.4, 0.5]] }.to_json
+      )
+      allow(drift_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http_double).to receive(:request).and_return(drift_response)
+
+      expect { provider.embed_batch(%w[text1 text2]) }
+        .to raise_error(Woods::Embedding::Provider::InvalidEmbeddingResponse, /dimension/i)
+    end
+
+    it 'does not raise for a well-formed batch response' do
+      allow(http_double).to receive(:request).and_return(batch_success_response)
+      expect { provider.embed_batch(%w[text1 text2]) }.not_to raise_error
+    end
+  end
+
   describe '#dimensions' do
     before { allow(http_double).to receive(:request).and_return(success_response) }
 
