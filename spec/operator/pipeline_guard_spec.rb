@@ -90,6 +90,40 @@ RSpec.describe Woods::Operator::PipelineGuard do
       expect(File.binread(state_path)).to eq(original)
     end
 
+    it 'does not create a missing state file for a no-op in a read-only directory' do
+      File.chmod(0o500, state_dir)
+
+      expect(guard.reset!(:all)).to be(false)
+      expect(File.exist?(state_path)).to be(false)
+    ensure
+      File.chmod(0o700, state_dir)
+    end
+
+    it 'does not open irrelevant state for writing in a read-only location' do
+      guard.record!(:custom_operation)
+      original = File.binread(state_path)
+      File.chmod(0o400, state_path)
+      File.chmod(0o500, state_dir)
+
+      expect(guard.reset!(:all)).to be(false)
+      expect(File.binread(state_path)).to eq(original)
+    ensure
+      File.chmod(0o700, state_dir)
+      File.chmod(0o600, state_path) if File.exist?(state_path)
+    end
+
+    it 'leaves malformed state untouched when it parses to no requested entries' do
+      File.write(state_path, '{not-json')
+      File.chmod(0o400, state_path)
+      File.chmod(0o500, state_dir)
+
+      expect(guard.reset!(:all)).to be(false)
+      expect(File.binread(state_path)).to eq('{not-json')
+    ensure
+      File.chmod(0o700, state_dir)
+      File.chmod(0o600, state_path) if File.exist?(state_path)
+    end
+
     it 'rejects unsupported operations without changing state' do
       guard.record!(:extraction)
       original = File.binread(state_path)
@@ -124,6 +158,40 @@ RSpec.describe Woods::Operator::PipelineGuard do
       expect(reset.value).to be(true)
       expect(JSON.parse(File.read(state_path)).keys).to eq(['embedding'])
       writer.join
+    end
+
+    it 'has only linearizable outcomes when record and reset start together' do
+      outcomes = 20.times.map do
+        File.write(
+          state_path,
+          JSON.generate(
+            'extraction' => Time.now.iso8601,
+            'custom_operation' => Time.now.iso8601
+          )
+        )
+        ready = Queue.new
+        start = Queue.new
+        resetter = Thread.new do
+          ready << true
+          start.pop
+          guard.reset!(:all)
+        end
+        recorder = Thread.new do
+          ready << true
+          start.pop
+          guard.record!(:embedding)
+        end
+        2.times { ready.pop }
+        2.times { start << true }
+
+        expect(resetter.value).to be(true)
+        recorder.join
+        JSON.parse(File.read(state_path)).keys.sort
+      end
+
+      expect(outcomes).to all(satisfy do |keys|
+        [%w[custom_operation], %w[custom_operation embedding].sort].include?(keys)
+      end)
     end
   end
 

@@ -17,6 +17,7 @@ RSpec.describe 'pipeline_extract in a standalone index-server process' do
     fixture_dir = File.expand_path('../fixtures/woods', __dir__)
 
     script = <<~RUBY
+      require 'fileutils'
       require 'logger'
       require 'tmpdir'
       require 'woods'
@@ -27,6 +28,7 @@ RSpec.describe 'pipeline_extract in a standalone index-server process' do
       abort 'precondition failed: Woods::Extractor already loaded' if defined?(Woods::Extractor)
 
       state_dir = Dir.mktmpdir
+      Woods.configuration.output_dir = state_dir
       server = Woods::MCP::Server.build(
         index_dir: ARGV[0],
         operator: {
@@ -40,6 +42,7 @@ RSpec.describe 'pipeline_extract in a standalone index-server process' do
         abort 'background pipeline thread did not finish' unless thread.join(10)
       end
       puts response.content.first[:text]
+      FileUtils.remove_entry(state_dir)
     RUBY
 
     lib = File.expand_path('../../lib', __dir__)

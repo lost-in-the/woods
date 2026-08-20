@@ -793,6 +793,7 @@ RSpec.describe Woods::MCP::Server do
   end
 
   describe 'tool: pipeline_extract incremental param' do
+    let(:pipeline_output_dir) { Dir.mktmpdir('woods-mcp-incremental') }
     let(:guard) do
       instance_double(Woods::Operator::PipelineGuard).tap do |g|
         allow(g).to receive(:allow?).with(:extraction).and_return(true)
@@ -817,12 +818,13 @@ RSpec.describe Woods::MCP::Server do
 
     before do
       stub_const('Woods::Extractor', extractor_class)
-      mock_config = Struct.new(:output_dir).new(fixture_dir)
+      mock_config = Struct.new(:output_dir).new(pipeline_output_dir)
       Woods.configuration = mock_config
     end
 
     after do
       Woods.configuration = nil
+      FileUtils.rm_rf(pipeline_output_dir)
     end
 
     it 'calls extract_changed with the supplied changed_files when incremental is true' do

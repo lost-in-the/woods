@@ -12,6 +12,7 @@ RSpec.describe 'Index MCP pipeline repair contract' do
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:state_dir) { Dir.mktmpdir('woods-mcp-repair') }
   let(:lock_path) { File.join(state_dir, 'extraction.lock') }
+  let(:guard_state_path) { File.join(state_dir, 'pipeline_guard.json') }
   let(:repair_lock) do
     Woods::Coordination::PipelineLock.new(
       lock_dir: state_dir, name: 'extraction', stale_timeout: 60
@@ -127,6 +128,53 @@ RSpec.describe 'Index MCP pipeline repair contract' do
     expect(result.dig('_meta', 'error_code')).to eq('cooldown_state_missing')
     expect(result.dig('_meta', 'action')).to eq('reset_cooldowns')
     expect(result.dig('structuredContent', 'data')).to be_nil
+  end
+
+  it 'reports missing read-only cooldown state without creating an artifact' do
+    server
+    File.chmod(0o500, state_dir)
+
+    result = repair('reset_cooldowns')
+
+    expect(result['isError']).to be(true)
+    expect(result.dig('_meta', 'error_code')).to eq('cooldown_state_missing')
+    expect(result.dig('_meta', 'error_code')).not_to eq('corrupt_artifact')
+    expect(File.exist?(guard_state_path)).to be(false)
+  ensure
+    File.chmod(0o700, state_dir)
+  end
+
+  it 'reports irrelevant read-only cooldown state without changing it' do
+    guard.record!(:custom_operation)
+    original = File.binread(guard_state_path)
+    server
+    File.chmod(0o400, guard_state_path)
+    File.chmod(0o500, state_dir)
+
+    result = repair('reset_cooldowns')
+
+    expect(result['isError']).to be(true)
+    expect(result.dig('_meta', 'error_code')).to eq('cooldown_state_missing')
+    expect(File.binread(guard_state_path)).to eq(original)
+  ensure
+    File.chmod(0o700, state_dir)
+    File.chmod(0o600, guard_state_path) if File.exist?(guard_state_path)
+  end
+
+  it 'reports malformed cooldown state as missing without truncating it' do
+    File.write(guard_state_path, '{not-json')
+    server
+    File.chmod(0o400, guard_state_path)
+    File.chmod(0o500, state_dir)
+
+    result = repair('reset_cooldowns')
+
+    expect(result['isError']).to be(true)
+    expect(result.dig('_meta', 'error_code')).to eq('cooldown_state_missing')
+    expect(File.binread(guard_state_path)).to eq('{not-json')
+  ensure
+    File.chmod(0o700, state_dir)
+    File.chmod(0o600, guard_state_path) if File.exist?(guard_state_path)
   end
 
   def repair(action)

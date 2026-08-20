@@ -59,7 +59,9 @@ module Woods
       # @raise [ArgumentError] when the operation is unsupported
       def reset!(operation)
         operations = reset_operations(operation)
-        with_locked_state do |state|
+        return false unless requested_state_present?(operations)
+
+        with_existing_locked_state do |state|
           changed = false
           operations.each do |key|
             next unless state.key?(key)
@@ -103,9 +105,36 @@ module Woods
       end
 
       def parse_state(content)
-        content.empty? ? {} : JSON.parse(content)
+        state = content.empty? ? {} : JSON.parse(content)
+        state.is_a?(Hash) ? state : {}
       rescue JSON::ParserError
         {}
+      end
+
+      def requested_state_present?(operations)
+        File.open(@state_path, File::RDONLY) do |file|
+          file.flock(File::LOCK_SH)
+          state = parse_state(file.read)
+          operations.any? { |key| state.key?(key) }
+        end
+      rescue Errno::ENOENT
+        false
+      end
+
+      def with_existing_locked_state
+        File.open(@state_path, File::RDWR) do |file|
+          file.flock(File::LOCK_EX)
+          state = parse_state(file.read)
+          changed = yield(state)
+          if changed
+            file.rewind
+            file.write(JSON.generate(state))
+            file.truncate(file.pos)
+          end
+          changed
+        end
+      rescue Errno::ENOENT
+        false
       end
 
       def reset_operations(operation)
@@ -120,8 +149,8 @@ module Woods
       def read_state
         return {} unless File.exist?(@state_path)
 
-        JSON.parse(File.read(@state_path))
-      rescue JSON::ParserError
+        parse_state(File.read(@state_path))
+      rescue Errno::ENOENT
         {}
       end
     end

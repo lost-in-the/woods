@@ -1,14 +1,19 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'io/wait'
 require 'tmpdir'
 require 'woods'
 require 'woods/coordination/pipeline_lock'
 
 RSpec.describe Woods::Coordination::PipelineLock do
   let(:lock_dir) { Dir.mktmpdir }
+  let(:guard_path) { "#{File.expand_path(lock_dir)}.extraction.lock.guard" }
 
-  after { FileUtils.rm_rf(lock_dir) }
+  after do
+    FileUtils.rm_rf(lock_dir)
+    FileUtils.rm_f(guard_path)
+  end
 
   subject(:lock) { described_class.new(lock_dir: lock_dir, name: 'extraction') }
 
@@ -26,6 +31,15 @@ RSpec.describe Woods::Coordination::PipelineLock do
       lock.acquire
       other_lock = described_class.new(lock_dir: lock_dir, name: 'extraction')
       expect(other_lock.acquire).to be false
+    end
+
+    it 'keeps a stable transaction guard after ownership is released' do
+      expect(lock.acquire).to be true
+
+      lock.release
+
+      expect(File.exist?(File.join(lock_dir, 'extraction.lock'))).to be false
+      expect(File.file?(guard_path)).to be true
     end
   end
 
@@ -135,6 +149,31 @@ RSpec.describe Woods::Coordination::PipelineLock do
       expect(File.exist?(lock_path)).to be(false)
     end
 
+    it 'serializes concurrent administrative cleaners' do
+      expect(lock.acquire).to be(true)
+      File.utime(Time.now - 120, Time.now - 120, lock_path)
+      cleaners = 2.times.map do
+        Thread.new do
+          described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 60).retire_stale
+        end
+      end
+
+      expect(cleaners.map(&:value)).to contain_exactly(:cleared, :missing)
+      expect(File.exist?(lock_path)).to be(false)
+      expect(File.file?(guard_path)).to be(true)
+    end
+
+    it 'preserves a fresh corrupt lock and clears it only after it becomes stale' do
+      File.write(lock_path, '{not-json')
+
+      expect(repair.retire_stale).to eq(:not_stale)
+      expect(File.binread(lock_path)).to eq('{not-json')
+
+      File.utime(Time.now - 120, Time.now - 120, lock_path)
+      expect(repair.retire_stale).to eq(:cleared)
+      expect(File.exist?(lock_path)).to be(false)
+    end
+
     it 'backs off without clearing a fresh successor that wins before retirement' do
       expect(lock.acquire).to be(true)
       File.utime(Time.now - 120, Time.now - 120, lock_path)
@@ -229,6 +268,163 @@ RSpec.describe Woods::Coordination::PipelineLock do
 
       expect(JSON.parse(File.read(lock_path))['token']).to eq('newer-holder')
       expect(File.exist?(graveyard)).to be false
+    end
+
+    it 'does not expose an administrative rename gap to another process' do
+      expect(lock.acquire).to be(true)
+      primary_path = lock_path
+      cleaner_ready_r, cleaner_ready_w = IO.pipe
+      continue_cleaner_r, continue_cleaner_w = IO.pipe
+      cleaner_result_r, cleaner_result_w = IO.pipe
+      contender_started_r, contender_started_w = IO.pipe
+      contender_result_r, contender_result_w = IO.pipe
+      release_contender_r, release_contender_w = IO.pipe
+
+      cleaner_pid = fork do
+        cleaner_ready_r.close
+        continue_cleaner_w.close
+        cleaner_result_r.close
+        contender_started_r.close
+        contender_started_w.close
+        contender_result_r.close
+        contender_result_w.close
+        release_contender_r.close
+        release_contender_w.close
+        original_rename = File.method(:rename)
+        File.define_singleton_method(:rename) do |source, destination|
+          original_rename.call(source, destination)
+          next unless source == primary_path
+
+          cleaner_ready_w.write("renamed\n")
+          cleaner_ready_w.flush
+          continue_cleaner_r.read(1)
+        end
+        outcome = described_class.new(
+          lock_dir: lock_dir, name: 'extraction', stale_timeout: 60
+        ).retire_stale
+        cleaner_result_w.write("#{outcome}\n")
+        cleaner_result_w.flush
+        exit!(0)
+      end
+
+      cleaner_ready_w.close
+      continue_cleaner_r.close
+      cleaner_result_w.close
+      expect(cleaner_ready_r.gets).to eq("renamed\n")
+
+      contender_pid = fork do
+        cleaner_ready_r.close
+        continue_cleaner_w.close
+        cleaner_result_r.close
+        contender_started_r.close
+        contender_result_r.close
+        release_contender_w.close
+        contender = described_class.new(lock_dir: lock_dir, name: 'extraction')
+        contender_started_w.write("started\n")
+        contender_started_w.flush
+        acquired = contender.acquire
+        contender_result_w.write("#{acquired}\n")
+        contender_result_w.flush
+        release_contender_r.read(1) if acquired
+        contender.release
+        exit!(0)
+      end
+
+      contender_started_w.close
+      contender_result_w.close
+      release_contender_r.close
+      expect(contender_started_r.gets).to eq("started\n")
+      completed_during_gap = !contender_result_r.wait_readable(0.1).nil?
+
+      continue_cleaner_w.write('.')
+      continue_cleaner_w.close
+      cleaner_outcome = cleaner_result_r.gets&.strip
+      contender_outcome = contender_result_r.gets&.strip
+      release_contender_w.write('.') if contender_outcome == 'true'
+      release_contender_w.close
+      Process.wait(cleaner_pid)
+      Process.wait(contender_pid)
+
+      expect(completed_during_gap).to be(false)
+      expect(cleaner_outcome).to eq('not_stale')
+      expect(contender_outcome).to eq('false')
+      expect(lock.touch).to be(true)
+    ensure
+      continue_cleaner_w&.close unless continue_cleaner_w&.closed?
+      release_contender_w&.close unless release_contender_w&.closed?
+      [cleaner_pid, contender_pid].compact.each do |pid|
+        Process.kill('TERM', pid)
+        Process.wait(pid)
+      rescue Errno::ESRCH, Errno::ECHILD
+        nil
+      end
+      [
+        cleaner_ready_r, cleaner_ready_w, continue_cleaner_r, continue_cleaner_w,
+        cleaner_result_r, cleaner_result_w, contender_started_r, contender_started_w,
+        contender_result_r, contender_result_w, release_contender_r, release_contender_w
+      ].compact.each { |io| io.close unless io.closed? }
+    end
+  end
+
+  describe 'path transaction interactions' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+
+    it 'does not let a contender acquire through the release rename gap' do
+      expect(lock.acquire).to be(true)
+      captured = Queue.new
+      continue_release = Queue.new
+      allow(lock).to receive(:own_lock?).and_wrap_original do |original, path|
+        captured << true
+        continue_release.pop
+        original.call(path)
+      end
+
+      releasing = Thread.new { lock.release }
+      captured.pop
+      contender = described_class.new(lock_dir: lock_dir, name: 'extraction')
+      acquiring = Thread.new { contender.acquire }
+      sleep 0.02
+      completed_during_gap = !acquiring.alive?
+
+      continue_release << true
+      releasing.join
+
+      expect(completed_during_gap).to be(false)
+      expect(acquiring.value).to be(true)
+    ensure
+      continue_release << true if releasing&.alive?
+      releasing&.join(1)
+      acquiring&.join(1)
+      contender&.release
+    end
+
+    it 'does not let a cleaner rename the path during an ownership touch' do
+      expect(lock.acquire).to be(true)
+      refreshing = Queue.new
+      continue_touch = Queue.new
+      allow(File).to receive(:utime).and_wrap_original do |original, *arguments|
+        if arguments.last == lock_path
+          refreshing << true
+          continue_touch.pop
+        end
+        original.call(*arguments)
+      end
+
+      touching = Thread.new { lock.touch }
+      refreshing.pop
+      cleaner = described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 60)
+      cleaning = Thread.new { cleaner.retire_stale }
+      sleep 0.02
+      completed_during_touch = !cleaning.alive?
+
+      continue_touch << true
+
+      expect(completed_during_touch).to be(false)
+      expect(touching.value).to be(true)
+      expect(cleaning.value).to eq(:not_stale)
+    ensure
+      continue_touch << true if touching&.alive?
+      [touching, cleaning].compact.each { |thread| thread.join(1) }
     end
   end
 

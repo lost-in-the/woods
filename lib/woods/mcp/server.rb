@@ -15,6 +15,7 @@ require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
+require_relative 'index_reader_pinning'
 require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
@@ -170,6 +171,7 @@ module Woods
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
           ToolContract.apply!(server)
+          IndexReaderPinning.install(server, reader: reader)
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one

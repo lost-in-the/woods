@@ -139,6 +139,10 @@ module Woods
       # 0 → 1; nested and overlapping pins ride the generation already held,
       # and invalidation resumes when the last pin releases.
       #
+      # The Index MCP server applies this around reader-backed handlers. Direct
+      # IndexReader callers remain responsible for pinning any multi-read
+      # operation that must not refresh between accessors.
+      #
       # @example
       #   reader.with_pinned_generation { [reader.manifest, reader.find_unit("Post")] }
       #

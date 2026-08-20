@@ -135,6 +135,28 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
   # reads consistent — a caller assembling an answer from several artifacts
   # can straddle two generations. Pinning closes that window.
   describe '#with_pinned_generation' do
+    it 'leaves direct multi-read callers responsible for pinning their sequence' do
+      generation.bump!(reason: 'full')
+      reader = described_class.new(dir)
+      first_read = Queue.new
+      continue_reading = Queue.new
+      seen = Thread.new do
+        first = reader.manifest['total_units']
+        first_read << true
+        continue_reading.pop
+        [first, reader.manifest['total_units']]
+      end
+      first_read.pop
+
+      republish(total_units: 2)
+      continue_reading << true
+
+      expect(seen.value).to eq([1, 2])
+    ensure
+      continue_reading << true if seen&.alive?
+      seen&.join(1)
+    end
+
     it 'does not drop already-loaded caches partway through a sequence' do
       File.write(File.join(dir, 'SUMMARY.md'), 'first')
       generation.bump!(reason: 'full')
