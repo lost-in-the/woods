@@ -416,6 +416,23 @@ RSpec.describe Woods::Builder do
 
       expect(described_class.new(config).build_vector_store(dimensions: 4)).to eq(pg_store)
     end
+
+    it 'uses the provider dimensions when build_retriever constructs pgvector' do
+      config.vector_store_options = { connection: fake_connection }
+      config.embedding_provider = Woods::Embedding::Provider::Fake.new(dims: 1536)
+      config.metadata_store = :in_memory
+      config.graph_store = :in_memory
+
+      expect(Woods::Storage::VectorStore::Pgvector).to receive(:new)
+        .with(connection: fake_connection, dimensions: 1536)
+        .and_return(pg_store)
+      expect(pg_store).to receive(:ensure_schema!)
+      allow(Woods::Storage::MetadataStore::InMemory).to receive(:new).and_return(fake_metadata_store)
+      allow(Woods::Storage::GraphStore::Memory).to receive(:new).and_return(fake_graph_store)
+      allow(Woods::Retriever).to receive(:new).and_return(fake_retriever)
+
+      expect(described_class.new(config).build_retriever).to eq(fake_retriever)
+    end
   end
 
   describe '#build_vector_store with :qdrant' do

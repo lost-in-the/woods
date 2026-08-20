@@ -142,7 +142,7 @@ module Woods
     end
 
     def vector_dimensions(provider)
-      provider.dimensions if @config.vector_store == :qdrant
+      provider.dimensions if %i[pgvector qdrant].include?(@config.vector_store)
     end
     private :vector_dimensions
 
@@ -221,6 +221,7 @@ module Woods
       validate_provider_options!(configured, opts)
       apply_embedding_model!(opts)
       normalize_dimension_option!(configured, opts)
+      validate_required_provider_options!(configured, opts)
       opts
     end
     private :provider_kwargs
@@ -239,6 +240,15 @@ module Woods
             "Valid options: #{allowed.join(', ')}"
     end
     private :validate_provider_options!
+
+    def validate_required_provider_options!(configured, opts)
+      return unless configured == :openai
+      return unless opts[:api_key].nil? || opts[:api_key].to_s.empty?
+
+      raise ConfigurationError,
+            'OpenAI requires embedding_options[:api_key]. Set it explicitly, typically from OPENAI_API_KEY.'
+    end
+    private :validate_required_provider_options!
 
     def apply_embedding_model!(opts)
       return if opts.key?(:model)
@@ -475,6 +485,7 @@ module Woods
     # @raise [Woods::Error] when the schema cannot be created
     def build_pgvector_store(provider_dimensions)
       opts = (@config.vector_store_options || {}).transform_keys(&:to_sym)
+      validate_required_store_options!(:pgvector, opts, :connection)
       opts[:dimensions] = resolve_pgvector_dimensions(provider_dimensions, opts[:dimensions])
       store = Storage::VectorStore::Pgvector.new(**opts)
       begin
@@ -504,11 +515,20 @@ module Woods
 
     def build_qdrant_store(provider_dimensions)
       opts = (@config.vector_store_options || {}).transform_keys(&:to_sym)
+      validate_required_store_options!(:qdrant, opts, :url, :collection)
       dimensions = resolve_qdrant_dimensions(provider_dimensions, opts[:dimensions])
       opts[:dimensions] = dimensions
       store = Storage::VectorStore::Qdrant.new(**opts)
       store.ensure_collection!(dimensions: dimensions)
       store
+    end
+
+    def validate_required_store_options!(adapter, opts, *keys)
+      missing = keys.select { |key| opts[key].nil? || opts[key].to_s.empty? }
+      return if missing.empty?
+
+      requirements = missing.map { |key| "vector_store_options[:#{key}]" }.join(' and ')
+      raise ConfigurationError, "#{adapter} requires #{requirements}"
     end
 
     def resolve_qdrant_dimensions(provider_dimensions, configured_dimensions)

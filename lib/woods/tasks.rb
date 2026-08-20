@@ -49,7 +49,7 @@ module Woods
       #
       # metadata_store and resolved_config are nil-safe — hosts that don't
       # configure metadata or that pre-date the persistence arc still work.
-      vector_store = builder.build_vector_store
+      vector_store = builder.build_vector_store(dimensions: provider.dimensions)
       verify_store_dimensions!(vector_store, provider)
 
       Embedding::Indexer.new(
