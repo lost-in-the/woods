@@ -48,11 +48,13 @@ RSpec.describe Woods::Extractor, '#re_extract_unit filtering' do
 
     graph = extractor.dependency_graph
     graph.instance_variable_get(:@nodes)[unit_id] = {
-      type: type,
-      file_path: fp,
-      namespace: nil
+      type => {
+        type: type,
+        file_path: fp,
+        namespace: nil
+      }
     }
-    graph.instance_variable_get(:@edges)[unit_id] = []
+    graph.instance_variable_get(:@edges)[unit_id] = { type => [] }
     fp
   end
 

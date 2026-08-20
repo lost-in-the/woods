@@ -22,8 +22,8 @@ module Woods
   #
   class DependencyGraph
     def initialize
-      @nodes = {}      # identifier => { type:, file_path: }
-      @edges = {}      # identifier => [{ target:, via: }]
+      @nodes = {}      # identifier => { type => { type:, file_path:, namespace: } }
+      @edges = {}      # identifier => { type => [{ target:, via: }] }
       @reverse = {}    # identifier => Set of dependent identifiers
       @reverse_via = {} # [target, via] => Set of dependent identifiers
       @file_map = {}   # file_path => Set of identifiers (one file can define many units)
@@ -34,26 +34,33 @@ module Woods
 
     # Register a unit in the graph.
     #
-    # Re-registering an identifier (incremental extraction registers into a
-    # graph loaded from disk) first removes the previous registration's
-    # reverse edges, file-map entry, and type-index entry — otherwise stale
-    # dependents accumulate across incremental runs and get persisted back
-    # to dependency_graph.json.
+    # Re-registering the same (identifier, type) — incremental extraction
+    # registers into a graph loaded from disk — first removes that
+    # registration's reverse edges, file-map entry, and type-index entry;
+    # otherwise stale dependents accumulate across incremental runs and get
+    # persisted back to dependency_graph.json.
+    #
+    # Re-registering the same identifier under a *different* type does not
+    # displace the first unit (#225). A Scenic view `reports` and a factory
+    # `reports` are two units, the index writes them to two files
+    # (`database_view/reports.json`, `factory/reports.json`), and the graph
+    # holds them as two nodes under one identifier.
     #
     # @param unit [ExtractedUnit] The unit to register
     def register(unit)
       @to_h = nil
       @suffix_groups = nil
 
-      unregister(unit.identifier) if @nodes.key?(unit.identifier)
+      unregister(unit.identifier, type: unit.type) if @nodes[unit.identifier]&.key?(unit.type)
 
-      @nodes[unit.identifier] = {
+      (@nodes[unit.identifier] ||= {})[unit.type] = {
         type: unit.type,
         file_path: unit.file_path,
         namespace: unit.namespace
       }
 
-      @edges[unit.identifier] = unit.dependencies.map { |d| { target: d[:target], via: d[:via] } }
+      (@edges[unit.identifier] ||= {})[unit.type] =
+        unit.dependencies.map { |d| { target: d[:target], via: d[:via] } }
       (@file_map[unit.file_path] ||= Set.new).add(unit.identifier) if unit.file_path
 
       # Type index for filtering (Set-based for O(1) insert)
@@ -66,44 +73,136 @@ module Woods
       end
     end
 
-    # Remove an identifier's registration side effects: its contribution to
-    # the reverse indexes (derived from its recorded forward edges), its
-    # file-map entry, and its type-index entry. Forward node/edge data is
-    # overwritten by the caller (register), so it is not cleared here.
+    # Remove a registration's side effects: its contribution to the reverse
+    # indexes (derived from its recorded forward edges), its file-map entry,
+    # and its type-index entry. Forward node/edge data is overwritten by the
+    # caller (register), so it is not cleared here.
+    #
+    # Scoped to one type when `type:` is given, so re-registering a Scenic
+    # view `reports` leaves a factory `reports` untouched. Without it, every
+    # type registered under the identifier is stripped — which is what a
+    # caller deleting the identifier outright wants.
+    #
+    # The reverse indexes are keyed on the *target* identifier and hold source
+    # identifiers, not (identifier, type) pairs: a dependency names a target
+    # by identifier alone, so there is no type to key on. A source's
+    # contribution is therefore only withdrawn once its **last** remaining
+    # type stops pointing at that target.
     #
     # @param identifier [String] Previously-registered unit identifier
+    # @param type [Symbol, nil] Restrict to one registered type
     # @return [void]
-    def unregister(identifier)
-      (@edges[identifier] || []).each do |edge|
-        if (set = @reverse[edge[:target]])
+    def unregister(identifier, type: nil)
+      withdrawing = registered_types(identifier, type).to_set
+
+      withdrawing.each do |t|
+        withdraw_reverse_edges(identifier, t, withdrawing)
+
+        old_node = @nodes[identifier]&.[](t)
+        next unless old_node
+
+        drop_from_file_map(identifier, old_node[:file_path], withdrawing)
+        drop_from_type_index(identifier, old_node[:type])
+      end
+    end
+
+    # Retract one registration's forward edges from the reverse indexes,
+    # keeping any contribution the identifier's *other* types still make to
+    # the same target.
+    #
+    # @param identifier [String]
+    # @param type [Symbol, nil]
+    # @param withdrawing [Set<Symbol>] every type being withdrawn in this call
+    # @return [void]
+    def withdraw_reverse_edges(identifier, type, withdrawing)
+      surviving = surviving_edges(identifier, withdrawing)
+      surviving_targets = surviving.to_set(&:first)
+
+      Array(@edges[identifier]&.[](type)).each do |edge|
+        if !surviving_targets.include?(edge[:target]) && (set = @reverse[edge[:target]])
           set.delete(identifier)
           @reverse.delete(edge[:target]) if set.empty?
         end
 
         via_key = [edge[:target], edge[:via]]
+        next if surviving.include?(via_key)
         next unless (set = @reverse_via[via_key])
 
         set.delete(identifier)
         @reverse_via.delete(via_key) if set.empty?
       end
+    end
+    private :withdraw_reverse_edges
 
-      old_node = @nodes[identifier]
-      return unless old_node
+    # `[target, via]` pairs the identifier's *other* types still record, which
+    # must keep their reverse entries when one type is withdrawn.
+    #
+    # @param identifier [String]
+    # @param withdrawing [Set<Symbol>] the types being withdrawn
+    # @return [Set<Array>] surviving `[target, via]` pairs
+    def surviving_edges(identifier, withdrawing)
+      (@edges[identifier] || {}).each_with_object(Set.new) do |(other_type, edges), set|
+        next if withdrawing.include?(other_type)
 
-      old_path = old_node[:file_path]
-      if old_path && (ids = @file_map[old_path])
-        ids.delete(identifier)
-        @file_map.delete(old_path) if ids.empty?
+        edges.each { |edge| set.add([edge[:target], edge[:via]]) }
+      end
+    end
+    private :surviving_edges
+
+    # Drop an identifier from a path's file-map entry, unless another of its
+    # types still claims that path.
+    #
+    # @param identifier [String]
+    # @param path [String, nil]
+    # @param withdrawing [Set<Symbol>] types being withdrawn, which do not count
+    #   as claimants — the node is still in `@nodes` at this point, since
+    #   `register` overwrites it only after `unregister` returns
+    # @return [void]
+    def drop_from_file_map(identifier, path, withdrawing)
+      return unless path
+
+      return if (@nodes[identifier] || {}).any? do |type, node|
+        !withdrawing.include?(type) && node[:file_path] == path
       end
 
-      return unless (type_ids = @type_index[old_node[:type]])
+      return unless (ids = @file_map[path])
+
+      ids.delete(identifier)
+      @file_map.delete(path) if ids.empty?
+    end
+    private :drop_from_file_map
+
+    # Drop an identifier from a type bucket.
+    #
+    # @param identifier [String]
+    # @param type [Symbol, nil]
+    # @return [void]
+    def drop_from_type_index(identifier, type)
+      return unless (type_ids = @type_index[type])
 
       type_ids.delete(identifier)
       # Drop the key when the last unit of a type goes away — a full
       # extraction never emits an empty type bucket, and a stale empty one
       # would show up in to_h[:type_index] and stats[:types] as a phantom.
-      @type_index.delete(old_node[:type]) if type_ids.empty?
+      @type_index.delete(type) if type_ids.empty?
     end
+    private :drop_from_type_index
+
+    # Types registered under an identifier, or the one requested.
+    #
+    # Reads from `@edges` as well as `@nodes`: a graph restored by {.from_h}
+    # from a hash carrying edges for an identifier it has no node for still
+    # has to be able to withdraw them.
+    #
+    # @param identifier [String]
+    # @param type [Symbol, nil] restrict to this one when given
+    # @return [Array<Symbol, nil>]
+    def registered_types(identifier, type = nil)
+      return [type] if type
+
+      ((@nodes[identifier]&.keys || []) | (@edges[identifier]&.keys || []))
+    end
+    private :registered_types
 
     # Fully remove a unit from the graph — node, forward edges, reverse-edge
     # contributions, file-map entry, and type-index entry.
@@ -117,16 +216,40 @@ module Woods
     # need not be a registered node).
     #
     # @param identifier [String] Unit identifier to remove
+    # @param type [Symbol, nil] Remove only this type's node; without it every
+    #   node registered under the identifier goes. A caller pruning a deleted
+    #   source file must pass the type, or it deletes the same-named unit of
+    #   another type along with it (#225).
     # @return [Hash, nil] the removed node, or nil if it was not registered
-    def remove(identifier)
-      return nil unless @nodes.key?(identifier)
+    def remove(identifier, type: nil)
+      nodes = @nodes[identifier]
+      return nil unless nodes&.any?
+      return nil if type && !nodes.key?(type)
 
       @to_h = nil
       @suffix_groups = nil
-      unregister(identifier)
+      unregister(identifier, type: type)
+
+      return remove_all(identifier, nodes) unless type
+
+      remaining_edges = @edges[identifier]
+      remaining_edges&.delete(type)
+      @edges.delete(identifier) if remaining_edges && remaining_edges.empty?
+      removed = nodes.delete(type)
+      @nodes.delete(identifier) if nodes.empty?
+      removed
+    end
+
+    # @param identifier [String]
+    # @param nodes [Hash{Symbol => Hash}] every node under the identifier
+    # @return [Hash, nil] the primary node, matching the pre-#225 return value
+    def remove_all(identifier, nodes)
+      primary = primary_of(nodes)
       @edges.delete(identifier)
       @nodes.delete(identifier)
+      primary
     end
+    private :remove_all
 
     # Identifiers defined by a given file path.
     #
@@ -181,11 +304,74 @@ module Woods
     # {#to_h} is memoized but rebuilds on every register/remove, so reaching
     # for `to_h[:nodes][id]` inside a loop is quadratic. Use this instead.
     #
+    # Without `type:` this answers with the **primary** node — the one whose
+    # type sorts first. It is deterministic on purpose: picking by
+    # registration order would let a full and an incremental extraction of one
+    # tree disagree about which of two colliding units is "the" node, and the
+    # graph's published artifacts have to be a pure function of its content.
+    # A caller that must not guess should use {#nodes_for} or {#node_types}.
+    #
     # @param identifier [String] Unit identifier
+    # @param type [Symbol, nil] Exact type to look up
     # @return [Hash, nil] `{ type:, file_path:, namespace: }` or nil
-    def node(identifier)
-      @nodes[identifier]
+    def node(identifier, type: nil)
+      nodes = @nodes[identifier]
+      return nil unless nodes
+
+      type ? nodes[type] : primary_of(nodes)
     end
+
+    # Every node registered under an identifier, sorted by type.
+    #
+    # One entry for all but the handful of identifiers a codebase reuses
+    # across unit types (a Scenic view and a factory both called `reports`).
+    #
+    # @param identifier [String] Unit identifier
+    # @return [Array<Hash>] `{ type:, file_path:, namespace: }` entries
+    def nodes_for(identifier)
+      sorted_nodes(@nodes[identifier] || {}).map(&:last)
+    end
+
+    # Types registered under an identifier, sorted.
+    #
+    # @param identifier [String] Unit identifier
+    # @return [Array<Symbol>]
+    def node_types(identifier)
+      sorted_nodes(@nodes[identifier] || {}).map(&:first)
+    end
+
+    # The (identifier, type) pairs a file defines.
+    #
+    # {#identifiers_for_path} answers with identifiers alone, which is
+    # ambiguous for a colliding identifier — a caller deleting the units of a
+    # vanished file needs to know *which* node that path registered, or it
+    # deletes the same-named unit of another type too.
+    #
+    # @param file_path [String] Absolute file path as registered
+    # @return [Array<Array(String, Symbol)>] `[identifier, type]` pairs
+    def units_for_path(file_path)
+      (@file_map[file_path] || []).flat_map do |identifier|
+        sorted_nodes(@nodes[identifier] || {})
+          .select { |_, node| node[:file_path] == file_path }
+          .map { |type, _| [identifier, type] }
+      end
+    end
+
+    # @param nodes [Hash{Symbol => Hash}]
+    # @return [Array<Array(Symbol, Hash)>] sorted by type name; a nil type
+    #   (an edges-only entry restored from a hash with no matching node) sorts
+    #   first, since it cannot be compared against a Symbol
+    def sorted_nodes(nodes)
+      nodes.sort_by { |type, _| [type ? 1 : 0, type.to_s] }
+    end
+    private :sorted_nodes
+
+    # @param nodes [Hash{Symbol => Hash}]
+    # @return [Hash, nil]
+    def primary_of(nodes)
+      sorted_nodes(nodes).first&.last
+    end
+    private :primary_of
 
     # Check if a node exists in the graph by exact identifier.
     #
@@ -241,17 +427,35 @@ module Woods
 
     # Get direct dependencies of a unit
     #
+    # Without `type:` this is the **union** across every type registered under
+    # the identifier. The caller is blast-radius computation, where a superset
+    # is safe and a subset silently under-extracts; for the identifiers that
+    # are not shared across types — all but a handful in any real index — the
+    # union is the same single list it always was.
+    #
     # @param identifier [String] Unit identifier
     # @param via [Symbol, Array<Symbol>, nil] Filter by relationship type(s)
+    # @param type [Symbol, nil] Restrict to one registered unit type
     # @return [Array<String>] List of dependency identifiers
-    def dependencies_of(identifier, via: nil)
-      edges = @edges[identifier] || []
+    def dependencies_of(identifier, via: nil, type: nil)
+      edges = edges_for(identifier, type)
       if via
         via_set = Array(via)
         edges = edges.select { |e| via_set.include?(e[:via]) }
       end
       edges.map { |e| e[:target] }
     end
+
+    # @param identifier [String]
+    # @param type [Symbol, nil] one registered type, or every one when nil
+    # @return [Array<Hash>] `{ target:, via: }` edges, in type-sorted order
+    def edges_for(identifier, type = nil)
+      by_type = @edges[identifier] || {}
+      return Array(by_type[type]) if type
+
+      by_type.sort_by { |t, _| [t ? 1 : 0, t.to_s] }.flat_map { |_, edges| edges }
+    end
+    private :edges_for
 
     # Get direct dependents of a unit (what depends on it)
     #
@@ -281,11 +485,10 @@ module Woods
     # @return [Array<Hash>] `{ type: Symbol, identifier: String }` entries
     def dependents_detail(identifier)
       (@reverse[identifier] || []).flat_map do |source|
-        node = @nodes[source]
-        next [] unless node
-
-        edge_count = (@edges[source] || []).count { |e| e[:target] == identifier }
-        Array.new(edge_count) { { type: node[:type], identifier: source } }
+        sorted_nodes(@nodes[source] || {}).flat_map do |type, node|
+          edge_count = Array(@edges[source]&.[](type)).count { |e| e[:target] == identifier }
+          Array.new(edge_count) { { type: node[:type], identifier: source } }
+        end
       end
     end
 
@@ -395,12 +598,14 @@ module Woods
     #
     # @return [Hash{String => Array(Hash{String => Integer}, Integer)}]
     def resolvable_edge_weights
-      @edges.each_with_object({}) do |(src, edges), weights|
+      @edges.each_with_object({}) do |(src, by_type), weights|
         counts = nil
-        edges.each do |edge|
-          next unless @nodes.key?(edge[:target])
+        by_type.each_value do |edges|
+          edges.each do |edge|
+            next unless @nodes.key?(edge[:target])
 
-          (counts ||= Hash.new(0))[edge[:target]] += 1
+            (counts ||= Hash.new(0))[edge[:target]] += 1
+          end
         end
 
         weights[src] = [counts, counts.each_value.sum] if counts
@@ -412,23 +617,92 @@ module Woods
     # Serialize graph for persistence. Memoized — cache is invalidated on register.
     # Returns a dup so callers can't pollute the cached hash.
     #
+    # ## Wire format and the `variants` key (#225)
+    #
+    # `nodes` and `edges` stay keyed on the bare identifier, holding the
+    # **primary** node — the type that sorts first. Identifiers registered
+    # under more than one type put their remaining nodes in `variants`, a flat
+    # array that is **omitted entirely when empty**. So the serialized form of
+    # a graph with no collisions is byte-for-byte what it has always been, and
+    # a `dependency_graph.json` written before this change loads through
+    # {.from_h} unmodified: it simply carries no `variants`.
+    #
+    # `reverse`, `file_map` and `type_index` need no new shape. They are
+    # already identifier-valued sets, so a Scenic view `reports` and a factory
+    # `reports` each contribute to their own type bucket and their own path.
+    #
     # @return [Hash] Complete graph data
     def to_h
       root = self.class.graph_root
-      @to_h ||= {
-        nodes: self.class.relativize_nodes(@nodes, root),
-        edges: @edges,
-        reverse: @reverse.transform_values(&:to_a),
-        file_map: self.class.relativize_file_map(@file_map, root),
-        type_index: @type_index.transform_values(&:to_a),
-        stats: {
-          node_count: @nodes.size,
-          edge_count: @edges.values.sum(&:size),
-          types: @type_index.transform_values(&:size)
+      @to_h ||= begin
+        variants = self.class.relativize_variants(variant_records, root)
+        base = {
+          nodes: self.class.relativize_nodes(primary_nodes, root),
+          edges: primary_edges,
+          reverse: @reverse.transform_values(&:to_a),
+          file_map: self.class.relativize_file_map(@file_map, root),
+          type_index: @type_index.transform_values(&:to_a),
+          stats: {
+            node_count: @nodes.each_value.sum(&:size),
+            edge_count: @edges.each_value.sum { |by_type| by_type.each_value.sum(&:size) },
+            types: @type_index.transform_values(&:size)
+          }
         }
-      }
+        variants.empty? ? base : base.merge(variants: variants)
+      end
       @to_h.dup
     end
+
+    # @return [Hash{String => Hash}] identifier => primary node
+    def primary_nodes
+      @nodes.transform_values { |nodes| primary_of(nodes) }
+    end
+    private :primary_nodes
+
+    # @return [Hash{String => Array<Hash>}] identifier => primary node's edges
+    def primary_edges
+      @edges.each_with_object({}) do |(identifier, by_type), edges|
+        primary_type = primary_type_for(identifier, by_type)
+        edges[identifier] = by_type.fetch(primary_type, [])
+      end
+    end
+    private :primary_edges
+
+    # Every non-primary node, flattened for serialization. Each record carries
+    # its own edges, so a variant round-trips whole.
+    #
+    # @return [Array<Hash>] sorted by identifier then type, so two extractions
+    #   of one tree serialize identically
+    def variant_records
+      records = @nodes.flat_map do |identifier, nodes|
+        sorted_nodes(nodes).drop(1).map do |type, node|
+          {
+            identifier: identifier,
+            type: type,
+            file_path: node[:file_path],
+            namespace: node[:namespace],
+            edges: @edges[identifier]&.[](type) || []
+          }
+        end
+      end
+      records.sort_by { |record| [record[:identifier], record[:type].to_s] }
+    end
+    private :variant_records
+
+    # The type whose node is primary for an identifier. Falls back to the
+    # edges' own first type when there is no node — {.from_h} accepts a hash
+    # carrying edges for an identifier it has no node for.
+    #
+    # @param identifier [String]
+    # @param by_type [Hash{Symbol => Array<Hash>}] that identifier's edges
+    # @return [Symbol, nil]
+    def primary_type_for(identifier, by_type)
+      nodes = @nodes[identifier]
+      return sorted_nodes(nodes).first&.first if nodes&.any?
+
+      by_type.keys.first
+    end
+    private :primary_type_for
 
     # ── Path portability (#166) ────────────────────────────────────────────
     #
@@ -493,6 +767,16 @@ module Woods
       end
     end
 
+    # Variant records carry a `file_path` like any other node, so they move
+    # with the same rules — relative on the way out, absolute on the way back.
+    def self.relativize_variants(variants, root)
+      return variants if root.nil?
+
+      variants.map do |record|
+        record[:file_path] ? record.merge(file_path: relativize(record[:file_path], root)) : record
+      end
+    end
+
     # Serialization form: **arrays**, matching what `to_h` has always emitted.
     def self.relativize_file_map(file_map, root)
       relocate_file_map(file_map) { |path| relativize(path, root) }
@@ -538,12 +822,21 @@ module Woods
       root = graph_root
 
       raw_nodes = data[:nodes] || data['nodes'] || {}
-      graph.instance_variable_set(
-        :@nodes, absolutize_nodes(raw_nodes.transform_values { |v| symbolize_node(v) }, root)
-      )
+      flat_nodes = absolutize_nodes(raw_nodes.transform_values { |v| symbolize_node(v) }, root)
+      nodes = flat_nodes.transform_values { |node| { node[:type] => node } }
 
       raw_edges = data[:edges] || data['edges'] || {}
-      graph.instance_variable_set(:@edges, raw_edges.transform_values { |edges| normalize_edges(edges) })
+      edges = raw_edges.each_with_object({}) do |(identifier, list), by_identifier|
+        # A hash carrying edges for an identifier it has no node for keys them
+        # under nil — the same type `symbolize_node` would have produced.
+        type = nodes[identifier]&.keys&.first
+        by_identifier[identifier] = { type => normalize_edges(list) }
+      end
+
+      merge_variants(data[:variants] || data['variants'], nodes, edges, root)
+
+      graph.instance_variable_set(:@nodes, nodes)
+      graph.instance_variable_set(:@edges, edges)
 
       raw_reverse = data[:reverse] || data['reverse'] || {}
       graph.instance_variable_set(:@reverse, raw_reverse.transform_values { |v| v.is_a?(Set) ? v : Set.new(v) })
@@ -558,15 +851,48 @@ module Woods
 
       # Rebuild reverse_via index from edges
       reverse_via = {}
-      graph.instance_variable_get(:@edges).each do |source_id, edges|
-        edges.each do |edge|
-          (reverse_via[[edge[:target], edge[:via]]] ||= Set.new).add(source_id)
+      graph.instance_variable_get(:@edges).each do |source_id, by_type|
+        by_type.each_value do |edge_list|
+          edge_list.each do |edge|
+            (reverse_via[[edge[:target], edge[:via]]] ||= Set.new).add(source_id)
+          end
         end
       end
       graph.instance_variable_set(:@reverse_via, reverse_via)
 
       graph
     end
+
+    # Fold the `variants` section back into the nested node/edge hashes.
+    #
+    # Absent (every graph written before #225, and every graph with no
+    # identifier shared across types) this is a no-op, which is what makes the
+    # format backward compatible without a migration.
+    #
+    # @param raw [Array<Hash>, nil] the persisted `variants` array
+    # @param nodes [Hash] identifier => { type => node }, mutated in place
+    # @param edges [Hash] identifier => { type => edges }, mutated in place
+    # @param root [String, nil] extraction root for path absolutizing
+    # @return [void]
+    def self.merge_variants(raw, nodes, edges, root)
+      return unless raw.is_a?(Array)
+
+      raw.each do |record|
+        next unless record.is_a?(Hash)
+
+        identifier = record[:identifier] || record['identifier']
+        type = (record[:type] || record['type'])&.to_sym
+        next if identifier.nil? || type.nil?
+
+        (nodes[identifier] ||= {})[type] = {
+          type: type,
+          file_path: absolutize(record[:file_path] || record['file_path'], root),
+          namespace: record[:namespace] || record['namespace']
+        }
+        (edges[identifier] ||= {})[type] = normalize_edges(record[:edges] || record['edges'])
+      end
+    end
+    private_class_method :merge_variants
 
     # Normalize a persisted file map to `path => Set<identifier>`.
     #
