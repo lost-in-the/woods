@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'securerandom'
 require_relative 'store'
 
 module Woods
@@ -19,17 +20,27 @@ module Woods
       INDEX_KEY = 'woods:session_index'
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
+      LOCK_KEY = 'woods:session_lock'
+      DEFAULT_LOCK_LEASE = 5.0
+      DEFAULT_LOCK_TIMEOUT = 2.0
+      DEFAULT_LOCK_RETRY_INTERVAL = 0.01
+
+      class LockTimeout < Woods::Error; end
 
       # @param cache [ActiveSupport::Cache::Store] A SolidCache (or compatible) cache instance
       # @param expires_in [Integer, nil] Expiry time in seconds (nil = no expiry)
       def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS,
-                     max_requests_per_session: DEFAULT_MAX_REQUESTS)
+                     max_requests_per_session: DEFAULT_MAX_REQUESTS,
+                     lock_lease: DEFAULT_LOCK_LEASE, lock_timeout: DEFAULT_LOCK_TIMEOUT,
+                     lock_retry_interval: DEFAULT_LOCK_RETRY_INTERVAL)
         super()
         @cache = cache
         @expires_in = expires_in
         @max_sessions = max_sessions
         @max_requests_per_session = max_requests_per_session
-        @mutex = Mutex.new
+        @lock_lease = Float(lock_lease)
+        @lock_timeout = Float(lock_timeout)
+        @lock_retry_interval = Float(lock_retry_interval)
       end
 
       # Append a request record to a session (read-modify-write).
@@ -42,7 +53,8 @@ module Woods
       # @param request_data [Hash] Request metadata to store
       # @return [void]
       def record(session_id, request_data)
-        @mutex.synchronize do
+        JSON.generate(request_data)
+        with_backend_lock do
           key = session_key(session_id)
           existing = @cache.read(key)
           requests = existing ? JSON.parse(existing) : []
@@ -61,13 +73,11 @@ module Woods
       # @param session_id [String] The session identifier
       # @return [Array<Hash>] Request records, oldest first
       def read(session_id)
-        @mutex.synchronize do
-          key = session_key(session_id)
-          raw = @cache.read(key)
-          return [] unless raw
+        key = session_key(session_id)
+        raw = @cache.read(key)
+        return [] unless raw
 
-          JSON.parse(raw)
-        end
+        JSON.parse(raw)
       rescue JSON::ParserError
         []
       end
@@ -77,14 +87,15 @@ module Woods
       # @param limit [Integer] Maximum number of sessions to return
       # @return [Array<Hash>] Session summaries
       def sessions(limit: 20)
-        index = read_index
-        active = index.select { |id| @cache.exist?(session_key(id)) }
+        with_backend_lock do
+          index = read_index
+          active = index.select { |id| @cache.exist?(session_key(id)) }
 
-        # Clean up expired entries from the index
-        write_index(active) if active.size != index.size
+          write_index(active) if active.size != index.size
 
-        active.first(limit).map do |session_id|
-          session_summary(session_id, read(session_id))
+          active.first(limit).map do |session_id|
+            session_summary(session_id, read(session_id))
+          end
         end
       end
 
@@ -93,22 +104,43 @@ module Woods
       # @param session_id [String] The session identifier
       # @return [void]
       def clear(session_id)
-        @cache.delete(session_key(session_id))
-        index = read_index
-        index.delete(session_id)
-        write_index(index)
+        with_backend_lock do
+          @cache.delete(session_key(session_id))
+          index = read_index
+          index.delete(session_id)
+          write_index(index)
+        end
       end
 
       # Remove all session data.
       #
       # @return [void]
       def clear_all
-        index = read_index
-        index.each { |id| @cache.delete(session_key(id)) }
-        @cache.delete(INDEX_KEY)
+        with_backend_lock do
+          index = read_index
+          index.each { |id| @cache.delete(session_key(id)) }
+          @cache.delete(INDEX_KEY)
+        end
       end
 
       private
+
+      def with_backend_lock
+        token = SecureRandom.uuid
+        deadline = monotonic_now + @lock_timeout
+        until @cache.write(LOCK_KEY, token, unless_exist: true, expires_in: @lock_lease)
+          raise LockTimeout, "Timed out acquiring SolidCache session lock after #{@lock_timeout}s" if monotonic_now >= deadline
+
+          sleep(@lock_retry_interval)
+        end
+        yield
+      ensure
+        @cache.delete(LOCK_KEY) if token && @cache.read(LOCK_KEY) == token
+      end
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      end
 
       # @param session_id [String]
       # @return [String] Cache key for this session
