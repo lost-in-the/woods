@@ -23,6 +23,26 @@ module PackagedGemSpec
     CODE_OF_CONDUCT.md
     SECURITY.md
   ].freeze
+  SEMANTIC_REOPEN_BOOTSTRAP = <<~'RUBY'
+    require 'json'
+    require 'woods'
+
+    executable, index_dir, expected_cwd, source_root, gem_home, evidence_path = ARGV
+    abort "unexpected cwd: #{Dir.pwd}" unless File.identical?(Dir.pwd, expected_cwd)
+    source_entries = $LOAD_PATH.select do |entry|
+      expanded = File.expand_path(entry)
+      expanded == source_root || expanded.start_with?("#{source_root}/")
+    end
+    abort "source load path leaked: #{source_entries.join(', ')}" unless source_entries.empty?
+    source_location = File.realpath(Woods.method(:configuration).source_location.fetch(0))
+    gem_root = File.realpath(gem_home)
+    abort "woods loaded outside installed gem: #{source_location}" unless source_location.start_with?("#{gem_root}/")
+    artifact_path = File.realpath(index_dir)
+    File.write(evidence_path, JSON.generate(
+      pwd: File.realpath(Dir.pwd), load_path: $LOAD_PATH, source_location: source_location, artifact_path: artifact_path
+    ))
+    exec(executable, artifact_path)
+  RUBY
 end
 
 RSpec.describe 'packaged gem' do
@@ -182,16 +202,55 @@ RSpec.describe 'packaged gem' do
       expect_success(['ruby', '-e', 'build installed preset artifact'], stdout, stderr, status)
     end
 
-    def assert_installed_semantic_reopen(index_dir)
-      transport = MCP::Client::Stdio.new(
-        command: File.join(@gem_home, 'bin/woods-mcp'), args: [index_dir], env: installed_env, read_timeout: 10
+    def installed_reopen_env(index_dir, isolated_cwd, evidence_path)
+      installed_env.merge(
+        'WOODS_TEST_CWD' => isolated_cwd,
+        'WOODS_TEST_RUBY' => Gem.ruby,
+        'WOODS_TEST_BOOTSTRAP' => PackagedGemSpec::SEMANTIC_REOPEN_BOOTSTRAP,
+        'WOODS_TEST_EXECUTABLE' => File.join(@gem_home, 'bin/woods-mcp'),
+        'WOODS_TEST_INDEX' => File.expand_path(index_dir),
+        'WOODS_TEST_SOURCE_ROOT' => PackagedGemSpec::ROOT,
+        'WOODS_TEST_GEM_HOME' => @gem_home,
+        'WOODS_TEST_EVIDENCE' => evidence_path
       )
+    end
+
+    def installed_reopen_transport(env)
+      MCP::Client::Stdio.new(
+        command: '/bin/sh',
+        args: ['-c', <<~'SH'],
+          cd "$WOODS_TEST_CWD" && exec "$WOODS_TEST_RUBY" -e "$WOODS_TEST_BOOTSTRAP" \
+            "$WOODS_TEST_EXECUTABLE" "$WOODS_TEST_INDEX" "$WOODS_TEST_CWD" \
+            "$WOODS_TEST_SOURCE_ROOT" "$WOODS_TEST_GEM_HOME" "$WOODS_TEST_EVIDENCE"
+        SH
+        env: env,
+        read_timeout: 10
+      )
+    end
+
+    def installed_semantic_result(transport)
       client = MCP::Client.new(transport: transport)
       client.connect(client_info: { name: 'preset-reopen', version: '1.0' },
                      protocol_version: '2026-07-28', mode: :modern)
-      result = client.call_tool(name: 'codebase_retrieve', arguments: { query: 'User model' })
+      client.call_tool(name: 'codebase_retrieve', arguments: { query: 'User model' })
+    end
+
+    def assert_installed_reopen_evidence(evidence_path, isolated_cwd, index_dir)
+      evidence = JSON.parse(File.read(evidence_path))
+      expect(evidence.fetch('pwd')).to eq(File.realpath(isolated_cwd))
+      expect(evidence.fetch('load_path')).not_to include(PackagedGemSpec::ROOT, File.join(PackagedGemSpec::ROOT, 'lib'))
+      expect(evidence.fetch('source_location')).to start_with(File.realpath(@gem_home))
+      expect(evidence.fetch('artifact_path')).to eq(File.realpath(index_dir))
+    end
+
+    def assert_installed_semantic_reopen(index_dir)
+      isolated_cwd = Dir.mktmpdir('woods-installed-cwd', @package_tmp)
+      evidence_path = File.join(isolated_cwd, 'boot-evidence.json')
+      transport = installed_reopen_transport(installed_reopen_env(index_dir, isolated_cwd, evidence_path))
+      result = installed_semantic_result(transport)
       expect(result.dig('result', 'isError')).to be(false)
       expect(result.dig('result', 'structuredContent', 'text')).to include('User')
+      assert_installed_reopen_evidence(evidence_path, isolated_cwd, index_dir)
     ensure
       transport&.close
     end
