@@ -556,6 +556,27 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['ok']).to be true
         expect(response['result']['record']).to be_nil
       end
+
+      it 'rejects a request with neither id nor by without calling find_by' do
+        # find_by is deliberately left unstubbed: a class_double raises if the
+        # production code reaches it, which independently proves find_by was
+        # never called.
+        response = executor.send_request({
+                                           'tool' => 'find',
+                                           'params' => { 'model' => 'User' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+      end
+
+      it 'rejects an empty by hash without returning an arbitrary row' do
+        response = executor.send_request({
+                                           'tool' => 'find',
+                                           'params' => { 'model' => 'User', 'by' => {} }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+      end
     end
 
     context 'pluck tool' do
@@ -739,6 +760,24 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error']).to match(/Unknown association/)
+        expect(user_model).not_to have_received(:find)
+      end
+
+      it 'rejects an invalid scope column before looking up the parent record' do
+        post_model = double('Post', name: 'Post')
+        reflection = double('reflection', klass: post_model)
+        allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(reflection)
+
+        response = executor.send_request({
+                                           'tool' => 'association_count',
+                                           'params' => {
+                                             'model' => 'User', 'id' => 1, 'association' => 'posts',
+                                             'scope' => { 'nonexistent_column' => 1 }
+                                           }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error']).to match(/Unknown column 'nonexistent_column'/)
         expect(user_model).not_to have_received(:find)
       end
     end
@@ -1044,6 +1083,34 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
           expect(response).to include('ok' => false, 'error_type' => 'validation')
           expect(response['error']).to include('Invalid arguments:', 'number at `/limit` is greater than: 10000')
           expect(connection).not_to have_received(:select_all)
+        end
+
+        it 'rejects EXPLAIN combined with limit as a typed validation error instead of a broken query' do
+          allow(connection).to receive(:select_all)
+
+          response = executor_with_read.send_request({
+                                                       'tool' => 'sql',
+                                                       'params' => {
+                                                         'sql' => 'EXPLAIN SELECT id FROM users',
+                                                         'limit' => 5
+                                                       }
+                                                     })
+
+          expect(response).to include('ok' => false, 'error_type' => 'validation')
+          expect(response['error']).to match(/EXPLAIN/)
+          expect(connection).not_to have_received(:select_all)
+        end
+
+        it 'still executes EXPLAIN without a limit' do
+          allow(connection).to receive(:select_all).and_return(select_result)
+
+          response = executor_with_read.send_request({
+                                                       'tool' => 'sql',
+                                                       'params' => { 'sql' => 'EXPLAIN SELECT id FROM users' }
+                                                     })
+
+          expect(response['ok']).to be true
+          expect(connection).to have_received(:select_all).with('EXPLAIN SELECT id FROM users')
         end
       end
 

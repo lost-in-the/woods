@@ -200,6 +200,34 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(response['error']).to include('Invalid arguments:', 'array size at `/having` is greater than: 2')
       expect(relation).not_to have_received(:having)
     end
+
+    it 'rejects a Hash bind value with a typed validation error, not a generic execution failure' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', { 'sneaky' => 1 }]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(relation).not_to have_received(:having)
+    end
+
+    it 'rejects an Array bind value with a typed validation error, not a generic execution failure' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', [1, 2]]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(relation).not_to have_received(:having)
+    end
   end
 
   describe 'multi-column group_by' do

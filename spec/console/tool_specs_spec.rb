@@ -347,6 +347,16 @@ RSpec.describe Woods::Console::Server do
         .to raise_error(MCP::Tool::InputSchema::ValidationError)
     end
 
+    it 'requires exactly one non-empty locator (id or by) for console_find' do
+      expect { schema_for('console_find').validate_arguments(model: 'Order') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_find').validate_arguments(model: 'Order', by: {}) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_find').validate_arguments(model: 'Order', id: 1) }.not_to raise_error
+      expect { schema_for('console_find').validate_arguments(model: 'Order', by: { 'sku' => 'x' }) }
+        .not_to raise_error
+    end
+
     it 'rejects query expressions, group columns, and order values the executor cannot run' do
       invalid_inputs = [
         { model: 'Order', select: ['status; DROP TABLE orders'] },

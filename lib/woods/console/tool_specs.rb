@@ -181,13 +181,24 @@ module Woods
             model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
                   description: 'Primary key value' },
-            by: { type: 'object', propertyNames: { pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
-                  description: 'Unique column lookup' },
+            by: { type: 'object', minProperties: 1, propertyNames: { pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
+                  description: 'Unique column lookup (must be non-empty)' },
             columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Columns to include' }
           },
           required: ['model'],
           tier: 1,
+          # Exactly one non-empty locator form: `id` XOR a non-empty `by`.
+          # `find_by({})` (no locator at all) returns an arbitrary row:
+          # this constraint is the schema half of closing that gap; the
+          # executor enforces it again as defense-in-depth (see
+          # EmbeddedExecutor#validate_find_locator!).
+          schema_constraints: {
+            oneOf: [
+              { required: ['id'] },
+              { required: ['by'] }
+            ]
+          },
           handler: lambda { |args|
             Tools::Tier1.console_find(
               model: args[:model], id: args[:id], by: args[:by], columns: args[:columns]
@@ -670,7 +681,14 @@ module Woods
                         },
                         {
                           type: 'array', minItems: 2, maxItems: 2,
-                          prefixItems: [{ type: 'string', pattern: HAVING_TEMPLATE_SCHEMA_PATTERN }, {}]
+                          # The bind is restricted to scalar JSON types the executor can
+                          # actually pass to AR's `?` binding: a Hash/Array bind reaches
+                          # the adapter and fails as a generic execution error instead of
+                          # a typed validation error (mirrors the `scope:` bind constraint).
+                          prefixItems: [
+                            { type: 'string', pattern: HAVING_TEMPLATE_SCHEMA_PATTERN },
+                            { type: %w[string number boolean null] }
+                          ]
                         }
                       ],
                       description: 'HAVING condition object or parameterized [template, bind] array' },

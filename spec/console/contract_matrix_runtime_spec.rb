@@ -844,6 +844,11 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
       row = matrix.find { |candidate| candidate.fetch(:name) == name }
       results = contract.fetch(:arguments).map { |arguments| tool_result(tools_call(server, name, arguments)) }
       results.first.fetch('records').sort_by! { |record| record.fetch('status') } if name == 'console_sample'
+      # console_pluck has no explicit order: the database is free to return
+      # rows in any order. Normalize the outer array by its first (status)
+      # column so the assertion doesn't depend on incidental row order, while
+      # each inner row's [status, title] pairing (the EAV proof) is untouched.
+      results.first.fetch('values').sort_by!(&:first) if name == 'console_pluck'
 
       expect(row.fetch(:redaction)).to match(/_and_eav\z/), name
       expect(results).to eq(contract.fetch(:expected)), name

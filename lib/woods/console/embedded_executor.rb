@@ -455,15 +455,31 @@ module Woods
       end
 
       def handle_find(params)
+        validate_find_locator!(params)
         @model_validator.validate_columns!(params['model'], params['by'].keys.map(&:to_s)) if params['by']
         validate_select_columns!(params)
         model = resolve_model(params['model'])
-        record = if params['id']
-                   model.find_by(id: params['id'])
-                 elsif params['by']
-                   model.find_by(params['by'])
-                 end
+        record = params['id'] ? model.find_by(id: params['id']) : model.find_by(params['by'])
         { 'record' => record ? serialize_record(record, params['columns']) : nil }
+      end
+
+      # Require exactly one non-empty locator: `id` or a non-empty `by` hash.
+      # `find_by({})` returns an arbitrary row when neither is supplied, and
+      # `find_by` with an empty `by` hash is indistinguishable from that:
+      # both must be refused before any query runs. Defense-in-depth against
+      # the public schema's `oneOf`/`minProperties` constraint (ToolSpec
+      # for console_find), for callers that reach this handler directly.
+      #
+      # @param params [Hash]
+      # @raise [ValidationError] when zero or both locator forms are present
+      def validate_find_locator!(params)
+        has_id = !params['id'].nil?
+        has_by = params['by'].is_a?(Hash) && params['by'].any?
+        return if has_id ^ has_by
+
+        raise ValidationError, 'console_find requires exactly one non-empty locator: id or by' unless has_id && has_by
+
+        raise ValidationError, 'console_find accepts only one locator at a time: id or by, not both'
       end
 
       def handle_pluck(params)
@@ -515,10 +531,34 @@ module Woods
         # explicitly before reading any rows from it.
         gate_association!(params['model'], association_name)
 
+        # Validate every request-controlled scope column against the
+        # association's own model before any database I/O runs (not just
+        # before the association is read): `model.find` below is itself a
+        # query, and a request with a bad scope should never reach it.
+        validate_scope_columns!(params['scope'], reflection.klass.name) if params['scope']
+
         record = model.find(params['id'])
         scope = record.public_send(association_name)
         scope = apply_scope(scope, params['scope'], model_name: reflection.klass.name) if params['scope']
         { 'count' => scope.count }
+      end
+
+      # Pure column-name validation for a scope Hash, no relation is built
+      # and no query runs. Reuses ScopePredicateParser's own suffix grammar
+      # so the two never drift.
+      #
+      # @param scope [Hash, nil]
+      # @param model_name [String]
+      # @raise [ValidationError] on an unknown column
+      def validate_scope_columns!(scope, model_name)
+        return unless scope.is_a?(Hash)
+
+        scope.each_key do |raw_key|
+          key = raw_key.to_s
+          match = ScopePredicateParser::SUFFIX_PATTERN.match(key)
+          column = match ? key.delete_suffix(match[1]) : key
+          @model_validator.validate_column!(model_name, column)
+        end
       end
 
       def gate_association!(model_name, association)
@@ -598,12 +638,28 @@ module Woods
         gate_sql!(sql)
 
         limit = params['limit']
+        # EXPLAIN's output is plan rows, not the query's own row set: wrapping
+        # it as `SELECT * FROM (EXPLAIN ...) AS _limited LIMIT n` is invalid
+        # SQL that fails as a generic adapter error. Reject the combination
+        # with a typed error instead of advertising a limit EXPLAIN can't honor.
+        if limit && explain_statement?(sql)
+          raise ValidationError, 'limit is not supported with EXPLAIN (EXPLAIN output is plan rows, ' \
+                                 'not the query result set, so it cannot be wrapped and limited). ' \
+                                 'Resubmit without limit.'
+        end
+
         query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
         result = active_connection.select_all(query_sql)
 
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       rescue SqlValidationError => e
         raise ValidationError, e.message
+      end
+
+      # @param sql [String] Validated SQL (already passed SqlValidator)
+      # @return [Boolean] true when the statement starts with EXPLAIN
+      def explain_statement?(sql)
+        sql.strip.match?(/\AEXPLAIN\b/i)
       end
 
       # Build and execute a structured ActiveRecord query.
@@ -714,7 +770,7 @@ module Woods
       # Anything else is rejected — raw strings (e.g. `"1=1 UNION SELECT
       # password_digest FROM users"`) used to flow straight through and
       # enable SELECT-based exfiltration despite the SafeContext rollback.
-      def validated_having(having, model_name) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def validated_having(having, model_name)
         case having
         when Hash
           raise ValidationError, 'having: empty hash' if having.empty?
@@ -722,22 +778,46 @@ module Woods
           having.each_key { |k| validate_column_reference!(k.to_s, model_name) }
           [having]
         when Array
-          unless having.length == 2 && having.first.is_a?(String)
-            raise ValidationError, 'having must contain exactly one template and one bind value'
-          end
-
-          template = having.first
-          match = Server::HAVING_TEMPLATE_REGEXP.match(template)
-          raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
-
-          # Validate any referenced columns through ModelValidator so
-          # aggregate args can't reach the db without a column check.
-          col = match[1] || match[3]
-          validate_column_reference!(col, model_name) if col && col != '*'
-
-          having
+          validated_having_array!(having, model_name)
         else
           raise ValidationError, "having: unsupported type #{having.class}"
+        end
+      end
+
+      # Validate the `[template, bind]` array form of `having:`.
+      #
+      # @param having [Array] `[template, bind]`
+      # @param model_name [String]
+      # @return [Array] `having`, unchanged, once validated
+      def validated_having_array!(having, model_name)
+        unless having.length == 2 && having.first.is_a?(String)
+          raise ValidationError, 'having must contain exactly one template and one bind value'
+        end
+
+        template = having.first
+        match = Server::HAVING_TEMPLATE_REGEXP.match(template)
+        raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
+
+        # Validate any referenced columns through ModelValidator so
+        # aggregate args can't reach the db without a column check.
+        col = match[1] || match[3]
+        validate_column_reference!(col, model_name) if col && col != '*'
+        validate_having_bind!(having.last)
+
+        having
+      end
+
+      # Defense-in-depth: the public schema already restricts the bind to a
+      # scalar JSON type (see tool_specs.rb), but a container (Hash/Array)
+      # bind that reaches AR's `?` placeholder fails as a generic adapter
+      # error, not a typed one: reject it here too, mirroring
+      # apply_query_scope's bind check.
+      def validate_having_bind!(bind)
+        case bind
+        when String, Numeric, true, false, nil
+          nil
+        else
+          raise ValidationError, 'having bind must be a string, number, boolean, or null'
         end
       end
 
