@@ -34,21 +34,12 @@ module Woods
       #     objects (validators, guards) are captured in the lambda's closure.
       ToolSpec = Struct.new(:name, :description, :properties, :required, :tier, :handler, keyword_init: true)
 
-      # All 31 console tool specifications, grouped by tier:
-      #   Tier 1 (read-only, 9 tools) — no guard required, bridge-level
-      #     table_gate already constrains reach.
-      #   Tier 2 (domain-aware, 9 tools) — no guard required, validators run
-      #     inside the app under SafeContext.
-      #   Tier 3 (analytics, 10 tools) — no guard required, adapters wrap
-      #     external services (Redis, job queues, cache).
-      #   Tier 4 (guarded, 3 tools) — `eval`, `sql`, `query`. Guards ARE
-      #     MANDATORY for these. The handler lambda for each Tier-4 tool
-      #     captures the relevant validator/guard closure; the Server's
-      #     {DispatchPipeline} and {EmbeddedExecutor} refuse to execute a
-      #     Tier-4 tool whose `guard` is missing or nil. Never call `eval`,
-      #     `sql`, or `query` without wiring EvalGuard / SqlValidator first.
-      # Each spec is a ToolSpec; the handler lambda captures any objects that
-      # must be built once at spec-definition time (validators, guards).
+      # All 31 possible Console tool specifications, grouped by tier. Runtime
+      # registration is derived separately in EXECUTABLE_MODES: Tier 1 is
+      # executable in both embedded modes, and sql/query are executable only
+      # in explicit embedded-read mode. Tier 2, Tier 3, and eval remain an
+      # unregistered inventory until real executors and enforceable controls
+      # exist for them.
       TOOL_SPECS = [
         # ── Tier 1: read-only ─────────────────────────────────────────────────
         ToolSpec.new(
@@ -546,6 +537,33 @@ module Woods
           }
         )
       ].freeze
+
+      EXECUTABLE_MODES = {
+        embedded: TIER1_TOOLS.map { |name| "console_#{name}" }.freeze,
+        embedded_read: (TIER1_TOOLS + %w[sql query]).map { |name| "console_#{name}" }.freeze
+      }.freeze
+
+      # Code-derived inventory of capability and safety claims for all 31
+      # possible Console tools. An empty mode list means the schema remains an
+      # inventory entry but the tool is not registered by a supported server.
+      CONTRACT_MATRIX = TOOL_SPECS.map do |spec|
+        modes = EXECUTABLE_MODES.filter_map { |mode, names| mode if names.include?(spec.name) }.freeze
+        executable = modes.any?
+
+        {
+          name: spec.name,
+          mode: modes,
+          required: Array(spec.required).freeze,
+          valid_output: executable ? :mcp_tool_response : :not_executable,
+          invalid_input: executable ? :mcp_error_response : :not_registered,
+          authorization: executable ? :transport : :not_registered,
+          table_gate: executable ? :configured : false,
+          redaction: executable ? :configured : false,
+          credential_scan: executable ? :enabled_unless_disabled : false,
+          confirmation: false,
+          audit: false
+        }.freeze
+      end.freeze
     end
   end
 end

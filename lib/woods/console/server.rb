@@ -25,12 +25,15 @@ module Woods
   module Console
     # Console MCP Server — queries live Rails application state.
     #
-    # Communicates with a bridge process running inside the Rails environment
-    # via JSON-lines over stdio. Exposes 31 tools across 4 tiers
-    # (9 read-only / 9 domain-aware / 10 analytics / 3 guarded) through MCP.
+    # Executes against a booted Rails application. The default embedded mode
+    # exposes 9 Tier 1 tools; explicit read-tool mode adds console_sql and
+    # console_query. The full 31-tool catalogue remains inventory-only.
     #
     # @example
-    #   server = Woods::Console::Server.build(config: config)
+    #   server = Woods::Console::Server.build_embedded(
+    #     model_validator: validator,
+    #     safe_context: safe_context
+    #   )
     #   transport = MCP::Server::Transports::StdioTransport.new(server)
     #   transport.open
     #
@@ -43,13 +46,8 @@ module Woods
         # changes are deployed. The swap is atomic on MRI (GVL) — in-flight scans see
         # either the old or the new index, never a partial one.
         #
-        # Returns nil when:
-        # - `console_credential_defense_enabled` is false
-        # - No server has been built yet in this process (`build` / `build_embedded`
-        #   have not been called)
-        #
-        # Existing callers of `build` / `build_embedded` are unaffected — this is an
-        # additive class method with no required arguments beyond `rails_app`.
+        # Returns nil when credential defense is disabled or no embedded server
+        # has been built yet in this process.
         #
         # @param rails_app [#credentials] The Rails application to re-read.
         #   Defaults to `Rails.application` when `Rails` is defined, otherwise
@@ -126,36 +124,15 @@ module Woods
           Rails.application
         end
 
-        # Build a configured MCP::Server with console tools using the bridge protocol.
-        #
-        # ⚠ Layer 1 limitation in bridge mode:
-        # The server side of the bridge has no access to the remote app's
-        # `ActiveRecord::Base.descendants`, so model_tables and model_reflections
-        # are empty. `TableGate#check_sql!` still fires against the raw SQL
-        # argument of `console_sql`, but `check_model!`, `check_joins!`, and
-        # `check_association!` are effectively no-ops for tools that receive a
-        # model name rather than SQL (find, sample, count, etc.). A bridge-mode
-        # deployment therefore relies on Layer 2 (credential scanning) + Layer 3
-        # (column/EAV redaction) + Layer 4 (SqlValidator + SafeContext rollback)
-        # for non-SQL tool calls. If you need full Layer 1 coverage, use
-        # `build_embedded` (the stdio entry point `exe/woods-console` does this).
-        #
-        # See docs/CONSOLE_MCP_SETUP.md "Bridge vs. embedded defense coverage"
-        # for the full matrix.
-        #
+        # The former JSON-lines bridge never executed live queries. Keep this
+        # entry point fail-closed so legacy callers cannot receive fabricated
+        # empty responses.
         # @param config [Hash] Configuration hash (from YAML or env)
-        # @return [MCP::Server] Configured server ready for transport
-        def build(config:)
-          connection_config = config['console'] || config
-          conn_mgr = ConnectionManager.new(config: connection_config)
-          redacted_columns = Array(config['redacted_columns'] || connection_config['redacted_columns'])
-          redacted_key_values = Array(
-            config['redacted_key_values'] || connection_config['redacted_key_values']
-          )
-          safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
-          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: {}, model_reflections: {})
-
-          build_server(conn_mgr, ctx)
+        # @raise [Woods::ConfigurationError] always
+        def build(config:) # rubocop:disable Lint/UnusedMethodArgument
+          raise Woods::ConfigurationError,
+                'The JSON-lines Console bridge is not supported. Use Server.build_embedded, ' \
+                'rake woods:console, or Woods::Console::RackMiddleware.'
         end
 
         # Build a configured MCP::Server using embedded ActiveRecord execution.
@@ -198,18 +175,18 @@ module Woods
           # PRE-execution against console_blocked_tables (previously TableGate
           # was only consulted on the render path, leaving the defense inert
           # for the sql and query tools).
-          table_gate = ctx&.table_gate
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_context,
             connection: connection, read_tools_enabled: read_tools_enabled,
-            table_gate: table_gate,
+            table_gate: ctx&.table_gate,
             eval_guard: eval_wiring[:eval_guard],
             confirmation: eval_wiring[:confirmation],
             audit_logger: eval_wiring[:audit_logger],
             unsafe_eval_enabled: eval_wiring[:unsafe_eval_enabled]
           )
 
-          build_server(executor, ctx)
+          mode = read_tools_enabled ? :embedded_read : :embedded
+          build_server(executor, ctx, tool_names: executable_tool_names(mode))
         end
 
         # Resolve the three-collaborator eval wiring for the current config.
@@ -267,58 +244,10 @@ module Woods
                 'must be audited.'
         end
 
-        # Register all tool specs for a given tier on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context bundling response-safety layers
-        # @param tier [Integer] Tier number (1-4)
-        # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
-        # @return [void]
-        def register_tier_tools(server, conn_mgr, ctx, tier:, renderer: nil)
-          TOOL_SPECS.select { |spec| spec.tier == tier }.each do |spec|
-            register(spec, server, conn_mgr, ctx, renderer: renderer)
-          end
-        end
-
-        # Register Tier 1 read-only tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier1_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 1, renderer: renderer)
-        end
-
-        # Register Tier 2 domain-aware tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier2_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 2, renderer: renderer)
-        end
-
-        # Register Tier 3 analytics tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier3_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 3, renderer: renderer)
-        end
-
-        # Register Tier 4 guarded tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier4_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 4, renderer: renderer)
+        # Resolve the exact tool list for a supported embedded mode from the
+        # same matrix used by tests and documentation evidence.
+        def executable_tool_names(mode)
+          CONTRACT_MATRIX.filter_map { |row| row[:name] if row[:mode].include?(mode) }
         end
 
         private
@@ -468,10 +397,11 @@ module Woods
 
         # Shared server construction used by both build() and build_embedded().
         #
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Any object with send_request(Hash) -> Hash
+        # @param conn_mgr [EmbeddedExecutor] Request executor
         # @param ctx [ResponseContext, nil] Optional context bundling response-safety layers
+        # @param tool_names [Array<String>] Exact executable tool names to advertise
         # @return [MCP::Server]
-        def build_server(conn_mgr, ctx)
+        def build_server(conn_mgr, ctx, tool_names:)
           server = ::MCP::Server.new(
             name: 'woods-console',
             version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0',
@@ -480,13 +410,9 @@ module Woods
 
           renderer = build_console_renderer
 
-          register_tier1_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier2_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier3_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier4_tools(server, conn_mgr, ctx, renderer: renderer)
-          # Tier registration is conditional (embedded mode drops sql/query,
-          # tier 4 needs the unsafe-eval opt-in), so the advertised order moves
-          # with configuration unless it is sorted. See ProtocolPolicy.
+          TOOL_SPECS.select { |spec| tool_names.include?(spec.name) }.each do |spec|
+            register(spec, server, conn_mgr, ctx, renderer: renderer)
+          end
           Woods::MCP::ProtocolPolicy.sort_tools!(server)
         end
 

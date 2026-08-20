@@ -43,6 +43,47 @@ RSpec.describe Woods::Console::Server do
     end
   end
 
+  describe 'CONTRACT_MATRIX' do
+    let(:matrix) { described_class::CONTRACT_MATRIX }
+
+    it 'derives one frozen contract row from each of the 31 tool specs' do
+      expect(matrix).to be_frozen
+      expect(matrix.size).to eq(31)
+      expect(matrix.map { |row| row.fetch(:name) }).to eq(all_specs.map(&:name))
+    end
+
+    it 'records the complete capability and safety contract for every row' do
+      required_keys = %i[
+        name mode required valid_output invalid_input authorization table_gate
+        redaction credential_scan confirmation audit
+      ]
+
+      expect(matrix).to all(satisfy { |row| (required_keys - row.keys).empty? })
+    end
+
+    it 'marks only Tier 1 tools executable in default embedded mode' do
+      executable = matrix.select { |row| row.fetch(:mode).include?(:embedded) }
+
+      expect(executable.map { |row| row.fetch(:name) }).to contain_exactly(
+        *described_class::TIER1_TOOLS.map { |name| "console_#{name}" }
+      )
+    end
+
+    it 'adds only SQL and query in embedded read mode' do
+      executable = matrix.select { |row| row.fetch(:mode).include?(:embedded_read) }
+      expected = described_class::TIER1_TOOLS.map { |name| "console_#{name}" } +
+                 %w[console_sql console_query]
+
+      expect(executable.map { |row| row.fetch(:name) }).to contain_exactly(*expected)
+    end
+
+    it 'does not claim confirmation or audit for an executable tool' do
+      executable = matrix.select { |row| row.fetch(:mode).any? }
+
+      expect(executable).to all(include(confirmation: false, audit: false))
+    end
+  end
+
   # ── Required fields on every ToolSpec ─────────────────────────────────────
 
   describe 'each ToolSpec' do

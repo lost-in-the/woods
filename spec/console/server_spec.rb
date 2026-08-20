@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/server'
 
 RSpec.describe Woods::Console::Server do
@@ -9,95 +10,15 @@ RSpec.describe Woods::Console::Server do
   end
 
   describe '.build' do
-    it 'returns an MCP::Server instance' do
-      server = described_class.build(config: config)
-      expect(server).to be_a(MCP::Server)
-    end
-
-    it 'accepts nested console config' do
-      nested_config = { 'console' => config }
-      server = described_class.build(config: nested_config)
-      expect(server).to be_a(MCP::Server)
-    end
-
-    it 'builds without redaction when no redacted_columns configured' do
-      server = described_class.build(config: config)
-      expect(server).to be_a(MCP::Server)
-    end
-
-    it 'builds with redaction when redacted_columns are configured' do
-      config_with_redaction = config.merge('redacted_columns' => %w[ssn password])
-      server = described_class.build(config: config_with_redaction)
-      expect(server).to be_a(MCP::Server)
-    end
-  end
-
-  describe 'tool registration' do
-    it 'registers all tools on the server' do
-      server = described_class.build(config: config)
-      tools = server.instance_variable_get(:@tools)
-
-      expected_count = described_class::TIER1_TOOLS.size +
-                       described_class::TIER2_TOOLS.size +
-                       described_class::TIER3_TOOLS.size +
-                       described_class::TIER4_TOOLS.size
-      expect(tools.size).to eq(expected_count)
-    end
-
-    it 'registers all Tier 1 tool names' do
-      server = described_class.build(config: config)
-      tools = server.instance_variable_get(:@tools)
-
-      described_class::TIER1_TOOLS.each do |tool|
-        expect(tools).to have_key("console_#{tool}")
-      end
-    end
-
-    it 'registers all Tier 2 tool names' do
-      server = described_class.build(config: config)
-      tools = server.instance_variable_get(:@tools)
-
-      described_class::TIER2_TOOLS.each do |tool|
-        expect(tools).to have_key("console_#{tool}")
-      end
-    end
-
-    it 'registers all Tier 3 tool names' do
-      server = described_class.build(config: config)
-      tools = server.instance_variable_get(:@tools)
-
-      described_class::TIER3_TOOLS.each do |tool|
-        expect(tools).to have_key("console_#{tool}")
-      end
-    end
-
-    it 'registers all Tier 4 tool names' do
-      server = described_class.build(config: config)
-      tools = server.instance_variable_get(:@tools)
-
-      described_class::TIER4_TOOLS.each do |tool|
-        expect(tools).to have_key("console_#{tool}")
-      end
+    it 'fails closed because the JSON-lines bridge has no real executor' do
+      expect { described_class.build(config: config) }
+        .to raise_error(Woods::ConfigurationError, /bridge.*not supported/i)
     end
   end
 
   describe 'redaction via SafeContext' do
-    let(:conn_mgr) do
-      instance_double(Woods::Console::ConnectionManager).tap do |m|
-        allow(m).to receive(:send_request).and_return(
-          'ok' => true,
-          'result' => { 'name' => 'Alice', 'ssn' => '123-45-6789', 'email' => 'alice@example.com' }
-        )
-      end
-    end
-
-    before do
-      allow(Woods::Console::ConnectionManager).to receive(:new).and_return(conn_mgr)
-    end
-
     it 'builds successfully when no redacted_columns configured' do
-      server = described_class.build(config: config)
-      expect(server).to be_a(MCP::Server)
+      expect(described_class.send(:build_safe_context, [], [])).to be_nil
     end
 
     it 'applies SafeContext redaction to Hash results' do

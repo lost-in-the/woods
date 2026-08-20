@@ -2,12 +2,8 @@
 
 module Woods
   module Console
-    # Canonical console-tool protocol contract shared by {StubBridge}
-    # (the JSON-lines scaffold) and {EmbeddedExecutor} (the in-process
-    # executor that ships today). The eventual real bridge-process
-    # implementation (Option D — see `docs/design/CONSOLE_SERVER.md`)
-    # will also reference this module so every executor that speaks the
-    # protocol agrees on the tool vocabulary.
+    # Canonical Tier 1 vocabulary used by {EmbeddedExecutor}. The historical
+    # name remains for compatibility after removal of the JSON-lines bridge.
     #
     # Three constants live here:
     #
@@ -17,12 +13,6 @@ module Woods
     #   supported set.
     # - {TOOL_HANDLERS}   — tool → `handle_<tool>` method-symbol map.
     #
-    # Previously these lived on {StubBridge} and {EmbeddedExecutor}
-    # borrowed them with `TIER1_TOOLS = StubBridge::TIER1_TOOLS`, which
-    # reads as "the real executor borrows constants from the stub" —
-    # backwards. Extracting the protocol here lets the real executor
-    # (and a future non-stub `Bridge` class) claim the contract without
-    # importing the scaffold.
     module BridgeProtocol
       SUPPORTED_TOOLS = %w[
         count
