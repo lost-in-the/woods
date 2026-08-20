@@ -13,9 +13,13 @@ module Woods
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
       DIRECTORY_CLAIM_ATTEMPTS = 3
+      RECORD_PUBLISH_ATTEMPTS = 32
 
       class AtomicIncrementRequired < Woods::Error; end
       class BackendWriteError < Woods::Error; end
+      class DirectoryContentionError < Woods::Error; end
+
+      DirectorySlot = Struct.new(:slot, :raw, :membership, keyword_init: true)
 
       # @param cache [ActiveSupport::Cache::Store] A Solid Cache store, or a cache with atomic
       #   +increment+, +write_if_absent+, and +delete_if_equal+ operations
@@ -44,37 +48,40 @@ module Woods
       # Admit the session, allocate a monotonic sequence, and publish one record.
       def record(session_id, request_data)
         normalized_record = JSON.parse(JSON.generate(request_data))
-        membership = active_membership(session_id) || admit_session(session_id)
+        membership = owned_membership(session_id) || admit_session(session_id)
         return unless membership
 
-        generation = membership['token']
-        sequence_key = sequence_key(session_id, generation)
+        sequence_key = slot_sequence_key(membership['slot'])
         sequence = increment!(sequence_key)
-        key = record_key(session_id, generation, sequence)
-        published = publish_current_slot?(key, sequence, @max_requests_per_session, sequence_key,
-                                          JSON.generate('sequence' => sequence, 'record' => normalized_record))
+        key = record_key(membership, sequence)
+        payload = JSON.generate('sequence' => sequence, 'token' => membership['token'],
+                                'record' => normalized_record)
+        published = publish_current_slot?(key, sequence, @max_requests_per_session, sequence_key, payload)
         if published && current_membership?(membership)
           refresh_activity!(membership)
           return if current_membership?(membership)
         end
 
-        @cache.delete(key)
+        atomic_delete_if_equal(key, payload)
         @cache.delete(activity_key(membership))
         nil
       end
 
       # Read the current bounded sequence window, skipping allocation gaps.
       def read(session_id)
-        membership = active_membership(session_id)
+        membership = owned_membership(session_id)
         return [] unless membership
 
-        generation = membership['token']
-        sequence = counter_value(sequence_key(session_id, generation))
-        return [] unless sequence.positive?
+        sequence = counter_value(slot_sequence_key(membership['slot']))
+        first_sequence = [sequence - @max_requests_per_session + 1, membership['record_floor'] + 1, 1].max
+        return [] if first_sequence > sequence
 
-        sequence_window(sequence, @max_requests_per_session).filter_map do |expected|
-          parse_slot(@cache.read(record_key(session_id, generation, expected)), expected, 'record')
+        records = (first_sequence..sequence).filter_map do |expected|
+          parse_record(@cache.read(record_key(membership, expected)), membership, expected)
         end
+        return [] unless current_membership?(membership)
+
+        records
       end
 
       # List the bounded active-session set, newest admission first.
@@ -94,7 +101,13 @@ module Woods
 
       def clear_all
         increment!(index_sequence_key, @max_sessions)
-        directory_memberships.compact.each { |membership| retire_membership(membership) }
+        directory_slots.each do |entry|
+          if entry.membership
+            retire_membership(entry.membership)
+          elsif entry.raw
+            atomic_delete_if_equal(index_slot_key(entry.slot), entry.raw)
+          end
+        end
         nil
       end
 
@@ -120,19 +133,30 @@ module Woods
       end
 
       def publish_current_slot?(key, sequence, window_size, counter_key, value)
-        write!(key, value)
-        @cache.delete(slot_key_before(key, sequence, window_size)) if sequence > window_size
+        return false unless write_newer_slot(key, sequence, value)
 
         if stale_sequence?(sequence, window_size, counter_key)
-          @cache.delete(key)
+          atomic_delete_if_equal(key, value)
           false
         else
           true
         end
       end
 
-      def slot_key_before(key, sequence, window_size)
-        key.sub(/:\d+\z/, ":#{sequence - window_size}")
+      def write_newer_slot(key, sequence, value)
+        RECORD_PUBLISH_ATTEMPTS.times do
+          raw = @cache.read(key)
+          stored_sequence = payload_sequence(raw)
+          return false if stored_sequence && stored_sequence >= sequence
+
+          next if raw && !atomic_delete_if_equal(key, raw)
+          return true if atomic_write_if_absent(key, value, **write_options)
+
+          Thread.pass
+        end
+
+        raise BackendWriteError, "SolidCache backend could not publish #{key.inspect} after " \
+                                 "#{RECORD_PUBLISH_ATTEMPTS} attempts"
       end
 
       def write_options
@@ -149,6 +173,27 @@ module Woods
 
         payload = JSON.parse(raw)
         payload[field] if payload['sequence'] == expected_sequence
+      rescue JSON::ParserError, TypeError
+        nil
+      end
+
+      def parse_record(raw, membership, expected_sequence)
+        return unless raw
+
+        payload = JSON.parse(raw)
+        return unless payload.is_a?(Hash)
+        return unless payload['token'] == membership['token'] && payload['sequence'] == expected_sequence
+
+        payload['record']
+      rescue JSON::ParserError, TypeError
+        nil
+      end
+
+      def payload_sequence(raw)
+        return unless raw
+
+        payload = JSON.parse(raw)
+        payload['sequence'] if payload.is_a?(Hash) && payload['sequence'].is_a?(Integer)
       rescue JSON::ParserError, TypeError
         nil
       end
@@ -191,22 +236,33 @@ module Woods
 
       def claim_directory_slot(attributes)
         DIRECTORY_CLAIM_ATTEMPTS.times do
-          memberships = directory_memberships
-          membership = claim_reclaimable_slot(attributes, memberships)
+          slots = directory_slots
+          membership = claim_reclaimable_slot(attributes, slots)
           return membership if membership
 
-          victim = oldest_active_membership(memberships)
+          victim = oldest_active_membership(slots.filter_map(&:membership))
           retire_membership(victim) if victim
         end
-        nil
+
+        raise DirectoryContentionError,
+              "SolidCacheStore could not claim a directory slot after #{DIRECTORY_CLAIM_ATTEMPTS} attempts " \
+              "for #{attributes['session_id'].inspect}; retry the record operation or investigate backend contention"
       end
 
-      def claim_reclaimable_slot(attributes, memberships)
-        memberships.each_with_index do |occupant, slot|
+      def claim_reclaimable_slot(attributes, slots)
+        slots.each do |entry|
+          occupant = entry.membership
           next if occupant && active_current_membership?(occupant)
 
-          retire_membership(occupant) if occupant
-          membership = attributes.merge('slot' => slot)
+          if occupant
+            retire_membership(occupant)
+          elsif entry.raw
+            atomic_delete_if_equal(index_slot_key(entry.slot), entry.raw)
+          end
+          membership = attributes.merge(
+            'slot' => entry.slot,
+            'record_floor' => counter_value(slot_sequence_key(entry.slot))
+          )
           return membership if claim_directory_slot?(membership)
         end
         nil
@@ -224,14 +280,20 @@ module Woods
       end
 
       def active_memberships
-        directory_memberships.select { |membership| membership && active_current_membership?(membership) }
-                             .sort_by { |membership| membership['sequence'] }
+        directory_slots.filter_map(&:membership).select { |membership| active_current_membership?(membership) }
+                       .sort_by { |membership| membership['sequence'] }
       end
 
-      def directory_memberships
+      def directory_slots
         @max_sessions.times.map do |slot|
-          parse_membership(@cache.read(index_slot_key(slot)), expected_slot: slot)
+          raw = @cache.read(index_slot_key(slot))
+          DirectorySlot.new(slot: slot, raw: raw, membership: parse_membership(raw, expected_slot: slot))
         end
+      end
+
+      def owned_membership(session_id)
+        membership = active_membership(session_id)
+        membership if membership && indexed_membership?(membership)
       end
 
       def active_membership(session_id)
@@ -260,9 +322,19 @@ module Woods
       end
 
       def valid_membership?(membership)
+        return false unless membership.is_a?(Hash)
+
+        valid_membership_identity?(membership) && valid_membership_position?(membership)
+      end
+
+      def valid_membership_identity?(membership)
         membership['sequence'].is_a?(Integer) && membership['sequence'].positive? &&
-          membership['session_id'].is_a?(String) && membership['token'].is_a?(String) &&
-          membership['slot'].is_a?(Integer) && membership['slot'].between?(0, @max_sessions - 1)
+          membership['session_id'].is_a?(String) && membership['token'].is_a?(String)
+      end
+
+      def valid_membership_position?(membership)
+        membership['slot'].is_a?(Integer) && membership['slot'].between?(0, @max_sessions - 1) &&
+          membership['record_floor'].is_a?(Integer) && membership['record_floor'] >= 0
       end
 
       def current_membership?(membership)
@@ -288,12 +360,9 @@ module Woods
       end
 
       def cleanup_generation(session_id, generation)
-        key = sequence_key(session_id, generation)
-        sequence = counter_value(key)
-        sequence_window(sequence, @max_requests_per_session).each do |slot_sequence|
-          @cache.delete(record_key(session_id, generation, slot_sequence))
+        @max_requests_per_session.times do |slot|
+          @cache.delete(record_ring_key(session_id, generation, slot + 1))
         end
-        @cache.delete(key)
       end
 
       def indexed_membership?(membership)
@@ -313,16 +382,16 @@ module Woods
         end
       end
 
-      def atomic_write_if_absent(key, value)
+      def atomic_write_if_absent(key, value, **options)
         if @cache.respond_to?(:write_if_absent)
-          @cache.write_if_absent(key, value)
+          @cache.write_if_absent(key, value, **options)
         else
-          solid_cache_write_if_absent?(key, value)
+          solid_cache_write_if_absent?(key, value, **options)
         end
       end
 
-      def solid_cache_write_if_absent?(key, value)
-        options = @cache.send(:merged_options, nil)
+      def solid_cache_write_if_absent?(key, value, **write_options)
+        options = @cache.send(:merged_options, write_options)
         normalized_key = @cache.send(:normalize_key, key, options)
         entry_class = ::SolidCache::Entry
         entry = ActiveSupport::Cache::Entry.new(value)
@@ -378,12 +447,17 @@ module Woods
         "#{KEY_PREFIX}#{sanitize_session_id(membership['session_id'])}:generation:#{membership['token']}:activity"
       end
 
-      def sequence_key(session_id, generation)
-        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:generation:#{generation}:sequence"
+      def slot_sequence_key(slot)
+        "#{INDEX_PREFIX}:slot:#{slot}:sequence"
       end
 
-      def record_key(session_id, generation, sequence)
-        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:generation:#{generation}:record:#{sequence}"
+      def record_key(membership, sequence)
+        ring_slot = ((sequence - 1) % @max_requests_per_session) + 1
+        record_ring_key(membership['session_id'], membership['token'], ring_slot)
+      end
+
+      def record_ring_key(session_id, generation, ring_slot)
+        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:generation:#{generation}:record:#{ring_slot}"
       end
 
       def index_sequence_key

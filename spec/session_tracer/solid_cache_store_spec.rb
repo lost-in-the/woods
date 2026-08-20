@@ -4,12 +4,14 @@ require 'spec_helper'
 require 'json'
 require 'open3'
 require 'rbconfig'
+require 'timeout'
 require 'woods/session_tracer/solid_cache_store'
 
 # Minimal in-memory cache mock compatible with ActiveSupport::Cache::Store interface.
 # Implements read/write/delete/exist? used by SolidCacheStore.
 class MockCache
-  attr_accessor :after_increment, :before_delete_attempt, :before_write
+  attr_accessor :after_increment, :after_read, :before_delete_attempt, :before_increment, :before_write,
+                :before_write_if_absent
   attr_reader :read_count
 
   def initialize(clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
@@ -21,11 +23,13 @@ class MockCache
   end
 
   def read(key)
-    @mutex.synchronize do
+    value = @mutex.synchronize do
       @read_count += 1
       expire!(key)
       @data[key]
     end
+    @after_read&.call(key, value)
+    value
   end
 
   # rubocop:disable Naming/PredicateMethod
@@ -41,12 +45,14 @@ class MockCache
     end
   end
 
-  def write_if_absent(key, value)
-    write(key, value, unless_exist: true)
+  def write_if_absent(key, value, **options)
+    @before_write_if_absent&.call(key, value)
+    write(key, value, unless_exist: true, **options)
   end
 
   def increment(key, amount = 1, options = nil)
     options ||= {}
+    @before_increment&.call(key, amount)
     value = @mutex.synchronize do
       expire!(key)
       @data[key] = @data.fetch(key, 0).to_i + amount
@@ -168,6 +174,30 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       results = store.read('sess1')
       expect(results.size).to eq(2)
       expect(results.map { |r| r['action'] }).to eq(%w[index create])
+    end
+
+    it 'requires matching active and directory owners before reading records' do
+      store.record('sess1', request_data)
+      membership = JSON.parse(cache.read(store.send(:active_key, 'sess1')))
+      cache.delete(store.send(:index_slot_key, membership.fetch('slot')))
+
+      expect(store.read('sess1')).to eq([])
+    end
+
+    it 'returns empty when clear retires ownership while records are being collected' do
+      store.record('sess1', request_data.merge('action' => 'first'))
+      store.record('sess1', request_data.merge('action' => 'second'))
+      cleared = false
+      cache.after_read = lambda do |key, _value|
+        next unless key.include?(':record:') && !cleared
+
+        cleared = true
+        store.clear('sess1')
+      end
+
+      result = Timeout.timeout(2) { store.read('sess1') }
+
+      expect(result).to eq([])
     end
 
     it 'returns empty array for unknown session' do
@@ -335,6 +365,32 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect(other.read('shared').map { |entry| entry['action'] }).to eq(['replacement'])
     end
+
+    it 'keeps counters bounded when retirement repeatedly wins before increment' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+
+      8.times do |index|
+        bounded.record('shared', request_data.merge('action' => "admitted-#{index}"))
+        increment_started = Queue.new
+        release_increment = Queue.new
+        cache.before_increment = lambda do |key, _amount|
+          next if key == bounded.send(:index_sequence_key)
+
+          increment_started << true
+          release_increment.pop
+        end
+        writer = Thread.new { bounded.record('shared', request_data.merge('action' => "stale-#{index}")) }
+        Timeout.timeout(2) { increment_started.pop }
+
+        bounded.clear('shared')
+        release_increment << true
+        Timeout.timeout(2) { writer.join }
+        cache.before_increment = nil
+      end
+
+      expect(cache.keys.grep(/:sequence\z/).size).to be <= 2
+      expect(cache.keys.grep(/:record:/)).to be_empty
+    end
   end
 
   describe '#clear_all' do
@@ -367,7 +423,15 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect(store.read('new')).to eq([])
       expect(store.sessions).to eq([])
-      expect(cache.keys.grep(/:record:|session_index:slot/)).to be_empty
+      expect(cache.keys.grep(/:record:|session_index:slot:\d+\z/)).to be_empty
+    end
+
+    it 'conditionally removes corrupt directory slots' do
+      cache.write(store.send(:index_slot_key, 0), '{broken')
+
+      store.clear_all
+
+      expect(cache.read(store.send(:index_slot_key, 0))).to be_nil
     end
   end
 
@@ -403,6 +467,39 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       3.times { |i| bounded.record("sess#{i}", request_data) }
 
       expect(bounded.sessions(limit: 10).size).to eq(2)
+    end
+
+    it 'reclaims invalid JSON directory slots before admitting a session' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      cache.write(bounded.send(:index_slot_key, 0), '{broken')
+
+      bounded.record('recovered', request_data)
+
+      expect(bounded.read('recovered')).to contain_exactly(request_data)
+    end
+
+    it 'reclaims scalar JSON directory slots before admitting a session' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      cache.write(bounded.send(:index_slot_key, 0), 'true')
+
+      expect { bounded.record('recovered', request_data) }.not_to raise_error
+      expect(bounded.read('recovered')).to contain_exactly(request_data)
+    end
+
+    it 'raises an actionable error after three directory claim collision waves' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      collision_waves = 0
+      cache.before_write_if_absent = lambda do |key, _value|
+        next unless key == bounded.send(:index_slot_key, 0)
+
+        collision_waves += 1
+        cache.write(key, "{collision-#{collision_waves}")
+      end
+
+      expect { bounded.record('contended', request_data) }
+        .to raise_error(described_class::DirectoryContentionError, /3 attempts.*contended/)
+      expect(collision_waves).to eq(3)
+      expect(cache.keys.grep(/:record:/)).to be_empty
     end
 
     it 'evicts data and counters outside the active session bound' do
@@ -499,7 +596,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       12.times { |i| bounded.record("sess#{i % 3}", request_data.merge('action' => "action_#{i}")) }
 
       expect(cache.keys.grep(/:record:/).size).to be <= 4
-      expect(cache.keys.grep(/session_index:slot/).size).to be <= 2
+      expect(cache.keys.grep(/session_index:slot:\d+\z/).size).to be <= 2
       expect(bounded.read('sess2').map { |entry| entry['action'] }).to eq(['action_11'])
       expect(bounded.sessions(limit: 10).map { |entry| entry['session_id'] }.uniq.size).to be <= 2
     end
