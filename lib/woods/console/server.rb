@@ -22,6 +22,12 @@ require_relative 'dispatch_pipeline'
 require_relative 'tool_specs'
 
 module Woods
+  # Same conditional-define pattern used elsewhere in the gem (e.g.
+  # Storage::MetadataStore) so this file can be required in isolation
+  # without tripping NameError on the raise in Server.build below.
+  class Error < StandardError; end unless defined?(Woods::Error)
+  class ConfigurationError < Error; end unless defined?(Woods::ConfigurationError)
+
   module Console
     # Console MCP Server — queries live Rails application state.
     #

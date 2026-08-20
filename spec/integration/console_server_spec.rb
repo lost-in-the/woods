@@ -3,47 +3,82 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'json'
+require 'open3'
+require 'rbconfig'
 require 'woods/console/server'
+require 'woods/console/embedded_executor'
 
 RSpec.describe 'Console MCP Server Safety Stack', :integration do
   let(:config) { { 'mode' => 'direct', 'command' => 'echo test' } }
 
-  describe 'tool registration across all tiers' do
-    it 'registers exactly the expected number of tools' do
-      server = Woods::Console::Server.build(config: config)
+  describe 'tool registration in embedded mode' do
+    let(:registry) { { 'User' => %w[id email name] } }
+    let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
+    let(:safe_context) { Woods::Console::SafeContext.new(connection: nil) }
+
+    it 'registers exactly EXECUTABLE_MODES[:embedded] by default' do
+      server = Woods::Console::Server.build_embedded(model_validator: validator, safe_context: safe_context)
       tools = server.instance_variable_get(:@tools)
 
-      tier1 = Woods::Console::Server::TIER1_TOOLS.size
-      tier2 = Woods::Console::Server::TIER2_TOOLS.size
-      tier3 = Woods::Console::Server::TIER3_TOOLS.size
-      tier4 = Woods::Console::Server::TIER4_TOOLS.size
-
-      expect(tools.size).to eq(tier1 + tier2 + tier3 + tier4)
+      expect(tools.keys).to contain_exactly(*Woods::Console::Server::EXECUTABLE_MODES[:embedded])
     end
 
-    it 'prefixes all tool names with console_' do
-      server = Woods::Console::Server.build(config: config)
+    it 'registers exactly EXECUTABLE_MODES[:embedded_read] when read tools are enabled' do
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, read_tools_enabled: true
+      )
       tools = server.instance_variable_get(:@tools)
 
-      tools.each_key do |name|
-        expect(name).to start_with('console_')
-      end
+      expect(tools.keys).to contain_exactly(*Woods::Console::Server::EXECUTABLE_MODES[:embedded_read])
     end
 
-    it 'registers tools from all four tiers' do
-      server = Woods::Console::Server.build(config: config)
+    it 'prefixes every registered tool name with console_' do
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, read_tools_enabled: true
+      )
       tools = server.instance_variable_get(:@tools)
 
-      all_expected = (
-        Woods::Console::Server::TIER1_TOOLS +
-        Woods::Console::Server::TIER2_TOOLS +
-        Woods::Console::Server::TIER3_TOOLS +
-        Woods::Console::Server::TIER4_TOOLS
-      ).map { |t| "console_#{t}" }
+      tools.each_key { |name| expect(name).to start_with('console_') }
+    end
 
-      all_expected.each do |name|
-        expect(tools).to have_key(name), "Expected tool '#{name}' to be registered"
-      end
+    it 'never advertises inventory-only Tier 2, Tier 3, or console_eval tools' do
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, read_tools_enabled: true
+      )
+      tools = server.instance_variable_get(:@tools)
+
+      inventory_only = (
+        Woods::Console::Server::TIER2_TOOLS + Woods::Console::Server::TIER3_TOOLS + %w[eval]
+      ).map { |name| "console_#{name}" }
+
+      expect(tools.keys & inventory_only).to be_empty
+    end
+
+    it 'refuses the legacy JSON-lines bridge with a typed ConfigurationError' do
+      expect do
+        Woods::Console::Server.build(config: config)
+      end.to raise_error(Woods::ConfigurationError, /JSON-lines Console bridge is not supported/)
+    end
+
+    it 'raises the typed ConfigurationError even when only woods/console/server is required' do
+      gemfile = File.expand_path('../../Gemfile', __dir__)
+      script = <<~RUBY
+        require 'bundler/setup'
+        require 'woods/console/server'
+        begin
+          Woods::Console::Server.build(config: {})
+          puts 'NO_ERROR'
+        rescue Woods::ConfigurationError => e
+          puts "ConfigurationError:\#{e.message}"
+        end
+      RUBY
+      stdout, stderr, status = Open3.capture3(
+        { 'BUNDLE_GEMFILE' => gemfile }, RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script
+      )
+
+      expect(status).to be_success, stderr
+      expect(stdout).to start_with('ConfigurationError:')
+      expect(stdout).to include('JSON-lines Console bridge is not supported')
     end
   end
 
@@ -126,12 +161,12 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       expect(result[:params][:limit]).to eq(50)
     end
 
-    it 'caps row limit at MAX_SQL_LIMIT' do
+    it 'preserves a limit above MAX_SQL_LIMIT for the executor to reject' do
       result = Woods::Console::Tools::Tier4.console_sql(
         sql: 'SELECT * FROM users', validator: validator, limit: 999_999
       )
 
-      expect(result[:params][:limit]).to eq(10_000)
+      expect(result[:params][:limit]).to eq(999_999)
     end
   end
 
@@ -389,57 +424,131 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
     end
   end
 
-  describe 'Server tool dispatch with mock bridge' do
-    let(:mock_conn_mgr) do
-      instance_double(Woods::Console::ConnectionManager).tap do |m|
-        allow(m).to receive(:send_request).and_return(
-          'ok' => true,
-          'result' => { 'count' => 42 }
-        )
-      end
-    end
+  describe 'Server tool dispatch through the embedded executor' do
+    let(:registry) { { 'User' => %w[id email name secret_field] } }
+    let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
+    let(:connection) { double('Connection') }
+    let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
+    let(:user_model) { class_double('User') }
 
     before do
-      allow(Woods::Console::ConnectionManager).to receive(:new).and_return(mock_conn_mgr)
+      allow(connection).to receive(:transaction) do |&block|
+        block.call
+      rescue ActiveRecord::Rollback
+        nil
+      end
+      allow(connection).to receive(:execute)
+      allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      stub_const('User', user_model)
     end
 
-    it 'builds server and dispatches Tier 1 tool through bridge' do
-      server = Woods::Console::Server.build(config: config)
-
-      # The server is built with tools that call send_to_bridge internally.
-      # We verify the tool is registered and the bridge mock is wired.
-      tools = server.instance_variable_get(:@tools)
-      expect(tools).to have_key('console_count')
+    def tools_call(server, name, arguments)
+      request = JSON.generate(
+        jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: name, arguments: arguments }
+      )
+      JSON.parse(server.handle_json(request))
     end
 
-    it 'applies redaction to bridge responses when configured' do
-      config_with_redaction = config.merge('redacted_columns' => %w[secret_field])
+    def tool_text(response)
+      response.fetch('result').dig('content', 0, 'text')
+    end
 
-      allow(mock_conn_mgr).to receive(:send_request).and_return(
-        'ok' => true,
-        'result' => { 'name' => 'test', 'secret_field' => 'hidden_value' }
+    def tool_error?(response)
+      response.fetch('result').fetch('isError')
+    end
+
+    it 'dispatches console_count end to end and renders a concrete count' do
+      allow(user_model).to receive(:count).and_return(42)
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, connection: connection
       )
 
-      server = Woods::Console::Server.build(config: config_with_redaction)
-      tools = server.instance_variable_get(:@tools)
+      response = tools_call(server, 'console_count', { model: 'User' })
 
-      expect(tools).to have_key('console_count')
-      # The redaction is applied inside send_to_bridge, which runs when the tool
-      # is invoked. We verify the wiring is correct by checking build succeeded
-      # with redaction config.
+      expect(tool_error?(response)).to be false
+      expect(tool_text(response)).to eq('**count:** 42')
     end
 
-    it 'handles bridge error responses gracefully' do
-      allow(mock_conn_mgr).to receive(:send_request).and_return(
-        'ok' => false,
-        'error_type' => 'RecordNotFound',
-        'error' => 'Could not find User with id=999'
+    it 'redacts a configured column in a dispatched Tier 1 read' do
+      record = double('User', attributes: { 'id' => 1, 'secret_field' => 'hidden_value' })
+      allow(user_model).to receive(:find_by).with(id: 1).and_return(record)
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, connection: connection,
+        redacted_columns: %w[secret_field]
       )
 
-      server = Woods::Console::Server.build(config: config)
-      # Error handling is tested by verifying the server builds successfully
-      # and is ready to dispatch — the error format is tested in unit specs.
-      expect(server).to be_a(MCP::Server)
+      response = tools_call(server, 'console_find', { model: 'User', id: 1 })
+      text = tool_text(response)
+
+      expect(tool_error?(response)).to be false
+      expect(text).to include('[REDACTED]')
+      expect(text).not_to include('hidden_value')
+    end
+
+    it 'surfaces an unknown-model validation failure as a validation-prefixed error' do
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, connection: connection
+      )
+
+      response = tools_call(server, 'console_count', { model: 'Missing' })
+
+      expect(tool_error?(response)).to be true
+      expect(tool_text(response)).to start_with('validation: ')
+    end
+
+    it 'sanitizes an execution error to a generic class-and-reason message' do
+      allow(user_model).to receive(:count).and_raise(StandardError, 'password_digest leaked here')
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, connection: connection
+      )
+
+      response = tools_call(server, 'console_count', { model: 'User' })
+      text = tool_text(response)
+
+      expect(tool_error?(response)).to be true
+      expect(text).to eq('execution: StandardError: execution failed (details logged server-side)')
+      expect(text).not_to include('password_digest leaked here')
+    end
+  end
+
+  describe 'declared limit bounds are enforced by dispatch/executor, not by clamping' do
+    let(:registry) { { 'User' => %w[id email name] } }
+    let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
+    let(:connection) { double('Connection') }
+    let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
+
+    it 'rejects an out-of-bounds console_sample limit at dispatch with a bounds message' do
+      server = Woods::Console::Server.build_embedded(model_validator: validator, safe_context: safe_context)
+      tools = server.instance_variable_get(:@tools)
+
+      response = tools.fetch('console_sample').call(model: 'User', limit: 100, server_context: {})
+
+      expect(response.error?).to be true
+      expect(response.content.first[:text]).to eq('limit must be between 1 and 25')
+    end
+
+    it 'rejects an out-of-bounds console_sql limit at the executor with a validation error' do
+      executor = Woods::Console::EmbeddedExecutor.new(
+        model_validator: validator, safe_context: safe_context, connection: connection, read_tools_enabled: true
+      )
+
+      response = executor.send_request('tool' => 'sql', 'params' => { 'sql' => 'SELECT 1', 'limit' => 50_000 })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('10000')
+    end
+
+    it 'rejects an out-of-bounds console_query limit at the executor with a validation error' do
+      executor = Woods::Console::EmbeddedExecutor.new(
+        model_validator: validator, safe_context: safe_context, connection: connection, read_tools_enabled: true
+      )
+
+      response = executor.send_request(
+        'tool' => 'query', 'params' => { 'model' => 'User', 'select' => ['id'], 'limit' => 50_000 }
+      )
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('10000')
     end
   end
 
@@ -450,10 +559,10 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       expect(request).to eq({ tool: 'count', params: { model: 'User', scope: { active: true } } })
     end
 
-    it 'Tier1 sample enforces max limit of 25' do
+    it 'Tier1 sample preserves a limit above 25 for the executor to reject' do
       request = Woods::Console::Tools::Tier1.console_sample(model: 'User', limit: 100)
 
-      expect(request[:params][:limit]).to eq(25)
+      expect(request[:params][:limit]).to eq(100)
     end
 
     it 'Tier4 eval clamps timeout within bounds' do
@@ -464,12 +573,12 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       expect(result_high[:params][:timeout]).to eq(30)
     end
 
-    it 'Tier4 query caps limit at MAX_QUERY_LIMIT' do
+    it 'Tier4 query preserves a limit above MAX_QUERY_LIMIT for the executor to reject' do
       result = Woods::Console::Tools::Tier4.console_query(
         model: 'User', select: %w[id name], limit: 999_999
       )
 
-      expect(result[:params][:limit]).to eq(10_000)
+      expect(result[:params][:limit]).to eq(999_999)
     end
   end
 end
