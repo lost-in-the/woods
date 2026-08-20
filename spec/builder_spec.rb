@@ -318,6 +318,21 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  describe '#build_metadata_store with a durable preset' do
+    it 'derives a file-backed SQLite database from output_dir' do
+      Dir.mktmpdir('woods-builder-metadata') do |dir|
+        config = described_class.preset_config(:local)
+        config.output_dir = dir
+
+        store = described_class.new(config).build_metadata_store
+        store.store('User', type: 'model')
+
+        expect(File).to exist(File.join(dir, 'metadata.sqlite3'))
+        expect(store.find('User')).to include('type' => 'model')
+      end
+    end
+  end
+
   # ── Builder#build_chunker — budget guard ──────────────────────────────
 
   describe '#build_chunker budget guard' do
@@ -667,7 +682,7 @@ RSpec.describe Woods::Builder do
         c.vector_store = :qdrant
         c.vector_store_options = { url: 'http://qdrant:6333', collection: 'myapp' }
         c.metadata_store = :sqlite
-        c.metadata_store_options = { db_path: '/tmp/meta.db' }
+        c.metadata_store_options = { database: '/tmp/meta.db' }
         c.graph_store = :in_memory
         c.embedding_provider = :openai
         c.embedding_options = { api_key: 'sk-test' }
@@ -694,7 +709,7 @@ RSpec.describe Woods::Builder do
 
       expect(Woods::Storage::MetadataStore::SQLite)
         .to receive(:new)
-        .with(db_path: '/tmp/meta.db')
+        .with(database: '/tmp/meta.db')
         .and_return(fake_metadata_store)
 
       described_class.new(config).build_retriever

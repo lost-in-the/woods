@@ -430,10 +430,17 @@ module Woods
     def build_metadata_store
       case @config.metadata_store
       when :in_memory then Storage::MetadataStore::InMemory.new
-      when :sqlite then Storage::MetadataStore::SQLite.new(**(@config.metadata_store_options || {}))
+      when :sqlite then Storage::MetadataStore::SQLite.new(**sqlite_metadata_options)
       else raise ArgumentError, "Unknown metadata_store: #{@config.metadata_store}"
       end
     end
+
+    def sqlite_metadata_options
+      opts = (@config.metadata_store_options || {}).transform_keys(&:to_sym)
+      opts[:database] ||= File.join(@config.output_dir.to_s, 'metadata.sqlite3')
+      opts
+    end
+    private :sqlite_metadata_options
 
     # Instantiate the graph store adapter specified by the configuration.
     #

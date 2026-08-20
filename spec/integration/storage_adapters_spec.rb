@@ -9,7 +9,7 @@ RSpec.describe 'Storage adapters working together', :integration do
   let(:fixture_hashes) { load_fixture_units }
   let(:units) { fixture_hashes.map { |h| build_extracted_unit(h) } }
   let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
   let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
   let(:provider) { Woods::Embedding::Provider::Fake.new(dims: 64) }
 

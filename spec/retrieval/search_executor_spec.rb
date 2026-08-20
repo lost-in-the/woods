@@ -9,7 +9,7 @@ require 'woods/retrieval/search_executor'
 
 RSpec.describe Woods::Retrieval::SearchExecutor do
   let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
   let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
   let(:classifier) { Woods::Retrieval::QueryClassifier.new }
 
@@ -481,7 +481,7 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
 
   describe 'empty store behavior' do
     let(:empty_vector) { Woods::Storage::VectorStore::InMemory.new }
-    let(:empty_metadata) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+    let(:empty_metadata) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
     let(:empty_graph) { Woods::Storage::GraphStore::Memory.new }
 
     let(:empty_executor) do
