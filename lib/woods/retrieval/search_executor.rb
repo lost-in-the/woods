@@ -85,7 +85,7 @@ module Woods
         )
 
         ExecutionResult.new(
-          candidates: candidates.first(limit),
+          candidates: bounded_candidates(candidates, limit, strategy),
           strategy: strategy,
           query: query
         )
@@ -291,13 +291,34 @@ module Woods
         deduplicate(candidates).first(limit)
       end
 
+      # How far past +limit+ to fetch from each source before handing the
+      # merged list to the Ranker's RRF fusion (#apply_rrf). A candidate
+      # found by two sources near either source's own cutoff needs BOTH
+      # hits to survive into the merged list for RRF to see them — fetching
+      # only +limit+ per source (the old behavior) starved that overlap.
+      # Bounded (not unbounded) so a large index doesn't turn one hybrid
+      # query into three full-index scans.
+      HYBRID_PER_SOURCE_LIMIT_MULTIPLIER = 3
+      private_constant :HYBRID_PER_SOURCE_LIMIT_MULTIPLIER
+
       # Hybrid strategy: combine vector, keyword, and graph expansion.
+      #
+      # Deliberately does NOT deduplicate across sources — a candidate
+      # found by both vector and keyword search must reach the Ranker as
+      # two separate entries (one per source) so RRF (Ranker#apply_rrf)
+      # can accumulate their per-source rank-based scores. Collapsing to
+      # one entry per identifier here, before ranking, discarded that
+      # cross-source consensus entirely: "hybrid" degraded into plain
+      # concatenation. Deduplication now happens exactly once, inside
+      # RRF's merge, which is where cross-source agreement is computed.
       #
       # @return [Array<Candidate>]
       def execute_hybrid(query, classification:, limit:, type_filter: nil)
+        per_source_limit = limit * HYBRID_PER_SOURCE_LIMIT_MULTIPLIER
+
         # Gather from all three sources
-        vector_candidates = execute_vector(query, limit: limit, type_filter: type_filter)
-        keyword_candidates = execute_keyword(classification: classification, limit: limit)
+        vector_candidates = execute_vector(query, limit: per_source_limit, type_filter: type_filter)
+        keyword_candidates = execute_keyword(classification: classification, limit: per_source_limit)
 
         # Graph expansion on top vector results
         graph_candidates = []
@@ -310,8 +331,10 @@ module Woods
           end
         end
 
-        all = vector_candidates + keyword_candidates + graph_candidates
-        deduplicate(all).first(limit)
+        # Sorted (not deduplicated) so the caller's later `.first(limit)`
+        # keeps the strongest candidates across all sources instead of
+        # exhausting the budget on whichever source is concatenated first.
+        (vector_candidates + keyword_candidates + graph_candidates).sort_by { |c| -c.score }
       end
 
       # Direct strategy: look up specific identifiers from keywords.
@@ -406,6 +429,29 @@ module Woods
           best[c.identifier] = c if existing.nil? || c.score > existing.score
         end
         best.values.sort_by { |c| -c.score }
+      end
+
+      # Chunk-stripped unit identity, matching Ranker#base_identifier —
+      # hybrid truncation must treat `User#chunk_0` and `User` as one unit.
+      CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
+      private_constant :CHUNK_SUFFIX_PATTERN
+
+      # Bound strategy output to +limit+ results. For hybrid, +limit+ counts
+      # UNIQUE units and cross-source duplicates of an already-kept unit ride
+      # along free: the Ranker's RRF consensus needs every source's entry for
+      # a unit, and a raw-score cut dropped the weaker source's duplicate
+      # exactly when the two sources' score scales disagreed.
+      def bounded_candidates(candidates, limit, strategy)
+        return candidates.first(limit) unless strategy == :hybrid
+
+        kept = {}
+        candidates.select do |candidate|
+          base = candidate.identifier.sub(CHUNK_SUFFIX_PATTERN, '')
+          next true if kept.key?(base)
+
+          kept[base] = true if kept.size < limit
+          kept.key?(base)
+        end
       end
     end
   end
