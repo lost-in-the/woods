@@ -55,15 +55,15 @@ RSpec.describe Woods::Console::Server do
 
     it 'records the complete capability and safety contract for every row' do
       required_keys = %i[
-        name mode required valid_output invalid_input authorization table_gate
-        redaction credential_scan confirmation audit
+        name executable_modes arguments representative_valid_input representative_invalid_input
+        semantic_output authorization table_gate redaction credential_scan confirmation audit
       ]
 
       expect(matrix).to all(satisfy { |row| (required_keys - row.keys).empty? })
     end
 
     it 'marks only Tier 1 tools executable in default embedded mode' do
-      executable = matrix.select { |row| row.fetch(:mode).include?(:embedded) }
+      executable = matrix.select { |row| row.fetch(:executable_modes).include?(:embedded) }
 
       expect(executable.map { |row| row.fetch(:name) }).to contain_exactly(
         *described_class::TIER1_TOOLS.map { |name| "console_#{name}" }
@@ -71,7 +71,7 @@ RSpec.describe Woods::Console::Server do
     end
 
     it 'adds only SQL and query in embedded read mode' do
-      executable = matrix.select { |row| row.fetch(:mode).include?(:embedded_read) }
+      executable = matrix.select { |row| row.fetch(:executable_modes).include?(:embedded_read) }
       expected = described_class::TIER1_TOOLS.map { |name| "console_#{name}" } +
                  %w[console_sql console_query]
 
@@ -79,9 +79,9 @@ RSpec.describe Woods::Console::Server do
     end
 
     it 'does not claim confirmation or audit for an executable tool' do
-      executable = matrix.select { |row| row.fetch(:mode).any? }
+      executable = matrix.select { |row| row.fetch(:executable_modes).any? }
 
-      expect(executable).to all(include(confirmation: false, audit: false))
+      expect(executable).to all(include(confirmation: :not_required, audit: :not_recorded))
     end
   end
 
@@ -264,15 +264,24 @@ RSpec.describe Woods::Console::Server do
       MCP::Tool::InputSchema.new(properties: spec.properties, required: spec.required)
     end
 
-    it 'accepts a non-empty condition object or a two-element parameterized array' do
+    it 'accepts a non-empty condition object or an executable two-element parameterized array' do
       expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { count: 2 }) }
         .not_to raise_error
       expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['COUNT(*) > ?', 2]) }
         .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['SUM(amount) >= ?', 2]) }
+        .not_to raise_error
     end
 
-    it 'rejects raw strings, empty objects, and arrays with the wrong shape' do
-      invalid_values = ['COUNT(*) > 2', {}, ['COUNT(*) > ?'], ['COUNT(*) > ?', 2, 3]]
+    it 'rejects raw strings, empty objects, and arrays the executor cannot run' do
+      invalid_values = [
+        'COUNT(*) > 2',
+        {},
+        ['COUNT(*) > ?'],
+        ['COUNT(*) > ?', 2, 3],
+        ['not executable', 2],
+        [2, 'not a template']
+      ]
 
       invalid_values.each do |having|
         expect { schema.validate_arguments(model: 'Order', select: ['id'], having: having) }

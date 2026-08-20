@@ -19,6 +19,17 @@ module Woods
       MIN_INTEGER_INPUT = 1
       MAX_RECORD_ID = 9_223_372_036_854_775_807
 
+      # Authoritative grammar shared by the public JSON Schema and executor.
+      # Schema and Ruby use different end-anchor syntax, but the executable
+      # template body is defined once so accepted SQL cannot drift.
+      HAVING_TEMPLATE_GRAMMAR =
+        '\\s*(?:([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)|' \
+        '(SUM|AVG|MIN|MAX|COUNT)\\s*\\(\\s*' \
+        '(\\*|[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\s*\\))' \
+        '\\s*(=|!=|<>|<=|>=|<|>)\\s*\\?\\s*'
+      HAVING_TEMPLATE_SCHEMA_PATTERN = "^(?:#{HAVING_TEMPLATE_GRAMMAR})$(?![\\s\\S])".freeze
+      HAVING_TEMPLATE_REGEXP = Regexp.new("\\A(?:#{HAVING_TEMPLATE_GRAMMAR})\\z").freeze
+
       # Value object that holds a single MCP tool's declarative specification.
       #
       # @!attribute [r] name
@@ -539,8 +550,14 @@ module Woods
                      description: 'Association names to JOIN (e.g. ["line_items", "user"])' },
             group_by: { type: 'array', items: { type: 'string' },
                         description: 'Columns to GROUP BY (e.g. ["status", "user_id"])' },
-            having: { type: %w[object array], minProperties: 1, minItems: 2, maxItems: 2,
-                      prefixItems: [{ type: 'string', minLength: 1 }, {}],
+            having: { type: %w[object array],
+                      oneOf: [
+                        { type: 'object', minProperties: 1 },
+                        {
+                          type: 'array', minItems: 2, maxItems: 2,
+                          prefixItems: [{ type: 'string', pattern: HAVING_TEMPLATE_SCHEMA_PATTERN }, {}]
+                        }
+                      ],
                       description: 'HAVING condition object or parameterized [template, bind] array' },
             order: { type: 'object',
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
@@ -566,27 +583,144 @@ module Woods
         embedded_read: (TIER1_TOOLS + %w[sql query]).map { |name| "console_#{name}" }.freeze
       }.freeze
 
-      # Code-derived inventory of capability and safety claims for all 31
-      # possible Console tools. An empty mode list means the schema remains an
-      # inventory entry but the tool is not registered by a supported server.
+      REPRESENTATIVE_ARGUMENT_VALUES = {
+        model: 'Post', columns: ['id'], id: 1, function: 'count', association: 'comments',
+        key: 'feature_flag', value: 'enabled', user_id: 1, action: 'show',
+        attributes: { 'title' => 'Example' }, feature: 'preview', job_id: 'job-1',
+        code: '1 + 1', sql: 'SELECT 1', select: ['id']
+      }.freeze
+
+      INVALID_ARGUMENT_VALUES = {
+        'string' => [], 'integer' => 'not-an-integer', 'boolean' => 'not-a-boolean',
+        'object' => [], 'array' => {}
+      }.freeze
+
+      SEMANTIC_OUTPUT_SHAPES = {
+        'console_count' => { count: :integer },
+        'console_sample' => { records: :array_of_records },
+        'console_find' => { record: :record_or_null },
+        'console_pluck' => { columns: :array_of_strings, values: :array },
+        'console_aggregate' => { value: :number_or_null },
+        'console_association_count' => { count: :integer },
+        'console_schema' => { columns: :column_metadata_by_name, indexes: :optional_index_metadata },
+        'console_recent' => { records: :array_of_records },
+        'console_status' => { status: :string, models: :array_of_strings, adapter: :string },
+        'console_diagnose_model' => { diagnostic: :count_recent_and_aggregates },
+        'console_data_snapshot' => { record: :record, associations: :records_by_association },
+        'console_validate_record' => { valid: :boolean, errors: :validation_errors },
+        'console_check_setting' => { setting: :key_value },
+        'console_update_setting' => { updated: :boolean, setting: :key_value },
+        'console_check_policy' => { allowed: :boolean },
+        'console_validate_with' => { valid: :boolean, errors: :validation_errors },
+        'console_check_eligibility' => { eligible: :boolean },
+        'console_decorate' => { record: :record, computed: :object },
+        'console_slow_endpoints' => { endpoints: :performance_rows },
+        'console_error_rates' => { error_rates: :rate_rows },
+        'console_throughput' => { throughput: :time_series },
+        'console_job_queues' => { queues: :queue_statistics },
+        'console_job_failures' => { failures: :job_failure_rows },
+        'console_job_find' => { job: :job_or_null, retried: :optional_boolean },
+        'console_job_schedule' => { jobs: :scheduled_job_rows },
+        'console_redis_info' => { info: :redis_section_map },
+        'console_cache_stats' => { stats: :cache_statistics },
+        'console_channel_status' => { channels: :channel_status_rows },
+        'console_eval' => { value: :ruby_value },
+        'console_sql' => { columns: :array_of_strings, rows: :array_of_arrays, count: :integer },
+        'console_query' => { columns: :array_of_strings, rows: :array_of_arrays, count: :integer }
+      }.transform_values(&:freeze).freeze
+
+      TABLE_GATE_CONTRACTS = {
+        'console_count' => :model_before_execution,
+        'console_sample' => :model_before_execution,
+        'console_find' => :model_before_execution,
+        'console_pluck' => :model_before_execution,
+        'console_aggregate' => :model_before_execution,
+        'console_association_count' => :model_and_association_before_execution,
+        'console_schema' => :model_before_execution,
+        'console_recent' => :model_before_execution,
+        'console_status' => :not_applicable_status_metadata,
+        'console_sql' => :sql_before_execution,
+        'console_query' => :model_joins_and_rendered_sql_before_execution
+      }.freeze
+
+      REDACTION_CONTRACTS = {
+        'console_count' => :not_applicable_scalar_count,
+        'console_sample' => :record_columns_and_eav,
+        'console_find' => :record_columns_and_eav,
+        'console_pluck' => :positional_columns_and_eav,
+        'console_aggregate' => :not_applicable_scalar_aggregate,
+        'console_association_count' => :not_applicable_scalar_count,
+        'console_schema' => :not_applicable_schema_metadata,
+        'console_recent' => :record_columns_and_eav,
+        'console_status' => :not_applicable_status_metadata,
+        'console_sql' => :positional_columns_and_eav,
+        'console_query' => :positional_columns_and_eav
+      }.freeze
+
+      TRANSPORT_AUTHORIZATION = {
+        stdio: :host_process_access,
+        railtie_http: :bearer_token_required
+      }.freeze
+
+      CONFIRMATION_REQUIREMENTS = {
+        'console_update_setting' => :required_before_registration,
+        'console_job_find' => :required_for_retry_before_registration,
+        'console_eval' => :required_before_registration
+      }.freeze
+
+      AUDIT_REQUIREMENTS = {
+        'console_eval' => :required_before_registration
+      }.freeze
+
+      # Code-derived inventory of all 31 possible Console tools. Argument
+      # names, constraints, and representative schema cases come directly
+      # from TOOL_SPECS. Only output semantics and control behavior that cannot
+      # be inferred from JSON Schema are declared above.
+      # rubocop:disable Metrics/BlockLength
       CONTRACT_MATRIX = TOOL_SPECS.map do |spec|
         modes = EXECUTABLE_MODES.filter_map { |mode, names| mode if names.include?(spec.name) }.freeze
         executable = modes.any?
+        required = Array(spec.required).freeze
+        optional = (spec.properties.keys.map(&:to_s) - required).freeze
+        valid_input = required.to_h do |name|
+          [name.to_sym, REPRESENTATIVE_ARGUMENT_VALUES.fetch(name.to_sym)]
+        end.freeze
+
+        invalid_arguments = if required.any?
+                              valid_input.reject { |name, _value| name == required.first.to_sym }.freeze
+                            elsif spec.properties.any?
+                              name, definition = spec.properties.first
+                              { name => INVALID_ARGUMENT_VALUES.fetch(Array(definition.fetch(:type)).first) }.freeze
+                            else
+                              [].freeze
+                            end
 
         {
           name: spec.name,
-          mode: modes,
-          required: Array(spec.required).freeze,
-          valid_output: executable ? :mcp_tool_response : :not_executable,
-          invalid_input: executable ? :mcp_error_response : :not_registered,
-          authorization: executable ? :transport : :not_registered,
-          table_gate: executable ? :configured : false,
-          redaction: executable ? :configured : false,
-          credential_scan: executable ? :enabled_unless_disabled : false,
-          confirmation: false,
-          audit: false
+          executable_modes: modes,
+          arguments: {
+            required: required,
+            optional: optional,
+            constraints: spec.properties
+          }.freeze,
+          representative_valid_input: valid_input,
+          representative_invalid_input: {
+            arguments: invalid_arguments,
+            error_class: 'MCP::Tool::InputSchema::ValidationError'
+          }.freeze,
+          semantic_output: {
+            availability: executable ? :executable : :inventory_only,
+            shape: SEMANTIC_OUTPUT_SHAPES.fetch(spec.name)
+          }.freeze,
+          authorization: executable ? TRANSPORT_AUTHORIZATION : :not_applicable_unregistered,
+          table_gate: executable ? TABLE_GATE_CONTRACTS.fetch(spec.name) : :not_active_unregistered,
+          redaction: executable ? REDACTION_CONTRACTS.fetch(spec.name) : :not_active_unregistered,
+          credential_scan: executable ? :response_and_error_text_when_enabled : :not_active_unregistered,
+          confirmation: CONFIRMATION_REQUIREMENTS.fetch(spec.name, :not_required),
+          audit: AUDIT_REQUIREMENTS.fetch(spec.name, executable ? :not_recorded : :not_active_unregistered)
         }.freeze
       end.freeze
+      # rubocop:enable Metrics/BlockLength
     end
   end
 end

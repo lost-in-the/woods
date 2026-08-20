@@ -711,17 +711,6 @@ module Woods
       # Anything else is rejected — raw strings (e.g. `"1=1 UNION SELECT
       # password_digest FROM users"`) used to flow straight through and
       # enable SELECT-based exfiltration despite the SafeContext rollback.
-      HAVING_AGG_TEMPLATE = /
-        \A\s*
-        (?:
-          (?<col>\w+(?:\.\w+)?)
-          |
-          (?<agg>SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(?<arg>\*|\w+(?:\.\w+)?)\s*\)
-        )
-        \s*(?<op>=|!=|<>|<=|>=|<|>)\s*\?\s*\z
-      /ix
-      private_constant :HAVING_AGG_TEMPLATE
-
       def validated_having(having, model_name) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         case having
         when Hash
@@ -735,12 +724,12 @@ module Woods
           end
 
           template = having.first
-          match = HAVING_AGG_TEMPLATE.match(template)
+          match = Server::HAVING_TEMPLATE_REGEXP.match(template)
           raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
 
           # Validate any referenced columns through ModelValidator so
           # aggregate args can't reach the db without a column check.
-          col = match[:col] || match[:arg]
+          col = match[1] || match[3]
           validate_column_reference!(col, model_name) if col && col != '*'
 
           having

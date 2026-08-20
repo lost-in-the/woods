@@ -159,7 +159,7 @@ module Woods
         # Resolve the exact tool list for a supported embedded mode from the
         # same matrix used by tests and documentation evidence.
         def executable_tool_names(mode)
-          CONTRACT_MATRIX.filter_map { |row| row[:name] if row[:mode].include?(mode) }
+          CONTRACT_MATRIX.filter_map { |row| row[:name] if row[:executable_modes].include?(mode) }
         end
 
         private

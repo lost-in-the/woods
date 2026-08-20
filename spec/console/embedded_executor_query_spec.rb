@@ -113,6 +113,35 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(relation).to have_received(:having).with('SUM(amount) > ?', 100)
     end
 
+    it 'applies a non-empty Hash HAVING condition' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with({ 'status' => 'paid' })
+    end
+
+    it 'rejects a two-element array whose template is not executable' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['not executable', 2]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('having: unsupported SQL template')
+      expect(relation).not_to have_received(:having)
+    end
+
     it 'rejects raw-string having clauses (SQL fragment injection vector)' do
       response = executor.send_request({
                                          'tool' => 'query',
