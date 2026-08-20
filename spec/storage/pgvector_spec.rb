@@ -92,7 +92,7 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
 
     it 'quotes an explicitly selected schema and table' do
       allow(connection).to receive(:execute)
-      allow(connection).to receive(:quote_table_name) { |name| %Q{"#{name}"} }
+      allow(connection).to receive(:quote_table_name) { |name| %("#{name}") }
       namespaced = described_class.new(connection: connection, dimensions: 3, schema: 'tenant_a')
 
       namespaced.ensure_schema!

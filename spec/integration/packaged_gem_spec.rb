@@ -140,7 +140,7 @@ RSpec.describe 'packaged gem' do
         'OLLAMA_BASE_URL' => 'http://127.0.0.1:1',
         'PACKAGE_GEM_HOME' => @gem_home,
         'PATH' => [File.join(@gem_home, 'bin'), File.dirname(Gem.ruby), ENV.fetch('PATH')]
-          .join(File::PATH_SEPARATOR)
+                  .join(File::PATH_SEPARATOR)
       )
     end
 
@@ -148,7 +148,7 @@ RSpec.describe 'packaged gem' do
       Open3.capture3(installed_env, *command, chdir: chdir)
     end
 
-    def build_installed_preset_artifact(preset, index_dir)
+    def build_installed_preset_artifact(preset, index_dir) # rubocop:disable Metrics/MethodLength
       FileUtils.cp_r(File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods', '.'), index_dir)
       script = <<~'RUBY'
         require 'woods'
@@ -433,7 +433,9 @@ RSpec.describe 'packaged gem' do
           schema_version: 1, gem_version: '2.0.0', created_at: Time.now.utc.iso8601,
           embedding_provider: { class: 'Woods::Embedding::Provider::Fake', model: 'installed', dimension: 8 },
           stores: { vector_store: adapter, metadata_store: 'in_memory', graph_store: 'in_memory' },
-          store_options: { vector_store: adapter == :qdrant ? { collection: 'woods', dimensions: 8 } : { dimensions: 8 } }
+          store_options: {
+            vector_store: adapter == :qdrant ? { collection: 'woods', dimensions: 8 } : { dimensions: 8 }
+          }
         }
         File.write(File.join(index_dir, 'woods.json'), JSON.pretty_generate(snapshot))
 

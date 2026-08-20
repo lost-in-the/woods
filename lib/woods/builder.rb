@@ -490,12 +490,7 @@ module Woods
       store = Storage::VectorStore::Pgvector.new(**opts)
       begin
         store.ensure_schema!
-        stored_dimensions = store.stored_dimensions
-        if stored_dimensions && stored_dimensions != opts[:dimensions]
-          raise ConfigurationError,
-                "Stored pgvector dimensions #{stored_dimensions} do not match embedding provider dimensions " \
-                "#{opts[:dimensions]}. Use a compatible table or rebuild the index."
-        end
+        verify_pgvector_dimensions!(store, opts[:dimensions])
       rescue ConfigurationError
         raise
       rescue StandardError => e
@@ -506,6 +501,15 @@ module Woods
               '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
       end
       store
+    end
+
+    def verify_pgvector_dimensions!(store, expected)
+      actual = store.stored_dimensions
+      return if actual.nil? || actual == expected
+
+      raise ConfigurationError,
+            "Stored pgvector dimensions #{actual} do not match embedding provider dimensions #{expected}. " \
+            'Use a compatible table or rebuild the index.'
     end
 
     def resolve_pgvector_dimensions(provider_dimensions, configured_dimensions)

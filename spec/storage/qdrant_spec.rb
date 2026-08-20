@@ -94,7 +94,8 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
 
     it 'rejects named vectors because this adapter sends unnamed vectors' do
       vectors = { text: { size: 384, distance: 'Cosine' } }
-      response = instance_double(Net::HTTPSuccess, code: '200', body: { result: { config: { params: { vectors: vectors } } } }.to_json)
+      response_body = { result: { config: { params: { vectors: vectors } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: response_body)
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       allow(http).to receive(:request).and_return(response)
 
@@ -485,7 +486,6 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
         end
       expect(http).to have_received(:request).once
     end
-
 
     [Errno::ECONNREFUSED, SocketError].each do |error_class|
       it "wraps #{error_class} as retryable and non-ambiguous" do

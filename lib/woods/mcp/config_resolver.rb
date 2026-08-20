@@ -209,6 +209,7 @@ module Woods
           if url.to_s.empty?
             raise ConfigMismatch, 'pgvector index requires WOODS_PG_URL when served outside its host application.'
           end
+
           require 'active_record'
           options[:connection] = ActiveRecord::Base.establish_connection(url).connection
         end

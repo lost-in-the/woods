@@ -233,7 +233,6 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
     end
   end
 
-
   describe 'backend lock posture' do
     it 'times out in a bounded interval when another owner holds the lease' do
       cache.write(described_class::LOCK_KEY, 'other', unless_exist: true, expires_in: 10)

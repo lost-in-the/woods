@@ -119,7 +119,7 @@ module Woods
     # @param created_at [Time]
     # @param embedding_provider [Hash]
     # @param stores [Hash]
-    def initialize(schema_version:, gem_version:, created_at:, embedding_provider:, stores:, store_options: {})
+    def initialize(schema_version:, gem_version:, created_at:, embedding_provider:, stores:, store_options: {}) # rubocop:disable Metrics/ParameterLists
       @schema_version = schema_version
       @gem_version = gem_version.to_s.freeze
       @created_at = created_at
@@ -295,6 +295,7 @@ module Woods
       end
 
       DURABLE_VECTOR_OPTION_KEYS = %i[url collection dimensions distance allow_private_hosts table schema].freeze
+      private_constant :DURABLE_VECTOR_OPTION_KEYS
 
       def durable_store_options(config)
         vector = normalize_keys(config.vector_store_options || {}).slice(*DURABLE_VECTOR_OPTION_KEYS)

@@ -15,7 +15,7 @@ module Woods
     #   store = SolidCacheStore.new(cache: SolidCache::Store.new, expires_in: 3600)
     #   store.record("abc123", { controller: "OrdersController", action: "create" })
     #
-    class SolidCacheStore < Store
+    class SolidCacheStore < Store # rubocop:disable Metrics/ClassLength
       KEY_PREFIX = 'woods:session:'
       INDEX_KEY = 'woods:session_index'
       DEFAULT_MAX_SESSIONS = 1_000
@@ -29,7 +29,7 @@ module Woods
 
       # @param cache [ActiveSupport::Cache::Store] A SolidCache (or compatible) cache instance
       # @param expires_in [Integer, nil] Expiry time in seconds (nil = no expiry)
-      def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS,
+      def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS, # rubocop:disable Metrics/ParameterLists
                      max_requests_per_session: DEFAULT_MAX_REQUESTS,
                      lock_lease: DEFAULT_LOCK_LEASE, lock_timeout: DEFAULT_LOCK_TIMEOUT,
                      lock_retry_interval: DEFAULT_LOCK_RETRY_INTERVAL)
@@ -129,7 +129,9 @@ module Woods
         token = SecureRandom.uuid
         deadline = monotonic_now + @lock_timeout
         until @cache.write(LOCK_KEY, token, unless_exist: true, expires_in: @lock_lease)
-          raise LockTimeout, "Timed out acquiring SolidCache session lock after #{@lock_timeout}s" if monotonic_now >= deadline
+          if monotonic_now >= deadline
+            raise LockTimeout, "Timed out acquiring SolidCache session lock after #{@lock_timeout}s"
+          end
 
           sleep(@lock_retry_interval)
         end

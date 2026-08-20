@@ -122,9 +122,13 @@ RSpec.describe Woods::MCP::ConfigResolver do
             }
           )
           write_woods_json(dir, qdrant)
+          serve_env = {
+            'WOODS_QDRANT_URL' => 'https://served.test', 'WOODS_QDRANT_API_KEY' => 'token'
+          }
           config, = described_class.resolve(
-            blank_config, artifact: Woods::IndexArtifact.new(dir),
-            env: { 'WOODS_QDRANT_URL' => 'https://served.test', 'WOODS_QDRANT_API_KEY' => 'token' }
+            blank_config,
+            artifact: Woods::IndexArtifact.new(dir),
+            env: serve_env
           )
 
           expect(config.vector_store_options).to include(

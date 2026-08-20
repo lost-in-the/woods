@@ -19,7 +19,7 @@ module Woods
     #   store.record("abc123", { controller: "PostsController", action: "create" })
     #   store.read("abc123") # => [{ "controller" => "PostsController", ... }]
     #
-    class FileStore < Store
+    class FileStore < Store # rubocop:disable Metrics/ClassLength
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
 
@@ -182,7 +182,7 @@ module Woods
       end
 
       def fsync_parent
-        File.open(@base_dir, File::RDONLY) { |directory| directory.fsync }
+        File.open(@base_dir, File::RDONLY, &:fsync)
       rescue Errno::EINVAL, Errno::ENOTSUP, Errno::EISDIR
         nil
       end

@@ -150,7 +150,7 @@ module Woods
         #   by default to block the common SSRF footgun. Set to true when the
         #   operator intentionally runs Qdrant on `localhost:6333` or inside
         #   a private network.
-        def initialize(url:, collection:, api_key: nil, dimensions: nil, distance: 'Cosine', allow_private_hosts: false)
+        def initialize(url:, collection:, api_key: nil, dimensions: nil, distance: 'Cosine', allow_private_hosts: false) # rubocop:disable Metrics/ParameterLists
           @uri = self.class.validate_url!(url, allow_private_hosts: allow_private_hosts)
           @url = url
           @collection = collection
