@@ -115,7 +115,7 @@ module Woods
       provider = wrap_with_embedding_cache(provider, cache) if cache
 
       retriever = Retriever.new(
-        vector_store: vector_store || build_vector_store,
+        vector_store: vector_store || build_vector_store(dimensions: vector_dimensions(provider)),
         metadata_store: metadata_store || build_metadata_store,
         graph_store: graph_store || build_graph_store,
         embedding_provider: provider
@@ -132,14 +132,19 @@ module Woods
     # @return [Storage::VectorStore::Interface] Vector store adapter instance
     # @raise [ArgumentError] if the configured type is not recognized
     # @raise [Woods::Error] if the pgvector schema cannot be created
-    def build_vector_store
+    def build_vector_store(dimensions: nil)
       case @config.vector_store
       when :in_memory then Storage::VectorStore::InMemory.new
       when :pgvector then build_pgvector_store
-      when :qdrant then Storage::VectorStore::Qdrant.new(**(@config.vector_store_options || {}))
+      when :qdrant then build_qdrant_store(dimensions)
       else raise ArgumentError, "Unknown vector_store: #{@config.vector_store}"
       end
     end
+
+    def vector_dimensions(provider)
+      provider.dimensions if @config.vector_store == :qdrant
+    end
+    private :vector_dimensions
 
     # Instantiate the embedding provider specified by the configuration.
     #
@@ -480,6 +485,28 @@ module Woods
               '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
       end
       store
+    end
+
+    def build_qdrant_store(provider_dimensions)
+      opts = (@config.vector_store_options || {}).transform_keys(&:to_sym)
+      dimensions = resolve_qdrant_dimensions(provider_dimensions, opts[:dimensions])
+      opts[:dimensions] = dimensions
+      store = Storage::VectorStore::Qdrant.new(**opts)
+      store.ensure_collection!(dimensions: dimensions)
+      store
+    end
+
+    def resolve_qdrant_dimensions(provider_dimensions, configured_dimensions)
+      if provider_dimensions && configured_dimensions && provider_dimensions != configured_dimensions
+        raise ConfigurationError,
+              "Qdrant dimensions #{configured_dimensions} do not match embedding provider dimensions " \
+              "#{provider_dimensions}"
+      end
+
+      provider_dimensions || configured_dimensions || raise(
+        ConfigurationError,
+        'Qdrant requires vector_store_options[:dimensions] when built without an embedding provider'
+      )
     end
 
     # Build a cache store from configuration, or nil if caching is disabled.

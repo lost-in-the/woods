@@ -9,7 +9,7 @@ RSpec.describe Woods::Builder do
   let(:fake_vector_store) { double('VectorStore') }
   let(:fake_metadata_store) { double('MetadataStore') }
   let(:fake_graph_store) { double('GraphStore') }
-  let(:fake_embedding_provider) { double('EmbeddingProvider') }
+  let(:fake_embedding_provider) { double('EmbeddingProvider', dimensions: 1536) }
   let(:fake_retriever) { instance_double(Woods::Retriever) }
 
   # ── Builder.preset_config ────────────────────────────────────────────
@@ -403,6 +403,29 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  describe '#build_vector_store with :qdrant' do
+    let(:qdrant_store) { instance_double(Woods::Storage::VectorStore::Qdrant) }
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :qdrant
+        c.vector_store_options = {
+          url: 'https://qdrant.example.test',
+          collection: 'woods_test',
+          dimensions: 384
+        }
+      end
+    end
+
+    it 'creates or verifies the configured collection during construction' do
+      expect(Woods::Storage::VectorStore::Qdrant).to receive(:new)
+        .with(url: 'https://qdrant.example.test', collection: 'woods_test', dimensions: 384)
+        .and_return(qdrant_store)
+      expect(qdrant_store).to receive(:ensure_collection!).with(dimensions: 384)
+
+      expect(described_class.new(config).build_vector_store).to eq(qdrant_store)
+    end
+  end
+
   # ── Builder#build_vector_store — unknown type ────────────────────────
 
   describe '#build_vector_store with unknown type' do
@@ -693,13 +716,15 @@ RSpec.describe Woods::Builder do
       allow(Woods::Storage::MetadataStore::SQLite).to receive(:new).and_return(fake_metadata_store)
       allow(Woods::Storage::GraphStore::Memory).to receive(:new).and_return(fake_graph_store)
       allow(Woods::Retriever).to receive(:new).and_return(fake_retriever)
+      allow(fake_vector_store).to receive(:ensure_collection!)
     end
 
     it 'passes vector_store_options to the vector store constructor' do
       expect(Woods::Storage::VectorStore::Qdrant)
         .to receive(:new)
-        .with(url: 'http://qdrant:6333', collection: 'myapp')
+        .with(url: 'http://qdrant:6333', collection: 'myapp', dimensions: 1536)
         .and_return(fake_vector_store)
+      expect(fake_vector_store).to receive(:ensure_collection!).with(dimensions: 1536)
 
       described_class.new(config).build_retriever
     end
