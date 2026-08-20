@@ -216,7 +216,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       threads = 20.times.map do |i|
         Thread.new { store.record('sess1', request_data.merge('action' => "action_#{i}")) }
       end
-      threads.each(&:join)
+      Timeout.timeout(10) { threads.each(&:join) }
 
       expect(store.read('sess1').size).to eq(20)
     end
@@ -227,7 +227,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         target = i.even? ? store : other
         Thread.new { target.record('sess1', request_data.merge('action' => "action_#{i}")) }
       end
-      threads.each(&:join)
+      Timeout.timeout(10) { threads.each(&:join) }
 
       expect(store.read('sess1').size).to eq(20)
       expect(store.sessions.map { |entry| entry['session_id'] }).to eq(['sess1'])
@@ -240,7 +240,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       writers = [first, second].each_with_index.map do |target, index|
         Thread.new { target.record('new-session', request_data.merge('action' => "action_#{index}")) }
       end
-      writers.each(&:join)
+      Timeout.timeout(10) { writers.each(&:join) }
 
       expect(first.read('new-session').map { |entry| entry['action'] })
         .to contain_exactly('action_0', 'action_1')
@@ -257,11 +257,11 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       end
       other = described_class.new(cache: cache)
       first = Thread.new { store.record('sess1', request_data.merge('action' => 'first')) }
-      first_slot_started.pop
+      Timeout.timeout(5) { first_slot_started.pop }
       second = Thread.new { other.record('sess1', request_data.merge('action' => 'second')) }
-      second.join
+      Timeout.timeout(5) { second.join }
       release_first_slot << true
-      first.join
+      Timeout.timeout(5) { first.join }
 
       expect(store.read('sess1').map { |entry| entry['action'] }).to eq(%w[first second])
     end
@@ -278,10 +278,10 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         release_first_slot.pop
       end
       first = Thread.new { bounded.record('sess1', request_data.merge('action' => 'first')) }
-      first_slot_started.pop
+      Timeout.timeout(5) { first_slot_started.pop }
       other.record('sess1', request_data.merge('action' => 'second'))
       release_first_slot << true
-      first.join
+      Timeout.timeout(5) { first.join }
 
       expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(['second'])
       expect(cache.keys.grep(/:record:/).size).to eq(1)
@@ -339,11 +339,11 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         release_slot.pop
       end
       writer = Thread.new { store.record('sess1', request_data) }
-      slot_started.pop
+      Timeout.timeout(5) { slot_started.pop }
 
       store.clear('sess1')
       release_slot << true
-      writer.join
+      Timeout.timeout(5) { writer.join }
 
       expect(store.read('sess1')).to eq([])
       expect(cache.keys.grep(/:record:/)).to be_empty
@@ -415,11 +415,11 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         release_reservation.pop
       end
       writer = Thread.new { store.record('new', request_data) }
-      reservation_started.pop
+      Timeout.timeout(5) { reservation_started.pop }
 
       store.clear_all
       release_reservation << true
-      writer.join
+      Timeout.timeout(5) { writer.join }
 
       expect(store.read('new')).to eq([])
       expect(store.sessions).to eq([])
@@ -568,7 +568,9 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       cache.reset_read_count
       expect(bounded.sessions(limit: 10).size).to eq(2)
       expect(cache.read_count).to be <= 24
-      expect(cache.keys.size).to be <= 9
+      # 2 slots + 2 slot counters + 2 active mappings + 2 ring records +
+      # the global admission counter + the clear_all epoch fence.
+      expect(cache.keys.size).to be <= 10
 
       cache.reset_read_count
       bounded.clear_all
@@ -705,6 +707,104 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect { described_class.new(cache: unsupported) }
         .to raise_error(ArgumentError, /atomic #write_if_absent/)
+    end
+  end
+
+  describe 'adversarial release blockers' do
+    it 'bounds record keys when writers crash after publishing into retired sessions' do
+      bounded = described_class.new(cache: cache, max_sessions: 1, max_requests_per_session: 1)
+      5.times do |index|
+        publish_started = Queue.new
+        release_publish = Queue.new
+        crashed = Queue.new
+        cache.before_write_if_absent = lambda do |key, _value|
+          next unless key.include?(':record:')
+
+          publish_started << true
+          release_publish.pop
+        end
+        writer = Thread.new do
+          bounded.record('shared', request_data.merge('action' => "doomed-#{index}"))
+        rescue IOError
+          crashed << true
+        end
+        Timeout.timeout(5) { publish_started.pop }
+        cache.before_write_if_absent = nil
+        bounded.clear('shared')
+        cache.before_delete_attempt = lambda do |key|
+          raise IOError, 'crash before rollback' if key.include?(':record:')
+        end
+        release_publish << true
+        Timeout.timeout(5) { crashed.pop }
+        cache.before_delete_attempt = nil
+        Timeout.timeout(5) { writer.join }
+      end
+
+      expect(cache.keys.grep(/:record:/).size).to be <= 1
+    end
+
+    it 'recovers ring ordering when a slot counter is corrupted' do
+      bounded = described_class.new(cache: cache, max_requests_per_session: 2)
+      bounded.record('sess1', request_data.merge('action' => 'first'))
+      bounded.record('sess1', request_data.merge('action' => 'second'))
+      membership = JSON.parse(cache.read(bounded.send(:active_key, 'sess1')))
+      cache.write(bounded.send(:slot_sequence_key, membership.fetch('slot')), 'corrupt')
+
+      bounded.record('sess1', request_data.merge('action' => 'third'))
+      bounded.record('sess1', request_data.merge('action' => 'fourth'))
+
+      expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(%w[third fourth])
+    end
+
+    it 'fences pre-clear admissions even when the global counter is reset' do
+      reservation_started = Queue.new
+      release_reservation = Queue.new
+      cache.write(store.send(:index_sequence_key), 100)
+      cache.after_increment = lambda do |key, value|
+        next unless key == store.send(:index_sequence_key) && value == 101
+
+        reservation_started << true
+        release_reservation.pop
+      end
+      writer = Thread.new { store.record('late', request_data) }
+      Timeout.timeout(5) { reservation_started.pop }
+      cache.after_increment = nil
+      cache.delete(store.send(:index_sequence_key))
+      store.clear_all
+      release_reservation << true
+      Timeout.timeout(5) { writer.join }
+
+      expect(store.read('late')).to eq([])
+      expect(store.sessions).to eq([])
+    end
+
+    it 'retries reads that race a ring overwrite instead of returning a mixed window' do
+      bounded = described_class.new(cache: cache, max_requests_per_session: 2)
+      bounded.record('sess1', request_data.merge('action' => 'first'))
+      bounded.record('sess1', request_data.merge('action' => 'second'))
+      overwritten = false
+      cache.after_read = lambda do |key, value|
+        next unless key.include?(':record:') && value && !overwritten
+        next unless JSON.parse(value)['sequence'] == 1
+
+        overwritten = true
+        bounded.record('sess1', request_data.merge('action' => 'third'))
+        bounded.record('sess1', request_data.merge('action' => 'fourth'))
+      end
+
+      expect(Timeout.timeout(5) { bounded.read('sess1') }.map { |entry| entry['action'] })
+        .to eq(%w[third fourth])
+    end
+
+    it 'repairs a lost directory slot so the session can be admitted again' do
+      store.record('sess1', request_data.merge('action' => 'first'))
+      membership = JSON.parse(cache.read(store.send(:active_key, 'sess1')))
+      cache.delete(store.send(:index_slot_key, membership.fetch('slot')))
+      3.times { |i| store.record('sess1', request_data.merge('action' => "repaired_#{i}")) }
+
+      expect(store.read('sess1').map { |entry| entry['action'] })
+        .to eq(%w[repaired_0 repaired_1 repaired_2])
+      expect(store.sessions.map { |entry| entry['session_id'] }).to eq(['sess1'])
     end
   end
 end

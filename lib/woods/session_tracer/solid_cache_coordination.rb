@@ -22,7 +22,7 @@ module Woods
           raw = routed_read(key, :read_entry)
           entry = @cache.send(:deserialize_entry, raw, **merged_options)
           if entry&.expired?
-            routed_delete(key, :delete_entry)
+            delete_expired_entry(key, raw)
             entry = nil
           end
           event[:hit] = !entry.nil? if event
@@ -64,8 +64,10 @@ module Woods
           payload = @cache.send(:serialize_entry, entry, **merged_options)
           result = routed_write(key, :write_entry) do
             entry_class = ::SolidCache::Entry
-            insert_result = insert_entry(entry_class, key, payload)
-            inserted = inserted?(entry_class, insert_result, key, payload)
+            inserted = attempt_insert?(entry_class, key, payload)
+            if !inserted && clear_expired_entry?(entry_class, key, merged_options)
+              inserted = attempt_insert?(entry_class, key, payload)
+            end
             @cache.send(:track_writes, 1) if inserted
             inserted
           end
@@ -73,35 +75,12 @@ module Woods
         end
       end
 
-      def ensure_present(name, value, **options)
-        with_operation(:write, name, options) do |key, merged_options, _event|
-          entry = cache_entry(name, value, merged_options, version: "woods-ensure:#{SecureRandom.hex(16)}")
-          payload = @cache.send(:serialize_entry, entry, **merged_options)
-          result = routed_write(key, :write_entry) do
-            entry_class = ::SolidCache::Entry
-            insert_result = insert_entry(entry_class, key, payload)
-            @cache.send(:track_writes, 1) if inserted?(entry_class, insert_result, key, payload)
-            stored = @cache.send(:deserialize_entry, entry_class.read(key), **merged_options)
-            stored && !stored.expired?
-          end
-          backend_result!(result, :ensure_present, name)
-        end
-      end
-
       def delete_if_equal(name, expected)
         with_operation(:delete, name, nil) do |key, merged_options, _event|
           result = routed_write(key, :delete_entry) do
-            entry_class = ::SolidCache::Entry
-            key_hash = entry_class.send(:key_hash_for, key)
-            entry_class.transaction do
-              raw_key, raw_value = entry_class.lock.where(key_hash: key_hash).pick(:key, :value)
-              next false unless raw_key == key
-
+            locked_compare_and_delete(key) do |raw_value|
               entry = @cache.send(:deserialize_entry, raw_value, **merged_options)
-              next false unless entry && !entry.expired? && entry.value == expected
-
-              entry_class.delete_by_key(key)
-              true
+              entry && !entry.expired? && entry.value == expected
             end
           end
           backend_result!(result, :delete_if_equal, name)
@@ -120,6 +99,52 @@ module Woods
             yield key, merged_options, event
           end
         end
+      rescue NoMethodError => e
+        raise BackendError,
+              "Solid Cache private API unavailable for #{operation} #{name.inspect} (#{e.message}); " \
+              'this Solid Cache version is not supported by Woods session tracing'
+      end
+
+      # Row-locked compare-and-delete on the raw stored payload. The block
+      # decides against the exact bytes read under lock, so a concurrent
+      # replacement can never be deleted by mistake.
+      def locked_compare_and_delete(key)
+        entry_class = ::SolidCache::Entry
+        key_hash = entry_class.send(:key_hash_for, key)
+        entry_class.transaction do
+          raw_key, raw_value = entry_class.lock.where(key_hash: key_hash).pick(:key, :value)
+          next false unless raw_key == key
+          next false unless yield(raw_value)
+
+          entry_class.delete_by_key(key)
+          true
+        end
+      end
+
+      # Conditionally remove an expired entry observed by a read: only the
+      # exact expired payload is deleted, never a fresh replacement.
+      def delete_expired_entry(key, observed_raw)
+        routed_write(key, :delete_entry) do
+          locked_compare_and_delete(key) { |raw_value| raw_value == observed_raw }
+        end
+      end
+
+      def attempt_insert?(entry_class, key, payload)
+        inserted?(entry_class, insert_entry(entry_class, key, payload), key, payload)
+      end
+
+      # Treat a physically-present but logically-expired row as absent for
+      # conditional writes by conditionally removing the exact expired payload.
+      def clear_expired_entry?(entry_class, key, merged_options)
+        raw = entry_class.read(key)
+        return false unless raw
+
+        entry = @cache.send(:deserialize_entry, raw, **merged_options)
+        return false unless entry&.expired?
+
+        locked_compare_and_delete(key) { |raw_value| raw_value == raw }
+      rescue ActiveSupport::Cache::DeserializationError
+        false
       end
 
       def cache_entry(name, value, options, version: @cache.send(:normalize_version, name, options))

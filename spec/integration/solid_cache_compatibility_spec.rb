@@ -66,6 +66,18 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
     SolidCache::Entry.singleton_class.prepend(SolidCacheMissingEntryProbe)
   end
 
+  module SolidCacheEntryReadProbe
+    def read(key)
+      value = super
+      Thread.current[:woods_entry_read_hook]&.call(key, value)
+      value
+    end
+  end
+
+  unless SolidCache::Entry.singleton_class.ancestors.include?(SolidCacheEntryReadProbe)
+    SolidCache::Entry.singleton_class.prepend(SolidCacheEntryReadProbe)
+  end
+
   # Run locally against PostgreSQL without the other live-lane services:
   # BUNDLE_GEMFILE=gemfiles/live_backends.gemfile WOODS_RUN_LIVE_BACKENDS=1 \
   #   WOODS_PG_URL=postgres://postgres:postgres@localhost:5432/woods_test \
@@ -181,6 +193,55 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
       expect(coordination.read('same-value')).to eq(0)
     end
 
+    def wait_for_entry_expiry(cache, name, timeout: 10)
+      normalized = cache.send(:normalize_key, name, cache.send(:merged_options, nil))
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      loop do
+        raw = SolidCache::Entry.read(normalized)
+        entry = raw && cache.send(:deserialize_entry, raw, **cache.send(:merged_options, nil))
+        return normalized if raw.nil? || entry.nil? || entry.expired?
+        raise "entry #{name.inspect} never expired" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        sleep 0.005
+      end
+    end
+
+    it 'does not delete a fresh replacement while cleaning up an expired entry' do
+      cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
+      coordination = Woods::SessionTracer::SolidCacheCoordination.new(cache)
+      coordination.write('contended', 'stale', expires_in: 0.01)
+      normalized = wait_for_entry_expiry(cache, 'contended')
+
+      replaced = false
+      Thread.current[:woods_entry_read_hook] = lambda do |key, value|
+        next unless key == normalized && value && !replaced
+
+        replaced = true
+        Thread.current[:woods_entry_read_hook] = nil
+        coordination.write('contended', 'fresh')
+      end
+      begin
+        expect(coordination.read('contended')).to be_nil
+      ensure
+        Thread.current[:woods_entry_read_hook] = nil
+      end
+
+      expect(replaced).to be(true)
+      expect(coordination.read('contended')).to eq('fresh')
+    end
+
+    it 'keeps recording after a backend-level TTL expires every session key' do
+      cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000, expires_in: 0.5)
+      session_store = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
+      session_store.record('ttl-session', { 'timestamp' => '2026-08-20T12:00:00Z', 'action' => 'before' })
+      wait_for_entry_expiry(cache, session_store.send(:active_key, 'ttl-session'))
+
+      expect(session_store.read('ttl-session')).to eq([])
+      session_store.record('ttl-session', { 'timestamp' => '2026-08-20T12:00:05Z', 'action' => 'after' })
+
+      expect(session_store.read('ttl-session').map { |entry| entry.fetch('action') }).to eq(['after'])
+    end
+
     it 'routes every session key to its assigned Solid Cache shard' do
       script = <<~'RUBY'
         ENV['RAILS_ENV'] = 'test'
@@ -258,7 +319,7 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
             store.send(:index_slot_key, membership.fetch('slot')),
             store.send(:slot_sequence_key, membership.fetch('slot')),
             active_key,
-            store.send(:record_key, membership, 1)
+            store.send(:record_key, membership.fetch('slot'), 1)
           ]
           placements = keys.to_h do |key|
             normalized_key = normalize.call(key)
