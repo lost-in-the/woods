@@ -10,6 +10,11 @@ require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
 
 module Woods
+  # Standalone-require shim (same pattern as Console::Server and
+  # Storage::MetadataStore): ChunkSuffixCollision below inherits Woods::Error,
+  # which lib/woods.rb defines but an isolated require of this file does not.
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Embedding
     # Orchestrates the indexing pipeline: reads extracted units, prepares text,
     # generates embeddings, and stores vectors. Supports full and incremental
