@@ -15,6 +15,16 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
   end
 
   describe '#ensure_schema!' do
+    before { allow(connection).to receive(:transaction).and_yield }
+
+    it 'creates the extension, table, and index in one transaction' do
+      allow(connection).to receive(:execute)
+
+      store.ensure_schema!
+
+      expect(connection).to have_received(:transaction).once
+    end
+
     it 'creates the extension, table, and index' do
       allow(connection).to receive(:execute)
 
@@ -341,11 +351,10 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       expect(store.stored_dimensions).to be_nil
     end
 
-    # A diagnostic must never break the pipeline it is diagnosing.
-    it 'returns nil rather than raising when the query fails' do
+    it 'surfaces connection and permission failures' do
       allow(connection).to receive(:execute).and_raise(StandardError, 'connection lost')
 
-      expect(store.stored_dimensions).to be_nil
+      expect { store.stored_dimensions }.to raise_error(StandardError, 'connection lost')
     end
   end
 

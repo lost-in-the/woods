@@ -39,19 +39,21 @@ module Woods
         #
         # Safe to call multiple times (uses IF NOT EXISTS).
         def ensure_schema!
-          @connection.execute('CREATE EXTENSION IF NOT EXISTS vector')
-          @connection.execute(<<~SQL)
-            CREATE TABLE IF NOT EXISTS #{TABLE} (
-              id TEXT PRIMARY KEY,
-              embedding vector(#{@dimensions}),
-              metadata JSONB DEFAULT '{}',
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-          SQL
-          @connection.execute(<<~SQL)
-            CREATE INDEX IF NOT EXISTS idx_#{TABLE}_embedding_hnsw
-            ON #{TABLE} USING hnsw (embedding vector_cosine_ops)
-          SQL
+          @connection.transaction do
+            @connection.execute('CREATE EXTENSION IF NOT EXISTS vector')
+            @connection.execute(<<~SQL)
+              CREATE TABLE IF NOT EXISTS #{TABLE} (
+                id TEXT PRIMARY KEY,
+                embedding vector(#{@dimensions}),
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+              )
+            SQL
+            @connection.execute(<<~SQL)
+              CREATE INDEX IF NOT EXISTS idx_#{TABLE}_embedding_hnsw
+              ON #{TABLE} USING hnsw (embedding vector_cosine_ops)
+            SQL
+          end
         end
 
         # Store or update a vector with metadata.
@@ -162,9 +164,6 @@ module Woods
 
           dimension = row['dimension'].to_i
           dimension.positive? ? dimension : nil
-        rescue StandardError
-          # Never let a diagnostic query break the pipeline it is diagnosing.
-          nil
         end
 
         # Iterate over every stored id without loading vectors.

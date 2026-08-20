@@ -135,7 +135,7 @@ module Woods
     def build_vector_store(dimensions: nil)
       case @config.vector_store
       when :in_memory then Storage::VectorStore::InMemory.new
-      when :pgvector then build_pgvector_store
+      when :pgvector then build_pgvector_store(dimensions)
       when :qdrant then build_qdrant_store(dimensions)
       else raise ArgumentError, "Unknown vector_store: #{@config.vector_store}"
       end
@@ -473,8 +473,10 @@ module Woods
     #
     # @return [Storage::VectorStore::Pgvector]
     # @raise [Woods::Error] when the schema cannot be created
-    def build_pgvector_store
-      store = Storage::VectorStore::Pgvector.new(**(@config.vector_store_options || {}))
+    def build_pgvector_store(provider_dimensions)
+      opts = (@config.vector_store_options || {}).transform_keys(&:to_sym)
+      opts[:dimensions] = resolve_pgvector_dimensions(provider_dimensions, opts[:dimensions])
+      store = Storage::VectorStore::Pgvector.new(**opts)
       begin
         store.ensure_schema!
       rescue StandardError => e
@@ -485,6 +487,19 @@ module Woods
               '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
       end
       store
+    end
+
+    def resolve_pgvector_dimensions(provider_dimensions, configured_dimensions)
+      if provider_dimensions && configured_dimensions && provider_dimensions != configured_dimensions
+        raise ConfigurationError,
+              "pgvector dimensions #{configured_dimensions} do not match embedding provider dimensions " \
+              "#{provider_dimensions}"
+      end
+
+      provider_dimensions || configured_dimensions || raise(
+        ConfigurationError,
+        'pgvector requires vector_store_options[:dimensions] when built without an embedding provider'
+      )
     end
 
     def build_qdrant_store(provider_dimensions)

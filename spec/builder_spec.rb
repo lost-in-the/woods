@@ -401,6 +401,21 @@ RSpec.describe Woods::Builder do
       expect { described_class.new(config).build_vector_store }
         .to raise_error(Woods::Error) { |e| expect(e.cause.message).to eq('no pg_hba.conf entry') }
     end
+
+    it 'rejects dimensions that disagree with the embedding provider' do
+      expect { described_class.new(config).build_vector_store(dimensions: 4) }
+        .to raise_error(Woods::ConfigurationError, /pgvector dimensions 3.*provider dimensions 4/i)
+    end
+
+    it 'uses the provider dimensions when vector_store_options omits them' do
+      config.vector_store_options = { connection: fake_connection }
+      expect(Woods::Storage::VectorStore::Pgvector).to receive(:new)
+        .with(connection: fake_connection, dimensions: 4)
+        .and_return(pg_store)
+      expect(pg_store).to receive(:ensure_schema!)
+
+      expect(described_class.new(config).build_vector_store(dimensions: 4)).to eq(pg_store)
+    end
   end
 
   describe '#build_vector_store with :qdrant' do
