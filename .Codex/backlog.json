@@ -8,49 +8,49 @@
   {
     "id": "release-v2-02",
     "title": "Close publishing and packaged-gem release blockers",
-    "status": "in_progress",
+    "status": "completed",
     "description": "Make the release workflow build, validate, test, and publish one immutable artifact from the exact approved SHA."
   },
   {
     "id": "release-v2-03",
     "title": "Repair Console MCP capability and safety contracts",
-    "status": "pending",
+    "status": "completed",
     "description": "Align advertised Console capabilities, executable behavior, validation, transport, and safety controls."
   },
   {
     "id": "release-v2-04",
     "title": "Make MCP 2026-07-28 Tasks and transport semantics real",
-    "status": "pending",
+    "status": "completed",
     "description": "Verify Tasks, tools, resources, stdio, and HTTP against MCP 2026-07-28 with real clients."
   },
   {
     "id": "release-v2-05",
     "title": "Correct configuration, provider, storage, and persistence contracts",
-    "status": "pending",
+    "status": "completed",
     "description": "Ensure every supported preset and adapter constructs, persists, and fails as documented."
   },
   {
     "id": "release-v2-06",
     "title": "Audit extraction, incremental maintenance, graphs, flows, and watch behavior",
-    "status": "pending",
+    "status": "in_progress",
     "description": "Prove deterministic and atomic output across extractors, publication boundaries, graphs, flows, and watch modes."
   },
   {
     "id": "release-v2-07",
     "title": "Audit embedding, retrieval, evaluation, caching, and output quality",
-    "status": "pending",
+    "status": "in_progress",
     "description": "Measure retrieval quality and validate bounded, deterministic output under success and degradation."
   },
   {
     "id": "release-v2-08",
     "title": "Make coverage and compatibility evidence complete",
-    "status": "pending",
+    "status": "in_progress",
     "description": "Track every production file and enforce meaningful release-critical compatibility and coverage gates."
   },
   {
     "id": "release-v2-09",
     "title": "Review and rebuild the entire documentation set",
-    "status": "pending",
+    "status": "in_progress",
     "description": "Make all current documentation concise, accurate, navigable, package-safe, and executable."
   },
   {
