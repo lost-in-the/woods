@@ -72,6 +72,7 @@ module Woods
             @model_validator.validate_column!(@model_name, column)
             arel_nodes << build_node(relation, column, suffix, value)
           else
+            @model_validator.validate_column!(@model_name, key)
             equality[raw_key] = value
           end
         end

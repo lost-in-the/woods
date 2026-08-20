@@ -88,9 +88,9 @@ RSpec.describe Woods::Console::Tools::Tier4 do
       expect(result[:params][:limit]).to eq(100)
     end
 
-    it 'caps limit at 10000' do
+    it 'preserves a limit above 10000 for the executor to reject' do
       result = described_class.console_sql(sql: 'SELECT 1', validator: validator, limit: 50_000)
-      expect(result[:params][:limit]).to eq(10_000)
+      expect(result[:params][:limit]).to eq(50_000)
     end
   end
 
@@ -141,9 +141,9 @@ RSpec.describe Woods::Console::Tools::Tier4 do
       expect(result[:params][:limit]).to eq(50)
     end
 
-    it 'caps limit at 10000' do
+    it 'preserves a limit above 10000 for the executor to reject' do
       result = described_class.console_query(model: 'User', select: %w[id], limit: 50_000)
-      expect(result[:params][:limit]).to eq(10_000)
+      expect(result[:params][:limit]).to eq(50_000)
     end
 
     it 'compacts nil values from params' do

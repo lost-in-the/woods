@@ -46,7 +46,6 @@ module Woods
         # @raise [SqlValidationError] if SQL is not read-only
         def console_sql(sql:, validator:, limit: nil)
           validator.validate!(sql)
-          limit = [limit, MAX_SQL_LIMIT].min if limit
           { tool: 'sql', params: { sql: sql, limit: limit }.compact }
         end
 
@@ -63,7 +62,6 @@ module Woods
         # @return [Hash] Bridge request
         # rubocop:disable Metrics/ParameterLists
         def console_query(model:, select:, joins: nil, group_by: nil, having: nil, order: nil, scope: nil, limit: nil)
-          limit = [limit, MAX_QUERY_LIMIT].min if limit
           {
             tool: 'query',
             params: {

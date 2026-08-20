@@ -152,7 +152,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response).to include('ok' => false, 'error_type' => 'validation')
-      expect(response['error']).to include('Rejected column reference')
+      expect(response['error']).to include('Invalid arguments:', 'at `/having`', 'does not match pattern')
       expect(relation).not_to have_received(:having)
     end
 
@@ -167,7 +167,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response).to include('ok' => false, 'error_type' => 'validation')
-      expect(response['error']).to include('having: unsupported SQL template')
+      expect(response['error']).to include('Invalid arguments:', 'at `/having/0`', 'does not match pattern')
       expect(relation).not_to have_received(:having)
     end
 
@@ -197,7 +197,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response).to include('ok' => false, 'error_type' => 'validation')
-      expect(response['error']).to include('having must contain exactly one template and one bind value')
+      expect(response['error']).to include('Invalid arguments:', 'array size at `/having` is greater than: 2')
       expect(relation).not_to have_received(:having)
     end
   end
@@ -253,6 +253,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
 
     before do
       stub_const('LineItem', line_item_model)
+      allow(order_model).to receive(:reflect_on_association).with(:line_items).and_return(double('line_items'))
+      allow(order_model).to receive(:reflect_on_association).with(:user).and_return(double('user'))
     end
 
     it 'applies joins and where scope together' do
@@ -327,7 +329,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
                                        })
 
       expect(response).to include('ok' => false, 'error_type' => 'validation')
-      expect(response['error']).to include('limit must be between 1 and 10000')
+      expect(response['error']).to include('Invalid arguments:', 'number at `/limit` is greater than: 10000')
       expect(relation).not_to have_received(:limit)
     end
   end

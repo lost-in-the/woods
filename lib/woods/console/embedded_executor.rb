@@ -374,7 +374,11 @@ module Woods
 
       def normalize_params!(tool, params)
         spec = Server::TOOL_SPECS.find { |candidate| candidate.name == "console_#{tool}" }
-        InputContract.normalize!(params, spec.properties) if spec
+        return unless spec
+
+        registered = Server::EXECUTABLE_MODES.values.any? { |names| names.include?(spec.name) }
+        spec.validate_arguments!(params) if registered
+        InputContract.normalize!(params, spec.properties)
       rescue InputContract::ValidationError => e
         raise ValidationError, e.message
       end
@@ -451,6 +455,8 @@ module Woods
       end
 
       def handle_find(params)
+        @model_validator.validate_columns!(params['model'], params['by'].keys.map(&:to_s)) if params['by']
+        validate_select_columns!(params)
         model = resolve_model(params['model'])
         record = if params['id']
                    model.find_by(id: params['id'])
@@ -497,12 +503,10 @@ module Woods
 
       def handle_association_count(params)
         model = resolve_model(params['model'])
-        record = model.find(params['id'])
         association_name = params['association']
+        reflection = model.reflect_on_association(association_name.to_sym)
 
-        unless model.reflect_on_association(association_name.to_sym)
-          raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}"
-        end
+        raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}" unless reflection
 
         # Defense-in-depth: the parent model passed validate_model!'s
         # gate_model! check, but the association may target a different
@@ -511,8 +515,9 @@ module Woods
         # explicitly before reading any rows from it.
         gate_association!(params['model'], association_name)
 
+        record = model.find(params['id'])
         scope = record.public_send(association_name)
-        scope = apply_scope(scope, params['scope'])
+        scope = apply_scope(scope, params['scope'], model_name: reflection.klass.name) if params['scope']
         { 'count' => scope.count }
       end
 
@@ -653,7 +658,10 @@ module Woods
         relation = model.all
 
         relation = relation.select(*validated_select(params['select'], model_name)) if params['select']
-        relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
+        if params['joins']&.any?
+          validate_joins!(model, params['joins'])
+          relation = relation.joins(params['joins'].map(&:to_sym))
+        end
         relation = apply_query_scope(relation, params['scope'], model_name) if params.key?('scope')
         relation = relation.group(*validated_columns(params['group_by'], model_name)) if params['group_by']&.any?
         relation = relation.having(*validated_having(params['having'], model_name)) if params['having']
@@ -809,29 +817,36 @@ module Woods
         name.is_a?(String) && name.match?(Server::SAFE_IDENTIFIER_REGEXP)
       end
 
+      def validate_joins!(model, joins)
+        joins.each do |association|
+          next if model.reflect_on_association(association.to_sym)
+
+          raise ValidationError, "Unknown association '#{association}' on #{model.name}"
+        end
+      end
+
       # ── Helpers ──────────────────────────────────────────────────────────
 
       # Apply scope conditions (WHERE clauses) to a relation.
       #
       # Accepts Hash form for equality or Ransack-style predicate suffixes
-      # (e.g., `{total_refund_gt: 0, status_in: ['paid','refunded']}`), or
-      # Array form for parameterized SQL (e.g., JSON column queries like
-      # ["preferences->>'theme' = ?", "dark"]).
+      # (e.g., `{total_refund_gt: 0, status_in: ['paid','refunded']}`). The
+      # array branch is used only after console_query's narrower contract has
+      # validated an exact `["column OP ?", bind]` pair.
       #
-      # When `model_name` is supplied and the Hash contains at least one key
-      # with a recognised predicate suffix, the ScopePredicateParser builds
-      # safe Arel nodes. Plain equality hashes skip the parser entirely.
+      # When `model_name` is supplied, ScopePredicateParser validates every
+      # equality and predicate column before applying the scope.
       #
       # @param relation [ActiveRecord::Relation, Class] Model or relation
       # @param scope [Hash, Array, nil] Filter conditions
-      # @param model_name [String, nil] Model name for column validation (predicate path only)
+      # @param model_name [String, nil] Model name for Hash key validation
       # @return [ActiveRecord::Relation]
       def apply_scope(relation, scope, model_name: nil)
         case scope
         when Hash
           return relation unless scope.any?
 
-          if model_name && predicate_suffix?(scope)
+          if model_name
             parser = ScopePredicateParser.new(model_name: model_name, model_validator: @model_validator)
             parser.parse(relation, scope)
           else
@@ -840,14 +855,8 @@ module Woods
         when Array
           return relation unless scope.any?
 
-          # Array form is `[template, *binds]`. The previous implementation
-          # splatted directly into `where(*scope)`, which is the
-          # `where(raw_sql_string)` arity — unbounded SQL injection. A
-          # caller could pass `["EXISTS (SELECT 1 FROM users WHERE
-          # password_digest LIKE 'a%')"]` and turn `console_count` /
-          # `console_pluck` into a boolean exfiltration oracle against
-          # any table the DB user can read (TableGate doesn't fire on
-          # the rendered Tier-1 SQL). Validate the template now.
+          # Keep defense-in-depth validation here even though the registered
+          # query schema and apply_query_scope enforce a narrower array form.
           validate_scope_array!(scope)
           relation.where(*scope)
         else
@@ -916,14 +925,6 @@ module Woods
 
         raise ValidationError,
               "scope template expects #{placeholder_count} bind(s), got #{bind_count}"
-      end
-
-      # Returns true if any key in the hash has a recognised predicate suffix.
-      #
-      # @param scope [Hash]
-      # @return [Boolean]
-      def predicate_suffix?(scope)
-        scope.any? { |k, _| ScopePredicateParser::SUFFIX_PATTERN.match?(k.to_s) }
       end
 
       # Validate that any requested +columns+ are real model columns before

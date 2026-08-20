@@ -52,6 +52,14 @@ RSpec.describe Woods::Console::ScopePredicateParser do
       expect(result).to eq(relation)
       expect(relation).not_to have_received(:where)
     end
+
+    it 'rejects an unknown equality column before relation.where' do
+      expect do
+        parser.parse(relation, { 'unknown' => 'paid' })
+      end.to raise_error(Woods::Console::ValidationError, /Unknown column 'unknown'/)
+
+      expect(relation).not_to have_received(:where)
+    end
   end
 
   # ── Supported suffixes ──────────────────────────────────────────────────────

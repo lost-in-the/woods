@@ -15,6 +15,11 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
     MCP::Tool::InputSchema.new(row.dig(:arguments, :constraints))
   end
 
+  def validation_errors(schema, arguments)
+    normalized = JSON.parse(JSON.generate(arguments))
+    schema.send(:schemer).validate(normalized).to_a
+  end
+
   it 'derives argument names and constraints from every ToolSpec' do
     expect(matrix.size).to eq(31)
 
@@ -75,6 +80,39 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
     ].each do |scope|
       expect { schema.validate_arguments(base.merge(scope: scope)) }
         .to raise_error(MCP::Tool::InputSchema::ValidationError), scope.inspect
+    end
+  end
+
+  it 'uses one object-scope key grammar for every registered scoped tool' do
+    scoped_inputs = {
+      'console_count' => { model: 'Post' },
+      'console_sample' => { model: 'Post' },
+      'console_pluck' => { model: 'Post', columns: ['id'] },
+      'console_aggregate' => { model: 'Post', function: 'count' },
+      'console_association_count' => { model: 'Post', id: 1, association: 'comments' },
+      'console_recent' => { model: 'Post' },
+      'console_query' => { model: 'Post', select: ['id'] }
+    }
+
+    expect(scoped_inputs.keys).to contain_exactly(
+      *matrix.select { |row| row.dig(:arguments, :constraints, :properties, :scope) }
+             .select { |row| row.fetch(:executable_modes).any? }
+             .map { |row| row.fetch(:name) }
+    )
+
+    scoped_inputs.each do |name, base|
+      schema = input_schema(matrix.find { |row| row.fetch(:name) == name })
+
+      expect { schema.validate_arguments(base.merge(scope: { 'status' => 20 })) }
+        .not_to raise_error, name
+      expect { schema.validate_arguments(base.merge(scope: { 'status_gteq' => 20 })) }
+        .not_to raise_error, name
+
+      arguments = base.merge(scope: { 'bad key' => 20 })
+      errors = validation_errors(schema, arguments)
+      expect(errors).to include(include('type' => 'pattern', 'data_pointer' => '/scope')), name
+      expect { schema.validate_arguments(arguments) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError), name
     end
   end
 

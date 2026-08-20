@@ -23,9 +23,9 @@ RSpec.describe Woods::Console::Tools::Tier1 do
       expect(result[:params][:limit]).to eq(5)
     end
 
-    it 'caps limit at 25' do
+    it 'preserves a limit above 25 for the executor to reject' do
       result = described_class.console_sample(model: 'Post', limit: 100)
-      expect(result[:params][:limit]).to eq(25)
+      expect(result[:params][:limit]).to eq(100)
     end
 
     it 'includes columns when provided' do
@@ -59,9 +59,9 @@ RSpec.describe Woods::Console::Tools::Tier1 do
       expect(result[:params][:limit]).to eq(100)
     end
 
-    it 'caps limit at 1000' do
+    it 'preserves a limit above 1000 for the executor to reject' do
       result = described_class.console_pluck(model: 'User', columns: %w[email], limit: 5000)
-      expect(result[:params][:limit]).to eq(1000)
+      expect(result[:params][:limit]).to eq(5000)
     end
 
     it 'excludes false distinct by compact' do
@@ -110,9 +110,9 @@ RSpec.describe Woods::Console::Tools::Tier1 do
       expect(result[:params][:limit]).to eq(10)
     end
 
-    it 'caps limit at 50' do
+    it 'preserves a limit above 50 for the executor to reject' do
       result = described_class.console_recent(model: 'Post', limit: 200)
-      expect(result[:params][:limit]).to eq(50)
+      expect(result[:params][:limit]).to eq(200)
     end
   end
 

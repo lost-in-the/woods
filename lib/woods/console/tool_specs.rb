@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+require 'mcp'
+
+require_relative 'input_contract'
+require_relative 'scope_predicate_parser'
+
 # This file is a pure data table — 31 ToolSpec entries across 4 tiers
 # (9 read-only / 9 domain-aware / 10 analytics / 3 guarded).
 # Metrics/ModuleLength is disabled here because the module body is almost
@@ -27,6 +32,10 @@ module Woods
       SAFE_IDENTIFIER_SCHEMA_PATTERN = "^(?:#{SAFE_IDENTIFIER_GRAMMAR})$(?![\\s\\S])".freeze
       COLUMN_REFERENCE_SCHEMA_PATTERN = "^(?:#{COLUMN_REFERENCE_GRAMMAR})$(?![\\s\\S])".freeze
       SAFE_IDENTIFIER_REGEXP = Regexp.new("\\A(?:#{SAFE_IDENTIFIER_GRAMMAR})\\z").freeze
+      SCOPE_PREDICATE_SUFFIX_GRAMMAR =
+        "(?:#{ScopePredicateParser::SUPPORTED_SUFFIXES.map { |suffix| Regexp.escape(suffix) }.join('|')})".freeze
+      SCOPE_KEY_GRAMMAR = "#{SAFE_IDENTIFIER_GRAMMAR}(?:#{SCOPE_PREDICATE_SUFFIX_GRAMMAR})?".freeze
+      SCOPE_KEY_SCHEMA_PATTERN = "^(?:#{SCOPE_KEY_GRAMMAR})$(?![\\s\\S])".freeze
 
       CASE_INSENSITIVE_AGGREGATE_GRAMMAR = [
         '[Ss][Uu][Mm]', '[Aa][Vv][Gg]', '[Mm][Ii][Nn]', '[Mm][Aa][Xx]', '[Cc][Oo][Uu][Nn][Tt]'
@@ -88,6 +97,36 @@ module Woods
           schema.merge!(schema_constraints) if schema_constraints
           schema
         end
+
+        def validate_arguments!(arguments)
+          schema = input_schema_value
+          if arguments.is_a?(Hash)
+            missing = schema.missing_required_arguments(arguments)
+            unless missing.empty?
+              raise InputContract::ValidationError, "Missing required arguments: #{missing.join(', ')}"
+            end
+          end
+
+          schema.validate_arguments(arguments)
+          arguments
+        rescue ::MCP::Tool::InputSchema::ValidationError => e
+          raise InputContract::ValidationError, e.message
+        end
+
+        def wrap_handler!
+          raw_handler = handler
+          self.handler = lambda do |arguments|
+            validate_arguments!(arguments)
+            raw_handler.call(arguments)
+          end
+          self
+        end
+
+        private
+
+        def input_schema_value
+          @input_schema_value ||= ::MCP::Tool::InputSchema.new(input_schema)
+        end
       end
 
       # All 31 possible Console tool specifications, grouped by tier. Runtime
@@ -103,10 +142,11 @@ module Woods
           description: 'Count records matching scope conditions.',
           properties: {
             model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
-            scope: { type: 'object', description: 'Filter: {status: "paid", total_refund_gt: 0, ' \
-                                                  'transaction_id_not_null: true}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' }
+            scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     description: 'Filter: {status: "paid", total_refund_gt: 0, ' \
+                                  'transaction_id_not_null: true}. ' \
+                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                  'Complex queries: use console_query.' }
           },
           required: ['model'],
           tier: 1,
@@ -121,9 +161,10 @@ module Woods
                      description: 'Max records (default 5, max 25)' },
             columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Columns to include' },
-            scope: { type: 'object', description: 'Filter: {status: "paid", amount_gt: 100}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' }
+            scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     description: 'Filter: {status: "paid", amount_gt: 100}. ' \
+                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                  'Complex queries: use console_query.' }
           },
           required: ['model'],
           tier: 1,
@@ -161,9 +202,10 @@ module Woods
             columns: { type: 'array', minItems: 1,
                        items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Column names to pluck' },
-            scope: { type: 'object', description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' },
+            scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
+                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                  'Complex queries: use console_query.' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 1000,
                      description: 'Max records (default 100, max 1000)' },
             distinct: { type: 'boolean', description: 'Return unique values only' }
@@ -189,8 +231,9 @@ module Woods
                         description: 'Aggregate function: sum, average, minimum, maximum, count' },
             column: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
                       description: 'Column to aggregate (optional for count)' },
-            scope: { type: 'object', description: 'Filter conditions: {col: val} or predicate suffixes ' \
-                                                  '(_gt, _lt, _in, _null, etc.)' }
+            scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     description: 'Filter conditions: {col: val} or predicate suffixes ' \
+                                  '(_gt, _lt, _in, _null, etc.)' }
           },
           required: %w[model function],
           tier: 1,
@@ -220,9 +263,10 @@ module Woods
                   description: 'Record primary key' },
             association: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
                            description: 'Association name' },
-            scope: { type: 'object', description: 'Filter on association: {status: "paid", amount_gt: 0}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' }
+            scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     description: 'Filter on association: {status: "paid", amount_gt: 0}. ' \
+                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                  'Complex queries: use console_query.' }
           },
           required: %w[model id association],
           tier: 1,
@@ -256,9 +300,10 @@ module Woods
                          description: 'Sort direction: asc or desc (default: desc)' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 50,
                      description: 'Max records (default 10, max 50)' },
-            scope: { type: 'object', description: 'Filter: {status: "paid", total_gt: 0}. ' \
-                                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
-                                                  'Complex queries: use console_query.' },
+            scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     description: 'Filter: {status: "paid", total_gt: 0}. ' \
+                                  'Suffixes: _eq _gt _lt _in _null _present. ' \
+                                  'Complex queries: use console_query.' },
             columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Columns to include' }
           },
@@ -635,7 +680,7 @@ module Woods
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
             scope: { type: %w[object array],
                      oneOf: [
-                       { type: 'object' },
+                       { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN } },
                        {
                          type: 'array', minItems: 2, maxItems: 2,
                          prefixItems: [
@@ -659,7 +704,9 @@ module Woods
             )
           }
         )
-      ].freeze
+      ].each do |spec|
+        spec.wrap_handler! if spec.tier == 1 || %w[console_sql console_query].include?(spec.name)
+      end.freeze
 
       EXECUTABLE_MODES = {
         embedded: TIER1_TOOLS.map { |name| "console_#{name}" }.freeze,

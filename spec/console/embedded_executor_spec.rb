@@ -419,176 +419,31 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error_type']).to eq('validation')
       end
 
-      # ── Scope SQL-injection regression tests ──────────────────────
-      #
-      # Prior to round-5 the array-form scope was splatted directly into
-      # AR's `where(*scope)`, which is the `where(raw_sql_string)` arity
-      # — turning every Tier-1 scope-accepting tool (count, pluck,
-      # aggregate, sample, find, recent) into a boolean exfiltration
-      # oracle. These specs lock in the rejection of the known bypass
-      # patterns. See `EmbeddedExecutor#validate_scope_array!`.
-      describe 'scope array-form SQL injection (R5-F1)' do
-        it 'rejects a scope template that contains a SELECT subquery' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id IN (SELECT password_digest FROM users)']
-                                             }
-                                           })
+      describe 'scope object contract' do
+        array_scopes = [
+          ['id IN (SELECT password_digest FROM users)'],
+          ['1=1 UNION SELECT 1'],
+          ['id = 1; DROP TABLE users'],
+          ['pg_sleep(5)'],
+          ['name = ?'],
+          [{ name: 'x' }],
+          ['name = ?', 'Alice'],
+          ['id IS NULL'],
+          ['id IN (/* hidden */ SELECT password FROM users)'],
+          ['id = $$1$$ OR EXISTS (SELECT 1 FROM users)'],
+          ["name = 'SELECT'"]
+        ]
 
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/forbidden SQL keywords/i)
-        end
+        array_scopes.each do |scope|
+          it "rejects non-advertised array scope #{scope.inspect}" do
+            response = executor.send_request({
+                                               'tool' => 'count',
+                                               'params' => { 'model' => 'User', 'scope' => scope }
+                                             })
 
-        it 'rejects a scope template that uses UNION' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['1=1 UNION SELECT 1']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'rejects a scope template containing `;` (statement chaining)' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id = 1; DROP TABLE users']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/`;`/)
-        end
-
-        it 'rejects a scope template containing pg_sleep or BENCHMARK (timing oracles)' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['pg_sleep(5)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'rejects a scope template with mismatched bind count' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['name = ?'] # zero binds, one placeholder
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/expects 1 bind/)
-        end
-
-        it 'rejects a scope where[0] is not a String' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => [{ name: 'x' }]
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'allows a parameterised scope template with matching binds' do
-          allow(user_model).to receive(:where).with('name = ?', 'Alice').and_return(relation)
-          allow(relation).to receive(:count).and_return(2)
-
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['name = ?', 'Alice']
-                                             }
-                                           })
-
-          expect(response['ok']).to be true
-          expect(response['result']['count']).to eq(2)
-        end
-
-        it 'allows a no-bind scope template with no forbidden keywords' do
-          allow(user_model).to receive(:where).with('id IS NULL').and_return(relation)
-          allow(relation).to receive(:count).and_return(0)
-
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id IS NULL']
-                                             }
-                                           })
-
-          expect(response['ok']).to be true
-        end
-
-        # Defense-in-depth — block comments and dollar-quoted strings
-        # don't actually let an attacker smuggle a SELECT past a real DB
-        # parser (SQL standard treats `/**/` as whitespace, so `SE/**/LECT`
-        # is two identifiers, not `SELECT` — verified against SQLite),
-        # but the validator still strips them before the keyword scan so
-        # callers get an honest "forbidden SQL keywords" error rather than
-        # a confusing adapter-level syntax failure.
-        it 'rejects forbidden keywords hidden behind block comments' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id IN (/* hidden */ SELECT password FROM users)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-          expect(response['error']).to match(/forbidden SQL keywords/i)
-        end
-
-        it 'rejects keywords hidden in PostgreSQL dollar-quoted strings' do
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ['id = $$1$$ OR EXISTS (SELECT 1 FROM users)']
-                                             }
-                                           })
-
-          expect(response['ok']).to be false
-          expect(response['error_type']).to eq('validation')
-        end
-
-        it 'does NOT reject a forbidden keyword that appears only inside a string literal bind' do
-          # The template must be scanned with literals stripped — otherwise
-          # legitimate searches like name = "SELECT ..." would false-reject.
-          allow(user_model).to receive(:where).with("name = 'SELECT'").and_return(relation)
-          allow(relation).to receive(:count).and_return(0)
-
-          response = executor.send_request({
-                                             'tool' => 'count',
-                                             'params' => {
-                                               'model' => 'User',
-                                               'scope' => ["name = 'SELECT'"]
-                                             }
-                                           })
-
-          expect(response['ok']).to be true
+            expect(response).to include('ok' => false, 'error_type' => 'validation')
+            expect(response['error']).to eq('Invalid arguments: value at `/scope` is not an object')
+          end
         end
       end
 
@@ -596,7 +451,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         response = executor.send_request({ 'tool' => 'count', 'params' => {} })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/Missing required parameter: model/)
+        expect(response['error']).to eq('Missing required arguments: model')
       end
     end
 
@@ -627,7 +482,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
-        expect(response['error']).to include('limit must be between 1 and 25')
+        expect(response['error']).to include('Invalid arguments:', 'number at `/limit` is greater than: 25')
         expect(ordered).not_to have_received(:limit)
       end
 
@@ -638,7 +493,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
-        expect(response['error']).to include('limit must be an integer')
+        expect(response['error']).to include('Invalid arguments:', 'value at `/limit` is not an integer')
         expect(ordered).not_to have_received(:limit)
       end
 
@@ -654,7 +509,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/Unknown column/)
+        expect(response['error']).to include('Invalid arguments:', 'string at `/columns/0` does not match pattern')
       end
     end
 
@@ -753,7 +608,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
-        expect(response['error']).to include('columns must contain at least one item')
+        expect(response['error']).to include('Invalid arguments:', 'array size at `/columns` is less than: 1')
       end
     end
 
@@ -824,7 +679,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/Invalid aggregate function/)
+        expect(response['error']).to include('Invalid arguments:', 'value at `/function` is not one of:')
       end
 
       it 'rejects a non-count aggregate without a column' do
@@ -834,7 +689,9 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
-        expect(response['error']).to include('column is required for sum')
+        expect(response['error']).to include(
+          'Invalid arguments:', 'object at root is missing required properties: column'
+        )
       end
 
       it 'validates column exists' do
@@ -882,6 +739,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error']).to match(/Unknown association/)
+        expect(user_model).not_to have_received(:find)
       end
     end
 
@@ -976,7 +834,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
-        expect(response['error']).to include('direction must be asc or desc')
+        expect(response['error']).to include('Invalid arguments:', 'value at `/direction` is not one of:')
         expect(post_model).not_to have_received(:order)
       end
 
@@ -990,7 +848,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/Unknown column/)
+        expect(response['error']).to include('Invalid arguments:', 'string at `/columns/0` does not match pattern')
       end
 
       it 'rejects limits above the schema maximum before querying' do
@@ -1000,7 +858,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
-        expect(response['error']).to include('limit must be between 1 and 50')
+        expect(response['error']).to include('Invalid arguments:', 'number at `/limit` is greater than: 50')
         expect(ordered).not_to have_received(:limit)
       end
     end
@@ -1044,18 +902,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
     end
 
-    context 'array-form scope' do
-      let(:user_model) { class_double('User') }
-      let(:scoped) { double('ActiveRecord::Relation') }
-
-      before do
-        stub_const('User', user_model)
-      end
-
-      it 'applies array-form scope for JSON column queries' do
-        allow(user_model).to receive(:where).with("preferences->>'theme' = ?", 'dark').and_return(scoped)
-        allow(scoped).to receive(:count).and_return(7)
-
+    context 'non-object scope' do
+      it 'rejects array-form scope for JSON column queries' do
         response = executor.send_request({
                                            'tool' => 'count',
                                            'params' => {
@@ -1064,32 +912,28 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                            }
                                          })
 
-        expect(response['ok']).to be true
-        expect(response['result']['count']).to eq(7)
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to eq('Invalid arguments: value at `/scope` is not an object')
       end
 
-      it 'ignores empty array scope' do
-        allow(user_model).to receive(:count).and_return(42)
-
+      it 'rejects empty array scope' do
         response = executor.send_request({
                                            'tool' => 'count',
                                            'params' => { 'model' => 'User', 'scope' => [] }
                                          })
 
-        expect(response['ok']).to be true
-        expect(response['result']['count']).to eq(42)
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to eq('Invalid arguments: value at `/scope` is not an object')
       end
 
-      it 'ignores non-hash non-array scope' do
-        allow(user_model).to receive(:count).and_return(42)
-
+      it 'rejects non-hash non-array scope' do
         response = executor.send_request({
                                            'tool' => 'count',
                                            'params' => { 'model' => 'User', 'scope' => 'invalid' }
                                          })
 
-        expect(response['ok']).to be true
-        expect(response['result']['count']).to eq(42)
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to eq('Invalid arguments: value at `/scope` is not an object')
       end
     end
 
@@ -1198,7 +1042,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                                      })
 
           expect(response).to include('ok' => false, 'error_type' => 'validation')
-          expect(response['error']).to include('limit must be between 1 and 10000')
+          expect(response['error']).to include('Invalid arguments:', 'number at `/limit` is greater than: 10000')
           expect(connection).not_to have_received(:select_all)
         end
       end
