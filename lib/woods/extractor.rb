@@ -645,12 +645,20 @@ module Woods
     # from the graph, so leaving it at the last full extraction's values let
     # it drift continuously between full runs (#164 gap 5).
     #
+    # Re-raises rather than warn-and-continue: a caller that swallowed this
+    # went on to write the manifest and publish a fresh generation over an
+    # index whose graph_analysis.json never updated — a failed analysis write
+    # must abort the run the same way a failed extraction does, not ship
+    # under a generation that says everything landed.
+    #
     # @return [void]
+    # @raise [StandardError] whatever GraphAnalyzer or the write raised
     def write_incremental_graph_analysis
       @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
       write_graph_analysis
     rescue StandardError => e
       Rails.logger.error "[Woods] Incremental graph analysis failed: #{e.message}"
+      raise
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -776,6 +784,7 @@ module Woods
       ModelNameCache.short_names_regex if ModelNameCache.respond_to?(:short_names_regex)
 
       results_mutex = Mutex.new
+      failures = []
       active = EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }
       threads = active.map do |type, extractor_class|
         Thread.new do
@@ -795,11 +804,20 @@ module Woods
           end
         rescue StandardError => e
           Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
-          results_mutex.synchronize { @results[type] = [] }
+          results_mutex.synchronize { failures << [type, e] }
         end
       end
 
       threads.each(&:join)
+
+      # Fail closed, matching sequential extraction: a raise there aborts
+      # before registering anything for the run. Silently substituting `[]`
+      # for a failed type let the run finish, register a partial graph, and
+      # publish it under a generation that says every type succeeded.
+      if failures.any?
+        names = failures.map { |(type, _e)| type }.sort.join(', ')
+        raise Woods::ExtractionError, "Concurrent extraction failed for: #{names}"
+      end
 
       # Register into dependency graph sequentially — DependencyGraph is not thread-safe
       EXTRACTORS.each_key do |type|

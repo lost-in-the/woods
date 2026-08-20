@@ -489,11 +489,64 @@ RSpec.describe Woods::Extractor do
       allow(model_name_cache).to receive(:model_names_regex)
       stub_const('Woods::ModelNameCache', model_name_cache)
 
-      extractor.send(:extract_all_concurrent)
+      expect { extractor.send(:extract_all_concurrent) }.to raise_error(Woods::ExtractionError)
 
       stored_extractor = extractor.instance_variable_get(:@extractors)[:test_type]
       expect(stored_extractor).not_to be_nil
       expect(stored_extractor.warnings).to include('pre-existing warning')
+    end
+
+    # A failing thread used to substitute `[]` into @results and let the run
+    # finish normally — a partial generation published as though every type
+    # had actually extracted. Fail closed instead: name the failure and never
+    # reach dependency-graph registration (the step write_results/publish_generation
+    # depend on) for that run.
+    it 'raises naming the failed type instead of silently substituting empty results' do
+      fake_class = Class.new do
+        def extract_all
+          raise StandardError, 'boom'
+        end
+      end
+      ok_class = Class.new do
+        def extract_all
+          []
+        end
+      end
+      stub_const('Woods::Extractor::EXTRACTORS', { broken_type: fake_class, fine_type: ok_class })
+
+      model_name_cache = double('ModelNameCache')
+      allow(model_name_cache).to receive(:model_names)
+      allow(model_name_cache).to receive(:model_names_regex)
+      stub_const('Woods::ModelNameCache', model_name_cache)
+
+      expect { extractor.send(:extract_all_concurrent) }
+        .to raise_error(Woods::ExtractionError, /broken_type/)
+
+      # Nothing was registered into the graph for this run — a partial result
+      # never reaches the write/publish phase that would otherwise ship it.
+      expect(extractor.instance_variable_get(:@dependency_graph).to_h[:nodes]).to be_empty
+    end
+
+    it 'does not reach write_results or publish_generation when a thread fails' do
+      fake_class = Class.new do
+        def extract_all
+          raise StandardError, 'boom'
+        end
+      end
+      stub_const('Woods::Extractor::EXTRACTORS', { broken_type: fake_class })
+
+      model_name_cache = double('ModelNameCache')
+      allow(model_name_cache).to receive(:reset!)
+      allow(model_name_cache).to receive(:model_names)
+      allow(model_name_cache).to receive(:model_names_regex)
+      stub_const('Woods::ModelNameCache', model_name_cache)
+
+      allow(extractor).to receive(:setup_output_directory)
+      allow(extractor).to receive(:safe_eager_load!)
+      expect(extractor).not_to receive(:write_results)
+      expect(extractor).not_to receive(:publish_generation)
+
+      expect { extractor.extract_all }.to raise_error(Woods::ExtractionError, /broken_type/)
     end
   end
 
@@ -1229,6 +1282,59 @@ RSpec.describe Woods::Extractor do
       extractor.extract_changed([])
 
       expect(File.exist?(File.join(models_dir, filename_for('Ghost')))).to be(true)
+    end
+  end
+
+  # ── write_incremental_graph_analysis fails closed ───────────────────
+  #
+  # A broken graph analysis used to warn and continue: finalize_incremental_run
+  # would go on to write the manifest and publish a fresh generation over an
+  # index whose graph_analysis.json never updated. Re-raising means the whole
+  # incremental run aborts before publish_generation, matching every other
+  # incremental failure mode (extraction raising, a bad reload).
+  describe '#write_incremental_graph_analysis' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      allow(extractor).to receive(:safe_eager_load!)
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 're-raises instead of warning and continuing when analysis fails' do
+      broken_analyzer = Class.new do
+        def initialize(*); end
+
+        def analyze
+          raise StandardError, 'graph corrupted'
+        end
+      end
+      stub_const('Woods::GraphAnalyzer', broken_analyzer)
+      allow(extractor).to receive(:write_graph_analysis)
+
+      expect { extractor.send(:write_incremental_graph_analysis) }
+        .to raise_error(StandardError, 'graph corrupted')
+    end
+
+    it 'extract_changed raises and does not bump the generation when the analysis write fails' do
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new(['User']))
+      allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
+      allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json)
+      allow(extractor).to receive(:regenerate_type_index)
+      allow(extractor).to receive(:write_dependency_graph)
+      allow(extractor).to receive(:write_incremental_graph_analysis).and_raise(StandardError, 'graph corrupted')
+
+      output_dir = extractor.instance_variable_get(:@output_dir)
+      before_generation = Woods::Generation.new(output_dir: output_dir).current.number
+
+      expect { extractor.extract_changed(['app/models/user.rb']) }
+        .to raise_error(StandardError, 'graph corrupted')
+
+      after_generation = Woods::Generation.new(output_dir: output_dir).current.number
+      expect(after_generation).to eq(before_generation)
     end
   end
 
