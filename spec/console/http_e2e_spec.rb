@@ -13,6 +13,7 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
   let(:root) { File.expand_path('../..', __dir__) }
   let(:host_script) { File.join(root, 'spec/console/support/booted_http_host.rb') }
   let(:rails_gemfile) { File.join(root, 'gemfiles/rails_8.1.gemfile') }
+  let(:bearer_token) { 'console-http-e2e-token-32-characters' }
 
   around do |example|
     Dir.mktmpdir('woods-console-http') do |tmpdir|
@@ -41,6 +42,7 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
       'PORT' => @port.to_s,
       'WOODS_DUMMY_DB' => @database,
       'WOODS_CONSOLE_READ_TOOLS' => '0',
+      'WOODS_CONSOLE_MCP_TOKEN' => bearer_token,
       'RAILS_ENV' => 'test'
     }
     environment['BUNDLE_PATH'] = ENV['BUNDLE_PATH'] if ENV['BUNDLE_PATH']
@@ -95,6 +97,10 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
     '(no output)'
   end
 
+  def bearer_headers(token = bearer_token)
+    { 'Authorization' => "Bearer #{token}" }
+  end
+
   def stop_process
     return unless @wait
 
@@ -106,8 +112,24 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
     [@stdin, @output].each { |io| io&.close unless io&.closed? }
   end
 
+  it 'requires the configured bearer token through the Railtie middleware stack' do
+    missing_response, missing = post('tools/list')
+    wrong_response, wrong = post('tools/list', headers: bearer_headers('wrong-token-with-at-least-32-characters'))
+    valid_response, valid = post('tools/list', headers: bearer_headers)
+
+    expect(missing_response.code).to eq('401')
+    expect(missing.dig('error', 'message')).to eq('Unauthorized')
+    expect(wrong_response.code).to eq('401')
+    expect(wrong.dig('error', 'message')).to eq('Unauthorized')
+    expect(valid_response.code).to eq('200')
+    expect(valid.dig('result', 'tools').map { |tool| tool['name'] }).to contain_exactly(
+      *Woods::Console::Server::EXECUTABLE_MODES.fetch(:embedded)
+    )
+  end
+
   it 'serves concurrent stateless real queries and shuts down on TERM' do
-    list_response, list = post('tools/list', headers: { 'Mcp-Session-Id' => 'stale-session' })
+    headers = bearer_headers.merge('Mcp-Session-Id' => 'stale-session')
+    list_response, list = post('tools/list', headers: headers)
     expect(list_response['mcp-session-id']).to be_nil
     expect(list.dig('result', 'tools').map { |tool| tool['name'] }).to contain_exactly(
       *Woods::Console::Server::EXECUTABLE_MODES.fetch(:embedded)
@@ -116,7 +138,7 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
     results = Array.new(4) do
       Thread.new do
         params = { name: 'console_count', arguments: { model: 'Post' } }
-        response, body = post('tools/call', params)
+        response, body = post('tools/call', params, headers: bearer_headers)
         { status: response.code, body: body }
       end
     end.map(&:value)

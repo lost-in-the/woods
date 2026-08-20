@@ -168,20 +168,22 @@ In an initializer (`config/initializers/woods.rb`):
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
-  config.console_mcp_path = '/mcp/console'       # default
+  config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
   config.console_redacted_columns = %w[password_digest api_key ssn]
 end
 ```
 
-The middleware registers itself automatically via the gem's Railtie when `console_mcp_enabled` is true. To mount it manually:
+Set `WOODS_CONSOLE_MCP_TOKEN` to a random value of at least 32 characters in
+the Rails server environment. The middleware stack registers automatically via
+the gem's Railtie and requires `Authorization: Bearer <token>` on every Console
+request. Missing or incorrect tokens receive `401 Unauthorized`.
 
-```ruby
-# config/application.rb
-config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
-```
+Do not mount `Woods::Console::RackMiddleware` by itself. The Railtie composes
+`OriginGuard`, `BearerAuth`, and the Console middleware in the supported order.
 
 Streamable HTTP is stateless by default. For a legacy client that still
-requires MCP session IDs, pass `stateless: false` explicitly on the middleware.
+requires MCP session IDs, a custom guarded mount may pass `stateless: false`;
+the default Railtie mount remains stateless.
 
 ### MCP Client Configuration
 
@@ -192,13 +194,16 @@ requires MCP session IDs, pass `stateless: false` explicitly on the middleware.
   "mcpServers": {
     "rails-console": {
       "type": "streamable-http",
-      "url": "http://localhost:3000/mcp/console"
+      "url": "http://localhost:3000/mcp/console",
+      "headers": {
+        "Authorization": "Bearer <same WOODS_CONSOLE_MCP_TOKEN value>"
+      }
     }
   }
 }
 ```
 
-For production or staging, use HTTPS and restrict the path with authentication middleware upstream.
+For production or staging, use HTTPS in addition to the mandatory bearer token.
 
 ### What Happens Under the Hood
 
@@ -603,20 +608,14 @@ To register them, set `console_embedded_read_tools = true` in `Woods.configure`:
 # config/initializers/woods.rb
 Woods.configure do |config|
   config.console_mcp_enabled           = true     # mount the Rack middleware via Railtie
-  config.console_mcp_path              = '/mcp/console'
+  config.console_mcp_token             = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
   config.console_embedded_read_tools   = true     # unlock console_sql / console_query
   config.console_redacted_columns      = %w[password_digest encrypted_password api_key token]
 end
 ```
 
-This flag flows through to both the Rack middleware (Option C) and the stdio transports (Options A and B) automatically. To override per-mount (e.g., enable it on one mount but not another), pass `embedded_read_tools:` directly:
-
-```ruby
-Rails.application.config.middleware.use \
-  Woods::Console::RackMiddleware,
-  path: '/mcp/console',
-  embedded_read_tools: true
-```
+This flag flows through to both the Railtie Rack middleware (Option C) and the
+stdio transports (Options A and B) automatically.
 
 Security posture with the flag on:
 

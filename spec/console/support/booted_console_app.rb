@@ -13,7 +13,7 @@ root = File.expand_path('../../dummy', __dir__)
 Woods.configuration = Woods::Configuration.new
 Woods.configure do |config|
   config.console_mcp_enabled = true
-  config.console_mcp_token = 'console-mcp-spec-token-32-characters'
+  config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN', 'console-mcp-spec-token-32-characters')
   config.console_embedded_read_tools = ENV.fetch('WOODS_CONSOLE_READ_TOOLS', '1') == '1'
   config.console_blocked_tables = %w[schema_migrations ar_internal_metadata]
 end
