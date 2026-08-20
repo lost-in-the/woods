@@ -141,11 +141,14 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
       unicode_units = units_v1.map(&:dup)
       unicode_units.first[:identifier] = 'CaféOrder'
       store.capture(manifest_v1, unicode_units)
+      # The identifier is spelled with a \u escape so the -e script stays pure
+      # ASCII: a child Ruby parses -e source in the locale encoding, and this
+      # suite must stay green under a US-ASCII locale (LANG=C).
       script = <<~RUBY
         require 'json'
         require 'woods/temporal/json_snapshot_store'
         store = Woods::Temporal::JsonSnapshotStore.new(dir: ARGV.fetch(0))
-        print JSON.generate(store.unit_history('CaféOrder'))
+        print JSON.generate(store.unit_history("Caf\\u00e9Order"))
       RUBY
 
       stdout, stderr, status = Open3.capture3(
