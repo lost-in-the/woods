@@ -136,11 +136,27 @@ config.vector_store_options = {
   collection: "woods",
   api_key:    ENV["QDRANT_API_KEY"],  # optional; omit for unauthenticated local instances
   dimensions: 1_536,                  # optional; pre-validates vector length client-side
+  distance:   "Cosine",               # Cosine, Dot, Euclid, or Manhattan; verified on reopen
   allow_private_hosts: true           # required for localhost/RFC1918 URLs — the SSRF guard blocks them by default
 }
 ```
 
 The adapter constructor takes these as keyword arguments (`Woods::Storage::VectorStore::Qdrant`); `Builder#build_vector_store` splats `vector_store_options` straight into it. Works identically whether your application database is MySQL or PostgreSQL — Qdrant is a separate service either way.
+
+When an installed `woods-mcp` process reopens `woods.json` without the host
+initializer, non-secret options such as collection, distance, table, schema,
+and dimensions come from the snapshot. Credentials and process-specific
+connections remain serve-time settings:
+
+- `OPENAI_API_KEY` supplies the embedding credential for OpenAI snapshots.
+- `WOODS_QDRANT_URL` overrides the stored Qdrant endpoint; `WOODS_QDRANT_API_KEY`
+  supplies its optional credential. Legacy snapshots without an endpoint must
+  set `WOODS_QDRANT_URL`.
+- `WOODS_PG_URL` is required to construct the Active Record connection for a
+  pgvector snapshot outside its host application.
+
+SQLite metadata is always reopened as `metadata.sqlite3` beneath the supplied
+index directory, never relative to the MCP process working directory.
 
 **Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point
 id, so the adapter cannot store a Woods identifier directly. It derives a

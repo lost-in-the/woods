@@ -32,7 +32,7 @@ RSpec.describe 'packaged gem' do
 
     unless ENV['WOODS_GEM_PATH']
       output, status = Open3.capture2e(
-        'gem', 'build', '--strict', '--output', @artifact, 'woods.gemspec',
+        Gem.ruby, '-S', 'gem', 'build', '--strict', '--output', @artifact, 'woods.gemspec',
         chdir: PackagedGemSpec::ROOT
       )
       raise output unless status.success?
@@ -120,7 +120,7 @@ RSpec.describe 'packaged gem' do
     before(:context) do
       @gem_home = File.join(@package_tmp, 'gem-home')
       output, status = Open3.capture2e(
-        'gem', 'install', '--local', '--ignore-dependencies', '--no-document',
+        Gem.ruby, '-S', 'gem', 'install', '--local', '--ignore-dependencies', '--no-document',
         '--install-dir', @gem_home, @artifact
       )
       raise output unless status.success?
@@ -139,12 +139,61 @@ RSpec.describe 'packaged gem' do
         'OPENAI_API_KEY' => nil,
         'OLLAMA_BASE_URL' => 'http://127.0.0.1:1',
         'PACKAGE_GEM_HOME' => @gem_home,
-        'PATH' => "#{File.join(@gem_home, 'bin')}#{File::PATH_SEPARATOR}#{ENV.fetch('PATH')}"
+        'PATH' => [File.join(@gem_home, 'bin'), File.dirname(Gem.ruby), ENV.fetch('PATH')]
+          .join(File::PATH_SEPARATOR)
       )
     end
 
     def run_installed(*command, chdir: @package_tmp)
       Open3.capture3(installed_env, *command, chdir: chdir)
+    end
+
+    def build_installed_preset_artifact(preset, index_dir)
+      FileUtils.cp_r(File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods', '.'), index_dir)
+      script = <<~'RUBY'
+        require 'woods'
+        require 'woods/builder'
+        require 'woods/index_artifact'
+        require 'woods/resolved_config'
+        require 'woods/storage/snapshotter'
+
+        preset, output_dir = ARGV
+        config = Woods::Builder.preset_config(preset.to_sym)
+        config.output_dir = output_dir
+        config.embedding_provider = :fake
+        config.embedding_options = { model: "#{preset}-installed", dimensions: 8 }
+        builder = Woods::Builder.new(config)
+        provider = builder.build_embedding_provider
+        vectors = builder.build_vector_store(dimensions: 8)
+        metadata = builder.build_metadata_store
+        vectors.store('User', provider.embed('User model account'), type: 'model', identifier: 'User')
+        metadata.store('User', type: 'model', identifier: 'User', source_code: 'class User; end')
+        artifact = Woods::IndexArtifact.new(output_dir)
+        resolved = Woods::ResolvedConfig.from_configuration(config, provider: provider)
+        dump = artifact.new_dump_dir
+        Woods::Storage::Snapshotter::Vector.dump(vectors, artifact, dump, resolved_config: resolved)
+        if config.metadata_store == :in_memory
+          Woods::Storage::Snapshotter::Metadata.dump(metadata, artifact, dump, resolved_config: resolved)
+        end
+        artifact.promote(dump)
+        artifact.write_config(resolved)
+      RUBY
+      stdout, stderr, status = run_installed('ruby', '-e', script, preset.to_s, index_dir)
+      expect_success(['ruby', '-e', 'build installed preset artifact'], stdout, stderr, status)
+    end
+
+    def assert_installed_semantic_reopen(index_dir)
+      transport = MCP::Client::Stdio.new(
+        command: File.join(@gem_home, 'bin/woods-mcp'), args: [index_dir], env: installed_env, read_timeout: 10
+      )
+      client = MCP::Client.new(transport: transport)
+      client.connect(client_info: { name: 'preset-reopen', version: '1.0' },
+                     protocol_version: '2026-07-28', mode: :modern)
+      result = client.call_tool(name: 'codebase_retrieve', arguments: { query: 'User model' })
+      expect(result.dig('result', 'isError')).to be(false)
+      expect(result.dig('result', 'structuredContent', 'text')).to include('User')
+    ensure
+      transport&.close
     end
 
     def expect_success(command, stdout, stderr, status)
@@ -360,6 +409,40 @@ RSpec.describe 'packaged gem' do
     ensure
       transport&.close
       expect(wait_thread).not_to be_alive if wait_thread
+    end
+
+    %i[local shared_filesystem].each do |preset|
+      it "reopens the #{preset} preset through installed woods-mcp from a clean cwd" do
+        index_dir = File.join(@package_tmp, "#{preset}-index")
+        FileUtils.mkdir_p(index_dir)
+        build_installed_preset_artifact(preset, index_dir)
+
+        assert_installed_semantic_reopen(index_dir)
+      end
+    end
+
+    { pgvector: 'WOODS_PG_URL', qdrant: 'WOODS_QDRANT_URL' }.each do |adapter, setting|
+      it "fails installed woods-mcp actionably when #{adapter} lacks #{setting}" do
+        index_dir = File.join(@package_tmp, "missing-#{adapter}")
+        FileUtils.mkdir_p(index_dir)
+        FileUtils.cp(
+          File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods/manifest.json'),
+          File.join(index_dir, 'manifest.json')
+        )
+        snapshot = {
+          schema_version: 1, gem_version: '2.0.0', created_at: Time.now.utc.iso8601,
+          embedding_provider: { class: 'Woods::Embedding::Provider::Fake', model: 'installed', dimension: 8 },
+          stores: { vector_store: adapter, metadata_store: 'in_memory', graph_store: 'in_memory' },
+          store_options: { vector_store: adapter == :qdrant ? { collection: 'woods', dimensions: 8 } : { dimensions: 8 } }
+        }
+        File.write(File.join(index_dir, 'woods.json'), JSON.pretty_generate(snapshot))
+
+        _stdout, stderr, status = run_installed(File.join(@gem_home, 'bin/woods-mcp'), index_dir)
+
+        expect(status).not_to be_success
+        expect(stderr).to include(setting)
+        expect(stderr).not_to include('NoMethodError', 'ArgumentError')
+      end
     end
 
     it 'drives the installed woods-mcp-http executable with the official Ruby client over a real socket' do

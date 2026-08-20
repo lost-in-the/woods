@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'open3'
-require 'rbconfig'
 require 'spec_helper'
 require 'tmpdir'
 require 'woods'
@@ -20,62 +18,13 @@ RSpec.describe 'Preset persistence contracts' do
     Woods.configuration = previous
   end
 
-  it 'reopens local preset metadata from a clean Ruby process' do
-    Dir.mktmpdir('woods-preset-persistence') do |dir|
-      config = Woods::Builder.preset_config(:local)
-      config.output_dir = dir
-      store = Woods::Builder.new(config).build_metadata_store
-      store.store('User', type: 'model', file_path: 'app/models/user.rb')
-
-      database = File.join(dir, 'metadata.sqlite3')
-      script = <<~RUBY
-        require 'json'
-        require 'woods'
-        require 'woods/storage/metadata_store'
-
-        store = Woods::Storage::MetadataStore::SQLite.new(database: ARGV.fetch(0))
-        print JSON.generate(store.find('User'))
-      RUBY
-
-      stdout, stderr, status = Open3.capture3(
-        RbConfig.ruby,
-        '-I', File.expand_path('../../lib', __dir__),
-        '-e', script,
-        database
-      )
-
-      expect(status).to be_success, stderr
-      expect(JSON.parse(stdout)).to include(
-        'type' => 'model',
-        'file_path' => 'app/models/user.rb'
-      )
-    end
-  end
-
-  {
-    local: :in_memory,
-    shared_filesystem: :in_memory,
-    postgresql: :pgvector,
-    production: :qdrant
-  }.each do |preset, expected_adapter|
+  %i[local shared_filesystem].each do |preset|
     it "persists, bootstraps, and retrieves through the #{preset} preset" do
       Dir.mktmpdir("woods-#{preset}-preset") do |dir|
         config = Woods::Builder.preset_config(preset)
         config.output_dir = dir
         config.embedding_provider = :fake
         config.embedding_options = { model: "#{preset}-fake", dimensions: 8 }
-
-        durable_vector_store = Woods::Storage::VectorStore::InMemory.new
-        case expected_adapter
-        when :pgvector
-          config.vector_store_options = { connection: Object.new }
-          durable_vector_store.define_singleton_method(:ensure_schema!) { true }
-          allow(Woods::Storage::VectorStore::Pgvector).to receive(:new).and_return(durable_vector_store)
-        when :qdrant
-          config.vector_store_options = { url: 'https://qdrant.example.test', collection: "woods_#{preset}" }
-          durable_vector_store.define_singleton_method(:ensure_collection!) { |dimensions:| dimensions }
-          allow(Woods::Storage::VectorStore::Qdrant).to receive(:new).and_return(durable_vector_store)
-        end
 
         builder = Woods::Builder.new(config)
         provider = builder.build_embedding_provider
@@ -110,13 +59,6 @@ RSpec.describe 'Preset persistence contracts' do
         expect(state.status).to eq(:hydrated)
         expect(result.sources).not_to be_empty
         expect(result.context).to include('User')
-        if expected_adapter == :pgvector
-          expect(Woods::Storage::VectorStore::Pgvector).to have_received(:new)
-            .with(connection: config.vector_store_options[:connection], dimensions: 8).at_least(:once)
-        elsif expected_adapter == :qdrant
-          expect(Woods::Storage::VectorStore::Qdrant).to have_received(:new)
-            .with(hash_including(dimensions: 8)).at_least(:once)
-        end
       end
     end
   end
