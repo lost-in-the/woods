@@ -129,7 +129,11 @@ module Woods
         end
 
         atomic_delete_if_equal(key, payload)
-        @backend.delete(activity_key(membership))
+        # Only tear down the activity key when the membership is genuinely no
+        # longer ours. A publish lost to a window race leaves the membership
+        # fully current, and deleting the live token's activity key here made
+        # the next TTL check retire the session and destroy committed records.
+        @backend.delete(activity_key(membership)) unless current_membership?(membership, current_epoch)
         nil
       end
 
@@ -213,24 +217,19 @@ module Woods
       def counter_floor(key, slot)
         return ring_sequence_floor(slot) if slot
 
-        unless counters_initialized?(key)
-          seed_sibling_counter(key)
-          return 0
-        end
-
-        key == epoch_key ? directory_epoch_floor : directory_sequence_floor
+        key == epoch_key ? epoch_recovery_floor : directory_sequence_floor
       end
 
-      # A fresh store has neither global counter; anything else is evidence of
-      # prior state and forces evidence-based recovery instead of a zero reset.
-      def counters_initialized?(key)
-        sibling = key == epoch_key ? index_sequence_key : epoch_key
-        !integer_value(@backend.read(sibling)).nil?
-      end
+      # A lost fence must never regress: any directory membership could be one
+      # clear_all already fenced (a crash between the epoch bump and slot
+      # retirement leaves it in place), so recovery lands one PAST the newest
+      # observed epoch. Live sessions at that epoch re-admit on their next
+      # record; cleared data stays cleared. An empty directory recovers to 0.
+      def epoch_recovery_floor
+        members = directory_slots.filter_map { |entry| entry.membership&.fetch('epoch') }
+        return 0 if members.empty?
 
-      def seed_sibling_counter(key)
-        sibling = key == epoch_key ? index_sequence_key : epoch_key
-        atomic_write_if_absent(sibling, 0)
+        members.max + 1
       end
 
       # Evidence floor for a slot counter. An occupied slot is scanned in full
@@ -249,10 +248,6 @@ module Woods
           sequences << occupant['record_floor']
         end
         [0, *sequences.compact].max
-      end
-
-      def directory_epoch_floor
-        directory_slots.filter_map { |entry| entry.membership&.fetch('epoch') }.max || 0
       end
 
       def directory_sequence_floor

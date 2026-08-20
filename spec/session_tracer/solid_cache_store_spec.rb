@@ -796,6 +796,39 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         .to eq(%w[third fourth])
     end
 
+    it 'keeps a live TTL session readable after a losing writer rolls back' do
+      now = 0
+      expiring = MockCache.new(clock: -> { now })
+      bounded = described_class.new(cache: expiring, expires_in: 10, max_requests_per_session: 1)
+      bounded.record('sess1', request_data.merge('action' => 'seed'))
+      increment_started = Queue.new
+      release_increment = Queue.new
+      expiring.after_increment = lambda do |key, value|
+        next if key == bounded.send(:index_sequence_key) || key == bounded.send(:epoch_key)
+        next unless value == 2
+
+        increment_started << true
+        release_increment.pop
+      end
+      loser = Thread.new { bounded.record('sess1', request_data.merge('action' => 'stalled')) }
+      Timeout.timeout(5) { increment_started.pop }
+      expiring.after_increment = nil
+      bounded.record('sess1', request_data.merge('action' => 'winner'))
+      release_increment << true
+      Timeout.timeout(5) { loser.join }
+
+      expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(['winner'])
+    end
+
+    it 'keeps cleared sessions fenced when the epoch counter is lost mid-clear' do
+      store.record('victim', request_data.merge('action' => 'secret'))
+      store.send(:increment!, store.send(:epoch_key))
+      cache.delete(store.send(:epoch_key))
+
+      expect(store.read('victim')).to eq([])
+      expect(store.sessions).to eq([])
+    end
+
     it 'repairs a lost directory slot so the session can be admitted again' do
       store.record('sess1', request_data.merge('action' => 'first'))
       membership = JSON.parse(cache.read(store.send(:active_key, 'sess1')))
