@@ -6,6 +6,9 @@ pkg/
 Gemfile.lock
 .bundle/
 
+# Node dependencies (the Inspector lockfile is committed for release audits)
+node_modules/
+
 # Test & coverage
 coverage/
 tmp/

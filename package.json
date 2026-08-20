@@ -1,0 +1,10 @@
+{
+  "name": "woods-release-audit",
+  "private": true,
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "2.2.0"
+  }
+}
