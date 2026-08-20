@@ -54,6 +54,7 @@ module Woods
         raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
 
         @unit_cache = {}
+        @unit_cache_signatures = {}
         @unit_cache_order = []
         @identifier_map = nil
         @auto_refresh = auto_refresh
@@ -169,6 +170,7 @@ module Woods
       # @return [void]
       def reload!
         @unit_cache = {}
+        @unit_cache_signatures = {}
         @unit_cache_order = []
         @identifier_map = nil
         @index_cache = {}
@@ -700,19 +702,24 @@ module Woods
       # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
+        path = @index_dir.join(type_dir, filename)
+        raise Errno::ENOENT, path.to_s unless path.file?
+
+        signature = unit_file_signature(path)
 
         cached = @cache_mutex.synchronize do
-          if @unit_cache.key?(cache_key)
+          if @unit_cache.key?(cache_key) && @unit_cache_signatures[cache_key] == signature
             # Move to end (most recently used)
             @unit_cache_order.delete(cache_key)
             @unit_cache_order.push(cache_key)
             @unit_cache[cache_key]
+          elsif @unit_cache.key?(cache_key)
+            @unit_cache.delete(cache_key)
+            @unit_cache_signatures.delete(cache_key)
+            @unit_cache_order.delete(cache_key)
           end
         end
         return cached if cached
-
-        path = @index_dir.join(type_dir, filename)
-        raise Errno::ENOENT, path.to_s unless path.file?
 
         data = JSON.parse(path.read)
 
@@ -721,13 +728,20 @@ module Woods
           if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
             oldest = @unit_cache_order.shift
             @unit_cache.delete(oldest)
+            @unit_cache_signatures.delete(oldest)
           end
 
           @unit_cache[cache_key] = data
+          @unit_cache_signatures[cache_key] = signature
           @unit_cache_order.delete(cache_key)
           @unit_cache_order.push(cache_key)
         end
         data
+      end
+
+      def unit_file_signature(path)
+        stat = path.stat
+        [stat.ino, stat.size, stat.mtime.to_r]
       end
 
       # Parse a JSON file relative to the index directory.

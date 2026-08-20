@@ -211,6 +211,9 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
       )
       wait_for_http(base, wait_thread, output)
       [base, stdin, output, wait_thread]
+    rescue StandardError
+      stop_http_server(wait_thread, stdin, output)
+      raise
     end
 
     def expect_policy_rejection(base, headers, client_info, protocol_version, type)
@@ -247,6 +250,18 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
     ensure
       transport&.close
       stop_http_server(wait_thread, stdin, output)
+    end
+
+    it 'reaps the HTTP child inside the spawn helper when readiness fails' do
+      child = nil
+      allow(self).to receive(:wait_for_http) do |_base, wait_thread, _output, **_options|
+        child = wait_thread
+        raise Timeout::Error, 'forced readiness timeout'
+      end
+
+      expect { start_http_server(gem_root, fixture_dir) }
+        .to raise_error(Timeout::Error, 'forced readiness timeout')
+      expect(child).not_to be_alive
     end
 
     it 'exercises auth, Origin, and Host policy through the supported headers API' do

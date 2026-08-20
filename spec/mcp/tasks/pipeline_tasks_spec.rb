@@ -7,6 +7,7 @@ require 'fileutils'
 require 'woods'
 require 'woods/dependency_graph'
 require 'woods/mcp/server'
+require 'woods/operator/pipeline_guard'
 
 # End-to-end: does a long-running pipeline tool actually hand back a durable
 # task handle, and does that handle survive the things it exists to survive?

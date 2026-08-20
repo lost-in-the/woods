@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'date'
 require 'securerandom'
 require 'time'
 require 'fileutils'
@@ -31,6 +32,7 @@ module Woods
       # exactly when its task record needs updating.
       class Store
         class CorruptRecordError < StandardError; end
+        class ProducerIdentityError < IOError; end
 
         # Subdirectory of the index directory holding one JSON file per task.
         DIRNAME = 'tasks'
@@ -68,10 +70,9 @@ module Woods
           #
           # @return [Hash]
           def to_h
-            {
+            wire = {
               taskId: id,
               status: status,
-              ttlMs: ttl_ms,
               pollIntervalMs: poll_interval_ms,
               createdAt: created_at,
               lastUpdatedAt: updated_at,
@@ -80,6 +81,8 @@ module Woods
               error: error,
               inputRequests: input_requests
             }.compact
+            wire[:ttlMs] = ttl_ms
+            wire
           end
 
           # On-disk shape: every field, snake_case, so a record round-trips
@@ -104,12 +107,15 @@ module Woods
         # @return [Task]
         def create!(tool:, ttl_ms: DEFAULT_TTL_MS, poll_interval_ms: DEFAULT_POLL_INTERVAL_MS)
           sweep_expired!
+          producer_identity = producer_identity_for(Process.pid)
+          raise ProducerIdentityError, 'Could not establish producer process identity.' unless producer_identity
+
           now = Time.now.utc.iso8601
           task = Task.new(
             id: SecureRandom.hex(16), tool: tool, status: 'working',
             created_at: now, updated_at: now, ttl_ms: ttl_ms,
             poll_interval_ms: poll_interval_ms, pid: Process.pid,
-            producer_identity: producer_identity_for(Process.pid)
+            producer_identity: producer_identity
           )
           write(task)
           task
@@ -332,12 +338,37 @@ module Woods
         end
 
         def producer_identity_for(pid)
-          output, status = Open3.capture2('ps', '-o', 'lstart=', '-p', Integer(pid).to_s)
-          identity = output.strip
-          return identity if status.success? && !identity.empty?
+          pid = Integer(pid)
+          return linux_process_identity(pid) if File.readable?('/proc/sys/kernel/random/boot_id')
 
-          nil
+          darwin_process_identity(pid)
         rescue SystemCallError, ArgumentError, TypeError
+          nil
+        end
+
+        def linux_process_identity(pid)
+          boot_id = File.read('/proc/sys/kernel/random/boot_id').strip
+          fields = File.read("/proc/#{pid}/stat").split
+          start_ticks = fields.fetch(21)
+          return if boot_id.empty? || start_ticks.empty?
+
+          "boot=#{boot_id};start_ticks=#{start_ticks}"
+        rescue Errno::ENOENT, IndexError
+          nil
+        end
+
+        def darwin_process_identity(pid)
+          environment = { 'LC_ALL' => 'C', 'LANG' => 'C', 'TZ' => 'UTC' }
+          started, ps_status = Open3.capture2(environment, '/bin/ps', '-o', 'lstart=', '-p', pid.to_s)
+          booted, boot_status = Open3.capture2('/usr/sbin/sysctl', '-n', 'kern.boottime')
+          return unless ps_status.success? && boot_status.success?
+
+          start_epoch = DateTime.strptime(started.strip, '%a %b %e %H:%M:%S %Y').to_time.to_i
+          boot_match = booted.match(/sec = (\d+), usec = (\d+)/)
+          return unless boot_match
+
+          "boot=#{boot_match[1]}.#{boot_match[2]};start=#{start_epoch}"
+        rescue Date::Error
           nil
         end
 

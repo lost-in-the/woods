@@ -125,6 +125,20 @@ RSpec.describe 'Index MCP resource contract' do
     expect_resource_not_found(read('codebase://unit/DoesNotExist'), 'codebase://unit/DoesNotExist')
   end
 
+  it 'rejects a warm cached unit after its manifest-known backing file is deleted' do
+    expect(read('codebase://unit/Post').dig('result', 'contents')).not_to be_empty
+    FileUtils.rm(File.join(index_dir, 'models/Post_a5554622.json'))
+
+    expect_corrupt_artifact(read('codebase://unit/Post'), 'codebase://unit/Post')
+  end
+
+  it 'rejects a warm cached unit after its manifest-known backing file changes to corrupt JSON' do
+    expect(read('codebase://unit/Post').dig('result', 'contents')).not_to be_empty
+    File.binwrite(File.join(index_dir, 'models/Post_a5554622.json'), '{not-json')
+
+    expect_corrupt_artifact(read('codebase://unit/Post'), 'codebase://unit/Post')
+  end
+
   it 'rejects malformed resource URIs instead of returning text success' do
     uris = [
       'codebase://unit',

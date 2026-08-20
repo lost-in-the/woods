@@ -194,6 +194,9 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
     )
     wait_for_http(base, wait_thread, output)
     [base, stdin, output, wait_thread]
+  rescue StandardError
+    stop_http_server(wait_thread, stdin, output)
+    raise
   end
 
   def inspector_http_server(base)
@@ -214,6 +217,17 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
 
     pending('Inspector 2.2.0 sends legacy logging/setLevel after negotiating modern 2026-07-28')
     expect(status).to be_success
+  end
+
+  it 'reaps the HTTP child inside the spawn helper when readiness fails' do
+    child = nil
+    allow(self).to receive(:wait_for_http) do |_base, wait_thread, _output|
+      child = wait_thread
+      raise Timeout::Error, 'forced readiness timeout'
+    end
+
+    expect { start_inspector_http }.to raise_error(Timeout::Error, 'forced readiness timeout')
+    expect(child).not_to be_alive
   end
 
   it 'validates stdio through Inspector 2.2.0 as an explicitly legacy smoke' do

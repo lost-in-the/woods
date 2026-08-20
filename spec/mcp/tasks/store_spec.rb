@@ -35,6 +35,28 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(task.producer_identity).not_to be_empty
     end
 
+    it 'establishes the same absolute identity with an empty PATH and changed TZ' do
+      original_path = ENV.fetch('PATH', nil)
+      original_tz = ENV.fetch('TZ', nil)
+      first = store.send(:producer_identity_for, Process.pid)
+      ENV['PATH'] = ''
+      ENV['TZ'] = 'Pacific/Honolulu'
+
+      expect(store.send(:producer_identity_for, Process.pid)).to eq(first)
+      expect(store.create!(tool: 'pipeline_extract').producer_identity).to eq(first)
+    ensure
+      ENV['PATH'] = original_path
+      ENV['TZ'] = original_tz
+    end
+
+    it 'fails before persistence when the OS identity cannot be established' do
+      allow(store).to receive(:producer_identity_for).and_return(nil)
+
+      expect { store.create!(tool: 'pipeline_extract') }
+        .to raise_error(described_class::ProducerIdentityError)
+      expect(Dir.glob(File.join(@index_dir, described_class::DIRNAME, '*.json'))).to be_empty
+    end
+
     # "The task must be durably created before sending the response" — otherwise
     # a client can receive a taskId the server has no record of.
     it 'persists the task before returning' do
@@ -261,6 +283,38 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
       expect(store.get(live.id).status).to eq('failed')
     end
+
+    it 'keeps the same live producer working across store restarts' do
+      live = store.create!(tool: 'pipeline_embed')
+
+      expect(described_class.new(@index_dir).get(live.id).status).to eq('working')
+    end
+
+    it 'marks a task failed after its exact producer process dies' do
+      child = Process.spawn('/bin/sleep', '30')
+      identity = store.send(:producer_identity_for, child)
+      task = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path)).merge('pid' => child, 'producer_identity' => identity)
+      File.write(path, JSON.generate(raw))
+      Process.kill('TERM', child)
+      Process.wait(child)
+
+      expect(described_class.new(@index_dir).get(task.id).status).to eq('failed')
+    ensure
+      if child
+        begin
+          Process.kill('KILL', child)
+        rescue Errno::ESRCH
+          nil
+        end
+        begin
+          Process.wait(child)
+        rescue Errno::ECHILD
+          nil
+        end
+      end
+    end
   end
 
   describe 'expiry' do
@@ -322,6 +376,12 @@ RSpec.describe Woods::MCP::Tasks::Store do
         createdAt: task.created_at,
         lastUpdatedAt: task.updated_at
       )
+    end
+
+    it 'emits required ttlMs when the value is explicitly null' do
+      task = store.create!(tool: 'pipeline_extract', ttl_ms: nil)
+
+      expect(task.to_h).to include(ttlMs: nil)
     end
 
     it 'omits result and error while still working' do
