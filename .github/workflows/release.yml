@@ -1,9 +1,16 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to publish (for example, v2.0.0)
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI workflow run ID for this tag
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -11,56 +18,55 @@ permissions:
 
 jobs:
   release-context:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     outputs:
-      should-release: ${{ steps.context.outputs.should-release }}
-      release-sha: ${{ steps.context.outputs.release-sha }}
-      tag: ${{ steps.context.outputs.tag }}
-      artifact-name: ${{ steps.context.outputs.artifact-name }}
-      gem-name: ${{ steps.context.outputs.gem-name }}
+      release-sha: ${{ steps.run.outputs.release-sha }}
+      tag: ${{ steps.run.outputs.tag }}
+      artifact-name: ${{ steps.run.outputs.artifact-name }}
+      gem-name: ${{ steps.release.outputs.gem-name }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Check out trusted release tooling
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Validate the named CI run through the GitHub API
+        id: run
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: script/validate-release-run
+      - name: Check out the exact tested SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+        with:
+          ref: ${{ steps.run.outputs.release-sha }}
           fetch-depth: 0
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
           ruby-version: '3.3'
-      - name: Locate the version tag at the tested SHA
-        id: context
+      - name: Validate release tag, history, changelog, and publication state
+        id: release
+        env:
+          RELEASE_MAIN_REF: origin/main
+          RELEASE_SHA: ${{ steps.run.outputs.release-sha }}
+          RELEASE_TAG: ${{ steps.run.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin main:refs/remotes/origin/main --tags
-          SHA="${{ github.event.workflow_run.head_sha }}"
+          git fetch --force --no-tags origin \
+            "refs/heads/main:refs/remotes/origin/main" \
+            "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          script/validate-release
           VERSION="$(ruby -Ilib -rwoods/version -e 'print Woods::VERSION')"
-          TAG="v${VERSION}"
-          TAG_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}" 2>/dev/null || true)"
-          echo "release-sha=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "artifact-name=woods-release-${SHA}" >> "$GITHUB_OUTPUT"
           echo "gem-name=woods-${VERSION}.gem" >> "$GITHUB_OUTPUT"
-          if [[ "$TAG_SHA" == "$SHA" ]]; then
-            echo "should-release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should-release=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Validate release tag, history, changelog, and publication state
-        if: steps.context.outputs.should-release == 'true'
-        env:
-          RELEASE_MAIN_REF: origin/main
-          RELEASE_SHA: ${{ steps.context.outputs.release-sha }}
-          RELEASE_TAG: ${{ steps.context.outputs.tag }}
-        run: script/validate-release
 
   package-test:
     needs: release-context
-    if: needs.release-context.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -87,7 +93,7 @@ jobs:
           path: dist
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.ci_run_id }}
       - name: Verify artifact SHA-256
         env:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
@@ -108,15 +114,8 @@ jobs:
 
   publish:
     needs: [release-context, package-test]
-    if: needs.release-context.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     environment: release
-    # GitHub keeps one running and only the latest pending job per group. That
-    # replacement is deliberate here: same-SHA reruns build identical bytes;
-    # after a tag move, only the candidate matching the freshly peeled tag can push.
-    concurrency:
-      group: release-${{ needs.release-context.outputs.tag }}
-      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
@@ -137,7 +136,7 @@ jobs:
           path: dist
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.ci_run_id }}
       - name: Verify artifact SHA-256
         env:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
@@ -153,6 +152,7 @@ jobs:
           RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
           RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
         run: |
+          set -euo pipefail
           script/verify-release-tag
           gem push "dist/${GEM_NAME}"
 

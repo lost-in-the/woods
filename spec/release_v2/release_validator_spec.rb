@@ -8,7 +8,9 @@ require 'tmpdir'
 
 RSpec.describe 'release validation' do
   let(:validator) { File.expand_path('../../script/validate-release', __dir__) }
+  let(:run_validator) { File.expand_path('../../script/validate-release-run', __dir__) }
   let(:tag_verifier) { File.expand_path('../../script/verify-release-tag', __dir__) }
+  let(:release_sha) { 'a' * 40 }
 
   def git(*args, chdir:)
     output, status = Open3.capture2e('git', *args, chdir: chdir)
@@ -69,6 +71,156 @@ RSpec.describe 'release validation' do
     }
 
     Open3.capture3(env, 'ruby', tag_verifier, chdir: repository)
+  end
+
+  def ci_run(overrides = {})
+    {
+      'id' => 12_345,
+      'workflow_id' => 678,
+      'conclusion' => 'success',
+      'event' => 'push',
+      'head_branch' => 'v2.0.0',
+      'head_sha' => release_sha,
+      'repository' => { 'full_name' => 'lost-in-the/woods' },
+      'head_repository' => { 'full_name' => 'lost-in-the/woods' }
+    }.merge(overrides)
+  end
+
+  def write_fake_gh(directory)
+    fake_bin = File.join(directory, 'bin')
+    FileUtils.mkdir_p(fake_bin)
+    gh = File.join(fake_bin, 'gh')
+    File.write(gh, <<~'RUBY')
+      #!/usr/bin/env ruby
+      endpoint = ARGV.fetch(-1)
+      File.open(ENV.fetch('GH_API_LOG'), 'a') { |file| file.puts(endpoint) }
+      case endpoint
+      when %r{/actions/runs/} then print ENV.fetch('GH_RUN_JSON')
+      when %r{/actions/workflows/ci\.yml\z} then print ENV.fetch('GH_WORKFLOW_JSON')
+      else
+        warn "unexpected endpoint: #{endpoint}"
+        exit 1
+      end
+    RUBY
+    FileUtils.chmod(0o755, gh)
+    fake_bin
+  end
+
+  def ci_run_env(directory, fake_bin, run, workflow)
+    {
+      'PATH' => "#{fake_bin}:#{ENV.fetch('PATH')}",
+      'CI_RUN_ID' => '12345',
+      'RELEASE_TAG' => 'v2.0.0',
+      'GITHUB_REPOSITORY' => 'lost-in-the/woods',
+      'GITHUB_OUTPUT' => File.join(directory, 'github-output'),
+      'GH_API_LOG' => File.join(directory, 'gh-api.log'),
+      'GH_RUN_JSON' => JSON.generate(run),
+      'GH_WORKFLOW_JSON' => JSON.generate(workflow)
+    }
+  end
+
+  def validate_ci_run(run: ci_run, workflow: { 'id' => 678 }, env: {})
+    Dir.mktmpdir('woods-release-run-validator') do |directory|
+      command_env = ci_run_env(directory, write_fake_gh(directory), run, workflow).merge(env)
+      command_env.delete_if { |_key, value| value.nil? }
+
+      stdout, stderr, status = Open3.capture3(command_env, 'ruby', run_validator)
+      outputs = File.exist?(command_env['GITHUB_OUTPUT']) ? File.read(command_env['GITHUB_OUTPUT']) : ''
+      calls = File.exist?(command_env['GH_API_LOG']) ? File.readlines(command_env['GH_API_LOG'], chomp: true) : []
+      return stdout, stderr, status, outputs, calls
+    end
+  end
+
+  it 'queries the named CI run and emits its exact SHA-scoped artifact context' do
+    _stdout, stderr, status, outputs, calls = validate_ci_run
+
+    expect(status).to be_success, stderr
+    expect(calls).to eq(
+      %w[
+        /repos/lost-in-the/woods/actions/runs/12345
+        /repos/lost-in-the/woods/actions/workflows/ci.yml
+      ]
+    )
+    expect(outputs.lines(chomp: true)).to contain_exactly(
+      "release-sha=#{release_sha}",
+      'tag=v2.0.0',
+      "artifact-name=woods-release-#{release_sha}"
+    )
+  end
+
+  it 'rejects missing dispatch inputs before querying GitHub' do
+    {
+      'CI_RUN_ID' => 'CI_RUN_ID is required',
+      'RELEASE_TAG' => 'RELEASE_TAG is required'
+    }.each do |name, message|
+      _stdout, stderr, status, _outputs, calls = validate_ci_run(env: { name => nil })
+
+      expect(status).not_to be_success
+      expect(stderr).to include(message)
+      expect(calls).to be_empty
+    end
+  end
+
+  it 'rejects an invalid CI run ID before querying GitHub' do
+    _stdout, stderr, status, _outputs, calls = validate_ci_run(env: { 'CI_RUN_ID' => 'latest' })
+
+    expect(status).not_to be_success
+    expect(stderr).to include('CI_RUN_ID must be a positive integer')
+    expect(calls).to be_empty
+  end
+
+  it 'rejects an invalid release tag before querying GitHub' do
+    _stdout, stderr, status, _outputs, calls = validate_ci_run(env: { 'RELEASE_TAG' => '../../main' })
+
+    expect(status).not_to be_success
+    expect(stderr).to include('RELEASE_TAG must be a version tag')
+    expect(calls).to be_empty
+  end
+
+  it 'rejects CI run data that does not describe the exact successful tag push' do
+    invalid_runs = [
+      [ci_run('id' => 99_999), 'returned run ID 99999, expected 12345'],
+      [ci_run('workflow_id' => 999), 'does not belong to .github/workflows/ci.yml'],
+      [ci_run('conclusion' => 'failure'), 'conclusion is failure, expected success'],
+      [ci_run('event' => 'pull_request'), 'event is pull_request, expected push'],
+      [ci_run('head_branch' => 'v1.6.1'), 'tested ref is v1.6.1, expected v2.0.0'],
+      [ci_run('head_sha' => 'short'), 'head SHA is not a full Git SHA'],
+      [ci_run('head_repository' => { 'full_name' => 'fork/woods' }), 'head repository is fork/woods'],
+      [ci_run('repository' => { 'full_name' => 'fork/woods' }), 'repository is fork/woods']
+    ]
+
+    invalid_runs.each do |run, message|
+      _stdout, stderr, status, _outputs, _calls = validate_ci_run(run: run)
+
+      expect(status).not_to be_success, message
+      expect(stderr).to include(message)
+    end
+  end
+
+  it 'rejects a stale named CI run after the release tag moves to a newer SHA' do
+    build_repository do |repository|
+      stale_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('commit', '--allow-empty', '-m', 'new tagged commit', chdir: repository)
+      current_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('tag', '-f', 'v2.0.0', chdir: repository)
+      git('update-ref', 'refs/remotes/origin/main', current_sha, chdir: repository)
+      git('checkout', '--detach', stale_sha, chdir: repository)
+
+      _stdout, context_stderr, context_status, outputs, _calls = validate_ci_run(
+        run: ci_run('head_sha' => stale_sha)
+      )
+      expect(context_status).to be_success, context_stderr
+      output = outputs.lines(chomp: true).to_h { |line| line.split('=', 2) }
+
+      _validator_stdout, validator_stderr, validator_status = validate(
+        repository,
+        tag: output.fetch('tag'),
+        sha: output.fetch('release-sha')
+      )
+
+      expect(validator_status).not_to be_success
+      expect(validator_stderr).to include("v2.0.0 resolves to #{current_sha}, not release SHA #{stale_sha}")
+    end
   end
 
   it 'accepts v2.0.0 at the exact main-reachable SHA with its dated changelog entry' do

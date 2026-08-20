@@ -6,10 +6,6 @@ require 'open3'
 require 'tmpdir'
 require 'yaml'
 
-module ReleaseWorkflowSpec
-  Candidate = Struct.new(:tag, :sha, :artifact_sha256, keyword_init: true)
-end
-
 RSpec.describe 'release workflow contract' do
   let(:root) { File.expand_path('../..', __dir__) }
   let(:ci) { YAML.safe_load_file(File.join(root, '.github/workflows/ci.yml'), aliases: true) }
@@ -28,37 +24,45 @@ RSpec.describe 'release workflow contract' do
     steps(job).select { |step| step.fetch('uses', '').start_with?('actions/download-artifact@') }
   end
 
-  def concurrency_group_for(candidate)
-    template = release.dig('jobs', 'publish', 'concurrency', 'group')
-    template.gsub('${{ needs.release-context.outputs.tag }}', candidate.tag)
-            .gsub('${{ needs.release-context.outputs.release-sha }}', candidate.sha)
-  end
-
-  def latest_pending_transition(running:, pending:, incoming:)
-    same_group = concurrency_group_for(pending) == concurrency_group_for(incoming)
-    return { running: running, pending: pending, replaced: nil } unless same_group
-
-    { running: running, pending: incoming, replaced: pending }
-  end
-
-  def pre_push_verifier_allows?(candidate, current_remote_tag_sha:)
-    candidate.sha == current_remote_tag_sha
-  end
-
-  it 'runs full CI for version tags before the release workflow can start' do
+  it 'requires an explicit tag and CI run ID without any automatic trigger or concurrency' do
     ci_trigger = ci.fetch('on') { ci.fetch(true) }
+    dispatch = release_trigger.fetch('workflow_dispatch')
+    inputs = dispatch.fetch('inputs')
 
     expect(ci_trigger.dig('push', 'tags')).to contain_exactly('v*')
-    expect(release_trigger.dig('workflow_run', 'workflows')).to contain_exactly('CI')
-    expect(release_trigger.dig('workflow_run', 'types')).to contain_exactly('completed')
+    expect(release_trigger.keys).to contain_exactly('workflow_dispatch')
+    expect(inputs.fetch('tag')).to include('required' => true, 'type' => 'string')
+    expect(inputs.fetch('ci_run_id')).to include('required' => true, 'type' => 'string')
+    expect(release).not_to have_key('concurrency')
+    expect(release.fetch('jobs').values).to all(satisfy { |job| !job.key?('concurrency') })
   end
 
-  it 'gates release context on successful full CI for its exact head SHA' do
+  it 'queries and validates the named successful tag CI run before repository validation' do
     context = release.fetch('jobs').fetch('release-context')
+    context_steps = steps(context)
+    tooling_checkout = context_steps.find { |step| step['name'] == 'Check out trusted release tooling' }
+    run_validation = context_steps.find { |step| step.fetch('run', '').include?('script/validate-release-run') }
+    checkout = context_steps.find do |step|
+      step.fetch('uses', '').start_with?('actions/checkout@') &&
+        step.dig('with', 'ref') == '${{ steps.run.outputs.release-sha }}'
+    end
+    release_validation = context_steps.find do |step|
+      step.fetch('run', '').lines.any? { |line| line.strip == 'script/validate-release' }
+    end
 
-    expect(context.fetch('if')).to include("workflow_run.conclusion == 'success'")
-    expect(run_commands(context)).to include('github.event.workflow_run.head_sha')
-    expect(run_commands(context)).to include('script/validate-release')
+    expect(context).not_to have_key('if')
+    expect(context.fetch('permissions')).to eq('actions' => 'read', 'contents' => 'read')
+    expect(tooling_checkout.dig('with', 'ref')).to eq('${{ github.event.repository.default_branch }}')
+    expect(run_validation.fetch('env')).to include(
+      'CI_RUN_ID' => '${{ inputs.ci_run_id }}',
+      'RELEASE_TAG' => '${{ inputs.tag }}',
+      'GITHUB_REPOSITORY' => '${{ github.repository }}'
+    )
+    expect(checkout.dig('with', 'ref')).to eq('${{ steps.run.outputs.release-sha }}')
+    expect(release_validation.fetch('env')).to include(
+      'RELEASE_SHA' => '${{ steps.run.outputs.release-sha }}',
+      'RELEASE_TAG' => '${{ steps.run.outputs.tag }}'
+    )
   end
 
   it 'builds exactly one strict artifact in CI and stores it under the exact SHA' do
@@ -102,11 +106,13 @@ RSpec.describe 'release workflow contract' do
     end
   end
 
-  it 'downloads only the triggering CI run artifact identified by its run ID and SHA' do
+  it 'downloads only the supplied validated CI run artifact identified by its run ID and SHA' do
     jobs = release.fetch('jobs')
+    context = jobs.fetch('release-context')
 
-    expect(run_commands(jobs.fetch('release-context'))).to include(
-      'artifact-name=woods-release-${SHA}'
+    expect(context.fetch('outputs')).to include(
+      'release-sha' => '${{ steps.run.outputs.release-sha }}',
+      'artifact-name' => '${{ steps.run.outputs.artifact-name }}'
     )
 
     %w[package-test publish].each do |job_name|
@@ -114,7 +120,7 @@ RSpec.describe 'release workflow contract' do
       expect(downloads.length).to eq(1), job_name
       inputs = downloads.fetch(0).fetch('with')
       expect(inputs.fetch('name')).to eq('${{ needs.release-context.outputs.artifact-name }}')
-      expect(inputs.fetch('run-id')).to eq('${{ github.event.workflow_run.id }}')
+      expect(inputs.fetch('run-id')).to eq('${{ inputs.ci_run_id }}')
       expect(inputs.fetch('github-token')).to eq('${{ github.token }}')
       expect(inputs.fetch('repository')).to eq('${{ github.repository }}')
     end
@@ -156,6 +162,7 @@ RSpec.describe 'release workflow contract' do
     publish = release.fetch('jobs').fetch('publish')
     commands = run_commands(publish)
 
+    expect(publish.fetch('environment')).to eq('release')
     expect(publish.dig('permissions', 'contents')).to eq('read')
     expect(commands.scan('script/verify-release-tag').length).to eq(1)
     expect(commands.index('script/verify-release-tag')).to be < commands.index('gem push')
@@ -163,51 +170,5 @@ RSpec.describe 'release workflow contract' do
       step.fetch('uses', '').include?('action-gh-release') || step.fetch('run', '').match?(/gh release/)
     end
     expect(release_actions).to be_empty
-  end
-
-  it 'scopes latest-pending replacement to validated publish candidates by tag' do
-    jobs = release.fetch('jobs')
-    publish = jobs.fetch('publish')
-
-    expect(release).not_to have_key('concurrency')
-    expect(publish.fetch('concurrency')).to eq(
-      'group' => 'release-${{ needs.release-context.outputs.tag }}',
-      'cancel-in-progress' => false
-    )
-    expect(publish.fetch('if')).to eq("needs.release-context.outputs.should-release == 'true'")
-    expect(jobs.except('publish').values).to all(satisfy { |job| !job.key?('concurrency') })
-
-    context_gate = jobs.fetch('release-context').fetch('if')
-    expect(context_gate).to include("workflow_run.conclusion == 'success'")
-    expect(context_gate).to include("workflow_run.event == 'push'")
-    expect(context_gate).to include('workflow_run.head_repository.full_name == github.repository')
-  end
-
-  it 'models latest-pending replacement as a fail-closed tag contract' do
-    publish = release.fetch('jobs').fetch('publish')
-    sha_a = 'a' * 40
-    sha_b = 'b' * 40
-    running = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.0', sha: sha_a, artifact_sha256: 'artifact-a')
-    same_sha = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.0', sha: sha_a, artifact_sha256: 'artifact-a')
-    moved_tag = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.0', sha: sha_b, artifact_sha256: 'artifact-b')
-    unrelated = ReleaseWorkflowSpec::Candidate.new(tag: 'v2.0.1', sha: sha_b, artifact_sha256: 'artifact-c')
-
-    expect(concurrency_group_for(running)).not_to eq(concurrency_group_for(unrelated))
-    expect(concurrency_group_for(running)).to eq(concurrency_group_for(moved_tag))
-
-    equivalent = latest_pending_transition(running: running, pending: running, incoming: same_sha)
-    expect(equivalent).to include(running: running, pending: same_sha, replaced: running)
-    expect(equivalent.fetch(:replaced).artifact_sha256).to eq(equivalent.fetch(:pending).artifact_sha256)
-
-    moved = latest_pending_transition(running: running, pending: same_sha, incoming: moved_tag)
-    expect(moved).to include(running: running, pending: moved_tag, replaced: same_sha)
-    expect(pre_push_verifier_allows?(moved.fetch(:replaced), current_remote_tag_sha: sha_b)).to be(false)
-    expect(pre_push_verifier_allows?(moved.fetch(:pending), current_remote_tag_sha: sha_b)).to be(true)
-
-    expect(publish.dig('concurrency', 'cancel-in-progress')).to be(false)
-    expect(moved.fetch(:running)).to equal(running)
-    expect(pre_push_verifier_allows?(running, current_remote_tag_sha: sha_b)).to be(false)
-    push_command = steps(publish).find { |step| step.fetch('run', '').include?('gem push') }.fetch('run')
-    expect(push_command.index('script/verify-release-tag')).to be < push_command.index('gem push')
   end
 end

@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'json'
+require 'open3'
+
+class ReleaseRunValidationError < StandardError; end
+
+def fail_validation(message)
+  raise ReleaseRunValidationError, message
+end
+
+def required_env(name)
+  value = ENV.fetch(name, '').strip
+  fail_validation("#{name} is required") if value.empty?
+
+  value
+end
+
+def github_api(endpoint)
+  stdout, stderr, status = Open3.capture3('gh', 'api', '--method', 'GET', endpoint)
+  fail_validation("GitHub API request failed for #{endpoint}: #{stderr.strip}") unless status.success?
+
+  JSON.parse(stdout)
+rescue Errno::ENOENT => e
+  fail_validation("GitHub API request failed: #{e.message}")
+rescue JSON::ParserError => e
+  fail_validation("GitHub API returned invalid JSON for #{endpoint}: #{e.message}")
+end
+
+begin
+  run_id = required_env('CI_RUN_ID')
+  tag = required_env('RELEASE_TAG')
+  repository = required_env('GITHUB_REPOSITORY')
+  output_path = required_env('GITHUB_OUTPUT')
+
+  fail_validation('CI_RUN_ID must be a positive integer') unless run_id.match?(/\A[1-9]\d*\z/)
+  fail_validation('RELEASE_TAG must be a version tag') unless tag.match?(/\Av[0-9A-Za-z][0-9A-Za-z._-]*\z/)
+  unless repository.match?(%r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z})
+    fail_validation('GITHUB_REPOSITORY must be an owner/name pair')
+  end
+
+  run = github_api("/repos/#{repository}/actions/runs/#{run_id}")
+  workflow = github_api("/repos/#{repository}/actions/workflows/ci.yml")
+
+  fail_validation("returned run ID #{run['id']}, expected #{run_id}") unless run['id'].to_s == run_id
+  unless run['workflow_id'].to_s == workflow['id'].to_s
+    fail_validation("CI run #{run_id} does not belong to .github/workflows/ci.yml")
+  end
+  unless run['conclusion'] == 'success'
+    fail_validation("CI run #{run_id} conclusion is #{run['conclusion']}, expected success")
+  end
+  fail_validation("CI run #{run_id} event is #{run['event']}, expected push") unless run['event'] == 'push'
+  unless run['head_branch'] == tag
+    fail_validation("CI run #{run_id} tested ref is #{run['head_branch']}, expected #{tag}")
+  end
+
+  release_sha = run['head_sha'].to_s
+  fail_validation("CI run #{run_id} head SHA is not a full Git SHA") unless release_sha.match?(/\A[0-9a-f]{40}\z/)
+
+  head_repository = run.dig('head_repository', 'full_name')
+  unless head_repository == repository
+    fail_validation("CI run #{run_id} head repository is #{head_repository}, expected #{repository}")
+  end
+  run_repository = run.dig('repository', 'full_name')
+  unless run_repository == repository
+    fail_validation("CI run #{run_id} repository is #{run_repository}, expected #{repository}")
+  end
+
+  File.open(output_path, 'a') do |output|
+    output.puts "release-sha=#{release_sha}"
+    output.puts "tag=#{tag}"
+    output.puts "artifact-name=woods-release-#{release_sha}"
+  end
+
+  puts "Validated CI run #{run_id} for #{tag} at #{release_sha}"
+rescue KeyError, ReleaseRunValidationError => e
+  warn "Release run validation failed: #{e.message}"
+  exit 1
+end

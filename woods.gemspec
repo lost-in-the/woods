@@ -51,7 +51,7 @@ Gem::Specification.new do |spec|
 
   # Runtime dependencies
   spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
-  spec.add_dependency 'msgpack', '>= 1.5'
+  spec.add_dependency 'msgpack', '>= 1.5', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower
@@ -61,5 +61,5 @@ Gem::Specification.new do |spec|
   # MCP serving). The only 6.1-introduced APIs touched (connection_db_config,
   # has_many_inversing) are respond_to?-guarded and degrade on 6.0. The Rails
   # version matrix in CI gates this floor. See #135 / #136.
-  spec.add_dependency 'railties', '>= 6.0'
+  spec.add_dependency 'railties', '>= 6.0', '< 9'
 end
