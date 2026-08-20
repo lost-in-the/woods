@@ -28,8 +28,23 @@ RSpec.describe Woods::MCP::Tasks::RequestCapture do
   end
 
   let(:opted_in_meta) do
-    { '_meta' => { 'io.modelcontextprotocol/clientCapabilities' =>
-      { 'extensions' => { 'io.modelcontextprotocol/tasks' => {} } } } }
+    {
+      '_meta' => {
+        'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+        'io.modelcontextprotocol/clientCapabilities' =>
+          { 'extensions' => { 'io.modelcontextprotocol/tasks' => {} } }
+      }
+    }
+  end
+
+  let(:legacy_opted_in_meta) do
+    {
+      '_meta' => {
+        'io.modelcontextprotocol/protocolVersion' => '2025-11-25',
+        'io.modelcontextprotocol/clientCapabilities' =>
+          { 'extensions' => { 'io.modelcontextprotocol/tasks' => {} } }
+      }
+    }
   end
 
   it 'exposes the opt-in to the tool handler' do
@@ -42,6 +57,14 @@ RSpec.describe Woods::MCP::Tasks::RequestCapture do
     seen = define_probe(server)
     call(server, { 'name' => 'probe', 'arguments' => {} })
     expect(seen).to eq([false])
+  end
+
+  it 'never exposes a legacy request that names the extension to the tool' do
+    seen = define_probe(server)
+    raw = call(server, { 'name' => 'probe', 'arguments' => {} }.merge(legacy_opted_in_meta))
+
+    expect(JSON.parse(raw).dig('error', 'code')).to eq(MCP::ErrorCodes::UNSUPPORTED_PROTOCOL_VERSION)
+    expect(seen).to be_empty
   end
 
   it 'is false outside of any request' do

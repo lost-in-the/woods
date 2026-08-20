@@ -1044,7 +1044,7 @@ module Woods
             next Woods::MCP::Server.send(
               :run_pipeline_in_background,
               kind: :extraction, tool: 'pipeline_extract', lock: lock,
-              task_store: task_store, respond: respond, runner: run_extraction,
+              task_store: task_store, respond: respond, respond_err: respond_err, runner: run_extraction,
               started_message: 'Extraction pipeline started in background thread'
             )
           end
@@ -1156,7 +1156,7 @@ module Woods
             next Woods::MCP::Server.send(
               :run_pipeline_in_background,
               kind: :embedding, tool: 'pipeline_embed', lock: lock,
-              task_store: task_store, respond: respond, runner: run_embed,
+              task_store: task_store, respond: respond, respond_err: respond_err, runner: run_embed,
               started_message: 'Embedding pipeline started in background thread'
             )
           end
@@ -1189,7 +1189,8 @@ module Woods
         # @param runner [Proc] the actual work
         # @param started_message [String] legacy fire-and-forget message
         # @return [Hash, MCP::Tool::Response]
-        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, runner:, started_message:)
+        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, respond_err:, runner:,
+                                       started_message:)
           task = create_pipeline_task(task_store, tool)
 
           Thread.new do
@@ -1218,26 +1219,28 @@ module Woods
           return Tasks::Extension.create_task_result(task) if task
 
           respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
+        rescue SystemCallError, IOError => e
+          lock&.release
+          Woods::MCP::Server.send(:pipeline_finish, kind)
+          respond_err.call(
+            'The task could not be durably recorded, so the pipeline was not started.',
+            code: :task_store_unavailable,
+            tool: tool,
+            exception: e.class.name
+          )
         end
 
         # Mint a task record, or return nil to take the legacy path.
         #
-        # Nil for the ordinary reason (the client did not opt in) and also when
-        # the record cannot be written: the index directory can legitimately be
-        # a read-only mount for a host-side reader, and a durable handle is an
-        # improvement to the answer, not a precondition for running the
-        # pipeline. Degrading to fire-and-forget keeps the tool working where
-        # raising would turn a read-only mount into a broken tool.
+        # Nil only when the client did not opt in. Once a client opts in, task
+        # durability is part of the response contract; a write failure propagates
+        # to {run_pipeline_in_background}, which fails closed before work starts.
         #
         # @return [Tasks::Store::Task, nil]
         def create_pipeline_task(task_store, tool)
           return nil unless task_store && Tasks::RequestCapture.tasks_requested?
 
           task_store.create!(tool: tool)
-        rescue SystemCallError, IOError => e
-          warn "[woods-mcp] could not record a task handle (#{e.class}); " \
-               'falling back to fire-and-forget for this run.'
-          nil
         end
 
         # What `tasks/get` hands back on success — shaped like the synchronous

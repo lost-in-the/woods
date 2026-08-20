@@ -72,6 +72,34 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
       expect(store.get(task.id)).to be_nil
     end
+
+    it 'returns nil for syntactically valid records missing required fields' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      File.write(path, JSON.generate('id' => task.id))
+
+      expect(store.get(task.id)).to be_nil
+    end
+
+    it 'returns nil when a record has malformed timestamps' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['created_at'] = 'not-a-timestamp'
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(task.id)).to be_nil
+    end
+
+    it 'returns nil when a record timestamp is not a string' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['created_at'] = 123
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(task.id)).to be_nil
+    end
   end
 
   describe 'terminal transitions' do
@@ -100,14 +128,7 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get(task.id).status).to eq('failed')
     end
 
-    it 'records a cancellation' do
-      store.cancel!(task.id)
-      expect(store.get(task.id).status).to eq('cancelled')
-    end
-
-    # `completed`, `failed` and `cancelled` are terminal — "once reached, the
-    # task's state does not change". A late-finishing thread must not overwrite
-    # a cancellation the client already observed.
+    # Terminal states never regress after a late producer update.
     it 'refuses to move a task out of a terminal state' do
       store.complete!(task.id, result: { 'ok' => true })
       store.fail!(task.id, message: 'too late')
@@ -153,6 +174,10 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
     it 'reports a working task whose process is gone as failed' do
       expect(store.get(task.id).status).to eq('failed')
+    end
+
+    it 'uses stable JSON-RPC error metadata when the producer process died' do
+      expect(store.get(task.id).error).to include('code' => described_class::JSON_RPC_INTERNAL_ERROR)
     end
 
     it 'explains why it failed' do
@@ -204,6 +229,30 @@ RSpec.describe Woods::MCP::Tasks::Store do
     it 'keeps a still-working task past its ttl' do
       task = store.create!(tool: 'pipeline_extract', ttl_ms: 0)
       expect(store.get(task.id)).not_to be_nil
+    end
+
+    it 'measures terminal task ttl from creation rather than the last update' do
+      task = store.create!(tool: 'pipeline_extract', ttl_ms: 10_000)
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['created_at'] = (Time.now.utc - 60).iso8601
+      File.write(path, JSON.generate(raw))
+
+      store.complete!(task.id, result: {})
+
+      expect(store.get(task.id)).to be_nil
+    end
+  end
+
+  describe 'concurrent polling' do
+    it 'returns the same durable result to concurrent readers' do
+      task = store.create!(tool: 'pipeline_extract')
+      store.complete!(task.id, result: { 'ok' => true })
+
+      results = 12.times.map { Thread.new { described_class.new(@index_dir).get(task.id)&.to_h } }.map(&:value)
+
+      expect(results).to all(eq(results.first))
+      expect(results.first[:result]).to eq('ok' => true)
     end
   end
 

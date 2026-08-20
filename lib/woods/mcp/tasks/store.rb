@@ -44,6 +44,7 @@ module Woods
 
         # Terminal states: "once reached, the task's state does not change".
         TERMINAL = %w[completed failed cancelled].freeze
+        STATUSES = (%w[working input_required] + TERMINAL).freeze
 
         # A task id is minted by {SecureRandom} and only ever compared against
         # this, so anything that could escape the directory is not a task id.
@@ -139,16 +140,6 @@ module Woods
           end
         end
 
-        # Cancellation is cooperative: this records the intent and the runner
-        # stops when it next checks. The work may still finish first, in which
-        # case the terminal-state guard keeps whichever landed first.
-        #
-        # @param id [String]
-        # @return [Task, nil] the updated record, or nil if it was already terminal
-        def cancel!(id)
-          transition!(id, 'cancelled')
-        end
-
         # Attach a progress message without leaving `working`.
         #
         # @param id [String]
@@ -166,15 +157,6 @@ module Woods
           end
         end
 
-        # Has a cancellation been recorded? Polled by a running task so
-        # cancellation can be honoured between units of work.
-        #
-        # @param id [String]
-        # @return [Boolean]
-        def cancelled?(id)
-          read(id)&.status == 'cancelled'
-        end
-
         private
 
         def path_for(id)
@@ -188,6 +170,8 @@ module Woods
           return nil unless path && File.exist?(path)
 
           data = JSON.parse(Woods::AtomicFile.read(path))
+          return nil unless valid_record?(data, id)
+
           Task.new(
             id: data['id'], tool: data['tool'], status: data['status'],
             created_at: data['created_at'], updated_at: data['updated_at'],
@@ -195,7 +179,7 @@ module Woods
             status_message: data['status_message'], result: data['result'],
             error: data['error'], pid: data['pid']
           )
-        rescue JSON::ParserError, SystemCallError
+        rescue JSON::ParserError, SystemCallError, TypeError
           # A torn or unreadable record is indistinguishable from an absent one
           # for every caller here, and raising would take down a tool call.
           nil
@@ -206,6 +190,30 @@ module Woods
         def write(task)
           FileUtils.mkdir_p(@dir)
           Woods::AtomicFile.write(path_for(task.id), JSON.pretty_generate(task.to_h_record))
+        end
+
+        def valid_record?(data, expected_id)
+          return false unless data.is_a?(Hash)
+          return false unless data['id'] == expected_id && data['id'].match?(SAFE_ID)
+          return false unless data['tool'].is_a?(String) && !data['tool'].empty?
+          return false unless STATUSES.include?(data['status'])
+          return false unless valid_time?(data['created_at']) && valid_time?(data['updated_at'])
+          return false unless data['ttl_ms'].nil? ||
+                              (data['ttl_ms'].is_a?(Integer) && data['ttl_ms'] >= 0)
+          return false unless data['poll_interval_ms'].nil? ||
+                              (data['poll_interval_ms'].is_a?(Integer) && data['poll_interval_ms'].positive?)
+          return false if data['status'] == 'working' && (!data['pid'].is_a?(Integer) || data['pid'] <= 0)
+
+          true
+        end
+
+        def valid_time?(value)
+          return false unless value.is_a?(String)
+
+          Time.iso8601(value)
+          true
+        rescue ArgumentError
+          false
         end
 
         # @return [Task, nil] the updated record, or nil when the transition was
@@ -244,7 +252,7 @@ module Woods
           return false unless task.terminal?
           return false if task.ttl_ms.nil?
 
-          Time.now.utc - Time.parse(task.updated_at) > (task.ttl_ms / 1000.0)
+          Time.now.utc - Time.parse(task.created_at) > (task.ttl_ms / 1000.0)
         rescue ArgumentError, TypeError
           false
         end
@@ -258,6 +266,7 @@ module Woods
 
           task.status = 'failed'
           task.error = {
+            'code' => JSON_RPC_INTERNAL_ERROR,
             'message' => "The process running this task did not survive (pid #{task.pid}). " \
                          'Re-run the tool; the index is unchanged unless the run had already committed.'
           }
