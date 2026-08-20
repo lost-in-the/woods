@@ -134,6 +134,20 @@ module Woods
       embedding_provider[:dimension].to_i
     end
 
+    # Model recorded in +embedding_provider[:model]+.
+    #
+    # {Storage::Snapshotter::Vector.dump} guards its call with
+    # +resolved_config.respond_to?(:model_name)+ before writing the WVF1
+    # header's model field — that guard passed for every {ResolvedConfig}
+    # even with no +#model_name+ defined, so the header's model was always
+    # +''+ and no dump could say which model produced it.
+    #
+    # @return [String, nil] the model name, or nil when absent
+    def model_name
+      model = embedding_provider[:model].to_s
+      model.empty? ? nil : model
+    end
+
     # Short string identifying this provider configuration, useful for log
     # messages and {ConfigMismatch} error text.
     #

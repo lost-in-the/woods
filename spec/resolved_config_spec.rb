@@ -95,6 +95,23 @@ RSpec.describe Woods::ResolvedConfig do
     end
   end
 
+  describe '#model_name' do
+    # Snapshotter::Vector.dump guards with resolved_config.respond_to?(:model_name)
+    # before writing the WVF1 header — that guard passed for every ResolvedConfig
+    # even though no #model_name method existed (respond_to_missing? was never
+    # defined either), so the header's model field was always ''.
+    it 'returns the model recorded in embedding_provider' do
+      config = described_class.from_hash(v1_hash)
+      expect(config.model_name).to eq('nomic-embed-text')
+    end
+
+    it 'returns nil when embedding_provider has no model' do
+      no_model = v1_hash.merge('embedding_provider' => v1_hash['embedding_provider'].except('model'))
+      config = described_class.from_hash(no_model)
+      expect(config.model_name).to be_nil
+    end
+  end
+
   describe '#provider_signature' do
     it 'includes provider class short name, model, and host' do
       config = described_class.from_hash(v1_hash)
