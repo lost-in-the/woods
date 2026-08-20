@@ -101,7 +101,8 @@ RSpec.describe 'release validation' do
       endpoint = ARGV.fetch(-1)
       File.open(ENV.fetch('GH_API_LOG'), 'a') { |file| file.puts(endpoint) }
       case endpoint
-      when %r{/actions/runs/} then print ENV.fetch('GH_RUN_JSON')
+      when %r{/actions/runs/\d+/artifacts\z} then print ENV.fetch('GH_ARTIFACTS_JSON')
+      when %r{/actions/runs/\d+\z} then print ENV.fetch('GH_RUN_JSON')
       when %r{/actions/workflows/ci\.yml\z} then print ENV.fetch('GH_WORKFLOW_JSON')
       else
         warn "unexpected endpoint: #{endpoint}"
@@ -121,7 +122,13 @@ RSpec.describe 'release validation' do
       'GITHUB_OUTPUT' => File.join(directory, 'github-output'),
       'GH_API_LOG' => File.join(directory, 'gh-api.log'),
       'GH_RUN_JSON' => JSON.generate(run),
-      'GH_WORKFLOW_JSON' => JSON.generate(workflow)
+      'GH_WORKFLOW_JSON' => JSON.generate(workflow),
+      'GH_ARTIFACTS_JSON' => JSON.generate(
+        'artifacts' => [
+          { 'id' => 987_654_321, 'name' => "woods-release-#{run['head_sha']}",
+            'digest' => "sha256:#{'c' * 64}" }
+        ]
+      )
     }
   end
 
@@ -145,13 +152,16 @@ RSpec.describe 'release validation' do
       %w[
         /repos/lost-in-the/woods/actions/runs/12345
         /repos/lost-in-the/woods/actions/workflows/ci.yml
+        /repos/lost-in-the/woods/actions/runs/12345/artifacts
       ]
     )
     expect(outputs.lines(chomp: true)).to contain_exactly(
       "release-sha=#{release_sha}",
       'ci-run-id=12345',
       'tag=v2.0.0',
-      "artifact-name=woods-release-#{release_sha}"
+      "artifact-name=woods-release-#{release_sha}",
+      'artifact-id=987654321',
+      "artifact-digest=sha256:#{'c' * 64}"
     )
   end
 

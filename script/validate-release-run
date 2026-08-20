@@ -67,11 +67,46 @@ begin
     fail_validation("CI run #{run_id} repository is #{run_repository}, expected #{repository}")
   end
 
+  # Task 10: resolve one immutable artifact identity here, once, so every
+  # downstream job (package-test, publish) downloads the literal same
+  # artifact object no matter what happens to the run afterward (e.g. a
+  # rerun re-uploading a same-named artifact). Name + run-id alone cannot
+  # guarantee that: two jobs resolving "the artifact named X in run Y" at
+  # different points in time can disagree if the run was rerun in between.
+  artifact_name = "woods-release-#{release_sha}"
+  artifacts = github_api("/repos/#{repository}/actions/runs/#{run_id}/artifacts").fetch('artifacts', [])
+  named_artifacts = artifacts.select { |candidate| candidate['name'] == artifact_name }
+
+  fail_validation("no artifact named #{artifact_name} exists in CI run #{run_id}") if named_artifacts.empty?
+  if named_artifacts.length > 1
+    fail_validation(
+      "#{named_artifacts.length} artifacts named #{artifact_name} exist in CI run #{run_id}, expected exactly one"
+    )
+  end
+
+  artifact = named_artifacts.first
+  artifact_id = artifact['id']
+  artifact_digest = artifact['digest'].to_s
+
+  # The GitHub API's digest covers the whole uploaded artifact archive (here:
+  # the gem plus its co-shipped .sha256 sidecar), not one file inside it, so
+  # it cannot be diffed byte-for-byte against the extracted gem. It is still
+  # required and fails closed when absent: an artifact GitHub can't attest a
+  # digest for is not one we trust on the strength of its own sidecar file.
+  if artifact_digest.strip.empty?
+    fail_validation(
+      "artifact #{artifact_name} (id #{artifact_id}) in CI run #{run_id} has no digest in the GitHub API " \
+      'response; refusing to fall back to the artifact-internal .sha256 file as the trust anchor'
+    )
+  end
+
   File.open(output_path, 'a') do |output|
     output.puts "release-sha=#{release_sha}"
     output.puts "ci-run-id=#{run_id}"
     output.puts "tag=#{tag}"
-    output.puts "artifact-name=woods-release-#{release_sha}"
+    output.puts "artifact-name=#{artifact_name}"
+    output.puts "artifact-id=#{artifact_id}"
+    output.puts "artifact-digest=#{artifact_digest}"
   end
 
   puts "Validated CI run #{run_id} for #{tag} at #{release_sha}"

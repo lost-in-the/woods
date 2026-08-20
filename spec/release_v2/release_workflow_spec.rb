@@ -122,17 +122,22 @@ RSpec.describe 'release workflow contract' do
     expect(context.fetch('outputs')).to include(
       'release-sha' => '${{ steps.run.outputs.release-sha }}',
       'ci-run-id' => '${{ steps.run.outputs.ci-run-id }}',
-      'artifact-name' => '${{ steps.run.outputs.artifact-name }}'
+      'artifact-name' => '${{ steps.run.outputs.artifact-name }}',
+      'artifact-id' => '${{ steps.run.outputs.artifact-id }}',
+      'artifact-digest' => '${{ steps.run.outputs.artifact-digest }}'
     )
 
     %w[package-test publish].each do |job_name|
-      downloads = download_steps(jobs.fetch(job_name))
+      job = jobs.fetch(job_name)
+      downloads = download_steps(job)
       expect(downloads.length).to eq(1), job_name
       inputs = downloads.fetch(0).fetch('with')
-      expect(inputs.fetch('name')).to eq('${{ needs.release-context.outputs.artifact-name }}')
+      expect(inputs).not_to have_key('name')
+      expect(inputs.fetch('artifact-ids')).to eq('${{ needs.release-context.outputs.artifact-id }}')
       expect(inputs.fetch('run-id')).to eq('${{ needs.release-context.outputs.ci-run-id }}')
       expect(inputs.fetch('github-token')).to eq('${{ github.token }}')
       expect(inputs.fetch('repository')).to eq('${{ github.repository }}')
+      expect(run_commands(job)).to include('test -n "${ARTIFACT_DIGEST}"')
     end
   end
 

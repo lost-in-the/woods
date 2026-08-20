@@ -23,6 +23,8 @@ jobs:
       ci-run-id: ${{ steps.run.outputs.ci-run-id }}
       tag: ${{ steps.run.outputs.tag }}
       artifact-name: ${{ steps.run.outputs.artifact-name }}
+      artifact-id: ${{ steps.run.outputs.artifact-id }}
+      artifact-digest: ${{ steps.run.outputs.artifact-digest }}
       gem-name: ${{ steps.release.outputs.gem-name }}
     steps:
       - name: Check out trusted default-branch SHA
@@ -83,11 +85,29 @@ jobs:
       - name: Download the exact release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ needs.release-context.outputs.artifact-name }}
+          artifact-ids: ${{ needs.release-context.outputs.artifact-id }}
           path: dist
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ needs.release-context.outputs.ci-run-id }}
+      # release-context resolved artifact-id once from the GitHub API's
+      # artifacts-by-run listing, so this and the publish job's download are
+      # structurally the same artifact object, not "whichever upload
+      # currently matches this name" — the fix for reruns replacing an
+      # artifact under an unchanged name between two jobs resolving it apart.
+      - name: Verify the resolved artifact digest is present
+        env:
+          ARTIFACT_DIGEST: ${{ needs.release-context.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          # Authoritative as an artifact-identity anchor, not as a byte
+          # comparison target: the API's digest covers the whole uploaded
+          # artifact archive (this gem plus its .sha256 sidecar), not one
+          # file inside it, so it cannot be diffed against the extracted gem
+          # below. release-context already fails closed if the API omitted
+          # it; this re-asserts that at download time rather than trusting
+          # output plumbing.
+          test -n "${ARTIFACT_DIGEST}"
       - name: Verify artifact SHA-256
         env:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
@@ -127,11 +147,21 @@ jobs:
       - name: Download the tested release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ needs.release-context.outputs.artifact-name }}
+          artifact-ids: ${{ needs.release-context.outputs.artifact-id }}
           path: dist
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ needs.release-context.outputs.ci-run-id }}
+      # Same resolved artifact-id as package-test's download above, so
+      # publish pushes the exact bytes package-test tested — see the
+      # comment on that job's equivalent step for why this checks presence
+      # rather than diffing the digest against the extracted gem.
+      - name: Verify the resolved artifact digest is present
+        env:
+          ARTIFACT_DIGEST: ${{ needs.release-context.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
       - name: Verify artifact SHA-256
         env:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
