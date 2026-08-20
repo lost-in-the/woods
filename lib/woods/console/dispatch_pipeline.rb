@@ -61,9 +61,9 @@ module Woods
         send_to_bridge(request)
       rescue TableGateError => e
         log_table_gate_rejection(args, e)
-        error_response(e.message)
+        error_response(scan_early_error(e.message))
       rescue InputContract::ValidationError, SqlValidationError, ForbiddenExpressionError => e
-        error_response(e.message)
+        error_response(scan_early_error(e.message))
       end
 
       private
@@ -91,6 +91,10 @@ module Woods
         scanned, counts = @ctx.scan(result)
         log_credential_hits(request, counts) unless counts.empty?
         scanned
+      end
+
+      def scan_early_error(message)
+        scan_for_credentials(message, 'tool' => @tool_name.delete_prefix('console_'))
       end
 
       def log_credential_hits(request, counts)

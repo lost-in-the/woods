@@ -187,6 +187,28 @@ RSpec.describe Woods::Console::DispatchPipeline do
       expect(response.content.first[:text]).to eq('bad sql')
     end
 
+    it 'credential-scans errors raised before an executor request exists' do
+      credential = 'sk_live_abcdefghijklmnopqrstuvwx'
+      raising_handler = lambda do |_args|
+        raise Woods::Console::SqlValidationError, "invalid SQL near #{credential}"
+      end
+      scanner = Woods::Console::CredentialScanner.new
+      response_ctx = Woods::Console::ResponseContext.build(credential_scanner: scanner)
+      logger = recording_logger_class.new
+      pipeline = described_class.new(
+        tool_name: 'console_sql', handler: raising_handler, properties: {},
+        conn_mgr: conn_mgr.new(ok_result), ctx: response_ctx, logger: logger
+      )
+
+      response = pipeline.call({})
+
+      expect(response).to be_error
+      expect(response.content.first[:text]).to include('[REDACTED]')
+      expect(response.content.first[:text]).not_to include(credential)
+      event = logger.events.find { |entry| entry[:event] == 'console.credential_scan.hits' }
+      expect(event.dig(:payload, :tool)).to eq('sql')
+    end
+
     it 'translates ConnectionError during dispatch into an error response' do
       exploding_conn = Class.new do
         def send_request(_request)
