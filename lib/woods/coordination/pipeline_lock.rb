@@ -27,6 +27,18 @@ module Woods
     class PipelineLock
       DEFAULT_STALE_TIMEOUT = 3600 # 1 hour
 
+      # The transaction-guard filename for a lock of +name+, exposed so
+      # cleanup code that empties a lock directory (woods:clean) can skip the
+      # guard during its sweep — deleting a flock'd guard out from under a
+      # contender's critical section would split the flock across two inodes —
+      # and remove it only after the lock is released.
+      #
+      # @param name [String]
+      # @return [String]
+      def self.guard_filename(name)
+        ".#{name}.lock.guard"
+      end
+
       # @param lock_dir [String] Directory for lock files
       # @param name [String] Lock name (used as filename prefix)
       # @param stale_timeout [Integer] Seconds after which a lock is considered stale
@@ -193,7 +205,7 @@ module Woods
       #
       # @return [String]
       def guard_path
-        @guard_path ||= File.join(canonical_lock_dir, ".#{@name}.lock.guard")
+        @guard_path ||= File.join(canonical_lock_dir, self.class.guard_filename(@name))
       end
 
       # @return [String] the lock directory's real path when it exists,

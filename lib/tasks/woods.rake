@@ -139,26 +139,38 @@ namespace :woods do
       return :refused
     end
 
+    lock_name = Woods::Watch::Daemon::LOCK_NAME
     woods_with_extraction_lock(output_dir, wait: wait) do
-      lock_file = output_dir.join("#{Woods::Watch::Daemon::LOCK_NAME}.lock")
-      output_dir.children.each do |entry|
-        next if entry == lock_file
-
-        FileUtils.rm_rf(entry)
-      end
+      woods_sweep_index_dir(output_dir, lock_name)
     end
 
-    # The lock was released (and its file removed) above, so the directory
-    # should now be empty. Another writer may legitimately have recreated
-    # content between release and here — a non-empty directory is left alone
-    # rather than forced.
-    begin
-      Dir.rmdir(output_dir)
-    rescue SystemCallError
-      nil
-    end
-
+    # The lock was released (and its file removed) above; drop the guard so
+    # the directory can empty, then remove the now-empty directory. Another
+    # writer may legitimately have recreated content between release and here
+    # — a non-empty directory is left alone rather than forced.
+    woods_remove_if_empty(output_dir, lock_name)
     :cleaned
+  end
+
+  # Delete every index artifact except the lock file and its transaction
+  # guard. The guard lives inside the lock directory and a contender may hold
+  # its flock right now — deleting it mid-sweep would split the flock across
+  # two inodes and defeat the mutual exclusion it provides.
+  def woods_sweep_index_dir(output_dir, lock_name)
+    preserved = [
+      output_dir.join("#{lock_name}.lock"),
+      output_dir.join(Woods::Coordination::PipelineLock.guard_filename(lock_name))
+    ]
+    output_dir.children.each do |entry|
+      FileUtils.rm_rf(entry) unless preserved.include?(entry)
+    end
+  end
+
+  def woods_remove_if_empty(output_dir, lock_name)
+    FileUtils.rm_f(output_dir.join(Woods::Coordination::PipelineLock.guard_filename(lock_name)))
+    Dir.rmdir(output_dir)
+  rescue SystemCallError
+    nil
   end
 
   # Does a unit's recorded file_path point at anything in THIS environment?
