@@ -92,7 +92,8 @@ RSpec.describe 'MCP CLI integration' do
 
   describe 'woods-mcp Ruby binary' do
     it 'pins only the protocol version on the built server configuration' do
-      source = File.read(ruby_bin)
+      # encoding: pinned so the multibyte executable source scans under LANG=C
+      source = File.read(ruby_bin, encoding: Encoding::UTF_8)
 
       expect(source).to include("server.configuration.protocol_version = ENV['MCP_PROTOCOL_VERSION']")
       expect(source).not_to match(/server\.configuration\s*=/)

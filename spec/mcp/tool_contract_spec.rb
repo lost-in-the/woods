@@ -536,7 +536,8 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def inventory_rows
-    JSON.parse(File.read(inventory_path)).dig('index_mcp', 'tools')
+    # encoding: pinned so the multibyte inventory JSON parses under LANG=C
+    JSON.parse(File.read(inventory_path, encoding: Encoding::UTF_8)).dig('index_mcp', 'tools')
   end
 
   def assert_semantic_result(name, contract, result)
