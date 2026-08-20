@@ -561,6 +561,28 @@ RSpec.describe Woods::Retriever do
       expect(result.trace.elapsed_ms).to be_a(Numeric)
       expect(result.trace.elapsed_ms).to be >= 0
     end
+
+    it 'carries skipped_missing_metadata through from the assembled context' do
+      stale_assembled_context = Woods::Retrieval::AssembledContext.new(
+        context: assembled_context.context,
+        tokens_used: 120,
+        budget: 8000,
+        sources: [],
+        sections: [],
+        skipped_missing_metadata: 1
+      )
+      allow(assembler_double).to receive(:assemble).and_return(stale_assembled_context)
+
+      result = retriever.retrieve('How does the User model work?')
+
+      expect(result.trace.skipped_missing_metadata).to eq(1)
+    end
+
+    it 'reports zero skipped_missing_metadata when the assembler resolved everything' do
+      result = retriever.retrieve('How does the User model work?')
+
+      expect(result.trace.skipped_missing_metadata).to eq(0)
+    end
   end
 
   # ── #build_structural_context (private) ──────────────────────────

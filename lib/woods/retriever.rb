@@ -50,8 +50,14 @@ module Woods
     ).freeze
 
     # Diagnostic trace for retrieval quality analysis.
+    #
+    # +skipped_missing_metadata+ carries {Retrieval::ContextAssembler}'s count
+    # of candidates dropped because the metadata store had no record for
+    # their identifier (a stale vector). See +RetrievalResult+'s docstring
+    # for how callers should read it alongside +sources+.
     RetrievalTrace = Struct.new(:classification, :strategy, :candidate_count,
                                 :ranked_count, :tokens_used, :elapsed_ms,
+                                :skipped_missing_metadata,
                                 keyword_init: true)
 
     # The result of a retrieval operation.
@@ -357,7 +363,8 @@ module Woods
         candidate_count: execution_result.candidates.size,
         ranked_count: filtered.size,
         tokens_used: assembled.tokens_used,
-        elapsed_ms: elapsed_ms
+        elapsed_ms: elapsed_ms,
+        skipped_missing_metadata: assembled.skipped_missing_metadata.to_i
       )
     end
 

@@ -765,6 +765,7 @@ module Woods
         def define_retrieve_tool(server, retriever, respond, respond_err)
           coerce_int = method(:coerce_integer)
           coerce = method(:coerce_array)
+          stale_check = method(:stale_index_result?)
           server.define_tool(
             name: 'codebase_retrieve',
             description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
@@ -832,6 +833,15 @@ module Woods
                 types: types,
                 exclude_types: exclude_types
               )
+              if stale_check.call(result)
+                next respond_err.call(
+                  'The vector index appears stale: matches were found but their source data is ' \
+                  'missing (likely a deleted or renamed unit). Re-run `woods:embed` (or ' \
+                  '`woods:embed_incremental`) to refresh the index, then retry.',
+                  code: :stale_index,
+                  tool: 'codebase_retrieve'
+                )
+              end
               respond.call(result.context)
             else
               respond_err.call(
@@ -846,6 +856,24 @@ module Woods
               )
             end
           end
+        end
+
+        # Detect a stale vector index: candidates matched the query but every
+        # one of them pointed at a unit the metadata store no longer has
+        # (deleted/renamed since the last embed). Distinguishes that case
+        # from a genuine "no matches" so the tool can say what happened
+        # instead of returning near-empty context as clean success.
+        #
+        # @param result [Woods::Retriever::RetrievalResult] (or a test double
+        #   with the same shape — +trace+ may be absent/nil on older doubles)
+        # @return [Boolean]
+        def stale_index_result?(result)
+          trace = result.respond_to?(:trace) ? result.trace : nil
+          return false unless trace
+
+          trace.ranked_count.to_i.positive? &&
+            trace.skipped_missing_metadata.to_i.positive? &&
+            Array(result.sources).empty?
         end
 
         def define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)

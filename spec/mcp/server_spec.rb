@@ -613,8 +613,12 @@ RSpec.describe Woods::MCP::Server do
     end
 
     context 'with retriever configured' do
+      let(:mock_result_struct) do
+        Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace, keyword_init: true)
+      end
+
       let(:mock_result) do
-        Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, keyword_init: true).new(
+        mock_result_struct.new(
           context: "## User (model)\nclass User < ApplicationRecord\nend",
           sources: [{ identifier: 'User', type: 'model' }],
           classification: nil,
@@ -670,6 +674,52 @@ RSpec.describe Woods::MCP::Server do
         text = response_text(response)
         expect(text).to include('User (model)')
         expect(text).to include('ApplicationRecord')
+      end
+
+      context 'when every matched candidate is missing from the metadata store (stale index)' do
+        let(:mock_result) do
+          mock_result_struct.new(
+            context: 'Codebase: 12 searchable entries (2 model entries).',
+            sources: [],
+            classification: nil,
+            strategy: :vector,
+            tokens_used: 20,
+            budget: 8000,
+            trace: Woods::Retriever::RetrievalTrace.new(ranked_count: 2, skipped_missing_metadata: 2)
+          )
+        end
+
+        it 'returns a typed, actionable error instead of empty success text' do
+          response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model')
+
+          expect(response.error?).to be(true)
+          text = response_text(response)
+          expect(text).to include('stale')
+          expect(text).to include('woods:embed')
+          expect(response.meta[:error_code]).to eq(:stale_index)
+        end
+      end
+
+      context 'when candidates matched and some resolved (not stale)' do
+        let(:mock_result) do
+          mock_result_struct.new(
+            context: "## User (model)\nclass User < ApplicationRecord\nend",
+            sources: [{ identifier: 'User', type: 'model' }],
+            classification: nil,
+            strategy: :vector,
+            tokens_used: 150,
+            budget: 8000,
+            trace: Woods::Retriever::RetrievalTrace.new(ranked_count: 2, skipped_missing_metadata: 1)
+          )
+        end
+
+        it 'returns the context unchanged rather than the stale-index error' do
+          response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model')
+
+          expect(response.error?).to be(false)
+          text = response_text(response)
+          expect(text).to include('User (model)')
+        end
       end
     end
   end

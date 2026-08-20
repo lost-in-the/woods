@@ -165,6 +165,36 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       expect(result.context).to include('FOUND_CONTENT')
       source_ids = result.sources.map { |s| s[:identifier] }
       expect(source_ids).not_to include('Missing')
+      expect(result.skipped_missing_metadata).to eq(1)
+    end
+
+    it 'counts every candidate as skipped when the metadata store has nothing for any of them' do
+      allow(metadata_store).to receive(:find).with('StaleOne').and_return(nil)
+      allow(metadata_store).to receive(:find).with('StaleTwo').and_return(nil)
+
+      result = assembler.assemble(
+        candidates: [
+          candidate(identifier: 'StaleOne', score: 0.9),
+          candidate(identifier: 'StaleTwo', score: 0.8)
+        ],
+        classification: classification
+      )
+
+      expect(result.sources).to eq([])
+      expect(result.skipped_missing_metadata).to eq(2)
+    end
+
+    it 'reports zero skipped when every candidate resolves' do
+      allow(metadata_store).to receive(:find).with('Found').and_return(
+        unit_data(identifier: 'Found', source_code: 'FOUND_CONTENT')
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'Found', score: 0.8)],
+        classification: classification
+      )
+
+      expect(result.skipped_missing_metadata).to eq(0)
     end
   end
 

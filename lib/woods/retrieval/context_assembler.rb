@@ -91,6 +91,7 @@ module Woods
         sections = []
         sources = []
         tokens_used = 0
+        @skipped_missing_metadata = 0
 
         # Collapse +User#chunk_0+, +User#chunk_1+, … back to their base unit
         # BEFORE metadata lookup and section assembly. Chunk IDs are an
@@ -111,7 +112,7 @@ module Woods
         # 3. Primary, supporting, and framework sections
         add_result_sections(sections, sources, candidates, budgets)
 
-        build_result(sections, sources, effective_budget)
+        build_result(sections, sources, effective_budget, @skipped_missing_metadata)
       end
 
       private
@@ -256,7 +257,14 @@ module Woods
       # Append a single candidate to the section. Returns updated tokens_used, or nil to stop.
       def append_candidate(parts, sources, candidate, budget, tokens_used)
         unit = @unit_cache[candidate.identifier]
-        return tokens_used unless unit
+        unless unit
+          # Vector search matched an identifier the metadata store no longer
+          # has (a stale vector for a deleted/renamed unit). Counted so
+          # callers can distinguish "nothing matched" from "matches existed
+          # but the index is stale" instead of a silent empty section.
+          @skipped_missing_metadata += 1
+          return tokens_used
+        end
 
         text = format_unit(unit, candidate)
         tokens = estimate_tokens(text)
@@ -375,20 +383,29 @@ module Woods
       # @param sections [Array<Hash>] Assembled sections
       # @param sources [Array<Hash>] Source attributions
       # @param effective_budget [Integer] The budget actually used for assembly
+      # @param skipped_missing_metadata [Integer] Candidates dropped because the
+      #   metadata store had no record for their identifier (stale vector)
       # @return [AssembledContext]
-      def build_result(sections, sources, effective_budget)
+      def build_result(sections, sources, effective_budget, skipped_missing_metadata)
         context = sections.map { |s| s[:content] }.join("\n\n---\n\n")
         AssembledContext.new(
           context: context,
           tokens_used: estimate_tokens(context),
           budget: effective_budget,
           sources: sources.uniq,
-          sections: sections.map { |s| s[:section] }
+          sections: sections.map { |s| s[:section] },
+          skipped_missing_metadata: skipped_missing_metadata
         )
       end
     end
 
     # Result of context assembly.
-    AssembledContext = Struct.new(:context, :tokens_used, :budget, :sources, :sections, keyword_init: true)
+    #
+    # +skipped_missing_metadata+ counts candidates whose identifier had no
+    # entry in the metadata store — a stale vector left behind by a deleted
+    # or renamed unit. A nonzero count alongside empty +sources+ means the
+    # index needs re-embedding, not that the query had no matches.
+    AssembledContext = Struct.new(:context, :tokens_used, :budget, :sources, :sections,
+                                  :skipped_missing_metadata, keyword_init: true)
   end
 end
