@@ -271,6 +271,44 @@ RSpec.describe Woods::Obsidian::VaultExporter do
     end
   end
 
+  describe 'path traversal safety' do
+    it 'sanitizes an unknown node type used as a fallback directory so a note stays inside the vault' do
+      graph['nodes']['Evil'] = { 'type' => '../../escape' }
+      units['Evil'] = { 'identifier' => 'Evil', 'type' => '../../escape', 'metadata' => {} }
+      allow(reader).to receive(:list_units).and_return(index_entries + [{ 'identifier' => 'Evil' }])
+
+      exporter.export_all
+
+      parent = File.dirname(@vault)
+      expect(Dir.glob(File.join(parent, '*')).map { |f| File.basename(f) }).to eq(['vault'])
+      escaped = Dir.glob(File.join(parent, '**', 'Evil.md')).reject { |f| f.start_with?(@vault) }
+      expect(escaped).to be_empty
+
+      note_path = Dir.glob(File.join(@vault, '**', 'Evil.md')).first
+      expect(note_path).not_to be_nil
+      dir_component = Pathname.new(note_path).relative_path_from(Pathname.new(@vault)).dirname.to_s
+      expect(dir_component).not_to include('..')
+      expect(dir_component).not_to include('/')
+    end
+
+    it 'refuses (via the write guard) to write a path that resolves outside the vault root' do
+      exp = exporter
+      outside = Pathname.new(File.join(File.dirname(@vault), 'escaped.md'))
+
+      expect { exp.send(:safe_write, outside, 'evil') }
+        .to raise_error(Woods::Obsidian::PathTraversalError)
+      expect(File).not_to exist(outside)
+    end
+
+    it 'allows the write guard to write a path that resolves inside the vault root' do
+      exp = exporter
+      inside = exp.instance_variable_get(:@vault).join('ok.md')
+
+      expect { exp.send(:safe_write, inside, 'fine') }.not_to raise_error
+      expect(File.read(inside)).to eq('fine')
+    end
+  end
+
   describe 'foreign-vault safety' do
     it 'writes notes additively but skips config and sweep when the vault is foreign' do
       FileUtils.mkdir_p(@vault)
