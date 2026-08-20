@@ -12,7 +12,8 @@ module Woods
     # Sessions are stored as individual files in a configurable directory:
     #   {base_dir}/{session_id}.jsonl
     #
-    # Append-only with file locking for concurrency safety. Zero external dependencies.
+    # Bounded JSONL history replaced atomically under a cross-process file lock.
+    # Zero external dependencies.
     #
     # @example
     #   store = FileStore.new(base_dir: "tmp/woods/sessions")
@@ -38,7 +39,7 @@ module Woods
         FileUtils.mkdir_p(@base_dir)
       end
 
-      # Append a request record to a session's JSONL file.
+      # Add a request record to a bounded session JSONL history.
       #
       # Uses file locking (LOCK_EX) for concurrency safety.
       #
