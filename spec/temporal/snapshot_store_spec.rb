@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'sqlite3'
+require 'timeout'
 require 'woods/db/migrator'
 require 'woods/temporal/snapshot_store'
 
@@ -195,6 +196,79 @@ RSpec.describe Woods::Temporal::SnapshotStore do
         expect(verifier.get_first_value('SELECT COUNT(*) FROM woods_snapshot_units')).to eq(6)
       ensure
         connections&.each(&:close)
+      end
+    end
+
+    it 'serializes a second connection before it can read the previous snapshot' do
+      Dir.mktmpdir('woods-temporal-barrier') do |dir|
+        database = File.join(dir, 'temporal.sqlite3')
+        setup = SQLite3::Database.new(database)
+        Woods::Db::Migrator.new(connection: setup).migrate!
+        setup.close
+        first_read, first_ready = IO.pipe
+        release_read, release_first = IO.pipe
+        second_read, second_reached_read = IO.pipe
+        second_attempt_read, second_attempted = IO.pipe
+        first = fork do
+          connection = SQLite3::Database.new(database)
+          connection.results_as_hash = true
+          child_store = described_class.new(connection: connection)
+          original_find = child_store.method(:find_latest)
+          child_store.define_singleton_method(:find_latest) do
+            result = original_find.call
+            first_ready.write('1')
+            release_read.read(1)
+            result
+          end
+          child_store.capture(manifest_v1, units_v1)
+          exit! 0
+        rescue StandardError => e
+          warn e.full_message
+          exit! 1
+        end
+        first_read.read(1)
+        second = fork do
+          connection = SQLite3::Database.new(database)
+          connection.results_as_hash = true
+          child_store = described_class.new(connection: connection)
+          original_find = child_store.method(:find_latest)
+          child_store.define_singleton_method(:find_latest) do
+            second_reached_read.write('1')
+            original_find.call
+          end
+          second_attempted.write('1')
+          child_store.capture(manifest_v2, units_v2)
+          exit! 0
+        rescue StandardError => e
+          warn e.full_message
+          exit! 1
+        end
+        second_attempt_read.read(1)
+        expect(second_read.wait_readable(0.1)).to be_nil
+        release_first.write('1')
+
+        statuses = Timeout.timeout(5) { [first, second].map { |pid| Process.wait2(pid).last } }
+        expect(statuses).to all(be_success)
+        expect(second_read.read(1)).to eq('1')
+        verifier = SQLite3::Database.new(database)
+        verifier.results_as_hash = true
+        verified = described_class.new(connection: verifier).find(manifest_v2.fetch('git_sha'))
+        expect(verified.values_at(:units_added, :units_modified, :units_deleted)).to eq([1, 1, 1])
+      ensure
+        begin
+          release_first&.write('1')
+        rescue IOError
+          nil
+        end
+        [first, second].compact.each do |pid|
+          Process.kill('TERM', pid)
+          Process.wait(pid)
+        rescue Errno::ESRCH, Errno::ECHILD
+          nil
+        end
+        [first_read, first_ready, release_read, release_first, second_read,
+         second_reached_read, second_attempt_read, second_attempted].compact.each(&:close)
+        verifier&.close
       end
     end
 
