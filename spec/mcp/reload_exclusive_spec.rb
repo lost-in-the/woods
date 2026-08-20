@@ -100,9 +100,20 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       dispatch_tool('structure')
     end
     active_entered.pop
+
+    # Proves the reload thread reached the lock attempt (not merely that it
+    # hasn't been scheduled yet), then a bounded non-completion plus
+    # `reloader_entered` still empty proves it's blocked specifically on the
+    # exclusive lock, not just slow: no sleep duration to get wrong.
+    reload_attempted = Queue.new
+    allow(reader).to receive(:with_exclusive_reload).and_wrap_original do |original, *args, &block|
+      reload_attempted << true
+      original.call(*args, &block)
+    end
+
     reload = Thread.new { dispatch_tool('reload') }
-    sleep 0.02
-    waited_for_tool = reloader_entered.empty?
+    Timeout.timeout(1) { reload_attempted.pop }
+    waited_for_tool = !reload.join(0.05) && reloader_entered.empty?
 
     release_active << true
     active_response = active.value
@@ -128,12 +139,22 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       later_entered << true if Thread.current[:later_structure]
       original_manifest.call
     end
+    # Proves the later thread reached its own pin attempt before we ask
+    # whether it got past the exclusive reload: replaces a fixed sleep with
+    # a signal tied to the actual code path under test.
+    later_attempted = Queue.new
+    allow(reader).to receive(:with_pinned_generation).and_wrap_original do |original, *args, &block|
+      later_attempted << true if Thread.current[:later_structure]
+      original.call(*args, &block)
+    end
+
     later = Thread.new do
       Thread.current[:later_structure] = true
       dispatch_tool('structure')
     end
-    sleep 0.02
-    entered_during_reload = !later_entered.empty?
+    Timeout.timeout(1) { later_attempted.pop }
+    completed_early = later.join(0.05)
+    entered_during_reload = completed_early || !later_entered.empty?
 
     finish_reloader << true
     reload_response = reload.value
@@ -210,11 +231,22 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     end
     exclusive_entered.pop
 
+    # `.alive?` alone is a race (nothing stops the thread finishing between
+    # the check and its use elsewhere), and a fixed sleep before it proves
+    # nothing about *why* it's still running. The barrier proves first_tool
+    # reached its own pin attempt; the bounded join is the atomic proof it
+    # hadn't finished within that window.
+    first_attempted = Queue.new
+    allow(first_reader).to receive(:with_pinned_generation).and_wrap_original do |original, *args, &block|
+      first_attempted << true
+      original.call(*args, &block)
+    end
+
     first_tool = Thread.new { dispatch_tool('structure', target: first_server) }
     second_tool = Thread.new { dispatch_tool('structure', target: second_server) }
     second_result = Timeout.timeout(1) { second_tool.value }
-    sleep 0.02
-    first_waited = first_tool.alive?
+    Timeout.timeout(1) { first_attempted.pop }
+    first_waited = !first_tool.join(0.05)
 
     release_exclusive << true
 
@@ -321,6 +353,16 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       original.call(*arguments)
     end
 
+    # Captured once, outside the loop: with_exclusive_reload is only wrapped
+    # a single time, so each iteration's reload_attempted signal comes from
+    # the real underlying call, not from a stub layered over the previous
+    # iteration's stub.
+    reload_attempted = Queue.new
+    allow(reader).to receive(:with_exclusive_reload).and_wrap_original do |original, *args, &block|
+      reload_attempted << true
+      original.call(*args, &block)
+    end
+
     waited = ['codebase://manifest', 'codebase://unit/Post'].map do |uri|
       serialization_entered = Queue.new
       release_serialization = Queue.new
@@ -332,8 +374,8 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       end
       serialization_entered.pop
       reload = Thread.new { dispatch_tool('reload') }
-      sleep 0.02
-      reload_waited = reloader_entered.empty?
+      Timeout.timeout(1) { reload_attempted.pop }
+      reload_waited = !reload.join(0.05) && reloader_entered.empty?
 
       release_serialization << true
       resource.value
