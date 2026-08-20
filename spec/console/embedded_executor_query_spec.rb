@@ -127,6 +127,35 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(relation).to have_received(:having).with({ 'status' => 'paid' })
     end
 
+    it 'applies a Hash HAVING condition with a qualified column reference' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'orders.amount' => 100 }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with({ 'orders.amount' => 100 })
+    end
+
+    it 'rejects a Hash HAVING condition with an unsafe column reference' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'bad key' => 2 }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('Rejected column reference')
+      expect(relation).not_to have_received(:having)
+    end
+
     it 'rejects a two-element array whose template is not executable' do
       response = executor.send_request({
                                          'tool' => 'query',

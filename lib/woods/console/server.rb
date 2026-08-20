@@ -198,9 +198,7 @@ module Woods
         # @param spec [ToolSpec]
         # @return [Hash]
         def spec_schema(spec)
-          schema = { properties: spec.properties }
-          schema[:required] = spec.required if spec.required&.any?
-          schema
+          spec.input_schema
         end
 
         # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.

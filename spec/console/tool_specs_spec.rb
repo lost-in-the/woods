@@ -264,19 +264,30 @@ RSpec.describe Woods::Console::Server do
       MCP::Tool::InputSchema.new(properties: spec.properties, required: spec.required)
     end
 
-    it 'accepts a non-empty condition object or an executable two-element parameterized array' do
+    it 'accepts safe bare and qualified object keys or an executable two-element parameterized array' do
       expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { count: 2 }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { _count2: 2 }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { 'orders.amount' => 2 }) }
         .not_to raise_error
       expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['COUNT(*) > ?', 2]) }
         .not_to raise_error
       expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['SUM(amount) >= ?', 2]) }
         .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['SUM(orders.amount) >= ?', 2]) }
+        .not_to raise_error
     end
 
-    it 'rejects raw strings, empty objects, and arrays the executor cannot run' do
+    it 'rejects malformed object keys, raw strings, empty objects, and arrays the executor cannot run' do
       invalid_values = [
         'COUNT(*) > 2',
         {},
+        { 'bad key' => 2 },
+        { 'orders.bad key' => 2 },
+        { '1count' => 2 },
+        { 'orders.amount.extra' => 2 },
+        { '' => 2 },
         ['COUNT(*) > ?'],
         ['COUNT(*) > ?', 2, 3],
         ['not executable', 2],
@@ -285,6 +296,67 @@ RSpec.describe Woods::Console::Server do
 
       invalid_values.each do |having|
         expect { schema.validate_arguments(model: 'Order', select: ['id'], having: having) }
+          .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      end
+    end
+  end
+
+  describe 'console_aggregate function schema' do
+    subject(:schema) do
+      spec = all_specs.find { |candidate| candidate.name == 'console_aggregate' }
+      MCP::Tool::InputSchema.new(spec.input_schema)
+    end
+
+    it 'accepts every aggregate function implemented by the executor' do
+      %w[sum average minimum maximum count].each do |function|
+        expect { schema.validate_arguments(model: 'Order', function: function, column: 'amount') }
+          .not_to raise_error
+      end
+    end
+
+    it 'rejects aggregate functions the executor cannot run' do
+      expect { schema.validate_arguments(model: 'Order', function: 'bogus') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'requires a column for every non-count aggregate' do
+      expect { schema.validate_arguments(model: 'Order', function: 'count') }.not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', function: 'sum', column: 'amount') }.not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', function: 'sum') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+  end
+
+  describe 'registered static executor constraints' do
+    def schema_for(tool_name)
+      spec = all_specs.find { |candidate| candidate.name == tool_name }
+      MCP::Tool::InputSchema.new(spec.input_schema)
+    end
+
+    it 'rejects empty required column and select lists' do
+      expect { schema_for('console_pluck').validate_arguments(model: 'Order', columns: []) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_query').validate_arguments(model: 'Order', select: []) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'rejects empty SQL and unsupported recent direction values' do
+      expect { schema_for('console_sql').validate_arguments(sql: '') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_recent').validate_arguments(model: 'Order', direction: 'sideways') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'rejects query expressions, group columns, and order values the executor cannot run' do
+      invalid_inputs = [
+        { model: 'Order', select: ['status; DROP TABLE orders'] },
+        { model: 'Order', select: ['status'], group_by: ['bad key'] },
+        { model: 'Order', select: ['status'], order: { 'bad key' => 'asc' } },
+        { model: 'Order', select: ['status'], order: { 'created_at' => 'sideways' } }
+      ]
+
+      invalid_inputs.each do |arguments|
+        expect { schema_for('console_query').validate_arguments(arguments) }
           .to raise_error(MCP::Tool::InputSchema::ValidationError)
       end
     end

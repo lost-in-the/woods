@@ -18,15 +18,31 @@ module Woods
 
       MIN_INTEGER_INPUT = 1
       MAX_RECORD_ID = 9_223_372_036_854_775_807
+      AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
+
+      SAFE_IDENTIFIER_GRAMMAR = '[A-Za-z_][A-Za-z0-9_]*'
+      COLUMN_REFERENCE_GRAMMAR =
+        "#{SAFE_IDENTIFIER_GRAMMAR}(?:\\.#{SAFE_IDENTIFIER_GRAMMAR})?".freeze
+      SAFE_IDENTIFIER_SCHEMA_PATTERN = "^(?:#{SAFE_IDENTIFIER_GRAMMAR})$(?![\\s\\S])".freeze
+      COLUMN_REFERENCE_SCHEMA_PATTERN = "^(?:#{COLUMN_REFERENCE_GRAMMAR})$(?![\\s\\S])".freeze
+      SAFE_IDENTIFIER_REGEXP = Regexp.new("\\A(?:#{SAFE_IDENTIFIER_GRAMMAR})\\z").freeze
+
+      SELECT_EXPRESSION_GRAMMAR = [
+        "\\s*(?:(SUM|AVG|MIN|MAX|COUNT)\\s*\\(\\s*(\\*|#{COLUMN_REFERENCE_GRAMMAR})\\s*\\)|",
+        "(#{COLUMN_REFERENCE_GRAMMAR}))(?:\\s+AS\\s+(#{SAFE_IDENTIFIER_GRAMMAR}))?\\s*"
+      ].join.freeze
+      SELECT_EXPRESSION_SCHEMA_PATTERN = "^(?:#{SELECT_EXPRESSION_GRAMMAR})$(?![\\s\\S])".freeze
+      SELECT_EXPRESSION_REGEXP = Regexp.new("\\A(?:#{SELECT_EXPRESSION_GRAMMAR})\\z", Regexp::IGNORECASE).freeze
 
       # Authoritative grammar shared by the public JSON Schema and executor.
       # Schema and Ruby use different end-anchor syntax, but the executable
       # template body is defined once so accepted SQL cannot drift.
-      HAVING_TEMPLATE_GRAMMAR =
-        '\\s*(?:([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)|' \
-        '(SUM|AVG|MIN|MAX|COUNT)\\s*\\(\\s*' \
-        '(\\*|[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\s*\\))' \
+      HAVING_TEMPLATE_GRAMMAR = [
+        "\\s*(?:(#{COLUMN_REFERENCE_GRAMMAR})|",
+        '(SUM|AVG|MIN|MAX|COUNT)\\s*\\(\\s*',
+        "(\\*|#{COLUMN_REFERENCE_GRAMMAR})\\s*\\))",
         '\\s*(=|!=|<>|<=|>=|<|>)\\s*\\?\\s*'
+      ].join.freeze
       HAVING_TEMPLATE_SCHEMA_PATTERN = "^(?:#{HAVING_TEMPLATE_GRAMMAR})$(?![\\s\\S])".freeze
       HAVING_TEMPLATE_REGEXP = Regexp.new("\\A(?:#{HAVING_TEMPLATE_GRAMMAR})\\z").freeze
 
@@ -46,7 +62,17 @@ module Woods
       #   @return [Proc] Lambda called with symbolised args hash; returns the
       #     request Hash forwarded to the bridge/executor. Any tier-specific
       #     objects (validators, guards) are captured in the lambda's closure.
-      ToolSpec = Struct.new(:name, :description, :properties, :required, :tier, :handler, keyword_init: true)
+      ToolSpec = Struct.new(
+        :name, :description, :properties, :required, :tier, :handler, :schema_constraints,
+        keyword_init: true
+      ) do
+        def input_schema
+          schema = { properties: properties }
+          schema[:required] = required if required&.any?
+          schema.merge!(schema_constraints) if schema_constraints
+          schema
+        end
+      end
 
       # All 31 possible Console tool specifications, grouped by tier. Runtime
       # registration is derived separately in EXECUTABLE_MODES: Tier 1 is
@@ -113,7 +139,8 @@ module Woods
           description: 'Extract column values from records.',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            columns: { type: 'array', items: { type: 'string' }, description: 'Column names to pluck' },
+            columns: { type: 'array', minItems: 1, items: { type: 'string' },
+                       description: 'Column names to pluck' },
             scope: { type: 'object', description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                                   'Complex queries: use console_query.' },
@@ -138,13 +165,25 @@ module Woods
                        'For complex queries use console_query.',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            function: { type: 'string', description: 'Aggregate function: sum, average, minimum, maximum, count' },
+            function: { type: 'string', enum: AGGREGATE_FUNCTIONS,
+                        description: 'Aggregate function: sum, average, minimum, maximum, count' },
             column: { type: 'string', description: 'Column to aggregate (optional for count)' },
             scope: { type: 'object', description: 'Filter conditions: {col: val} or predicate suffixes ' \
                                                   '(_gt, _lt, _in, _null, etc.)' }
           },
           required: %w[model function],
           tier: 1,
+          schema_constraints: {
+            allOf: [
+              {
+                if: {
+                  properties: { function: { enum: AGGREGATE_FUNCTIONS.reject { |name| name == 'count' } } },
+                  required: ['function']
+                },
+                then: { required: ['column'] }
+              }
+            ]
+          },
           handler: lambda { |args|
             Tools::Tier1.console_aggregate(
               model: args[:model], function: args[:function], column: args[:column], scope: args[:scope]
@@ -190,7 +229,8 @@ module Woods
           properties: {
             model: { type: 'string', description: 'Model name' },
             order_by: { type: 'string', description: 'Column to sort by (default: created_at)' },
-            direction: { type: 'string', description: 'Sort direction: asc or desc (default: desc)' },
+            direction: { type: 'string', enum: %w[asc desc],
+                         description: 'Sort direction: asc or desc (default: desc)' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 50,
                      description: 'Max records (default 10, max 50)' },
             scope: { type: 'object', description: 'Filter: {status: "paid", total_gt: 0}. ' \
@@ -521,7 +561,7 @@ module Woods
             'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
           ].join(' '),
           properties: {
-            sql: { type: 'string', description: 'SQL query (SELECT or WITH...SELECT only)' },
+            sql: { type: 'string', minLength: 1, description: 'SQL query (SELECT or WITH...SELECT only)' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 10_000,
                      description: 'Max rows returned (default unlimited, max 10000)' }
           },
@@ -544,15 +584,19 @@ module Woods
           ].join(' '),
           properties: {
             model: { type: 'string', description: 'ActiveRecord model name (e.g. "Order")' },
-            select: { type: 'array', items: { type: 'string' },
+            select: { type: 'array', minItems: 1,
+                      items: { type: 'string', pattern: SELECT_EXPRESSION_SCHEMA_PATTERN },
                       description: 'Columns or expressions to select (e.g. ["status", "COUNT(*) AS n"])' },
-            joins: { type: 'array', items: { type: 'string' },
+            joins: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                      description: 'Association names to JOIN (e.g. ["line_items", "user"])' },
-            group_by: { type: 'array', items: { type: 'string' },
+            group_by: { type: 'array', items: { type: 'string', pattern: COLUMN_REFERENCE_SCHEMA_PATTERN },
                         description: 'Columns to GROUP BY (e.g. ["status", "user_id"])' },
             having: { type: %w[object array],
                       oneOf: [
-                        { type: 'object', minProperties: 1 },
+                        {
+                          type: 'object', minProperties: 1,
+                          propertyNames: { pattern: COLUMN_REFERENCE_SCHEMA_PATTERN }
+                        },
                         {
                           type: 'array', minItems: 2, maxItems: 2,
                           prefixItems: [{ type: 'string', pattern: HAVING_TEMPLATE_SCHEMA_PATTERN }, {}]
@@ -560,6 +604,8 @@ module Woods
                       ],
                       description: 'HAVING condition object or parameterized [template, bind] array' },
             order: { type: 'object',
+                     propertyNames: { pattern: COLUMN_REFERENCE_SCHEMA_PATTERN },
+                     additionalProperties: { type: 'string', enum: %w[asc desc] },
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
             scope: { type: 'object',
                      description: 'WHERE conditions as {column => value} or [sql, bind] array' },
@@ -701,7 +747,7 @@ module Woods
           arguments: {
             required: required,
             optional: optional,
-            constraints: spec.properties
+            constraints: spec.input_schema
           }.freeze,
           representative_valid_input: valid_input,
           representative_invalid_input: {

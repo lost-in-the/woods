@@ -27,8 +27,6 @@ module Woods
     #   # => { 'ok' => true, 'result' => { 'count' => 42 }, 'timing_ms' => 1.2 }
     #
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
-      AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
-
       TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS
 
       # Tools gated behind the read_tools_enabled flag.
@@ -464,6 +462,8 @@ module Woods
 
       def handle_pluck(params)
         columns = params['columns']
+        raise ValidationError, 'columns must contain at least one item' if columns && columns.empty?
+
         @model_validator.validate_columns!(params['model'], columns) if columns
         model = resolve_model(params['model'])
         limit = params.fetch('limit', 100)
@@ -478,10 +478,11 @@ module Woods
         function = params['function']
         @model_validator.validate_column!(params['model'], column) if column
 
-        unless AGGREGATE_FUNCTIONS.include?(function)
+        unless Server::AGGREGATE_FUNCTIONS.include?(function)
           raise ValidationError, "Invalid aggregate function: #{function}. " \
-                                 "Allowed: #{AGGREGATE_FUNCTIONS.join(', ')}"
+                                 "Allowed: #{Server::AGGREGATE_FUNCTIONS.join(', ')}"
         end
+        raise ValidationError, "column is required for #{function} aggregate" if function != 'count' && column.nil?
 
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -556,7 +557,9 @@ module Woods
         limit = params.fetch('limit', 10)
 
         @model_validator.validate_column!(params['model'], order_by)
-        direction = 'desc' unless %w[asc desc].include?(direction)
+        unless %w[asc desc].include?(direction)
+          raise ValidationError, "direction must be asc or desc (got #{direction.inspect})"
+        end
 
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
@@ -632,14 +635,6 @@ module Woods
       # Anything else must be a bare column name validated against the model.
       # Matching is case-insensitive; the trailing `AS alias` is optional and
       # the alias itself must be an identifier — it can't carry SQL.
-      SAFE_SELECT_EXPR = /
-        \A\s*
-        (?:(SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(\*|\w+(?:\.\w+)?)\s*\)|(\w+(?:\.\w+)?))
-        (?:\s+AS\s+(\w+))?
-        \s*\z
-      /ix
-      private_constant :SAFE_SELECT_EXPR
-
       # Apply select/joins/scope/group/having/order clauses to a relation.
       #
       # Validates every user-supplied column/alias through the ModelValidator
@@ -680,7 +675,7 @@ module Woods
       end
 
       def validate_select_expression!(expr, model_name)
-        match = SAFE_SELECT_EXPR.match(expr)
+        match = Server::SELECT_EXPRESSION_REGEXP.match(expr)
         raise ValidationError, "Rejected select expression: #{expr.inspect}" unless match
 
         _fn, fn_arg, bare_col, _alias = match.captures
@@ -788,7 +783,7 @@ module Woods
       end
 
       def safe_identifier?(name)
-        name.is_a?(String) && name.match?(/\A[a-zA-Z_][a-zA-Z0-9_]*\z/)
+        name.is_a?(String) && name.match?(Server::SAFE_IDENTIFIER_REGEXP)
       end
 
       # ── Helpers ──────────────────────────────────────────────────────────

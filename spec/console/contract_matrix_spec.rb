@@ -12,10 +12,7 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
   end
 
   def input_schema(row)
-    MCP::Tool::InputSchema.new(
-      properties: row.dig(:arguments, :constraints),
-      required: row.dig(:arguments, :required)
-    )
+    MCP::Tool::InputSchema.new(row.dig(:arguments, :constraints))
   end
 
   it 'derives argument names and constraints from every ToolSpec' do
@@ -28,7 +25,7 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
       expect(row.fetch(:arguments)).to eq(
         required: required,
         optional: spec.properties.keys.map(&:to_s) - required,
-        constraints: spec.properties
+        constraints: spec.input_schema
       )
     end
   end

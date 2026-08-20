@@ -745,6 +745,16 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['ok']).to be false
         expect(response['error']).to match(/Unknown column 'bad_col'/)
       end
+
+      it 'rejects an empty columns list' do
+        response = executor.send_request({
+                                           'tool' => 'pluck',
+                                           'params' => { 'model' => 'User', 'columns' => [] }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to include('columns must contain at least one item')
+      end
     end
 
     context 'aggregate tool' do
@@ -815,6 +825,16 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error']).to match(/Invalid aggregate function/)
+      end
+
+      it 'rejects a non-count aggregate without a column' do
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'sum' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to include('column is required for sum')
       end
 
       it 'validates column exists' do
@@ -947,6 +967,17 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be false
         expect(response['error']).to match(/Unknown column 'nonexistent'/)
+      end
+
+      it 'rejects an unsupported direction' do
+        response = executor.send_request({
+                                           'tool' => 'recent',
+                                           'params' => { 'model' => 'Post', 'direction' => 'sideways' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to include('direction must be asc or desc')
+        expect(post_model).not_to have_received(:order)
       end
 
       it 'rejects columns that are not real model columns (SQL fragment injection)' do
