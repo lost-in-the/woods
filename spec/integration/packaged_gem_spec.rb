@@ -73,7 +73,8 @@ RSpec.describe 'packaged gem' do
   end
 
   def local_readme_targets
-    readme = File.read(File.join(@unpacked, 'README.md'))
+    # encoding: pinned so the multibyte README parses under a US-ASCII locale
+    readme = File.read(File.join(@unpacked, 'README.md'), encoding: Encoding::UTF_8)
     markdown_targets = readme.scan(/\[[^\]]+\]\(([^)]+)\)/).flatten
     html_targets = Nokogiri::HTML.fragment(readme).css('[src], [href]').flat_map do |node|
       %w[src href].filter_map { |attribute| node[attribute] }
