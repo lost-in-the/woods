@@ -36,6 +36,68 @@ RSpec.describe Woods::Operator::PipelineGuard do
       guard.record!(:extraction)
       expect(guard.allow?(:embedding)).to be true
     end
+
+    # A corrupt state file used to be indistinguishable from "never run": both
+    # parsed to `{}` and `allow?` returned true, silently defeating the
+    # cooldown it exists to enforce. Missing state is genuinely fine (a fresh
+    # install); corrupt or unreadable state is not, and must fail closed.
+    it 'fails closed (denies) when the state file is corrupt, rather than treating it as unrun' do
+      state_path = File.join(state_dir, 'pipeline_guard.json')
+      File.write(state_path, '{not-json')
+
+      expect(guard.allow?(:extraction)).to be false
+    end
+
+    it 'fails closed (denies) when the state file is unreadable' do
+      state_path = File.join(state_dir, 'pipeline_guard.json')
+      File.write(state_path, JSON.generate('extraction' => (Time.now - 301).iso8601))
+      File.chmod(0o000, state_path)
+
+      expect(guard.allow?(:extraction)).to be false
+    ensure
+      File.chmod(0o600, state_path)
+    end
+
+    it 'still allows when the state file is simply missing' do
+      expect(File.exist?(File.join(state_dir, 'pipeline_guard.json'))).to be false
+
+      expect(guard.allow?(:extraction)).to be true
+    end
+  end
+
+  describe '#state_status' do
+    let(:state_path) { File.join(state_dir, 'pipeline_guard.json') }
+
+    it 'reports :missing when no state file has ever been written' do
+      expect(guard.state_status).to eq(:missing)
+    end
+
+    it 'reports :ok for a valid state file' do
+      guard.record!(:extraction)
+
+      expect(guard.state_status).to eq(:ok)
+    end
+
+    it 'reports :corrupt for unparseable JSON, distinct from :missing' do
+      File.write(state_path, '{not-json')
+
+      expect(guard.state_status).to eq(:corrupt)
+    end
+
+    it 'reports :corrupt for valid JSON that is not an object' do
+      File.write(state_path, '[1,2,3]')
+
+      expect(guard.state_status).to eq(:corrupt)
+    end
+
+    it 'reports :permission_denied for a state file this process cannot read, distinct from :corrupt' do
+      File.write(state_path, JSON.generate('extraction' => Time.now.iso8601))
+      File.chmod(0o000, state_path)
+
+      expect(guard.state_status).to eq(:permission_denied)
+    ensure
+      File.chmod(0o600, state_path)
+    end
   end
 
   describe '#record!' do
@@ -151,8 +213,9 @@ RSpec.describe Woods::Operator::PipelineGuard do
       writer_has_lock.pop
 
       reset = Thread.new { guard.reset!(:extraction) }
-      sleep 0.02
-      expect(reset).to be_alive
+      # The writer holds the file's flock (proven by writer_has_lock above);
+      # a bounded join that times out is the observed-blocking proof.
+      expect(reset.join(0.3)).to be_nil
       release_writer << true
 
       expect(reset.value).to be(true)

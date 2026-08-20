@@ -31,13 +31,44 @@ module Woods
 
       # Check if an operation is allowed (cooldown elapsed).
       #
+      # Fails closed on state this process cannot trust: :missing is the
+      # legitimate "never run" case and allows, but :corrupt and
+      # :permission_denied used to be indistinguishable from :missing —
+      # both parsed to `{}` (or crashed uncaught) and let the operation
+      # through, silently defeating the cooldown on exactly the state that
+      # means it can no longer be verified.
+      #
       # @param operation [Symbol, String] Operation name
       # @return [Boolean]
       def allow?(operation)
-        last = last_run(operation)
-        return true if last.nil?
+        case state_status
+        when :corrupt, :permission_denied
+          false
+        else
+          last = last_run(operation)
+          return true if last.nil?
 
-        (Time.now - last) >= @cooldown
+          (Time.now - last) >= @cooldown
+        end
+      end
+
+      # Diagnose the on-disk cooldown state without side effects, distinguishing
+      # the three states {#allow?} used to collapse into one silent outcome —
+      # public callers (the MCP pipeline tools) need to tell a fresh install
+      # apart from a state file that needs operator attention.
+      #
+      # @return [Symbol] `:ok`, `:missing`, `:corrupt`, or `:permission_denied`
+      def state_status
+        return :missing unless File.exist?(@state_path)
+
+        parsed = JSON.parse(File.read(@state_path))
+        parsed.is_a?(Hash) ? :ok : :corrupt
+      rescue Errno::EACCES
+        :permission_denied
+      rescue JSON::ParserError
+        :corrupt
+      rescue Errno::ENOENT
+        :missing
       end
 
       # Record that an operation has just run.
@@ -150,7 +181,7 @@ module Woods
         return {} unless File.exist?(@state_path)
 
         parse_state(File.read(@state_path))
-      rescue Errno::ENOENT
+      rescue Errno::ENOENT, Errno::EACCES
         {}
       end
     end

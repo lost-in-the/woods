@@ -777,6 +777,7 @@ RSpec.describe Woods::MCP::Server do
         instance_double(Woods::Operator::PipelineGuard).tap do |g|
           allow(g).to receive(:allow?).with(:extraction).and_return(true)
           allow(g).to receive(:record!).with(:extraction)
+          allow(g).to receive(:state_status).and_return(:ok)
         end
       end
 
@@ -795,10 +796,31 @@ RSpec.describe Woods::MCP::Server do
         end
       end
 
-      it 'is rate-limited when guard denies' do
+      it 'is rate-limited when guard denies with verified (:ok) cooldown state' do
         allow(guard).to receive(:allow?).with(:extraction).and_return(false)
         response = call_tool(server_with_operator, 'pipeline_extract')
         expect(response_text(response)).to include('rate-limited')
+        expect(response.meta[:error_code]).to eq(:rate_limited)
+      end
+
+      # PipelineGuard#allow? fails closed on state it cannot verify, which
+      # reads identically to a genuine cooldown from the boolean alone —
+      # `:rate_limited, retry_after_seconds: 300` would be inaccurate public
+      # metadata for state that will never resolve on its own.
+      it 'reports cooldown_state_corrupt instead of rate_limited when guard state is corrupt' do
+        allow(guard).to receive(:allow?).with(:extraction).and_return(false)
+        allow(guard).to receive(:state_status).and_return(:corrupt)
+        response = call_tool(server_with_operator, 'pipeline_extract')
+        expect(response.meta[:error_code]).to eq(:cooldown_state_corrupt)
+        expect(response_text(response)).not_to include('rate-limited')
+      end
+
+      it 'reports cooldown_state_unreadable instead of rate_limited when guard state is permission-denied' do
+        allow(guard).to receive(:allow?).with(:extraction).and_return(false)
+        allow(guard).to receive(:state_status).and_return(:permission_denied)
+        response = call_tool(server_with_operator, 'pipeline_extract')
+        expect(response.meta[:error_code]).to eq(:cooldown_state_unreadable)
+        expect(response_text(response)).not_to include('rate-limited')
       end
     end
   end
@@ -816,6 +838,7 @@ RSpec.describe Woods::MCP::Server do
         instance_double(Woods::Operator::PipelineGuard).tap do |g|
           allow(g).to receive(:allow?).with(:embedding).and_return(true)
           allow(g).to receive(:record!).with(:embedding)
+          allow(g).to receive(:state_status).and_return(:ok)
         end
       end
 

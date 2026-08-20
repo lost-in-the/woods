@@ -56,6 +56,11 @@ Metrics/ClassLength:
     # ownership-checked touch). Splitting it would scatter invariants that
     # only make sense together.
     - 'lib/woods/coordination/pipeline_lock.rb'
+    # PipelineGuard's cooldown-state diagnosis (#state_status) and its use in
+    # #allow? to fail closed on unverifiable state belong beside the read
+    # path they diagnose — splitting them out would separate the fail-closed
+    # decision from the state it is deciding about.
+    - 'lib/woods/operator/pipeline_guard.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'

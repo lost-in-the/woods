@@ -996,6 +996,7 @@ module Woods
         end
 
         def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)
+          cooldown = method(:cooldown_error)
           server.define_tool(
             name: 'pipeline_extract',
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
@@ -1030,13 +1031,8 @@ module Woods
             end
 
             guard = operator[:pipeline_guard]
-            if guard && !guard.allow?(:extraction)
-              next respond_err.call(
-                'Extraction is rate-limited. Try again later.',
-                code: :rate_limited,
-                tool: 'pipeline_extract',
-                retry_after_seconds: 300
-              )
+            if (blocked = cooldown.call(guard, :extraction, 'pipeline_extract'))
+              next blocked
             end
 
             # Acquire the in-process lock BEFORE recording to the guard.
@@ -1131,7 +1127,52 @@ module Woods
           acquired
         end
 
+        # Build the cooldown-gate error for pipeline_extract/pipeline_embed,
+        # or nil when the operation may proceed.
+        #
+        # `PipelineGuard#allow?` fails closed on state it cannot verify
+        # (corrupt or permission-denied), which reads identically to a
+        # genuine, elapsing cooldown from the boolean alone. Reporting
+        # `:rate_limited, retry_after_seconds: 300` for state that will
+        # never resolve on its own is the inaccurate public metadata this
+        # closes — `PipelineGuard#state_status` distinguishes why, and the
+        # tool error now says so.
+        #
+        # @param guard [Woods::Operator::PipelineGuard, nil]
+        # @param operation [Symbol] :extraction or :embedding
+        # @param tool [String] tool name, for the error payload
+        # @return [MCP::Tool::Response, nil]
+        def cooldown_error(guard, operation, tool)
+          return nil unless guard
+          return nil if guard.allow?(operation)
+
+          case guard.state_status
+          when :corrupt
+            # `pipeline_repair`'s `reset_cooldowns` action deletes state by
+            # key and cannot act on content it cannot parse, so it will not
+            # clear this — the fix is replacing or removing the state file
+            # directly.
+            error_response(
+              'Pipeline cooldown state is corrupt, so the cooldown cannot be verified. ' \
+              'Inspect and replace (or remove) pipeline_guard.json in the operator state directory.',
+              code: :cooldown_state_corrupt, tool: tool
+            )
+          when :permission_denied
+            error_response(
+              'Pipeline cooldown state is unreadable (permission denied), so the cooldown cannot be verified. ' \
+              'Check the operator state directory permissions.',
+              code: :cooldown_state_unreadable, tool: tool
+            )
+          else
+            error_response(
+              "#{operation == :extraction ? 'Extraction' : 'Embedding'} is rate-limited. Try again later.",
+              code: :rate_limited, tool: tool, retry_after_seconds: 300
+            )
+          end
+        end
+
         def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store)
+          cooldown = method(:cooldown_error)
           server.define_tool(
             name: 'pipeline_embed',
             description: 'Trigger embedding generation for extracted units. Checks rate limits before proceeding.',
@@ -1144,13 +1185,8 @@ module Woods
             next op_missing.call('pipeline_embed') unless operator
 
             guard = operator[:pipeline_guard]
-            if guard && !guard.allow?(:embedding)
-              next respond_err.call(
-                'Embedding is rate-limited. Try again later.',
-                code: :rate_limited,
-                tool: 'pipeline_embed',
-                retry_after_seconds: 300
-              )
+            if (blocked = cooldown.call(guard, :embedding, 'pipeline_embed'))
+              next blocked
             end
 
             # Acquire the in-process lock first so a refused "already
