@@ -9,16 +9,20 @@ require 'woods/session_tracer/solid_cache_store'
 # Minimal in-memory cache mock compatible with ActiveSupport::Cache::Store interface.
 # Implements read/write/delete/exist? used by SolidCacheStore.
 class MockCache
-  attr_accessor :after_increment, :before_write
+  attr_accessor :after_increment, :before_delete_attempt, :before_write
+  attr_reader :read_count
 
-  def initialize
+  def initialize(clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
     @data = {}
     @expires = {}
     @mutex = Mutex.new
+    @read_count = 0
+    @clock = clock
   end
 
   def read(key)
     @mutex.synchronize do
+      @read_count += 1
       expire!(key)
       @data[key]
     end
@@ -32,9 +36,13 @@ class MockCache
       return false if options[:unless_exist] && @data.key?(key)
 
       @data[key] = value
-      @expires[key] = Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:expires_in] if options[:expires_in]
+      @expires[key] = @clock.call + options[:expires_in] if options[:expires_in]
       true
     end
+  end
+
+  def write_if_absent(key, value)
+    write(key, value, unless_exist: true)
   end
 
   def increment(key, amount = 1, options = nil)
@@ -42,7 +50,7 @@ class MockCache
     value = @mutex.synchronize do
       expire!(key)
       @data[key] = @data.fetch(key, 0).to_i + amount
-      @expires[key] ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:expires_in] if options[:expires_in]
+      @expires[key] ||= @clock.call + options[:expires_in] if options[:expires_in]
       @data[key]
     end
     @after_increment&.call(key, value)
@@ -54,11 +62,24 @@ class MockCache
   end
 
   def delete(key)
+    @before_delete_attempt&.call(key)
     @mutex.synchronize do
       @expires.delete(key)
       @data.delete(key)
     end
     true
+  end
+
+  def delete_if_equal(key, expected)
+    @before_delete_attempt&.call(key)
+    @mutex.synchronize do
+      expire!(key)
+      return false unless @data[key] == expected
+
+      @expires.delete(key)
+      @data.delete(key)
+      true
+    end
   end
   # rubocop:enable Naming/PredicateMethod
 
@@ -66,10 +87,14 @@ class MockCache
     !read(key).nil?
   end
 
+  def reset_read_count
+    @mutex.synchronize { @read_count = 0 }
+  end
+
   private
 
   def expire!(key)
-    return unless @expires[key] && Process.clock_gettime(Process::CLOCK_MONOTONIC) >= @expires[key]
+    return unless @expires[key] && @clock.call >= @expires[key]
 
     @expires.delete(key)
     @data.delete(key)
@@ -293,6 +318,23 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       expect(store.read('sess1')).to eq([])
       expect(cache.keys.grep(/:record:/)).to be_empty
     end
+
+    it 'does not delete a replacement active membership during a stale clear' do
+      other = described_class.new(cache: cache, max_sessions: 1)
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      bounded.record('shared', request_data.merge('action' => 'old'))
+      cache.before_delete_attempt = lambda do |key|
+        next unless key.end_with?(':active')
+
+        cache.before_delete_attempt = nil
+        cache.delete(key)
+        other.record('shared', request_data.merge('action' => 'replacement'))
+      end
+
+      bounded.clear('shared')
+
+      expect(other.read('shared').map { |entry| entry['action'] }).to eq(['replacement'])
+    end
   end
 
   describe '#clear_all' do
@@ -330,14 +372,21 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
   end
 
   describe 'expires_in support' do
-    it 'expires sequence, record, and index keys' do
-      allow(cache).to receive(:write).and_call_original
-      allow(cache).to receive(:increment).and_call_original
-      store_with_expiry = described_class.new(cache: cache, expires_in: 3600)
-      store_with_expiry.record('sess1', request_data)
+    it 'slides observable session expiry after each successful record' do
+      now = 0
+      expiring_cache = MockCache.new(clock: -> { now })
+      store_with_expiry = described_class.new(cache: expiring_cache, expires_in: 10)
+      store_with_expiry.record('sess1', request_data.merge('action' => 'first'))
 
-      expect(cache).to have_received(:write).with(kind_of(String), kind_of(String), expires_in: 3600).twice
-      expect(cache).to have_received(:increment).with(kind_of(String), 1, expires_in: 3600).twice
+      now = 9
+      store_with_expiry.record('sess1', request_data.merge('action' => 'second'))
+
+      now = 11
+      expect(store_with_expiry.read('sess1').map { |entry| entry['action'] }).to eq(['second'])
+
+      now = 20
+      expect(store_with_expiry.read('sess1')).to eq([])
+      expect(expiring_cache.keys.grep(/woods:session:.*generation/)).to be_empty
     end
   end
 
@@ -406,6 +455,45 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       expect(cache.keys.grep(/:record:/)).to be_empty
     end
 
+    it 'bounds admission, discovery, and clear_all work after indefinite churn' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      100.times do |i|
+        session_id = "cleared#{i}"
+        bounded.record(session_id, request_data)
+        bounded.clear(session_id)
+      end
+      bounded.record('keeper', request_data)
+
+      cache.reset_read_count
+      bounded.record('newest', request_data)
+      expect(cache.read_count).to be <= 24
+
+      cache.reset_read_count
+      expect(bounded.sessions(limit: 10).size).to eq(2)
+      expect(cache.read_count).to be <= 24
+      expect(cache.keys.size).to be <= 9
+
+      cache.reset_read_count
+      bounded.clear_all
+      expect(cache.read_count).to be <= 24
+    end
+
+    it 'does not delete a replacement directory slot during stale retirement' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      replacement = described_class.new(cache: cache, max_sessions: 1)
+      bounded.record('old', request_data)
+      cache.before_delete_attempt = lambda do |key|
+        next unless key == 'woods:session_index:slot:0'
+
+        cache.before_delete_attempt = nil
+        replacement.record('new', request_data)
+      end
+
+      bounded.clear('old')
+
+      expect(replacement.sessions.map { |entry| entry['session_id'] }).to eq(['new'])
+    end
+
     it 'bounds record and active-session keys without retaining evicted generations' do
       bounded = described_class.new(cache: cache, max_sessions: 2, max_requests_per_session: 2)
       12.times { |i| bounded.record("sess#{i % 3}", request_data.merge('action' => "action_#{i}")) }
@@ -450,8 +538,15 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
           def initialize = (@data = {})
           def read(key) = @data[key]
           def write(key, value, **) = (@data[key] = value)
+          def write_if_absent(key, value)
+            return false if @data.key?(key)
+
+            @data[key] = value
+            true
+          end
           def increment(key, amount = 1, **) = (@data[key] = @data.fetch(key, 0).to_i + amount)
           def delete(key) = @data.delete(key)
+          def delete_if_equal(key, expected) = (@data.delete(key) if @data[key] == expected)
           def exist?(key) = @data.key?(key)
         end.new
         store = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
@@ -481,6 +576,38 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect { described_class.new(cache: unsupported) }
         .to raise_error(ArgumentError, /atomic #increment/)
+    end
+
+    it 'fails clearly when a generic backend cannot conditionally delete' do
+      # Cache mutation APIs return backend success rather than acting as predicates.
+      # rubocop:disable Naming/PredicateMethod
+      unsupported = Class.new do
+        def read(*) = nil
+        def write(*) = true
+        def write_if_absent(*) = true
+        def increment(*) = 1
+        def delete(*) = true
+      end.new
+      # rubocop:enable Naming/PredicateMethod
+
+      expect { described_class.new(cache: unsupported) }
+        .to raise_error(ArgumentError, /atomic #delete_if_equal/)
+    end
+
+    it 'fails clearly when a generic backend cannot atomically create keys' do
+      # Cache mutation APIs return backend success rather than acting as predicates.
+      # rubocop:disable Naming/PredicateMethod
+      unsupported = Class.new do
+        def read(*) = nil
+        def write(*) = true
+        def increment(*) = 1
+        def delete(*) = true
+        def delete_if_equal(*) = true
+      end.new
+      # rubocop:enable Naming/PredicateMethod
+
+      expect { described_class.new(cache: unsupported) }
+        .to raise_error(ArgumentError, /atomic #write_if_absent/)
     end
   end
 end

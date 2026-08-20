@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'securerandom'
 require_relative 'store'
 
 module Woods
@@ -11,20 +12,30 @@ module Woods
       INDEX_PREFIX = 'woods:session_index'
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
+      DIRECTORY_CLAIM_ATTEMPTS = 3
 
       class AtomicIncrementRequired < Woods::Error; end
       class BackendWriteError < Woods::Error; end
 
-      # @param cache [ActiveSupport::Cache::Store] A cache with atomic +increment+
+      # @param cache [ActiveSupport::Cache::Store] A Solid Cache store, or a cache with atomic
+      #   +increment+, +write_if_absent+, and +delete_if_equal+ operations
       # @param expires_in [Integer, nil] Expiry time in seconds (nil = no expiry)
       def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS,
                      max_requests_per_session: DEFAULT_MAX_REQUESTS)
         super()
+        @cache = cache
         unless cache.respond_to?(:increment)
           raise ArgumentError, 'SolidCacheStore requires a backend with atomic #increment'
         end
+        unless cache.respond_to?(:write_if_absent) || solid_cache_backend?
+          raise ArgumentError,
+                'SolidCacheStore requires atomic #write_if_absent or a direct SolidCache::Store backend'
+        end
+        unless cache.respond_to?(:delete_if_equal) || solid_cache_backend?
+          raise ArgumentError,
+                'SolidCacheStore requires atomic #delete_if_equal or a direct SolidCache::Store backend'
+        end
 
-        @cache = cache
         @expires_in = expires_in
         @max_sessions = positive_integer!(:max_sessions, max_sessions)
         @max_requests_per_session = positive_integer!(:max_requests_per_session, max_requests_per_session)
@@ -36,12 +47,19 @@ module Woods
         membership = active_membership(session_id) || admit_session(session_id)
         return unless membership
 
-        sequence_key = sequence_key(session_id, membership['sequence'])
+        generation = membership['token']
+        sequence_key = sequence_key(session_id, generation)
         sequence = increment!(sequence_key)
-        key = record_key(session_id, membership['sequence'], sequence)
+        key = record_key(session_id, generation, sequence)
         published = publish_current_slot?(key, sequence, @max_requests_per_session, sequence_key,
                                           JSON.generate('sequence' => sequence, 'record' => normalized_record))
-        @cache.delete(key) unless published && current_membership?(membership)
+        if published && current_membership?(membership)
+          refresh_activity!(membership)
+          return if current_membership?(membership)
+        end
+
+        @cache.delete(key)
+        @cache.delete(activity_key(membership))
         nil
       end
 
@@ -50,7 +68,7 @@ module Woods
         membership = active_membership(session_id)
         return [] unless membership
 
-        generation = membership['sequence']
+        generation = membership['token']
         sequence = counter_value(sequence_key(session_id, generation))
         return [] unless sequence.positive?
 
@@ -75,19 +93,16 @@ module Woods
       end
 
       def clear_all
-        cleared_through = increment!(index_sequence_key, @max_sessions) - @max_sessions
-        indexed_memberships(cleared_through, current_only: false).each { |membership| retire_membership(membership) }
-        sequence_window(cleared_through, cleared_through).each do |slot_sequence|
-          @cache.delete(index_slot_key(slot_sequence))
-        end
+        increment!(index_sequence_key, @max_sessions)
+        directory_memberships.compact.each { |membership| retire_membership(membership) }
         nil
       end
 
       private
 
       def increment!(key, amount = 1)
-        @cache.write(key, 0, unless_exist: true, **write_options)
-        value = @cache.increment(key, amount, **write_options)
+        atomic_write_if_absent(key, 0)
+        value = @cache.increment(key, amount)
         return value if value.is_a?(Integer) && value.positive?
 
         message = "SolidCache backend atomic #increment failed for #{key.inspect}; " \
@@ -146,59 +161,98 @@ module Woods
 
       def admit_session(session_id)
         index_sequence = increment!(index_sequence_key)
-        membership = { 'sequence' => index_sequence, 'session_id' => session_id.to_s }
-        claimed = @cache.write(active_key(session_id), JSON.generate(membership), unless_exist: true, **write_options)
-        return active_membership(session_id) unless claimed
+        membership = claim_directory_slot(
+          'sequence' => index_sequence,
+          'session_id' => session_id.to_s,
+          'token' => SecureRandom.hex(16)
+        )
+        return unless membership
 
-        write!(index_slot_key(index_sequence), JSON.generate(membership))
-        unless current_membership?(membership)
-          retire_membership(membership)
+        unless atomic_write_if_absent(active_key(session_id), serialized_membership(membership))
+          release_directory_slot(membership)
           return active_membership(session_id)
         end
-        if stale_index_sequence?(index_sequence)
+        refresh_activity!(membership)
+        finalize_admission(membership)
+      end
+
+      def finalize_admission(membership)
+        unless current_membership?(membership)
+          retire_membership(membership)
+          return active_membership(membership['session_id'])
+        end
+        if stale_index_sequence?(membership['sequence'])
           retire_membership(membership)
           return
         end
 
-        enforce_active_bound
-        active_membership(session_id)
+        active_membership(membership['session_id'])
       end
 
-      def enforce_active_bound
-        memberships = active_memberships
-        overflow = memberships.size - @max_sessions
-        memberships.first(overflow).each { |membership| retire_membership(membership) } if overflow.positive?
+      def claim_directory_slot(attributes)
+        DIRECTORY_CLAIM_ATTEMPTS.times do
+          memberships = directory_memberships
+          membership = claim_reclaimable_slot(attributes, memberships)
+          return membership if membership
+
+          victim = oldest_active_membership(memberships)
+          retire_membership(victim) if victim
+        end
+        nil
+      end
+
+      def claim_reclaimable_slot(attributes, memberships)
+        memberships.each_with_index do |occupant, slot|
+          next if occupant && active_current_membership?(occupant)
+
+          retire_membership(occupant) if occupant
+          membership = attributes.merge('slot' => slot)
+          return membership if claim_directory_slot?(membership)
+        end
+        nil
+      end
+
+      def oldest_active_membership(memberships)
+        memberships.compact.select { |membership| active_current_membership?(membership) }
+                   .min_by { |membership| membership['sequence'] }
+      end
+
+      def claim_directory_slot?(membership)
+        key = index_slot_key(membership['slot'])
+        written = atomic_write_if_absent(key, serialized_membership(membership))
+        written && indexed_membership?(membership)
       end
 
       def active_memberships
-        indexed_memberships(counter_value(index_sequence_key))
+        directory_memberships.select { |membership| membership && active_current_membership?(membership) }
+                             .sort_by { |membership| membership['sequence'] }
       end
 
-      def indexed_memberships(sequence, current_only: true)
-        seen = {}
-        sequence_window(sequence, sequence).filter_map do |expected|
-          membership = parse_membership(@cache.read(index_slot_key(expected)), expected)
-          next unless membership
-          next if current_only && !current_membership?(membership)
-
-          identity = [membership['session_id'], membership['sequence']]
-          next if seen[identity]
-
-          seen[identity] = true
-          membership
+      def directory_memberships
+        @max_sessions.times.map do |slot|
+          parse_membership(@cache.read(index_slot_key(slot)), expected_slot: slot)
         end
       end
 
       def active_membership(session_id)
+        membership = stored_membership(session_id)
+        return membership unless membership && @expires_in
+        return membership if @cache.read(activity_key(membership))
+
+        retire_membership(membership)
+        nil
+      end
+
+      def stored_membership(session_id)
         parse_membership(@cache.read(active_key(session_id)))
       end
 
-      def parse_membership(raw, expected_sequence = nil)
+      def parse_membership(raw, expected_slot: nil)
         return unless raw
 
         membership = JSON.parse(raw)
         return unless valid_membership?(membership)
-        return if expected_sequence && membership['sequence'] != expected_sequence
+        return if expected_slot && membership['slot'] != expected_slot
 
         membership
       rescue JSON::ParserError, TypeError
@@ -207,18 +261,30 @@ module Woods
 
       def valid_membership?(membership)
         membership['sequence'].is_a?(Integer) && membership['sequence'].positive? &&
-          membership['session_id'].is_a?(String)
+          membership['session_id'].is_a?(String) && membership['token'].is_a?(String) &&
+          membership['slot'].is_a?(Integer) && membership['slot'].between?(0, @max_sessions - 1)
       end
 
       def current_membership?(membership)
-        active_membership(membership['session_id']) == membership
+        stored_membership(membership['session_id']) == membership && indexed_membership?(membership)
+      end
+
+      def active_current_membership?(membership)
+        active_membership(membership['session_id']) == membership && indexed_membership?(membership)
       end
 
       def retire_membership(membership)
         session_id = membership['session_id']
-        @cache.delete(active_key(session_id)) if current_membership?(membership)
-        cleanup_generation(session_id, membership['sequence'])
-        @cache.delete(index_slot_key(membership['sequence'])) if indexed_membership?(membership)
+        atomic_delete_if_equal(active_key(session_id), serialized_membership(membership))
+        @cache.delete(activity_key(membership))
+        cleanup_generation(session_id, membership['token'])
+        release_directory_slot(membership)
+      end
+
+      def refresh_activity!(membership)
+        return unless @expires_in
+
+        write!(activity_key(membership), true)
       end
 
       def cleanup_generation(session_id, generation)
@@ -231,7 +297,69 @@ module Woods
       end
 
       def indexed_membership?(membership)
-        parse_membership(@cache.read(index_slot_key(membership['sequence'])), membership['sequence']) == membership
+        raw = @cache.read(index_slot_key(membership['slot']))
+        parse_membership(raw, expected_slot: membership['slot']) == membership
+      end
+
+      def release_directory_slot(membership)
+        atomic_delete_if_equal(index_slot_key(membership['slot']), serialized_membership(membership))
+      end
+
+      def atomic_delete_if_equal(key, expected)
+        if @cache.respond_to?(:delete_if_equal)
+          @cache.delete_if_equal(key, expected)
+        else
+          solid_cache_delete_if_equal(key, expected)
+        end
+      end
+
+      def atomic_write_if_absent(key, value)
+        if @cache.respond_to?(:write_if_absent)
+          @cache.write_if_absent(key, value)
+        else
+          solid_cache_write_if_absent?(key, value)
+        end
+      end
+
+      def solid_cache_write_if_absent?(key, value)
+        options = @cache.send(:merged_options, nil)
+        normalized_key = @cache.send(:normalize_key, key, options)
+        entry_class = ::SolidCache::Entry
+        entry = ActiveSupport::Cache::Entry.new(value)
+        payload = @cache.send(:serialize_entry, entry, **options)
+        attributes = entry_class.send(:add_key_hash_and_byte_size, [{ key: normalized_key, value: payload }]).first
+
+        entry_class.insert_all([attributes], unique_by: entry_class.send(:upsert_unique_by))
+        stored = entry_class.read(normalized_key)
+        @cache.send(:deserialize_entry, stored, **options)&.value == value
+      end
+
+      def solid_cache_delete_if_equal(key, expected)
+        options = @cache.send(:merged_options, nil)
+        normalized_key = @cache.send(:normalize_key, key, options)
+        entry_class = ::SolidCache::Entry
+        key_hash = entry_class.send(:key_hash_for, normalized_key)
+        deleted = false
+
+        entry_class.transaction do
+          raw_key, raw_value = entry_class.lock.where(key_hash: key_hash).pick(:key, :value)
+          next unless raw_key == normalized_key
+
+          entry = @cache.send(:deserialize_entry, raw_value, **options)
+          next unless entry&.value == expected
+
+          @cache.delete(key)
+          deleted = true
+        end
+        deleted
+      end
+
+      def solid_cache_backend?
+        defined?(::SolidCache::Store) && @cache.is_a?(::SolidCache::Store)
+      end
+
+      def serialized_membership(membership)
+        JSON.generate(membership)
       end
 
       def stale_sequence?(sequence, window_size, counter_key)
@@ -246,6 +374,10 @@ module Woods
         "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:active"
       end
 
+      def activity_key(membership)
+        "#{KEY_PREFIX}#{sanitize_session_id(membership['session_id'])}:generation:#{membership['token']}:activity"
+      end
+
       def sequence_key(session_id, generation)
         "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:generation:#{generation}:sequence"
       end
@@ -258,8 +390,8 @@ module Woods
         "#{INDEX_PREFIX}:sequence"
       end
 
-      def index_slot_key(sequence)
-        "#{INDEX_PREFIX}:slot:#{sequence}"
+      def index_slot_key(slot)
+        "#{INDEX_PREFIX}:slot:#{slot}"
       end
 
       def positive_integer!(name, value)

@@ -16,9 +16,9 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
   Object.const_set(:WoodsSolidCacheCompatibilityApplication, app_class)
   WoodsSolidCacheCompatibilityApplication.initialize!
 
-  class FirstIncrementBarrierCache
-    def initialize(cache)
-      @cache = cache
+  class FirstIncrementBarrierCache < SolidCache::Store
+    def initialize(**options)
+      super(options)
       @arrivals = Hash.new(0)
       @mutex = Mutex.new
       @ready = ConditionVariable.new
@@ -26,15 +26,7 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
 
     def increment(key, amount = 1, **options)
       wait_for_competing_increment(key)
-      @cache.increment(key, amount, **options)
-    end
-
-    def method_missing(name, ...)
-      @cache.public_send(name, ...)
-    end
-
-    def respond_to_missing?(name, include_private = false)
-      @cache.respond_to?(name, include_private) || super
+      super
     end
 
     private
@@ -99,7 +91,7 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
       expect(first.read('shared')).to eq([])
     end
     it 'keeps both records when PostgreSQL interleaves first increments on absent counters' do
-      cache = FirstIncrementBarrierCache.new(SolidCache::Store.new(max_age: nil, max_entries: 10_000))
+      cache = FirstIncrementBarrierCache.new(max_age: nil, max_entries: 10_000)
       first = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
       second = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
       writers = [first, second].each_with_index.map do |target, index|
