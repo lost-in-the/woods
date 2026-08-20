@@ -5,6 +5,7 @@ require 'date'
 require 'json'
 require 'net/http'
 require 'open3'
+require 'prism'
 require 'uri'
 
 class ReleaseValidationError < StandardError; end
@@ -60,11 +61,63 @@ def release_file(path, release_sha, trusted_checkout)
   git('show', "#{release_sha}:#{path}")
 end
 
+# Statically parse the exact Woods::VERSION constant, never executing
+# candidate code. The previous regex accepted a literal VERSION under ANY
+# namespace, so a candidate could define a foreign module's VERSION matching
+# the tag while the gem's real Woods::VERSION disagreed - publishing bytes
+# whose embedded version contradicts the tag.
 def release_version(source)
-  matches = source.scan(/^\s*VERSION\s*=\s*(['"])([0-9A-Za-z][0-9A-Za-z._-]*)\1\s*$/)
-  fail_release('lib/woods/version.rb must define exactly one literal VERSION') unless matches.one?
+  parsed = Prism.parse(source)
+  fail_release('lib/woods/version.rb must parse cleanly') unless parsed.success?
 
-  matches.first.fetch(1)
+  versions = woods_version_assignments(parsed.value, [])
+  unless versions.one?
+    fail_release('lib/woods/version.rb must define exactly one literal Woods::VERSION string')
+  end
+
+  versions.first
+end
+
+def woods_version_assignments(node, nesting)
+  case node
+  when Prism::ModuleNode, Prism::ClassNode
+    path = constant_path_names(node.constant_path)
+    return [] unless path
+
+    node.child_nodes.compact.flat_map { |child| woods_version_assignments(child, nesting + path) }
+  when Prism::ConstantWriteNode
+    literal_woods_version(node, nesting + [node.name.to_s])
+  when Prism::ConstantPathWriteNode
+    path = constant_path_names(node.target)
+    path ? literal_woods_version(node, nesting + path) : []
+  else
+    node.child_nodes.compact.flat_map { |child| woods_version_assignments(child, nesting) }
+  end
+end
+
+def literal_woods_version(node, full_path)
+  return [] unless full_path == %w[Woods VERSION]
+  fail_release('Woods::VERSION must be a plain string literal') unless node.value.is_a?(Prism::StringNode)
+
+  [node.value.unescaped]
+end
+
+def constant_path_names(node)
+  names = []
+  current = node
+  while current
+    case current
+    when Prism::ConstantPathNode
+      names.unshift(current.name.to_s)
+      current = current.parent
+    when Prism::ConstantReadNode
+      names.unshift(current.name.to_s)
+      current = nil
+    else
+      return nil
+    end
+  end
+  names
 end
 
 begin

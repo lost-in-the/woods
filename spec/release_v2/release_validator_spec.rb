@@ -244,6 +244,51 @@ RSpec.describe 'release validation' do
     end
   end
 
+  it 'rejects a version constant defined outside the Woods namespace' do
+    build_repository do |repository|
+      File.write(File.join(repository, 'lib/woods/version.rb'), <<~RUBY)
+        module NotWoods
+          VERSION = '2.0.0'
+        end
+      RUBY
+
+      _stdout, stderr, status = validate(repository)
+
+      expect(status).not_to be_success
+      expect(stderr).to include('Woods::VERSION')
+    end
+  end
+
+  it 'accepts the constant-path spelling of Woods::VERSION' do
+    build_repository do |repository|
+      File.write(File.join(repository, 'lib/woods/version.rb'), <<~RUBY)
+        module Woods
+        end
+        Woods::VERSION = '2.0.0'
+      RUBY
+
+      stdout, stderr, status = validate(repository)
+
+      expect(status).to be_success, stderr
+      expect(stdout).to include('v2.0.0')
+    end
+  end
+
+  it 'rejects a non-literal Woods::VERSION' do
+    build_repository do |repository|
+      File.write(File.join(repository, 'lib/woods/version.rb'), <<~RUBY)
+        module Woods
+          VERSION = ENV.fetch('SPOOFED_VERSION')
+        end
+      RUBY
+
+      _stdout, stderr, status = validate(repository)
+
+      expect(status).not_to be_success
+      expect(stderr).to include('Woods::VERSION')
+    end
+  end
+
   it 'rejects a tag that does not exactly match the gem version' do
     build_repository do |repository|
       _stdout, stderr, status = validate(repository, tag: 'v2.0.1')
