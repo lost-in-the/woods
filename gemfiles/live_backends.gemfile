@@ -11,6 +11,8 @@
 #   and calls #execute/#quote on it. Nothing in the base bundle provides one.
 # - Qdrant needs no gem — the adapter speaks HTTP via net/http — but its specs
 #   live in the same file, so they share this bundle.
+# - `solid_cache` runs the session tracer against its real SQLite-backed cache
+#   API, including the backend's transactional atomic increment implementation.
 #
 # Keep in sync with ../Gemfile; this only adds, never re-pins.
 
@@ -20,3 +22,4 @@ eval_gemfile File.expand_path('../Gemfile', __dir__)
 
 gem 'activerecord'
 gem 'pg', '~> 1.5'
+gem 'solid_cache', '~> 1.0'

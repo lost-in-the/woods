@@ -92,12 +92,11 @@ jobs:
       - name: Run multi-worktree integration
         run: bundle exec rspec spec/integration/multi_worktree_spec.rb
 
-  # Storage adapters against REAL servers (#220). Every other storage spec uses
-  # doubles, which verify the SQL/HTTP the adapter builds but not what a server
-  # does with it — #181 (PG::CardinalityViolation on a duplicate id inside one
-  # batch) shipped because no lane ever sent a real batch to a real PostgreSQL.
+  # Storage adapters against real servers (#220), plus the session tracer
+  # against the real Solid Cache API. Unit doubles verify requests and SQL but
+  # cannot prove backend locking or transaction behavior.
   live-backends:
-    name: Live backends (pgvector + Qdrant)
+    name: Live backends (pgvector + Qdrant + Solid Cache)
     runs-on: ubuntu-latest
     env:
       BUNDLE_GEMFILE: gemfiles/live_backends.gemfile
@@ -145,7 +144,10 @@ jobs:
           echo "Qdrant did not become ready within 30s"
           exit 1
       - name: Run live-backend contract specs
-        run: bundle exec rspec spec/integration/live_backends_spec.rb
+        run: >-
+          bundle exec rspec
+          spec/integration/live_backends_spec.rb
+          spec/integration/solid_cache_compatibility_spec.rb
 
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with

@@ -49,12 +49,9 @@ RSpec.configure do |config|
   # the per-version gemfiles under gemfiles/.
   config.filter_run_excluding(booted_app: true) unless ENV['WOODS_RUN_BOOTED_APP']
 
-  # Live-backend specs (spec/integration/live_backends_spec.rb) talk to a real
-  # PostgreSQL+pgvector and a real Qdrant over the network. Every other storage
-  # spec drives the adapters through doubles, which is how #181 (a PG-only
-  # CardinalityViolation on duplicate batch ids) reached a release. Excluded
-  # from the default suite; the CI `live-backends` job opts in via
-  # WOODS_RUN_LIVE_BACKENDS with service containers and gemfiles/live_backends.gemfile.
+  # Live-backend specs use PostgreSQL+pgvector, Qdrant, and an actual Solid
+  # Cache store. Excluded from the default suite; CI opts in through
+  # WOODS_RUN_LIVE_BACKENDS with gemfiles/live_backends.gemfile.
   config.filter_run_excluding(live_backends: true) unless ENV['WOODS_RUN_LIVE_BACKENDS']
 
   # HTTP end-to-end specs boot `exe/woods-mcp-http` as a real subprocess and
