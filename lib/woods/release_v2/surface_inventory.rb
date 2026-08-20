@@ -58,6 +58,13 @@ module Woods
       ].freeze
 
       class << self # rubocop:disable Metrics/ClassLength
+        # Inventoried files carry multibyte comment characters; a bare
+        # Pathname#read tags them with the process default external encoding,
+        # which is US-ASCII under LANG=C and breaks every regex scan below.
+        def read_utf8(path)
+          path.read(encoding: Encoding::UTF_8)
+        end
+
         def inventory
           {
             'schema_version' => 1,
@@ -90,7 +97,7 @@ module Woods
           actual = inventory
           verify_documentation_claims!(actual)
 
-          expected = JSON.parse(INVENTORY_PATH.read)
+          expected = JSON.parse(read_utf8(INVENTORY_PATH))
           return true if canonicalize(expected) == canonicalize(actual)
 
           raise DriftError,
@@ -139,7 +146,7 @@ module Woods
         end
 
         def index_mcp
-          source = INDEX_SERVER_PATH.read
+          source = read_utf8(INDEX_SERVER_PATH)
           {
             'tools' => index_tool_registrations(source),
             'resources' => resources(source),
@@ -274,7 +281,7 @@ module Woods
         end
 
         def adapters
-          builder_source = BUILDER_PATH.read
+          builder_source = read_utf8(BUILDER_PATH)
           {
             'embedding_providers' => adapter_keys(builder_source, 'build_embedding_provider'),
             'vector_stores' => adapter_keys(builder_source, 'build_vector_store'),
@@ -292,7 +299,7 @@ module Woods
           ROOT.glob('lib/woods/**/*exporter.rb').sort.map do |path|
             {
               'name' => path.dirname.basename.to_s,
-              'class' => path.read.scan(/^\s*(?:module|class)\s+([A-Z][A-Za-z0-9_:]*)/).flatten.join('::'),
+              'class' => read_utf8(path).scan(/^\s*(?:module|class)\s+([A-Z][A-Za-z0-9_:]*)/).flatten.join('::'),
               'path' => path.relative_path_from(ROOT).to_s
             }
           end
@@ -323,7 +330,7 @@ module Woods
 
         def documentation_claims
           current_public_documentation_paths.to_h do |path|
-            [path.relative_path_from(ROOT).to_s, documented_surface_claims(path.read)]
+            [path.relative_path_from(ROOT).to_s, documented_surface_claims(read_utf8(path))]
           end
         end
 
@@ -332,7 +339,7 @@ module Woods
         end
 
         def indexed_current_guides
-          DOCUMENTATION_INDEX_PATH.read.scan(/\]\(([^)#]+\.md)\)/).flatten.filter_map do |reference|
+          read_utf8(DOCUMENTATION_INDEX_PATH).scan(/\]\(([^)#]+\.md)\)/).flatten.filter_map do |reference|
             path = DOCUMENTATION_INDEX_PATH.dirname.join(reference).cleanpath
             path if current_guide?(path)
           end
@@ -341,7 +348,7 @@ module Woods
         def current_guide?(path)
           return false unless path.file? && path.dirname == DOCUMENTATION_INDEX_PATH.dirname
 
-          heading = path.read.lines.first(4).join
+          heading = read_utf8(path).lines.first(4).join
           !heading.match?(/\b(?:retrospective|design doc|spike)\b/i)
         end
 

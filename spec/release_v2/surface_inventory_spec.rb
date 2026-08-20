@@ -231,4 +231,23 @@ RSpec.describe 'release-v2 public-surface inventory' do
   ensure
     File.write(exporter_path, original) if original
   end
+
+  it 'inventories the surface under a US-ASCII default external encoding' do
+    require 'open3'
+    require 'rbconfig'
+    # Inventoried sources legitimately contain multibyte comment characters;
+    # a bare Pathname#read under LANG=C tags them US-ASCII and the regex
+    # scans raise ArgumentError, so the verify task crashes in any C-locale
+    # environment (plain containers, launchd, this repo's own canary rule).
+    script = 'require "woods/release_v2/surface_inventory"; ' \
+             'Woods::ReleaseV2::SurfaceInventory.inventory; print "ok"'
+    stdout, stderr, status = Open3.capture3(
+      { 'LANG' => 'C', 'LC_ALL' => 'C' },
+      RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script,
+      chdir: root
+    )
+
+    expect(status).to be_success, stderr
+    expect(stdout).to eq('ok')
+  end
 end
