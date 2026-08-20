@@ -20,8 +20,14 @@ module Woods
     #
     class ModelValidator
       # @param registry [Hash<String, Array<String>>] Model name => column names mapping
-      def initialize(registry:)
+      # @param table_names [Hash<String, String>] Model name => table name mapping, used to
+      #   resolve a qualified `table.column` reference back to the model that owns it. Optional
+      #   and defaults to empty — callers that don't supply it get every qualified column
+      #   reference rejected by {#validate_table_column!} (fail closed: an unmapped table can't
+      #   be proven safe).
+      def initialize(registry:, table_names: {})
         @registry = registry
+        @model_by_table = table_names.each_with_object({}) { |(model, table), acc| acc[table.to_s] = model }
       end
 
       # Validate that a model name is known.
@@ -57,6 +63,28 @@ module Woods
       # @raise [ValidationError] if any column is unknown
       def validate_columns!(model_name, column_names)
         column_names.each { |col| validate_column!(model_name, col) }
+      end
+
+      # Validate a qualified `table.column` reference against the real
+      # columns of the model that owns `table_name`. Table gating (TableGate)
+      # only checks whether a table is *blocked*; it never confirms the
+      # column exists on that table at all, so a syntactically valid but
+      # nonexistent qualified column previously reached SQL execution and
+      # failed as a generic adapter error instead of a typed one.
+      #
+      # @param table_name [String]
+      # @param column_name [String]
+      # @return [true]
+      # @raise [ValidationError] if the table is unmapped or the column is unknown on it
+      def validate_table_column!(table_name, column_name)
+        model_name = @model_by_table[table_name.to_s]
+        unless model_name
+          raise ValidationError,
+                "Unknown table '#{table_name}'. Cannot validate qualified column " \
+                "'#{table_name}.#{column_name}'."
+        end
+
+        validate_column!(model_name, column_name)
       end
 
       # List all known model names.

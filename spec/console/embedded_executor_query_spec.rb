@@ -14,7 +14,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       'LineItem' => %w[id order_id product_id quantity price]
     }
   end
-  let(:validator)    { Woods::Console::ModelValidator.new(registry: registry) }
+  let(:table_names) { { 'Order' => 'orders', 'LineItem' => 'line_items' } }
+  let(:validator) { Woods::Console::ModelValidator.new(registry: registry, table_names: table_names) }
   let(:connection)   { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
@@ -139,6 +140,22 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
 
       expect(response['ok']).to be true
       expect(relation).to have_received(:having).with({ 'orders.amount' => 100 })
+    end
+
+    it 'rejects a Hash HAVING condition qualified to a real table but a nonexistent column' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'orders.not_a_real_column' => 100 }
+                                         }
+                                       })
+
+      expect(response['ok']).to be false
+      expect(response['error_type']).to eq('validation')
+      expect(response['error']).to match(/Unknown column 'not_a_real_column'/)
+      expect(connection).not_to have_received(:select_all)
     end
 
     it 'rejects a Hash HAVING condition with an unsafe column reference' do

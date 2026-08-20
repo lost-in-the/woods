@@ -39,6 +39,15 @@ module Woods
       # Suffix pattern — longest suffix match wins because we scan the full list.
       SUFFIX_PATTERN = /(_eq|_not_eq|_gteq|_lteq|_gt|_lt|_not_in|_not_null|_in|_null|_present|_blank|_matches)\z/
 
+      # Suffix classes, each with its own required value type. Ruby truthiness
+      # treats any non-nil, non-false value as true — so without a strict type
+      # check, `{status_present: "false"}` (a JSON string) inverts the caller's
+      # intent instead of raising. `_eq`/`_not_eq`/`_matches` accept any scalar
+      # and are intentionally not classified here.
+      EXISTENCE_SUFFIXES = %w[_null _not_null _present _blank].freeze
+      COMPARISON_SUFFIXES = %w[_gt _gteq _lt _lteq].freeze
+      SET_SUFFIXES = %w[_in _not_in].freeze
+
       SUFFIX_HINT = "Supported suffixes: #{SUPPORTED_SUFFIXES.join(', ')}.".freeze
 
       # @param model_name [String] ActiveRecord model name (e.g. 'Order')
@@ -70,6 +79,7 @@ module Woods
             suffix = match[1]
             column = key.delete_suffix(suffix)
             @model_validator.validate_column!(@model_name, column)
+            validate_suffix_value_type!(suffix, value)
             arel_nodes << build_node(relation, column, suffix, value)
           else
             @model_validator.validate_column!(@model_name, key)
@@ -83,6 +93,36 @@ module Woods
       end
 
       private
+
+      # Enforce the suffix-dependent value type before any Arel node is
+      # built. `true`/`false` are checked by identity (`==`), not truthiness,
+      # so a JSON string like `"false"` is rejected rather than silently
+      # treated as truthy.
+      #
+      # @param suffix [String] One of SUPPORTED_SUFFIXES
+      # @param value [Object] The predicate value
+      # @raise [ValidationError] when the value's type doesn't match the suffix class
+      def validate_suffix_value_type!(suffix, value)
+        case suffix
+        when *EXISTENCE_SUFFIXES
+          return if [true, false].include?(value)
+
+          raise ValidationError,
+                "Predicate suffix '#{suffix}' requires a strict boolean value " \
+                "(got #{value.class}: #{value.inspect}). #{SUFFIX_HINT}"
+        when *COMPARISON_SUFFIXES
+          return if value.is_a?(String) || value.is_a?(Numeric)
+
+          raise ValidationError,
+                "Predicate suffix '#{suffix}' requires a scalar (String or Numeric) value " \
+                "(got #{value.class}: #{value.inspect}). #{SUFFIX_HINT}"
+        end
+        # _in/_not_in are intentionally not type-checked here: build_node
+        # already wraps a scalar in a single-element Array via `Array(value)`,
+        # a pre-existing, separately-tested convenience for callers building
+        # scope hashes programmatically. The public JSON Schema still
+        # requires a real array for _in/_not_in at the MCP boundary.
+      end
 
       # Build an Arel predicate node for a validated column + suffix.
       #

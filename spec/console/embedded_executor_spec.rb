@@ -239,6 +239,23 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error']).to eq('timeout must be between 1 and 30')
       end
 
+      it 'rejects a well-formed numeric string for timeout, matching the public schema, ' \
+         'instead of silently coercing it' do
+        spec = Woods::Console::Server::TOOL_SPECS.find { |s| s.name == 'console_eval' }
+        expect { spec.validate_arguments!({ 'code' => '1 + 1', 'timeout' => '15' }) }
+          .to raise_error(Woods::Console::InputContract::ValidationError)
+
+        response = executor.send_request({
+                                           'tool' => 'eval',
+                                           'params' => { 'code' => '1 + 1', 'timeout' => '15' }
+                                         })
+
+        expect(response['ok']).to be false
+        expect(response['error_type']).to eq('validation')
+        expect(response['error']).to eq('timeout must be an integer')
+        expect(audit_entries).to be_empty
+      end
+
       it 'reduces a complex return value to its class name in the audit summary' do
         # Something that looks like an AR relation — we don't actually
         # need ActiveRecord here, just an object whose #inspect would

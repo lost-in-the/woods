@@ -37,6 +37,17 @@ module Woods
       SCOPE_KEY_GRAMMAR = "#{SAFE_IDENTIFIER_GRAMMAR}(?:#{SCOPE_PREDICATE_SUFFIX_GRAMMAR})?".freeze
       SCOPE_KEY_SCHEMA_PATTERN = "^(?:#{SCOPE_KEY_GRAMMAR})$(?![\\s\\S])".freeze
 
+      # Suffix-dependent value types for scope predicates, shared by every
+      # `scope:` property below. Without this, a JSON boolean-looking string
+      # (e.g. `"false"`) reaches the executor for an existence suffix
+      # (`_null`/`_present`/`_blank`) and inverts on Ruby truthiness — any
+      # non-empty String is truthy, so `"false"` behaves as `true`.
+      SCOPE_VALUE_PATTERN_PROPERTIES = {
+        "(#{Regexp.union(ScopePredicateParser::EXISTENCE_SUFFIXES).source})$" => { type: 'boolean' },
+        "(#{Regexp.union(ScopePredicateParser::COMPARISON_SUFFIXES).source})$" => { type: %w[string number] },
+        "(#{Regexp.union(ScopePredicateParser::SET_SUFFIXES).source})$" => { type: 'array' }
+      }.freeze
+
       CASE_INSENSITIVE_AGGREGATE_GRAMMAR = [
         '[Ss][Uu][Mm]', '[Aa][Vv][Gg]', '[Mm][Ii][Nn]', '[Mm][Aa][Xx]', '[Cc][Oo][Uu][Nn][Tt]'
       ].join('|').freeze
@@ -143,6 +154,7 @@ module Woods
           properties: {
             model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES,
                      description: 'Filter: {status: "paid", total_refund_gt: 0, ' \
                                   'transaction_id_not_null: true}. ' \
                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
@@ -162,6 +174,7 @@ module Woods
             columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Columns to include' },
             scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES,
                      description: 'Filter: {status: "paid", amount_gt: 100}. ' \
                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                   'Complex queries: use console_query.' }
@@ -214,6 +227,7 @@ module Woods
                        items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Column names to pluck' },
             scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES,
                      description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                   'Complex queries: use console_query.' },
@@ -243,6 +257,7 @@ module Woods
             column: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
                       description: 'Column to aggregate (optional for count)' },
             scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES,
                      description: 'Filter conditions: {col: val} or predicate suffixes ' \
                                   '(_gt, _lt, _in, _null, etc.)' }
           },
@@ -275,6 +290,7 @@ module Woods
             association: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
                            description: 'Association name' },
             scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES,
                      description: 'Filter on association: {status: "paid", amount_gt: 0}. ' \
                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                   'Complex queries: use console_query.' }
@@ -312,6 +328,7 @@ module Woods
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 50,
                      description: 'Max records (default 10, max 50)' },
             scope: { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                     patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES,
                      description: 'Filter: {status: "paid", total_gt: 0}. ' \
                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                   'Complex queries: use console_query.' },
@@ -698,7 +715,8 @@ module Woods
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
             scope: { type: %w[object array],
                      oneOf: [
-                       { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN } },
+                       { type: 'object', propertyNames: { pattern: SCOPE_KEY_SCHEMA_PATTERN },
+                         patternProperties: SCOPE_VALUE_PATTERN_PROPERTIES },
                        {
                          type: 'array', minItems: 2, maxItems: 2,
                          prefixItems: [

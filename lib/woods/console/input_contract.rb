@@ -26,6 +26,29 @@ module Woods
         arguments
       end
 
+      # Reject a String value for any integer-typed property, without
+      # attempting to parse it. Used ahead of {normalize!} on paths that skip
+      # full JSON-Schema validation (e.g. an unregistered tool spec): without
+      # this, a well-formed decimal string like `"15"` sails past
+      # {parse_integer} untouched (it's valid input to that method) even
+      # though the declared schema's `type: integer` would reject any String
+      # outright — silently coercing input the public contract disallows.
+      #
+      # @param arguments [Hash] Mutated arguments hash (string or symbol keys)
+      # @param properties [Hash] ToolSpec JSON Schema property definitions
+      # @raise [ValidationError] when an integer-typed property holds a String
+      def reject_string_typed_integers!(arguments, properties)
+        properties.each do |property_name, definition|
+          next unless definition[:type] == 'integer'
+
+          key = argument_key(arguments, property_name)
+          next unless key
+          next unless arguments[key].is_a?(String)
+
+          raise ValidationError, "#{property_name} must be an integer"
+        end
+      end
+
       def argument_key(arguments, property_name)
         return property_name if arguments.key?(property_name)
 

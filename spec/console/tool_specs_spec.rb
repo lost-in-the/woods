@@ -372,6 +372,50 @@ RSpec.describe Woods::Console::Server do
     end
   end
 
+  describe 'console_count scope suffix value types' do
+    subject(:schema) do
+      spec = all_specs.find { |candidate| candidate.name == 'console_count' }
+      MCP::Tool::InputSchema.new(spec.input_schema)
+    end
+
+    it 'rejects the truthiness-inversion case: a string "false" for an existence suffix' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_present: 'false' }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'accepts a strict boolean for existence suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_present: false }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', scope: { status_null: true }) }
+        .not_to raise_error
+    end
+
+    it 'rejects a non-boolean for existence suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_blank: 1 }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'accepts a scalar for comparison suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { total_gt: 0 }) }
+        .not_to raise_error
+    end
+
+    it 'rejects an array for comparison suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { total_gt: [1, 2] }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'accepts an array for _in' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_in: %w[paid refunded] }) }
+        .not_to raise_error
+    end
+
+    it 'rejects a non-array for _in' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_in: 'paid' }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+  end
+
   describe 'console_status' do
     subject(:spec) { all_specs.find { |s| s.name == 'console_status' } }
 

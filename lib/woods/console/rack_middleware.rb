@@ -186,7 +186,7 @@ module Woods
         config = Woods.configuration
         introspection = build_model_introspection
         Server.build_embedded(
-          model_validator: ModelValidator.new(registry: introspection[:registry]),
+          model_validator: ModelValidator.new(registry: introspection[:registry], table_names: introspection[:tables]),
           safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
           redacted_columns: Array(config&.console_redacted_columns),
           redacted_key_values: Array(config&.console_redacted_key_values),

@@ -377,7 +377,18 @@ module Woods
         return unless spec
 
         registered = Server::EXECUTABLE_MODES.values.any? { |names| names.include?(spec.name) }
-        spec.validate_arguments!(params) if registered
+        if registered
+          spec.validate_arguments!(params)
+        else
+          # Unregistered specs (console_eval today) never run the full public
+          # JSON Schema here, so without this check a well-formed numeric
+          # string (e.g. `timeout: "15"`) sails straight into normalize!'s
+          # coercion below — silently accepting input the declared schema's
+          # `type: integer` would reject outright. This closes that gap
+          # without changing normalize!'s own messages for malformed/
+          # out-of-bounds values, which are asserted verbatim elsewhere.
+          InputContract.reject_string_typed_integers!(params, spec.properties)
+        end
         InputContract.normalize!(params, spec.properties)
       rescue InputContract::ValidationError => e
         raise ValidationError, e.message
@@ -886,6 +897,11 @@ module Woods
           rescue TableGateError => e
             raise ValidationError, e.message
           end
+
+          # TableGate only proves `table` isn't *blocked* — it says nothing
+          # about whether `col` actually exists there. Validate ownership
+          # against the real schema before this reference can reach SQL.
+          @model_validator.validate_table_column!(table, col)
         else
           raise ValidationError, "Rejected column reference: #{column.inspect}" unless safe_identifier?(column)
 
