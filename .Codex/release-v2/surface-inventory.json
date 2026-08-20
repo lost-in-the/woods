@@ -880,6 +880,32 @@
       "2": 9,
       "3": 10,
       "4": 3
+    },
+    "executable_modes": {
+      "embedded": [
+        "console_aggregate",
+        "console_association_count",
+        "console_count",
+        "console_find",
+        "console_pluck",
+        "console_recent",
+        "console_sample",
+        "console_schema",
+        "console_status"
+      ],
+      "embedded_read": [
+        "console_aggregate",
+        "console_association_count",
+        "console_count",
+        "console_find",
+        "console_pluck",
+        "console_query",
+        "console_recent",
+        "console_sample",
+        "console_schema",
+        "console_sql",
+        "console_status"
+      ]
     }
   },
   "tasks_methods": [
@@ -937,6 +963,8 @@
   ],
   "counts": {
     "configuration_attributes": 99,
+    "console_mcp_default_tools": 9,
+    "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
     "executables": 5,
     "extractor_registrations": 34,
@@ -969,10 +997,6 @@
       {
         "surface": "index_mcp_tools",
         "count": 29
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
       }
     ],
     "docs/AGENT_GUIDE.md": [
@@ -1021,28 +1045,15 @@
     ],
     "docs/BACKEND_MATRIX.md": [],
     "docs/CONFIGURATION_REFERENCE.md": [],
-    "docs/CONSOLE_MCP_SETUP.md": [
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      }
-    ],
+    "docs/CONSOLE_MCP_SETUP.md": [],
     "docs/DOCKER_SETUP.md": [
       {
         "surface": "index_mcp_tools",
         "count": 29
       },
       {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
+        "surface": "console_mcp_read_tools",
+        "count": 11
       }
     ],
     "docs/EMBEDDING_MODELS.md": [],
@@ -1056,28 +1067,7 @@
         "count": 34
       }
     ],
-    "docs/FAQ.md": [
-      {
-        "surface": "index_mcp_tools",
-        "count": 29
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
-      }
-    ],
+    "docs/FAQ.md": [],
     "docs/GETTING_STARTED.md": [],
     "docs/INCREMENTAL_EXTRACTION.md": [],
     "docs/MCP_HTTP_TRANSPORT.md": [],
@@ -1091,12 +1081,12 @@
         "count": 31
       },
       {
-        "surface": "index_mcp_tools",
-        "count": 29
+        "surface": "console_mcp_default_tools",
+        "count": 9
       },
       {
-        "surface": "console_mcp_schemas",
-        "count": 31
+        "surface": "console_mcp_read_tools",
+        "count": 11
       }
     ],
     "docs/MCP_TOOL_COOKBOOK.md": [

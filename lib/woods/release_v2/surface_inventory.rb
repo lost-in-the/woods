@@ -33,6 +33,7 @@ module Woods
         },
         { surface: 'index_mcp_tools', pattern: /\bTools\s*\(\s*(?<count>\d+)\s*[—-]/i },
         { surface: 'console_mcp_schemas', pattern: /\bTools\s*\(\s*(?<count>\d+)\s*\)\s*$/i },
+        { surface: 'console_mcp_schemas', pattern: /\bTool inventory\s*\(\s*(?<count>\d+)\s+schemas\b/i },
         { surface: 'console_mcp_schemas', pattern: /\bConsole Server(?:\*{2})?\s*\(\s*(?<count>\d+) tools\b/i },
         { surface: 'console_mcp_schemas', pattern: /\bConsole Server\b[^\n]{0,120}?\bprovides (?<count>\d+) tools\b/i },
         { surface: 'console_mcp_schemas', pattern: /\b(?<count>\d+)-tool console server\b/i },
@@ -44,6 +45,14 @@ module Woods
         { surface: 'console_mcp_schemas', pattern: /\bfull (?<count>\d+)-tool surface\b/i },
         { surface: 'console_mcp_schemas', pattern: /\bBridge \((?<count>\d+) tools\)/i },
         { surface: 'console_mcp_schemas', pattern: /\b(?<count>\d+) tools, live Rails\b/i },
+        {
+          surface: 'console_mcp_default_tools',
+          pattern: /\bTool inventory\s*\(\s*\d+\s+schemas;\s*(?<count>\d+)\s+registered by default\b/i
+        },
+        {
+          surface: 'console_mcp_read_tools',
+          pattern: /\b(?<count>\d+)\s+with read tools(?: enabled)?\b/i
+        },
         { surface: 'index_mcp_resources', pattern: /(?<count>\d+) resources\b/i },
         { surface: 'index_mcp_resource_templates', pattern: /(?<count>\d+) templates\b/i }
       ].freeze
@@ -250,8 +259,18 @@ module Woods
           {
             'schemas' => specs.map { |spec| { 'name' => spec.name, 'tier' => spec.tier } }
                               .sort_by { |spec| spec['name'] },
-            'tiers' => specs.group_by(&:tier).transform_keys(&:to_s).transform_values(&:count).sort.to_h
+            'tiers' => specs.group_by(&:tier).transform_keys(&:to_s).transform_values(&:count).sort.to_h,
+            'executable_modes' => console_executable_modes
           }
+        end
+
+        def console_executable_modes
+          Woods::Console::Server::EXECUTABLE_MODES.keys.sort.to_h do |mode|
+            names = Woods::Console::Server::CONTRACT_MATRIX.filter_map do |row|
+              row.fetch(:name) if row.fetch(:executable_modes).include?(mode)
+            end
+            [mode.to_s, names.sort]
+          end
         end
 
         def adapters
@@ -294,6 +313,8 @@ module Woods
             'index_mcp_resources' => index_mcp.fetch('resources').count,
             'index_mcp_resource_templates' => index_mcp.fetch('resource_templates').count,
             'console_mcp_schemas' => console_mcp.fetch('schemas').count,
+            'console_mcp_default_tools' => console_mcp.fetch('executable_modes').fetch('embedded').count,
+            'console_mcp_read_tools' => console_mcp.fetch('executable_modes').fetch('embedded_read').count,
             'tasks_methods' => Woods::Tasks.singleton_methods(false).count,
             'public_woods_methods' => public_woods_methods.count
           }

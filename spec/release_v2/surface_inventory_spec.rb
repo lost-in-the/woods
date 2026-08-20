@@ -59,7 +59,10 @@ RSpec.describe 'release-v2 public-surface inventory' do
   it 'rejects a drifted Console MCP heading count in the current guide' do
     documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
     original = File.read(documentation_path)
-    changed = original.sub('### Tools (31)', '### Tools (30)')
+    changed = original.sub(
+      '### Tool inventory (31 schemas; 9 registered by default)',
+      '### Tool inventory (30 schemas; 9 registered by default)'
+    )
     expect(changed).not_to eq(original)
 
     File.write(documentation_path, changed)
@@ -68,6 +71,36 @@ RSpec.describe 'release-v2 public-surface inventory' do
       .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /MCP_SERVERS\.md/)
   ensure
     File.write(documentation_path, original) if original
+  end
+
+  it 'rejects a drifted Console MCP default registration count in the current guide' do
+    documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
+    original = File.read(documentation_path)
+    changed = original.sub(
+      '### Tool inventory (31 schemas; 9 registered by default)',
+      '### Tool inventory (31 schemas; 8 registered by default)'
+    )
+    expect(changed).not_to eq(original)
+
+    File.write(documentation_path, changed)
+
+    expect { surface_inventory.verify! }
+      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /MCP_SERVERS\.md/)
+  ensure
+    File.write(documentation_path, original) if original
+  end
+
+  it 'derives each Console executable mode from the registration contract' do
+    modes = surface_inventory.inventory.fetch('console_mcp').fetch('executable_modes')
+
+    expect(modes.fetch('embedded')).to contain_exactly(
+      *Woods::Console::Server::TIER1_TOOLS.map { |name| "console_#{name}" }
+    )
+    expect(modes.fetch('embedded_read')).to contain_exactly(
+      *Woods::Console::Server::TIER1_TOOLS.map { |name| "console_#{name}" },
+      'console_sql',
+      'console_query'
+    )
   end
 
   it 'derives current guides from the documentation index' do
