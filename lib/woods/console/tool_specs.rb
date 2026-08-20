@@ -21,18 +21,27 @@ module Woods
       AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
 
       SAFE_IDENTIFIER_GRAMMAR = '[A-Za-z_][A-Za-z0-9_]*'
+      NON_WHITESPACE_SCHEMA_PATTERN = '\\S'
       COLUMN_REFERENCE_GRAMMAR =
         "#{SAFE_IDENTIFIER_GRAMMAR}(?:\\.#{SAFE_IDENTIFIER_GRAMMAR})?".freeze
       SAFE_IDENTIFIER_SCHEMA_PATTERN = "^(?:#{SAFE_IDENTIFIER_GRAMMAR})$(?![\\s\\S])".freeze
       COLUMN_REFERENCE_SCHEMA_PATTERN = "^(?:#{COLUMN_REFERENCE_GRAMMAR})$(?![\\s\\S])".freeze
       SAFE_IDENTIFIER_REGEXP = Regexp.new("\\A(?:#{SAFE_IDENTIFIER_GRAMMAR})\\z").freeze
 
+      CASE_INSENSITIVE_AGGREGATE_GRAMMAR = [
+        '[Ss][Uu][Mm]', '[Aa][Vv][Gg]', '[Mm][Ii][Nn]', '[Mm][Aa][Xx]', '[Cc][Oo][Uu][Nn][Tt]'
+      ].join('|').freeze
       SELECT_EXPRESSION_GRAMMAR = [
-        "\\s*(?:(SUM|AVG|MIN|MAX|COUNT)\\s*\\(\\s*(\\*|#{COLUMN_REFERENCE_GRAMMAR})\\s*\\)|",
-        "(#{COLUMN_REFERENCE_GRAMMAR}))(?:\\s+AS\\s+(#{SAFE_IDENTIFIER_GRAMMAR}))?\\s*"
+        "\\s*(?:((?:#{CASE_INSENSITIVE_AGGREGATE_GRAMMAR}))\\s*\\(\\s*",
+        "(\\*|#{COLUMN_REFERENCE_GRAMMAR})\\s*\\)|",
+        "(#{COLUMN_REFERENCE_GRAMMAR}))(?:\\s+[Aa][Ss]\\s+(#{SAFE_IDENTIFIER_GRAMMAR}))?\\s*"
       ].join.freeze
       SELECT_EXPRESSION_SCHEMA_PATTERN = "^(?:#{SELECT_EXPRESSION_GRAMMAR})$(?![\\s\\S])".freeze
-      SELECT_EXPRESSION_REGEXP = Regexp.new("\\A(?:#{SELECT_EXPRESSION_GRAMMAR})\\z", Regexp::IGNORECASE).freeze
+      SELECT_EXPRESSION_REGEXP = Regexp.new("\\A(?:#{SELECT_EXPRESSION_GRAMMAR})\\z").freeze
+
+      ORDER_DIRECTION_GRAMMAR = '(?:[Aa][Ss][Cc]|[Dd][Ee][Ss][Cc])'
+      ORDER_DIRECTION_SCHEMA_PATTERN = "^(?:#{ORDER_DIRECTION_GRAMMAR})$(?![\\s\\S])".freeze
+      ORDER_DIRECTION_REGEXP = Regexp.new("\\A(?:#{ORDER_DIRECTION_GRAMMAR})\\z").freeze
 
       # Authoritative grammar shared by the public JSON Schema and executor.
       # Schema and Ruby use different end-anchor syntax, but the executable
@@ -86,7 +95,7 @@ module Woods
           name: 'console_count',
           description: 'Count records matching scope conditions.',
           properties: {
-            model: { type: 'string', description: 'Model name' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             scope: { type: 'object', description: 'Filter: {status: "paid", total_refund_gt: 0, ' \
                                                   'transaction_id_not_null: true}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
@@ -100,10 +109,11 @@ module Woods
           name: 'console_sample',
           description: 'Random sample of records.',
           properties: {
-            model: { type: 'string', description: 'Model name' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 25,
                      description: 'Max records (default 5, max 25)' },
-            columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' },
+            columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
+                       description: 'Columns to include' },
             scope: { type: 'object', description: 'Filter: {status: "paid", amount_gt: 100}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                                   'Complex queries: use console_query.' }
@@ -120,11 +130,13 @@ module Woods
           name: 'console_find',
           description: 'Find a single record by primary key or unique column',
           properties: {
-            model: { type: 'string', description: 'Model name' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
                   description: 'Primary key value' },
-            by: { type: 'object', description: 'Unique column lookup' },
-            columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' }
+            by: { type: 'object', propertyNames: { pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
+                  description: 'Unique column lookup' },
+            columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
+                       description: 'Columns to include' }
           },
           required: ['model'],
           tier: 1,
@@ -138,8 +150,9 @@ module Woods
           name: 'console_pluck',
           description: 'Extract column values from records.',
           properties: {
-            model: { type: 'string', description: 'Model name' },
-            columns: { type: 'array', minItems: 1, items: { type: 'string' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
+            columns: { type: 'array', minItems: 1,
+                       items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
                        description: 'Column names to pluck' },
             scope: { type: 'object', description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
@@ -164,10 +177,11 @@ module Woods
                        'Supports scope predicates: {status: "paid", total_gt: 0}. ' \
                        'For complex queries use console_query.',
           properties: {
-            model: { type: 'string', description: 'Model name' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             function: { type: 'string', enum: AGGREGATE_FUNCTIONS,
                         description: 'Aggregate function: sum, average, minimum, maximum, count' },
-            column: { type: 'string', description: 'Column to aggregate (optional for count)' },
+            column: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
+                      description: 'Column to aggregate (optional for count)' },
             scope: { type: 'object', description: 'Filter conditions: {col: val} or predicate suffixes ' \
                                                   '(_gt, _lt, _in, _null, etc.)' }
           },
@@ -194,10 +208,11 @@ module Woods
           name: 'console_association_count',
           description: 'Count associated records for a specific record.',
           properties: {
-            model: { type: 'string', description: 'Model name' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
                   description: 'Record primary key' },
-            association: { type: 'string', description: 'Association name' },
+            association: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
+                           description: 'Association name' },
             scope: { type: 'object', description: 'Filter on association: {status: "paid", amount_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                                   'Complex queries: use console_query.' }
@@ -214,7 +229,7 @@ module Woods
           name: 'console_schema',
           description: 'Get database schema for a model',
           properties: {
-            model: { type: 'string', description: 'Model name' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             include_indexes: { type: 'boolean', description: 'Include index information' }
           },
           required: ['model'],
@@ -227,8 +242,9 @@ module Woods
           name: 'console_recent',
           description: 'Recently created/updated records.',
           properties: {
-            model: { type: 'string', description: 'Model name' },
-            order_by: { type: 'string', description: 'Column to sort by (default: created_at)' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
+            order_by: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN,
+                        description: 'Column to sort by (default: created_at)' },
             direction: { type: 'string', enum: %w[asc desc],
                          description: 'Sort direction: asc or desc (default: desc)' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 50,
@@ -236,7 +252,8 @@ module Woods
             scope: { type: 'object', description: 'Filter: {status: "paid", total_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                                   'Complex queries: use console_query.' },
-            columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' }
+            columns: { type: 'array', items: { type: 'string', pattern: SAFE_IDENTIFIER_SCHEMA_PATTERN },
+                       description: 'Columns to include' }
           },
           required: ['model'],
           tier: 1,
@@ -561,7 +578,8 @@ module Woods
             'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
           ].join(' '),
           properties: {
-            sql: { type: 'string', minLength: 1, description: 'SQL query (SELECT or WITH...SELECT only)' },
+            sql: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN,
+                   description: 'SQL query (SELECT or WITH...SELECT only)' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 10_000,
                      description: 'Max rows returned (default unlimited, max 10000)' }
           },
@@ -583,7 +601,8 @@ module Woods
             'Max 10,000 rows returned. Returns columns + rows arrays like a SQL result set.'
           ].join(' '),
           properties: {
-            model: { type: 'string', description: 'ActiveRecord model name (e.g. "Order")' },
+            model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN,
+                     description: 'ActiveRecord model name (e.g. "Order")' },
             select: { type: 'array', minItems: 1,
                       items: { type: 'string', pattern: SELECT_EXPRESSION_SCHEMA_PATTERN },
                       description: 'Columns or expressions to select (e.g. ["status", "COUNT(*) AS n"])' },
@@ -605,7 +624,7 @@ module Woods
                       description: 'HAVING condition object or parameterized [template, bind] array' },
             order: { type: 'object',
                      propertyNames: { pattern: COLUMN_REFERENCE_SCHEMA_PATTERN },
-                     additionalProperties: { type: 'string', enum: %w[asc desc] },
+                     additionalProperties: { type: 'string', pattern: ORDER_DIRECTION_SCHEMA_PATTERN },
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
             scope: { type: 'object',
                      description: 'WHERE conditions as {column => value} or [sql, bind] array' },
@@ -635,6 +654,17 @@ module Woods
         attributes: { 'title' => 'Example' }, feature: 'preview', job_id: 'job-1',
         code: '1 + 1', sql: 'SELECT 1', select: ['id']
       }.freeze
+
+      REPRESENTATIVE_VALID_INPUT_OVERRIDES = {
+        'console_sample' => { limit: 25, columns: %w[id title] },
+        'console_find' => { id: 1, columns: %w[id title] },
+        'console_pluck' => { columns: %w[id title] },
+        'console_aggregate' => { function: 'sum', column: 'status' },
+        'console_schema' => { include_indexes: true },
+        'console_recent' => { direction: 'desc', limit: 3, columns: %w[id title] },
+        'console_sql' => { sql: 'SELECT id, title FROM posts ORDER BY id' },
+        'console_query' => { select: %w[id title], order: { 'id' => 'ASC' } }
+      }.transform_values(&:freeze).freeze
 
       INVALID_ARGUMENT_VALUES = {
         'string' => [], 'integer' => 'not-an-integer', 'boolean' => 'not-a-boolean',
@@ -728,9 +758,10 @@ module Woods
         executable = modes.any?
         required = Array(spec.required).freeze
         optional = (spec.properties.keys.map(&:to_s) - required).freeze
-        valid_input = required.to_h do |name|
+        required_input = required.to_h do |name|
           [name.to_sym, REPRESENTATIVE_ARGUMENT_VALUES.fetch(name.to_sym)]
-        end.freeze
+        end
+        valid_input = required_input.merge(REPRESENTATIVE_VALID_INPUT_OVERRIDES.fetch(spec.name, {})).freeze
 
         invalid_arguments = if required.any?
                               valid_input.reject { |name, _value| name == required.first.to_sym }.freeze
@@ -740,6 +771,19 @@ module Woods
                             else
                               [].freeze
                             end
+        error_contract = if required.any?
+                           {
+                             stage: :sdk_required_arguments,
+                             is_error: true,
+                             text_prefix: "Missing required arguments: #{required.first}"
+                           }.freeze
+                         else
+                           {
+                             stage: :sdk_schema_validation,
+                             is_error: true,
+                             text_prefix: 'Invalid arguments:'
+                           }.freeze
+                         end
 
         {
           name: spec.name,
@@ -752,7 +796,7 @@ module Woods
           representative_valid_input: valid_input,
           representative_invalid_input: {
             arguments: invalid_arguments,
-            error_class: 'MCP::Tool::InputSchema::ValidationError'
+            error_contract: error_contract
           }.freeze,
           semantic_output: {
             availability: executable ? :executable : :inventory_only,

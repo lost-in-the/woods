@@ -36,7 +36,10 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
         .not_to raise_error, row.fetch(:name)
 
       invalid = row.fetch(:representative_invalid_input)
-      expect(invalid.fetch(:error_class)).to eq('MCP::Tool::InputSchema::ValidationError')
+      error_contract = invalid.fetch(:error_contract)
+      expect(error_contract.fetch(:is_error)).to be(true)
+      expect(%i[sdk_required_arguments sdk_schema_validation]).to include(error_contract.fetch(:stage))
+      expect(error_contract.fetch(:text_prefix)).to be_a(String)
       expect { input_schema(row).validate_arguments(invalid.fetch(:arguments)) }
         .to raise_error(MCP::Tool::InputSchema::ValidationError), row.fetch(:name)
     end

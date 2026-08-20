@@ -669,7 +669,7 @@ module Woods
       # @param model_name [String]
       # @return [Array<String>]
       def validated_select(select, model_name)
-        Array(select).flat_map { |s| s.to_s.split(',') }.map do |expr|
+        Array(select).map do |expr|
           validate_select_expression!(expr.strip, model_name)
         end
       end
@@ -739,12 +739,11 @@ module Woods
         when Hash
           order.each_key { |k| validate_column_reference!(k.to_s, model_name) }
           order.transform_values do |dir|
-            dir_sym = dir.to_s.downcase.to_sym
-            unless %i[asc desc].include?(dir_sym)
+            unless dir.to_s.match?(Server::ORDER_DIRECTION_REGEXP)
               raise ValidationError, "order direction must be :asc or :desc (got #{dir.inspect})"
             end
 
-            dir_sym
+            dir.to_s.downcase.to_sym
           end
         when String, Symbol
           col = order.to_s.strip

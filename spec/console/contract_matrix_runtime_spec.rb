@@ -8,17 +8,27 @@ require_relative 'support/booted_console_app' if ENV['WOODS_RUN_BOOTED_APP']
 require 'woods/console/server'
 
 module ConsoleContractMatrixRuntime
-  SEMANTIC_PREDICATES = {
-    integer: ->(value) { value.is_a?(Integer) },
-    number_or_null: ->(value) { value.nil? || value.is_a?(Numeric) },
-    string: ->(value) { value.is_a?(String) },
-    array: ->(value) { value.is_a?(Array) },
-    array_of_strings: ->(value) { value.is_a?(Array) && value.all?(String) },
-    array_of_arrays: ->(value) { value.is_a?(Array) && value.all?(Array) },
-    array_of_records: ->(value) { value.is_a?(Array) && value.all?(Hash) },
-    record_or_null: ->(value) { value.nil? || value.is_a?(Hash) },
-    column_metadata_by_name: ->(value) { value.is_a?(Hash) && value.values.all?(Hash) },
-    optional_index_metadata: ->(value) { value.nil? || value.is_a?(Array) }
+  RECORD_ROWS = [
+    { 'id' => 1, 'title' => 'Alpha' },
+    { 'id' => 2, 'title' => 'Beta' },
+    { 'id' => 3, 'title' => 'Gamma' }
+  ].freeze
+  POSITIONAL_ROWS = [[1, 'Alpha'], [2, 'Beta'], [3, 'Gamma']].freeze
+  EXPECTED_RESULTS = {
+    'console_count' => { 'count' => 3 },
+    'console_sample' => { 'records' => RECORD_ROWS },
+    'console_find' => { 'record' => RECORD_ROWS.first },
+    'console_pluck' => { 'columns' => %w[id title], 'values' => POSITIONAL_ROWS },
+    'console_aggregate' => { 'value' => 60 },
+    'console_association_count' => { 'count' => 2 },
+    'console_schema' => {
+      'columns' => %w[created_at id status title updated_at],
+      'indexes' => []
+    },
+    'console_recent' => { 'records' => RECORD_ROWS.reverse },
+    'console_status' => { 'status' => 'ok', 'models' => %w[Comment Post], 'adapter' => 'SQLite' },
+    'console_sql' => { 'columns' => %w[id title], 'rows' => POSITIONAL_ROWS, 'count' => 3 },
+    'console_query' => { 'columns' => %w[id title], 'rows' => POSITIONAL_ROWS, 'count' => 3 }
   }.freeze
 end
 
@@ -45,13 +55,21 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
       row.fetch(:executable_modes).include?(:embedded_read)
     end
   end
+  let(:direct_executor) do
+    Woods::Console::EmbeddedExecutor.new(
+      model_validator: validator,
+      safe_context: safe_context,
+      connection: connection,
+      read_tools_enabled: true
+    )
+  end
 
   before do
     @original_context_format = Woods.configuration.context_format
     @original_blocked_tables = Woods.configuration.console_blocked_tables
     Woods.configuration.context_format = :json
     Woods.configuration.console_blocked_tables = %w[schema_migrations ar_internal_metadata]
-    Comment.find_or_create_by!(post: Post.first, body: 'Console contract comment')
+    seed_contract_rows
   end
 
   after do
@@ -59,11 +77,23 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
     Woods.configuration.console_blocked_tables = @original_blocked_tables
   end
 
-  def build_server(redacted_columns: [])
+  def seed_contract_rows
+    Comment.delete_all
+    Post.delete_all
+    Post.create!(id: 1, title: 'Alpha', status: 10, created_at: Time.utc(2026, 1, 1))
+    Post.create!(id: 2, title: 'Beta', status: 20, created_at: Time.utc(2026, 1, 2))
+    Post.create!(id: 3, title: 'Gamma', status: 30, created_at: Time.utc(2026, 1, 3))
+    Comment.create!(id: 1, post_id: 1, body: 'First')
+    Comment.create!(id: 2, post_id: 1, body: 'Second')
+    Comment.create!(id: 3, post_id: 2, body: 'Third')
+  end
+
+  def build_server(redacted_columns: [], redacted_key_values: [])
     Woods::Console::Server.build_embedded(
       model_validator: validator,
       safe_context: safe_context,
       redacted_columns: redacted_columns,
+      redacted_key_values: redacted_key_values,
       connection: connection,
       read_tools_enabled: true,
       model_tables: model_tables,
@@ -71,111 +101,181 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
     )
   end
 
-  def registered_tools(server)
-    server.instance_variable_get(:@tools)
+  def tools_call(server, name, arguments)
+    request = JSON.generate(
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: name, arguments: arguments }
+    )
+    JSON.parse(server.handle_json(request))
   end
 
-  def call_tool(server, name, arguments)
-    tool = registered_tools(server).fetch(name)
+  def tool_result(response)
+    expect(response).to include('jsonrpc' => '2.0', 'id' => 1)
+    result = response.fetch('result')
+    expect(result.fetch('isError')).to be(false)
+    expect(result.dig('content', 0, 'type')).to eq('text')
+    JSON.parse(result.dig('content', 0, 'text'))
+  end
+
+  def tool_error(response)
+    expect(response).to include('jsonrpc' => '2.0', 'id' => 1)
+    result = response.fetch('result')
+    expect(result.fetch('isError')).to be(true)
+    expect(result.dig('content', 0, 'type')).to eq('text')
+    result.dig('content', 0, 'text')
+  end
+
+  def execute_after_schema(name, arguments)
+    spec = Woods::Console::Server::TOOL_SPECS.find { |candidate| candidate.name == name }
+    request = spec.handler.call(arguments.transform_keys(&:to_sym))
+    direct_executor.send_request(request)
+  rescue Woods::Console::SqlValidationError => e
+    { 'ok' => false, 'error' => e.message, 'error_type' => 'validation' }
+  end
+
+  def schema_accepts?(server, name, arguments)
+    tool = server.instance_variable_get(:@tools).fetch(name)
     tool.input_schema_value.validate_arguments(arguments)
-    tool.call(**arguments, server_context: {})
+    true
+  rescue MCP::Tool::InputSchema::ValidationError
+    false
   end
 
-  def parsed_result(response)
-    expect(response).not_to be_error
-    JSON.parse(response.content.first.fetch(:text))
-  end
-
-  def expect_semantic_value(value, semantic)
-    predicate = ConsoleContractMatrixRuntime::SEMANTIC_PREDICATES.fetch(semantic)
-    expect(value).to satisfy("match #{semantic}") { |candidate| predicate.call(candidate) }
-  end
-
-  def expect_semantic_shape(result, shape)
-    shape.each do |key, semantic|
-      value = result[key.to_s]
-      expect(result).to have_key(key.to_s) unless semantic == :optional_index_metadata
-      expect_semantic_value(value, semantic)
+  def normalize_concrete_result(name, result)
+    case name
+    when 'console_sample'
+      result.merge('records' => result.fetch('records').sort_by { |row| row.fetch('id') })
+    when 'console_schema'
+      result.merge('columns' => result.fetch('columns').keys.sort)
+    else
+      result
     end
   end
 
-  it 'executes every registered row through ActiveRecord and its full dispatch pipeline' do
+  it 'dispatches all 11 valid representatives through the public JSON-RPC server with concrete results' do
     server = build_server
+    registered = server.instance_variable_get(:@tools).keys
 
     expect(matrix.size).to eq(11)
-    expect(registered_tools(server).keys).to contain_exactly(*matrix.map { |row| row.fetch(:name) })
-
+    expect(registered).to contain_exactly(*matrix.map { |row| row.fetch(:name) })
     matrix.each do |row|
-      response = call_tool(server, row.fetch(:name), row.fetch(:representative_valid_input))
-      result = parsed_result(response)
+      name = row.fetch(:name)
+      response = tools_call(server, name, row.fetch(:representative_valid_input))
 
-      expect_semantic_shape(result, row.dig(:semantic_output, :shape))
+      expect(normalize_concrete_result(name, tool_result(response))).to eq(
+        ConsoleContractMatrixRuntime::EXPECTED_RESULTS.fetch(name)
+      )
     end
   end
 
-  it 'drives every registered invalid representative to its declared schema error' do
+  it 'dispatches all 11 invalid representatives to their declared wire error contract' do
     server = build_server
 
     matrix.each do |row|
-      tool = registered_tools(server).fetch(row.fetch(:name))
       invalid = row.fetch(:representative_invalid_input)
+      text = tool_error(tools_call(server, row.fetch(:name), invalid.fetch(:arguments)))
+      contract = invalid.fetch(:error_contract)
 
-      expect(invalid.fetch(:error_class)).to eq('MCP::Tool::InputSchema::ValidationError')
-      expect { tool.input_schema_value.validate_arguments(invalid.fetch(:arguments)) }
-        .to raise_error(MCP::Tool::InputSchema::ValidationError), row.fetch(:name)
+      expect(contract.fetch(:is_error)).to be(true)
+      expect(text).to start_with(contract.fetch(:text_prefix)), row.fetch(:name)
     end
   end
 
-  it 'enforces every executable table-gate claim before a real query' do
-    Woods.configuration.console_blocked_tables = ['posts']
+  it 'keeps SQL, select, and order SDK schemas in parity with real execution' do
     server = build_server
-    gated_rows = matrix.reject { |row| row.fetch(:table_gate) == :not_applicable_status_metadata }
+    cases = [
+      ['console_sql', { sql: " \nSELECT 1\t" }, true],
+      ['console_sql', { sql: " \n\t" }, false],
+      ['console_query', { model: 'Post', select: ['sum(status) AS total'] }, true],
+      ['console_query', { model: 'Post', select: ['SuM(status) aS total'] }, true],
+      ['console_query', { model: 'Post', select: ['id, title'] }, false],
+      ['console_query', { model: 'Post', select: ['id'], order: { 'id' => 'ASC' } }, true],
+      ['console_query', { model: 'Post', select: ['id'], order: { 'id' => 'dEsC' } }, true],
+      ['console_query', { model: 'Post', select: ['id'], order: { 'id' => 'sideways' } }, false]
+    ]
 
-    gated_rows.each do |row|
-      arguments = row.fetch(:representative_valid_input)
-      arguments = { sql: 'SELECT * FROM posts' } if row.fetch(:name) == 'console_sql'
-      response = call_tool(server, row.fetch(:name), arguments)
+    aggregate_failures do
+      cases.each do |name, arguments, accepted|
+        execution = execute_after_schema(name, arguments)
+        response = tools_call(server, name, arguments)
 
-      expect(response).to be_error, row.fetch(:name)
-      expect(response.content.first.fetch(:text)).to include('posts'), row.fetch(:name)
+        expect(schema_accepts?(server, name, arguments)).to be(accepted), arguments.inspect
+        expect(execution.fetch('ok')).to be(accepted), arguments.inspect
+        expect(response.dig('result', 'isError')).to be(!accepted), arguments.inspect
+      end
     end
   end
 
-  it 'redacts real record and positional outputs for every claimed data-bearing path' do
-    source = Post.first.title
-    server = build_server(redacted_columns: ['title'])
+  it 'rejects every predictable registered executor validation in the SDK schema' do
+    server = build_server
+    cases = [
+      ['console_count', { model: ' ' }],
+      ['console_sample', { model: 'Post', columns: ['bad key'] }],
+      ['console_find', { model: 'Post', by: { 'bad key' => 1 } }],
+      ['console_pluck', { model: 'Post', columns: ['bad key'] }],
+      ['console_aggregate', { model: 'Post', function: 'sum', column: 'bad key' }],
+      ['console_association_count', { model: 'Post', id: 1, association: 'bad key' }],
+      ['console_schema', { model: ' ' }],
+      ['console_recent', { model: 'Post', order_by: 'bad key' }],
+      ['console_sql', { sql: " \n\t" }],
+      ['console_query', { model: 'Post', select: ['bad key'] }]
+    ]
+
+    aggregate_failures do
+      cases.each do |name, arguments|
+        expect(execute_after_schema(name, arguments).fetch('ok')).to be(false), name
+        expect(schema_accepts?(server, name, arguments)).to be(false), name
+        expect(tools_call(server, name, arguments).dig('result', 'isError')).to be(true), name
+      end
+    end
+  end
+
+  it 'gates base model, association, join, and SQL-derived table access independently' do
+    cases = [
+      [%w[posts], 'console_count', { model: 'Post' }, 'posts'],
+      [%w[comments], 'console_association_count', { model: 'Post', id: 1, association: 'comments' }, 'comments'],
+      [%w[comments], 'console_query', { model: 'Post', select: ['posts.id'], joins: ['comments'] }, 'comments'],
+      [%w[comments], 'console_sql', { sql: 'SELECT * FROM comments' }, 'comments']
+    ]
+
+    cases.each do |blocked, name, arguments, expected_table|
+      Woods.configuration.console_blocked_tables = blocked
+      text = tool_error(tools_call(build_server, name, arguments))
+
+      expect(text).to include(expected_table), name
+    end
+  end
+
+  it 'applies configured EAV redaction to every claimed record and positional result' do
+    pattern = { key_column: 'status', value_column: 'title', sensitive_keys: ['10'] }
+    server = build_server(redacted_key_values: [pattern])
     calls = {
-      'console_sample' => { model: 'Post' },
-      'console_find' => { model: 'Post', id: Post.first.id, columns: %w[id title] },
-      'console_pluck' => { model: 'Post', columns: ['title'] },
-      'console_recent' => { model: 'Post', columns: %w[id title] },
-      'console_sql' => { sql: 'SELECT title FROM posts' },
-      'console_query' => { model: 'Post', select: ['title'] }
+      'console_sample' => { model: 'Post', limit: 25, columns: %w[status title] },
+      'console_find' => { model: 'Post', id: 1, columns: %w[status title] },
+      'console_pluck' => { model: 'Post', columns: %w[status title] },
+      'console_recent' => { model: 'Post', limit: 3, columns: %w[status title] },
+      'console_sql' => { sql: 'SELECT status, title FROM posts ORDER BY id' },
+      'console_query' => { model: 'Post', select: %w[status title], order: { 'id' => 'asc' } }
     }
 
     calls.each do |name, arguments|
       row = matrix.find { |candidate| candidate.fetch(:name) == name }
-      expect(row.fetch(:redaction)).not_to match(/^not_applicable/)
+      result_text = JSON.generate(tool_result(tools_call(server, name, arguments)))
 
-      text = call_tool(server, name, arguments).content.first.fetch(:text)
-      expect(text).to include('[REDACTED]'), name
-      expect(text).not_to include(source), name
+      expect(row.fetch(:redaction)).to match(/_and_eav\z/), name
+      expect(result_text).to include('[REDACTED]'), name
+      expect(result_text).not_to include('Alpha'), name
     end
   end
 
-  it 'credential-scans a real executor result before rendering' do
+  it 'credential-scans an early table-gate error through registered server dispatch' do
     credential = 'sk_live_abcdefghijklmnopqrstuvwx'
-    post = Post.first
-    original_title = post.title
-    post.update!(title: credential)
+    Woods.configuration.console_blocked_tables = [credential]
     server = build_server
 
-    arguments = { model: 'Post', id: post.id, columns: ['title'] }
-    text = call_tool(server, 'console_find', arguments).content.first.fetch(:text)
+    text = tool_error(tools_call(server, 'console_sql', { sql: "SELECT * FROM #{credential}" }))
 
     expect(text).to include('[REDACTED]')
     expect(text).not_to include(credential)
-  ensure
-    post&.update!(title: original_title) if original_title
   end
 end
