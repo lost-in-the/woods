@@ -120,6 +120,19 @@ RSpec.describe Woods::Resilience::CircuitBreaker do
         expect(breaker.state).to eq(:open)
       end
 
+      it 'releases the probe slot when the block raises a non-StandardError' do
+        non_standard_error = Class.new(Exception) # rubocop:disable Lint/InheritException
+
+        expect do
+          breaker.call { raise non_standard_error, 'signal-like failure' }
+        end.to raise_error(non_standard_error)
+
+        # The probe slot must not be stuck "in flight" forever — a subsequent
+        # call must be admitted rather than rejected with CircuitOpenError.
+        result = breaker.call { 'recovered' }
+        expect(result).to eq('recovered')
+      end
+
       it 'admits only a single probe at a time, rejecting concurrent calls' do
         probe_started = Queue.new
         release_probe = Queue.new

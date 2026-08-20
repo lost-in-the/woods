@@ -65,30 +65,64 @@ module Woods
       # @raise [StandardError] re-raises any error from the block
       def call(&block)
         probing = admit_call!
+        handled = false
 
         begin
           result = block.call
+          handled = true
         rescue CircuitOpenError
           # A nested breaker tripped — release our probe slot but don't count
           # it as this breaker's own failure.
-          @mutex.synchronize { @half_open_probe_in_flight = false if probing }
+          handled = true
+          release_probe(probing)
           raise
         rescue StandardError => e
-          @mutex.synchronize do
-            @half_open_probe_in_flight = false if probing
-            record_failure(probing)
-          end
+          handled = true
+          finish_failure(probing)
           raise e
+        ensure
+          # A non-StandardError hits neither rescue above (Interrupt,
+          # Thread#raise-delivered exceptions, a custom Exception subclass).
+          # Release only the probe slot here — deliberately no
+          # record_failure, matching pre-existing state-transition rules.
+          release_probe(probing) unless handled
         end
 
-        @mutex.synchronize do
-          @half_open_probe_in_flight = false if probing
-          record_success(probing)
-        end
+        finish_success(probing)
         result
       end
 
       private
+
+      # Release the half_open probe slot without recording an outcome.
+      # Used by the CircuitOpenError rescue (a nested breaker's failure
+      # isn't this breaker's own) and the ensure fallback (a non-StandardError
+      # that skipped both rescue clauses).
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def release_probe(probing)
+        @mutex.synchronize { @half_open_probe_in_flight = false if probing }
+      end
+
+      # Release the probe slot and record a failure, atomically.
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def finish_failure(probing)
+        @mutex.synchronize do
+          @half_open_probe_in_flight = false if probing
+          record_failure(probing)
+        end
+      end
+
+      # Release the probe slot and record a success, atomically.
+      #
+      # @param probing [Boolean] whether this call was admitted as the probe
+      def finish_success(probing)
+        @mutex.synchronize do
+          @half_open_probe_in_flight = false if probing
+          record_success(probing)
+        end
+      end
 
       # Decide whether this call may proceed, transitioning open→half_open when
       # the reset timeout has elapsed. Runs entirely under the mutex.
