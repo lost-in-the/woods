@@ -254,7 +254,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
     end
 
     it 'scans past cleared recent sessions to find older active sessions' do
-      bounded = described_class.new(cache: cache, max_sessions: 2)
+      bounded = described_class.new(cache: cache, max_sessions: 3)
       %w[older cleared-a cleared-b].each { |session_id| bounded.record(session_id, request_data) }
       bounded.clear('cleared-a')
       bounded.clear('cleared-b')
@@ -355,13 +355,64 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect(bounded.sessions(limit: 10).size).to eq(2)
     end
-    it 'wraps record and global index slots without growing cache keys' do
+
+    it 'evicts data and counters outside the active session bound' do
+      bounded = described_class.new(cache: cache, max_sessions: 2, max_requests_per_session: 2)
+      6.times { |i| bounded.record("sess#{i}", request_data) }
+
+      expect(bounded.read('sess0')).to eq([])
+      expect(bounded.read('sess5')).to contain_exactly(request_data)
+      expect(cache.keys.grep(/:record:/).size).to be <= 4
+      expect(cache.keys.grep(/woods:session:.*:sequence/).size).to be <= 2
+    end
+
+    it 'does not let a hot session consume active session discovery' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      bounded.record('cold', request_data)
+      10.times { |i| bounded.record('hot', request_data.merge('action' => "action_#{i}")) }
+
+      expect(bounded.sessions(limit: 10).map { |entry| entry['session_id'] })
+        .to contain_exactly('cold', 'hot')
+    end
+
+    it 'keeps an old active session discoverable through cleared-session churn' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      bounded.record('keeper', request_data)
+      8.times do |i|
+        session_id = "cleared#{i}"
+        bounded.record(session_id, request_data)
+        bounded.clear(session_id)
+      end
+      bounded.record('newest', request_data)
+
+      expect(bounded.sessions(limit: 10).map { |entry| entry['session_id'] })
+        .to contain_exactly('keeper', 'newest')
+    end
+
+    it 'clears every retained session after churn' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      bounded.record('keeper', request_data)
+      8.times do |i|
+        session_id = "cleared#{i}"
+        bounded.record(session_id, request_data)
+        bounded.clear(session_id)
+      end
+      bounded.record('newest', request_data)
+
+      bounded.clear_all
+
+      expect(bounded.read('keeper')).to eq([])
+      expect(bounded.read('newest')).to eq([])
+      expect(cache.keys.grep(/:record:/)).to be_empty
+    end
+
+    it 'bounds record and active-session keys without retaining evicted generations' do
       bounded = described_class.new(cache: cache, max_sessions: 2, max_requests_per_session: 2)
       12.times { |i| bounded.record("sess#{i % 3}", request_data.merge('action' => "action_#{i}")) }
 
-      expect(cache.keys.grep(/:record:/).size).to be <= 6
-      expect(cache.keys.grep(/session_index:slot/).size).to be <= 4
-      expect(bounded.read('sess2').map { |entry| entry['action'] }).to eq(%w[action_8 action_11])
+      expect(cache.keys.grep(/:record:/).size).to be <= 4
+      expect(cache.keys.grep(/session_index:slot/).size).to be <= 2
+      expect(bounded.read('sess2').map { |entry| entry['action'] }).to eq(['action_11'])
       expect(bounded.sessions(limit: 10).map { |entry| entry['session_id'] }.uniq.size).to be <= 2
     end
 

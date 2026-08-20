@@ -11,7 +11,6 @@ module Woods
       INDEX_PREFIX = 'woods:session_index'
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
-      INDEX_SLOT_MULTIPLIER = 2
 
       class AtomicIncrementRequired < Woods::Error; end
       class BackendWriteError < Woods::Error; end
@@ -29,64 +28,56 @@ module Woods
         @expires_in = expires_in
         @max_sessions = positive_integer!(:max_sessions, max_sessions)
         @max_requests_per_session = positive_integer!(:max_requests_per_session, max_requests_per_session)
-        @index_slots = @max_sessions * INDEX_SLOT_MULTIPLIER
       end
 
-      # Allocate a monotonic sequence and publish one immutable-sequence slot.
+      # Admit the session, allocate a monotonic sequence, and publish one record.
       def record(session_id, request_data)
         normalized_record = JSON.parse(JSON.generate(request_data))
-        index_sequence = increment!(index_sequence_key)
-        sequence = increment!(sequence_key(session_id))
-        index_current = publish_current_slot?(
-          index_slot_key(index_sequence), index_sequence, @index_slots, index_sequence_key,
-          JSON.generate('sequence' => index_sequence, 'session_id' => session_id.to_s)
-        )
-        return unless index_current
+        membership = active_membership(session_id) || admit_session(session_id)
+        return unless membership
 
-        key = record_key(session_id, sequence)
-        publish_current_slot?(key, sequence, @max_requests_per_session, sequence_key(session_id),
-                              JSON.generate('sequence' => sequence, 'record' => normalized_record))
-        @cache.delete(key) if stale_sequence?(index_sequence, @index_slots, index_sequence_key)
+        sequence_key = sequence_key(session_id, membership['sequence'])
+        sequence = increment!(sequence_key)
+        key = record_key(session_id, membership['sequence'], sequence)
+        published = publish_current_slot?(key, sequence, @max_requests_per_session, sequence_key,
+                                          JSON.generate('sequence' => sequence, 'record' => normalized_record))
+        @cache.delete(key) unless published && current_membership?(membership)
         nil
       end
 
       # Read the current bounded sequence window, skipping allocation gaps.
       def read(session_id)
-        sequence = counter_value(sequence_key(session_id))
+        membership = active_membership(session_id)
+        return [] unless membership
+
+        generation = membership['sequence']
+        sequence = counter_value(sequence_key(session_id, generation))
         return [] unless sequence.positive?
 
         sequence_window(sequence, @max_requests_per_session).filter_map do |expected|
-          parse_slot(@cache.read(record_key(session_id, expected)), expected, 'record')
+          parse_slot(@cache.read(record_key(session_id, generation, expected)), expected, 'record')
         end
       end
 
-      # Reconstruct recent unique sessions from the bounded global event ring.
+      # List the bounded active-session set, newest admission first.
       def sessions(limit: 20)
-        sequence = counter_value(index_sequence_key)
-        summaries = []
-        indexed_session_ids(sequence).each do |session_id|
+        active_memberships.reverse_each.filter_map do |membership|
+          session_id = membership['session_id']
           requests = read(session_id)
-          next if requests.empty?
-
-          summaries << session_summary(session_id, requests)
-          break if summaries.size >= [limit, @max_sessions].min
-        end
-        summaries
+          session_summary(session_id, requests) unless requests.empty?
+        end.first([limit, @max_sessions].min)
       end
 
       def clear(session_id)
-        cleared_through = increment!(sequence_key(session_id), @max_requests_per_session) -
-                          @max_requests_per_session
-        sequence_window(cleared_through, @max_requests_per_session).each do |slot_sequence|
-          @cache.delete(record_key(session_id, slot_sequence))
-        end
+        membership = active_membership(session_id)
+        retire_membership(membership) if membership
         nil
       end
 
       def clear_all
-        cleared_through = increment!(index_sequence_key, @index_slots) - @index_slots
-        indexed_session_ids(cleared_through).each { |session_id| clear(session_id) }
-        sequence_window(cleared_through, @index_slots).each do |slot_sequence|
+        cleared_through = increment!(index_sequence_key, @max_sessions) - @max_sessions
+        indexed_memberships(cleared_through, current_only: false).each { |membership| retire_membership(membership) }
+        sequence_window(cleared_through, cleared_through).each do |slot_sequence|
           @cache.delete(index_slot_key(slot_sequence))
         end
         nil
@@ -153,28 +144,114 @@ module Woods
         0
       end
 
-      def indexed_session_ids(sequence)
-        seen = {}
-        sequence_window(sequence, @index_slots).reverse_each.filter_map do |expected|
-          session_id = parse_slot(@cache.read(index_slot_key(expected)), expected, 'session_id')
-          next unless session_id
-          next if seen[session_id]
+      def admit_session(session_id)
+        index_sequence = increment!(index_sequence_key)
+        membership = { 'sequence' => index_sequence, 'session_id' => session_id.to_s }
+        claimed = @cache.write(active_key(session_id), JSON.generate(membership), unless_exist: true, **write_options)
+        return active_membership(session_id) unless claimed
 
-          seen[session_id] = true
-          session_id
+        write!(index_slot_key(index_sequence), JSON.generate(membership))
+        unless current_membership?(membership)
+          retire_membership(membership)
+          return active_membership(session_id)
         end
+        if stale_index_sequence?(index_sequence)
+          retire_membership(membership)
+          return
+        end
+
+        enforce_active_bound
+        active_membership(session_id)
+      end
+
+      def enforce_active_bound
+        memberships = active_memberships
+        overflow = memberships.size - @max_sessions
+        memberships.first(overflow).each { |membership| retire_membership(membership) } if overflow.positive?
+      end
+
+      def active_memberships
+        indexed_memberships(counter_value(index_sequence_key))
+      end
+
+      def indexed_memberships(sequence, current_only: true)
+        seen = {}
+        sequence_window(sequence, sequence).filter_map do |expected|
+          membership = parse_membership(@cache.read(index_slot_key(expected)), expected)
+          next unless membership
+          next if current_only && !current_membership?(membership)
+
+          identity = [membership['session_id'], membership['sequence']]
+          next if seen[identity]
+
+          seen[identity] = true
+          membership
+        end
+      end
+
+      def active_membership(session_id)
+        parse_membership(@cache.read(active_key(session_id)))
+      end
+
+      def parse_membership(raw, expected_sequence = nil)
+        return unless raw
+
+        membership = JSON.parse(raw)
+        return unless valid_membership?(membership)
+        return if expected_sequence && membership['sequence'] != expected_sequence
+
+        membership
+      rescue JSON::ParserError, TypeError
+        nil
+      end
+
+      def valid_membership?(membership)
+        membership['sequence'].is_a?(Integer) && membership['sequence'].positive? &&
+          membership['session_id'].is_a?(String)
+      end
+
+      def current_membership?(membership)
+        active_membership(membership['session_id']) == membership
+      end
+
+      def retire_membership(membership)
+        session_id = membership['session_id']
+        @cache.delete(active_key(session_id)) if current_membership?(membership)
+        cleanup_generation(session_id, membership['sequence'])
+        @cache.delete(index_slot_key(membership['sequence'])) if indexed_membership?(membership)
+      end
+
+      def cleanup_generation(session_id, generation)
+        key = sequence_key(session_id, generation)
+        sequence = counter_value(key)
+        sequence_window(sequence, @max_requests_per_session).each do |slot_sequence|
+          @cache.delete(record_key(session_id, generation, slot_sequence))
+        end
+        @cache.delete(key)
+      end
+
+      def indexed_membership?(membership)
+        parse_membership(@cache.read(index_slot_key(membership['sequence'])), membership['sequence']) == membership
       end
 
       def stale_sequence?(sequence, window_size, counter_key)
         sequence <= counter_value(counter_key) - window_size
       end
 
-      def sequence_key(session_id)
-        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:sequence"
+      def stale_index_sequence?(sequence)
+        stale_sequence?(sequence, @max_sessions, index_sequence_key)
       end
 
-      def record_key(session_id, sequence)
-        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:record:#{sequence}"
+      def active_key(session_id)
+        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:active"
+      end
+
+      def sequence_key(session_id, generation)
+        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:generation:#{generation}:sequence"
+      end
+
+      def record_key(session_id, generation, sequence)
+        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:generation:#{generation}:record:#{sequence}"
       end
 
       def index_sequence_key
