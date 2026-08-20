@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'rbconfig'
 require 'woods'
 require 'woods/index_artifact'
 require 'woods/resolved_config'
@@ -134,7 +135,7 @@ RSpec.describe 'Snapshotter round-trip across process boundary' do
       # that isn't yet on the metadata store, the subprocess raises
       # before reaching our assertions — which is what we want, because
       # that's a real integration bug.
-      output = IO.popen(['ruby', '-e', loader_script], &:read)
+      output = IO.popen([RbConfig.ruby, '-e', loader_script], &:read)
       payload = begin
         JSON.parse(output)
       rescue JSON::ParserError
