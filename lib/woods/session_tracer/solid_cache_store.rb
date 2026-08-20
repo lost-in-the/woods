@@ -95,6 +95,7 @@ module Woods
       private
 
       def increment!(key, amount = 1)
+        @cache.write(key, 0, unless_exist: true, **write_options)
         value = @cache.increment(key, amount, **write_options)
         return value if value.is_a?(Integer) && value.positive?
 

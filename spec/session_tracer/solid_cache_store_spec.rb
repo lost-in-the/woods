@@ -29,6 +29,8 @@ class MockCache
     @before_write&.call(key, value)
     @mutex.synchronize do
       expire!(key)
+      return false if options[:unless_exist] && @data.key?(key)
+
       @data[key] = value
       @expires[key] = Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:expires_in] if options[:expires_in]
       true
@@ -71,6 +73,39 @@ class MockCache
 
     @expires.delete(key)
     @data.delete(key)
+  end
+end
+
+# Reproduces Solid Cache 1.0's absent-row increment race while retaining the
+# cache API's atomic unless_exist write contract.
+class RacyInitialIncrementCache < MockCache
+  def initialize
+    super
+    @barriers = Hash.new do |barriers, key|
+      barriers[key] = { arrivals: 0, mutex: Mutex.new, ready: ConditionVariable.new }
+    end
+  end
+
+  def increment(key, amount = 1, options = nil)
+    return super unless read(key).nil?
+
+    wait_for_competing_increment(key)
+    write(key, amount, **(options || {}))
+    amount
+  end
+
+  private
+
+  def wait_for_competing_increment(key)
+    barrier = @barriers[key]
+    barrier[:mutex].synchronize do
+      barrier[:arrivals] += 1
+      if barrier[:arrivals] == 2
+        barrier[:ready].broadcast
+      else
+        barrier[:ready].wait(barrier[:mutex]) until barrier[:arrivals] == 2
+      end
+    end
   end
 end
 
@@ -142,6 +177,20 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       expect(store.read('sess1').size).to eq(20)
       expect(store.sessions.map { |entry| entry['session_id'] }).to eq(['sess1'])
     end
+
+    it 'initializes absent counters before concurrent first increments' do
+      racy_cache = RacyInitialIncrementCache.new
+      first = described_class.new(cache: racy_cache)
+      second = described_class.new(cache: racy_cache)
+      writers = [first, second].each_with_index.map do |target, index|
+        Thread.new { target.record('new-session', request_data.merge('action' => "action_#{index}")) }
+      end
+      writers.each(&:join)
+
+      expect(first.read('new-session').map { |entry| entry['action'] })
+        .to contain_exactly('action_0', 'action_1')
+    end
+
     it 'keeps both committed records when two instances interleave after sequence allocation' do
       first_slot_started = Queue.new
       release_first_slot = Queue.new
