@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'rake'
+require 'stringio'
 
 # The evaluation rake file shipped in the gem for its whole life without ever
 # being loaded — the railtie loaded only `woods.rake` — so `woods:evaluate`
@@ -116,5 +117,112 @@ RSpec.describe 'lib/tasks/woods_evaluation.rake' do
   it 'defines its task bodies in a module rather than at top level' do
     expect(source).to include('module EvaluationTasks')
     expect(source).not_to match(/^def [a-z_]+/)
+  end
+
+  describe 'threshold gating' do
+    let(:eval_query_set) do
+      Woods::Evaluation::QuerySet.new(
+        queries: [
+          Woods::Evaluation::QuerySet::Query.new(
+            query: 'payment service',
+            expected_units: %w[PaymentService Extra], # only one of two is retrieved => recall 0.5
+            intent: :understand, scope: :focused, tags: []
+          )
+        ]
+      )
+    end
+
+    let(:result_struct) do
+      Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, keyword_init: true)
+    end
+
+    let(:retrieval_result) do
+      result_struct.new(context: 'x', sources: [{ identifier: 'PaymentService' }],
+                        classification: nil, strategy: :vector, tokens_used: 100, budget: 8000)
+    end
+
+    around do |example|
+      require 'woods'
+      previous_config = Woods.configuration
+      previous_env = ENV.to_h.slice('EVAL_MIN_PRECISION', 'EVAL_MIN_RECALL', 'EVAL_MIN_MRR',
+                                    'EVAL_BASELINE_FILE', 'EVAL_OUTPUT', 'EVAL_QUERY_SET')
+      example.run
+    ensure
+      Woods.configuration = previous_config
+      %w[EVAL_MIN_PRECISION EVAL_MIN_RECALL EVAL_MIN_MRR EVAL_BASELINE_FILE
+         EVAL_OUTPUT EVAL_QUERY_SET].each do |key|
+        previous_env.key?(key) ? (ENV[key] = previous_env[key]) : ENV.delete(key)
+      end
+    end
+
+    before do
+      require 'woods/evaluation/query_set'
+      require 'woods/mcp/bootstrapper'
+      load rake_path unless defined?(Woods::EvaluationTasks)
+
+      retriever = instance_double(Woods::Retriever)
+      allow(retriever).to receive(:retrieve).and_return(retrieval_result)
+      allow(Woods::Evaluation::QuerySet).to receive(:load).and_return(eval_query_set)
+      allow(Woods::MCP::Bootstrapper).to receive(:build_retriever).and_return([retriever, nil])
+      Woods.configuration = nil
+      ENV['EVAL_OUTPUT'] = File.join(Dir.mktmpdir, 'eval_report.json')
+    end
+
+    # Runs the task body with $stdout captured, tolerating the SystemExit a
+    # failing threshold raises so the caller can assert on both.
+    def run_and_capture
+      captured = StringIO.new
+      original = $stdout
+      $stdout = captured
+      status = :ok
+      begin
+        Woods::EvaluationTasks.run_evaluation
+      rescue SystemExit => e
+        status = e.status
+      ensure
+        $stdout = original
+      end
+      [status, captured.string]
+    end
+
+    it 'behaves exactly as before (report-only, exit 0) when no thresholds are configured' do
+      status, output = run_and_capture
+
+      expect(status).to eq(:ok)
+      expect(output).to include('Evaluation complete!')
+      expect(output).not_to include('[PASS]')
+      expect(output).not_to include('[FAIL]')
+    end
+
+    it 'exits non-zero and prints a FAIL line when an aggregate misses its threshold' do
+      ENV['EVAL_MIN_RECALL'] = '0.9' # actual recall is 0.5
+
+      status, output = run_and_capture
+
+      expect(status).to eq(1)
+      expect(output).to include('[FAIL]', 'mean_recall')
+      expect(output).not_to include('Evaluation complete!')
+    end
+
+    it 'exits zero and prints Evaluation complete! when every aggregate clears its threshold' do
+      ENV['EVAL_MIN_RECALL'] = '0.1' # actual recall is 0.5
+
+      status, output = run_and_capture
+
+      expect(status).to eq(:ok)
+      expect(output).to include('[PASS]', 'mean_recall')
+      expect(output).to include('Evaluation complete!')
+    end
+
+    it 'loads thresholds from EVAL_BASELINE_FILE (the versioned baseline format)' do
+      ENV['EVAL_BASELINE_FILE'] = File.expand_path('../fixtures/evaluation_baseline.example.json', __dir__)
+
+      status, output = run_and_capture
+
+      # the checked-in example's thresholds are 0.0 placeholders, so this
+      # always passes — it only proves the file wired thresholds through.
+      expect(status).to eq(:ok)
+      expect(output).to include('Evaluation complete!', 'mean_recall')
+    end
   end
 end

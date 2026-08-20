@@ -200,6 +200,49 @@ RSpec.describe Woods::Evaluation::Evaluator do
     end
   end
 
+  describe 'thresholds' do
+    it 'leaves threshold_report nil when no thresholds are given (report-only, unchanged)' do
+      report = evaluator.evaluate
+
+      expect(report.threshold_report).to be_nil
+    end
+
+    it 'passes when every aggregate meets its threshold' do
+      evaluator_with_thresholds = described_class.new(
+        retriever: retriever, query_set: query_set,
+        thresholds: { mean_recall: 0.5, mean_mrr: 1.0 }
+      )
+
+      report = evaluator_with_thresholds.evaluate
+
+      expect(report.threshold_report.passed).to be(true)
+      expect(report.threshold_report.metrics[:mean_recall]).to include(threshold: 0.5, actual: 0.75, passed: true)
+      expect(report.threshold_report.metrics[:mean_recall][:delta]).to be_within(0.0001).of(0.25)
+    end
+
+    it 'fails with a per-metric delta when an aggregate misses its threshold' do
+      evaluator_with_thresholds = described_class.new(
+        retriever: retriever, query_set: query_set,
+        thresholds: { mean_recall: 0.9 }
+      )
+
+      report = evaluator_with_thresholds.evaluate
+
+      expect(report.threshold_report.passed).to be(false)
+      metric = report.threshold_report.metrics[:mean_recall]
+      expect(metric[:passed]).to be(false)
+      expect(metric[:delta]).to be_within(0.0001).of(-0.15)
+    end
+
+    it 'treats an empty thresholds hash the same as absent thresholds' do
+      evaluator_with_thresholds = described_class.new(retriever: retriever, query_set: query_set, thresholds: {})
+
+      report = evaluator_with_thresholds.evaluate
+
+      expect(report.threshold_report).to be_nil
+    end
+  end
+
   describe 'with custom budget' do
     it 'passes budget to retriever' do
       custom_evaluator = described_class.new(retriever: retriever, query_set: query_set, budget: 4000)

@@ -20,30 +20,56 @@ module Woods
       QueryResult = Struct.new(:query, :expected_units, :retrieved_units, :scores, :tokens_used,
                                keyword_init: true)
 
-      # Aggregate report across all queries.
-      EvaluationReport = Struct.new(:results, :aggregates, keyword_init: true)
+      # Aggregate report across all queries. +threshold_report+ is nil unless
+      # thresholds were given — absent thresholds stay report-only.
+      EvaluationReport = Struct.new(:results, :aggregates, :threshold_report, keyword_init: true)
+
+      # Structured pass/fail against a thresholds hash. +metrics+ maps each
+      # thresholded aggregate key to { threshold:, actual:, delta:, passed: }.
+      ThresholdReport = Struct.new(:thresholds, :metrics, :passed, keyword_init: true)
 
       METRIC_KEYS = %i[precision_at5 precision_at10 recall mrr context_completeness token_efficiency].freeze
 
       # @param retriever [Woods::Retriever] Configured retriever instance
       # @param query_set [QuerySet] Set of evaluation queries with ground truth
       # @param budget [Integer] Token budget per query
-      def initialize(retriever:, query_set:, budget: 8000)
+      # @param thresholds [Hash{Symbol=>Numeric}, nil] minimum value per
+      #   aggregate key (e.g. `mean_recall: 0.7`). nil/empty means report-only:
+      #   metrics are still computed but nothing is scored pass/fail.
+      def initialize(retriever:, query_set:, budget: 8000, thresholds: nil)
         @retriever = retriever
         @query_set = query_set
         @budget = budget
+        @thresholds = thresholds
       end
 
       # Run all queries and produce an evaluation report.
       #
-      # @return [EvaluationReport] Per-query results and aggregate metrics
+      # @return [EvaluationReport] Per-query results, aggregate metrics, and
+      #   (when thresholds were given) a structured pass/fail
       def evaluate
         results = @query_set.queries.map { |q| evaluate_query(q) }
         aggregates = compute_aggregates(results)
-        EvaluationReport.new(results: results, aggregates: aggregates)
+        EvaluationReport.new(results: results, aggregates: aggregates,
+                             threshold_report: evaluate_thresholds(aggregates))
       end
 
       private
+
+      # @param aggregates [Hash] computed aggregate metrics
+      # @return [ThresholdReport, nil] nil when no thresholds were configured
+      def evaluate_thresholds(aggregates)
+        return nil if @thresholds.nil? || @thresholds.empty?
+
+        metrics = @thresholds.to_h do |key, minimum|
+          actual = aggregates[key]
+          passed = !actual.nil? && actual >= minimum
+          delta = actual.nil? ? nil : (actual - minimum).round(6)
+          [key, { threshold: minimum, actual: actual, delta: delta, passed: passed }]
+        end
+
+        ThresholdReport.new(thresholds: @thresholds, metrics: metrics, passed: metrics.values.all? { |m| m[:passed] })
+      end
 
       # Evaluate a single query against the retriever.
       #
