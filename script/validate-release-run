@@ -69,6 +69,7 @@ begin
 
   File.open(output_path, 'a') do |output|
     output.puts "release-sha=#{release_sha}"
+    output.puts "ci-run-id=#{run_id}"
     output.puts "tag=#{tag}"
     output.puts "artifact-name=woods-release-#{release_sha}"
   end

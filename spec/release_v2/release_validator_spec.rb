@@ -51,7 +51,8 @@ RSpec.describe 'release validation' do
     git('push', 'origin', 'main', 'refs/tags/v2.0.0', chdir: repository)
   end
 
-  def validate(repository, tag: 'v2.0.0', sha: nil, published_versions: [])
+  def validate(repository, tag: 'v2.0.0', sha: nil, published_versions: [], trusted_checkout: false,
+               output_path: nil, trusted_sha: nil)
     sha ||= git('rev-parse', 'HEAD', chdir: repository)
     env = {
       'RELEASE_TAG' => tag,
@@ -59,18 +60,23 @@ RSpec.describe 'release validation' do
       'RELEASE_MAIN_REF' => 'refs/remotes/origin/main',
       'RUBYGEMS_VERSIONS_JSON' => JSON.generate(published_versions)
     }
+    env['GITHUB_OUTPUT'] = output_path if output_path
+    env['RELEASE_TRUSTED_SHA'] = trusted_sha || git('rev-parse', 'HEAD', chdir: repository) if trusted_checkout
+    arguments = trusted_checkout ? ['--trusted-checkout'] : []
 
-    Open3.capture3(env, validator, chdir: repository)
+    Open3.capture3(env, validator, *arguments, chdir: repository)
   end
 
-  def verify_remote_tag(repository, sha:)
+  def verify_remote_tag(repository, sha:, trusted_checkout: false, trusted_sha: nil)
     env = {
       'RELEASE_REMOTE' => 'origin',
       'RELEASE_SHA' => sha,
       'RELEASE_TAG' => 'v2.0.0'
     }
+    env['RELEASE_TRUSTED_SHA'] = trusted_sha || git('rev-parse', 'HEAD', chdir: repository) if trusted_checkout
+    arguments = trusted_checkout ? ['--trusted-checkout'] : []
 
-    Open3.capture3(env, 'ruby', tag_verifier, chdir: repository)
+    Open3.capture3(env, 'ruby', tag_verifier, *arguments, chdir: repository)
   end
 
   def ci_run(overrides = {})
@@ -143,6 +149,7 @@ RSpec.describe 'release validation' do
     )
     expect(outputs.lines(chomp: true)).to contain_exactly(
       "release-sha=#{release_sha}",
+      'ci-run-id=12345',
       'tag=v2.0.0',
       "artifact-name=woods-release-#{release_sha}"
     )
@@ -199,12 +206,15 @@ RSpec.describe 'release validation' do
 
   it 'rejects a stale named CI run after the release tag moves to a newer SHA' do
     build_repository do |repository|
+      add_origin(repository)
       stale_sha = git('rev-parse', 'HEAD', chdir: repository)
       git('commit', '--allow-empty', '-m', 'new tagged commit', chdir: repository)
       current_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('push', 'origin', 'main', chdir: repository)
+      git('push', 'origin', ':refs/tags/v2.0.0', chdir: repository)
       git('tag', '-f', 'v2.0.0', chdir: repository)
-      git('update-ref', 'refs/remotes/origin/main', current_sha, chdir: repository)
-      git('checkout', '--detach', stale_sha, chdir: repository)
+      git('push', 'origin', 'refs/tags/v2.0.0', chdir: repository)
+      git('tag', '-f', 'v2.0.0', stale_sha, chdir: repository)
 
       _stdout, context_stderr, context_status, outputs, _calls = validate_ci_run(
         run: ci_run('head_sha' => stale_sha)
@@ -215,7 +225,8 @@ RSpec.describe 'release validation' do
       _validator_stdout, validator_stderr, validator_status = validate(
         repository,
         tag: output.fetch('tag'),
-        sha: output.fetch('release-sha')
+        sha: output.fetch('release-sha'),
+        trusted_checkout: true
       )
 
       expect(validator_status).not_to be_success
@@ -288,6 +299,103 @@ RSpec.describe 'release validation' do
         expect(status).to be_success, "#{tag_type}: #{stderr}"
         expect(stdout).to include("v2.0.0 at #{release_sha}")
       end
+    end
+  end
+
+  it 'validates a main-reachable candidate while trusted tooling remains checked out' do
+    build_repository do |repository|
+      add_origin(repository)
+      release_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('commit', '--allow-empty', '-m', 'trusted tooling update', chdir: repository)
+      trusted_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('push', 'origin', 'main', chdir: repository)
+      output_path = File.join(repository, 'release-output')
+
+      stdout, stderr, status = validate(
+        repository,
+        sha: release_sha,
+        trusted_checkout: true,
+        output_path: output_path
+      )
+      outputs = File.exist?(output_path) ? File.readlines(output_path, chomp: true) : []
+
+      expect(status).to be_success, stderr
+      expect(stdout).to include("v2.0.0 at #{release_sha}")
+      expect(outputs).to contain_exactly('gem-name=woods-2.0.0.gem')
+      expect(git('rev-parse', 'HEAD', chdir: repository)).to eq(trusted_sha)
+    end
+  end
+
+  it 'ignores a malicious candidate validator and rejects the candidate outside current main' do
+    build_repository do |repository|
+      add_origin(repository)
+      trusted_sha = git('rev-parse', 'HEAD', chdir: repository)
+      marker = File.join(repository, 'candidate-validator-ran')
+      git('switch', '--orphan', 'malicious-release', chdir: repository)
+      write_release_files(repository)
+      FileUtils.mkdir_p(File.join(repository, 'script'))
+      File.write(File.join(repository, 'script/validate-release'), <<~RUBY)
+        #!/usr/bin/env ruby
+        File.write(#{marker.inspect}, 'candidate validator executed')
+        exit 0
+      RUBY
+      FileUtils.chmod(0o755, File.join(repository, 'script/validate-release'))
+      git('add', '.', chdir: repository)
+      git('commit', '-m', 'malicious release candidate', chdir: repository)
+      candidate_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('tag', '-f', 'v2.0.0', chdir: repository)
+      git('push', 'origin', ':refs/tags/v2.0.0', chdir: repository)
+      git('push', 'origin', 'refs/tags/v2.0.0', chdir: repository)
+      git('update-ref', 'refs/remotes/origin/main', candidate_sha, chdir: repository)
+      git('checkout', 'main', chdir: repository)
+
+      _stdout, stderr, status = validate(repository, sha: candidate_sha, trusted_checkout: true)
+
+      expect(status).not_to be_success
+      expect(stderr).to include("release SHA #{candidate_sha} is not reachable from refs/remotes/origin/main")
+      expect(File.exist?(marker)).to be(false)
+      expect(git('rev-parse', 'HEAD', chdir: repository)).to eq(trusted_sha)
+    end
+  end
+
+  it 'freshly verifies the candidate tag from a trusted checkout before publication' do
+    build_repository do |repository|
+      add_origin(repository)
+      release_sha = git('rev-parse', 'HEAD', chdir: repository)
+      git('commit', '--allow-empty', '-m', 'trusted tooling update', chdir: repository)
+      trusted_sha = git('rev-parse', 'HEAD', chdir: repository)
+
+      stdout, stderr, status = verify_remote_tag(repository, sha: release_sha, trusted_checkout: true)
+
+      expect(status).to be_success, stderr
+      expect(stdout).to include("v2.0.0 at #{release_sha}")
+      expect(git('rev-parse', 'HEAD', chdir: repository)).to eq(trusted_sha)
+    end
+  end
+
+  it 'rejects trusted mode when HEAD is not the declared default-branch tooling SHA' do
+    build_repository do |repository|
+      add_origin(repository)
+      release_sha = git('rev-parse', 'HEAD', chdir: repository)
+      wrong_trusted_sha = 'f' * 40
+
+      _stdout, validator_stderr, validator_status = validate(
+        repository,
+        sha: release_sha,
+        trusted_checkout: true,
+        trusted_sha: wrong_trusted_sha
+      )
+      _stdout, verifier_stderr, verifier_status = verify_remote_tag(
+        repository,
+        sha: release_sha,
+        trusted_checkout: true,
+        trusted_sha: wrong_trusted_sha
+      )
+
+      expect(validator_status).not_to be_success
+      expect(validator_stderr).to include("does not equal trusted tooling SHA #{wrong_trusted_sha}")
+      expect(verifier_status).not_to be_success
+      expect(verifier_stderr).to include("does not equal trusted tooling SHA #{wrong_trusted_sha}")
     end
   end
 

@@ -17,6 +17,11 @@ def git(*args)
 end
 
 begin
+  trusted_checkout = case ARGV
+                     when [] then false
+                     when ['--trusted-checkout'] then true
+                     else fail_verification('usage: verify-release-tag [--trusted-checkout]')
+                     end
   tag = ENV.fetch('RELEASE_TAG')
   release_sha = ENV.fetch('RELEASE_SHA')
   remote = ENV.fetch('RELEASE_REMOTE', 'origin')
@@ -24,9 +29,21 @@ begin
     fail_verification("release SHA #{release_sha.inspect} is not a full Git SHA")
   end
 
+  expected_head_sha = if trusted_checkout
+                        trusted_sha = ENV.fetch('RELEASE_TRUSTED_SHA', '')
+                        unless trusted_sha.match?(/\A[0-9a-f]{40}\z/)
+                          fail_verification("trusted tooling SHA #{trusted_sha.inspect} is not a full Git SHA")
+                        end
+                        trusted_sha
+                      else
+                        release_sha
+                      end
   head_sha = git('rev-parse', 'HEAD')
-  unless head_sha == release_sha
-    fail_verification("checked-out HEAD #{head_sha} does not equal release SHA #{release_sha}")
+  unless head_sha == expected_head_sha
+    expectation = trusted_checkout ? 'trusted tooling SHA' : 'release SHA'
+    fail_verification(
+      "checked-out HEAD #{head_sha} does not equal #{expectation} #{expected_head_sha}"
+    )
   end
 
   verification_ref = "refs/release-validation/#{tag}"

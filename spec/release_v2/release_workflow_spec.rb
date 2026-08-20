@@ -8,8 +8,10 @@ require 'yaml'
 
 RSpec.describe 'release workflow contract' do
   let(:root) { File.expand_path('../..', __dir__) }
+  let(:release_path) { File.join(root, '.github/workflows/release.yml') }
   let(:ci) { YAML.safe_load_file(File.join(root, '.github/workflows/ci.yml'), aliases: true) }
-  let(:release) { YAML.safe_load_file(File.join(root, '.github/workflows/release.yml'), aliases: true) }
+  let(:release) { YAML.safe_load_file(release_path, aliases: true) }
+  let(:release_source) { File.read(release_path) }
   let(:release_trigger) { release.fetch('on') { release.fetch(true) } }
 
   def steps(job)
@@ -24,45 +26,52 @@ RSpec.describe 'release workflow contract' do
     steps(job).select { |step| step.fetch('uses', '').start_with?('actions/download-artifact@') }
   end
 
-  it 'requires an explicit tag and CI run ID without any automatic trigger or concurrency' do
+  def checkout_steps(job)
+    steps(job).select { |step| step.fetch('uses', '').start_with?('actions/checkout@') }
+  end
+
+  it 'accepts only an explicit release repository dispatch without concurrency' do
     ci_trigger = ci.fetch('on') { ci.fetch(true) }
-    dispatch = release_trigger.fetch('workflow_dispatch')
-    inputs = dispatch.fetch('inputs')
+    dispatch = release_trigger['repository_dispatch']
 
     expect(ci_trigger.dig('push', 'tags')).to contain_exactly('v*')
-    expect(release_trigger.keys).to contain_exactly('workflow_dispatch')
-    expect(inputs.fetch('tag')).to include('required' => true, 'type' => 'string')
-    expect(inputs.fetch('ci_run_id')).to include('required' => true, 'type' => 'string')
+    expect(release_trigger.keys).to contain_exactly('repository_dispatch')
+    expect(dispatch.fetch('types')).to contain_exactly('release')
+    expect(release_source).not_to include('workflow_dispatch:')
+    expect(release_source).to include('gh api --method POST repos/lost-in-the/woods/dispatches')
+    expect(release_source).to include('client_payload[tag]')
+    expect(release_source).to include('client_payload[ci_run_id]')
     expect(release).not_to have_key('concurrency')
     expect(release.fetch('jobs').values).to all(satisfy { |job| !job.key?('concurrency') })
   end
 
-  it 'queries and validates the named successful tag CI run before repository validation' do
+  it 'checks out only the trusted default-branch SHA before all release-context validation' do
     context = release.fetch('jobs').fetch('release-context')
     context_steps = steps(context)
-    tooling_checkout = context_steps.find { |step| step['name'] == 'Check out trusted release tooling' }
+    tooling_checkout = context_steps.find { |step| step['name'] == 'Check out trusted default-branch SHA' }
     run_validation = context_steps.find { |step| step.fetch('run', '').include?('script/validate-release-run') }
-    checkout = context_steps.find do |step|
-      step.fetch('uses', '').start_with?('actions/checkout@') &&
-        step.dig('with', 'ref') == '${{ steps.run.outputs.release-sha }}'
-    end
     release_validation = context_steps.find do |step|
-      step.fetch('run', '').lines.any? { |line| line.strip == 'script/validate-release' }
+      step.fetch('run', '').lines.any? { |line| line.strip == 'script/validate-release --trusted-checkout' }
     end
 
     expect(context).not_to have_key('if')
     expect(context.fetch('permissions')).to eq('actions' => 'read', 'contents' => 'read')
-    expect(tooling_checkout.dig('with', 'ref')).to eq('${{ github.event.repository.default_branch }}')
+    expect(checkout_steps(context)).to contain_exactly(tooling_checkout)
+    expect(context_steps.index(tooling_checkout)).to eq(0)
+    expect(tooling_checkout.dig('with', 'ref')).to eq('${{ github.sha }}')
+    expect(context_steps.index(tooling_checkout)).to be < context_steps.index(run_validation)
+    expect(context_steps.index(run_validation)).to be < context_steps.index(release_validation)
     expect(run_validation.fetch('env')).to include(
-      'CI_RUN_ID' => '${{ inputs.ci_run_id }}',
-      'RELEASE_TAG' => '${{ inputs.tag }}',
+      'CI_RUN_ID' => '${{ github.event.client_payload.ci_run_id }}',
+      'RELEASE_TAG' => '${{ github.event.client_payload.tag }}',
       'GITHUB_REPOSITORY' => '${{ github.repository }}'
     )
-    expect(checkout.dig('with', 'ref')).to eq('${{ steps.run.outputs.release-sha }}')
     expect(release_validation.fetch('env')).to include(
       'RELEASE_SHA' => '${{ steps.run.outputs.release-sha }}',
-      'RELEASE_TAG' => '${{ steps.run.outputs.tag }}'
+      'RELEASE_TAG' => '${{ steps.run.outputs.tag }}',
+      'RELEASE_TRUSTED_SHA' => '${{ github.sha }}'
     )
+    expect(run_commands(context)).not_to include('ruby -Ilib -rwoods/version')
   end
 
   it 'builds exactly one strict artifact in CI and stores it under the exact SHA' do
@@ -106,12 +115,13 @@ RSpec.describe 'release workflow contract' do
     end
   end
 
-  it 'downloads only the supplied validated CI run artifact identified by its run ID and SHA' do
+  it 'downloads only the validated repository-dispatch CI artifact identified by run ID and SHA' do
     jobs = release.fetch('jobs')
     context = jobs.fetch('release-context')
 
     expect(context.fetch('outputs')).to include(
       'release-sha' => '${{ steps.run.outputs.release-sha }}',
+      'ci-run-id' => '${{ steps.run.outputs.ci-run-id }}',
       'artifact-name' => '${{ steps.run.outputs.artifact-name }}'
     )
 
@@ -120,17 +130,27 @@ RSpec.describe 'release workflow contract' do
       expect(downloads.length).to eq(1), job_name
       inputs = downloads.fetch(0).fetch('with')
       expect(inputs.fetch('name')).to eq('${{ needs.release-context.outputs.artifact-name }}')
-      expect(inputs.fetch('run-id')).to eq('${{ inputs.ci_run_id }}')
+      expect(inputs.fetch('run-id')).to eq('${{ needs.release-context.outputs.ci-run-id }}')
       expect(inputs.fetch('github-token')).to eq('${{ github.token }}')
       expect(inputs.fetch('repository')).to eq('${{ github.repository }}')
     end
   end
 
-  it 'tests the uploaded artifact on the Ruby floor and latest lanes before publishing' do
+  it 'confines candidate checkout and execution to a secret-free read-only package job' do
     jobs = release.fetch('jobs')
     package_test = jobs.fetch('package-test')
+    candidate_checkout = checkout_steps(package_test).fetch(0)
 
     expect(package_test.fetch('needs')).to eq('release-context')
+    expect(package_test.fetch('name')).to eq('Candidate package tests (secret-free, read-only)')
+    expect(package_test.fetch('permissions')).to eq('actions' => 'read', 'contents' => 'read')
+    expect(package_test).not_to have_key('environment')
+    expect(package_test.to_s).not_to include('secrets.')
+    expect(package_test.to_s).not_to include('id-token')
+    expect(package_test.fetch('permissions').values).not_to include('write')
+    expect(checkout_steps(package_test).length).to eq(1)
+    expect(candidate_checkout.dig('with', 'ref')).to eq('${{ needs.release-context.outputs.release-sha }}')
+    expect(candidate_checkout.dig('with', 'persist-credentials')).to be(false)
     expect(package_test.dig('strategy', 'matrix', 'include')).to include(
       a_hash_including('ruby' => '3.0'),
       a_hash_including('ruby' => '4.0')
@@ -161,11 +181,17 @@ RSpec.describe 'release workflow contract' do
   it 'publishes only the gem because GitHub Release creation cannot close the existing-tag race' do
     publish = release.fetch('jobs').fetch('publish')
     commands = run_commands(publish)
+    tooling_checkout = checkout_steps(publish).fetch(0)
+    push = steps(publish).find { |step| step.fetch('run', '').include?('gem push') }
 
     expect(publish.fetch('environment')).to eq('release')
     expect(publish.dig('permissions', 'contents')).to eq('read')
-    expect(commands.scan('script/verify-release-tag').length).to eq(1)
-    expect(commands.index('script/verify-release-tag')).to be < commands.index('gem push')
+    expect(checkout_steps(publish).length).to eq(1)
+    expect(tooling_checkout.dig('with', 'ref')).to eq('${{ github.sha }}')
+    expect(tooling_checkout.dig('with', 'ref')).not_to eq('${{ needs.release-context.outputs.release-sha }}')
+    expect(push.fetch('env')).to include('RELEASE_TRUSTED_SHA' => '${{ github.sha }}')
+    expect(commands.scan('script/verify-release-tag --trusted-checkout').length).to eq(1)
+    expect(commands.index('script/verify-release-tag --trusted-checkout')).to be < commands.index('gem push')
     release_actions = steps(publish).select do |step|
       step.fetch('uses', '').include?('action-gh-release') || step.fetch('run', '').match?(/gh release/)
     end

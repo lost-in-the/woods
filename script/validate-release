@@ -41,29 +41,78 @@ rescue SocketError, SystemCallError, Timeout::Error, URI::InvalidURIError => e
   fail_release("RubyGems version check failed: #{e.message}")
 end
 
-begin
-  require File.expand_path('lib/woods/version', Dir.pwd)
+def trusted_release_refs(tag, remote, main_ref)
+  verification_ref = "refs/release-validation/#{tag}"
+  git('check-ref-format', verification_ref)
+  git('check-ref-format', main_ref)
+  system('git', 'update-ref', '-d', verification_ref, out: File::NULL, err: File::NULL)
+  git(
+    'fetch', '--atomic', '--force', '--no-tags', remote,
+    "refs/heads/main:#{main_ref}",
+    "refs/tags/#{tag}:#{verification_ref}"
+  )
+  verification_ref
+end
 
-  version = Woods::VERSION
-  expected_tag = "v#{version}"
+def release_file(path, release_sha, trusted_checkout)
+  return File.read(path) unless trusted_checkout
+
+  git('show', "#{release_sha}:#{path}")
+end
+
+def release_version(source)
+  matches = source.scan(/^\s*VERSION\s*=\s*(['"])([0-9A-Za-z][0-9A-Za-z._-]*)\1\s*$/)
+  fail_release('lib/woods/version.rb must define exactly one literal VERSION') unless matches.one?
+
+  matches.first.fetch(1)
+end
+
+begin
+  trusted_checkout = case ARGV
+                     when [] then false
+                     when ['--trusted-checkout'] then true
+                     else fail_release('usage: validate-release [--trusted-checkout]')
+                     end
   tag = ENV.fetch('RELEASE_TAG')
   release_sha = ENV.fetch('RELEASE_SHA')
-  main_ref = ENV.fetch('RELEASE_MAIN_REF', 'origin/main')
+  main_ref = ENV.fetch('RELEASE_MAIN_REF', 'refs/remotes/origin/main')
+  remote = ENV.fetch('RELEASE_REMOTE', 'origin')
 
-  fail_release("release tag #{tag.inspect} must equal #{expected_tag}") unless tag == expected_tag
+  fail_release('release tag must be a version tag') unless tag.match?(/\Av[0-9A-Za-z][0-9A-Za-z._-]*\z/)
   fail_release("release SHA #{release_sha.inspect} is not a full Git SHA") unless release_sha.match?(/\A[0-9a-f]{40}\z/)
 
-  tag_sha = git('rev-parse', "refs/tags/#{tag}^{commit}")
-  fail_release("#{tag} resolves to #{tag_sha}, not release SHA #{release_sha}") unless tag_sha == release_sha
-
+  expected_head_sha = if trusted_checkout
+                        trusted_sha = ENV.fetch('RELEASE_TRUSTED_SHA', '')
+                        unless trusted_sha.match?(/\A[0-9a-f]{40}\z/)
+                          fail_release("trusted tooling SHA #{trusted_sha.inspect} is not a full Git SHA")
+                        end
+                        trusted_sha
+                      else
+                        release_sha
+                      end
   head_sha = git('rev-parse', 'HEAD')
-  fail_release("checked-out HEAD #{head_sha} does not equal release SHA #{release_sha}") unless head_sha == release_sha
+  unless head_sha == expected_head_sha
+    expectation = trusted_checkout ? 'trusted tooling SHA' : 'release SHA'
+    fail_release("checked-out HEAD #{head_sha} does not equal #{expectation} #{expected_head_sha}")
+  end
+
+  tag_ref = if trusted_checkout
+              trusted_release_refs(tag, remote, main_ref)
+            else
+              "refs/tags/#{tag}"
+            end
+  version = release_version(release_file('lib/woods/version.rb', release_sha, trusted_checkout))
+  expected_tag = "v#{version}"
+  fail_release("release tag #{tag.inspect} must equal #{expected_tag}") unless tag == expected_tag
+
+  tag_sha = git('rev-parse', "#{tag_ref}^{commit}")
+  fail_release("#{tag} resolves to #{tag_sha}, not release SHA #{release_sha}") unless tag_sha == release_sha
 
   unless system('git', 'merge-base', '--is-ancestor', release_sha, main_ref, out: File::NULL, err: File::NULL)
     fail_release("release SHA #{release_sha} is not reachable from #{main_ref}")
   end
 
-  changelog = File.read('CHANGELOG.md')
+  changelog = release_file('CHANGELOG.md', release_sha, trusted_checkout)
   heading = changelog.match(/^## \[#{Regexp.escape(version)}\] - (\d{4}-\d{2}-\d{2})$/)
   fail_release("missing dated CHANGELOG.md section for #{version}") unless heading
 
@@ -72,6 +121,10 @@ begin
 
   if published_versions.any? { |entry| entry.fetch('number', entry['version']) == version }
     fail_release("woods #{version} is already published")
+  end
+
+  if (output_path = ENV.fetch('GITHUB_OUTPUT', nil))
+    File.open(output_path, 'a') { |output| output.puts "gem-name=woods-#{version}.gem" }
   end
 
   puts "Validated #{tag} at #{release_sha} with CHANGELOG.md date #{release_date.iso8601}"
