@@ -1125,6 +1125,7 @@
       }
     ],
     "docs/UNBLOCKED_INTEGRATION.md": [],
+    "docs/UPGRADING_TO_2.md": [],
     "docs/USE_CASES_AND_FEATURE_GAPS.md": [
       {
         "surface": "index_mcp_tools",
