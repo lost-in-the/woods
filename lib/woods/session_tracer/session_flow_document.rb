@@ -33,20 +33,29 @@ module Woods
       # @param context_pool [Hash<String, Hash>] Deduplicated unit data keyed by identifier
       # @param side_effects [Array<Hash>] Async side effects (jobs, mailers)
       # @param dependency_map [Hash<String, Array<String>>] Unit -> dependency identifiers
-      # @param token_count [Integer] Estimated total tokens
+      # @param token_count [Integer] Estimated tokens of the rendered context output
+      # @param budget_exceeded [Boolean] True when even the fully-truncated
+      #   rendering exceeds the requested budget, so callers see an honest
+      #   flag instead of a silently over-budget document
       # @param generated_at [String, nil] ISO8601 timestamp (defaults to now)
       # rubocop:disable Metrics/ParameterLists
       def initialize(session_id:, steps: [], context_pool: {}, side_effects: [],
-                     dependency_map: {}, token_count: 0, generated_at: nil)
+                     dependency_map: {}, token_count: 0, budget_exceeded: false, generated_at: nil)
         @session_id = session_id
         @steps = steps
         @context_pool = context_pool
         @side_effects = side_effects
         @dependency_map = dependency_map
         @token_count = token_count
+        @budget_exceeded = budget_exceeded
         @generated_at = generated_at || Time.now.utc.iso8601
       end
       # rubocop:enable Metrics/ParameterLists
+
+      # @return [Boolean]
+      def budget_exceeded?
+        @budget_exceeded ? true : false
+      end
 
       # Serialize to a JSON-compatible Hash.
       #
@@ -56,6 +65,7 @@ module Woods
           session_id: @session_id,
           generated_at: @generated_at,
           token_count: @token_count,
+          budget_exceeded: budget_exceeded?,
           steps: @steps,
           context_pool: @context_pool,
           side_effects: @side_effects,
@@ -79,6 +89,7 @@ module Woods
           side_effects: data[:side_effects] || [],
           dependency_map: data[:dependency_map] || {},
           token_count: data[:token_count] || 0,
+          budget_exceeded: data.fetch(:budget_exceeded, false),
           generated_at: data[:generated_at]
         )
       end
