@@ -226,7 +226,49 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     [exclusive, first_tool, second_tool].compact.each { |thread| thread.join(1) }
   end
 
-  it 'leaves unknown tools, non-reader tools, and Tasks methods outside the reader gate' do
+  it 'leaves unknown tools and Tasks methods outside the reader gate' do
+    isolated_reader = Woods::MCP::IndexReader.new(index_dir, auto_refresh: false)
+    allow(Woods::MCP::IndexReader).to receive(:new).with(index_dir).and_return(isolated_reader)
+    isolated_server = Woods::MCP::Server.build(index_dir: index_dir, response_format: :json, warmup: false)
+    exclusive_entered = Queue.new
+    release_exclusive = Queue.new
+    exclusive = Thread.new do
+      isolated_reader.with_exclusive_reload do
+        exclusive_entered << true
+        release_exclusive.pop
+      end
+    end
+    exclusive_entered.pop
+
+    unknown = Thread.new do
+      dispatch_rpc('tools/call', { name: 'not_a_tool', arguments: {} }, target: isolated_server)
+    end
+    task = Thread.new do
+      dispatch_rpc(
+        'tasks/cancel',
+        { taskId: 'a' * 32, _meta: request_meta(tasks: true) },
+        target: isolated_server,
+        include_meta: false
+      )
+    end
+    completed_outside_gate = [unknown, task].all? { |thread| thread.join(1) }
+    release_exclusive << true
+
+    expect(completed_outside_gate).to be(true)
+    expect(unknown.value).to have_key('error')
+    expect(task.value).to have_key('error')
+  ensure
+    release_exclusive << true if exclusive&.alive?
+    [exclusive, unknown, task].compact.each { |thread| thread.join(1) }
+  end
+
+  # A previous version of the pin wrapper covered only 14 of 28 non-reload
+  # tools via a hand-maintained allowlist, so `pipeline_status` — like every
+  # other operator/feedback/snapshot tool — ran concurrently with an active
+  # exclusive reload. Coverage is now derived from every registered tool
+  # (see Woods::MCP::IndexReaderPinning), so a pipeline tool waits behind an
+  # exclusive reload the same way a reader tool like `structure` does.
+  it 'gates a pipeline tool behind an active exclusive reload, now that pin coverage includes it' do
     isolated_reader = Woods::MCP::IndexReader.new(index_dir, auto_refresh: false)
     allow(Woods::MCP::IndexReader).to receive(:new).with(index_dir).and_return(isolated_reader)
     reporter = Class.new do
@@ -251,28 +293,21 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     exclusive_entered.pop
 
     status = Thread.new { dispatch_tool('pipeline_status', target: isolated_server) }
-    unknown = Thread.new do
-      dispatch_rpc('tools/call', { name: 'not_a_tool', arguments: {} }, target: isolated_server)
-    end
-    task = Thread.new do
-      dispatch_rpc(
-        'tasks/cancel',
-        { taskId: 'a' * 32, _meta: request_meta(tasks: true) },
-        target: isolated_server,
-        include_meta: false
-      )
-    end
-    sleep 0.02
-    completed_outside_gate = [status, unknown, task].none?(&:alive?)
+    still_blocked =
+      begin
+        Timeout.timeout(0.3) { status.join }
+        false
+      rescue Timeout::Error
+        true
+      end
+
     release_exclusive << true
 
-    expect(completed_outside_gate).to be(true)
+    expect(still_blocked).to be(true)
     expect(status.value.dig('structuredContent', 'data', 'state')).to eq('idle')
-    expect(unknown.value).to have_key('error')
-    expect(task.value).to have_key('error')
   ensure
     release_exclusive << true if exclusive&.alive?
-    [exclusive, status, unknown, task].compact.each { |thread| thread.join(1) }
+    [exclusive, status].compact.each { |thread| thread.join(1) }
   end
 
   it 'holds resource and template pins through response serialization' do
