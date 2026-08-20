@@ -30,6 +30,11 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(task.pid).to eq(Process.pid)
     end
 
+    it 'records a durable identity for the owning process' do
+      expect(task.producer_identity).to be_a(String)
+      expect(task.producer_identity).not_to be_empty
+    end
+
     # "The task must be durably created before sending the response" — otherwise
     # a client can receive a taskId the server has no record of.
     it 'persists the task before returning' do
@@ -66,19 +71,19 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get('a/b')).to be_nil
     end
 
-    it 'returns nil rather than raising on a corrupt record' do
+    it 'raises a stable error for malformed JSON' do
       task = store.create!(tool: 'pipeline_extract')
       File.write(File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json"), 'not json{')
 
-      expect(store.get(task.id)).to be_nil
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
     end
 
-    it 'returns nil for syntactically valid records missing required fields' do
+    it 'raises a stable error for records missing required fields' do
       task = store.create!(tool: 'pipeline_extract')
       path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
       File.write(path, JSON.generate('id' => task.id))
 
-      expect(store.get(task.id)).to be_nil
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
     end
 
     it 'returns nil when a record has malformed timestamps' do
@@ -88,7 +93,7 @@ RSpec.describe Woods::MCP::Tasks::Store do
       raw['created_at'] = 'not-a-timestamp'
       File.write(path, JSON.generate(raw))
 
-      expect(store.get(task.id)).to be_nil
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
     end
 
     it 'returns nil when a record timestamp is not a string' do
@@ -98,7 +103,47 @@ RSpec.describe Woods::MCP::Tasks::Store do
       raw['created_at'] = 123
       File.write(path, JSON.generate(raw))
 
-      expect(store.get(task.id)).to be_nil
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+    end
+
+    it 'rejects records whose status contradicts official task fields' do
+      invalid = {
+        'working' => { 'result' => {} },
+        'completed' => { 'result' => nil },
+        'failed' => { 'error' => 'boom' },
+        'input_required' => { 'input_requests' => [] },
+        'cancelled' => { 'result' => {} }
+      }
+
+      invalid.each do |status, changes|
+        task = store.create!(tool: 'pipeline_extract')
+        path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+        record = JSON.parse(File.read(path)).merge('status' => status).merge(changes)
+        File.write(path, JSON.generate(record))
+
+        expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+      end
+    end
+
+    it 'accepts official completed, failed, and input_required field shapes' do
+      shapes = {
+        'completed' => { 'result' => { 'content' => [] } },
+        'failed' => { 'error' => { 'code' => -32_603, 'message' => 'failed' } },
+        'input_required' => {
+          'input_requests' => {
+            'approval' => { 'method' => 'elicitation/create', 'params' => { 'message' => 'Approve?' } }
+          }
+        }
+      }
+
+      shapes.each do |status, changes|
+        task = store.create!(tool: 'pipeline_extract')
+        path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+        record = JSON.parse(File.read(path)).merge('status' => status).merge(changes)
+        File.write(path, JSON.generate(record))
+
+        expect(store.get(task.id).status).to eq(status)
+      end
     end
   end
 
@@ -205,6 +250,16 @@ RSpec.describe Woods::MCP::Tasks::Store do
       File.write(path, JSON.generate(raw))
 
       expect(store.get(done.id).status).to eq('completed')
+    end
+
+    it 'does not mistake an unrelated live process with a reused pid for the producer' do
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['producer_identity'] = 'different-process-start'
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('failed')
     end
   end
 

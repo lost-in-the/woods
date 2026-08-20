@@ -4,6 +4,7 @@ require 'json'
 require 'securerandom'
 require 'time'
 require 'fileutils'
+require 'open3'
 require_relative '../../atomic_file'
 
 module Woods
@@ -29,6 +30,8 @@ module Woods
       # `pipeline_extract` holds it for the duration of the run, which is
       # exactly when its task record needs updating.
       class Store
+        class CorruptRecordError < StandardError; end
+
         # Subdirectory of the index directory holding one JSON file per task.
         DIRNAME = 'tasks'
 
@@ -54,6 +57,7 @@ module Woods
         Task = Struct.new(
           :id, :tool, :status, :created_at, :updated_at, :ttl_ms,
           :poll_interval_ms, :status_message, :result, :error, :pid,
+          :producer_identity, :input_requests,
           keyword_init: true
         ) do
           def terminal?
@@ -73,7 +77,8 @@ module Woods
               lastUpdatedAt: updated_at,
               statusMessage: status_message,
               result: result,
-              error: error
+              error: error,
+              inputRequests: input_requests
             }.compact
           end
 
@@ -103,7 +108,8 @@ module Woods
           task = Task.new(
             id: SecureRandom.hex(16), tool: tool, status: 'working',
             created_at: now, updated_at: now, ttl_ms: ttl_ms,
-            poll_interval_ms: poll_interval_ms, pid: Process.pid
+            poll_interval_ms: poll_interval_ms, pid: Process.pid,
+            producer_identity: producer_identity_for(Process.pid)
           )
           write(task)
           task
@@ -170,19 +176,18 @@ module Woods
           return nil unless path && File.exist?(path)
 
           data = JSON.parse(Woods::AtomicFile.read(path))
-          return nil unless valid_record?(data, id)
+          raise CorruptRecordError, "Invalid task record #{id}: schema mismatch" unless valid_record?(data, id)
 
           Task.new(
             id: data['id'], tool: data['tool'], status: data['status'],
             created_at: data['created_at'], updated_at: data['updated_at'],
             ttl_ms: data['ttl_ms'], poll_interval_ms: data['poll_interval_ms'],
             status_message: data['status_message'], result: data['result'],
-            error: data['error'], pid: data['pid']
+            error: data['error'], pid: data['pid'],
+            producer_identity: data['producer_identity'], input_requests: data['input_requests']
           )
-        rescue JSON::ParserError, SystemCallError, TypeError
-          # A torn or unreadable record is indistinguishable from an absent one
-          # for every caller here, and raising would take down a tool call.
-          nil
+        rescue JSON::ParserError, SystemCallError, TypeError => e
+          raise CorruptRecordError, "Invalid task record #{id}: #{e.class}"
         end
 
         # Persisted shape is the struct's own fields, not {Task#to_h} — that is
@@ -202,9 +207,46 @@ module Woods
                               (data['ttl_ms'].is_a?(Integer) && data['ttl_ms'] >= 0)
           return false unless data['poll_interval_ms'].nil? ||
                               (data['poll_interval_ms'].is_a?(Integer) && data['poll_interval_ms'].positive?)
-          return false if data['status'] == 'working' && (!data['pid'].is_a?(Integer) || data['pid'] <= 0)
+          return false unless data['status_message'].nil? || data['status_message'].is_a?(String)
 
-          true
+          valid_status_fields?(data)
+        end
+
+        def valid_status_fields?(data)
+          case data['status']
+          when 'working'
+            valid_producer?(data) && absent?(data, 'result', 'error', 'input_requests')
+          when 'input_required'
+            valid_producer?(data) && absent?(data, 'result', 'error') && valid_input_requests?(data['input_requests'])
+          when 'completed'
+            data['result'].is_a?(Hash) && absent?(data, 'error', 'input_requests')
+          when 'failed'
+            valid_error?(data['error']) && absent?(data, 'result', 'input_requests')
+          when 'cancelled'
+            absent?(data, 'result', 'error', 'input_requests')
+          else
+            false
+          end
+        end
+
+        def valid_producer?(data)
+          data['pid'].is_a?(Integer) && data['pid'].positive? &&
+            data['producer_identity'].is_a?(String) && !data['producer_identity'].empty?
+        end
+
+        def valid_error?(error)
+          error.is_a?(Hash) && error['code'].is_a?(Integer) &&
+            error['message'].is_a?(String) && !error['message'].empty?
+        end
+
+        def valid_input_requests?(requests)
+          requests.is_a?(Hash) && !requests.empty? && requests.values.all? do |request|
+            request.is_a?(Hash) && request['method'].is_a?(String) && request['params'].is_a?(Hash)
+          end
+        end
+
+        def absent?(data, *keys)
+          keys.all? { |key| data[key].nil? }
         end
 
         def valid_time?(value)
@@ -262,7 +304,7 @@ module Woods
         # every later reader gets the same answer instead of re-deciding.
         def adopt_orphan(task)
           return task unless task.status == 'working'
-          return task if task.pid && process_alive?(task.pid)
+          return task if producer_alive?(task)
 
           task.status = 'failed'
           task.error = {
@@ -275,6 +317,10 @@ module Woods
           task
         end
 
+        def producer_alive?(task)
+          process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
+        end
+
         def process_alive?(pid)
           Process.kill(0, Integer(pid))
           true
@@ -283,6 +329,16 @@ module Woods
           true
         rescue Errno::ESRCH, ArgumentError, TypeError
           false
+        end
+
+        def producer_identity_for(pid)
+          output, status = Open3.capture2('ps', '-o', 'lstart=', '-p', Integer(pid).to_s)
+          identity = output.strip
+          return identity if status.success? && !identity.empty?
+
+          nil
+        rescue SystemCallError, ArgumentError, TypeError
+          nil
         end
 
         def sweep_expired!
@@ -295,7 +351,7 @@ module Woods
 
             File.delete(path)
             FileUtils.rm_f("#{path}.lock")
-          rescue SystemCallError
+          rescue SystemCallError, CorruptRecordError
             # Another process swept it first; nothing to do.
             nil
           end

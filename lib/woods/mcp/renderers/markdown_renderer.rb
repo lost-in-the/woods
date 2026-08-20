@@ -192,7 +192,9 @@ module Woods
             total_key = "#{section}_total"
             if data[total_key]
               lines << ''
-              lines << "_Showing #{items.size} of #{data[total_key]} (truncated)_"
+              offset = fetch_key(data, "#{section}_offset", 0)
+              position = offset.positive? ? " from offset #{offset}" : ''
+              lines << "_Showing #{items.size} of #{data[total_key]}#{position} (truncated)_"
             end
             lines << ''
           end

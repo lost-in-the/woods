@@ -155,6 +155,17 @@ RSpec.describe Woods::MCP::Tasks::Extension do
       expect(error['data']).to match(/Unknown or expired/)
     end
 
+    it 'reports a corrupt task record with stable protocol metadata' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, Woods::MCP::Tasks::Store::DIRNAME, "#{task.id}.json")
+      File.write(path, '{not-json')
+
+      error = call('tasks/get', task_params(taskId: task.id)).fetch('error')
+
+      expect(error['code']).to eq(-32_603)
+      expect(error['data']).to eq('error_code' => 'corrupt_task_record', 'taskId' => task.id)
+    end
+
     it 'returns a stable unsupported-method response for tasks/cancel' do
       task = store.create!(tool: 'pipeline_extract')
       error = call('tasks/cancel', task_params(taskId: task.id)).fetch('error')

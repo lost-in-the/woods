@@ -712,7 +712,7 @@ module Woods
         return cached if cached
 
         path = @index_dir.join(type_dir, filename)
-        return nil unless path.file?
+        raise Errno::ENOENT, path.to_s unless path.file?
 
         data = JSON.parse(path.read)
 

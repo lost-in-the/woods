@@ -2,10 +2,13 @@
 
 require 'spec_helper'
 require 'fileutils'
+require 'mcp'
+require 'net/http'
 require 'nokogiri'
 require 'open3'
 require 'pathname'
 require 'rubygems/package'
+require 'socket'
 require 'tmpdir'
 require 'uri'
 
@@ -154,6 +157,58 @@ RSpec.describe 'packaged gem' do
       MESSAGE
     end
 
+    def assert_installed_protocol(client)
+      discovery = client.connect(
+        client_info: { name: 'installed-woods-contract', version: '1.0' },
+        protocol_version: '2026-07-28',
+        mode: :modern
+      )
+      expect(discovery.dig('_meta', 'io.modelcontextprotocol/serverInfo', 'name')).to eq('woods')
+      expect(client.tools.map(&:name)).to include('lookup', 'woods_status')
+      result = client.call_tool(name: 'lookup', arguments: { identifier: 'Post' })
+      expect(result.dig('result', 'isError')).to be(false)
+      expect(result.dig('result', 'structuredContent', 'text')).to include('Post')
+    end
+
+    def free_port
+      server = TCPServer.new('127.0.0.1', 0)
+      server.local_address.ip_port
+    ensure
+      server&.close
+    end
+
+    def wait_for_http(base, wait_thread, output)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+      loop do
+        raise "installed HTTP server exited:\n#{output.read}" unless wait_thread.alive?
+
+        begin
+          Net::HTTP.start(base.host, base.port, open_timeout: 1, read_timeout: 1) { |http| http.head('/') }
+          return
+        rescue StandardError
+          if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+            raise "installed HTTP server never bound to #{base}"
+          end
+
+          sleep 0.1
+        end
+      end
+    end
+
+    def reap_process(wait_thread)
+      return unless wait_thread
+
+      Process.kill('TERM', wait_thread.pid) if wait_thread.alive?
+      wait_thread.join(5)
+      if wait_thread.alive?
+        Process.kill('KILL', wait_thread.pid)
+        wait_thread.join(5)
+      end
+      expect(wait_thread).not_to be_alive
+    rescue Errno::ESRCH, Errno::ECHILD
+      nil
+    end
+
     def write_dummy_app(app) # rubocop:disable Metrics/MethodLength
       files = {
         'Gemfile' => <<~GEMFILE,
@@ -291,6 +346,39 @@ RSpec.describe 'packaged gem' do
       expect(booted).to be(true), error_output
       expect(error_output).not_to include('LoadError')
       expect(error_output).not_to match(/from .+\.rb:\d+:in/)
+    end
+
+    it 'drives the installed woods-mcp executable with the official Ruby client' do
+      transport = MCP::Client::Stdio.new(
+        command: File.join(@gem_home, 'bin/woods-mcp'),
+        args: [File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods')],
+        env: installed_env,
+        read_timeout: 10
+      )
+      assert_installed_protocol(MCP::Client.new(transport: transport))
+      wait_thread = transport.instance_variable_get(:@wait_thread)
+    ensure
+      transport&.close
+      expect(wait_thread).not_to be_alive if wait_thread
+    end
+
+    it 'drives the installed woods-mcp-http executable with the official Ruby client over a real socket' do
+      port = free_port
+      base = URI("http://127.0.0.1:#{port}/")
+      stdin, output, wait_thread = Open3.popen2e(
+        installed_env.merge('PORT' => port.to_s, 'HOST' => '127.0.0.1', 'WOODS_MCP_HTTP_STATELESS' => '1'),
+        File.join(@gem_home, 'bin/woods-mcp-http'),
+        File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods'),
+        chdir: @package_tmp
+      )
+      wait_for_http(base, wait_thread, output)
+      transport = MCP::Client::HTTP.new(url: base.to_s)
+      assert_installed_protocol(MCP::Client.new(transport: transport))
+    ensure
+      transport&.close
+      reap_process(wait_thread)
+      stdin&.close unless stdin&.closed?
+      output&.close unless output&.closed?
     end
 
     it 'runs both generators, loads rake tasks, and extracts a dummy Rails app' do

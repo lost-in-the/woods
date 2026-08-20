@@ -117,6 +117,14 @@ RSpec.describe 'Index MCP resource contract' do
     end
   end
 
+  it 'distinguishes an indexed unit with a missing backing file from an unknown unit' do
+    server
+    FileUtils.rm(File.join(index_dir, 'models/Post_a5554622.json'))
+
+    expect_corrupt_artifact(read('codebase://unit/Post'), 'codebase://unit/Post')
+    expect_resource_not_found(read('codebase://unit/DoesNotExist'), 'codebase://unit/DoesNotExist')
+  end
+
   it 'rejects malformed resource URIs instead of returning text success' do
     uris = [
       'codebase://unit',

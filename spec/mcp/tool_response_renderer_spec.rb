@@ -73,6 +73,26 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
         end
       end
     end
+
+    it 'preserves search match fields and graph pagination offsets in every format' do
+      search = search_fixture
+      search['results'][0]['match_field'] = 'source_code'
+      graph = graph_analysis_fixture.merge(
+        'hubs_total' => 9,
+        'hubs_truncated' => true,
+        'hubs_offset' => 2
+      )
+
+      aggregate_failures do
+        described_class::VALID_FORMATS.each do |format|
+          search_output = described_class.for(format).render(:search, search)
+          graph_output = described_class.for(format).render(:graph_analysis, graph)
+          expect(search_output).to include('source_code'), "search/#{format}"
+          expect(graph_output).to include('offset'), "graph_analysis/#{format}"
+          expect(graph_output).to include('2'), "graph_analysis/#{format}"
+        end
+      end
+    end
   end
 
   # ── JSON Renderer ──────────────────────────────────────────────────

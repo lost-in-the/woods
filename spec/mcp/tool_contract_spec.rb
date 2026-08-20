@@ -12,6 +12,15 @@ require 'woods/notion/exporter'
 require 'woods/session_tracer/session_flow_assembler'
 
 RSpec.describe 'Index MCP tool contracts' do
+  let(:expected_tools) do
+    %w[
+      codebase_retrieve dependencies dependents domain_clusters framework graph_analysis
+      list_snapshots lookup notion_sync pagerank pipeline_diagnose pipeline_embed pipeline_extract
+      pipeline_repair pipeline_status recent_changes reload retrieval_explain retrieval_rate
+      retrieval_report_gap retrieval_suggest search session_trace snapshot_detail snapshot_diff
+      structure trace_flow unit_history woods_status
+    ]
+  end
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:inventory_path) { File.expand_path('../../.Codex/release-v2/surface-inventory.json', __dir__) }
   let(:tool_contract_meta) do
@@ -164,6 +173,8 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def wrong_value(schema)
+    return false if schema['anyOf']
+
     {
       'array' => {},
       'boolean' => 'true',
@@ -174,9 +185,10 @@ RSpec.describe 'Index MCP tool contracts' do
 
   it 'derives exactly 29 tool rows from the release surface inventory' do
     expect(inventory_rows.size).to eq(29)
+    expect(inventory_rows.map { |row| row.fetch('name') }).to contain_exactly(*expected_tools)
     expect(valid_arguments.keys).to contain_exactly(*inventory_rows.map { |row| row.fetch('name') })
     expect(listed_tools(full_server).map { |tool| tool.fetch('name') })
-      .to contain_exactly(*inventory_rows.map { |row| row.fetch('name') })
+      .to contain_exactly(*expected_tools)
   end
 
   it 'returns a non-vacuous schema-valid success for every inventory row' do
@@ -351,7 +363,7 @@ RSpec.describe 'Index MCP tool contracts' do
             arguments = valid_arguments.fetch(tool.fetch('name')).merge(name => value)
             result = call_tool(full_server, tool.fetch('name'), arguments).fetch('result')
             label = "#{tool.fetch('name')}.#{name}=#{value}"
-            expect(result.dig('_meta', 'error_code')).not_to eq('invalid_arguments'), label
+            expect(result['isError']).to be(false), label
           end
 
           [schema.fetch('minimum') - 1, schema.fetch('maximum') + 1].each do |value|
@@ -362,6 +374,39 @@ RSpec.describe 'Index MCP tool contracts' do
             expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments'), label
           end
         end
+      end
+    end
+  end
+
+  it 'declares and executes via as the documented string-or-array union' do
+    tool = listed_tools(full_server).find { |entry| entry.fetch('name') == 'dependencies' }
+    schema = tool.dig('inputSchema', 'properties', 'via')
+    expected_union = [{ 'type' => 'string', 'maxLength' => 10_000 },
+                      { 'type' => 'array', 'items' => { 'type' => 'string', 'maxLength' => 10_000 },
+                        'maxItems' => 1_000 }]
+
+    expect(schema.fetch('anyOf')).to eq(expected_union)
+
+    string_result = call_tool(full_server, 'dependencies', 'identifier' => 'Comment', 'via' => 'code_reference')
+    array_result = call_tool(full_server, 'dependencies', 'identifier' => 'Comment', 'via' => ['code_reference'])
+    expect(string_result.dig('result', 'isError')).to be(false)
+    expect(array_result.dig('result', 'isError')).to be(false)
+    expect(string_result.dig('result', 'structuredContent', 'data'))
+      .to eq(array_result.dig('result', 'structuredContent', 'data'))
+  end
+
+  it 'bounds every declared string and array branch' do
+    schemas = listed_tools(full_server).flat_map do |tool|
+      tool.dig('inputSchema', 'properties').to_h.values.flat_map { |schema| schema.fetch('anyOf', [schema]) }
+    end
+
+    aggregate_failures do
+      schemas.each do |schema|
+        expect(schema['maxLength']).to eq(10_000) if schema['type'] == 'string'
+        next unless schema['type'] == 'array'
+
+        expect(schema['maxItems']).to eq(1_000)
+        expect(schema.dig('items', 'maxLength')).to eq(10_000) if schema.dig('items', 'type') == 'string'
       end
     end
   end

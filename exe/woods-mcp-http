@@ -26,6 +26,7 @@ begin
 rescue LoadError
   require 'rack'
 end
+require 'bundler'
 require 'uri'
 require_relative '../lib/woods'
 require_relative '../lib/woods/dependency_graph'

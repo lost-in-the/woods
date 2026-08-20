@@ -25,6 +25,39 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
+    it 'uses a private copy of the current MCP configuration' do
+      global = MCP.configuration
+      global.validate_tool_call_results = false
+      global.validate_tool_call_arguments = false
+
+      built = described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+      configuration = built.configuration
+
+      expect(configuration).not_to equal(global)
+      expect(configuration.validate_tool_call_arguments?).to be(false)
+      expect(configuration.validate_tool_call_results?).to be(true)
+      expect(global.validate_tool_call_results?).to be(false)
+    ensure
+      global.validate_tool_call_arguments = true
+      global.validate_tool_call_results = false
+    end
+
+    it 'does not change foreign servers or leak between Woods servers' do
+      foreign_before = MCP::Server.new(name: 'before', version: '1')
+      first = described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+      second = described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+      foreign_after = MCP::Server.new(name: 'after', version: '1')
+
+      first.configuration.validate_tool_call_arguments = false
+
+      expect(foreign_before.configuration.validate_tool_call_results?).to be(false)
+      expect(foreign_after.configuration.validate_tool_call_results?).to be(false)
+      expect(foreign_before.configuration).to equal(MCP.configuration)
+      expect(foreign_after.configuration).to equal(MCP.configuration)
+      expect(second.configuration.validate_tool_call_arguments?).to be(true)
+      expect(first.configuration).not_to equal(second.configuration)
+    end
+
     it 'registers 14 tools when no optional collaborators are wired' do
       # Without operator / feedback_store / snapshot_store / session_store /
       # notion config, the 15 collaborator-dependent tools (5 pipeline_*, 4

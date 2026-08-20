@@ -184,6 +184,11 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
 
       Process.kill('TERM', wait_thread.pid) if wait_thread.alive?
       wait_thread.join(5)
+      if wait_thread.alive?
+        Process.kill('KILL', wait_thread.pid)
+        wait_thread.join(5)
+      end
+      expect(wait_thread).not_to be_alive
     rescue Errno::ESRCH, Errno::ECHILD
       nil
     end

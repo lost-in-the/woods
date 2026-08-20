@@ -117,6 +117,7 @@ module Woods
             version: Woods::VERSION,
             resources: resources,
             resource_templates: resource_templates,
+            configuration: ::MCP::Configuration.new.merge(::MCP.configuration),
             **ProtocolPolicy.cache_hints
           )
           # Rewrite "Tool not found" into version-aware update guidance for agents
@@ -514,7 +515,10 @@ module Woods
                   description: 'Filter to these types'
                 },
                 via: {
-                  type: 'array', items: { type: 'string' },
+                  anyOf: [
+                    { type: 'string' },
+                    { type: 'array', items: { type: 'string' } }
+                  ],
                   description: 'Filter by relationship type. Accepts either a single string ' \
                                "(e.g. 'code_reference') or an array " \
                                "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
@@ -1049,9 +1053,6 @@ module Woods
               )
             end
 
-            # Lock acquired — now it's safe to record the run.
-            guard&.record!(:extraction)
-
             run_extraction = lambda do
               # exe/woods-mcp deliberately loads no extraction machinery, so
               # Woods::Extractor is not defined in a standalone index-server
@@ -1067,6 +1068,7 @@ module Woods
               :run_pipeline_in_background,
               kind: :extraction, tool: 'pipeline_extract', lock: lock,
               task_store: task_store, respond: respond, respond_err: respond_err, runner: run_extraction,
+              started: -> { guard&.record!(:extraction) },
               started_message: 'Extraction pipeline started in background thread'
             )
           end
@@ -1162,9 +1164,6 @@ module Woods
               )
             end
 
-            # Lock acquired — now it's safe to record the run.
-            guard&.record!(:embedding)
-
             run_embed = lambda do
               # Share the rake-task wiring so the MCP path picks up the
               # provider-tuned TextPreparer + token-aware chunker. Without
@@ -1179,6 +1178,7 @@ module Woods
               :run_pipeline_in_background,
               kind: :embedding, tool: 'pipeline_embed', lock: lock,
               task_store: task_store, respond: respond, respond_err: respond_err, runner: run_embed,
+              started: -> { guard&.record!(:embedding) },
               started_message: 'Embedding pipeline started in background thread'
             )
           end
@@ -1211,9 +1211,10 @@ module Woods
         # @param runner [Proc] the actual work
         # @param started_message [String] legacy fire-and-forget message
         # @return [Hash, MCP::Tool::Response]
-        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, respond_err:, runner:,
+        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, respond_err:, runner:, started:,
                                        started_message:)
           task = create_pipeline_task(task_store, tool)
+          started.call
 
           Thread.new do
             # Heartbeat, like the rake writers: a full run on a large host can

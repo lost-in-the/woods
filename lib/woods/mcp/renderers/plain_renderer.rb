@@ -69,7 +69,10 @@ module Woods
           results.each do |r|
             ident = fetch_key(r, :identifier)
             type = fetch_key(r, :type)
-            lines << "  #{ident} (#{type})"
+            match = fetch_key(r, :match_field)
+            line = "  #{ident} (#{type})"
+            line += " - matched in #{match}" if match
+            lines << line
           end
 
           note = fetch_key(data, :note)
@@ -154,7 +157,11 @@ module Woods
             end
 
             total_key = "#{section}_total"
-            lines << "  (showing #{items.size} of #{data[total_key]}; truncated)" if data[total_key]
+            offset = fetch_key(data, "#{section}_offset", 0)
+            if data[total_key]
+              position = offset.positive? ? " from offset #{offset}" : ''
+              lines << "  (showing #{items.size} of #{data[total_key]}#{position}; truncated)"
+            end
             lines << ''
           end
 

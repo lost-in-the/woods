@@ -94,7 +94,7 @@ module Woods
           def define_get(server, store)
             server.define_custom_method(method_name: 'tasks/get') do |params, server_context:|
               require_tasks_capability!(params, server_context)
-              task = store.get(task_id_from(params))
+              task = Extension.send(:load_task, store, params)
               unless task
                 raise ::MCP::Server::RequestHandlerError.new(
                   'Unknown or expired taskId.', params, error_type: :invalid_params
@@ -127,7 +127,7 @@ module Woods
               # makes this an acknowledgement. The method exists because the
               # extension advertises it, and a client that probes it should get
               # an answer rather than "method not found".
-              task = store.get(task_id_from(params))
+              task = Extension.send(:load_task, store, params)
               unless task
                 raise ::MCP::Server::RequestHandlerError.new(
                   'Unknown or expired taskId.', params, error_type: :invalid_params
@@ -163,6 +163,19 @@ module Woods
             return nil unless params.is_a?(Hash)
 
             params[:taskId] || params['taskId']
+          end
+
+          def load_task(store, params)
+            store.get(task_id_from(params))
+          rescue Store::CorruptRecordError => e
+            task_id = task_id_from(params)
+            raise ::MCP::Server::RequestHandlerError.new(
+              'Task record is unavailable or malformed.', params,
+              error_type: :internal_error,
+              error_code: ::JsonRpcHandler::ErrorCode::INTERNAL_ERROR,
+              error_data: { error_code: 'corrupt_task_record', taskId: task_id },
+              original_error: e
+            )
           end
 
           # Reads a nested value tolerating symbol/string keys at every level.

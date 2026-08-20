@@ -233,6 +233,27 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     ensure
       File.chmod(0o755, @index_dir) if @index_dir && File.exist?(@index_dir)
     end
+
+    it 'does not consume pipeline cooldown and permits an immediate retry' do
+      guard = instance_double(Woods::Operator::PipelineGuard, allow?: true, record!: nil)
+      operator[:pipeline_guard] = guard
+      allow(fake_extractor).to receive(:extract_all).and_return(true)
+      attempts = 0
+      original_create = Woods::MCP::Tasks::Store.instance_method(:create!)
+      allow_any_instance_of(Woods::MCP::Tasks::Store).to receive(:create!) do |instance, **arguments|
+        attempts += 1
+        raise Errno::EACCES if attempts == 1
+
+        original_create.bind_call(instance, **arguments)
+      end
+
+      first = extract_call(tasks_meta)
+      second = extract_call(tasks_meta)
+
+      expect(first.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
+      expect(second.dig('result', 'resultType')).to eq('task')
+      expect(guard).to have_received(:record!).with(:extraction).once
+    end
   end
 
   describe 'durability across processes' do

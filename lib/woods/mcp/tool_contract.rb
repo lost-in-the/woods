@@ -35,7 +35,7 @@ module Woods
       class << self
         def apply!(server)
           server.tools.each do |name, tool|
-            tool.input_schema(close_input_schema(name, tool.input_schema_value.to_h))
+            tool.input_schema(close_input_schema(tool.input_schema_value.to_h))
             tool.output_schema(OUTPUT_SCHEMA) unless TASK_RESULT_TOOLS.include?(name)
           end
           server.configuration.validate_tool_call_results = true
@@ -60,41 +60,36 @@ module Woods
 
         private
 
-        def close_input_schema(name, source)
+        def close_input_schema(source)
           schema = JSON.parse(JSON.generate(source), symbolize_names: true)
           schema.delete(:$schema)
           schema[:type] = 'object'
           schema[:properties] ||= {}
           schema[:additionalProperties] = false
-          add_retrieve_limit!(name, schema[:properties])
           bound_properties!(schema)
           schema
-        end
-
-        def add_retrieve_limit!(name, properties)
-          return unless name == 'codebase_retrieve'
-
-          properties[:limit] = {
-            type: 'integer',
-            description: 'Unsupported result-count alias. Use budget instead.'
-          }
         end
 
         def bound_properties!(schema)
           required = Array(schema[:required]).map(&:to_s)
           schema[:properties].each do |name, property|
-            case property[:type]
-            when 'integer'
-              minimum, maximum = INTEGER_BOUNDS.fetch(name.to_s)
-              property[:minimum] = minimum
-              property[:maximum] = maximum
-            when 'string'
-              property[:minLength] = 1 if required.include?(name.to_s)
-              property[:maxLength] = 10_000
-            when 'array'
-              property[:maxItems] = 1_000
-              property[:items][:maxLength] ||= 10_000 if property.dig(:items, :type) == 'string'
-            end
+            Array(property[:anyOf]).each { |branch| bound_property!(name, branch, required) }
+            bound_property!(name, property, required)
+          end
+        end
+
+        def bound_property!(name, property, required)
+          case property[:type]
+          when 'integer'
+            minimum, maximum = INTEGER_BOUNDS.fetch(name.to_s)
+            property[:minimum] = minimum
+            property[:maximum] = maximum
+          when 'string'
+            property[:minLength] = 1 if required.include?(name.to_s)
+            property[:maxLength] = 10_000
+          when 'array'
+            property[:maxItems] = 1_000
+            property[:items][:maxLength] ||= 10_000 if property.dig(:items, :type) == 'string'
           end
         end
       end
@@ -110,6 +105,14 @@ module Woods
 
           arguments = request.key?(:arguments) ? request[:arguments] : {}
           return contract_error(request[:name], 'Arguments must be an object.') unless arguments.is_a?(Hash)
+          if request[:name] == 'codebase_retrieve' && (arguments.key?(:limit) || arguments.key?('limit'))
+            return contract_error(
+              request[:name],
+              'codebase_retrieve uses `budget` (token budget, default 8000), not `limit`.',
+              code: :unsupported_argument,
+              argument: 'limit'
+            )
+          end
 
           missing = tool.input_schema_value.missing_required_arguments(arguments)
           unless missing.empty?

@@ -150,6 +150,11 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
 
     Process.kill('TERM', wait_thread.pid) if wait_thread.alive?
     wait_thread.join(5)
+    if wait_thread.alive?
+      Process.kill('KILL', wait_thread.pid)
+      wait_thread.join(5)
+    end
+    expect(wait_thread).not_to be_alive
   rescue Errno::ESRCH, Errno::ECHILD
     nil
   end
@@ -158,8 +163,8 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
     ios.compact.each { |io| io.close unless io.closed? }
   end
 
-  it 'records the modern stdio limitation and validates Inspector through its legacy fallback' do
-    server = {
+  def stdio_server
+    {
       'type' => 'stdio',
       'command' => 'bundle',
       'args' => ['exec', 'ruby', 'exe/woods-mcp', fixture_dir],
@@ -170,16 +175,9 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
         'BUNDLE_PATH' => ENV.fetch('BUNDLE_PATH', nil)
       }.compact
     }
-
-    write_inspector_config(server, protocol_era: 'modern')
-    assert_modern_inspector_limitation
-    write_inspector_config(server, protocol_era: 'legacy')
-    assert_inspector_surface
   end
 
-  it 'records the modern HTTP limitation and validates Inspector through its legacy fallback' do
-    token = 'task-4-inspector-token-0000000000000000'
-    allowed_origin = 'https://allowed.example'
+  def start_inspector_http
     port = free_port
     base = URI("http://127.0.0.1:#{port}/")
     stdin, output, wait_thread = Open3.popen2e(
@@ -187,23 +185,57 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
         'PORT' => port.to_s,
         'HOST' => '127.0.0.1',
         'WOODS_MCP_HTTP_STATELESS' => '1',
-        'WOODS_MCP_HTTP_TOKEN' => token,
-        'WOODS_MCP_HTTP_ALLOWED_ORIGINS' => allowed_origin,
+        'WOODS_MCP_HTTP_TOKEN' => 'task-4-inspector-token-0000000000000000',
+        'WOODS_MCP_HTTP_ALLOWED_ORIGINS' => 'https://allowed.example',
         'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile')
       },
       'bundle', 'exec', 'ruby', 'exe/woods-mcp-http', fixture_dir,
       chdir: gem_root
     )
     wait_for_http(base, wait_thread, output)
-    server = {
+    [base, stdin, output, wait_thread]
+  end
+
+  def inspector_http_server(base)
+    {
       'type' => 'streamable-http',
       'url' => base.to_s,
-      'headers' => { 'Authorization' => "Bearer #{token}", 'Origin' => allowed_origin }
+      'headers' => {
+        'Authorization' => 'Bearer task-4-inspector-token-0000000000000000',
+        'Origin' => 'https://allowed.example'
+      }
     }
+  end
 
-    write_inspector_config(server, protocol_era: 'modern')
-    assert_modern_inspector_limitation
-    write_inspector_config(server, protocol_era: 'legacy')
+  it 'keeps modern stdio conformance pending on the Inspector 2.2.0 logging request' do
+    write_inspector_config(stdio_server, protocol_era: 'modern')
+    _command, _stdout, stderr, status = capture_inspector('initialize')
+    expect(stderr).to include("Method 'logging/setLevel' is not supported by the negotiated protocol version")
+
+    pending('Inspector 2.2.0 sends legacy logging/setLevel after negotiating modern 2026-07-28')
+    expect(status).to be_success
+  end
+
+  it 'validates stdio through Inspector 2.2.0 as an explicitly legacy smoke' do
+    write_inspector_config(stdio_server, protocol_era: 'legacy')
+    assert_inspector_surface
+  end
+
+  it 'keeps modern HTTP conformance pending on the Inspector 2.2.0 logging request' do
+    base, stdin, output, wait_thread = start_inspector_http
+    write_inspector_config(inspector_http_server(base), protocol_era: 'modern')
+    _command, _stdout, stderr, status = capture_inspector('initialize')
+    expect(stderr).to include("Method 'logging/setLevel' is not supported by the negotiated protocol version")
+
+    pending('Inspector 2.2.0 sends legacy logging/setLevel after negotiating modern 2026-07-28')
+    expect(status).to be_success
+  ensure
+    stop_http_server(wait_thread, stdin, output)
+  end
+
+  it 'validates HTTP through Inspector 2.2.0 as an explicitly legacy smoke' do
+    base, stdin, output, wait_thread = start_inspector_http
+    write_inspector_config(inspector_http_server(base), protocol_era: 'legacy')
     assert_inspector_surface
   ensure
     stop_http_server(wait_thread, stdin, output)
