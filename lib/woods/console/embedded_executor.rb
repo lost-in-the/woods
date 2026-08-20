@@ -654,7 +654,7 @@ module Woods
 
         relation = relation.select(*validated_select(params['select'], model_name)) if params['select']
         relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
-        relation = apply_scope(relation, params['scope'], model_name: model_name)
+        relation = apply_query_scope(relation, params['scope'], model_name) if params.key?('scope')
         relation = relation.group(*validated_columns(params['group_by'], model_name)) if params['group_by']&.any?
         relation = relation.having(*validated_having(params['having'], model_name)) if params['having']
         relation = relation.order(validated_order(params['order'], model_name)) if params['order']
@@ -731,6 +731,30 @@ module Woods
         else
           raise ValidationError, "having: unsupported type #{having.class}"
         end
+      end
+
+      # Apply the public console_query scope contract. Query arrays are
+      # intentionally narrower than the legacy Tier 1 executor form: exactly
+      # one safe column comparison template and one bind value.
+      def apply_query_scope(relation, scope, model_name)
+        return apply_scope(relation, scope, model_name: model_name) if scope.is_a?(Hash)
+
+        unless scope.is_a?(Array) && scope.length == 2 && scope.first.is_a?(String)
+          raise ValidationError, 'scope must be an object or exact ["column OP ?", bind] array'
+        end
+
+        case scope.last
+        when String, Numeric, true, false, nil
+          nil
+        else
+          raise ValidationError, 'scope bind must be a string, number, boolean, or null'
+        end
+
+        match = Server::QUERY_SCOPE_TEMPLATE_REGEXP.match(scope.first)
+        raise ValidationError, "scope: unsupported SQL template #{scope.first.inspect}" unless match
+
+        validate_column_reference!(match[1], model_name)
+        apply_scope(relation, scope, model_name: model_name)
       end
 
       # Validate `order:` — only Hash `{col => :asc|:desc}` or bare column name.

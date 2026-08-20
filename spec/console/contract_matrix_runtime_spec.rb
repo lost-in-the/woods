@@ -8,6 +8,11 @@ require_relative 'support/booted_console_app' if ENV['WOODS_RUN_BOOTED_APP']
 require 'woods/console/server'
 
 module ConsoleContractMatrixRuntime
+  POST_STATUS_INDEX = {
+    'name' => 'index_posts_on_status_for_console_contract',
+    'columns' => ['status'],
+    'unique' => false
+  }.freeze
   RECORD_ROWS = [
     { 'id' => 1, 'title' => 'Alpha' },
     { 'id' => 2, 'title' => 'Beta' },
@@ -23,7 +28,7 @@ module ConsoleContractMatrixRuntime
     'console_association_count' => { 'count' => 2 },
     'console_schema' => {
       'columns' => %w[created_at id status title updated_at],
-      'indexes' => []
+      'indexes' => [POST_STATUS_INDEX]
     },
     'console_recent' => { 'records' => RECORD_ROWS.reverse },
     'console_status' => { 'status' => 'ok', 'models' => %w[Comment Post], 'adapter' => 'SQLite' },
@@ -78,6 +83,15 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
   end
 
   def seed_contract_rows
+    unless connection.indexes(Post.table_name).any? { |index| index.name == ConsoleContractMatrixRuntime::POST_STATUS_INDEX['name'] }
+      connection.add_index(
+        Post.table_name,
+        :status,
+        name: ConsoleContractMatrixRuntime::POST_STATUS_INDEX['name'],
+        unique: false
+      )
+    end
+
     Comment.delete_all
     Post.delete_all
     Post.create!(id: 1, title: 'Alpha', status: 10, created_at: Time.utc(2026, 1, 1))
@@ -146,7 +160,10 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
     when 'console_sample'
       result.merge('records' => result.fetch('records').sort_by { |row| row.fetch('id') })
     when 'console_schema'
-      result.merge('columns' => result.fetch('columns').keys.sort)
+      result.merge(
+        'columns' => result.fetch('columns').keys.sort,
+        'indexes' => result.fetch('indexes').sort_by { |index| index.fetch('name') }
+      )
     else
       result
     end
@@ -206,26 +223,115 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
     end
   end
 
-  it 'rejects every predictable registered executor validation in the SDK schema' do
+  it 'keeps console_query object and exact two-element array scopes in public and executor parity' do
     server = build_server
-    cases = [
-      ['console_count', { model: ' ' }],
-      ['console_sample', { model: 'Post', columns: ['bad key'] }],
-      ['console_find', { model: 'Post', by: { 'bad key' => 1 } }],
-      ['console_pluck', { model: 'Post', columns: ['bad key'] }],
-      ['console_aggregate', { model: 'Post', function: 'sum', column: 'bad key' }],
-      ['console_association_count', { model: 'Post', id: 1, association: 'bad key' }],
-      ['console_schema', { model: ' ' }],
-      ['console_recent', { model: 'Post', order_by: 'bad key' }],
-      ['console_sql', { sql: " \n\t" }],
-      ['console_query', { model: 'Post', select: ['bad key'] }]
+    base = { model: 'Post', select: %w[id title], order: { 'id' => 'asc' } }
+    valid_cases = [
+      [{ 'status' => 20 }, [[2, 'Beta']]],
+      [['status >= ?', 20], [[2, 'Beta'], [3, 'Gamma']]],
+      [['posts.status = ?', 10], [[1, 'Alpha']]]
+    ]
+    invalid_scopes = [
+      'status = 10',
+      [],
+      ['status = ?'],
+      ['status = ?', 10, 20],
+      [1, 10],
+      ['status = 10', 10],
+      ['status = ? OR title = ?', 10],
+      ['status = ?', [10]],
+      ['status = ?', { value: 10 }],
+      ['bad key = ?', 10],
+      ['status = ?; DROP TABLE posts', 10],
+      ['status = ? UNION SELECT title FROM posts', 10]
     ]
 
     aggregate_failures do
-      cases.each do |name, arguments|
-        expect(execute_after_schema(name, arguments).fetch('ok')).to be(false), name
-        expect(schema_accepts?(server, name, arguments)).to be(false), name
-        expect(tools_call(server, name, arguments).dig('result', 'isError')).to be(true), name
+      valid_cases.each do |scope, expected_rows|
+        arguments = base.merge(scope: scope)
+        execution = execute_after_schema('console_query', arguments)
+        response = tools_call(server, 'console_query', arguments)
+
+        expect(schema_accepts?(server, 'console_query', arguments)).to be(true), scope.inspect
+        expect(execution.fetch('ok')).to be(true), scope.inspect
+        expect(execution.dig('result', 'rows')).to eq(expected_rows), scope.inspect
+        expect(tool_result(response).fetch('rows')).to eq(expected_rows), scope.inspect
+      end
+
+      invalid_scopes.each do |scope|
+        arguments = base.merge(scope: scope)
+
+        expect(schema_accepts?(server, 'console_query', arguments)).to be(false), scope.inspect
+        expect(execute_after_schema('console_query', arguments).fetch('ok')).to be(false), scope.inspect
+        expect(tools_call(server, 'console_query', arguments).dig('result', 'isError')).to be(true), scope.inspect
+      end
+    end
+  end
+
+  it 'rejects every predictable registered executor validation in the SDK schema and public dispatch' do
+    server = build_server
+    cases = {
+      'console_count' => [
+        { model: ' ' }
+      ],
+      'console_sample' => [
+        { model: 'Post', columns: ['bad key'] }
+      ],
+      'console_find' => [
+        { model: 'Post', by: { 'bad key' => 1 } }
+      ],
+      'console_pluck' => [
+        { model: 'Post', columns: [] },
+        { model: 'Post', columns: ['bad key'] }
+      ],
+      'console_aggregate' => [
+        { model: 'Post', function: 'bogus' },
+        { model: 'Post', function: 'sum' },
+        { model: 'Post', function: 'sum', column: 'bad key' }
+      ],
+      'console_association_count' => [
+        { model: 'Post', id: 1, association: 'bad key' }
+      ],
+      'console_schema' => [
+        { model: ' ' }
+      ],
+      'console_recent' => [
+        { model: 'Post', order_by: 'bad key' },
+        { model: 'Post', direction: 'sideways' },
+        { model: 'Post', columns: ['bad key'] }
+      ],
+      'console_status' => [
+        []
+      ],
+      'console_sql' => [
+        { sql: " \n\t" }
+      ],
+      'console_query' => [
+        { model: 'Post', select: [] },
+        { model: 'Post', select: ['bad key'] },
+        { model: 'Post', select: ['id'], joins: ['bad key'] },
+        { model: 'Post', select: ['id'], group_by: ['bad key'] },
+        { model: 'Post', select: ['id'], having: { 'bad key' => 1 } },
+        { model: 'Post', select: ['id'], having: ['COUNT(*) > ?'] },
+        { model: 'Post', select: ['id'], order: { 'bad key' => 'asc' } },
+        { model: 'Post', select: ['id'], order: { 'id' => 'sideways' } }
+      ]
+    }
+
+    expect(cases.keys).to contain_exactly(*matrix.map { |row| row.fetch(:name) })
+
+    aggregate_failures do
+      cases.each do |name, invalid_arguments|
+        invalid_arguments.each do |arguments|
+          failure_message = "#{name}: #{arguments.inspect}"
+          expect(schema_accepts?(server, name, arguments)).to be(false), failure_message
+          response = tools_call(server, name, arguments)
+          expect(response.dig('result', 'isError')).to be(true), failure_message
+          next if name == 'console_status'
+
+          execution = execute_after_schema(name, arguments)
+          expect(execution.fetch('ok')).to be(false), failure_message
+        end
       end
     end
   end
@@ -250,21 +356,27 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
     pattern = { key_column: 'status', value_column: 'title', sensitive_keys: ['10'] }
     server = build_server(redacted_key_values: [pattern])
     calls = {
-      'console_sample' => { model: 'Post', limit: 25, columns: %w[status title] },
-      'console_find' => { model: 'Post', id: 1, columns: %w[status title] },
-      'console_pluck' => { model: 'Post', columns: %w[status title] },
-      'console_recent' => { model: 'Post', limit: 3, columns: %w[status title] },
-      'console_sql' => { sql: 'SELECT status, title FROM posts ORDER BY id' },
-      'console_query' => { model: 'Post', select: %w[status title], order: { 'id' => 'asc' } }
+      'console_sample' => [{ model: 'Post', limit: 25, columns: %w[status title] }],
+      'console_find' => [
+        { model: 'Post', id: 1, columns: %w[status title] },
+        { model: 'Post', id: 2, columns: %w[status title] },
+        { model: 'Post', id: 3, columns: %w[status title] }
+      ],
+      'console_pluck' => [{ model: 'Post', columns: %w[status title] }],
+      'console_recent' => [{ model: 'Post', limit: 3, columns: %w[status title] }],
+      'console_sql' => [{ sql: 'SELECT status, title FROM posts ORDER BY id' }],
+      'console_query' => [{ model: 'Post', select: %w[status title], order: { 'id' => 'asc' } }]
     }
 
-    calls.each do |name, arguments|
+    calls.each do |name, argument_list|
       row = matrix.find { |candidate| candidate.fetch(:name) == name }
-      result_text = JSON.generate(tool_result(tools_call(server, name, arguments)))
+      result_text = JSON.generate(argument_list.map { |arguments| tool_result(tools_call(server, name, arguments)) })
 
       expect(row.fetch(:redaction)).to match(/_and_eav\z/), name
       expect(result_text).to include('[REDACTED]'), name
       expect(result_text).not_to include('Alpha'), name
+      expect(result_text).to include('Beta'), name
+      expect(result_text).to include('Gamma'), name
     end
   end
 

@@ -45,6 +45,39 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
     end
   end
 
+  it 'defines the exact public console_query scope object and parameterized-array contract' do
+    row = matrix.find { |candidate| candidate.fetch(:name) == 'console_query' }
+    schema = input_schema(row)
+    base = { model: 'Post', select: %w[id title] }
+
+    [
+      {},
+      { 'status' => 10 },
+      ['status = ?', 10],
+      ['posts.status >= ?', 20]
+    ].each do |scope|
+      expect { schema.validate_arguments(base.merge(scope: scope)) }.not_to raise_error, scope.inspect
+    end
+
+    [
+      'status = 10',
+      [],
+      ['status = ?'],
+      ['status = ?', 10, 20],
+      [1, 10],
+      ['status = 10', 10],
+      ['status = ? OR title = ?', 10],
+      ['status = ?', [10]],
+      ['status = ?', { value: 10 }],
+      ['bad key = ?', 10],
+      ['status = ?; DROP TABLE posts', 10],
+      ['status = ? UNION SELECT title FROM posts', 10]
+    ].each do |scope|
+      expect { schema.validate_arguments(base.merge(scope: scope)) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError), scope.inspect
+    end
+  end
+
   it 'executes every registered row representative through its real request handler' do
     matrix.select { |row| row.fetch(:executable_modes).any? }.each do |row|
       spec = specs_by_name.fetch(row.fetch(:name))

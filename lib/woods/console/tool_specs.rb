@@ -55,6 +55,13 @@ module Woods
       HAVING_TEMPLATE_SCHEMA_PATTERN = "^(?:#{HAVING_TEMPLATE_GRAMMAR})$(?![\\s\\S])".freeze
       HAVING_TEMPLATE_REGEXP = Regexp.new("\\A(?:#{HAVING_TEMPLATE_GRAMMAR})\\z").freeze
 
+      QUERY_SCOPE_TEMPLATE_GRAMMAR = [
+        "\\s*(#{COLUMN_REFERENCE_GRAMMAR})\\s*",
+        '(?:=|!=|<>|<=|>=|<|>)\\s*\\?\\s*'
+      ].join.freeze
+      QUERY_SCOPE_TEMPLATE_SCHEMA_PATTERN = "^(?:#{QUERY_SCOPE_TEMPLATE_GRAMMAR})$(?![\\s\\S])".freeze
+      QUERY_SCOPE_TEMPLATE_REGEXP = Regexp.new("\\A(?:#{QUERY_SCOPE_TEMPLATE_GRAMMAR})\\z").freeze
+
       # Value object that holds a single MCP tool's declarative specification.
       #
       # @!attribute [r] name
@@ -626,8 +633,19 @@ module Woods
                      propertyNames: { pattern: COLUMN_REFERENCE_SCHEMA_PATTERN },
                      additionalProperties: { type: 'string', pattern: ORDER_DIRECTION_SCHEMA_PATTERN },
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
-            scope: { type: 'object',
-                     description: 'WHERE conditions as {column => value} or [sql, bind] array' },
+            scope: { type: %w[object array],
+                     oneOf: [
+                       { type: 'object' },
+                       {
+                         type: 'array', minItems: 2, maxItems: 2,
+                         prefixItems: [
+                           { type: 'string', pattern: QUERY_SCOPE_TEMPLATE_SCHEMA_PATTERN },
+                           { type: %w[string number boolean null] }
+                         ]
+                       }
+                     ],
+                     description: 'WHERE conditions as {column => value} or exact ' \
+                                  '["column OP ?", bind] array' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 10_000,
                      description: 'Maximum rows to return (default 10000, hard max 10000)' }
           },
