@@ -182,6 +182,54 @@ namespace :woods do
     false
   end
 
+  # Changed paths across a git range, for `woods:incremental`'s CI branches.
+  #
+  # `git diff --name-only` split on lines corrupted three things at once: a
+  # path containing a newline split into two entries; a non-ASCII path came
+  # back octal-escaped inside quotes under git's default `core.quotePath`,
+  # which the dispatcher then can't match to any rule; and a rename reported
+  # only the new path, so the old path's unit was never pruned. `-z` +
+  # `--name-status` + `--no-renames` fixes all three: NUL-delimited records,
+  # `core.quotePath=false` unescaped, and a rename decomposed by git itself
+  # into a separate `A <new>` and `D <old>` record rather than one `R` record
+  # naming both.
+  #
+  # @param range [String] a git diff range/revision expression
+  # @return [Array<String>] changed paths, both halves of any rename included
+  def woods_changed_paths_for_range(range)
+    require 'open3'
+    output, = Open3.capture2(
+      'git', '-c', 'core.quotePath=false', 'diff', '--name-status', '-z', '--no-renames', range
+    )
+    woods_parse_git_diff_name_status(output)
+  end
+
+  # Parse NUL-delimited `git diff --name-status -z --no-renames` output.
+  #
+  # Each record is `<status>\0<path>\0` — `--no-renames` guarantees a single
+  # path per record, since it is what stops git emitting a two-path `R`/`C`
+  # record in the first place. Status letters are not inspected beyond "did
+  # git report anything at all"; a deleted path still needs to reach the
+  # change set so its unit can be pruned.
+  #
+  # A bare `Open3.capture2` read is tagged with the process's default
+  # external encoding — US-ASCII under `LANG=C`, this daemon's usual
+  # environment (see `AtomicFile.read`'s gotcha) — so a UTF-8 path is a
+  # US-ASCII string containing invalid bytes until re-tagged.
+  #
+  # @param output [String] raw NUL-delimited git output
+  # @return [Array<String>] changed paths
+  def woods_parse_git_diff_name_status(output)
+    fields = output.dup.force_encoding(Encoding::UTF_8).split("\x00")
+    paths = []
+    fields.each_slice(2) do |status, path|
+      break if path.nil?
+
+      paths << path unless status.nil? || status.empty?
+    end
+    paths
+  end
+
   desc 'Full extraction of codebase for indexing'
   task extract: :environment do
     require 'woods/extractor'
@@ -224,18 +272,13 @@ namespace :woods do
                       ENV['CHANGED_FILES'].split(',').map(&:strip)
                     elsif ENV['CI_COMMIT_BEFORE_SHA']
                       # GitLab CI
-                      output, = Open3.capture2('git', 'diff', '--name-only',
-                                               "#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}")
-                      output.lines.map(&:strip)
+                      woods_changed_paths_for_range("#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}")
                     elsif ENV['GITHUB_BASE_REF']
                       # GitHub Actions PR
-                      output, = Open3.capture2('git', 'diff', '--name-only',
-                                               "origin/#{ENV['GITHUB_BASE_REF']}...HEAD")
-                      output.lines.map(&:strip)
+                      woods_changed_paths_for_range("origin/#{ENV['GITHUB_BASE_REF']}...HEAD")
                     else
                       # Default: changes since last commit
-                      output, = Open3.capture2('git', 'diff', '--name-only', 'HEAD~1')
-                      output.lines.map(&:strip)
+                      woods_changed_paths_for_range('HEAD~1')
                     end
 
     # Filter to paths that imply extraction work. The rule set lives in
