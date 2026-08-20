@@ -86,14 +86,22 @@ module Woods
         end
       end
 
-      # Read and parse +woods.json+ if it exists.
+      # Read and parse the resolved config snapshot, if one exists.
+      #
+      # Delegates entirely to {IndexArtifact#read_config}, which prefers the
+      # config embedded in the promoted dump over the root +woods.json+ (#217
+      # / FIX 3 — the two used to be independent atomic writes, so a crash
+      # between them could publish a new config against the old dump). Do
+      # NOT gate on +artifact.config_path.exist?+ here: a promoted dump can
+      # carry its own config with no root +woods.json+ ever having been
+      # written, and that pre-check would skip straight past it.
       #
       # @param artifact [Woods::IndexArtifact, nil]
       # @return [Woods::ResolvedConfig, nil]
       # @raise [Woods::MCP::UnsupportedArtifact] if the file has an unsupported
       #   schema version.
       def self.read_stored_config(artifact)
-        return nil unless artifact&.config_path&.exist?
+        return nil unless artifact
 
         raw = artifact.read_config
         return nil unless raw

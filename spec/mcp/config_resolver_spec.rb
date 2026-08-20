@@ -77,6 +77,28 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
     end
 
+    # FIX 3 (P1): the config snapshot now lives inside the promoted dump
+    # directory (IndexArtifact#read_config prefers it there). No root
+    # woods.json exists in this scenario at all — read_stored_config must
+    # not skip straight to `:host_config`/autodetect just because
+    # artifact.config_path (the root file) is absent.
+    context 'woods.json present only inside the promoted dump (no root woods.json)' do
+      it 'still resolves from the snapshot' do
+        Dir.mktmpdir do |dir|
+          artifact = Woods::IndexArtifact.new(dir)
+          dump_dir = artifact.new_dump_dir
+          artifact.write_dump_config(dump_dir, woods_json_hash)
+          artifact.promote(dump_dir)
+          expect(artifact.config_path).not_to exist
+
+          config, source = described_class.resolve(ollama_config, artifact: artifact)
+
+          expect(config).to eq(ollama_config)
+          expect(source).to eq(:snapshot)
+        end
+      end
+    end
+
     context 'woods.json present, host has no provider — populates config from snapshot' do
       it 'returns [config, :snapshot] and sets embedding_provider' do
         Dir.mktmpdir do |dir|
