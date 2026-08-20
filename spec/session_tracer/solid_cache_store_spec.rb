@@ -9,7 +9,7 @@ require 'woods/session_tracer/solid_cache_store'
 # Minimal in-memory cache mock compatible with ActiveSupport::Cache::Store interface.
 # Implements read/write/delete/exist? used by SolidCacheStore.
 class MockCache
-  attr_accessor :before_write
+  attr_accessor :after_increment, :before_write
 
   def initialize
     @data = {}
@@ -37,12 +37,14 @@ class MockCache
 
   def increment(key, amount = 1, options = nil)
     options ||= {}
-    @mutex.synchronize do
+    value = @mutex.synchronize do
       expire!(key)
       @data[key] = @data.fetch(key, 0).to_i + amount
       @expires[key] ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:expires_in] if options[:expires_in]
       @data[key]
     end
+    @after_increment&.call(key, value)
+    value
   end
 
   def keys
@@ -201,6 +203,15 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
     it 'returns empty when no sessions exist' do
       expect(store.sessions).to eq([])
     end
+
+    it 'scans past cleared recent sessions to find older active sessions' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      %w[older cleared-a cleared-b].each { |session_id| bounded.record(session_id, request_data) }
+      bounded.clear('cleared-a')
+      bounded.clear('cleared-b')
+
+      expect(bounded.sessions(limit: 2).map { |entry| entry['session_id'] }).to eq(['older'])
+    end
   end
 
   describe '#clear' do
@@ -212,6 +223,26 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect(store.read('sess1')).to eq([])
       expect(store.read('sess2').size).to eq(1)
+    end
+
+    it 'tombstones a record that was allocated before clear but publishes afterward' do
+      slot_started = Queue.new
+      release_slot = Queue.new
+      cache.before_write = lambda do |key, value|
+        next unless key.end_with?(':record:1') && JSON.parse(value)['sequence'] == 1
+
+        slot_started << true
+        release_slot.pop
+      end
+      writer = Thread.new { store.record('sess1', request_data) }
+      slot_started.pop
+
+      store.clear('sess1')
+      release_slot << true
+      writer.join
+
+      expect(store.read('sess1')).to eq([])
+      expect(cache.keys.grep(/:record:/)).to be_empty
     end
   end
 
@@ -225,6 +256,27 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       expect(store.read('sess1')).to eq([])
       expect(store.read('sess2')).to eq([])
       expect(store.sessions).to eq([])
+    end
+
+    it 'tombstones a record whose global reservation predates clear_all' do
+      reservation_started = Queue.new
+      release_reservation = Queue.new
+      cache.after_increment = lambda do |key, value|
+        next unless key == 'woods:session_index:sequence' && value == 1
+
+        reservation_started << true
+        release_reservation.pop
+      end
+      writer = Thread.new { store.record('new', request_data) }
+      reservation_started.pop
+
+      store.clear_all
+      release_reservation << true
+      writer.join
+
+      expect(store.read('new')).to eq([])
+      expect(store.sessions).to eq([])
+      expect(cache.keys.grep(/:record:|session_index:slot/)).to be_empty
     end
   end
 
@@ -318,11 +370,14 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
   describe 'atomic increment requirement' do
     it 'fails clearly when the backend cannot atomically increment' do
+      # Cache write/delete APIs return backend success rather than acting as predicates.
+      # rubocop:disable Naming/PredicateMethod
       unsupported = Class.new do
         def read(*) = nil
         def write(*) = true
         def delete(*) = true
       end.new
+      # rubocop:enable Naming/PredicateMethod
 
       expect { described_class.new(cache: unsupported) }
         .to raise_error(ArgumentError, /atomic #increment/)
