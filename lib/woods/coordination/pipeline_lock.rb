@@ -42,10 +42,6 @@ module Woods
         @name = name
         @stale_timeout = stale_timeout
         @lock_path = File.join(lock_dir, "#{name}.lock")
-        # Keep the transaction guard outside the owned directory. An
-        # administrative clean may remove and recreate that directory, but it
-        # must not replace the flock inode and split contenders across guards.
-        @guard_path = "#{File.expand_path(lock_dir)}.#{name}.lock.guard"
         @held = false
       end
 
@@ -54,7 +50,6 @@ module Woods
       # @return [Boolean] true if lock acquired, false if already held
       def acquire
         with_path_guard do
-          FileUtils.mkdir_p(@lock_dir)
           if File.exist?(@lock_path)
             return false unless stale?
             # Retire the stale lock atomically. A bare rm_f + create here is
@@ -170,11 +165,45 @@ module Woods
       private
 
       def with_path_guard
-        FileUtils.mkdir_p(File.dirname(@guard_path))
-        File.open(@guard_path, File::RDWR | File::CREAT, 0o600) do |guard|
+        # Ensure the lock directory itself exists — never its parent. A guard
+        # that lived beside @lock_dir needed the parent writable too, which a
+        # deployment that only grants write access to the lock directory
+        # can't satisfy.
+        FileUtils.mkdir_p(@lock_dir)
+        File.open(guard_path, File::RDWR | File::CREAT, 0o600) do |guard|
           guard.flock(File::LOCK_EX)
           yield
         end
+      end
+
+      # The transaction guard, kept inside the owned lock directory so it
+      # resolves through the same symlink the lock file itself does. A guard
+      # computed from `File.expand_path(lock_dir)` split in two: expand_path
+      # normalizes `.`/`..` but never dereferences a symlink, so a real path
+      # and a symlinked alias of the same directory produced two different
+      # sibling guard files — flocks that never contended, defeating every
+      # TOCTOU protection `with_path_guard` exists to provide. Deriving the
+      # guard from `File.realpath` and placing it inside the directory
+      # resolves both aliases to the identical path, the same way `@lock_path`
+      # already does implicitly by living inside `lock_dir`.
+      #
+      # Memoized: only the first caller (which has just ensured the directory
+      # exists via `mkdir_p`) needs to resolve it; every later access reuses
+      # that resolution rather than re-touching the filesystem.
+      #
+      # @return [String]
+      def guard_path
+        @guard_path ||= File.join(canonical_lock_dir, ".#{@name}.lock.guard")
+      end
+
+      # @return [String] the lock directory's real path when it exists,
+      #   falling back to a lexical expansion when it does not — realpath
+      #   requires an existing path and callers must never be made to create
+      #   one just to compute a guard location.
+      def canonical_lock_dir
+        File.realpath(@lock_dir)
+      rescue Errno::ENOENT
+        File.expand_path(@lock_dir)
       end
 
       def retire_stale_unlocked

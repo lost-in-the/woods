@@ -8,11 +8,10 @@ require 'woods/coordination/pipeline_lock'
 
 RSpec.describe Woods::Coordination::PipelineLock do
   let(:lock_dir) { Dir.mktmpdir }
-  let(:guard_path) { "#{File.expand_path(lock_dir)}.extraction.lock.guard" }
+  let(:guard_path) { lock.send(:guard_path) }
 
   after do
     FileUtils.rm_rf(lock_dir)
-    FileUtils.rm_f(guard_path)
   end
 
   subject(:lock) { described_class.new(lock_dir: lock_dir, name: 'extraction') }
@@ -383,8 +382,11 @@ RSpec.describe Woods::Coordination::PipelineLock do
       captured.pop
       contender = described_class.new(lock_dir: lock_dir, name: 'extraction')
       acquiring = Thread.new { contender.acquire }
-      sleep 0.02
-      completed_during_gap = !acquiring.alive?
+      # `own_lock?` is parked mid-release (captured above), holding the path
+      # guard the contender's own acquire needs — a bounded join that times
+      # out is the attempted-entry-then-observed-blocking proof; it does not
+      # wait the full bound when nothing is actually blocking.
+      completed_during_gap = acquiring.join(0.3) ? true : false
 
       continue_release << true
       releasing.join
@@ -414,8 +416,10 @@ RSpec.describe Woods::Coordination::PipelineLock do
       refreshing.pop
       cleaner = described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 60)
       cleaning = Thread.new { cleaner.retire_stale }
-      sleep 0.02
-      completed_during_touch = !cleaning.alive?
+      # `File.utime` is parked mid-touch (captured above), holding the path
+      # guard the cleaner's own retire_stale needs — a bounded join that
+      # times out is the observed-blocking proof.
+      completed_during_touch = cleaning.join(0.3) ? true : false
 
       continue_touch << true
 
@@ -425,6 +429,75 @@ RSpec.describe Woods::Coordination::PipelineLock do
     ensure
       continue_touch << true if touching&.alive?
       [touching, cleaning].compact.each { |thread| thread.join(1) }
+    end
+  end
+
+  describe 'symlinked lock directory aliasing' do
+    let(:real_dir) { Dir.mktmpdir('woods_lock_real') }
+    let(:alias_parent) { Dir.mktmpdir('woods_lock_alias_parent') }
+    let(:alias_dir) { File.join(alias_parent, 'alias') }
+    let(:real_lock) { described_class.new(lock_dir: real_dir, name: 'extraction') }
+    let(:alias_lock) { described_class.new(lock_dir: alias_dir, name: 'extraction') }
+
+    before { FileUtils.ln_s(real_dir, alias_dir) }
+
+    after do
+      FileUtils.rm_rf(real_dir)
+      FileUtils.rm_rf(alias_parent)
+    end
+
+    it 'derives the identical guard path for the real directory and a symlinked alias of it' do
+      expect(alias_lock.send(:guard_path)).to eq(real_lock.send(:guard_path))
+    end
+
+    it 'blocks a symlink-path contender from entering the guard critical section the real-path lock holds' do
+      entered = Queue.new
+      continue = Queue.new
+      allow(File).to receive(:utime).and_wrap_original do |original, *arguments|
+        entered << true
+        continue.pop
+        original.call(*arguments)
+      end
+      expect(real_lock.acquire).to be(true)
+
+      touching = Thread.new { real_lock.touch }
+      entered.pop
+      contender = Thread.new { alias_lock.retire_stale }
+      still_blocked =
+        begin
+          Timeout.timeout(0.3) { contender.join }
+          false
+        rescue Timeout::Error
+          true
+        end
+
+      continue << true
+      touching.join(1)
+
+      expect(still_blocked).to be(true)
+      # Not stale (the real holder is actively touching it), so the aliased
+      # contender's retire attempt correctly backs off once it is finally let
+      # in — this proves the two aliases share one guard, not just that the
+      # contender happened to be slow.
+      expect(contender.value).to eq(:not_stale)
+    ensure
+      continue << true if touching&.alive?
+      [touching, contender].compact.each { |thread| thread.join(1) }
+    end
+
+    it 'lets an alias-path lock take over a real-path lock left stale, and vice versa' do
+      expect(real_lock.acquire).to be(true)
+      lock_path = File.join(real_dir, 'extraction.lock')
+      File.utime(Time.now - 7200, Time.now - 7200, lock_path)
+      stale_alias_lock = described_class.new(lock_dir: alias_dir, name: 'extraction', stale_timeout: 60)
+
+      expect(stale_alias_lock.acquire).to be(true)
+      expect(File.exist?(lock_path)).to be(true)
+
+      File.utime(Time.now - 7200, Time.now - 7200, lock_path)
+      stale_real_lock = described_class.new(lock_dir: real_dir, name: 'extraction', stale_timeout: 60)
+
+      expect(stale_real_lock.acquire).to be(true)
     end
   end
 
