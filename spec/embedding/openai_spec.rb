@@ -108,6 +108,14 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       custom_provider = described_class.new(api_key: 'test-key', model: 'custom-model')
       expect(custom_provider.dimensions).to eq(5)
     end
+
+    it 'returns an explicitly requested dimension without probing the API' do
+      allow(http_double).to receive(:request)
+      custom_provider = described_class.new(api_key: 'test-key', dimensions: 256)
+
+      expect(custom_provider.dimensions).to eq(256)
+      expect(http_double).not_to have_received(:request)
+    end
   end
 
   describe '#model_name' do
@@ -257,6 +265,18 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       custom_provider.embed('text')
       expect(http_double).to have_received(:request) do |req|
         expect(req['Authorization']).to eq('Bearer custom-key')
+      end
+    end
+
+    it 'sends explicitly configured dimensions in single and batch requests' do
+      dimensioned = described_class.new(api_key: 'custom-key', dimensions: 256)
+      allow(http_double).to receive(:request).and_return(success_response, batch_success_response)
+
+      dimensioned.embed('text')
+      dimensioned.embed_batch(%w[first second])
+
+      expect(http_double).to have_received(:request).twice do |request|
+        expect(JSON.parse(request.body)['dimensions']).to eq(256)
       end
     end
   end

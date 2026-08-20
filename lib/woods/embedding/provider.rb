@@ -150,13 +150,15 @@ module Woods
         #   context from `MODEL_CONTEXT_LENGTHS`, falling back to 2048 for
         #   unknown models. Set explicitly only if running a model with a
         #   known-larger native context that isn't in the registry yet.
+        # @param dimensions [Integer, nil] Requested output vector size.
         # @param read_timeout [Integer] HTTP read timeout in seconds.
         #   Bump this for slow / cold-start hosts or very large batches.
         def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil,
-                       read_timeout: DEFAULT_READ_TIMEOUT)
+                       dimensions: nil, read_timeout: DEFAULT_READ_TIMEOUT)
           @model = model
           @host = host
           @num_ctx = num_ctx || MODEL_CONTEXT_LENGTHS.fetch(model, FALLBACK_NUM_CTX)
+          @dimensions = normalize_dimensions(dimensions)
           @read_timeout = read_timeout
           @uri = URI("#{host}/api/embed")
         end
@@ -218,6 +220,15 @@ module Woods
 
         private
 
+        def normalize_dimensions(value)
+          return if value.nil?
+
+          dimensions = Integer(value)
+          raise ArgumentError, "dimensions must be positive, got #{value.inspect}" unless dimensions.positive?
+
+          dimensions
+        end
+
         # Cap interpolated response bodies so misconfigured Ollama responses
         # (e.g. proxied HTML error pages) don't unbounded-leak into logs or
         # re-raised error messages.
@@ -236,6 +247,7 @@ module Woods
         # tokens and returns 400 when the input exceeds that default.
         def build_body(input)
           body = { model: @model, input: input }
+          body[:dimensions] = @dimensions if @dimensions
           body[:options] = { num_ctx: @num_ctx } if @num_ctx
           body
         end

@@ -82,17 +82,18 @@ module Woods
     def self.from_configuration(config, gem_version: nil, provider: nil) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
       require_relative 'version'
 
-      opts = config.embedding_options || {}
-      declared_dim = opts[:dimension] || opts['dimension']
-      dim = declared_dim || (provider.respond_to?(:dimensions) ? provider.dimensions : nil)
+      opts = (config.embedding_options || {}).transform_keys(&:to_sym)
+      declared_dim = opts[:dimensions] || opts[:dimension] || opts[:dims]
+      dim = provider.respond_to?(:dimensions) ? provider.dimensions : declared_dim
+      model = provider.respond_to?(:model_name) ? provider.model_name : (opts[:model] || config.embedding_model)
 
       provider_hash = {
         class: resolve_provider_class(config.embedding_provider),
-        model: (opts[:model] || opts['model'] || config.embedding_model).to_s,
+        model: model.to_s,
         dimension: dim.to_i,
-        host: opts[:host] || opts['host'],
-        num_ctx: opts[:num_ctx] || opts['num_ctx'],
-        read_timeout: opts[:read_timeout] || opts['read_timeout']
+        host: opts[:host],
+        num_ctx: opts[:num_ctx],
+        read_timeout: opts[:read_timeout]
       }.compact
 
       new(

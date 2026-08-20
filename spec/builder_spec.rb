@@ -546,6 +546,56 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  describe '#build_embedding_provider configuration' do
+    let(:config) { Woods::Configuration.new }
+    let(:builder) { described_class.new(config) }
+
+    it 'passes an explicitly configured embedding_model to Ollama' do
+      config.embedding_provider = :ollama
+      config.embedding_model = 'mxbai-embed-large'
+
+      expect(builder.build_embedding_provider.model_name).to eq('mxbai-embed-large')
+    end
+
+    it 'keeps the Ollama model default when embedding_model was not explicitly configured' do
+      config.embedding_provider = :ollama
+
+      expect(builder.build_embedding_provider.model_name)
+        .to eq(Woods::Embedding::Provider::Ollama::DEFAULT_MODEL)
+    end
+
+    it 'passes an explicitly configured embedding_model to OpenAI' do
+      config.embedding_provider = :openai
+      config.embedding_model = 'text-embedding-3-large'
+      config.embedding_options = { api_key: 'sk-test' }
+
+      expect(builder.build_embedding_provider.model_name).to eq('text-embedding-3-large')
+    end
+
+    it 'lets provider-specific model configuration override embedding_model' do
+      config.embedding_provider = :ollama
+      config.embedding_model = 'nomic-embed-text'
+      config.embedding_options = { model: 'bge-m3' }
+
+      expect(builder.build_embedding_provider.model_name).to eq('bge-m3')
+    end
+
+    it 'passes dimensions through to the selected provider' do
+      config.embedding_provider = :openai
+      config.embedding_options = { api_key: 'sk-test', dimensions: 256 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(256)
+    end
+
+    it 'rejects disconnected provider options with an actionable error' do
+      config.embedding_provider = :ollama
+      config.embedding_options = { api_key: 'not-an-ollama-option' }
+
+      expect { builder.build_embedding_provider }
+        .to raise_error(Woods::ConfigurationError, /Unknown Ollama embedding option: api_key/)
+    end
+  end
+
   # ── Builder#build_embedding_provider — injected object (#178) ─────────
 
   describe '#build_embedding_provider with an injected provider object' do

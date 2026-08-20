@@ -296,22 +296,39 @@ RSpec.describe Woods::ResolvedConfig do
     end
 
     it 'probes the live provider for its dimension when declared config omits it' do
-      provider = instance_double(Woods::Embedding::Provider::Ollama, dimensions: 768)
+      provider = instance_double(
+        Woods::Embedding::Provider::Ollama,
+        dimensions: 768,
+        model_name: 'actual-ollama-model'
+      )
+
+      resolved = described_class.from_configuration(host_config, provider: provider)
+
+      expect(resolved.dimension).to eq(768)
+      expect(resolved.embedding_provider[:model]).to eq('actual-ollama-model')
+    end
+
+    it 'records the live provider dimension instead of a stale declaration' do
+      declared = host_config.embedding_options.merge(dimensions: 1024)
+      allow(host_config).to receive(:embedding_options).and_return(declared)
+      provider = instance_double(
+        Woods::Embedding::Provider::Ollama,
+        dimensions: 768,
+        model_name: 'nomic-embed-text'
+      )
 
       resolved = described_class.from_configuration(host_config, provider: provider)
 
       expect(resolved.dimension).to eq(768)
     end
 
-    it 'prefers a declared dimension over the live provider probe' do
-      declared = host_config.embedding_options.merge(dimension: 1024)
+    it 'uses a declared dimension when no live provider is available' do
+      declared = host_config.embedding_options.merge(dimensions: 1024)
       allow(host_config).to receive(:embedding_options).and_return(declared)
-      provider = instance_double(Woods::Embedding::Provider::Ollama)
 
-      resolved = described_class.from_configuration(host_config, provider: provider)
+      resolved = described_class.from_configuration(host_config)
 
       expect(resolved.dimension).to eq(1024)
-      expect(provider).not_to have_received(:dimensions) if provider.respond_to?(:dimensions)
     end
 
     it 'falls back to zero when no provider is supplied and config omits dimension' do

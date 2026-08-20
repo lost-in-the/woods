@@ -163,11 +163,11 @@ module Woods
       configured = @config.embedding_provider
       return configured if provider_object?(configured)
 
-      opts = provider_kwargs
+      opts = provider_kwargs(configured)
       case configured
       when :openai then Embedding::Provider::OpenAI.new(**opts)
       when :ollama then Embedding::Provider::Ollama.new(**opts)
-      when :fake then build_fake_provider
+      when :fake then build_fake_provider(opts)
       else
         raise ArgumentError,
               "Unknown embedding_provider: #{configured}. Valid: :openai, :ollama, :fake, " \
@@ -204,18 +204,63 @@ module Woods
       )
     end
 
-    # Kwargs accepted by embedding provider constructors — everything in
-    # `embedding_options` except metadata fields that live there for
-    # ResolvedConfig bookkeeping.
-    SNAPSHOT_ONLY_KEYS = %i[dimension].freeze
-    private_constant :SNAPSHOT_ONLY_KEYS
+    PROVIDER_OPTION_KEYS = {
+      openai: %i[api_key model dimension dimensions],
+      ollama: %i[model host num_ctx read_timeout dimension dimensions],
+      fake: %i[model dims dimension dimensions]
+    }.freeze
+    private_constant :PROVIDER_OPTION_KEYS
 
-    def provider_kwargs
+    def provider_kwargs(configured)
       opts = (@config.embedding_options || {}).transform_keys(&:to_sym)
-      SNAPSHOT_ONLY_KEYS.each { |k| opts.delete(k) }
+      validate_provider_options!(configured, opts)
+      apply_embedding_model!(opts)
+      normalize_dimension_option!(configured, opts)
       opts
     end
     private :provider_kwargs
+
+    def validate_provider_options!(configured, opts)
+      allowed = PROVIDER_OPTION_KEYS[configured]
+      return unless allowed
+
+      unknown = opts.keys - allowed
+      return if unknown.empty?
+
+      provider_name = configured.to_s.capitalize
+      noun = unknown.one? ? 'option' : 'options'
+      raise ConfigurationError,
+            "Unknown #{provider_name} embedding #{noun}: #{unknown.join(', ')}. " \
+            "Valid options: #{allowed.join(', ')}"
+    end
+    private :validate_provider_options!
+
+    def apply_embedding_model!(opts)
+      return if opts.key?(:model)
+      return unless @config.respond_to?(:embedding_model_explicit?) && @config.embedding_model_explicit?
+
+      opts[:model] = @config.embedding_model
+    end
+    private :apply_embedding_model!
+
+    def normalize_dimension_option!(configured, opts)
+      legacy_dimension = opts.delete(:dimension)
+      dimensions = opts.delete(:dimensions)
+      if conflicting_dimensions?(legacy_dimension, dimensions)
+        raise ConfigurationError, 'embedding_options dimension and dimensions must match when both are provided'
+      end
+
+      dimension = dimensions || legacy_dimension
+      return unless dimension
+
+      opts[configured == :fake ? :dims : :dimensions] ||= dimension
+    end
+    private :normalize_dimension_option!
+
+    def conflicting_dimensions?(legacy_dimension, dimensions)
+      !legacy_dimension.nil? && !dimensions.nil? && legacy_dimension != dimensions
+    end
+    private :conflicting_dimensions?
 
     # True when the configured `embedding_provider` is not a Symbol naming a
     # built-in adapter but an already-constructed provider object (#178).
@@ -242,10 +287,7 @@ module Woods
     # vectors of the recorded dimension.
     #
     # @return [Embedding::Provider::Fake]
-    def build_fake_provider
-      opts = provider_kwargs
-      declared = (@config.embedding_options || {}).transform_keys(&:to_sym)[:dimension]
-      opts[:dims] ||= declared if declared
+    def build_fake_provider(opts)
       Embedding::Provider::Fake.new(**opts)
     end
     private :build_fake_provider

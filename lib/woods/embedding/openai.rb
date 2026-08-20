@@ -33,9 +33,11 @@ module Woods
 
         # @param api_key [String] OpenAI API key
         # @param model [String] OpenAI embedding model name (default: text-embedding-3-small)
-        def initialize(api_key:, model: DEFAULT_MODEL)
+        # @param dimensions [Integer, nil] Requested output size for text-embedding-3 models
+        def initialize(api_key:, model: DEFAULT_MODEL, dimensions: nil)
           @api_key = api_key
           @model = model
+          @dimensions = normalize_dimensions(dimensions)
         end
 
         # Embed a single text string.
@@ -47,7 +49,7 @@ module Woods
         def embed(text)
           raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
 
-          response = post_request({ model: @model, input: text })
+          response = post_request(request_body(text))
           response['data'].first['embedding']
         end
 
@@ -65,7 +67,7 @@ module Woods
             raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
           end
 
-          response = post_request({ model: @model, input: texts })
+          response = post_request(request_body(texts))
           response['data']
             .sort_by { |item| item['index'] }
             .map { |item| item['embedding'] }
@@ -78,7 +80,7 @@ module Woods
         #
         # @return [Integer] number of dimensions
         def dimensions
-          DIMENSIONS[@model] || embed('test').length
+          @dimensions || DIMENSIONS[@model] || embed('test').length
         end
 
         # Return the model name.
@@ -97,6 +99,21 @@ module Woods
         end
 
         private
+
+        def request_body(input)
+          { model: @model, input: input }.tap do |body|
+            body[:dimensions] = @dimensions if @dimensions
+          end
+        end
+
+        def normalize_dimensions(value)
+          return if value.nil?
+
+          dimensions = Integer(value)
+          raise ArgumentError, "dimensions must be positive, got #{value.inspect}" unless dimensions.positive?
+
+          dimensions
+        end
 
         # Cap interpolated response bodies so misconfigured API errors
         # (which occasionally echo request metadata, including headers) don't

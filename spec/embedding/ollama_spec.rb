@@ -124,6 +124,13 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
       custom = described_class.new(model: 'mystery-embed')
       expect(custom.dimensions).to eq(5)
     end
+
+    it 'returns an explicitly requested dimension without probing the API' do
+      custom = described_class.new(dimensions: 256)
+
+      expect(custom.dimensions).to eq(256)
+      expect(http_double).not_to have_received(:request)
+    end
   end
 
   describe '#model_name' do
@@ -370,6 +377,14 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
       expect(http_double).to have_received(:request) do |req|
         body = JSON.parse(req.body)
         expect(body['model']).to eq('mxbai-embed-large')
+      end
+    end
+
+    it 'sends explicitly configured dimensions in requests' do
+      described_class.new(dimensions: 256).embed('text')
+
+      expect(http_double).to have_received(:request) do |request|
+        expect(JSON.parse(request.body)['dimensions']).to eq(256)
       end
     end
   end
