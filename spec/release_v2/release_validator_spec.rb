@@ -19,7 +19,7 @@ RSpec.describe 'release validation' do
     output.strip
   end
 
-  def write_release_files(repository, changelog: "## [2.0.0] - 2026-08-19\n")
+  def write_release_files(repository, changelog: "## [2.0.0] - 2026-08-20\n")
     FileUtils.mkdir_p(File.join(repository, 'lib/woods'))
     File.write(File.join(repository, 'lib/woods/version.rb'), <<~RUBY)
       module Woods
@@ -29,7 +29,7 @@ RSpec.describe 'release validation' do
     File.write(File.join(repository, 'CHANGELOG.md'), changelog)
   end
 
-  def build_repository(changelog: "## [2.0.0] - 2026-08-19\n", tag_type: :lightweight)
+  def build_repository(changelog: "## [2.0.0] - 2026-08-20\n", tag_type: :lightweight)
     Dir.mktmpdir('woods-release-validator') do |repository|
       git('init', '-b', 'main', chdir: repository)
       git('config', 'user.email', 'release-test@example.invalid', chdir: repository)
@@ -240,7 +240,7 @@ RSpec.describe 'release validation' do
 
       expect(status).to be_success, stderr
       expect(stdout).to include('v2.0.0')
-      expect(stdout).to include('2026-08-19')
+      expect(stdout).to include('2026-08-20')
     end
   end
 
