@@ -801,4 +801,44 @@ RSpec.describe Woods::DependencyGraph do
       expect(restored.identifiers_for_path("#{root}/app/models/user.rb")).to be_empty
     end
   end
+
+  # Known, pre-existing bug (see CLAUDE.md Gotchas): the graph keys nodes on
+  # the bare identifier, so two units of *different types* sharing one
+  # identifier collapse onto a single node — the second #register call
+  # unregisters the first's side effects (reverse edges, file_map entry,
+  # type_index entry) before overwriting @nodes/@edges, so the first unit's
+  # data is gone, not merely shadowed.
+  #
+  # Left pending rather than fixed: @nodes/@edges are `Hash<identifier,
+  # value>` in both the in-memory form and the persisted to_h/from_h shape
+  # that IndexReader and every persisted dependency_graph.json already
+  # depend on. A Hash key holds one value, so representing two distinct
+  # nodes under one identifier needs a wire-format change (a composite key
+  # in the persisted JSON, not just internally) plus a type-aware
+  # node()/dependencies_of()/dependents_of() API — both of which reach past
+  # this file into IndexReader and every reader of the current identifier-keyed
+  # shape.
+  describe 'identifier collision across types' do
+    it "destroys the first unit's node, edges, file_map entry, and type-index entry" do
+      pending 'requires a wire-format change (composite type+identifier keys); out of scope here'
+
+      view = make_unit(
+        type: :database_view, identifier: 'reports', file_path: '/db/views/reports.sql',
+        dependencies: [{ type: :model, target: 'Order', via: :code_reference }]
+      )
+      factory = make_unit(
+        type: :factory, identifier: 'reports', file_path: '/spec/factories/reports.rb',
+        dependencies: [{ type: :model, target: 'Report', via: :code_reference }]
+      )
+
+      graph.register(view)
+      graph.register(factory)
+
+      expect(graph.units_of_type(:database_view)).to include('reports')
+      expect(graph.units_of_type(:factory)).to include('reports')
+      expect(graph.identifiers_for_path('/db/views/reports.sql')).to include('reports')
+      expect(graph.identifiers_for_path('/spec/factories/reports.rb')).to include('reports')
+      expect(graph.dependencies_of('reports')).to include('Order')
+    end
+  end
 end
