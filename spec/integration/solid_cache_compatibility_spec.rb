@@ -338,6 +338,11 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
           print 'ok'
         ensure
           SolidCache::Record.connection_handler.clear_all_connections!
+          # SQLite in WAL mode leaves -wal/-shm sidecars that clear_all_connections!
+          # does not synchronously remove, so Dir.mktmpdir's own rmdir raced them
+          # to Errno::ENOTEMPTY and failed the subprocess after its logic passed.
+          # Empty the directory ourselves before mktmpdir cleans it up.
+          Dir.glob(File.join(dir, '*')).each { |file| File.delete(file) }
         end
       RUBY
       stdout, stderr, status = Open3.capture3(
