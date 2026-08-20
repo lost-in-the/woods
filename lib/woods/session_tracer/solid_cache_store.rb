@@ -1,184 +1,163 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'securerandom'
 require_relative 'store'
 
 module Woods
   module SessionTracer
-    # SolidCache-backed session store.
-    #
-    # Uses SolidCache key-value storage with `expires_in`. Single JSON blob
-    # per session (read-modify-write pattern). Requires the `solid_cache` gem.
-    #
-    # @example
-    #   store = SolidCacheStore.new(cache: SolidCache::Store.new, expires_in: 3600)
-    #   store.record("abc123", { controller: "OrdersController", action: "create" })
-    #
+    # SolidCache-backed session store using atomic counters and bounded slots.
     class SolidCacheStore < Store # rubocop:disable Metrics/ClassLength
       KEY_PREFIX = 'woods:session:'
-      INDEX_KEY = 'woods:session_index'
+      INDEX_PREFIX = 'woods:session_index'
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
-      LOCK_KEY = 'woods:session_lock'
-      DEFAULT_LOCK_LEASE = 5.0
-      DEFAULT_LOCK_TIMEOUT = 2.0
-      DEFAULT_LOCK_RETRY_INTERVAL = 0.01
+      INDEX_SLOT_MULTIPLIER = 2
 
-      class LockTimeout < Woods::Error; end
+      class AtomicIncrementRequired < Woods::Error; end
+      class BackendWriteError < Woods::Error; end
 
-      # @param cache [ActiveSupport::Cache::Store] A SolidCache (or compatible) cache instance
+      # @param cache [ActiveSupport::Cache::Store] A cache with atomic +increment+
       # @param expires_in [Integer, nil] Expiry time in seconds (nil = no expiry)
-      def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS, # rubocop:disable Metrics/ParameterLists
-                     max_requests_per_session: DEFAULT_MAX_REQUESTS,
-                     lock_lease: DEFAULT_LOCK_LEASE, lock_timeout: DEFAULT_LOCK_TIMEOUT,
-                     lock_retry_interval: DEFAULT_LOCK_RETRY_INTERVAL)
+      def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS,
+                     max_requests_per_session: DEFAULT_MAX_REQUESTS)
         super()
+        raise ArgumentError, 'SolidCacheStore requires a backend with atomic #increment' unless cache.respond_to?(:increment)
+
         @cache = cache
         @expires_in = expires_in
-        @max_sessions = max_sessions
-        @max_requests_per_session = max_requests_per_session
-        @lock_lease = Float(lock_lease)
-        @lock_timeout = Float(lock_timeout)
-        @lock_retry_interval = Float(lock_retry_interval)
+        @max_sessions = positive_integer!(:max_sessions, max_sessions)
+        @max_requests_per_session = positive_integer!(:max_requests_per_session, max_requests_per_session)
+        @index_slots = @max_sessions * INDEX_SLOT_MULTIPLIER
       end
 
-      # Append a request record to a session (read-modify-write).
-      #
-      # NOTE: Not atomic — concurrent writes to the same session may lose data.
-      # Acceptable for development tracing. For high-concurrency tracing, use
-      # RedisStore (RPUSH is atomic) or FileStore (LOCK_EX).
-      #
-      # @param session_id [String] The session identifier
-      # @param request_data [Hash] Request metadata to store
-      # @return [void]
+      # Allocate a monotonic sequence and publish one immutable-sequence slot.
       def record(session_id, request_data)
         JSON.generate(request_data)
-        with_backend_lock do
-          key = session_key(session_id)
-          existing = @cache.read(key)
-          requests = existing ? JSON.parse(existing) : []
-          requests << request_data
-          requests = requests.last(@max_requests_per_session)
+        sequence = increment!(sequence_key(session_id))
+        publish_slot(record_key(session_id, sequence), sequence, @max_requests_per_session,
+                     sequence_key(session_id), JSON.generate('sequence' => sequence, 'record' => request_data))
 
-          write_opts = @expires_in ? { expires_in: @expires_in } : {}
-          @cache.write(key, JSON.generate(requests), **write_opts)
-
-          update_index(session_id)
-        end
+        index_sequence = increment!(index_sequence_key)
+        publish_slot(index_slot_key(index_sequence), index_sequence, @index_slots, index_sequence_key,
+                     JSON.generate('sequence' => index_sequence, 'session_id' => session_id.to_s))
+        nil
       end
 
-      # Read all request records for a session.
-      #
-      # @param session_id [String] The session identifier
-      # @return [Array<Hash>] Request records, oldest first
+      # Read the current bounded sequence window, skipping allocation gaps.
       def read(session_id)
-        key = session_key(session_id)
-        raw = @cache.read(key)
-        return [] unless raw
+        sequence = counter_value(sequence_key(session_id))
+        return [] unless sequence.positive?
 
-        JSON.parse(raw)
-      rescue JSON::ParserError
-        []
+        sequence_window(sequence, @max_requests_per_session).filter_map do |expected|
+          parse_slot(@cache.read(record_key(session_id, expected)), expected, 'record')
+        end
       end
 
-      # List recent session summaries.
-      #
-      # @param limit [Integer] Maximum number of sessions to return
-      # @return [Array<Hash>] Session summaries
+      # Reconstruct recent unique sessions from the bounded global event ring.
       def sessions(limit: 20)
-        with_backend_lock do
-          index = read_index
-          active = index.select { |id| @cache.exist?(session_key(id)) }
+        sequence = counter_value(index_sequence_key)
+        ids = sequence_window(sequence, @index_slots).reverse_each.filter_map do |expected|
+          parse_slot(@cache.read(index_slot_key(expected)), expected, 'session_id')
+        end.uniq.first(@max_sessions)
 
-          write_index(active) if active.size != index.size
-
-          active.first(limit).map do |session_id|
-            session_summary(session_id, read(session_id))
-          end
-        end
+        ids.filter_map do |session_id|
+          requests = read(session_id)
+          session_summary(session_id, requests) unless requests.empty?
+        end.first(limit)
       end
 
-      # Remove all data for a single session.
-      #
-      # @param session_id [String] The session identifier
-      # @return [void]
       def clear(session_id)
-        with_backend_lock do
-          @cache.delete(session_key(session_id))
-          index = read_index
-          index.delete(session_id)
-          write_index(index)
+        sequence = counter_value(sequence_key(session_id))
+        @cache.delete(sequence_key(session_id))
+        sequence_window(sequence, @max_requests_per_session).each do |slot_sequence|
+          @cache.delete(record_key(session_id, slot_sequence))
         end
+        nil
       end
 
-      # Remove all session data.
-      #
-      # @return [void]
       def clear_all
-        with_backend_lock do
-          index = read_index
-          index.each { |id| @cache.delete(session_key(id)) }
-          @cache.delete(INDEX_KEY)
-        end
+        sessions(limit: @max_sessions).each { |entry| clear(entry.fetch('session_id')) }
+        index_sequence = counter_value(index_sequence_key)
+        @cache.delete(index_sequence_key)
+        sequence_window(index_sequence, @index_slots).each { |slot_sequence| @cache.delete(index_slot_key(slot_sequence)) }
+        nil
       end
 
       private
 
-      def with_backend_lock
-        token = SecureRandom.uuid
-        deadline = monotonic_now + @lock_timeout
-        until @cache.write(LOCK_KEY, token, unless_exist: true, expires_in: @lock_lease)
-          if monotonic_now >= deadline
-            raise LockTimeout, "Timed out acquiring SolidCache session lock after #{@lock_timeout}s"
-          end
+      def increment!(key)
+        value = @cache.increment(key, 1, **write_options)
+        return value if value.is_a?(Integer) && value.positive?
 
-          sleep(@lock_retry_interval)
-        end
-        yield
-      ensure
-        @cache.delete(LOCK_KEY) if token && @cache.read(LOCK_KEY) == token
+        raise AtomicIncrementRequired,
+              "SolidCache backend atomic #increment failed for #{key.inspect}; configure a backend that supports increment"
+      rescue NotImplementedError, NoMethodError => e
+        raise AtomicIncrementRequired,
+              "SolidCacheStore requires a working backend atomic #increment (#{e.class}: #{e.message})"
       end
 
-      def monotonic_now
-        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      def write!(key, value)
+        return if @cache.write(key, value, **write_options)
+
+        raise BackendWriteError, "SolidCache backend failed to write #{key.inspect}"
       end
 
-      # @param session_id [String]
-      # @return [String] Cache key for this session
-      def session_key(session_id)
-        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}"
+      def publish_slot(key, sequence, window_size, counter_key, value)
+        write!(key, value)
+        @cache.delete(slot_key_before(key, sequence, window_size)) if sequence > window_size
+
+        latest = counter_value(counter_key)
+        @cache.delete(key) if sequence <= latest - window_size
       end
 
-      # Read the session index (list of known session IDs).
-      #
-      # @return [Array<String>]
-      def read_index
-        raw = @cache.read(INDEX_KEY)
-        return [] unless raw
-
-        JSON.parse(raw)
-      rescue JSON::ParserError
-        []
+      def slot_key_before(key, sequence, window_size)
+        key.sub(/:\d+\z/, ":#{sequence - window_size}")
       end
 
-      # Write the session index.
-      #
-      # @param ids [Array<String>]
-      def write_index(ids)
-        @cache.write(INDEX_KEY, JSON.generate(ids))
+      def write_options
+        @expires_in ? { expires_in: @expires_in } : {}
       end
 
-      # Add a session ID to the index if not already present.
-      #
-      # @param session_id [String]
-      def update_index(session_id)
-        index = read_index
-        index.delete(session_id)
-        index << session_id
-        stale = index.shift([index.size - @max_sessions, 0].max)
-        stale.each { |id| @cache.delete(session_key(id)) }
-        write_index(index)
+      def sequence_window(sequence, size)
+        first = [sequence - size + 1, 1].max
+        first..sequence
+      end
+
+      def parse_slot(raw, expected_sequence, field)
+        return unless raw
+
+        payload = JSON.parse(raw)
+        payload[field] if payload['sequence'] == expected_sequence
+      rescue JSON::ParserError, TypeError
+        nil
+      end
+
+      def counter_value(key)
+        Integer(@cache.read(key) || 0)
+      rescue ArgumentError, TypeError
+        0
+      end
+
+      def sequence_key(session_id)
+        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:sequence"
+      end
+
+      def record_key(session_id, sequence)
+        "#{KEY_PREFIX}#{sanitize_session_id(session_id)}:record:#{sequence}"
+      end
+
+      def index_sequence_key
+        "#{INDEX_PREFIX}:sequence"
+      end
+
+      def index_slot_key(sequence)
+        "#{INDEX_PREFIX}:slot:#{sequence}"
+      end
+
+      def positive_integer!(name, value)
+        return value if value.is_a?(Integer) && value.positive?
+
+        raise ArgumentError, "#{name} must be a positive Integer"
       end
     end
   end

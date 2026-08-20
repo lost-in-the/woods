@@ -9,6 +9,8 @@ require 'woods/session_tracer/solid_cache_store'
 # Minimal in-memory cache mock compatible with ActiveSupport::Cache::Store interface.
 # Implements read/write/delete/exist? used by SolidCacheStore.
 class MockCache
+  attr_accessor :before_write
+
   def initialize
     @data = {}
     @expires = {}
@@ -24,14 +26,27 @@ class MockCache
 
   # rubocop:disable Naming/PredicateMethod
   def write(key, value, **options)
+    @before_write&.call(key, value)
     @mutex.synchronize do
       expire!(key)
-      return false if options[:unless_exist] && @data.key?(key)
-
       @data[key] = value
       @expires[key] = Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:expires_in] if options[:expires_in]
       true
     end
+  end
+
+  def increment(key, amount = 1, options = nil)
+    options ||= {}
+    @mutex.synchronize do
+      expire!(key)
+      @data[key] = @data.fetch(key, 0).to_i + amount
+      @expires[key] ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:expires_in] if options[:expires_in]
+      @data[key]
+    end
+  end
+
+  def keys
+    @mutex.synchronize { @data.keys.dup }
   end
 
   def delete(key)
@@ -125,6 +140,46 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       expect(store.read('sess1').size).to eq(20)
       expect(store.sessions.map { |entry| entry['session_id'] }).to eq(['sess1'])
     end
+    it 'keeps both committed records when two instances interleave after sequence allocation' do
+      first_slot_started = Queue.new
+      release_first_slot = Queue.new
+      cache.before_write = lambda do |key, value|
+        next unless key.end_with?(':record:1') && JSON.parse(value)['sequence'] == 1
+
+        first_slot_started << true
+        release_first_slot.pop
+      end
+      other = described_class.new(cache: cache)
+      first = Thread.new { store.record('sess1', request_data.merge('action' => 'first')) }
+      first_slot_started.pop
+      second = Thread.new { other.record('sess1', request_data.merge('action' => 'second')) }
+      second.join
+      release_first_slot << true
+      first.join
+
+      expect(store.read('sess1').map { |entry| entry['action'] }).to eq(%w[first second])
+    end
+
+    it 'does not let a delayed older writer overwrite a wrapped slot' do
+      bounded = described_class.new(cache: cache, max_requests_per_session: 1)
+      other = described_class.new(cache: cache, max_requests_per_session: 1)
+      first_slot_started = Queue.new
+      release_first_slot = Queue.new
+      cache.before_write = lambda do |key, value|
+        next unless key.end_with?(':record:1') && JSON.parse(value)['sequence'] == 1
+
+        first_slot_started << true
+        release_first_slot.pop
+      end
+      first = Thread.new { bounded.record('sess1', request_data.merge('action' => 'first')) }
+      first_slot_started.pop
+      other.record('sess1', request_data.merge('action' => 'second'))
+      release_first_slot << true
+      first.join
+
+      expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(['second'])
+      expect(cache.keys.grep(/:record:/).size).to eq(1)
+    end
   end
 
   describe '#sessions' do
@@ -174,12 +229,14 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
   end
 
   describe 'expires_in support' do
-    it 'passes expires_in to the session write' do
+    it 'expires sequence, record, and index keys' do
       allow(cache).to receive(:write).and_call_original
+      allow(cache).to receive(:increment).and_call_original
       store_with_expiry = described_class.new(cache: cache, expires_in: 3600)
       store_with_expiry.record('sess1', request_data)
 
-      expect(cache).to have_received(:write).with(kind_of(String), kind_of(String), expires_in: 3600)
+      expect(cache).to have_received(:write).with(kind_of(String), kind_of(String), expires_in: 3600).twice
+      expect(cache).to have_received(:increment).with(kind_of(String), 1, expires_in: 3600).twice
     end
   end
 
@@ -196,6 +253,31 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       3.times { |i| bounded.record("sess#{i}", request_data) }
 
       expect(bounded.sessions(limit: 10).size).to eq(2)
+    end
+    it 'wraps record and global index slots without growing cache keys' do
+      bounded = described_class.new(cache: cache, max_sessions: 2, max_requests_per_session: 2)
+      12.times { |i| bounded.record("sess#{i % 3}", request_data.merge('action' => "action_#{i}")) }
+
+      expect(cache.keys.grep(/:record:/).size).to be <= 6
+      expect(cache.keys.grep(/session_index:slot/).size).to be <= 4
+      expect(bounded.read('sess2').map { |entry| entry['action'] }).to eq(%w[action_8 action_11])
+      expect(bounded.sessions(limit: 10).map { |entry| entry['session_id'] }.uniq.size).to be <= 2
+    end
+
+    it 'tolerates a crash after sequence allocation as a readable gap' do
+      failed = false
+      cache.before_write = lambda do |key, _value|
+        next unless key.include?(':record:') && !failed
+
+        failed = true
+        raise IOError, 'simulated crash'
+      end
+
+      expect { store.record('sess1', request_data.merge('action' => 'lost')) }.to raise_error(IOError)
+      cache.before_write = nil
+      store.record('sess1', request_data.merge('action' => 'committed'))
+
+      expect(store.read('sess1').map { |entry| entry['action'] }).to eq(['committed'])
     end
 
     it 'does not mutate the cache when serialization fails' do
@@ -216,6 +298,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
           def initialize = (@data = {})
           def read(key) = @data[key]
           def write(key, value, **) = (@data[key] = value)
+          def increment(key, amount = 1, **) = (@data[key] = @data.fetch(key, 0).to_i + amount)
           def delete(key) = @data.delete(key)
           def exist?(key) = @data.key?(key)
         end.new
@@ -233,22 +316,16 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
     end
   end
 
-  describe 'backend lock posture' do
-    it 'times out in a bounded interval when another owner holds the lease' do
-      cache.write(described_class::LOCK_KEY, 'other', unless_exist: true, expires_in: 10)
-      blocked = described_class.new(cache: cache, lock_timeout: 0.02, lock_retry_interval: 0.005)
+  describe 'atomic increment requirement' do
+    it 'fails clearly when the backend cannot atomically increment' do
+      unsupported = Class.new do
+        def read(*) = nil
+        def write(*) = true
+        def delete(*) = true
+      end.new
 
-      expect { blocked.record('sess1', request_data) }
-        .to raise_error(described_class::LockTimeout, /SolidCache session lock/)
-    end
-
-    it 'recovers after an abandoned owner lease expires' do
-      cache.write(described_class::LOCK_KEY, 'crashed', unless_exist: true, expires_in: 0.01)
-      recovering = described_class.new(cache: cache, lock_timeout: 0.2, lock_retry_interval: 0.005)
-
-      recovering.record('sess1', request_data)
-
-      expect(recovering.read('sess1')).to contain_exactly(request_data)
+      expect { described_class.new(cache: unsupported) }
+        .to raise_error(ArgumentError, /atomic #increment/)
     end
   end
 end
