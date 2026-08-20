@@ -60,6 +60,73 @@ RSpec.describe Woods::Operator::PipelineGuard do
     end
   end
 
+  describe '#reset!' do
+    let(:state_path) { File.join(state_dir, 'pipeline_guard.json') }
+
+    it 'removes one supported operation while preserving unrelated state' do
+      guard.record!(:extraction)
+      guard.record!(:embedding)
+      guard.record!(:custom_operation)
+
+      expect(guard.reset!(:extraction)).to be(true)
+      expect(JSON.parse(File.read(state_path)).keys)
+        .to contain_exactly('embedding', 'custom_operation')
+    end
+
+    it 'removes all explicitly supported operations while preserving unrelated state' do
+      guard.record!(:extraction)
+      guard.record!(:embedding)
+      guard.record!(:custom_operation)
+
+      expect(guard.reset!(:all)).to be(true)
+      expect(JSON.parse(File.read(state_path)).keys).to eq(['custom_operation'])
+    end
+
+    it 'returns false and leaves state unchanged when there is nothing to reset' do
+      guard.record!(:custom_operation)
+      original = File.binread(state_path)
+
+      expect(guard.reset!(:all)).to be(false)
+      expect(File.binread(state_path)).to eq(original)
+    end
+
+    it 'rejects unsupported operations without changing state' do
+      guard.record!(:extraction)
+      original = File.binread(state_path)
+
+      expect { guard.reset!(:unknown) }.to raise_error(ArgumentError, /unknown/)
+      expect(File.binread(state_path)).to eq(original)
+    end
+
+    it 'waits for a concurrent record and preserves that writer state atomically' do
+      guard.record!(:extraction)
+      writer_has_lock = Queue.new
+      release_writer = Queue.new
+      writer = Thread.new do
+        File.open(state_path, File::RDWR) do |file|
+          file.flock(File::LOCK_EX)
+          writer_has_lock << true
+          release_writer.pop
+          state = JSON.parse(file.read)
+          state['embedding'] = Time.now.iso8601
+          file.rewind
+          file.write(JSON.generate(state))
+          file.truncate(file.pos)
+        end
+      end
+      writer_has_lock.pop
+
+      reset = Thread.new { guard.reset!(:extraction) }
+      sleep 0.02
+      expect(reset).to be_alive
+      release_writer << true
+
+      expect(reset.value).to be(true)
+      expect(JSON.parse(File.read(state_path)).keys).to eq(['embedding'])
+      writer.join
+    end
+  end
+
   describe 'concurrent record!' do
     it 'preserves all operations under concurrent access' do
       threads = 10.times.map do |i|

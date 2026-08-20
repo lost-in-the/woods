@@ -741,29 +741,22 @@ module Woods
                          'externally — their counts in the response reflect the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            # Through the pin, not around it. A bare `reload!` under the
-            # threaded HTTP transport drops the caches of a concurrent pinned
-            # sequence mid-flight — the exact tear refcounted pins exist to
-            # prevent. Pinning here also makes the manifest read below describe
-            # the generation this reload just loaded.
-            manifest = reader.with_pinned_generation do
-              reader.reload!
-              reader.manifest
-            end
-            payload = {
-              reloaded: true,
-              extracted_at: manifest['extracted_at'],
-              total_units: manifest['total_units'],
-              counts: manifest['counts']
-            }
-            if retriever_reloader
-              begin
-                payload[:retriever] = retriever_reloader.call
-              rescue StandardError => e
-                payload[:retriever] = { error: "#{e.class}: #{e.message}" }
+            reader.with_exclusive_reload do |manifest|
+              payload = {
+                reloaded: true,
+                extracted_at: manifest['extracted_at'],
+                total_units: manifest['total_units'],
+                counts: manifest['counts']
+              }
+              if retriever_reloader
+                begin
+                  payload[:retriever] = retriever_reloader.call
+                rescue StandardError => e
+                  payload[:retriever] = { error: "#{e.class}: #{e.message}" }
+                end
               end
+              respond.call(JSON.pretty_generate(payload))
             end
-            respond.call(JSON.pretty_generate(payload))
           end
         end
 
@@ -1374,8 +1367,21 @@ module Woods
             when 'clear_locks'
               lock = operator[:pipeline_lock]
               if lock
-                lock.release
-                respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks' }))
+                outcome = lock.retire_stale
+                case outcome
+                when :cleared
+                  respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks', outcome: 'cleared' }))
+                when :missing
+                  respond_err.call(
+                    'No pipeline lock exists; nothing was repaired.',
+                    code: :lock_missing, tool: 'pipeline_repair', action: action, repaired: false
+                  )
+                when :not_stale
+                  respond_err.call(
+                    'The pipeline lock is active and was not cleared.',
+                    code: :lock_active, tool: 'pipeline_repair', action: action, repaired: false
+                  )
+                end
               else
                 respond_err.call(
                   'Pipeline lock is not configured.',
@@ -1385,7 +1391,22 @@ module Woods
                 )
               end
             when 'reset_cooldowns'
-              respond.call(JSON.pretty_generate({ repaired: true, action: 'reset_cooldowns' }))
+              guard = operator[:pipeline_guard]
+              if guard.nil?
+                respond_err.call(
+                  'Pipeline guard is not configured.',
+                  code: :not_configured,
+                  config_key: 'operator.pipeline_guard',
+                  tool: 'pipeline_repair'
+                )
+              elsif guard.reset!(:all)
+                respond.call(JSON.pretty_generate({ repaired: true, action: action, outcome: 'reset' }))
+              else
+                respond_err.call(
+                  'No pipeline cooldown state exists; nothing was repaired.',
+                  code: :cooldown_state_missing, tool: 'pipeline_repair', action: action, repaired: false
+                )
+              end
             else
               respond_err.call(
                 "Unknown repair action: #{action}",

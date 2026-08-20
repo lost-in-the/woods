@@ -108,6 +108,57 @@ RSpec.describe Woods::Coordination::PipelineLock do
     end
   end
 
+  describe '#retire_stale' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+    let(:repair) do
+      described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 60)
+    end
+
+    it 'reports a missing lock without creating one' do
+      expect(repair.retire_stale).to eq(:missing)
+      expect(File.exist?(lock_path)).to be(false)
+    end
+
+    it 'reports a current lock as not stale and preserves its ownership token' do
+      expect(lock.acquire).to be(true)
+      token = JSON.parse(File.read(lock_path)).fetch('token')
+
+      expect(repair.retire_stale).to eq(:not_stale)
+      expect(JSON.parse(File.read(lock_path)).fetch('token')).to eq(token)
+    end
+
+    it 'clears a genuinely stale lock' do
+      expect(lock.acquire).to be(true)
+      File.utime(Time.now - 120, Time.now - 120, lock_path)
+
+      expect(repair.retire_stale).to eq(:cleared)
+      expect(File.exist?(lock_path)).to be(false)
+    end
+
+    it 'backs off without clearing a fresh successor that wins before retirement' do
+      expect(lock.acquire).to be(true)
+      File.utime(Time.now - 120, Time.now - 120, lock_path)
+      successor_token = 'fresh-successor'
+      original_rename = File.method(:rename)
+      raced = false
+
+      allow(File).to receive(:rename).and_call_original
+      allow(File).to receive(:rename).with(lock_path, kind_of(String)) do |source, destination|
+        unless raced
+          raced = true
+          retired = "#{lock_path}.raced-stale"
+          original_rename.call(source, retired)
+          File.write(source, JSON.generate(pid: Process.pid, token: successor_token))
+          FileUtils.rm_f(retired)
+        end
+        original_rename.call(source, destination)
+      end
+
+      expect(repair.retire_stale).to eq(:not_stale)
+      expect(JSON.parse(File.read(lock_path)).fetch('token')).to eq(successor_token)
+    end
+  end
+
   describe 'release ownership' do
     let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
 
@@ -160,7 +211,7 @@ RSpec.describe Woods::Coordination::PipelineLock do
       File.write(lock_path, JSON.generate(token: 'competitor-fresh'))
       # mtime is now (fresh), i.e. not older than stale_timeout.
 
-      expect(lock.send(:retire_stale_lock)).to be false
+      expect(lock.send(:retire_stale_lock?)).to be false
       expect(File.exist?(lock_path)).to be true
       expect(JSON.parse(File.read(lock_path))['token']).to eq('competitor-fresh')
     end

@@ -19,6 +19,8 @@ module Woods
     #   end
     #
     class PipelineGuard
+      SUPPORTED_OPERATIONS = %w[extraction embedding].freeze
+
       # @param state_dir [String] Directory for persisting state
       # @param cooldown [Integer] Minimum seconds between runs
       def initialize(state_dir:, cooldown: 300)
@@ -43,23 +45,29 @@ module Woods
       # @param operation [Symbol, String] Operation name
       # @return [void]
       def record!(operation)
-        FileUtils.mkdir_p(@state_dir)
-        File.open(@state_path, File::RDWR | File::CREAT) do |f|
-          f.flock(File::LOCK_EX)
-          content = f.read
-          state = if content.empty?
-                    {}
-                  else
-                    begin
-                      JSON.parse(content)
-                    rescue StandardError
-                      {}
-                    end
-                  end
+        with_locked_state do |state|
           state[operation.to_s] = Time.now.iso8601
-          f.rewind
-          f.write(JSON.generate(state))
-          f.truncate(f.pos)
+          true
+        end
+        nil
+      end
+
+      # Reset one supported operation or all supported operations atomically.
+      #
+      # @param operation [Symbol, String] `:extraction`, `:embedding`, or `:all`
+      # @return [Boolean] true when at least one cooldown was removed
+      # @raise [ArgumentError] when the operation is unsupported
+      def reset!(operation)
+        operations = reset_operations(operation)
+        with_locked_state do |state|
+          changed = false
+          operations.each do |key|
+            next unless state.key?(key)
+
+            state.delete(key)
+            changed = true
+          end
+          changed
         end
       end
 
@@ -78,6 +86,35 @@ module Woods
       end
 
       private
+
+      def with_locked_state
+        FileUtils.mkdir_p(@state_dir)
+        File.open(@state_path, File::RDWR | File::CREAT) do |file|
+          file.flock(File::LOCK_EX)
+          state = parse_state(file.read)
+          changed = yield(state)
+          if changed
+            file.rewind
+            file.write(JSON.generate(state))
+            file.truncate(file.pos)
+          end
+          changed
+        end
+      end
+
+      def parse_state(content)
+        content.empty? ? {} : JSON.parse(content)
+      rescue JSON::ParserError
+        {}
+      end
+
+      def reset_operations(operation)
+        key = operation.to_s
+        return SUPPORTED_OPERATIONS if key == 'all'
+        return [key] if SUPPORTED_OPERATIONS.include?(key)
+
+        raise ArgumentError, "Unsupported pipeline operation: #{operation}"
+      end
 
       # @return [Hash]
       def read_state

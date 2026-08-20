@@ -72,8 +72,8 @@ RSpec.describe Woods::MCP::Tasks::Store do
   end
 
   describe 'producer identity' do
-    def linux_stat(comm:, start_ticks: '987654')
-      stat_fields = ['S'] + (4..21).map(&:to_s)
+    def linux_stat(comm:, state: 'S', numeric_fields: (4..21).map(&:to_s), start_ticks: '987654')
+      stat_fields = [state] + numeric_fields
       "123 (#{comm}) #{(stat_fields + [start_ticks, '23']).join(' ')}"
     end
 
@@ -83,14 +83,35 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.send(:linux_start_ticks, stat)).to eq('987654')
     end
 
-    it 'fails closed for malformed Linux stat content' do
-      malformed = [
-        '123 worker S 1 2 3',
-        '123 (worker) S 1 2 3',
-        linux_stat(comm: 'worker', start_ticks: 'not-an-integer')
-      ]
+    it 'rejects an invalid or multi-character Linux process state' do
+      malformed = ['?', 'SS'].map { |state| linux_stat(comm: 'worker', state: state) }
 
-      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to all(be_nil)
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to eq([nil, nil])
+    end
+
+    it 'rejects a nonnumeric intermediate field before starttime' do
+      fields = (4..21).map(&:to_s)
+      fields[7] = 'not-numeric'
+
+      expect(store.send(:linux_start_ticks, linux_stat(comm: 'worker', numeric_fields: fields))).to be_nil
+    end
+
+    it 'rejects a record truncated before field 22' do
+      stat = "123 (worker) S #{(4..21).to_a.join(' ')}"
+
+      expect(store.send(:linux_start_ticks, stat)).to be_nil
+    end
+
+    it 'rejects a negative or nonnumeric starttime' do
+      malformed = %w[-1 not-an-integer].map { |start| linux_stat(comm: 'worker', start_ticks: start) }
+
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to eq([nil, nil])
+    end
+
+    it 'rejects content without a valid pid and parenthesized comm boundary' do
+      malformed = ['123 worker S 1 2 3', 'pid (worker) S 1 2 3']
+
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to eq([nil, nil])
     end
 
     it 'reads the actual current Linux process identity when procfs is available' do

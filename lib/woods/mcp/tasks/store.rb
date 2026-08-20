@@ -54,6 +54,9 @@ module Woods
         # A task id is minted by {SecureRandom} and only ever compared against
         # this, so anything that could escape the directory is not a task id.
         SAFE_ID = /\A[a-f0-9]{32}\z/
+        LINUX_PROCESS_STATE = /\A[RSDZTtXxKWPI]\z/
+        LINUX_NUMERIC_FIELD = /\A-?\d+\z/
+        private_constant :LINUX_PROCESS_STATE, :LINUX_NUMERIC_FIELD
 
         # One task record.
         Task = Struct.new(
@@ -360,8 +363,15 @@ module Woods
           boundary = stat.rindex(') ')
           return unless boundary && stat.match?(/\A\d+ \(/)
 
-          start_ticks = stat[(boundary + 2)..].split[19]
-          start_ticks if start_ticks&.match?(/\A\d+\z/)
+          fields = stat[(boundary + 2)..].split
+          return unless fields.length >= 20
+          return unless fields.first.match?(LINUX_PROCESS_STATE)
+
+          numeric_fields = fields[1, 19]
+          return unless numeric_fields.all? { |field| field.match?(LINUX_NUMERIC_FIELD) }
+
+          start_ticks = numeric_fields.last
+          start_ticks if start_ticks.match?(/\A\d+\z/)
         end
 
         def darwin_process_identity(pid)

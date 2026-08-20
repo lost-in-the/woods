@@ -6,45 +6,91 @@ require 'mcp'
 require 'timeout'
 require 'woods'
 require 'woods/dependency_graph'
+require 'woods/coordination/pipeline_lock'
+require 'woods/feedback/store'
 require 'woods/feedback/gap_detector'
 require 'woods/mcp/server'
 require 'woods/notion/exporter'
+require 'woods/operator/error_escalator'
+require 'woods/operator/pipeline_guard'
+require 'woods/operator/status_reporter'
 require 'woods/session_tracer/session_flow_assembler'
 
 RSpec.describe 'Index MCP tool contracts' do
+  # Exact response literals are intentionally kept beside each tool contract.
+  # rubocop:disable Layout/LineLength
   let(:contract_oracle) do
     {
-      'codebase_retrieve' => contract(:always, { 'query' => 'How does Post work?' }, ['Post'],
+      'codebase_retrieve' => contract(:always, { 'query' => 'How does Post work?' },
+                                      exact_text("## Post\nclass Post; end"),
                                       required: %w[query], properties: {
                                         'query' => string_contract(1, 10_000),
                                         'budget' => integer_contract(1, 200_000),
                                         'types' => array_contract(1_000, 10_000),
                                         'exclude_types' => array_contract(1_000, 10_000)
                                       }),
-      'dependencies' => contract(:always, { 'identifier' => 'Comment' }, %w[Comment Post],
+      'dependencies' => contract(:always, { 'identifier' => 'Comment' }, exact_data({
+                                                                                      'root' => 'Comment', 'found' => true,
+                                                                                      'nodes' => {
+                                                                                        'Comment' => {
+                                                                                          'type' => 'model', 'depth' => 0, 'deps' => ['Post']
+                                                                                        },
+                                                                                        'Post' => { 'type' => 'model',
+                                                                                                    'depth' => 1, 'deps' => [] }
+                                                                                      }
+                                                                                    }),
                                  required: %w[identifier], properties: {
                                    'identifier' => string_contract(1, 10_000),
                                    'depth' => integer_contract(0, 20),
                                    'types' => array_contract(1_000, 10_000),
                                    'via' => union_contract
                                  }),
-      'dependents' => contract(:always, { 'identifier' => 'Post' }, %w[Post Comment],
+      'dependents' => contract(:always, { 'identifier' => 'Post' }, exact_data({
+                                                                                 'root' => 'Post', 'found' => true,
+                                                                                 'nodes' => {
+                                                                                   'Post' => { 'type' => 'model', 'depth' => 0,
+                                                                                               'deps' => %w[Comment PostsController] },
+                                                                                   'Comment' => { 'type' => 'model',
+                                                                                                  'depth' => 1, 'deps' => [] },
+                                                                                   'PostsController' => {
+                                                                                     'type' => 'controller', 'depth' => 1, 'deps' => []
+                                                                                   }
+                                                                                 }
+                                                                               }),
                                required: %w[identifier], properties: {
                                  'identifier' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20),
                                  'types' => array_contract(1_000, 10_000),
                                  'via' => union_contract
                                }),
-      'domain_clusters' => contract(:always, {}, %w[Billing PaymentService], properties: {
-                                      'min_size' => integer_contract(1, 100_000),
-                                      'types' => array_contract(1_000, 10_000)
-                                    }),
-      'framework' => contract(:always, { 'keyword' => 'ActiveRecord' }, ['ActiveRecord'],
+      'domain_clusters' => contract(:always, {}, exact_data({
+                                                              'clusters' => [{ 'name' => 'Billing', 'member_count' => 2,
+                                                                               'hub' => 'PaymentService' }],
+                                                              'total' => 1
+                                                            }), properties: {
+                                                              'min_size' => integer_contract(1, 100_000),
+                                                              'types' => array_contract(1_000, 10_000)
+                                                            }),
+      'framework' => contract(:always, { 'keyword' => 'ActiveRecord' }, exact_data({
+                                                                                     'keyword' => 'ActiveRecord', 'result_count' => 1,
+                                                                                     'results' => [{
+                                                                                       'identifier' => 'ActiveRecord::Base', 'type' => 'rails_source',
+                                                                                       'file_path' => 'activerecord-8.1.2/lib/active_record/base.rb',
+                                                                                       'metadata' => { 'gem_name' => 'activerecord', 'gem_version' => '8.1.2',
+                                                                                                       'concept' => 'persistence' }
+                                                                                     }]
+                                                                                   }),
                               required: %w[keyword], properties: {
                                 'keyword' => string_contract(1, 10_000),
                                 'limit' => integer_contract(1, 1_000)
                               }),
-      'graph_analysis' => contract(:always, { 'analysis' => 'orphans' }, %w[orphans PostsController],
+      'graph_analysis' => contract(:always, { 'analysis' => 'orphans' }, exact_data({
+                                                                                      'orphans' => ['PostsController'],
+                                                                                      'stats' => {
+                                                                                        'orphan_count' => 1, 'dead_end_count' => 1,
+                                                                                        'hub_count' => 3, 'cycle_count' => 0
+                                                                                      }
+                                                                                    }),
                                    properties: {
                                      'analysis' => enum_contract(
                                        %w[orphans dead_ends hubs cycles bridges all], nil, 10_000
@@ -52,61 +98,162 @@ RSpec.describe 'Index MCP tool contracts' do
                                      'limit' => integer_contract(1, 1_000),
                                      'offset' => integer_contract(0, 1_000_000)
                                    }),
-      'list_snapshots' => contract(:snapshot, {}, %w[aaa111 snapshot_count], properties: {
-                                     'limit' => integer_contract(1, 1_000),
-                                     'branch' => string_contract(nil, 10_000)
-                                   }),
-      'lookup' => contract(:always, { 'identifier' => 'Post' }, %w[Post model],
+      'list_snapshots' => contract(:snapshot, {}, exact_data({
+                                                               'snapshot_count' => 1,
+                                                               'snapshots' => [{ 'git_sha' => 'aaa111',
+                                                                                 'branch' => 'main' }]
+                                                             }), properties: {
+                                                               'limit' => integer_contract(1, 1_000),
+                                                               'branch' => string_contract(nil, 10_000)
+                                                             }),
+      'lookup' => contract(:always, { 'identifier' => 'Post' }, data_projection(
+                                                                  [%w[type], 'model'],
+                                                                  [%w[identifier], 'Post'],
+                                                                  [%w[file_path], 'app/models/post.rb'],
+                                                                  [%w[source_code], "class Post < ApplicationRecord\n  has_many :comments\n  " \
+                                                                                    "validates :title, presence: true\nend\n"],
+                                                                  [%w[metadata associations], [{ 'type' => 'has_many', 'name' => 'comments',
+                                                                                                 'class_name' => 'Comment' }]],
+                                                                  [%w[dependencies], []],
+                                                                  [%w[dependents], %w[Comment PostsController]],
+                                                                  key_sets: {
+                                                                    [] => %w[type identifier file_path namespace source_code metadata dependencies
+                                                                             dependents chunks extracted_at source_hash]
+                                                                  }
+                                                                ),
                            properties: {
                              'identifier' => string_contract(nil, 10_000),
                              'name' => string_contract(nil, 10_000),
                              'include_source' => boolean_contract,
                              'sections' => array_contract(1_000, 10_000)
                            }),
-      'notion_sync' => contract(:notion, {}, %w[synced data_models]),
-      'pagerank' => contract(:always, {}, %w[Post total_nodes], properties: {
-                               'limit' => integer_contract(1, 1_000),
-                               'types' => array_contract(1_000, 10_000)
-                             }),
-      'pipeline_diagnose' => contract(:operator, { 'error_class' => 'Timeout::Error', 'error_message' => 'timed out' },
-                                      %w[transient retryable], required: %w[error_class error_message], properties: {
-                                        'error_class' => string_contract(1, 10_000),
-                                        'error_message' => string_contract(1, 10_000)
-                                      }),
-      'pipeline_embed' => contract(:operator, {}, %w[started Embedding], properties: {
-                                     'incremental' => boolean_contract
-                                   }),
-      'pipeline_extract' => contract(:operator, {}, %w[started Extraction], properties: {
-                                       'incremental' => boolean_contract,
-                                       'changed_files' => array_contract(1_000, 10_000)
-                                     }),
-      'pipeline_repair' => contract(:operator, { 'action' => 'reset_cooldowns' }, %w[repaired reset_cooldowns],
+      'notion_sync' => contract(:notion, {}, exact_data({
+                                                          'synced' => true, 'data_models' => 2, 'columns' => 4, 'errors' => []
+                                                        })),
+      'pagerank' => contract(:always, {}, exact_data({
+                                                       'total_nodes' => 3,
+                                                       'results' => [
+                                                         { 'identifier' => 'Post', 'type' => 'model',
+                                                           'score' => 0.574465 },
+                                                         { 'identifier' => 'Comment', 'type' => 'model',
+                                                           'score' => 0.212767 },
+                                                         { 'identifier' => 'PostsController', 'type' => 'controller',
+                                                           'score' => 0.212767 }
+                                                       ]
+                                                     }), properties: {
+                                                       'limit' => integer_contract(1, 1_000),
+                                                       'types' => array_contract(1_000, 10_000)
+                                                     }),
+      'pipeline_diagnose' => contract(
+        :operator, { 'error_class' => 'Timeout::Error', 'error_message' => 'timed out' },
+        exact_data({
+                     'severity' => 'transient', 'category' => 'timeout',
+                     'remediation' => 'Retry after a short delay', 'error_class' => 'Timeout::Error',
+                     'message' => 'timed out', 'original_class' => 'Timeout::Error'
+                   }), required: %w[error_class error_message], properties: {
+                     'error_class' => string_contract(1, 10_000),
+                     'error_message' => string_contract(1, 10_000)
+                   }
+      ),
+      'pipeline_embed' => contract(:operator, {}, exact_data({
+                                                               'status' => 'started',
+                                                               'message' => 'Embedding pipeline started in background thread'
+                                                             }), properties: {
+                                                               'incremental' => boolean_contract
+                                                             }, effect: :embedding_cooldown),
+      'pipeline_extract' => contract(:operator, {}, exact_data({
+                                                                 'status' => 'started',
+                                                                 'message' => 'Extraction pipeline started in background thread'
+                                                               }), properties: {
+                                                                 'incremental' => boolean_contract,
+                                                                 'changed_files' => array_contract(1_000, 10_000)
+                                                               }, effect: :extraction_cooldown),
+      'pipeline_repair' => contract(:operator, { 'action' => 'reset_cooldowns' }, exact_data({
+                                                                                               'repaired' => true, 'action' => 'reset_cooldowns', 'outcome' => 'reset'
+                                                                                             }),
                                     required: %w[action], properties: {
                                       'action' => enum_contract(%w[clear_locks reset_cooldowns], 1, 10_000)
-                                    }),
-      'pipeline_status' => contract(:operator, {}, %w[status ok]),
-      'recent_changes' => contract(:always, {}, %w[result_count Post], properties: {
-                                     'limit' => integer_contract(1, 1_000),
-                                     'types' => array_contract(1_000, 10_000)
-                                   }),
-      'reload' => contract(:always, {}, %w[reloaded true total_units 9]),
-      'retrieval_explain' => contract(:feedback, {}, %w[total_ratings average_score]),
-      'retrieval_rate' => contract(:feedback, { 'query' => 'Post', 'score' => 4 }, %w[recorded rating],
+                                    }, effect: :cooldowns_reset),
+      'pipeline_status' => contract(:operator, {}, data_projection(
+                                                     [%w[status], 'stale'],
+                                                     [%w[extracted_at], '2026-01-15T12:00:00Z'],
+                                                     [%w[total_units], 9],
+                                                     [%w[counts], expected_counts],
+                                                     [%w[git_sha], 'abc1234'],
+                                                     [%w[git_branch], 'main'],
+                                                     key_sets: {
+                                                       [] => %w[status extracted_at total_units counts git_sha git_branch
+                                                                staleness_seconds]
+                                                     },
+                                                     types: { %w[staleness_seconds] => Numeric }
+                                                   )),
+      'recent_changes' => contract(:always, {}, exact_data({
+                                                             'result_count' => 3,
+                                                             'results' => [
+                                                               { 'identifier' => 'Comment', 'type' => 'model',
+                                                                 'file_path' => 'app/models/comment.rb',
+                                                                 'last_modified' => '2026-01-14T16:00:00Z',
+                                                                 'author' => 'dev@example.com' },
+                                                               { 'identifier' => 'PostsController', 'type' => 'controller',
+                                                                 'file_path' => 'app/controllers/posts_controller.rb',
+                                                                 'last_modified' => '2026-01-12T10:00:00Z',
+                                                                 'author' => 'dev@example.com' },
+                                                               { 'identifier' => 'Post', 'type' => 'model',
+                                                                 'file_path' => 'app/models/post.rb',
+                                                                 'last_modified' => '2026-01-10T08:30:00Z',
+                                                                 'author' => 'dev@example.com' }
+                                                             ]
+                                                           }), properties: {
+                                                             'limit' => integer_contract(1, 1_000),
+                                                             'types' => array_contract(1_000, 10_000)
+                                                           }),
+      'reload' => contract(:always, {}, exact_data({
+                                                     'reloaded' => true, 'extracted_at' => '2026-01-15T12:00:00Z',
+                                                     'total_units' => 10, 'counts' => expected_counts.merge('models' => 3)
+                                                   }), effect: :reloaded_manifest),
+      'retrieval_explain' => contract(:feedback, {}, exact_data({
+                                                                  'total_ratings' => 1, 'average_score' => 2.0, 'total_gaps' => 0,
+                                                                  'recent_ratings' => [{
+                                                                    'type' => 'rating', 'query' => 'seed', 'score' => 2, 'comment' => nil,
+                                                                    'timestamp' => '2026-01-01T00:00:00Z'
+                                                                  }],
+                                                                  'recent_gaps' => []
+                                                                })),
+      'retrieval_rate' => contract(:feedback, { 'query' => 'Post', 'score' => 4 }, exact_data({
+                                                                                                'recorded' => true, 'type' => 'rating', 'query' => 'Post', 'score' => 4
+                                                                                              }),
                                    required: %w[query score], properties: {
                                      'query' => string_contract(1, 10_000),
                                      'score' => integer_contract(1, 5),
                                      'comment' => string_contract(nil, 10_000)
-                                   }),
+                                   }, effect: :rating_persisted),
       'retrieval_report_gap' => contract(:feedback,
                                          { 'query' => 'Post', 'missing_unit' => 'Post', 'unit_type' => 'model' },
-                                         %w[recorded gap], required: %w[query missing_unit unit_type], properties: {
-                                           'query' => string_contract(1, 10_000),
-                                           'missing_unit' => string_contract(1, 10_000),
-                                           'unit_type' => string_contract(1, 10_000)
-                                         }),
-      'retrieval_suggest' => contract(:feedback, {}, %w[issues_found missing_unit]),
+                                         exact_data({
+                                                      'recorded' => true, 'type' => 'gap',
+                                                      'missing_unit' => 'Post'
+                                                    }), required: %w[query missing_unit unit_type], properties: {
+                                                      'query' => string_contract(1, 10_000),
+                                                      'missing_unit' => string_contract(1, 10_000),
+                                                      'unit_type' => string_contract(1, 10_000)
+                                                    }, effect: :gap_persisted),
+      'retrieval_suggest' => contract(:feedback, {}, exact_data({
+                                                                  'issues_found' => 1,
+                                                                  'issues' => [{ 'kind' => 'missing_unit',
+                                                                                 'count' => 1 }]
+                                                                })),
       'search' => contract(
-        :always, { 'query' => 'Post' }, %w[Post match_field],
+        :always, { 'query' => 'Post' }, exact_data({
+                                                     'query' => 'Post', 'result_count' => 3,
+                                                     'results' => [
+                                                       { 'identifier' => 'Post', 'type' => 'model',
+                                                         'match_field' => 'identifier' },
+                                                       { 'identifier' => 'PostsController', 'type' => 'controller',
+                                                         'match_field' => 'identifier' },
+                                                       { 'identifier' => 'PostDecorator', 'type' => 'decorator',
+                                                         'match_field' => 'identifier' }
+                                                     ]
+                                                   }),
         properties: {
           'query' => string_contract(nil, 10_000),
           'types' => array_contract(1_000, 10_000),
@@ -116,39 +263,80 @@ RSpec.describe 'Index MCP tool contracts' do
           'exact_suffix' => string_contract(nil, 10_000)
         }
       ),
-      'session_trace' => contract(:session, { 'session_id' => 'session-1' }, ['Session session-1'],
+      'session_trace' => contract(:session, { 'session_id' => 'session-1' },
+                                  exact_text("## Session session-1\n1 request"),
                                   required: %w[session_id], properties: {
                                     'session_id' => string_contract(1, 10_000),
                                     'budget' => integer_contract(1, 200_000),
                                     'depth' => integer_contract(0, 20)
                                   }),
-      'snapshot_detail' => contract(:snapshot, { 'git_sha' => 'aaa111' }, %w[aaa111 main],
+      'snapshot_detail' => contract(:snapshot, { 'git_sha' => 'aaa111' },
+                                    exact_data({ 'git_sha' => 'aaa111', 'branch' => 'main' }),
                                     required: %w[git_sha], properties: {
                                       'git_sha' => string_contract(1, 10_000)
                                     }),
-      'snapshot_diff' => contract(:snapshot, { 'sha_a' => 'aaa111', 'sha_b' => 'bbb222' }, %w[aaa111 bbb222 Post],
+      'snapshot_diff' => contract(:snapshot, { 'sha_a' => 'aaa111', 'sha_b' => 'bbb222' }, exact_data({
+                                                                                                        'sha_a' => 'aaa111', 'sha_b' => 'bbb222',
+                                                                                                        'added' => 1, 'modified' => 0, 'deleted' => 0,
+                                                                                                        'details' => { 'added' => ['Post'], 'modified' => [], 'deleted' => [] }
+                                                                                                      }),
                                   required: %w[sha_a sha_b], properties: {
                                     'sha_a' => string_contract(1, 10_000),
                                     'sha_b' => string_contract(1, 10_000)
                                   }),
-      'structure' => contract(:always, {}, %w[manifest rails_version], properties: {
-                                'detail' => enum_contract(%w[summary full], nil, 10_000)
-                              }),
+      'structure' => contract(:always, {}, exact_data({
+                                                        'manifest' => expected_manifest,
+                                                        'template_engines' => ['erb']
+                                                      }), properties: {
+                                                        'detail' => enum_contract(%w[summary full], nil, 10_000)
+                                                      }),
       'trace_flow' => contract(:always, { 'entry_point' => 'PostsController#create' },
-                               %w[PostsController app/controllers/posts_controller.rb],
+                               data_projection(
+                                 [%w[entry_point], 'PostsController#create'],
+                                 [%w[route], nil],
+                                 [%w[max_depth], 3],
+                                 [%w[steps], [{
+                                   'unit' => 'PostsController#create', 'type' => 'controller',
+                                   'file_path' => 'app/controllers/posts_controller.rb', 'operations' => []
+                                 }]],
+                                 key_sets: { [] => %w[entry_point route max_depth generated_at steps] },
+                                 types: { %w[generated_at] => String }
+                               ),
                                required: %w[entry_point], properties: {
                                  'entry_point' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20)
                                }),
-      'unit_history' => contract(:snapshot, { 'identifier' => 'Post' }, %w[Post versions],
+      'unit_history' => contract(:snapshot, { 'identifier' => 'Post' }, exact_data({
+                                                                                     'identifier' => 'Post', 'versions' => 1,
+                                                                                     'history' => [{ 'git_sha' => 'aaa111', 'identifier' => 'Post' }]
+                                                                                   }),
                                  required: %w[identifier], properties: {
                                    'identifier' => string_contract(1, 10_000),
                                    'limit' => integer_contract(1, 1_000)
                                  }),
-      'woods_status' => contract(:always, {}, %w[ready index])
+      'woods_status' => contract(:always, {}, data_projection(
+                                                [%w[ready], true],
+                                                [%w[server name], 'woods'],
+                                                [%w[server version], Woods::VERSION],
+                                                [%w[index extracted_at], '2026-01-15T12:00:00Z'],
+                                                [%w[index total_units], 9],
+                                                [%w[index counts], expected_counts],
+                                                [%w[index git_sha], 'abc1234'],
+                                                [%w[index git_branch], 'main'],
+                                                [%w[watch state], 'absent'],
+                                                [%w[retriever configured], true],
+                                                [%w[features notion_configured], true],
+                                                key_sets: {
+                                                  [] => %w[ready server index watch retriever bootstrap features]
+                                                }
+                                              ))
     }
   end
-  let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
+  # rubocop:enable Layout/LineLength
+
+  let(:source_fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
+  let(:runtime_root) { Dir.mktmpdir('woods-tool-contract') }
+  let(:fixture_dir) { File.join(runtime_root, 'woods') }
   let(:inventory_path) { File.expand_path('../../.Codex/release-v2/surface-inventory.json', __dir__) }
   let(:tool_contract_meta) do
     {
@@ -170,26 +358,24 @@ RSpec.describe 'Index MCP tool contracts' do
   let(:retriever) do
     double('retriever', retrieve: Struct.new(:context).new("## Post\nclass Post; end"))
   end
-  let(:pipeline_guard) { double('pipeline guard', allow?: true, record!: nil) }
-  let(:pipeline_lock) { double('pipeline lock', release: nil) }
+  let(:pipeline_guard) do
+    Woods::Operator::PipelineGuard.new(state_dir: File.join(runtime_root, 'operator'), cooldown: 300)
+  end
+  let(:pipeline_lock) do
+    Woods::Coordination::PipelineLock.new(
+      lock_dir: File.join(runtime_root, 'operator'), name: 'extraction', stale_timeout: 60
+    )
+  end
   let(:operator) do
     {
-      status_reporter: double('status reporter', report: { status: 'ok', total_units: 5 }),
-      error_escalator: double('error escalator', classify: { category: 'transient', retryable: true }),
+      status_reporter: Woods::Operator::StatusReporter.new(output_dir: fixture_dir),
+      error_escalator: Woods::Operator::ErrorEscalator.new,
       pipeline_guard: pipeline_guard,
       pipeline_lock: pipeline_lock
     }
   end
-  let(:feedback_store) do
-    double(
-      'feedback store',
-      record_rating: nil,
-      record_gap: nil,
-      ratings: [{ 'query' => 'Post', 'score' => 4 }],
-      gaps: [],
-      average_score: 4.0
-    )
-  end
+  let(:feedback_path) { File.join(runtime_root, 'feedback.jsonl') }
+  let(:feedback_store) { Woods::Feedback::Store.new(path: feedback_path) }
   let(:snapshot_store) do
     double(
       'snapshot store',
@@ -200,19 +386,15 @@ RSpec.describe 'Index MCP tool contracts' do
     )
   end
   let(:notion_exporter) { double(sync_all: { data_models: 2, columns: 4, errors: [] }) }
-  let(:full_server) do
-    Woods::MCP::Server.build(
-      index_dir: fixture_dir,
-      retriever: retriever,
-      operator: operator,
-      feedback_store: feedback_store,
-      snapshot_store: snapshot_store,
-      response_format: :json,
-      warmup: false
-    )
-  end
+  let(:full_server) { build_full_server }
 
   before do
+    FileUtils.cp_r(source_fixture_dir, fixture_dir)
+    seed_rating = JSON.generate(
+      type: 'rating', query: 'seed', score: 2, comment: nil,
+      timestamp: '2026-01-01T00:00:00Z'
+    )
+    File.write(feedback_path, "#{seed_rating}\n")
     allow(Woods).to receive(:configuration).and_return(config)
     allow(config).to receive(:output_dir).and_return(nil)
     stub_const('Woods::Extractor', double('extractor class', new: double(extract_all: nil, extract_changed: nil)))
@@ -229,14 +411,95 @@ RSpec.describe 'Index MCP tool contracts' do
       .and_return(notion_exporter)
   end
 
-  def contract(registration, arguments, facts, required: [], properties: {})
+  after { FileUtils.rm_rf(runtime_root) }
+
+  def build_full_server
+    Woods::MCP::Server.build(
+      index_dir: fixture_dir,
+      retriever: retriever,
+      operator: operator,
+      feedback_store: feedback_store,
+      snapshot_store: snapshot_store,
+      response_format: :json,
+      warmup: false
+    )
+  end
+
+  def contract(registration, arguments, result, required: [], properties: {}, effect: nil)
     {
       registration: registration,
       arguments: arguments,
-      facts: facts,
+      result: result,
       required: required,
-      properties: properties
+      properties: properties,
+      effect: effect
     }
+  end
+
+  def exact_data(data)
+    { data: data }
+  end
+
+  def exact_text(text)
+    { text: text }
+  end
+
+  def data_projection(*paths, key_sets: {}, types: {})
+    { paths: paths, key_sets: key_sets, types: types }
+  end
+
+  def expected_counts
+    {
+      'models' => 2, 'controllers' => 1, 'graphql' => 0, 'components' => 0,
+      'view_components' => 0, 'services' => 0, 'jobs' => 0, 'mailers' => 1,
+      'serializers' => 0, 'decorators' => 1, 'concerns' => 1,
+      'rails_source' => 2, 'libs' => 1
+    }
+  end
+
+  def expected_manifest
+    {
+      'extracted_at' => '2026-01-15T12:00:00Z', 'rails_version' => '8.1.2',
+      'ruby_version' => '4.0.1', 'counts' => expected_counts, 'total_units' => 9,
+      'total_chunks' => 0, 'git_sha' => 'abc1234', 'git_branch' => 'main'
+    }
+  end
+
+  def expected_graph_stats
+    { 'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0 }
+  end
+
+  def expected_graph_analysis
+    {
+      'orphans' => ['PostsController'],
+      'dead_ends' => ['Post'],
+      'hubs' => [
+        { 'identifier' => 'Post', 'type' => 'model', 'dependent_count' => 2,
+          'dependents' => %w[Comment PostsController] },
+        { 'identifier' => 'Comment', 'type' => 'model', 'dependent_count' => 0, 'dependents' => [] },
+        { 'identifier' => 'PostsController', 'type' => 'controller', 'dependent_count' => 0, 'dependents' => [] }
+      ],
+      'cycles' => [], 'bridges' => [], 'stats' => expected_graph_stats
+    }
+  end
+
+  def expected_summary
+    <<~SUMMARY
+      # Codebase Index Summary
+      Generated: 2026-01-15T12:00:00Z
+      Rails 8.1.2 / Ruby 4.0.1
+
+      ## Models (2)
+
+      ### (root)
+      - Comment
+      - Post
+
+      ## Controllers (1)
+
+      ### (root)
+      - PostsController
+    SUMMARY
   end
 
   def integer_contract(minimum, maximum)
@@ -276,28 +539,247 @@ RSpec.describe 'Index MCP tool contracts' do
     JSON.parse(File.read(inventory_path)).dig('index_mcp', 'tools')
   end
 
-  def assert_semantic_facts(name, contract, text)
-    contract.fetch(:facts).each { |fact| expect(text).to include(fact), "#{name}: #{fact}" }
+  def assert_semantic_result(name, contract, result)
+    expected = contract.fetch(:result)
+    structured = result.fetch('structuredContent')
+    assert_semantic_text(name, expected, result, structured)
+    assert_semantic_data(name, expected, structured) if expected.key?(:data) || expected.key?(:paths)
   end
 
-  def assert_boundary_semantics(name, contract, text)
-    facts = {
-      'dependencies' => %w[root Comment found],
-      'dependents' => %w[root Post found],
-      'graph_analysis' => %w[stats orphan_count],
-      'recent_changes' => %w[result_count identifier]
-    }.fetch(name, contract.fetch(:facts))
-    facts.each { |fact| expect(text).to include(fact), "#{name} boundary: #{fact}" }
+  def assert_semantic_text(name, expected, result, structured)
+    expect(structured.fetch('text')).to eq(result.dig('content', 0, 'text')), name
+    expect(structured.fetch('text')).to eq(expected.fetch(:text)), name if expected.key?(:text)
   end
 
-  def assert_enum_semantics(name, value, text)
-    facts = case name
-            when 'graph_analysis' then value == 'all' ? %w[stats orphans] : [value, 'stats']
-            when 'pipeline_repair' then ['repaired', value]
-            when 'structure' then %w[manifest rails_version]
-            else raise "Missing enum semantic oracle for #{name}.#{value}"
-            end
-    facts.each { |fact| expect(text).to include(fact), "#{name}=#{value}: #{fact}" }
+  def assert_semantic_data(name, expected, structured)
+    data = structured.fetch('data')
+    expect(data).to eq(expected.fetch(:data)), name if expected.key?(:data)
+    assert_projected_paths(name, expected, data)
+    assert_projected_key_sets(name, expected, data)
+    assert_projected_types(name, expected, data)
+  end
+
+  def assert_projected_paths(name, expected, data)
+    expected.fetch(:paths, []).each do |path, value|
+      expect(value_at(data, path)).to eq(value), "#{name}.#{path.join('.')}"
+    end
+  end
+
+  def assert_projected_key_sets(name, expected, data)
+    expected.fetch(:key_sets, {}).each do |path, keys|
+      expect(value_at(data, path).keys).to contain_exactly(*keys), "#{name}.#{path.join('.')} keys"
+    end
+  end
+
+  def assert_projected_types(name, expected, data)
+    expected.fetch(:types, {}).each do |path, type|
+      expect(value_at(data, path)).to be_a(type), "#{name}.#{path.join('.')} type"
+    end
+  end
+
+  def value_at(value, path)
+    path.reduce(value) { |current, key| current.respond_to?(:[]) ? current[key] : nil }
+  end
+
+  def prepare_contract(name, server)
+    case contract_oracle.fetch(name).fetch(:effect)
+    when :extraction_cooldown
+      prepare_pipeline_cooldown(:extraction)
+    when :embedding_cooldown
+      prepare_pipeline_cooldown(:embedding)
+    when :cooldowns_reset
+      prepare_cooldowns_reset
+    when :rating_persisted
+      prepare_feedback_effect(:ratings)
+    when :gap_persisted
+      prepare_feedback_effect(:gaps)
+    when :reloaded_manifest
+      prepare_reloaded_manifest(server)
+    else
+      {}
+    end
+  end
+
+  def prepare_pipeline_cooldown(operation)
+    pipeline_guard.reset!(operation)
+    { observe: -> { pipeline_guard.allow?(operation) } }
+  end
+
+  def prepare_cooldowns_reset
+    pipeline_guard.record!(:extraction)
+    pipeline_guard.record!(:embedding)
+    { observe: -> { [pipeline_guard.allow?(:extraction), pipeline_guard.allow?(:embedding)] } }
+  end
+
+  def prepare_feedback_effect(collection)
+    { before: feedback_store.public_send(collection).size, observe: -> { feedback_store.public_send(collection) } }
+  end
+
+  def prepare_reloaded_manifest(server)
+    path = File.join(fixture_dir, 'manifest.json')
+    original = File.binread(path)
+    call_tool(server, 'structure', {})
+    changed = expected_manifest.merge('total_units' => 10, 'counts' => expected_counts.merge('models' => 3))
+    File.write(path, JSON.generate(changed))
+    { original: original, observe: -> { served_manifest_total(server) } }
+  end
+
+  def served_manifest_total(server)
+    call_tool(server, 'structure', {}).dig('result', 'structuredContent', 'data', 'manifest', 'total_units')
+  end
+
+  def assert_contract_effect(name, contract, context)
+    case contract.fetch(:effect)
+    when :extraction_cooldown, :embedding_cooldown
+      expect(context.fetch(:observe).call).to be(false), "#{name} persisted cooldown"
+    when :cooldowns_reset
+      expect(context.fetch(:observe).call).to eq([true, true]), "#{name} reset cooldowns"
+    when :rating_persisted
+      assert_feedback_effect(context, 'type' => 'rating', 'query' => 'Post', 'score' => 4, 'comment' => nil)
+    when :gap_persisted
+      assert_feedback_effect(
+        context,
+        'type' => 'gap', 'query' => 'Post', 'missing_unit' => 'Post', 'unit_type' => 'model'
+      )
+    when :reloaded_manifest
+      expect(context.fetch(:observe).call).to eq(10), 'reload changed the served manifest'
+    end
+  end
+
+  def assert_feedback_effect(context, expected)
+    entries = context.fetch(:observe).call
+    expect(entries.size).to eq(context.fetch(:before) + 1)
+    expect(entries.last.except('timestamp')).to eq(expected)
+  end
+
+  def cleanup_contract(contract, context)
+    return unless contract.fetch(:effect) == :reloaded_manifest
+
+    File.binwrite(File.join(fixture_dir, 'manifest.json'), context.fetch(:original))
+  end
+
+  def fake_result(data: nil, text: nil)
+    text ||= JSON.generate(data)
+    structured = { 'text' => text }
+    structured['data'] = data unless data.nil?
+    {
+      'isError' => false,
+      'content' => [{ 'type' => 'text', 'text' => text }],
+      'structuredContent' => structured
+    }
+  end
+
+  def assert_boundary_semantics(name, argument, value, result)
+    data = result.dig('structuredContent', 'data')
+    assertion = boundary_assertions[[name, argument]]
+    return assert_semantic_result(name, contract_oracle.fetch(name), result) unless assertion
+
+    send(assertion, data, value, name)
+  end
+
+  def boundary_assertions
+    {
+      %w[dependencies depth] => :assert_dependencies_depth,
+      %w[dependents depth] => :assert_dependents_depth,
+      %w[graph_analysis offset] => :assert_graph_offset,
+      %w[pagerank limit] => :assert_limited_results,
+      %w[recent_changes limit] => :assert_limited_results,
+      %w[search limit] => :assert_limited_results,
+      %w[retrieval_rate score] => :assert_rating_score,
+      %w[trace_flow depth] => :assert_trace_depth
+    }
+  end
+
+  def assert_dependencies_depth(data, value, _name)
+    expected = value.zero? ? ['Comment'] : %w[Comment Post]
+    expect(data.fetch('nodes').keys).to eq(expected)
+    expect(data.dig('nodes', 'Comment', 'deps')).to eq(value.zero? ? [] : ['Post'])
+  end
+
+  def assert_dependents_depth(data, value, _name)
+    expected = value.zero? ? ['Post'] : %w[Post Comment PostsController]
+    expect(data.fetch('nodes').keys).to eq(expected)
+    expect(data.dig('nodes', 'Post', 'deps')).to eq(value.zero? ? [] : %w[Comment PostsController])
+  end
+
+  def assert_graph_offset(data, value, _name)
+    expected = if value.zero?
+                 { 'orphans' => ['PostsController'], 'stats' => expected_graph_stats }
+               else
+                 { 'orphans' => [], 'stats' => expected_graph_stats, 'orphans_offset' => value }
+               end
+    expect(data).to eq(expected)
+  end
+
+  def assert_limited_results(data, value, name)
+    expected = contract_oracle.fetch(name).dig(:result, :data)
+    results = expected.fetch('results').first(value)
+    expected = expected.merge('results' => results)
+    expected = expected.merge('result_count' => results.size) if expected.key?('result_count')
+    expect(data).to eq(expected)
+  end
+
+  def assert_rating_score(data, value, _name)
+    expect(data).to eq('recorded' => true, 'type' => 'rating', 'query' => 'Post', 'score' => value)
+  end
+
+  def assert_trace_depth(data, value, _name)
+    expect(data.except('generated_at')).to eq(
+      'entry_point' => 'PostsController#create', 'route' => nil, 'max_depth' => value,
+      'steps' => [{ 'unit' => 'PostsController#create', 'type' => 'controller',
+                    'file_path' => 'app/controllers/posts_controller.rb', 'operations' => [] }]
+    )
+  end
+
+  def prepare_enum_semantics(name, value)
+    return unless name == 'pipeline_repair'
+
+    if value == 'clear_locks'
+      holder = Woods::Coordination::PipelineLock.new(
+        lock_dir: File.join(runtime_root, 'operator'), name: 'extraction', stale_timeout: 60
+      )
+      raise 'could not seed stale repair lock' unless holder.acquire
+
+      path = File.join(runtime_root, 'operator', 'extraction.lock')
+      File.utime(Time.now - 120, Time.now - 120, path)
+    else
+      pipeline_guard.record!(:extraction)
+    end
+  end
+
+  def assert_enum_semantics(name, value, result)
+    data = result.dig('structuredContent', 'data')
+    case name
+    when 'graph_analysis'
+      assert_graph_enum(data, value)
+    when 'pipeline_repair'
+      outcome = value == 'clear_locks' ? 'cleared' : 'reset'
+      expect(data).to eq('repaired' => true, 'action' => value, 'outcome' => outcome)
+    when 'structure'
+      expected = { 'manifest' => expected_manifest, 'template_engines' => ['erb'] }
+      expected['summary'] = expected_summary if value == 'full'
+      expect(data).to eq(expected)
+    else
+      raise "Missing enum semantic oracle for #{name}.#{value}"
+    end
+  end
+
+  def assert_graph_enum(data, value)
+    expected = if value == 'all'
+                 expected_graph_analysis
+               else
+                 { value => expected_graph_analysis.fetch(value), 'stats' => expected_graph_stats }
+               end
+    expect(data).to eq(expected)
+  end
+
+  def assert_union_semantics(name, result)
+    root, type = name == 'dependencies' ? %w[Comment model] : %w[Post model]
+    expect(result.dig('structuredContent', 'data')).to eq(
+      'root' => root,
+      'found' => true,
+      'nodes' => { root => { 'type' => type, 'depth' => 0, 'deps' => [] } }
+    )
   end
 
   def rpc(server, method, params = {})
@@ -353,30 +835,61 @@ RSpec.describe 'Index MCP tool contracts' do
 
     aggregate_failures do
       contract_oracle.each do |name, contract|
-        result = call_tool(full_server, name, contract.fetch(:arguments)).fetch('result')
-        wait_for_pipeline(name)
-        text = result.dig('content', 0, 'text')
+        contract_server = build_full_server
+        context = prepare_contract(name, contract_server)
+        begin
+          result = call_tool(contract_server, name, contract.fetch(:arguments)).fetch('result')
+          wait_for_pipeline(name)
 
-        expect(result['isError']).to be(false), name
-        assert_semantic_facts(name, contract, text)
-        expect(result.dig('structuredContent', 'text')).to eq(text), name
-        schema = schemas.fetch(name)
-        next unless schema
+          expect(result['isError']).to be(false), name
+          assert_semantic_result(name, contract, result)
+          assert_contract_effect(name, contract, context)
+          schema = schemas.fetch(name)
+          next unless schema
 
-        expect do
-          MCP::Tool::OutputSchema.new(schema).validate_result(result.fetch('structuredContent'))
-        end.not_to raise_error, name
+          expect do
+            MCP::Tool::OutputSchema.new(schema).validate_result(result.fetch('structuredContent'))
+          end.not_to raise_error, name
+        ensure
+          cleanup_contract(contract, context)
+        end
       end
     end
   end
 
-  it 'rejects a generic ok payload in the semantic harness' do
+  it 'rejects generic, empty, fabricated, and no-op payloads in the semantic harness' do
+    generic = fake_result(data: { 'ok' => true })
     contract_oracle.each do |name, contract|
-      expect { assert_semantic_facts(name, contract, '{"ok":true}') }
+      expect { assert_semantic_result(name, contract, generic) }
         .to raise_error(RSpec::Expectations::ExpectationNotMetError), name
     end
-    expect { assert_semantic_facts('domain_clusters', contract_oracle.fetch('domain_clusters'), '{"clusters":[]}') }
-      .to raise_error(RSpec::Expectations::ExpectationNotMetError, /domain_clusters: Billing/)
+
+    expect do
+      assert_semantic_result(
+        'domain_clusters', contract_oracle.fetch('domain_clusters'),
+        fake_result(data: { 'clusters' => [], 'total' => 0 })
+      )
+    end.to raise_error(RSpec::Expectations::ExpectationNotMetError)
+    expect do
+      assert_semantic_result(
+        'pipeline_status', contract_oracle.fetch('pipeline_status'),
+        fake_result(data: { 'status' => 'ok' })
+      )
+    end.to raise_error(RSpec::Expectations::ExpectationNotMetError)
+
+    reload_contract = contract_oracle.fetch('reload')
+    assert_semantic_result('reload', reload_contract, fake_result(data: reload_contract.dig(:result, :data)))
+    expect do
+      assert_contract_effect('reload', reload_contract, observe: -> { 9 })
+    end.to raise_error(RSpec::Expectations::ExpectationNotMetError)
+
+    repair_contract = contract_oracle.fetch('pipeline_repair')
+    assert_semantic_result(
+      'pipeline_repair', repair_contract, fake_result(data: repair_contract.dig(:result, :data))
+    )
+    expect do
+      assert_contract_effect('pipeline_repair', repair_contract, observe: -> { [false, false] })
+    end.to raise_error(RSpec::Expectations::ExpectationNotMetError)
   end
 
   it 'proves the explicit side effects for mutating and collaborator-backed tools' do
@@ -386,17 +899,22 @@ RSpec.describe 'Index MCP tool contracts' do
       wait_for_pipeline(name)
     end
 
-    expect(pipeline_guard).to have_received(:record!).with(:extraction)
-    expect(pipeline_guard).to have_received(:record!).with(:embedding)
-    expect(feedback_store).to have_received(:record_rating).with(query: 'Post', score: 4, comment: nil)
-    expect(feedback_store).to have_received(:record_gap).with(query: 'Post', missing_unit: 'Post', unit_type: 'model')
+    expect(pipeline_guard.allow?(:extraction)).to be(false)
+    expect(pipeline_guard.allow?(:embedding)).to be(false)
+    expect(feedback_store.ratings.last.except('timestamp')).to eq(
+      'type' => 'rating', 'query' => 'Post', 'score' => 4, 'comment' => nil
+    )
+    expect(feedback_store.gaps.last.except('timestamp')).to eq(
+      'type' => 'gap', 'query' => 'Post', 'missing_unit' => 'Post', 'unit_type' => 'model'
+    )
     expect(notion_exporter).to have_received(:sync_all)
     expect(snapshot_store).to have_received(:list).with(limit: 20, branch: nil)
     expect(snapshot_store).to have_received(:diff).with('aaa111', 'bbb222')
     expect(snapshot_store).to have_received(:unit_history).with('Post', limit: 20)
     expect(snapshot_store).to have_received(:find).with('aaa111')
-    call_tool(full_server, 'pipeline_repair', 'action' => 'clear_locks')
-    expect(pipeline_lock).to have_received(:release)
+    call_tool(full_server, 'pipeline_repair', 'action' => 'reset_cooldowns')
+    expect(pipeline_guard.allow?(:extraction)).to be(true)
+    expect(pipeline_guard.allow?(:embedding)).to be(true)
   end
 
   it 'exercises each explicit dependency class independently' do
@@ -574,7 +1092,7 @@ RSpec.describe 'Index MCP tool contracts' do
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
             expect(result['isError']).to be(false), label
-            assert_boundary_semantics(tool_name, contract, result.dig('content', 0, 'text'))
+            assert_boundary_semantics(tool_name, name, value, result)
           end
 
           [property.fetch('minimum') - 1, property.fetch('maximum') + 1].each do |value|
@@ -606,7 +1124,7 @@ RSpec.describe 'Index MCP tool contracts' do
           expect(array_result.dig('result', 'isError')).to be(false), "#{tool_name}.#{name} array"
           expect(string_result.dig('result', 'structuredContent', 'data'))
             .to eq(array_result.dig('result', 'structuredContent', 'data'))
-          assert_boundary_semantics(tool_name, contract, string_result.dig('result', 'content', 0, 'text'))
+          assert_union_semantics(tool_name, string_result.fetch('result'))
           invalid = call_tool(full_server, tool_name, contract.fetch(:arguments).merge(name => false)).fetch('result')
           expect(invalid['isError']).to be(true), "#{tool_name}.#{name} invalid"
           expect(invalid.dig('_meta', 'error_code')).to eq('invalid_arguments'), "#{tool_name}.#{name} invalid"
@@ -670,11 +1188,12 @@ RSpec.describe 'Index MCP tool contracts' do
           next unless property['enum']
 
           property.fetch('enum').each do |value|
+            prepare_enum_semantics(tool_name, value)
             result = call_tool(
               full_server, tool_name, contract.fetch(:arguments).merge(name => value)
             ).fetch('result')
             expect(result['isError']).to be(false), "#{tool_name}.#{name}=#{value}"
-            assert_enum_semantics(tool_name, value, result.dig('content', 0, 'text'))
+            assert_enum_semantics(tool_name, value, result)
           end
           result = call_tool(
             full_server, tool_name, contract.fetch(:arguments).merge(name => '__invalid__')

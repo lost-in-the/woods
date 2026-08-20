@@ -59,7 +59,11 @@ module Woods
         @identifier_map = nil
         @auto_refresh = auto_refresh
         @pin_depth = 0
+        @pin_owners = Hash.new(0)
+        @exclusive_waiters = 0
+        @exclusive_owner = nil
         @freshness_mutex = Mutex.new
+        @freshness_condition = ConditionVariable.new
         # Separate from @freshness_mutex: the LRU bookkeeping must not
         # serialize behind a generation check, and a reader that took the
         # freshness lock must be able to touch the caches without deadlocking.
@@ -101,7 +105,11 @@ module Woods
       def ensure_fresh!
         return nil unless @auto_refresh
 
-        @freshness_mutex.synchronize { refresh_if_stale }
+        thread = Thread.current
+        @freshness_mutex.synchronize do
+          wait_for_generation_access(thread)
+          refresh_if_stale
+        end
       end
 
       # Suppress cache invalidation for the duration of a block.
@@ -137,15 +145,43 @@ module Woods
       # @yield the block to run against a single generation
       # @return [Object] the block's value
       def with_pinned_generation
+        thread = Thread.current
+        exclusive_owner = false
         @freshness_mutex.synchronize do
-          refresh_if_stale if @auto_refresh && @pin_depth.zero?
-          @pin_depth += 1
+          if @exclusive_owner.equal?(thread)
+            exclusive_owner = true
+          else
+            wait_for_generation_access(thread)
+            refresh_if_stale if @auto_refresh && @pin_depth.zero?
+            @pin_depth += 1
+            @pin_owners[thread] += 1
+          end
         end
 
         begin
           yield
         ensure
-          @freshness_mutex.synchronize { @pin_depth -= 1 }
+          release_generation_pin(thread) unless exclusive_owner
+        end
+      end
+
+      # Reload all cached index state while excluding pinned readers.
+      #
+      # Existing pins may finish and nest normally. Once an exclusive reload is
+      # waiting, new pins wait until the reload block has assembled its result.
+      #
+      # @yieldparam manifest [Hash] the manifest loaded after caches are cleared
+      # @return [Object] the block's value
+      # @raise [ThreadError] when upgrading a pin or nesting an exclusive reload
+      def with_exclusive_reload
+        thread = Thread.current
+        acquire_exclusive_generation(thread)
+
+        begin
+          reload!
+          yield manifest
+        ensure
+          release_exclusive_generation(thread)
         end
       end
 
@@ -169,9 +205,11 @@ module Woods
       #
       # @return [void]
       def reload!
-        @unit_cache = {}
-        @unit_cache_signatures = {}
-        @unit_cache_order = []
+        @cache_mutex.synchronize do
+          @unit_cache = {}
+          @unit_cache_signatures = {}
+          @unit_cache_order = []
+        end
         @identifier_map = nil
         @index_cache = {}
         @manifest = nil
@@ -531,6 +569,48 @@ module Woods
       end
 
       private
+
+      def wait_for_generation_access(thread)
+        @freshness_condition.wait(@freshness_mutex) while generation_access_blocked?(thread)
+      end
+
+      def generation_access_blocked?(thread)
+        return false if @exclusive_owner.equal?(thread) || @pin_owners.key?(thread)
+
+        !@exclusive_owner.nil? || @exclusive_waiters.positive?
+      end
+
+      def release_generation_pin(thread)
+        @freshness_mutex.synchronize do
+          @pin_depth -= 1
+          @pin_owners[thread] -= 1
+          @pin_owners.delete(thread) if @pin_owners[thread].zero?
+          @freshness_condition.broadcast if @pin_depth.zero?
+        end
+      end
+
+      def acquire_exclusive_generation(thread)
+        @freshness_mutex.synchronize do
+          raise ThreadError, 'Cannot start an exclusive reload from a pinned generation' if @pin_owners.key?(thread)
+          raise ThreadError, 'This thread already owns an exclusive reload' if @exclusive_owner.equal?(thread)
+
+          @exclusive_waiters += 1
+          begin
+            @freshness_condition.wait(@freshness_mutex) until @pin_depth.zero? && @exclusive_owner.nil?
+            @exclusive_owner = thread
+          ensure
+            @exclusive_waiters -= 1
+            @freshness_condition.broadcast
+          end
+        end
+      end
+
+      def release_exclusive_generation(thread)
+        @freshness_mutex.synchronize do
+          @exclusive_owner = nil if @exclusive_owner.equal?(thread)
+          @freshness_condition.broadcast
+        end
+      end
 
       # The body of {#ensure_fresh!}. Callers must hold `@freshness_mutex`; it
       # is split out so {#with_pinned_generation} can run it inside the same

@@ -57,7 +57,7 @@ module Woods
           # a TOCTOU race: two processes passing the stale check together
           # could each delete-and-create, the second deleting the first's
           # FRESH lock — both would then "hold" it.
-          return false unless retire_stale_lock
+          return false unless retire_stale_lock?
         end
 
         # Atomic lock creation: File::EXCL ensures this fails if file already exists
@@ -68,6 +68,25 @@ module Woods
         true
       rescue Errno::EEXIST
         false
+      end
+
+      # Retire the lock only when the file captured atomically from the public
+      # lock path is genuinely stale.
+      #
+      # @return [Symbol] `:cleared`, `:not_stale`, or `:missing`
+      def retire_stale
+        graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
+        File.rename(@lock_path, graveyard)
+
+        unless stale_file?(graveyard)
+          restore_lock(graveyard)
+          return :not_stale
+        end
+
+        FileUtils.rm_f(graveyard)
+        :cleared
+      rescue Errno::ENOENT
+        :missing
       end
 
       # Release the lock.
@@ -219,23 +238,9 @@ module Woods
       # fresh (someone beat us to the takeover), we put it back and lose the
       # race instead of clobbering a live holder.
       #
-      # @return [Boolean] true if this process retired a genuinely stale lock
-      def retire_stale_lock
-        graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
-        File.rename(@lock_path, graveyard)
-
-        unless stale_file?(graveyard)
-          # We grabbed a lock that is no longer stale — a competitor already
-          # took over. Restore it (without clobbering a still-newer holder)
-          # and back off.
-          restore_lock(graveyard)
-          return false
-        end
-
-        FileUtils.rm_f(graveyard)
-        true
-      rescue Errno::ENOENT
-        false
+      # @return [Boolean] true when a genuinely stale lock was retired
+      def retire_stale_lock?
+        retire_stale == :cleared
       end
 
       # Whether the lock file at +path+ carries this instance's token.
