@@ -25,8 +25,14 @@ module Woods
   #   serving N and knows it.
   #
   # The write itself is atomic ({AtomicFile}), so a reader never sees a torn
-  # generation file — though the *payload* it points at is still a directory
-  # of independently-written files, and closing that gap is separate work.
+  # generation file. It can also carry a **payload pointer** — the name of an
+  # immutable per-generation directory the payload was published into. When
+  # present, the single atomic write of this file is the one commit point for
+  # the whole payload: a reader resolves every artifact of a read through the
+  # directory this generation names, so it sees one generation whole rather
+  # than a mix of a manifest from N+1 next to a unit from N. The pointer is
+  # optional — an index written flat (payload files directly under the output
+  # directory) carries none, and readers fall back to the output directory.
   #
   # @example Publishing after a successful write
   #   Woods::Generation.new(output_dir: "tmp/woods").bump!(reason: "incremental")
@@ -45,10 +51,18 @@ module Woods
     #   @return [String, nil] ISO8601 stamp of the bump
     # @!attribute reason
     #   @return [String, nil] what produced this generation
-    Marker = Struct.new(:number, :token, :updated_at, :reason, keyword_init: true) do
-      # @return [Hash] string-keyed, ready to serialize
+    # @!attribute payload
+    #   @return [String, nil] name of the immutable directory this generation's
+    #     payload lives in, relative to the output directory. nil for an index
+    #     written flat (payload files directly under the output directory).
+    Marker = Struct.new(:number, :token, :updated_at, :reason, :payload, keyword_init: true) do
+      # @return [Hash] string-keyed, ready to serialize. The +payload+ key is
+      #   emitted only when set, so a flat index's generation file is byte-for-
+      #   byte what it always was.
       def to_h
-        { 'number' => number, 'token' => token, 'updated_at' => updated_at, 'reason' => reason }
+        base = { 'number' => number, 'token' => token, 'updated_at' => updated_at, 'reason' => reason }
+        base['payload'] = payload if payload
+        base
       end
     end
 
@@ -82,7 +96,8 @@ module Woods
         number: data['number'].to_i,
         token: data['token'],
         updated_at: data['updated_at'],
-        reason: data['reason']
+        reason: data['reason'],
+        payload: data['payload']
       )
     rescue JSON::ParserError, SystemCallError
       UNPUBLISHED
@@ -95,13 +110,18 @@ module Woods
     #
     # @param reason [String, nil] what produced this generation, for humans
     #   reading `woods_status`
+    # @param payload [String, nil] name of the immutable directory this
+    #   generation's payload was published into, relative to the output
+    #   directory. Omit for a flat index; when given, this bump becomes the
+    #   single commit point for that whole payload (see the class docs).
     # @return [Marker] the newly published generation
-    def bump!(reason: nil)
+    def bump!(reason: nil, payload: nil)
       marker = Marker.new(
         number: current.number + 1,
         token: SecureRandom.hex(8),
         updated_at: @clock.call,
-        reason: reason
+        reason: reason,
+        payload: payload
       )
       AtomicFile.write(@path, JSON.generate(marker.to_h))
       marker

@@ -72,6 +72,10 @@ module Woods
         @loaded_generation = nil
         @loaded_token = nil
         @generation_signature = nil
+        # The directory the loaded generation's payload lives in. nil until a
+        # generation naming a payload is loaded; {#payload_dir} then falls back
+        # to the index root, which is every flat/pre-pointer index.
+        @payload_dir = nil
       end
 
       # The generation this reader's caches were populated from.
@@ -124,11 +128,16 @@ module Woods
       # then holds it — so nothing already cached is dropped and re-read at a
       # newer generation partway through.
       #
-      # **What this does not do:** an artifact that has never been read is
-      # still loaded from whatever is on disk when the block reaches it.
+      # **What this does not do on a flat index:** an artifact that has never
+      # been read is loaded from whatever is on disk when the block reaches it.
       # Guaranteeing more would mean materializing the whole index on entry,
-      # which is what {#warmup!} costs, per request. Closing that last gap
-      # properly needs the payload behind an atomic pointer — see
+      # which is what {#warmup!} costs, per request. When the loaded generation
+      # names an immutable payload directory (its {Woods::Generation} carries a
+      # +payload+ pointer), that gap is closed for free: every read in the
+      # block resolves through {#payload_dir}, which is fixed at pin entry and
+      # names one immutable snapshot, so a never-read artifact still comes from
+      # the pinned generation even as a newer payload is published. A flat
+      # index carries no pointer and keeps the old behaviour — see
       # docs/WATCH_DAEMON.md.
       #
       # Pins are *refcounted*, not a boolean. Under a threaded transport two
@@ -245,7 +254,7 @@ module Woods
       def summary
         ensure_fresh!
         @summary ||= begin
-          path = @index_dir.join('SUMMARY.md')
+          path = payload_dir.join('SUMMARY.md')
           path.file? ? path.read : nil
         end
       end
@@ -633,8 +642,44 @@ module Woods
         return nil if marker.number.zero? || same_generation?(marker)
 
         reload!
+        @payload_dir = resolve_payload_dir(marker)
         @loaded_token = marker.token
         @loaded_generation = marker.number
+      end
+
+      # The directory the current read resolves payload artifacts against —
+      # manifest, summary, graph, per-type indexes and unit files. It is the
+      # immutable payload directory the loaded generation names, or the index
+      # root for a flat/pre-pointer index. Fixed for the life of a pin (only
+      # {#refresh_if_stale} moves it, and pins suppress refresh), so every
+      # artifact of a pinned read resolves through one generation.
+      #
+      # @return [Pathname]
+      def payload_dir
+        @payload_dir || @index_dir
+      end
+
+      # Resolve a generation's payload pointer to an on-disk directory.
+      #
+      # Returns the index root when there is no pointer (flat index), when the
+      # named directory does not exist (a stale pointer, e.g. a payload pruned
+      # by retention), or when the name would escape the index root — a torn or
+      # tampered pointer must degrade to the flat layout, never read outside the
+      # index. The name is written by Woods and is relative by contract; the
+      # containment check mirrors {IndexArtifact#promote}'s boundary guard.
+      #
+      # @param marker [Woods::Generation::Marker]
+      # @return [Pathname]
+      def resolve_payload_dir(marker)
+        name = marker.payload
+        return @index_dir if name.nil? || name.empty?
+
+        candidate = @index_dir.join(name)
+        root = @index_dir.expand_path.to_s
+        resolved = candidate.expand_path.to_s
+        return @index_dir unless resolved.start_with?("#{root}#{File::SEPARATOR}")
+
+        candidate.directory? ? candidate : @index_dir
       end
 
       # Compare the *token*, not the number.
@@ -765,7 +810,7 @@ module Woods
       def read_index(dir)
         @index_cache ||= {}
         @index_cache[dir] ||= begin
-          path = @index_dir.join(dir, '_index.json')
+          path = payload_dir.join(dir, '_index.json')
           path.file? ? JSON.parse(path.read) : []
         end
       end
@@ -786,7 +831,7 @@ module Woods
       # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
-        path = @index_dir.join(type_dir, filename)
+        path = payload_dir.join(type_dir, filename)
         open_unit(path.to_s) do |file|
           signature = unit_file_signature(file.stat)
           cached = @cache_mutex.synchronize do
@@ -831,9 +876,10 @@ module Woods
         File.open(path, 'rb', &block)
       end
 
-      # Parse a JSON file relative to the index directory.
+      # Parse a JSON payload file (manifest, graph, analysis) resolved through
+      # the loaded generation's {#payload_dir}.
       def parse_json(filename)
-        path = @index_dir.join(filename)
+        path = payload_dir.join(filename)
         JSON.parse(path.read)
       end
 
