@@ -71,9 +71,7 @@ def release_version(source)
   fail_release('lib/woods/version.rb must parse cleanly') unless parsed.success?
 
   versions = woods_version_assignments(parsed.value, [])
-  unless versions.one?
-    fail_release('lib/woods/version.rb must define exactly one literal Woods::VERSION string')
-  end
+  fail_release('lib/woods/version.rb must define exactly one literal Woods::VERSION string') unless versions.one?
 
   versions.first
 end
@@ -81,10 +79,7 @@ end
 def woods_version_assignments(node, nesting)
   case node
   when Prism::ModuleNode, Prism::ClassNode
-    path = constant_path_names(node.constant_path)
-    return [] unless path
-
-    node.child_nodes.compact.flat_map { |child| woods_version_assignments(child, nesting + path) }
+    namespace_version_assignments(node, nesting)
   when Prism::ConstantWriteNode
     literal_woods_version(node, nesting + [node.name.to_s])
   when Prism::ConstantPathWriteNode
@@ -95,8 +90,16 @@ def woods_version_assignments(node, nesting)
   end
 end
 
+def namespace_version_assignments(node, nesting)
+  path = constant_path_names(node.constant_path)
+  return [] unless path
+
+  node.child_nodes.compact.flat_map { |child| woods_version_assignments(child, nesting + path) }
+end
+
 def literal_woods_version(node, full_path)
   return [] unless full_path == %w[Woods VERSION]
+
   fail_release('Woods::VERSION must be a plain string literal') unless node.value.is_a?(Prism::StringNode)
 
   [node.value.unescaped]
