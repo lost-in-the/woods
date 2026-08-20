@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
+require 'rbconfig'
 require 'woods'
 require 'woods/cache/cache_store'
 require 'woods/cache/cache_middleware'
@@ -110,6 +112,11 @@ RSpec.describe Woods::Cache::InMemory do
     end
   end
 
+  it 'rejects a non-positive max_entries bound' do
+    expect { described_class.new(max_entries: 0) }
+      .to raise_error(ArgumentError, /max_entries must be a positive Integer/)
+  end
+
   describe 'LRU eviction' do
     it 'evicts the oldest entry when at capacity' do
       5.times { |i| store.write("key:#{i}", "val#{i}") }
@@ -203,7 +210,12 @@ RSpec.describe Woods::Cache do
 
     it 'concatenates multiple parts' do
       key = described_class.cache_key(:context, 'query', '8000')
-      expect(key).to eq('woods:cache:context:query:8000')
+      expect(key).to start_with('woods:cache:context:')
+    end
+
+    it 'does not collide when separators appear inside different parts' do
+      expect(described_class.cache_key(:context, 'a:b', 'c'))
+        .not_to eq(described_class.cache_key(:context, 'a', 'b:c'))
     end
   end
 end
@@ -915,6 +927,15 @@ RSpec.describe Woods::Cache::RedisCacheStore do
       expect(store.read('k')).to eq([0.1, 0.2])
     end
 
+    it 'raises serializer errors before touching Redis' do
+      cyclic = []
+      cyclic << cyclic
+      allow(redis_double).to receive(:set)
+
+      expect { store.write('k', cyclic) }.to raise_error(JSON::NestingError)
+      expect(redis_double).not_to have_received(:set)
+    end
+
     it 'returns nil for missing keys' do
       allow(redis_double).to receive(:get).with('k').and_return(nil)
       expect(store.read('k')).to be_nil
@@ -973,6 +994,22 @@ RSpec.describe Woods::Cache::RedisCacheStore do
       expect(redis_double).to have_received(:del).with('k')
     end
   end
+
+  describe 'missing dependency' do
+    it 'raises an actionable error in a process without the redis gem' do
+      script = <<~RUBY
+        require 'woods'
+        require 'woods/cache/redis_cache_store'
+        Woods::Cache::RedisCacheStore.new(redis: Object.new)
+      RUBY
+      _stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script
+      )
+
+      expect(status).not_to be_success
+      expect(stderr).to include('redis gem is required')
+    end
+  end
 end
 
 # ── SolidCacheStore ───────────────────────────────────────────────────
@@ -988,6 +1025,15 @@ RSpec.describe Woods::Cache::SolidCacheStore do
 
       store.write('k', [0.1, 0.2])
       expect(store.read('k')).to eq([0.1, 0.2])
+    end
+
+    it 'raises serializer errors before touching the backend' do
+      cyclic = []
+      cyclic << cyclic
+      allow(cache_double).to receive(:write)
+
+      expect { store.write('k', cyclic) }.to raise_error(JSON::NestingError)
+      expect(cache_double).not_to have_received(:write)
     end
 
     it 'returns nil for missing keys' do

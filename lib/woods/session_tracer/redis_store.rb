@@ -19,10 +19,13 @@ module Woods
     class RedisStore < Store
       KEY_PREFIX = 'woods:session:'
       SESSIONS_KEY = 'woods:sessions'
+      DEFAULT_MAX_SESSIONS = 1_000
+      DEFAULT_MAX_REQUESTS = 1_000
 
       # @param redis [Redis] A Redis client instance
       # @param ttl [Integer, nil] Time-to-live in seconds for session keys (nil = no expiry)
-      def initialize(redis:, ttl: nil)
+      def initialize(redis:, ttl: nil, max_sessions: DEFAULT_MAX_SESSIONS,
+                     max_requests_per_session: DEFAULT_MAX_REQUESTS)
         super()
         unless defined?(::Redis)
           raise SessionTracerError, 'The redis gem is required for RedisStore. Add `gem "redis"` to your Gemfile.'
@@ -30,6 +33,8 @@ module Woods
 
         @redis = redis
         @ttl = ttl
+        @max_sessions = max_sessions
+        @max_requests_per_session = max_requests_per_session
       end
 
       # Append a request record to a session's Redis List.
@@ -40,8 +45,10 @@ module Woods
       def record(session_id, request_data)
         key = session_key(session_id)
         @redis.rpush(key, JSON.generate(request_data))
+        @redis.ltrim(key, -@max_requests_per_session, -1)
         @redis.expire(key, @ttl) if @ttl
         @redis.sadd(SESSIONS_KEY, session_id)
+        prune_sessions(session_id)
       end
 
       # Read all request records for a session.
@@ -111,6 +118,18 @@ module Woods
       # @return [String] Redis key for this session
       def session_key(session_id)
         "#{KEY_PREFIX}#{sanitize_session_id(session_id)}"
+      end
+
+      def prune_sessions(current_session_id)
+        ids = @redis.smembers(SESSIONS_KEY)
+        overflow = ids.size - @max_sessions
+        return unless overflow.positive?
+
+        victims = ids.reject { |id| id == current_session_id }.first(overflow)
+        victims.each do |id|
+          @redis.del(session_key(id))
+          @redis.srem(SESSIONS_KEY, id)
+        end
       end
 
       # Sort key for {#sessions}: most recent request first.

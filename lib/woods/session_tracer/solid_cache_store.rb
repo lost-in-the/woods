@@ -17,13 +17,19 @@ module Woods
     class SolidCacheStore < Store
       KEY_PREFIX = 'woods:session:'
       INDEX_KEY = 'woods:session_index'
+      DEFAULT_MAX_SESSIONS = 1_000
+      DEFAULT_MAX_REQUESTS = 1_000
 
       # @param cache [ActiveSupport::Cache::Store] A SolidCache (or compatible) cache instance
       # @param expires_in [Integer, nil] Expiry time in seconds (nil = no expiry)
-      def initialize(cache:, expires_in: nil)
+      def initialize(cache:, expires_in: nil, max_sessions: DEFAULT_MAX_SESSIONS,
+                     max_requests_per_session: DEFAULT_MAX_REQUESTS)
         super()
         @cache = cache
         @expires_in = expires_in
+        @max_sessions = max_sessions
+        @max_requests_per_session = max_requests_per_session
+        @mutex = Mutex.new
       end
 
       # Append a request record to a session (read-modify-write).
@@ -36,15 +42,18 @@ module Woods
       # @param request_data [Hash] Request metadata to store
       # @return [void]
       def record(session_id, request_data)
-        key = session_key(session_id)
-        existing = @cache.read(key)
-        requests = existing ? JSON.parse(existing) : []
-        requests << request_data
+        @mutex.synchronize do
+          key = session_key(session_id)
+          existing = @cache.read(key)
+          requests = existing ? JSON.parse(existing) : []
+          requests << request_data
+          requests = requests.last(@max_requests_per_session)
 
-        write_opts = @expires_in ? { expires_in: @expires_in } : {}
-        @cache.write(key, JSON.generate(requests), **write_opts)
+          write_opts = @expires_in ? { expires_in: @expires_in } : {}
+          @cache.write(key, JSON.generate(requests), **write_opts)
 
-        update_index(session_id)
+          update_index(session_id)
+        end
       end
 
       # Read all request records for a session.
@@ -52,11 +61,13 @@ module Woods
       # @param session_id [String] The session identifier
       # @return [Array<Hash>] Request records, oldest first
       def read(session_id)
-        key = session_key(session_id)
-        raw = @cache.read(key)
-        return [] unless raw
+        @mutex.synchronize do
+          key = session_key(session_id)
+          raw = @cache.read(key)
+          return [] unless raw
 
-        JSON.parse(raw)
+          JSON.parse(raw)
+        end
       rescue JSON::ParserError
         []
       end
@@ -129,9 +140,10 @@ module Woods
       # @param session_id [String]
       def update_index(session_id)
         index = read_index
-        return if index.include?(session_id)
-
+        index.delete(session_id)
         index << session_id
+        stale = index.shift([index.size - @max_sessions, 0].max)
+        stale.each { |id| @cache.delete(session_key(id)) }
         write_index(index)
       end
     end

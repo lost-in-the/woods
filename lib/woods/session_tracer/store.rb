@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'base64'
+
 module Woods
   module SessionTracer
     # Abstract store interface for session trace data.
@@ -60,7 +62,18 @@ module Woods
       # @param session_id [String] Raw session identifier
       # @return [String] Sanitized identifier (alphanumeric, hyphens, underscores only)
       def sanitize_session_id(session_id)
-        session_id.to_s.gsub(/[^a-zA-Z0-9_-]/, '_')
+        raw = session_id.to_s
+        raise ArgumentError, 'session_id exceeds 180 bytes' if raw.bytesize > 180
+
+        "b64.#{Base64.urlsafe_encode64(raw, padding: false)}"
+      end
+
+      def restore_session_id(encoded)
+        return encoded unless encoded.start_with?('b64.')
+
+        Base64.urlsafe_decode64(encoded.delete_prefix('b64.'))
+      rescue ArgumentError
+        encoded
       end
 
       # Build a session summary hash from a session ID and its requests.

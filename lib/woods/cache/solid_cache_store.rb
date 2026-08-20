@@ -56,10 +56,12 @@ module Woods
         effective_ttl = ttl || @default_ttl
 
         opts = effective_ttl ? { expires_in: effective_ttl } : {}
-        @cache.write(key, serialized, **opts)
-      rescue StandardError => e
-        logger.warn("[Woods] SolidCacheStore#write failed for #{key}: #{e.message}")
-        nil
+        begin
+          @cache.write(key, serialized, **opts)
+        rescue StandardError => e
+          logger.warn("[Woods] SolidCacheStore#write failed for #{key}: #{e.message}")
+          nil
+        end
       end
 
       # Delete a key from the cache.

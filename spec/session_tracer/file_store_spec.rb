@@ -65,8 +65,16 @@ RSpec.describe Woods::SessionTracer::FileStore do
       expect(results.size).to eq(1)
     end
 
+    it 'keeps formerly colliding session IDs isolated' do
+      store.record('account/a', request_data.merge('action' => 'slash'))
+      store.record('account?a', request_data.merge('action' => 'question'))
+
+      expect(store.read('account/a').first['action']).to eq('slash')
+      expect(store.read('account?a').first['action']).to eq('question')
+    end
+
     it 'skips corrupt lines gracefully' do
-      path = File.join(base_dir, 'corrupt.jsonl')
+      path = store.send(:session_path, 'corrupt')
       File.write(path, "{\"valid\":true}\nnot json\n{\"also\":\"valid\"}\n")
 
       results = store.read('corrupt')
@@ -148,6 +156,41 @@ RSpec.describe Woods::SessionTracer::FileStore do
 
       results = store.read('concurrent')
       expect(results.size).to eq(5)
+    end
+  end
+
+  describe 'retention bounds' do
+    it 'keeps only the newest requests per session' do
+      bounded = described_class.new(base_dir: base_dir, max_requests_per_session: 2)
+      3.times { |i| bounded.record('sess1', request_data.merge('action' => "action_#{i}")) }
+
+      expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(%w[action_1 action_2])
+    end
+
+    it 'keeps the number of session files bounded' do
+      bounded = described_class.new(base_dir: base_dir, max_sessions: 2)
+      3.times { |i| bounded.record("sess#{i}", request_data.merge('timestamp' => "2026-02-13T10:0#{i}:00Z")) }
+
+      expect(bounded.sessions(limit: 10).size).to eq(2)
+    end
+
+    it 'expires stale sessions by TTL' do
+      now = Time.now
+      clock = -> { now }
+      expiring = described_class.new(base_dir: base_dir, ttl: 60, clock: clock)
+      expiring.record('sess1', request_data)
+      now += 61
+
+      expect(expiring.read('sess1')).to eq([])
+      expect(expiring.sessions).to eq([])
+    end
+
+    it 'does not append a partial record when serialization fails' do
+      cyclic = {}
+      cyclic['self'] = cyclic
+
+      expect { store.record('sess1', cyclic) }.to raise_error(JSON::NestingError)
+      expect(store.read('sess1')).to eq([])
     end
   end
 end

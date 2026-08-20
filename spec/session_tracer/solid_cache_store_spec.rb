@@ -2,6 +2,8 @@
 
 require 'spec_helper'
 require 'json'
+require 'open3'
+require 'rbconfig'
 require 'woods/session_tracer/solid_cache_store'
 
 # Minimal in-memory cache mock compatible with ActiveSupport::Cache::Store interface.
@@ -12,6 +14,7 @@ class MockCache
   end
 
   def read(key)
+    Thread.pass
     @data[key]
   end
 
@@ -71,6 +74,23 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
     it 'returns empty array for unknown session' do
       expect(store.read('nonexistent')).to eq([])
     end
+
+    it 'keeps formerly colliding session IDs isolated' do
+      store.record('account/a', request_data.merge('action' => 'slash'))
+      store.record('account?a', request_data.merge('action' => 'question'))
+
+      expect(store.read('account/a').first['action']).to eq('slash')
+      expect(store.read('account?a').first['action']).to eq('question')
+    end
+
+    it 'does not lose concurrent updates to one session' do
+      threads = 20.times.map do |i|
+        Thread.new { store.record('sess1', request_data.merge('action' => "action_#{i}")) }
+      end
+      threads.each(&:join)
+
+      expect(store.read('sess1').size).to eq(20)
+    end
   end
 
   describe '#sessions' do
@@ -120,9 +140,62 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
   end
 
   describe 'expires_in support' do
-    it 'accepts expires_in parameter' do
+    it 'passes expires_in to the session write' do
+      allow(cache).to receive(:write).and_call_original
       store_with_expiry = described_class.new(cache: cache, expires_in: 3600)
-      expect { store_with_expiry.record('sess1', request_data) }.not_to raise_error
+      store_with_expiry.record('sess1', request_data)
+
+      expect(cache).to have_received(:write).with(kind_of(String), kind_of(String), expires_in: 3600)
+    end
+  end
+
+  describe 'retention bounds' do
+    it 'keeps only the newest requests per session' do
+      bounded = described_class.new(cache: cache, max_requests_per_session: 2)
+      3.times { |i| bounded.record('sess1', request_data.merge('action' => "action_#{i}")) }
+
+      expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(%w[action_1 action_2])
+    end
+
+    it 'bounds the session index' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      3.times { |i| bounded.record("sess#{i}", request_data) }
+
+      expect(bounded.sessions(limit: 10).size).to eq(2)
+    end
+
+    it 'does not mutate the cache when serialization fails' do
+      cyclic = {}
+      cyclic['self'] = cyclic
+
+      expect { store.record('sess1', cyclic) }.to raise_error(JSON::NestingError)
+      expect(store.read('sess1')).to eq([])
+    end
+  end
+
+  describe 'dependency absence' do
+    it 'works with an injected compatible cache without loading solid_cache' do
+      script = <<~RUBY
+        require 'woods'
+        require 'woods/session_tracer/solid_cache_store'
+        cache = Class.new do
+          def initialize = (@data = {})
+          def read(key) = @data[key]
+          def write(key, value, **) = (@data[key] = value)
+          def delete(key) = @data.delete(key)
+          def exist?(key) = @data.key?(key)
+        end.new
+        store = Woods::SessionTracer::SolidCacheStore.new(cache: cache)
+        store.record('session', { 'timestamp' => '2026-01-01T00:00:00Z' })
+        abort 'solid_cache unexpectedly loaded' if defined?(SolidCache)
+        print store.read('session').length
+      RUBY
+      stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script
+      )
+
+      expect(status).to be_success, stderr
+      expect(stdout).to eq('1')
     end
   end
 end

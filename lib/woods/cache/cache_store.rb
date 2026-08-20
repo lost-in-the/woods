@@ -25,7 +25,11 @@ module Woods
     # @param parts [Array<String>] Key components (will be SHA256-hashed if long)
     # @return [String] Namespaced key
     def self.cache_key(domain, *parts)
-      raw = parts.join(':')
+      raw = if parts.one?
+              parts.first.to_s
+            else
+              parts.map { |part| "#{part.to_s.bytesize}:#{part}" }.join
+            end
       suffix = raw.length > 64 ? Digest::SHA256.hexdigest(raw) : raw
       "woods:cache:#{domain}:#{suffix}"
     end
@@ -148,6 +152,10 @@ module Woods
       # @param max_entries [Integer] Maximum cached entries before LRU eviction
       def initialize(max_entries: 500)
         super()
+        unless max_entries.is_a?(Integer) && max_entries.positive?
+          raise ArgumentError, 'max_entries must be a positive Integer'
+        end
+
         @max_entries = max_entries
         @entries = {}
         @access_order = []
