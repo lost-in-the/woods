@@ -208,48 +208,38 @@ A mid-size Rails app (50-100 models, typical controller and service layer) takes
 
 ### What's the difference between the Index Server and the Console Server?
 
-The Index Server reads pre-extracted JSON from disk and does not require Rails. It provides 27 tools for querying extracted codebase structure, dependency graphs, semantic search, and temporal snapshots. The Console Server connects to a live Rails application and provides 31 tools for querying real database records, running diagnostics, and monitoring job queues. Use the Index Server for structural/architectural questions; use the Console Server for live data and runtime diagnostics.
+The Index Server reads pre-extracted JSON from disk and does not require Rails.
+The Console Server connects to a live Rails application and registers 9
+read-only model/schema tools by default, with `console_sql` and `console_query`
+available through explicit read-tool configuration.
 
 ---
 
-### Why do I only see 9 console tools instead of 31?
+### Why do I only see 9 console tools?
 
-You're using the embedded console mode (launched via `rake woods:console` or `docker compose exec ... rake woods:console`). Embedded mode intentionally exposes only the 9 Tier 1 read-only tools (count, sample, find, pluck, aggregate, association_count, schema, recent, status). To access all 31 tools across all 4 tiers, use the bridge architecture. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) Option D for bridge setup.
+That is the default supported surface: count, sample, find, pluck, aggregate,
+association_count, schema, recent, and status. Enable
+`console_embedded_read_tools` to register SQL and query as well. The remaining
+schemas are inventory only.
 
 ---
 
 ### Is the Console Server safe to use?
 
-The Console Server implements five defense-in-depth layers: a feature gate (`console_mcp_enabled`, default `false`), a conservative `DEFAULT_CONSOLE_BLOCKED_TABLES` list covering `users`, `accounts`, `sessions`, `api_keys`, `credentials`, `oauth_applications`, `oauth_access_tokens`, and `active_storage_blobs`, a `CredentialScanner` that redacts credential-shaped values, column-name-based redaction via `DEFAULT_CONSOLE_REDACTED_COLUMNS`, and `SqlValidator` + rolled-back transactions on every query. Tier 4 tools (eval, raw SQL) require explicit human confirmation. These layers are defense-in-depth, not primary controls — the Console Server is a development/staging tool and should stay disabled in production regardless of configuration. See [CONSOLE_MCP_SETUP.md — Safety Model](CONSOLE_MCP_SETUP.md#safety-model) for the full breakdown.
+The executable tools enforce the feature gate, blocked-table checks,
+credential scanning, configured column/EAV redaction, and rolled-back
+transactions. `console_sql` also runs through `SqlValidator`. These controls
+are defense in depth, not a primary authorization boundary.
 
 ---
 
-### How do I get access to all 31 console tools?
+### How do I get access to SQL and structured query tools?
 
-Switch from the embedded mode (Tier 1 only) to the bridge architecture (all 4 tiers). The bridge runs `woods-console-mcp` on the host and connects to a bridge process inside the Rails environment.
+Set `config.console_embedded_read_tools = true` in `Woods.configure`, or pass
+`embedded_read_tools: true` when mounting the Rack middleware. Tier 2, Tier 3,
+and `console_eval` are not registered in a supported mode.
 
-1. Create `~/.woods/console.yml`:
-
-```yaml
-connection:
-  mode: docker
-  service: app
-  compose_file: docker-compose.yml
-```
-
-2. Update `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "codebase-console": {
-      "command": "woods-console-mcp"
-    }
-  }
-}
-```
-
-See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for the full bridge setup guide.
+See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for setup details.
 
 ---
 
@@ -280,12 +270,12 @@ See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker architecture guide.
 
 The Index Server is looking at the wrong path — specifically the container-internal path rather than the host-side path. The Index Server runs on the host and reads from the volume-mounted output directory.
 
-```json
+```jsonc
 {
   "mcpServers": {
     "codebase": {
       "command": "woods-mcp-start",
-      "args": ["./tmp/woods"]    ✓ host path
+      "args": ["./tmp/woods"]    // host path (NOT the container /app/tmp/woods)
     }
   }
 }
@@ -311,7 +301,9 @@ For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose 
 }
 ```
 
-The `-i` flag is required to keep stdin attached for MCP protocol communication. For all 31 tools, use the bridge architecture instead. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for both configurations with complete examples.
+The `-i` flag is required to keep stdin attached for MCP protocol
+communication. Enable `console_embedded_read_tools` when SQL/query should also
+be registered. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete examples.
 
 ---
 
@@ -557,6 +549,6 @@ Quick links:
 
 - Extraction produces empty output → [Extraction Problems](TROUBLESHOOTING.md#extraction-produces-empty-or-incomplete-output)
 - "No manifest.json" error → [MCP Server Problems](TROUBLESHOOTING.md#no-manifestjson-error-when-starting-the-index-server)
-- Only 9 console tools visible → [MCP Server Problems](TROUBLESHOOTING.md#tier-2-4-console-tools-return-unsupported-in-embedded-mode)
+- Only 9 console tools visible → [MCP Server Problems](TROUBLESHOOTING.md#a-console-inventory-tool-is-not-listed)
 - Docker path confusion → [Docker Problems](TROUBLESHOOTING.md#path-confusion-index-server-uses-container-path)
 - Dimension mismatch on embeddings → [Embedding Problems](TROUBLESHOOTING.md#dimension-mismatch-error-when-querying-embeddings)

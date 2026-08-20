@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'json'
-require 'open3'
 require 'shellwords'
 
 # @see Woods
@@ -11,162 +9,79 @@ module Woods
   module Console
     class ConnectionError < Woods::Error; end
 
-    # Manages the bridge process connection via Docker exec, direct spawn, or SSH.
+    # Resolves and launches an embedded Console MCP process.
     #
-    # Spawns and manages the bridge process, sends JSON-lines requests,
-    # receives responses. Implements heartbeat (30s) and reconnect with
-    # exponential backoff (max 5 retries).
-    #
-    # @example
-    #   manager = ConnectionManager.new(config: {
-    #     'mode' => 'direct',
-    #     'command' => 'bundle exec rails runner bridge.rb'
-    #   })
-    #   manager.connect!
-    #   response = manager.send_request({ 'id' => 'r1', 'tool' => 'status', 'params' => {} })
-    #   manager.disconnect!
-    #
+    # The former implementation spoke a private JSON-lines bridge protocol to
+    # a scaffold that returned static data. The supported path now forwards the
+    # MCP client's stdio directly to the real embedded server by replacing this
+    # process with a direct, Docker, or SSH command.
     class ConnectionManager
-      MAX_RETRIES = 5
-      HEARTBEAT_INTERVAL = 30
+      DEFAULT_COMMAND = 'bundle exec rake woods:console'
 
-      # @param config [Hash] Connection configuration
-      # @option config [String] 'mode' Connection mode: 'docker', 'direct', or 'ssh'
-      # @option config [String] 'command' Command to run the bridge
-      # @option config [String] 'container' Docker container name (docker mode)
-      # @option config [String] 'directory' Working directory (direct mode)
-      # @option config [String] 'host' SSH host (ssh mode)
-      # @option config [String] 'user' SSH user (ssh mode)
+      # @param config [Hash] Process-launch configuration
+      # @option config [String] 'mode' direct, docker, or ssh (default: direct)
+      # @option config [String] 'command' Embedded server command
+      # @option config [String] 'directory' Working directory for direct mode
+      # @option config [String] 'container' Container name for docker mode
+      # @option config [String] 'host' SSH host for ssh mode
+      # @option config [String] 'user' Optional SSH user
       def initialize(config:)
         @config = config
-        @mode = config['mode'] || 'direct'
-        @command = config['command'] || 'bundle exec rails runner lib/woods/console/bridge.rb'
-        @stdin = nil
-        @stdout = nil
-        @wait_thread = nil
-        @retries = 0
-        @last_heartbeat = nil
+        @mode = config.fetch('mode', 'direct')
+        @embedded_command = config.fetch('command', DEFAULT_COMMAND)
       end
 
-      # Spawn the bridge process.
-      #
-      # @return [void]
-      # @raise [ConnectionError] if the process cannot be started
-      def connect!
-        cmd = build_command
-        if @mode == 'direct' && @config['directory']
-          Dir.chdir(@config['directory']) do
-            @stdin, @stdout, @wait_thread = Open3.popen2(*cmd)
-          end
-        else
-          @stdin, @stdout, @wait_thread = Open3.popen2(*cmd)
-        end
-        @last_heartbeat = Time.now
-        @retries = 0
-      rescue StandardError => e
-        raise ConnectionError, "Failed to connect (#{@mode}): #{e.message}"
-      end
-
-      # Terminate the bridge process.
-      #
-      # @return [void]
-      def disconnect!
-        @stdin&.close
-        @stdout&.close
-        @wait_thread&.value
-        @stdin = nil
-        @stdout = nil
-        @wait_thread = nil
-      end
-
-      # Send a request to the bridge and read the response.
-      #
-      # @param request [Hash] JSON-serializable request hash
-      # @return [Hash] Parsed response hash
-      # @raise [ConnectionError] if communication fails after retries
-      def send_request(request)
-        ensure_connected!
-        @stdin.puts(JSON.generate(request))
-        @stdin.flush
-        line = @stdout.gets
-        raise ConnectionError, 'Bridge process closed unexpectedly' unless line
-
-        @last_heartbeat = Time.now
-        JSON.parse(line)
-      rescue IOError, Errno::EPIPE, Errno::ECONNRESET => e
-        reconnect_or_raise!(e)
-        retry
-      end
-
-      # Check if the bridge process is alive.
-      #
-      # @return [Boolean]
-      def alive?
-        return false unless @wait_thread
-
-        @wait_thread.alive?
-      end
-
-      # Check if a heartbeat is needed (30s since last communication).
-      #
-      # @return [Boolean]
-      def heartbeat_needed?
-        return false unless @last_heartbeat
-
-        (Time.now - @last_heartbeat) >= HEARTBEAT_INTERVAL
-      end
-
-      private
-
-      # Build the shell command based on connection mode.
+      # Return the argv used to launch the embedded MCP server.
       #
       # @return [Array<String>]
-      def build_command
+      # @raise [ConnectionError] when the mode is invalid or incomplete
+      def command
         case @mode
-        when 'docker' then build_docker_command
-        when 'ssh'    then build_ssh_command
-        when 'direct' then build_direct_command
+        when 'direct' then embedded_argv
+        when 'docker' then docker_command
+        when 'ssh' then ssh_command
         else raise ConnectionError, "Unknown connection mode: #{@mode}"
         end
       end
 
-      def build_docker_command
-        container = @config['container'] || raise(ConnectionError, 'Docker mode requires container name')
-        ['docker', 'exec', '-i', container] + @command.shellsplit
-      end
-
-      def build_ssh_command
-        host = @config['host'] || raise(ConnectionError, 'SSH mode requires host')
-        user = @config['user']
-        target = user ? "#{user}@#{host}" : host
-        ['ssh', target] + @command.shellsplit
-      end
-
-      def build_direct_command
-        @command.shellsplit
-      end
-
-      # Ensure the connection is active.
-      def ensure_connected!
-        return if alive?
-
-        connect!
-      end
-
-      # Attempt reconnection with exponential backoff.
+      # Replace the current process with the embedded MCP server.
       #
-      # @param error [StandardError] The original error
-      # @raise [ConnectionError] if max retries exceeded
-      def reconnect_or_raise!(error)
-        @retries += 1
-        if @retries > MAX_RETRIES
-          raise ConnectionError,
-                "Connection failed after #{MAX_RETRIES} retries: #{error.message}"
+      # Process replacement gives the MCP client direct ownership of lifecycle:
+      # EOF, INT, and TERM reach the real server without an intermediate process
+      # that can hang while waiting for a child.
+      #
+      # @return [void]
+      # @raise [ConnectionError] when the process cannot be launched
+      def replace_process!
+        if @mode == 'direct' && @config['directory']
+          Dir.chdir(@config['directory']) { exec(*command) }
+        else
+          exec(*command)
         end
+      rescue SystemCallError, ArgumentError => e
+        raise ConnectionError, "Failed to launch embedded Console MCP (#{@mode}): #{e.message}"
+      end
 
-        sleep((2**(@retries - 1)) * 0.1)
-        disconnect!
-        connect!
+      private
+
+      def embedded_argv
+        argv = @embedded_command.to_s.shellsplit
+        raise ConnectionError, 'Console command must not be empty' if argv.empty?
+
+        argv
+      rescue ArgumentError => e
+        raise ConnectionError, "Invalid console command: #{e.message}"
+      end
+
+      def docker_command
+        container = @config['container'] || raise(ConnectionError, 'Docker mode requires container name')
+        ['docker', 'exec', '-i', container] + embedded_argv
+      end
+
+      def ssh_command
+        host = @config['host'] || raise(ConnectionError, 'SSH mode requires host')
+        target = @config['user'] ? "#{@config['user']}@#{host}" : host
+        ['ssh', target] + embedded_argv
       end
     end
   end

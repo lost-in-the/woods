@@ -3,6 +3,7 @@
 require 'ipaddr'
 require 'net/http'
 require 'json'
+require 'openssl'
 require 'socket'
 require 'uri'
 require_relative 'vector_store'
@@ -25,6 +26,26 @@ module Woods
       #
       class Qdrant # rubocop:disable Metrics/ClassLength
         include Interface
+
+        class RequestError < Woods::Error
+          attr_reader :http_status, :retry_after
+
+          def initialize(message, http_status: nil, retry_after: nil, retryable: false, ambiguous: false)
+            super(message)
+            @http_status = http_status
+            @retry_after = retry_after
+            @retryable = retryable
+            @ambiguous = ambiguous
+          end
+
+          def retryable?
+            @retryable
+          end
+
+          def ambiguous?
+            @ambiguous
+          end
+        end
 
         # URL schemes allowed for the Qdrant endpoint. `file://`, `gopher://`,
         # and anything else would let a misconfigured or attacker-controlled
@@ -105,6 +126,7 @@ module Woods
         # sizable index costs few round trips, small enough that one response
         # stays comfortably in memory (ids and one payload key only).
         SCROLL_PAGE_SIZE = 1_000
+        DISTANCES = %w[Cosine Dot Euclid Manhattan].freeze
 
         # Payload key holding the original Woods identifier for a point.
         #
@@ -128,12 +150,13 @@ module Woods
         #   by default to block the common SSRF footgun. Set to true when the
         #   operator intentionally runs Qdrant on `localhost:6333` or inside
         #   a private network.
-        def initialize(url:, collection:, api_key: nil, dimensions: nil, allow_private_hosts: false)
+        def initialize(url:, collection:, api_key: nil, dimensions: nil, distance: 'Cosine', allow_private_hosts: false) # rubocop:disable Metrics/ParameterLists
           @uri = self.class.validate_url!(url, allow_private_hosts: allow_private_hosts)
           @url = url
           @collection = collection
           @api_key = api_key
           @dimensions = dimensions
+          @distance = normalize_distance(distance)
         end
 
         # Validate a Qdrant endpoint URL — scheme in {ALLOWED_SCHEMES} and,
@@ -233,14 +256,17 @@ module Woods
         #
         # @param dimensions [Integer] Vector dimensionality
         def ensure_collection!(dimensions:)
-          @dimensions ||= dimensions
-          body = {
-            vectors: {
-              size: dimensions,
-              distance: 'Cosine'
-            }
-          }
-          request(:put, "/collections/#{@collection}", body)
+          dimensions = normalize_dimensions(dimensions)
+          validate_configured_dimensions!(dimensions)
+          @dimensions = dimensions
+          existing = request(:get, "/collections/#{@collection}")
+          verify_collection_dimensions!(existing, dimensions)
+          true
+        rescue RequestError => e
+          raise unless e.http_status == 404
+
+          create_collection!(dimensions)
+          true
         end
 
         # Deterministic Qdrant point id for a Woods identifier.
@@ -347,14 +373,10 @@ module Woods
         #   collection does not exist or the shape is unrecognized (named
         #   vectors, for instance, which this adapter does not write)
         def stored_dimensions
-          config = request(:get, "/collections/#{@collection}")
-                   .dig('result', 'config', 'params', 'vectors')
-          return nil unless config.is_a?(Hash)
+          extract_dimensions(request(:get, "/collections/#{@collection}"))
+        rescue RequestError => e
+          raise unless e.http_status == 404
 
-          size = config['size']
-          size.is_a?(Integer) && size.positive? ? size : nil
-        rescue StandardError
-          # Never let a diagnostic query break the pipeline it is diagnosing.
           nil
         end
 
@@ -408,6 +430,64 @@ module Woods
         end
 
         private
+
+        def normalize_dimensions(value)
+          dimensions = Integer(value)
+          raise ArgumentError, 'dimensions must be positive' unless dimensions.positive?
+
+          dimensions
+        end
+
+        def normalize_distance(value)
+          distance = DISTANCES.find { |candidate| candidate.casecmp?(value.to_s) }
+          return distance if distance
+
+          raise ArgumentError, "distance must be one of #{DISTANCES.join(', ')}"
+        end
+
+        def validate_configured_dimensions!(dimensions)
+          return unless @dimensions && Integer(@dimensions) != dimensions
+
+          raise Woods::ConfigurationError,
+                "Qdrant dimension mismatch: Builder requested #{dimensions}, " \
+                "but vector_store_options configured #{@dimensions}"
+        end
+
+        def verify_collection_dimensions!(response, dimensions)
+          vectors = response.dig('result', 'config', 'params', 'vectors')
+          unless vectors.is_a?(Hash) && vectors['size']
+            raise Woods::ConfigurationError,
+                  "Qdrant collection #{@collection.inspect} uses named vectors; named vectors are not supported " \
+                  'by this unnamed-vector adapter.'
+          end
+          existing_dimensions = vectors['size']
+          if existing_dimensions != dimensions
+            raise Woods::ConfigurationError,
+                  "Qdrant collection dimension mismatch: configured #{dimensions}, existing #{existing_dimensions}. " \
+                  'Use a new collection or rebuild the existing collection.'
+          end
+          return if vectors['distance'] == @distance
+
+          raise Woods::ConfigurationError,
+                "Qdrant collection distance mismatch: configured #{@distance}, existing #{vectors['distance']}. " \
+                'Use a new collection or rebuild the existing collection.'
+        end
+
+        def create_collection!(dimensions)
+          request(
+            :put,
+            "/collections/#{@collection}",
+            vectors: { size: dimensions, distance: @distance }
+          )
+        end
+
+        def extract_dimensions(response)
+          config = response.dig('result', 'config', 'params', 'vectors')
+          return unless config.is_a?(Hash)
+
+          size = config['size']
+          size if size.is_a?(Integer) && size.positive?
+        end
 
         # Fetch one page of the scroll cursor.
         #
@@ -501,22 +581,77 @@ module Woods
         # @raise [Woods::Error] if the API returns a non-success status
         def request(method, path, body = nil)
           req = build_request(method, path, body)
-          response = http_client.request(req)
+          attempt = 0
 
-          unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Qdrant API error: #{response.code} #{truncate_response_body(response.body)}"
+          begin
+            attempt += 1
+            response = http_client.request(req)
+            parse_response(response, path)
+          rescue OpenSSL::SSL::SSLError => e
+            @http_client = nil
+            raise RequestError, "Qdrant TLS error: #{e.message}"
+          rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout => e
+            @http_client = nil
+            retry if attempt == 1
+
+            raise transport_error(e, ambiguous: false)
+          rescue Errno::ECONNRESET, Net::ReadTimeout, Net::WriteTimeout, IOError => e
+            @http_client = nil
+            retry if attempt == 1 && retry_safe?(method, path) && !write_request?(method, path)
+
+            raise transport_error(e, ambiguous: write_request?(method, path))
           end
+        end
+
+        def parse_response(response, path)
+          raise response_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
-        rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
-          # Connection dropped — reset and retry once
-          @http_client = nil
-          response = http_client.request(req)
-          unless response.is_a?(Net::HTTPSuccess)
-            raise Woods::Error, "Qdrant API error: #{response.code} #{truncate_response_body(response.body)}"
-          end
+        rescue JSON::ParserError => e
+          raise RequestError.new(
+            "Qdrant API returned malformed JSON for #{path}: #{e.message}",
+            http_status: response.code.to_i
+          )
+        end
 
-          JSON.parse(response.body)
+        def response_error(response)
+          status = response.code.to_i
+          RequestError.new(
+            "Qdrant API error: #{status} #{truncate_response_body(response.body)}",
+            http_status: status,
+            retry_after: response['Retry-After'],
+            retryable: status == 408 || status == 429 || status >= 500
+          )
+        end
+
+        def transport_error(error, ambiguous:)
+          RequestError.new(
+            "Qdrant transport error: #{error.class}: #{error.message}",
+            retryable: true,
+            ambiguous: ambiguous
+          )
+        end
+
+        def retry_safe?(method, path)
+          return true if %i[get put delete].include?(method)
+
+          method == :post && idempotent_post?(path)
+        end
+
+        def idempotent_post?(path)
+          path_without_query = path.split('?').first
+          %w[/search /count /scroll /delete].any? { |suffix| path_without_query.end_with?(suffix) }
+        end
+
+        def write_request?(method, path)
+          return false if method == :get
+          return false if method == :post && read_only_post?(path)
+
+          true
+        end
+
+        def read_only_post?(path)
+          %w[/search /count /scroll].any? { |suffix| path.split('?').first.end_with?(suffix) }
         end
 
         # Return a reusable, started HTTP client for the Qdrant server.

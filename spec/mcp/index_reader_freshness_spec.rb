@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'json'
+require 'timeout'
 require 'woods'
 require 'woods/mcp/index_reader'
 require 'woods/generation'
@@ -134,6 +135,28 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
   # reads consistent — a caller assembling an answer from several artifacts
   # can straddle two generations. Pinning closes that window.
   describe '#with_pinned_generation' do
+    it 'leaves direct multi-read callers responsible for pinning their sequence' do
+      generation.bump!(reason: 'full')
+      reader = described_class.new(dir)
+      first_read = Queue.new
+      continue_reading = Queue.new
+      seen = Thread.new do
+        first = reader.manifest['total_units']
+        first_read << true
+        continue_reading.pop
+        [first, reader.manifest['total_units']]
+      end
+      first_read.pop
+
+      republish(total_units: 2)
+      continue_reading << true
+
+      expect(seen.value).to eq([1, 2])
+    ensure
+      continue_reading << true if seen&.alive?
+      seen&.join(1)
+    end
+
     it 'does not drop already-loaded caches partway through a sequence' do
       File.write(File.join(dir, 'SUMMARY.md'), 'first')
       generation.bump!(reason: 'full')
@@ -229,6 +252,51 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
 
       # Invalidation resumes once the last pin is gone.
       expect(reader.manifest['total_units']).to eq(2)
+    end
+  end
+
+  describe '#with_exclusive_reload' do
+    it 'reloads the post-publication manifest before yielding it' do
+      reader = described_class.new(dir, auto_refresh: false)
+      expect(reader).to respond_to(:with_exclusive_reload)
+      expect(reader.manifest['total_units']).to eq(1)
+      write_manifest(total_units: 2)
+
+      seen = reader.with_exclusive_reload do |manifest|
+        [manifest['total_units'], reader.manifest['total_units']]
+      end
+
+      expect(seen).to eq([2, 2])
+    end
+
+    it 'releases blocked readers when the exclusive block raises' do
+      reader = described_class.new(dir, auto_refresh: false)
+      expect(reader).to respond_to(:with_exclusive_reload)
+
+      expect do
+        reader.with_exclusive_reload { raise 'reload response failed' }
+      end.to raise_error('reload response failed')
+
+      expect do
+        Timeout.timeout(1) { reader.with_pinned_generation { reader.manifest } }
+      end.not_to raise_error
+    end
+
+    it 'allows shared nesting by the exclusive owner but rejects exclusive upgrades and recursion' do
+      reader = described_class.new(dir, auto_refresh: false)
+      expect(reader).to respond_to(:with_exclusive_reload)
+
+      nested_manifest = reader.with_exclusive_reload do
+        reader.with_pinned_generation { reader.manifest['total_units'] }
+      end
+      expect(nested_manifest).to eq(1)
+
+      expect do
+        reader.with_pinned_generation { reader.with_exclusive_reload { nil } }
+      end.to raise_error(ThreadError, /pinned generation/)
+      expect do
+        reader.with_exclusive_reload { reader.with_exclusive_reload { nil } }
+      end.to raise_error(ThreadError, /already owns/)
     end
   end
 

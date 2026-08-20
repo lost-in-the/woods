@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'mcp'
 
 # tool_specs.rb is a pure data table. Tier 4 `handler:` values use `begin`
 # blocks that instantiate EvalGuard / SqlValidator at require-time, and
@@ -40,6 +41,47 @@ RSpec.describe Woods::Console::Server do
 
     it 'is frozen' do
       expect(all_specs).to be_frozen
+    end
+  end
+
+  describe 'CONTRACT_MATRIX' do
+    let(:matrix) { described_class::CONTRACT_MATRIX }
+
+    it 'derives one frozen contract row from each of the 31 tool specs' do
+      expect(matrix).to be_frozen
+      expect(matrix.size).to eq(31)
+      expect(matrix.map { |row| row.fetch(:name) }).to eq(all_specs.map(&:name))
+    end
+
+    it 'records the complete capability and safety contract for every row' do
+      required_keys = %i[
+        name executable_modes arguments representative_valid_input representative_invalid_input
+        semantic_output authorization table_gate redaction credential_scan confirmation audit
+      ]
+
+      expect(matrix).to all(satisfy { |row| (required_keys - row.keys).empty? })
+    end
+
+    it 'marks only Tier 1 tools executable in default embedded mode' do
+      executable = matrix.select { |row| row.fetch(:executable_modes).include?(:embedded) }
+
+      expect(executable.map { |row| row.fetch(:name) }).to contain_exactly(
+        *described_class::TIER1_TOOLS.map { |name| "console_#{name}" }
+      )
+    end
+
+    it 'adds only SQL and query in embedded read mode' do
+      executable = matrix.select { |row| row.fetch(:executable_modes).include?(:embedded_read) }
+      expected = described_class::TIER1_TOOLS.map { |name| "console_#{name}" } +
+                 %w[console_sql console_query]
+
+      expect(executable.map { |row| row.fetch(:name) }).to contain_exactly(*expected)
+    end
+
+    it 'does not claim confirmation or audit for an executable tool' do
+      executable = matrix.select { |row| row.fetch(:executable_modes).any? }
+
+      expect(executable).to all(include(confirmation: :not_required, audit: :not_recorded))
     end
   end
 
@@ -149,8 +191,23 @@ RSpec.describe Woods::Console::Server do
       allowed_types = %w[string integer boolean object array number].freeze
       all_specs.each do |spec|
         spec.properties.each do |prop_name, defn|
-          expect(allowed_types).to include(defn[:type]),
-                                   "#{spec.name}.#{prop_name}: unexpected type '#{defn[:type]}'"
+          types = Array(defn[:type])
+          expect(types).to all(satisfy { |type| allowed_types.include?(type) }),
+                           "#{spec.name}.#{prop_name}: unexpected type '#{defn[:type]}'"
+        end
+      end
+    end
+
+    it 'declares minimum and maximum for every integer property' do
+      all_specs.each do |spec|
+        spec.properties.each do |prop_name, definition|
+          next unless definition[:type] == 'integer'
+
+          expect(definition[:minimum]).to be_an(Integer),
+                                          "#{spec.name}.#{prop_name}: missing integer minimum"
+          expect(definition[:maximum]).to be_an(Integer),
+                                          "#{spec.name}.#{prop_name}: missing integer maximum"
+          expect(definition[:minimum]).to be <= definition[:maximum]
         end
       end
     end
@@ -198,6 +255,164 @@ RSpec.describe Woods::Console::Server do
 
     it 'requires sql' do
       expect(spec.required).to include('sql')
+    end
+  end
+
+  describe 'console_query having schema' do
+    subject(:schema) do
+      spec = all_specs.find { |candidate| candidate.name == 'console_query' }
+      MCP::Tool::InputSchema.new(properties: spec.properties, required: spec.required)
+    end
+
+    it 'accepts safe bare and qualified object keys or an executable two-element parameterized array' do
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { count: 2 }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { _count2: 2 }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { 'orders.amount' => 2 }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['COUNT(*) > ?', 2]) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['SUM(amount) >= ?', 2]) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['SUM(orders.amount) >= ?', 2]) }
+        .not_to raise_error
+    end
+
+    it 'rejects malformed object keys, raw strings, empty objects, and arrays the executor cannot run' do
+      invalid_values = [
+        'COUNT(*) > 2',
+        {},
+        { 'bad key' => 2 },
+        { 'orders.bad key' => 2 },
+        { '1count' => 2 },
+        { 'orders.amount.extra' => 2 },
+        { '' => 2 },
+        ['COUNT(*) > ?'],
+        ['COUNT(*) > ?', 2, 3],
+        ['not executable', 2],
+        [2, 'not a template']
+      ]
+
+      invalid_values.each do |having|
+        expect { schema.validate_arguments(model: 'Order', select: ['id'], having: having) }
+          .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      end
+    end
+  end
+
+  describe 'console_aggregate function schema' do
+    subject(:schema) do
+      spec = all_specs.find { |candidate| candidate.name == 'console_aggregate' }
+      MCP::Tool::InputSchema.new(spec.input_schema)
+    end
+
+    it 'accepts every aggregate function implemented by the executor' do
+      %w[sum average minimum maximum count].each do |function|
+        expect { schema.validate_arguments(model: 'Order', function: function, column: 'amount') }
+          .not_to raise_error
+      end
+    end
+
+    it 'rejects aggregate functions the executor cannot run' do
+      expect { schema.validate_arguments(model: 'Order', function: 'bogus') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'requires a column for every non-count aggregate' do
+      expect { schema.validate_arguments(model: 'Order', function: 'count') }.not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', function: 'sum', column: 'amount') }.not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', function: 'sum') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+  end
+
+  describe 'registered static executor constraints' do
+    def schema_for(tool_name)
+      spec = all_specs.find { |candidate| candidate.name == tool_name }
+      MCP::Tool::InputSchema.new(spec.input_schema)
+    end
+
+    it 'rejects empty required column and select lists' do
+      expect { schema_for('console_pluck').validate_arguments(model: 'Order', columns: []) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_query').validate_arguments(model: 'Order', select: []) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'rejects empty SQL and unsupported recent direction values' do
+      expect { schema_for('console_sql').validate_arguments(sql: '') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_recent').validate_arguments(model: 'Order', direction: 'sideways') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'requires exactly one non-empty locator (id or by) for console_find' do
+      expect { schema_for('console_find').validate_arguments(model: 'Order') }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_find').validate_arguments(model: 'Order', by: {}) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      expect { schema_for('console_find').validate_arguments(model: 'Order', id: 1) }.not_to raise_error
+      expect { schema_for('console_find').validate_arguments(model: 'Order', by: { 'sku' => 'x' }) }
+        .not_to raise_error
+    end
+
+    it 'rejects query expressions, group columns, and order values the executor cannot run' do
+      invalid_inputs = [
+        { model: 'Order', select: ['status; DROP TABLE orders'] },
+        { model: 'Order', select: ['status'], group_by: ['bad key'] },
+        { model: 'Order', select: ['status'], order: { 'bad key' => 'asc' } },
+        { model: 'Order', select: ['status'], order: { 'created_at' => 'sideways' } }
+      ]
+
+      invalid_inputs.each do |arguments|
+        expect { schema_for('console_query').validate_arguments(arguments) }
+          .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      end
+    end
+  end
+
+  describe 'console_count scope suffix value types' do
+    subject(:schema) do
+      spec = all_specs.find { |candidate| candidate.name == 'console_count' }
+      MCP::Tool::InputSchema.new(spec.input_schema)
+    end
+
+    it 'rejects the truthiness-inversion case: a string "false" for an existence suffix' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_present: 'false' }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'accepts a strict boolean for existence suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_present: false }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', scope: { status_null: true }) }
+        .not_to raise_error
+    end
+
+    it 'rejects a non-boolean for existence suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_blank: 1 }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'accepts a scalar for comparison suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { total_gt: 0 }) }
+        .not_to raise_error
+    end
+
+    it 'rejects an array for comparison suffixes' do
+      expect { schema.validate_arguments(model: 'Order', scope: { total_gt: [1, 2] }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
+    end
+
+    it 'accepts an array for _in' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_in: %w[paid refunded] }) }
+        .not_to raise_error
+    end
+
+    it 'rejects a non-array for _in' do
+      expect { schema.validate_arguments(model: 'Order', scope: { status_in: 'paid' }) }
+        .to raise_error(MCP::Tool::InputSchema::ValidationError)
     end
   end
 

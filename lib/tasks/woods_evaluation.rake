@@ -54,23 +54,46 @@ module Woods
       require 'woods/evaluation/query_set'
       require 'woods/evaluation/evaluator'
       require 'woods/evaluation/report_generator'
+      require 'woods/evaluation/baseline'
 
-      query_set_path = ENV.fetch('EVAL_QUERY_SET', DEFAULT_QUERY_SET)
-      output_path = ENV.fetch('EVAL_OUTPUT', DEFAULT_OUTPUT)
-      budget = ENV.fetch('EVAL_BUDGET', DEFAULT_BUDGET.to_s).to_i
+      query_set_path, output_path, budget = eval_run_config
+      thresholds = build_thresholds
 
       puts "Loading query set from: #{query_set_path}"
       query_set = Evaluation::QuerySet.load(query_set_path)
       puts "Loaded #{query_set.size} queries — building retriever..."
 
       report = Evaluation::Evaluator.new(
-        retriever: build_eval_retriever, query_set: query_set, budget: budget
+        retriever: build_eval_retriever, query_set: query_set, budget: budget, thresholds: thresholds
       ).evaluate
 
       Evaluation::ReportGenerator.new
                                  .save(report, output_path, metadata: { 'query_set' => query_set_path })
 
       print_eval_report(report, output_path)
+      exit 1 if report.threshold_report && !report.threshold_report.passed
+    end
+
+    # @return [Array(String, String, Integer)] query_set_path, output_path, budget
+    def eval_run_config
+      [ENV.fetch('EVAL_QUERY_SET', DEFAULT_QUERY_SET), ENV.fetch('EVAL_OUTPUT', DEFAULT_OUTPUT),
+       ENV.fetch('EVAL_BUDGET', DEFAULT_BUDGET.to_s).to_i]
+    end
+
+    # Build the thresholds hash for the release-quality gate, or nil for the
+    # report-only default (no gate). `EVAL_BASELINE_FILE` (the versioned
+    # baseline format, see Evaluation::Baseline) seeds it; the three flat
+    # EVAL_MIN_* vars override individual metrics on top, so a one-off CI run
+    # can tighten a single metric without a new baseline file.
+    #
+    # @return [Hash{Symbol=>Float}, nil]
+    def build_thresholds
+      path = ENV.fetch('EVAL_BASELINE_FILE', nil)
+      thresholds = path ? Evaluation::Baseline.load(path).thresholds : {}
+      thresholds[:mean_precision_at5] = ENV['EVAL_MIN_PRECISION'].to_f if ENV['EVAL_MIN_PRECISION']
+      thresholds[:mean_recall] = ENV['EVAL_MIN_RECALL'].to_f if ENV['EVAL_MIN_RECALL']
+      thresholds[:mean_mrr] = ENV['EVAL_MIN_MRR'].to_f if ENV['EVAL_MIN_MRR']
+      thresholds.empty? ? nil : thresholds
     end
 
     # Score a naive baseline strategy on the same query set, for comparison.
@@ -117,15 +140,33 @@ module Woods
     end
 
     def print_eval_report(report, output_path)
+      threshold_report = report.threshold_report
+      passed = threshold_report.nil? || threshold_report.passed
       puts
-      puts 'Evaluation complete!'
+      puts(passed ? 'Evaluation complete!' : 'Evaluation FAILED — one or more thresholds not met.')
       puts '=' * 50
       report.aggregates.each do |key, value|
         formatted = value.is_a?(Float) ? format('%.4f', value) : value.to_s
         puts "  #{key.to_s.ljust(25)}: #{formatted}"
       end
       puts '=' * 50
+      print_threshold_report(threshold_report) if threshold_report
       puts "Report saved to: #{output_path}"
+    end
+
+    # Per-metric [PASS]/[FAIL] lines with the delta against the configured
+    # minimum. Absent unconditionally, same as today, when no thresholds were
+    # given — see the "Evaluation complete!" gate above.
+    def print_threshold_report(threshold_report)
+      puts 'Thresholds:'
+      threshold_report.metrics.sort.each do |key, metric|
+        status = metric[:passed] ? '[PASS]' : '[FAIL]'
+        actual = metric[:actual].nil? ? 'n/a' : format('%.4f', metric[:actual])
+        delta = metric[:delta].nil? ? 'n/a' : format('%+.4f', metric[:delta])
+        puts "  #{status} #{key.to_s.ljust(25)} actual=#{actual} min=#{format('%.4f', metric[:threshold])} " \
+             "delta=#{delta}"
+      end
+      puts '=' * 50
     end
 
     def print_baseline_report(strategy, count, totals)

@@ -189,6 +189,28 @@ RSpec.describe Woods::Retrieval::Ranker do
         expect(fused.map(&:score)).to all(eq(1.0))
       end
 
+      # P1 fix: chunked units embed as `Identifier#chunk_N`, but the
+      # metadata/graph stores (and keyword search) key on the bare
+      # identifier. RRF used to key its accumulator on the raw candidate
+      # identifier, so a vector chunk hit (`User#chunk_0`) and a keyword
+      # base hit (`User`) were treated as two unrelated identifiers and
+      # never fused — chunked corpora got zero RRF benefit from hybrid
+      # search. Keying on the chunk-stripped base identifier fixes this.
+      it 'fuses a vector chunk hit and a keyword base hit for the same unit into one ranked entry' do
+        candidates = [
+          candidate(identifier: 'User#chunk_0', score: 0.9, source: :vector),
+          candidate(identifier: 'User', score: 0.8, source: :keyword),
+          candidate(identifier: 'Order', score: 0.9, source: :vector)
+        ]
+
+        result = ranker.rank(candidates, classification: classification)
+
+        user_entries = result.select { |c| c.identifier.to_s.start_with?('User') }
+        expect(user_entries.size).to eq(1)
+        # Fused (two sources) must outrank Order (one source, tied score).
+        expect(result.first.identifier).to eq(user_entries.first.identifier)
+      end
+
       it 'carries matched_fields through the RRF merge so the keyword signal survives fusion' do
         candidates = [
           candidate(identifier: 'NoFields', score: 0.9, source: :vector),

@@ -7,6 +7,7 @@ require 'fileutils'
 require 'woods'
 require 'woods/dependency_graph'
 require 'woods/mcp/server'
+require 'woods/operator/pipeline_guard'
 
 # End-to-end: does a long-running pipeline tool actually hand back a durable
 # task handle, and does that handle survive the things it exists to survive?
@@ -49,7 +50,9 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
   before do
     stub_const('Woods::Extractor', double('ExtractorClass', new: fake_extractor))
     stub_const('Woods::MCP::Server::PIPELINE_LOCK_WAIT', 0)
-    allow(Woods.configuration).to receive(:output_dir).and_return(@index_dir)
+    config = Woods.configuration || Woods::Configuration.new
+    allow(Woods).to receive(:configuration).and_return(config)
+    allow(config).to receive(:output_dir).and_return(@index_dir)
   end
 
   after do
@@ -92,7 +95,7 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
 
   def settle
     # The tool answers immediately and finishes on a background thread.
-    20.times do
+    100.times do
       break if yield
 
       sleep 0.02
@@ -122,6 +125,50 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
       settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'completed' }
 
       expect(rpc('tasks/get', task_params(task_id)).dig('result', 'status')).to eq('completed')
+    end
+  end
+
+  describe 'cancellation capability audit' do
+    it 'does not claim cancellation when blocked work cannot be stopped safely' do
+      started = Queue.new
+      release = Queue.new
+      published = File.join(@index_dir, 'completed-generation.json')
+      allow(fake_extractor).to receive(:extract_all) do
+        started << true
+        release.pop
+        File.write(published, '{}')
+      end
+
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      started.pop
+      error = rpc('tasks/cancel', task_params(task_id)).fetch('error')
+
+      probe = Woods::MCP::Server.send(:build_extraction_lock, @index_dir)
+      lock_held_while_working = !probe.acquire
+      probe.release unless lock_held_while_working
+      release << true
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'completed' }
+
+      lock_released_after_completion = false
+      after_completion = nil
+      20.times do
+        after_completion = Woods::MCP::Server.send(:build_extraction_lock, @index_dir)
+        lock_released_after_completion = after_completion.acquire
+        break if lock_released_after_completion
+
+        sleep 0.02
+      end
+      after_completion.release if lock_released_after_completion
+
+      aggregate_failures do
+        expect(error).to include('code' => -32_601, 'message' => 'Method not found')
+        expect(error['data']).to eq('Task cancellation is not supported by Woods.')
+        expect(lock_held_while_working).to be true
+        expect(lock_released_after_completion).to be true
+        expect(File.exist?(published)).to be true
+      end
+    ensure
+      release << true if defined?(release)
     end
   end
 
@@ -159,6 +206,70 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     it 'creates no task record' do
       extract_call
       expect(Dir.glob(File.join(@index_dir, 'tasks', '*.json'))).to be_empty
+    end
+
+    it 'does not create a task for a legacy request that names the extension' do
+      legacy_meta = Marshal.load(Marshal.dump(tasks_meta))
+      legacy_meta['_meta']['io.modelcontextprotocol/protocolVersion'] = '2025-11-25'
+
+      body = extract_call(legacy_meta)
+
+      expect(body.dig('result', 'resultType')).to be_nil
+      expect(Dir.glob(File.join(@index_dir, 'tasks', '*.json'))).to be_empty
+    end
+  end
+
+  describe 'when opted-in task storage is read-only' do
+    it 'starts no record, cooldown, or work when producer identity is unavailable' do
+      guard = instance_double(Woods::Operator::PipelineGuard, allow?: true, record!: nil)
+      operator[:pipeline_guard] = guard
+      allow(fake_extractor).to receive(:extract_all).and_return(true)
+      allow_any_instance_of(Woods::MCP::Tasks::Store).to receive(:producer_identity_for).and_return(nil)
+
+      body = extract_call(tasks_meta)
+
+      expect(body.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
+      expect(Dir.glob(File.join(@index_dir, 'tasks', '*.json'))).to be_empty
+      expect(guard).not_to have_received(:record!)
+      expect(fake_extractor).not_to have_received(:extract_all)
+      in_flight = Woods::MCP::Server.instance_variable_get(:@pipeline_in_flight)
+      expect(in_flight).not_to have_key(:extraction)
+    end
+
+    it 'fails closed without starting untrackable work' do
+      allow(fake_extractor).to receive(:extract_all).and_return(true)
+      allow(Woods.configuration).to receive(:output_dir).and_return(nil)
+      server
+      File.chmod(0o555, @index_dir)
+
+      body = extract_call(tasks_meta)
+
+      expect(body.dig('result', 'isError')).to be true
+      expect(body.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
+      expect(fake_extractor).not_to have_received(:extract_all)
+    ensure
+      File.chmod(0o755, @index_dir) if @index_dir && File.exist?(@index_dir)
+    end
+
+    it 'does not consume pipeline cooldown and permits an immediate retry' do
+      guard = instance_double(Woods::Operator::PipelineGuard, allow?: true, record!: nil)
+      operator[:pipeline_guard] = guard
+      allow(fake_extractor).to receive(:extract_all).and_return(true)
+      attempts = 0
+      original_create = Woods::MCP::Tasks::Store.instance_method(:create!)
+      allow_any_instance_of(Woods::MCP::Tasks::Store).to receive(:create!) do |instance, **arguments|
+        attempts += 1
+        raise Errno::EACCES if attempts == 1
+
+        original_create.bind_call(instance, **arguments)
+      end
+
+      first = extract_call(tasks_meta)
+      second = extract_call(tasks_meta)
+
+      expect(first.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
+      expect(second.dig('result', 'resultType')).to eq('task')
+      expect(guard).to have_received(:record!).with(:extraction).once
     end
   end
 

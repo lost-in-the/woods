@@ -12,9 +12,59 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
     it 'stores the connection and dimensions' do
       expect(store).to be_a(described_class)
     end
+
+    it 'accepts a validated table name for isolated live namespaces' do
+      isolated = described_class.new(
+        connection: connection,
+        dimensions: 3,
+        table: 'woods_vectors_a1b2c3'
+      )
+
+      expect(isolated.table).to eq('woods_vectors_a1b2c3')
+    end
+
+    it 'rejects table names that could alter SQL structure' do
+      expect do
+        described_class.new(connection: connection, dimensions: 3, table: 'woods_vectors; DROP TABLE users')
+      end.to raise_error(ArgumentError, /table must be a PostgreSQL identifier/)
+    end
+
+    it 'uses an actual positive Integer before SQL construction' do
+      normalized = described_class.new(connection: connection, dimensions: 3)
+      allow(connection).to receive(:transaction).and_yield
+      allow(connection).to receive(:execute)
+
+      normalized.ensure_schema!
+
+      expect(connection).to have_received(:execute).with(/vector\(3\)/)
+    end
+
+    [3.0, '3', true, false, '3); DROP TABLE users; --'].each do |dimensions|
+      it "rejects non-Integer dimensions #{dimensions.inspect} before SQL" do
+        expect { described_class.new(connection: connection, dimensions: dimensions) }
+          .to raise_error(ArgumentError, /dimensions must be a positive Integer/)
+      end
+    end
+
+    it 'rejects invalid dimensions and schema identifiers before executing SQL' do
+      expect { described_class.new(connection: connection, dimensions: '0') }
+        .to raise_error(ArgumentError, /dimensions must be a positive Integer/)
+      expect { described_class.new(connection: connection, dimensions: 3, schema: 'public; DROP') }
+        .to raise_error(ArgumentError, /schema must be a PostgreSQL identifier/)
+    end
   end
 
   describe '#ensure_schema!' do
+    before { allow(connection).to receive(:transaction).and_yield }
+
+    it 'creates the extension, table, and index in one transaction' do
+      allow(connection).to receive(:execute)
+
+      store.ensure_schema!
+
+      expect(connection).to have_received(:transaction).once
+    end
+
     it 'creates the extension, table, and index' do
       allow(connection).to receive(:execute)
 
@@ -31,6 +81,30 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       store.ensure_schema!
 
       expect(connection).to have_received(:execute).with(/vector\(3\)/)
+    end
+
+    it 'creates an explicitly isolated table and index' do
+      allow(connection).to receive(:execute)
+      isolated = described_class.new(
+        connection: connection,
+        dimensions: 3,
+        table: 'woods_vectors_a1b2c3'
+      )
+
+      isolated.ensure_schema!
+
+      expect(connection).to have_received(:execute).with(/CREATE TABLE IF NOT EXISTS woods_vectors_a1b2c3/)
+      expect(connection).to have_received(:execute).with(/ON woods_vectors_a1b2c3 USING hnsw/)
+    end
+
+    it 'quotes an explicitly selected schema and table' do
+      allow(connection).to receive(:execute)
+      allow(connection).to receive(:quote_table_name) { |name| %("#{name}") }
+      namespaced = described_class.new(connection: connection, dimensions: 3, schema: 'tenant_a')
+
+      namespaced.ensure_schema!
+
+      expect(connection).to have_received(:execute).with(/CREATE TABLE IF NOT EXISTS "tenant_a"\."woods_vectors"/)
     end
   end
 
@@ -322,6 +396,8 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
   end
 
   describe '#stored_dimensions' do
+    before { allow(connection).to receive(:quote) { |value| "'#{value}'" } }
+
     # For pgvector's `vector` type, atttypmod carries the dimension directly.
     it 'reads the width the column was created with' do
       allow(connection).to receive(:execute).and_return([{ 'dimension' => 384 }])
@@ -341,11 +417,10 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       expect(store.stored_dimensions).to be_nil
     end
 
-    # A diagnostic must never break the pipeline it is diagnosing.
-    it 'returns nil rather than raising when the query fails' do
+    it 'surfaces connection and permission failures' do
       allow(connection).to receive(:execute).and_raise(StandardError, 'connection lost')
 
-      expect(store.stored_dimensions).to be_nil
+      expect { store.stored_dimensions }.to raise_error(StandardError, 'connection lost')
     end
   end
 

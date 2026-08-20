@@ -2,6 +2,7 @@
 
 require 'net/http'
 require 'json'
+require_relative 'provider'
 
 module Woods
   module Embedding
@@ -33,9 +34,11 @@ module Woods
 
         # @param api_key [String] OpenAI API key
         # @param model [String] OpenAI embedding model name (default: text-embedding-3-small)
-        def initialize(api_key:, model: DEFAULT_MODEL)
+        # @param dimensions [Integer, nil] Requested output size for text-embedding-3 models
+        def initialize(api_key:, model: DEFAULT_MODEL, dimensions: nil)
           @api_key = api_key
           @model = model
+          @dimensions = normalize_dimensions(dimensions)
         end
 
         # Embed a single text string.
@@ -47,8 +50,10 @@ module Woods
         def embed(text)
           raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
 
-          response = post_request({ model: @model, input: text })
-          response['data'].first['embedding']
+          response = post_request(request_body(text))
+          vectors = Array(response['data']).map { |item| item['embedding'] }
+          VectorValidation.validate!(vectors, expected_count: 1, provider: 'OpenAI')
+          vectors.first
         end
 
         # Embed multiple texts in a single request.
@@ -59,16 +64,14 @@ module Woods
         # @return [Array<Array<Float>>] array of embedding vectors
         # @raise [Woods::Error] if the API returns an error
         # @raise [ArgumentError] if the array is empty or any element is nil/empty
-        def embed_batch(texts) # rubocop:disable Metrics/CyclomaticComplexity
+        def embed_batch(texts)
           raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
           if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
             raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
           end
 
-          response = post_request({ model: @model, input: texts })
-          response['data']
-            .sort_by { |item| item['index'] }
-            .map { |item| item['embedding'] }
+          response = post_request(request_body(texts))
+          extract_validated_batch(response, texts.size)
         end
 
         # Return the dimensionality of vectors produced by this model.
@@ -78,7 +81,7 @@ module Woods
         #
         # @return [Integer] number of dimensions
         def dimensions
-          DIMENSIONS[@model] || embed('test').length
+          @dimensions || DIMENSIONS[@model] || embed('test').length
         end
 
         # Return the model name.
@@ -97,6 +100,38 @@ module Woods
         end
 
         private
+
+        # Validate the batch response's shape/cardinality/indexes and
+        # return vectors reordered to match the input order.
+        #
+        # @param response [Hash] parsed JSON response
+        # @param expected_count [Integer] number of texts requested
+        # @return [Array<Array<Float>>]
+        def extract_validated_batch(response, expected_count)
+          data = Array(response['data'])
+          VectorValidation.validate!(
+            data.map { |item| item['embedding'] },
+            expected_count: expected_count,
+            provider: 'OpenAI',
+            indexes: data.map { |item| item['index'] }
+          )
+          data.sort_by { |item| item['index'] }.map { |item| item['embedding'] }
+        end
+
+        def request_body(input)
+          { model: @model, input: input }.tap do |body|
+            body[:dimensions] = @dimensions if @dimensions
+          end
+        end
+
+        def normalize_dimensions(value)
+          return if value.nil?
+
+          dimensions = Integer(value)
+          raise ArgumentError, "dimensions must be positive, got #{value.inspect}" unless dimensions.positive?
+
+          dimensions
+        end
 
         # Cap interpolated response bodies so misconfigured API errors
         # (which occasionally echo request metadata, including headers) don't

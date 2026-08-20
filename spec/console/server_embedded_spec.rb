@@ -31,18 +31,45 @@ RSpec.describe 'Woods::Console::Server.build_embedded' do
       expect(server).to be_a(MCP::Server)
     end
 
-    it 'registers all 31 tools (same as bridge-based build)' do
+    it 'registers only the 9 executable Tier 1 tools by default' do
       server = Woods::Console::Server.build_embedded(
         model_validator: validator,
         safe_context: safe_context
       )
       tools = server.instance_variable_get(:@tools)
 
-      expected_count = Woods::Console::Server::TIER1_TOOLS.size +
-                       Woods::Console::Server::TIER2_TOOLS.size +
-                       Woods::Console::Server::TIER3_TOOLS.size +
-                       Woods::Console::Server::TIER4_TOOLS.size
-      expect(tools.size).to eq(expected_count)
+      expect(tools.keys).to contain_exactly(
+        *Woods::Console::Server::TIER1_TOOLS.map { |name| "console_#{name}" }
+      )
+    end
+
+    it 'adds only console_sql and console_query when embedded read tools are enabled' do
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: safe_context,
+        read_tools_enabled: true
+      )
+      tools = server.instance_variable_get(:@tools)
+
+      expected = Woods::Console::Server::TIER1_TOOLS.map { |name| "console_#{name}" } +
+                 %w[console_sql console_query]
+      expect(tools.keys).to contain_exactly(*expected)
+    end
+
+    it 'never advertises inventory-only Tier 2, Tier 3, or console_eval tools' do
+      server = Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: safe_context,
+        read_tools_enabled: true
+      )
+      tools = server.instance_variable_get(:@tools)
+
+      inventory_only = (
+        Woods::Console::Server::TIER2_TOOLS +
+        Woods::Console::Server::TIER3_TOOLS +
+        %w[eval]
+      ).map { |name| "console_#{name}" }
+      expect(tools.keys & inventory_only).to be_empty
     end
 
     it 'registers all Tier 1 tool names' do

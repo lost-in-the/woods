@@ -1,56 +1,187 @@
 name: Release
 
+# Operator invocation (requires repository Contents write permission):
+# gh api --method POST repos/lost-in-the/woods/dispatches \
+#   -f event_type=release -F 'client_payload[tag]=v2.0.0' \
+#   -F 'client_payload[ci_run_id]=123456789'
 on:
-  push:
-    tags:
-      - 'v*'
+  repository_dispatch:
+    types: [release]
 
-# Top-level least-privilege default. The `publish` job overrides this with
-# `contents: write` + `id-token: write` for the gem push + GitHub release.
 permissions:
+  actions: read
   contents: read
 
 jobs:
-  test:
+  release-context:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
+    outputs:
+      release-sha: ${{ steps.run.outputs.release-sha }}
+      ci-run-id: ${{ steps.run.outputs.ci-run-id }}
+      tag: ${{ steps.run.outputs.tag }}
+      artifact-name: ${{ steps.run.outputs.artifact-name }}
+      artifact-id: ${{ steps.run.outputs.artifact-id }}
+      artifact-digest: ${{ steps.run.outputs.artifact-digest }}
+      gem-name: ${{ steps.release.outputs.gem-name }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
-      - name: Set up Ruby
+      - name: Check out trusted default-branch SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Set up trusted Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
           ruby-version: '3.3'
-          bundler-cache: true
-      - name: Run tests
-        run: bundle exec rspec
-      - name: Run linter
-        run: bundle exec rubocop
+      - name: Validate the named CI run through the GitHub API
+        id: run
+        env:
+          CI_RUN_ID: ${{ github.event.client_payload.ci_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+        run: script/validate-release-run
+      - name: Validate release tag, history, changelog, and publication state
+        id: release
+        env:
+          RELEASE_MAIN_REF: refs/remotes/origin/main
+          RELEASE_REMOTE: origin
+          RELEASE_SHA: ${{ steps.run.outputs.release-sha }}
+          RELEASE_TAG: ${{ steps.run.outputs.tag }}
+          RELEASE_TRUSTED_SHA: ${{ github.sha }}
+        run: script/validate-release --trusted-checkout
+
+  # Candidate source is permitted only here. This job has no protected
+  # environment, secrets, OIDC, or write scope, and it does not persist checkout credentials.
+  package-test:
+    name: Candidate package tests (secret-free, read-only)
+    needs: release-context
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ruby: '3.0'
+            rails: '~> 6.0.0'
+            sqlite3: '~> 1.4'
+          - ruby: '4.0'
+            rails: '~> 8.1.0'
+            sqlite3: '~> 2.7'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+        with:
+          ref: ${{ needs.release-context.outputs.release-sha }}
+          persist-credentials: false
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - name: Download the exact release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.release-context.outputs.artifact-id }}
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.release-context.outputs.ci-run-id }}
+      # release-context resolved artifact-id once from the GitHub API's
+      # artifacts-by-run listing, so this and the publish job's download are
+      # structurally the same artifact object, not "whichever upload
+      # currently matches this name" — the fix for reruns replacing an
+      # artifact under an unchanged name between two jobs resolving it apart.
+      - name: Verify the resolved artifact digest is present
+        env:
+          ARTIFACT_DIGEST: ${{ needs.release-context.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          # Authoritative as an artifact-identity anchor, not as a byte
+          # comparison target: the API's digest covers the whole uploaded
+          # artifact archive (this gem plus its .sha256 sidecar), not one
+          # file inside it, so it cannot be diffed against the extracted gem
+          # below. release-context already fails closed if the API omitted
+          # it; this re-asserts that at download time rather than trusting
+          # output plumbing.
+          test -n "${ARTIFACT_DIGEST}"
+      - name: Verify artifact SHA-256
+        env:
+          GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
+        run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
+      - name: Install package-test dependencies
+        run: |
+          gem install --no-document rspec -v '~> 3.13'
+          gem install --no-document rails -v '${{ matrix.rails }}'
+          gem install --no-document sqlite3 -v '${{ matrix.sqlite3 }}'
+          gem install --no-document "dist/${{ needs.release-context.outputs.gem-name }}"
+      - name: Test the installed artifact outside the repository load path
+        env:
+          WOODS_GEM_PATH: ${{ github.workspace }}/dist/${{ needs.release-context.outputs.gem-name }}
+          WOODS_RUN_PACKAGE_SMOKE: '1'
+        run: >-
+          ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' --
+          spec/integration/packaged_gem_spec.rb
 
   publish:
-    needs: test
+    needs: [release-context, package-test]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
     environment: release
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Check out trusted default-branch SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
           ruby-version: '3.3'
-          bundler-cache: true
+      - name: Download the tested release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.release-context.outputs.artifact-id }}
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.release-context.outputs.ci-run-id }}
+      # Same resolved artifact-id as package-test's download above, so
+      # publish pushes the exact bytes package-test tested — see the
+      # comment on that job's equivalent step for why this checks presence
+      # rather than diffing the digest against the extracted gem.
+      - name: Verify the resolved artifact digest is present
+        env:
+          ARTIFACT_DIGEST: ${{ needs.release-context.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test -n "${ARTIFACT_DIGEST}"
+      - name: Verify artifact SHA-256
+        env:
+          GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
+        run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
       - name: Configure RubyGems credentials
         uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
         with:
           gem-server: https://rubygems.org
           audience: rubygems.org
-      - name: Build gem
-        run: gem build woods.gemspec
-      - name: Push to RubyGems
-        run: gem push woods-*.gem
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          generate_release_notes: true
+      - name: Push the tested gem bytes to RubyGems
+        env:
+          GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
+          RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
+          RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
+          RELEASE_TRUSTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          script/verify-release-tag --trusted-checkout
+          gem push "dist/${GEM_NAME}"
+
+      # GitHub Release creation is intentionally separate from gem publication.
+      # The API cannot atomically bind an existing tag to an expected commit;
+      # create a release only after the tag's immutability is independently assured.

@@ -6,21 +6,20 @@ require_relative 'audit_logger'
 require_relative 'bridge_protocol'
 require_relative 'confirmation'
 require_relative 'eval_guard'
+require_relative 'input_contract'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'scope_predicate_parser'
+require_relative 'sql_validator'
 require_relative 'sql_noise_stripper'
 require_relative 'table_gate'
+require_relative 'tool_specs'
 
 module Woods
   module Console
-    # Drop-in replacement for ConnectionManager + the bridge process that
-    # executes queries directly via ActiveRecord instead of going over the
-    # JSON-lines protocol (see {StubBridge} for the protocol scaffold).
-    #
-    # Implements the same `send_request(Hash) -> Hash` interface as
-    # ConnectionManager, so all existing tool definitions in Server work
-    # unchanged — just pass this where `conn_mgr` goes.
+    # Executes supported Console requests directly through ActiveRecord in a
+    # booted Rails process. Server registration limits callers to the subset
+    # this executor can run with the configured safety controls.
     #
     # @example
     #   executor = EmbeddedExecutor.new(model_validator: validator, safe_context: ctx)
@@ -28,8 +27,6 @@ module Woods
     #   # => { 'ok' => true, 'result' => { 'count' => 42 }, 'timing_ms' => 1.2 }
     #
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
-      AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
-
       TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS
 
       # Tools gated behind the read_tools_enabled flag.
@@ -37,11 +34,6 @@ module Woods
       # but require explicit opt-in for embedded mode.
       EMBEDDED_READ_TOOLS = %w[sql query].freeze
 
-      MAX_SQL_LIMIT = 10_000
-      MAX_QUERY_LIMIT = 10_000
-
-      MIN_EVAL_TIMEOUT = 1
-      MAX_EVAL_TIMEOUT = 30
       DEFAULT_EVAL_TIMEOUT = 10
 
       # @param model_validator [ModelValidator] Validates model/column names
@@ -97,6 +89,7 @@ module Woods
         refusal = refusal_for(tool)
         return refusal if refusal
 
+        normalize_params!(tool, params)
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         result = @safe_context.execute { dispatch(tool, params) }
         elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
@@ -158,20 +151,18 @@ module Woods
 
       # Self-describing error for tools the embedded executor cannot run.
       #
-      # `sql`/`query` are gated behind `embedded_read_tools: true` — point the
-      # caller at the flag. Everything else (Tier 2–4 domain/analytics tools)
-      # requires the bridge architecture.
+      # `sql`/`query` are gated behind `embedded_read_tools: true`. Everything
+      # else outside Tier 1 is unavailable through a supported server mode.
       #
       # @param tool [String] Tool name that was rejected
       # @return [String] Actionable error message
       def unsupported_message(tool)
         if EMBEDDED_READ_TOOLS.include?(tool)
           "Tool '#{tool}' requires embedded_read_tools: true on " \
-            'Woods::Console::RackMiddleware, or use the bridge (Option D). ' \
+            'Woods::Console::RackMiddleware. ' \
             'See docs/CONSOLE_MCP_SETUP.md.'
         else
-          "Tool '#{tool}' is not available in embedded mode — it requires the " \
-            'bridge architecture (Option D in docs/CONSOLE_MCP_SETUP.md).'
+          "Tool '#{tool}' is not available in a supported Console MCP mode."
         end
       end
 
@@ -190,16 +181,12 @@ module Woods
       # @return [String] Multi-line actionable message.
       def eval_disabled_message
         <<~MSG.strip
-          console_eval is disabled — the unsafe-eval opt-in is off by default.
+          console_eval is not available in a supported Console MCP mode.
           Use console_query (model + select + joins/group_by/having/order) or console_sql
           for anything you were about to run. Both already support aggregates and scoping.
           If you believe eval is still necessary, SHOW your proposed Ruby snippet to the
           user first and let them run it manually — do not retry console_eval automatically.
-          Operators: set WOODS_CONSOLE_UNSAFE_EVAL=true (or console_unsafe_eval_enabled = true)
-          AND wire console_unsafe_eval_confirmation + console_unsafe_eval_audit_log_path.
-          The server refuses to boot with the flag on in Rails.env.production?, and refuses
-          to boot with the flag on but any collaborator missing (fail-closed).
-          See docs/CONSOLE_MCP_SETUP.md "console_eval opt-in" for the full checklist.
+          WOODS_CONSOLE_UNSAFE_EVAL and the legacy collaborator options fail closed at boot.
         MSG
       end
 
@@ -251,19 +238,8 @@ module Woods
         raise
       end
 
-      # Validate + clamp the user-supplied timeout. Accepts a positive
-      # Integer (or nil → default). Everything else is rejected so a
-      # caller passing `timeout: 0` or `timeout: "forever"` hears about
-      # it instead of silently getting MIN_EVAL_TIMEOUT.
       def eval_timeout_from(raw)
-        return DEFAULT_EVAL_TIMEOUT if raw.nil?
-
-        unless raw.is_a?(Integer) && raw.positive?
-          raise ValidationError,
-                "timeout must be a positive integer (#{MIN_EVAL_TIMEOUT}..#{MAX_EVAL_TIMEOUT})"
-        end
-
-        raw.clamp(MIN_EVAL_TIMEOUT, MAX_EVAL_TIMEOUT)
+        raw || DEFAULT_EVAL_TIMEOUT
       end
 
       def guard_check!(code, audit_params)
@@ -396,6 +372,28 @@ module Woods
         end
       end
 
+      def normalize_params!(tool, params)
+        spec = Server::TOOL_SPECS.find { |candidate| candidate.name == "console_#{tool}" }
+        return unless spec
+
+        registered = Server::EXECUTABLE_MODES.values.any? { |names| names.include?(spec.name) }
+        if registered
+          spec.validate_arguments!(params)
+        else
+          # Unregistered specs (console_eval today) never run the full public
+          # JSON Schema here, so without this check a well-formed numeric
+          # string (e.g. `timeout: "15"`) sails straight into normalize!'s
+          # coercion below — silently accepting input the declared schema's
+          # `type: integer` would reject outright. This closes that gap
+          # without changing normalize!'s own messages for malformed/
+          # out-of-bounds values, which are asserted verbatim elsewhere.
+          InputContract.reject_string_typed_integers!(params, spec.properties)
+        end
+        InputContract.normalize!(params, spec.properties)
+      rescue InputContract::ValidationError => e
+        raise ValidationError, e.message
+      end
+
       # @param params [Hash] Must contain 'model' key
       # @raise [ValidationError]
       def validate_model!(params)
@@ -460,7 +458,7 @@ module Woods
       def handle_sample(params)
         validate_select_columns!(params)
         model = resolve_model(params['model'])
-        limit = [params.fetch('limit', 5).to_i, 25].min
+        limit = params.fetch('limit', 5)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
         records = scope.order(random_function).limit(limit)
@@ -468,20 +466,40 @@ module Woods
       end
 
       def handle_find(params)
+        validate_find_locator!(params)
+        @model_validator.validate_columns!(params['model'], params['by'].keys.map(&:to_s)) if params['by']
+        validate_select_columns!(params)
         model = resolve_model(params['model'])
-        record = if params['id']
-                   model.find_by(id: params['id'])
-                 elsif params['by']
-                   model.find_by(params['by'])
-                 end
+        record = params['id'] ? model.find_by(id: params['id']) : model.find_by(params['by'])
         { 'record' => record ? serialize_record(record, params['columns']) : nil }
+      end
+
+      # Require exactly one non-empty locator: `id` or a non-empty `by` hash.
+      # `find_by({})` returns an arbitrary row when neither is supplied, and
+      # `find_by` with an empty `by` hash is indistinguishable from that:
+      # both must be refused before any query runs. Defense-in-depth against
+      # the public schema's `oneOf`/`minProperties` constraint (ToolSpec
+      # for console_find), for callers that reach this handler directly.
+      #
+      # @param params [Hash]
+      # @raise [ValidationError] when zero or both locator forms are present
+      def validate_find_locator!(params)
+        has_id = !params['id'].nil?
+        has_by = params['by'].is_a?(Hash) && params['by'].any?
+        return if has_id ^ has_by
+
+        raise ValidationError, 'console_find requires exactly one non-empty locator: id or by' unless has_id && has_by
+
+        raise ValidationError, 'console_find accepts only one locator at a time: id or by, not both'
       end
 
       def handle_pluck(params)
         columns = params['columns']
+        raise ValidationError, 'columns must contain at least one item' if columns && columns.empty?
+
         @model_validator.validate_columns!(params['model'], columns) if columns
         model = resolve_model(params['model'])
-        limit = [params.fetch('limit', 100).to_i, 1000].min
+        limit = params.fetch('limit', 100)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = scope.distinct if params['distinct']
         values = scope.limit(limit).pluck(*columns.map(&:to_sym))
@@ -493,10 +511,11 @@ module Woods
         function = params['function']
         @model_validator.validate_column!(params['model'], column) if column
 
-        unless AGGREGATE_FUNCTIONS.include?(function)
+        unless Server::AGGREGATE_FUNCTIONS.include?(function)
           raise ValidationError, "Invalid aggregate function: #{function}. " \
-                                 "Allowed: #{AGGREGATE_FUNCTIONS.join(', ')}"
+                                 "Allowed: #{Server::AGGREGATE_FUNCTIONS.join(', ')}"
         end
+        raise ValidationError, "column is required for #{function} aggregate" if function != 'count' && column.nil?
 
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -511,12 +530,10 @@ module Woods
 
       def handle_association_count(params)
         model = resolve_model(params['model'])
-        record = model.find(params['id'])
         association_name = params['association']
+        reflection = model.reflect_on_association(association_name.to_sym)
 
-        unless model.reflect_on_association(association_name.to_sym)
-          raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}"
-        end
+        raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}" unless reflection
 
         # Defense-in-depth: the parent model passed validate_model!'s
         # gate_model! check, but the association may target a different
@@ -525,9 +542,34 @@ module Woods
         # explicitly before reading any rows from it.
         gate_association!(params['model'], association_name)
 
+        # Validate every request-controlled scope column against the
+        # association's own model before any database I/O runs (not just
+        # before the association is read): `model.find` below is itself a
+        # query, and a request with a bad scope should never reach it.
+        validate_scope_columns!(params['scope'], reflection.klass.name) if params['scope']
+
+        record = model.find(params['id'])
         scope = record.public_send(association_name)
-        scope = apply_scope(scope, params['scope'])
+        scope = apply_scope(scope, params['scope'], model_name: reflection.klass.name) if params['scope']
         { 'count' => scope.count }
+      end
+
+      # Pure column-name validation for a scope Hash, no relation is built
+      # and no query runs. Reuses ScopePredicateParser's own suffix grammar
+      # so the two never drift.
+      #
+      # @param scope [Hash, nil]
+      # @param model_name [String]
+      # @raise [ValidationError] on an unknown column
+      def validate_scope_columns!(scope, model_name)
+        return unless scope.is_a?(Hash)
+
+        scope.each_key do |raw_key|
+          key = raw_key.to_s
+          match = ScopePredicateParser::SUFFIX_PATTERN.match(key)
+          column = match ? key.delete_suffix(match[1]) : key
+          @model_validator.validate_column!(model_name, column)
+        end
       end
 
       def gate_association!(model_name, association)
@@ -568,10 +610,12 @@ module Woods
         model = resolve_model(params['model'])
         order_by = params.fetch('order_by', 'created_at')
         direction = params.fetch('direction', 'desc')
-        limit = [params.fetch('limit', 10).to_i, 50].min
+        limit = params.fetch('limit', 10)
 
         @model_validator.validate_column!(params['model'], order_by)
-        direction = 'desc' unless %w[asc desc].include?(direction)
+        unless %w[asc desc].include?(direction)
+          raise ValidationError, "direction must be asc or desc (got #{direction.inspect})"
+        end
 
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
@@ -604,13 +648,29 @@ module Woods
         # table even if the sql is otherwise well-formed.
         gate_sql!(sql)
 
-        limit = params['limit'] ? [params['limit'].to_i, MAX_SQL_LIMIT].min : nil
+        limit = params['limit']
+        # EXPLAIN's output is plan rows, not the query's own row set: wrapping
+        # it as `SELECT * FROM (EXPLAIN ...) AS _limited LIMIT n` is invalid
+        # SQL that fails as a generic adapter error. Reject the combination
+        # with a typed error instead of advertising a limit EXPLAIN can't honor.
+        if limit && explain_statement?(sql)
+          raise ValidationError, 'limit is not supported with EXPLAIN (EXPLAIN output is plan rows, ' \
+                                 'not the query result set, so it cannot be wrapped and limited). ' \
+                                 'Resubmit without limit.'
+        end
+
         query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
         result = active_connection.select_all(query_sql)
 
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       rescue SqlValidationError => e
         raise ValidationError, e.message
+      end
+
+      # @param sql [String] Validated SQL (already passed SqlValidator)
+      # @return [Boolean] true when the statement starts with EXPLAIN
+      def explain_statement?(sql)
+        sql.strip.match?(/\AEXPLAIN\b/i)
       end
 
       # Build and execute a structured ActiveRecord query.
@@ -639,7 +699,7 @@ module Woods
       # @return [ActiveRecord::Relation]
       def build_query_relation(model, params)
         relation = apply_query_clauses(model, params)
-        limit = params['limit'] ? [params['limit'].to_i, MAX_QUERY_LIMIT].min : MAX_QUERY_LIMIT
+        limit = params.fetch('limit', 10_000)
         relation.limit(limit)
       end
 
@@ -647,14 +707,6 @@ module Woods
       # Anything else must be a bare column name validated against the model.
       # Matching is case-insensitive; the trailing `AS alias` is optional and
       # the alias itself must be an identifier — it can't carry SQL.
-      SAFE_SELECT_EXPR = /
-        \A\s*
-        (?:(SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(\*|\w+(?:\.\w+)?)\s*\)|(\w+(?:\.\w+)?))
-        (?:\s+AS\s+(\w+))?
-        \s*\z
-      /ix
-      private_constant :SAFE_SELECT_EXPR
-
       # Apply select/joins/scope/group/having/order clauses to a relation.
       #
       # Validates every user-supplied column/alias through the ModelValidator
@@ -673,8 +725,11 @@ module Woods
         relation = model.all
 
         relation = relation.select(*validated_select(params['select'], model_name)) if params['select']
-        relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
-        relation = apply_scope(relation, params['scope'], model_name: model_name)
+        if params['joins']&.any?
+          validate_joins!(model, params['joins'])
+          relation = relation.joins(params['joins'].map(&:to_sym))
+        end
+        relation = apply_query_scope(relation, params['scope'], model_name) if params.key?('scope')
         relation = relation.group(*validated_columns(params['group_by'], model_name)) if params['group_by']&.any?
         relation = relation.having(*validated_having(params['having'], model_name)) if params['having']
         relation = relation.order(validated_order(params['order'], model_name)) if params['order']
@@ -689,13 +744,13 @@ module Woods
       # @param model_name [String]
       # @return [Array<String>]
       def validated_select(select, model_name)
-        Array(select).flat_map { |s| s.to_s.split(',') }.map do |expr|
+        Array(select).map do |expr|
           validate_select_expression!(expr.strip, model_name)
         end
       end
 
       def validate_select_expression!(expr, model_name)
-        match = SAFE_SELECT_EXPR.match(expr)
+        match = Server::SELECT_EXPRESSION_REGEXP.match(expr)
         raise ValidationError, "Rejected select expression: #{expr.inspect}" unless match
 
         _fn, fn_arg, bare_col, _alias = match.captures
@@ -726,18 +781,7 @@ module Woods
       # Anything else is rejected — raw strings (e.g. `"1=1 UNION SELECT
       # password_digest FROM users"`) used to flow straight through and
       # enable SELECT-based exfiltration despite the SafeContext rollback.
-      HAVING_AGG_TEMPLATE = /
-        \A\s*
-        (?:
-          (?<col>\w+(?:\.\w+)?)
-          |
-          (?<agg>SUM|AVG|MIN|MAX|COUNT)\s*\(\s*(?<arg>\*|\w+(?:\.\w+)?)\s*\)
-        )
-        \s*(?<op>=|!=|<>|<=|>=|<|>)\s*\?\s*\z
-      /ix
-      private_constant :HAVING_AGG_TEMPLATE
-
-      def validated_having(having, model_name) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def validated_having(having, model_name)
         case having
         when Hash
           raise ValidationError, 'having: empty hash' if having.empty?
@@ -745,21 +789,71 @@ module Woods
           having.each_key { |k| validate_column_reference!(k.to_s, model_name) }
           [having]
         when Array
-          raise ValidationError, 'having: array must be [sql_with_placeholders, *binds]' if having.empty?
-
-          template = having.first.to_s
-          match = HAVING_AGG_TEMPLATE.match(template)
-          raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
-
-          # Validate any referenced columns through ModelValidator so
-          # aggregate args can't reach the db without a column check.
-          col = match[:col] || match[:arg]
-          validate_column_reference!(col, model_name) if col && col != '*'
-
-          having
+          validated_having_array!(having, model_name)
         else
           raise ValidationError, "having: unsupported type #{having.class}"
         end
+      end
+
+      # Validate the `[template, bind]` array form of `having:`.
+      #
+      # @param having [Array] `[template, bind]`
+      # @param model_name [String]
+      # @return [Array] `having`, unchanged, once validated
+      def validated_having_array!(having, model_name)
+        unless having.length == 2 && having.first.is_a?(String)
+          raise ValidationError, 'having must contain exactly one template and one bind value'
+        end
+
+        template = having.first
+        match = Server::HAVING_TEMPLATE_REGEXP.match(template)
+        raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
+
+        # Validate any referenced columns through ModelValidator so
+        # aggregate args can't reach the db without a column check.
+        col = match[1] || match[3]
+        validate_column_reference!(col, model_name) if col && col != '*'
+        validate_having_bind!(having.last)
+
+        having
+      end
+
+      # Defense-in-depth: the public schema already restricts the bind to a
+      # scalar JSON type (see tool_specs.rb), but a container (Hash/Array)
+      # bind that reaches AR's `?` placeholder fails as a generic adapter
+      # error, not a typed one: reject it here too, mirroring
+      # apply_query_scope's bind check.
+      def validate_having_bind!(bind)
+        case bind
+        when String, Numeric, true, false, nil
+          nil
+        else
+          raise ValidationError, 'having bind must be a string, number, boolean, or null'
+        end
+      end
+
+      # Apply the public console_query scope contract. Query arrays are
+      # intentionally narrower than the legacy Tier 1 executor form: exactly
+      # one safe column comparison template and one bind value.
+      def apply_query_scope(relation, scope, model_name)
+        return apply_scope(relation, scope, model_name: model_name) if scope.is_a?(Hash)
+
+        unless scope.is_a?(Array) && scope.length == 2 && scope.first.is_a?(String)
+          raise ValidationError, 'scope must be an object or exact ["column OP ?", bind] array'
+        end
+
+        case scope.last
+        when String, Numeric, true, false, nil
+          nil
+        else
+          raise ValidationError, 'scope bind must be a string, number, boolean, or null'
+        end
+
+        match = Server::QUERY_SCOPE_TEMPLATE_REGEXP.match(scope.first)
+        raise ValidationError, "scope: unsupported SQL template #{scope.first.inspect}" unless match
+
+        validate_column_reference!(match[1], model_name)
+        apply_scope(relation, scope, model_name: model_name)
       end
 
       # Validate `order:` — only Hash `{col => :asc|:desc}` or bare column name.
@@ -768,12 +862,11 @@ module Woods
         when Hash
           order.each_key { |k| validate_column_reference!(k.to_s, model_name) }
           order.transform_values do |dir|
-            dir_sym = dir.to_s.downcase.to_sym
-            unless %i[asc desc].include?(dir_sym)
+            unless dir.to_s.match?(Server::ORDER_DIRECTION_REGEXP)
               raise ValidationError, "order direction must be :asc or :desc (got #{dir.inspect})"
             end
 
-            dir_sym
+            dir.to_s.downcase.to_sym
           end
         when String, Symbol
           col = order.to_s.strip
@@ -804,6 +897,11 @@ module Woods
           rescue TableGateError => e
             raise ValidationError, e.message
           end
+
+          # TableGate only proves `table` isn't *blocked* — it says nothing
+          # about whether `col` actually exists there. Validate ownership
+          # against the real schema before this reference can reach SQL.
+          @model_validator.validate_table_column!(table, col)
         else
           raise ValidationError, "Rejected column reference: #{column.inspect}" unless safe_identifier?(column)
 
@@ -812,7 +910,15 @@ module Woods
       end
 
       def safe_identifier?(name)
-        name.is_a?(String) && name.match?(/\A[a-zA-Z_][a-zA-Z0-9_]*\z/)
+        name.is_a?(String) && name.match?(Server::SAFE_IDENTIFIER_REGEXP)
+      end
+
+      def validate_joins!(model, joins)
+        joins.each do |association|
+          next if model.reflect_on_association(association.to_sym)
+
+          raise ValidationError, "Unknown association '#{association}' on #{model.name}"
+        end
       end
 
       # ── Helpers ──────────────────────────────────────────────────────────
@@ -820,24 +926,23 @@ module Woods
       # Apply scope conditions (WHERE clauses) to a relation.
       #
       # Accepts Hash form for equality or Ransack-style predicate suffixes
-      # (e.g., `{total_refund_gt: 0, status_in: ['paid','refunded']}`), or
-      # Array form for parameterized SQL (e.g., JSON column queries like
-      # ["preferences->>'theme' = ?", "dark"]).
+      # (e.g., `{total_refund_gt: 0, status_in: ['paid','refunded']}`). The
+      # array branch is used only after console_query's narrower contract has
+      # validated an exact `["column OP ?", bind]` pair.
       #
-      # When `model_name` is supplied and the Hash contains at least one key
-      # with a recognised predicate suffix, the ScopePredicateParser builds
-      # safe Arel nodes. Plain equality hashes skip the parser entirely.
+      # When `model_name` is supplied, ScopePredicateParser validates every
+      # equality and predicate column before applying the scope.
       #
       # @param relation [ActiveRecord::Relation, Class] Model or relation
       # @param scope [Hash, Array, nil] Filter conditions
-      # @param model_name [String, nil] Model name for column validation (predicate path only)
+      # @param model_name [String, nil] Model name for Hash key validation
       # @return [ActiveRecord::Relation]
       def apply_scope(relation, scope, model_name: nil)
         case scope
         when Hash
           return relation unless scope.any?
 
-          if model_name && predicate_suffix?(scope)
+          if model_name
             parser = ScopePredicateParser.new(model_name: model_name, model_validator: @model_validator)
             parser.parse(relation, scope)
           else
@@ -846,14 +951,8 @@ module Woods
         when Array
           return relation unless scope.any?
 
-          # Array form is `[template, *binds]`. The previous implementation
-          # splatted directly into `where(*scope)`, which is the
-          # `where(raw_sql_string)` arity — unbounded SQL injection. A
-          # caller could pass `["EXISTS (SELECT 1 FROM users WHERE
-          # password_digest LIKE 'a%')"]` and turn `console_count` /
-          # `console_pluck` into a boolean exfiltration oracle against
-          # any table the DB user can read (TableGate doesn't fire on
-          # the rendered Tier-1 SQL). Validate the template now.
+          # Keep defense-in-depth validation here even though the registered
+          # query schema and apply_query_scope enforce a narrower array form.
           validate_scope_array!(scope)
           relation.where(*scope)
         else
@@ -922,14 +1021,6 @@ module Woods
 
         raise ValidationError,
               "scope template expects #{placeholder_count} bind(s), got #{bind_count}"
-      end
-
-      # Returns true if any key in the hash has a recognised predicate suffix.
-      #
-      # @param scope [Hash]
-      # @return [Boolean]
-      def predicate_suffix?(scope)
-        scope.any? { |k, _| ScopePredicateParser::SUFFIX_PATTERN.match?(k.to_s) }
       end
 
       # Validate that any requested +columns+ are real model columns before

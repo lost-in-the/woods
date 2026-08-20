@@ -6,6 +6,7 @@ require 'fileutils'
 require 'pathname'
 require 'woods/storage/snapshotter/vector'
 require 'woods/index_artifact'
+require 'woods/resolved_config'
 
 RSpec.describe Woods::Storage::Snapshotter::Vector do
   let(:tmpdir) { Dir.mktmpdir }
@@ -691,6 +692,42 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
 
       loaded = described_class.load_or_empty(artifact, resolved_config: config)
       expect(loaded.count).to eq(2)
+    end
+
+    # Regression for the ResolvedConfig#model_name gap: `respond_to?(:model_name)`
+    # passed for every real ResolvedConfig even though it defined no such
+    # method, so the header's model field was always ''. This exercises the
+    # real class (not a double) end to end.
+    it 'records the real model from a real ResolvedConfig, and the dimension check still works' do
+      real_config = Woods::ResolvedConfig.from_hash(
+        'schema_version' => 1, 'gem_version' => '1.0.0', 'created_at' => '2026-04-22T00:00:00Z',
+        'embedding_provider' => { 'class' => 'Woods::Embedding::Provider::Ollama',
+                                  'model' => 'nomic-embed-text', 'dimension' => dim },
+        'stores' => {}
+      )
+      store = make_store([['id1', Array.new(dim, 0.5)]])
+      dump_dir = artifact.new_dump_dir
+      artifact.promote(dump_dir)
+
+      described_class.dump(store, artifact, dump_dir, resolved_config: real_config)
+
+      bin = File.binread(dump_dir.join('vectors.bin').to_s)
+      gem_version_length = bin.byteslice(20, 4).unpack1('L<')
+      model_name_offset = 24 + gem_version_length
+      model_name_length = bin.byteslice(model_name_offset, 4).unpack1('L<')
+      expect(bin.byteslice(model_name_offset + 4, model_name_length)).to eq('nomic-embed-text')
+
+      loaded = described_class.load_or_empty(artifact, resolved_config: real_config)
+      expect(loaded.count).to eq(1)
+
+      mismatched = Woods::ResolvedConfig.from_hash(
+        'schema_version' => 1, 'gem_version' => '1.0.0', 'created_at' => '2026-04-22T00:00:00Z',
+        'embedding_provider' => { 'class' => 'Woods::Embedding::Provider::Ollama',
+                                  'model' => 'nomic-embed-text', 'dimension' => dim + 1 },
+        'stores' => {}
+      )
+      expect { described_class.load_or_empty(artifact, resolved_config: mismatched) }
+        .to raise_error(Woods::MCP::DimensionMismatch)
     end
   end
 end

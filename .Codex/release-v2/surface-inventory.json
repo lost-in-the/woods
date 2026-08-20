@@ -1,0 +1,1159 @@
+{
+  "schema_version": 1,
+  "generation": {
+    "command": "bundle exec rake release_v2:write_surface_inventory",
+    "verification_command": "bundle exec rake release_v2:verify_surface_inventory",
+    "serial_ledger_updates_required": true
+  },
+  "configuration_attributes": [
+    "add_gem",
+    "cache_enabled",
+    "cache_enabled=",
+    "cache_options",
+    "cache_options=",
+    "cache_store",
+    "cache_store=",
+    "concurrent_extraction",
+    "concurrent_extraction=",
+    "console_blocked_tables",
+    "console_blocked_tables=",
+    "console_credential_defense_enabled",
+    "console_credential_defense_enabled=",
+    "console_credential_rotation_warning",
+    "console_credential_rotation_warning=",
+    "console_disabled_scanner_patterns",
+    "console_disabled_scanner_patterns=",
+    "console_embedded_read_tools",
+    "console_embedded_read_tools=",
+    "console_mcp_allowed_origins",
+    "console_mcp_allowed_origins=",
+    "console_mcp_enabled",
+    "console_mcp_enabled=",
+    "console_mcp_path",
+    "console_mcp_path=",
+    "console_mcp_token",
+    "console_mcp_token=",
+    "console_redacted_columns",
+    "console_redacted_columns=",
+    "console_redacted_key_values",
+    "console_redacted_key_values=",
+    "console_unsafe_eval_audit_log_path",
+    "console_unsafe_eval_audit_log_path=",
+    "console_unsafe_eval_confirmation",
+    "console_unsafe_eval_confirmation=",
+    "console_unsafe_eval_enabled",
+    "console_unsafe_eval_enabled=",
+    "context_format",
+    "context_format=",
+    "dump_retention_count",
+    "dump_retention_count=",
+    "embedding_model",
+    "embedding_model=",
+    "embedding_options",
+    "embedding_options=",
+    "embedding_provider",
+    "embedding_provider=",
+    "enable_snapshots",
+    "enable_snapshots=",
+    "extract_navigation_edges",
+    "extract_navigation_edges=",
+    "extractors",
+    "extractors=",
+    "gem_configs",
+    "gem_configs=",
+    "graph_store",
+    "graph_store=",
+    "include_framework_sources",
+    "include_framework_sources=",
+    "log_level",
+    "log_level=",
+    "max_context_tokens",
+    "max_context_tokens=",
+    "metadata_store",
+    "metadata_store=",
+    "metadata_store_options",
+    "metadata_store_options=",
+    "notion_api_token",
+    "notion_api_token=",
+    "notion_database_ids",
+    "notion_database_ids=",
+    "output_dir",
+    "output_dir=",
+    "precompute_flows",
+    "precompute_flows=",
+    "pretty_json",
+    "pretty_json=",
+    "session_exclude_paths",
+    "session_exclude_paths=",
+    "session_id_proc",
+    "session_id_proc=",
+    "session_store",
+    "session_store=",
+    "session_tracer_allow_production",
+    "session_tracer_allow_production=",
+    "session_tracer_enabled",
+    "session_tracer_enabled=",
+    "similarity_threshold",
+    "similarity_threshold=",
+    "unblocked_api_token",
+    "unblocked_api_token=",
+    "unblocked_collection_id",
+    "unblocked_collection_id=",
+    "unblocked_repo_url",
+    "unblocked_repo_url=",
+    "vector_store",
+    "vector_store=",
+    "vector_store_options",
+    "vector_store_options="
+  ],
+  "presets": {
+    "local": {
+      "vector_store": "in_memory",
+      "metadata_store": "sqlite",
+      "graph_store": "in_memory",
+      "embedding_provider": "ollama"
+    },
+    "postgresql": {
+      "vector_store": "pgvector",
+      "metadata_store": "sqlite",
+      "graph_store": "in_memory",
+      "embedding_provider": "openai"
+    },
+    "production": {
+      "vector_store": "qdrant",
+      "metadata_store": "sqlite",
+      "graph_store": "in_memory",
+      "embedding_provider": "openai"
+    },
+    "shared_filesystem": {
+      "vector_store": "in_memory",
+      "metadata_store": "in_memory",
+      "graph_store": "in_memory",
+      "embedding_provider": "ollama"
+    }
+  },
+  "extractor_registrations": [
+    "action_cable_channels",
+    "caching",
+    "components",
+    "concerns",
+    "configurations",
+    "controllers",
+    "database_views",
+    "decorators",
+    "engines",
+    "events",
+    "factories",
+    "graphql",
+    "i18n",
+    "jobs",
+    "libs",
+    "mailers",
+    "managers",
+    "middleware",
+    "migrations",
+    "models",
+    "policies",
+    "poros",
+    "pundit_policies",
+    "rails_source",
+    "rake_tasks",
+    "routes",
+    "scheduled_jobs",
+    "serializers",
+    "services",
+    "state_machines",
+    "test_mappings",
+    "validators",
+    "view_components",
+    "view_templates"
+  ],
+  "rake_tasks": [
+    {
+      "name": "woods:clean",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:clear",
+      "arguments": [],
+      "prerequisites": [
+        "clean"
+      ]
+    },
+    {
+      "name": "woods:console",
+      "arguments": [],
+      "prerequisites": []
+    },
+    {
+      "name": "woods:embed",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:embed_incremental",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:evaluate",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:evaluate:baseline",
+      "arguments": [
+        "strategy"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:extract",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:extract_framework",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:flow",
+      "arguments": [
+        "entry_point"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:generate_token",
+      "arguments": [],
+      "prerequisites": []
+    },
+    {
+      "name": "woods:guard",
+      "arguments": [],
+      "prerequisites": [
+        "watch"
+      ]
+    },
+    {
+      "name": "woods:hone",
+      "arguments": [],
+      "prerequisites": [
+        "embed_incremental"
+      ]
+    },
+    {
+      "name": "woods:incremental",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:look",
+      "arguments": [],
+      "prerequisites": [
+        "stats"
+      ]
+    },
+    {
+      "name": "woods:nest",
+      "arguments": [],
+      "prerequisites": [
+        "embed"
+      ]
+    },
+    {
+      "name": "woods:notion_sync",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:obsidian",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:refresh",
+      "arguments": [
+        "extractor"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:relay",
+      "arguments": [],
+      "prerequisites": [
+        "unblocked_sync"
+      ]
+    },
+    {
+      "name": "woods:retrieve",
+      "arguments": [
+        "query"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:scan",
+      "arguments": [],
+      "prerequisites": [
+        "extract"
+      ]
+    },
+    {
+      "name": "woods:self_analyze",
+      "arguments": [],
+      "prerequisites": []
+    },
+    {
+      "name": "woods:send",
+      "arguments": [],
+      "prerequisites": [
+        "notion_sync"
+      ]
+    },
+    {
+      "name": "woods:stats",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:tend",
+      "arguments": [],
+      "prerequisites": [
+        "incremental"
+      ]
+    },
+    {
+      "name": "woods:unblocked_sync",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:validate",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:vault",
+      "arguments": [],
+      "prerequisites": [
+        "obsidian"
+      ]
+    },
+    {
+      "name": "woods:vet",
+      "arguments": [],
+      "prerequisites": [
+        "validate"
+      ]
+    },
+    {
+      "name": "woods:watch",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:watch_status",
+      "arguments": [],
+      "prerequisites": []
+    }
+  ],
+  "executables": [
+    "woods-console",
+    "woods-console-mcp",
+    "woods-mcp",
+    "woods-mcp-http",
+    "woods-mcp-start"
+  ],
+  "index_mcp": {
+    "tools": [
+      {
+        "name": "codebase_retrieve",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_retrieve_tool(server, retriever, respond, respond_err) coerce_int = method(:coerce_integer) coerce = method(:coerce_array) stale_check = method(:stale_index_result?) server.define_tool( name: 'codebase_retrieve', description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \\ 'Example: codebase_retrieve(\"how does billing work?\") returns ranked source context. ' \\ 'Returns a token-budgeted context string ready to paste into a prompt. ' \\ 'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \\ 'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable. ' \\ 'By default excludes test_mappings (~33% of a typical index) so spec filenames do not ' \\ 'dominate semantic rank; pass types: [\"test_mapping\"] to opt back in. ' \\ 'Parameter: use `budget` for the token budget (not `limit` — that means result count ' \\ 'on sibling tools, and mapping it here would silently produce a near-empty response).', input_schema: { properties: { query: { type: 'string', description: 'Natural language question (e.g. \"How does user authentication work?\")' }, budget: { type: 'integer', description: 'Token budget for context assembly (default: 8000).' }, types: { type: 'array', items: { type: 'string' }, description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \\ 'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \\ 'When the unfiltered top-K has no candidate of a requested type, the retriever ' \\ 'falls back to rank-within-type so the response is populated whenever units of ' \\ 'the requested type exist in the index. The response appends a \"Type rank ' \\ 'context\" table with per-type: source, rank in unfiltered top-K, global_k, ' \\ 'total_of_type. Read source to tell the cases apart: in_top_k (strong match), ' \\ 'within_type_fallback (weak match surfaced by the fallback), outside_top_k ' \\ '(index has this type but other requested types filled the result), absent ' \\ '(zero units of this type in the index).' }, exclude_types: { type: 'array', items: { type: 'string' }, description: 'Additional types to exclude on top of the default test_mapping exclusion.' } }, required: ['query'] } ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil| unless limit.nil? next respond_err.call( 'codebase_retrieve uses `budget` (token budget, default 8000), not `limit`. ' \\ '`limit` is the result-count parameter on sibling tools (search, recent_changes, pagerank). ' \\ \"Pass `budget: #{coerce_int.call(limit)}` if you meant a #{coerce_int.call(limit)}-token context, \" \\ 'or drop the kwarg entirely for the default 8000.', code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'limit', hint: 'Use `budget:` for tokens. Retrieval does not cap by result count — the token budget ' \\ 'governs how many ranked units fit in the returned context.' ) end budget = coerce_int.call(budget) types = coerce.call(types) exclude_types = coerce.call(exclude_types) if retriever result = retriever.retrieve( query, budget: budget || 8000, types: types, exclude_types: exclude_types ) if stale_check.call(result) next respond_err.call( 'The vector index appears stale: matches were found but their source data is ' \\ 'missing (likely a deleted or renamed unit). Re-run `woods:embed` (or ' \\ '`woods:embed_incremental`) to refresh the index, then retry.', code: :stale_index, tool: 'codebase_retrieve' ) end respond.call(result.context) else respond_err.call( 'Semantic search is disabled — no embedding provider is configured. ' \\ 'To enable: set OPENAI_API_KEY, or run Ollama locally ' \\ '(brew install ollama && ollama serve && ollama pull nomic-embed-text). ' \\ 'Use the `search` tool for pattern-based matching in the meantime.', code: :not_configured, config_key: 'embedding_provider', doc_link: 'docs/RETRIEVAL_GUIDE.md#configuring-retrieval', tool: 'codebase_retrieve' ) end end end"
+        }
+      },
+      {
+        "name": "dependencies",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_traversal_tool(server, reader, respond, renderer, name:, description:, reader_method:, render_key:) coerce = method(:coerce_array) coerce_int = method(:coerce_integer) server.define_tool( name: name, description: description, input_schema: { properties: { identifier: { type: 'string', description: 'Unit identifier to start from' }, depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' }, types: { type: 'array', items: { type: 'string' }, description: 'Filter to these types' }, via: { anyOf: [ { type: 'string' }, { type: 'array', items: { type: 'string' } } ], description: 'Filter by relationship type. Accepts either a single string ' \\ \"(e.g. 'code_reference') or an array \" \\ \"(e.g. ['code_reference','render']); both forms are coerced to an array internally. \" \\ 'Known values: link_to, redirect_to, form_action, render, code_reference, ' \\ 'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface.' } }, required: ['identifier'] } ) do |identifier:, server_context:, depth: nil, types: nil, via: nil| types = coerce.call(types) via = coerce.call(via) depth = coerce_int.call(depth) result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via) if result[:found] == false result[:message] = \"Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers.\" end respond.call(renderer.render(render_key, result)) end end"
+        }
+      },
+      {
+        "name": "dependents",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_traversal_tool(server, reader, respond, renderer, name:, description:, reader_method:, render_key:) coerce = method(:coerce_array) coerce_int = method(:coerce_integer) server.define_tool( name: name, description: description, input_schema: { properties: { identifier: { type: 'string', description: 'Unit identifier to start from' }, depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' }, types: { type: 'array', items: { type: 'string' }, description: 'Filter to these types' }, via: { anyOf: [ { type: 'string' }, { type: 'array', items: { type: 'string' } } ], description: 'Filter by relationship type. Accepts either a single string ' \\ \"(e.g. 'code_reference') or an array \" \\ \"(e.g. ['code_reference','render']); both forms are coerced to an array internally. \" \\ 'Known values: link_to, redirect_to, form_action, render, code_reference, ' \\ 'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface.' } }, required: ['identifier'] } ) do |identifier:, server_context:, depth: nil, types: nil, via: nil| types = coerce.call(types) via = coerce.call(via) depth = coerce_int.call(depth) result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via) if result[:found] == false result[:message] = \"Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers.\" end respond.call(renderer.render(render_key, result)) end end"
+        }
+      },
+      {
+        "name": "domain_clusters",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_domain_clusters_tool(server, reader, respond, renderer) coerce = method(:coerce_array) coerce_int = method(:coerce_integer) server.define_tool( name: 'domain_clusters', description: 'Group code units into semantic domains by namespace and graph connectivity. ' \\ 'Returns clusters with hub nodes, entry points, boundary edges, and type breakdowns. ' \\ 'Useful for understanding architectural domains and blast radius.', input_schema: { properties: { min_size: { type: 'integer', description: 'Minimum units per cluster before merging into neighbors (default: 3)' }, types: { type: 'array', items: { type: 'string' }, description: 'Filter to these unit types (default: all). Example: [\"model\", \"service\", \"job\"]' } } } ) do |server_context:, min_size: nil, types: nil| min_size = coerce_int.call(min_size) || 3 types = coerce.call(types) graph = reader.dependency_graph analyzer = Woods::GraphAnalyzer.new(graph) clusters = analyzer.domain_clusters(min_size: min_size, types: types) respond.call(renderer.render(:domain_clusters, { clusters: clusters, total: clusters.size })) end end"
+        }
+      },
+      {
+        "name": "framework",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_framework_tool(server, reader, respond, renderer) coerce_int = method(:coerce_integer) server.define_tool( name: 'framework', description: 'Search Rails framework source units by concept keyword. Matches against identifier, ' \\ 'source_code, and metadata of rails_source type units extracted from installed gems.', input_schema: { properties: { keyword: { type: 'string', description: 'Concept keyword to search for (e.g. \"ActiveRecord\", \"routing\", \"callbacks\")' }, limit: { type: 'integer', description: 'Maximum results (default: 20)' } }, required: ['keyword'] } ) do |keyword:, server_context:, limit: nil| limit = coerce_int.call(limit) results = reader.framework_sources(keyword, limit: limit || 20) respond.call(renderer.render(:framework, { keyword: keyword, result_count: results.size, results: results })) end end"
+        }
+      },
+      {
+        "name": "graph_analysis",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_graph_analysis_tool(server, reader, respond, renderer) paginate = method(:paginate_section) coerce_int = method(:coerce_integer) server.define_tool( name: 'graph_analysis', description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, and bridges.', input_schema: { properties: { analysis: { type: 'string', enum: %w[orphans dead_ends hubs cycles bridges all], description: 'Which analysis to return. Default: all' }, limit: { type: 'integer', description: 'Limit results per section (default: 20)' }, offset: { type: 'integer', description: 'Skip this many results per section (default: 0)' } } } ) do |server_context:, analysis: nil, limit: nil, offset: nil| limit = coerce_int.call(limit) offset = coerce_int.call(offset) data = reader.graph_analysis section = analysis || 'all' effective_offset = offset || 0 result = if section == 'all' if limit || effective_offset.positive? truncated = data.dup %w[orphans dead_ends hubs cycles bridges].each do |key| paginate.call(truncated, key, limit, effective_offset) end truncated else data end else single = { section => data[section], 'stats' => data['stats'] } paginate.call(single, section, limit, effective_offset) if limit || effective_offset.positive? single end respond.call(renderer.render(:graph_analysis, result)) end end"
+        }
+      },
+      {
+        "name": "list_snapshots",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) define_list_snapshots_tool(server, snapshot_store, respond, snap_missing) define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing) define_unit_history_tool(server, snapshot_store, respond, snap_missing) define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing) end"
+        }
+      },
+      {
+        "name": "lookup",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_lookup_tool(server, reader, respond, respond_err, renderer) coerce = method(:coerce_array) server.define_tool( name: 'lookup', description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \\ 'dependencies, and dependents. Use include_source: false to omit source_code. ' \\ 'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \\ '`name` is accepted as an alias for `identifier` for discoverability.', input_schema: { properties: { identifier: { type: 'string', description: 'Exact unit identifier (e.g. \"Post\", \"PostsController\", \"Api::V1::HealthController\")' }, name: { type: 'string', description: 'Alias for `identifier`. Either one works.' }, include_source: { type: 'boolean', description: 'Include source_code in response (default: true)' }, sections: { type: 'array', items: { type: 'string' }, description: 'Select specific keys to return (e.g. [\"metadata\", \"dependencies\"]). Always includes type, identifier, file_path, namespace.' } } } ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil| identifier ||= name if identifier.nil? || identifier.empty? next respond_err.call( 'lookup requires `identifier` (or its alias `name`).', code: :unsupported_argument, tool: 'lookup', argument: 'identifier', hint: 'Pass identifier: \"PostsController\" (or name: \"PostsController\").' ) end sections = coerce.call(sections) unit = reader.find_unit(identifier) if unit always_include = %w[type identifier file_path namespace] filtered = unit filtered = filtered.except('source_code') if include_source == false if sections&.any? allowed = (always_include + sections).to_set filtered = filtered.slice(*allowed) end respond.call(renderer.render(:lookup, filtered)) else respond_err.call( \"Unit not found: #{identifier}\", code: :not_found, identifier: identifier, tool: 'lookup', hint: 'Use `search` to find identifiers by pattern, then `lookup` on the exact match.' ) end end end"
+        }
+      },
+      {
+        "name": "notion_sync",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "notion_wired?",
+          "predicate_logic": "def notion_wired? config = Woods.configuration return false unless config token = Woods.resolve_notion_token(config) ids = config.respond_to?(:notion_database_ids) ? config.notion_database_ids : nil !token.nil? && ids && !ids.empty? end",
+          "predicate_definitions": {
+            "notion_wired?": "def notion_wired? config = Woods.configuration return false unless config token = Woods.resolve_notion_token(config) ids = config.respond_to?(:notion_database_ids) ? config.notion_database_ids : nil !token.nil? && ids && !ids.empty? end"
+          },
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_notion_sync_tool(server, reader, index_dir, respond, respond_err) server.define_tool( name: 'notion_sync', description: 'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \\ 'Requires notion_api_token and notion_database_ids to be configured.', input_schema: { type: 'object', properties: {} } ) do |server_context:| config = Woods.configuration if Woods.resolve_notion_token(config).nil? next respond_err.call( 'notion_api_token is not configured. Set it in Woods.configure or via the NOTION_API_TOKEN env var.', code: :not_configured, config_key: 'notion_api_token', doc_link: 'docs/NOTION_EXPORT.md', tool: 'notion_sync' ) end if (config.notion_database_ids || {}).empty? next respond_err.call( 'notion_database_ids is not configured. Set it in Woods.configure.', code: :not_configured, config_key: 'notion_database_ids', doc_link: 'docs/NOTION_EXPORT.md', tool: 'notion_sync' ) end require_relative '../notion/exporter' exporter = Woods::Notion::Exporter.new(index_dir: index_dir, reader: reader) stats = exporter.sync_all respond.call(JSON.pretty_generate({ synced: true, data_models: stats[:data_models], columns: stats[:columns], errors: stats[:errors].first(10) })) rescue StandardError => e respond_err.call( \"Notion sync failed: #{e.message}\", code: :api_error, tool: 'notion_sync' ) end end"
+        }
+      },
+      {
+        "name": "pagerank",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_pagerank_tool(server, reader, respond, renderer) coerce = method(:coerce_array) coerce_int = method(:coerce_integer) server.define_tool( name: 'pagerank', description: 'Get PageRank importance scores for code units. Higher scores indicate more structurally important nodes.', input_schema: { properties: { limit: { type: 'integer', description: 'Maximum results to return (default: 20)' }, types: { type: 'array', items: { type: 'string' }, description: 'Filter to these types' } } } ) do |server_context:, limit: nil, types: nil| types = coerce.call(types) limit = coerce_int.call(limit) scores = reader.dependency_graph.pagerank graph_data = reader.raw_graph_data nodes = graph_data['nodes'] || {} type_set = types&.to_set ranked = scores .sort_by { |_id, score| -score } .filter_map do |id, score| node_type = nodes.dig(id, 'type') next if type_set && !type_set.include?(node_type) { identifier: id, type: node_type, score: score.round(6) } end effective_limit = limit || 20 result = { total_nodes: scores.size, results: ranked.first(effective_limit) } respond.call(renderer.render(:pagerank, result)) end end"
+        }
+      },
+      {
+        "name": "pipeline_diagnose",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_status_tool(server, operator, respond, respond_err, op_missing) define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing) define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing) end"
+        }
+      },
+      {
+        "name": "pipeline_embed",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_status_tool(server, operator, respond, respond_err, op_missing) define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing) define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing) end"
+        }
+      },
+      {
+        "name": "pipeline_extract",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_status_tool(server, operator, respond, respond_err, op_missing) define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing) define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing) end"
+        }
+      },
+      {
+        "name": "pipeline_repair",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_status_tool(server, operator, respond, respond_err, op_missing) define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing) define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing) end"
+        }
+      },
+      {
+        "name": "pipeline_status",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "operator",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store) define_pipeline_status_tool(server, operator, respond, respond_err, op_missing) define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing) define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing) end"
+        }
+      },
+      {
+        "name": "recent_changes",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_recent_changes_tool(server, reader, respond, renderer) coerce = method(:coerce_array) coerce_int = method(:coerce_integer) server.define_tool( name: 'recent_changes', description: 'List recently modified code units sorted by git last_modified timestamp. ' \\ 'Returns the most recently changed units first.', input_schema: { properties: { limit: { type: 'integer', description: 'Maximum results (default: 10)' }, types: { type: 'array', items: { type: 'string' }, description: 'Filter to these types: model, controller, service, job, mailer, etc.' } } } ) do |server_context:, limit: nil, types: nil| types = coerce.call(types) limit = coerce_int.call(limit) results = reader.recent_changes(limit: limit || 10, types: types) respond.call(renderer.render(:recent_changes, { result_count: results.size, results: results })) end end"
+        }
+      },
+      {
+        "name": "reload",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_reload_tool(server, reader, respond, retriever_reloader) server.define_tool( name: 'reload', description: 'Reload extraction data from disk. Use after re-running extraction or woods:embed to pick ' \\ 'up changes without restarting the server. Refreshes the JSON index (manifest, dependency ' \\ 'graph, unit cache) AND re-hydrates the retriever\\'s in-memory vector/metadata/graph ' \\ 'stores from the latest dumps. Durable backends (pgvector, Qdrant) are auto-refreshed ' \\ 'externally — their counts in the response reflect the read-through state.', input_schema: { type: 'object', properties: {} } ) do |server_context:| reader.with_exclusive_reload do |manifest| payload = { reloaded: true, extracted_at: manifest['extracted_at'], total_units: manifest['total_units'], counts: manifest['counts'] } if retriever_reloader begin payload[:retriever] = retriever_reloader.call rescue StandardError => e payload[:retriever] = { error: \"#{e.class}: #{e.message}\" } end end respond.call(JSON.pretty_generate(payload)) end end end"
+        }
+      },
+      {
+        "name": "retrieval_explain",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_feedback_tools(server, feedback_store, respond, _respond_err, fb_missing) define_retrieval_rate_tool(server, feedback_store, respond, fb_missing) define_retrieval_report_gap_tool(server, feedback_store, respond, fb_missing) define_retrieval_explain_tool(server, feedback_store, respond, fb_missing) define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing) end"
+        }
+      },
+      {
+        "name": "retrieval_rate",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_feedback_tools(server, feedback_store, respond, _respond_err, fb_missing) define_retrieval_rate_tool(server, feedback_store, respond, fb_missing) define_retrieval_report_gap_tool(server, feedback_store, respond, fb_missing) define_retrieval_explain_tool(server, feedback_store, respond, fb_missing) define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing) end"
+        }
+      },
+      {
+        "name": "retrieval_report_gap",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_feedback_tools(server, feedback_store, respond, _respond_err, fb_missing) define_retrieval_rate_tool(server, feedback_store, respond, fb_missing) define_retrieval_report_gap_tool(server, feedback_store, respond, fb_missing) define_retrieval_explain_tool(server, feedback_store, respond, fb_missing) define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing) end"
+        }
+      },
+      {
+        "name": "retrieval_suggest",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "feedback_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_feedback_tools(server, feedback_store, respond, _respond_err, fb_missing) define_retrieval_rate_tool(server, feedback_store, respond, fb_missing) define_retrieval_report_gap_tool(server, feedback_store, respond, fb_missing) define_retrieval_explain_tool(server, feedback_store, respond, fb_missing) define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing) end"
+        }
+      },
+      {
+        "name": "search",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_search_tool(server, reader, respond, respond_err, renderer) coerce = method(:coerce_array) coerce_int = method(:coerce_integer) server.define_tool( name: 'search', description: 'Find code units whose identifiers (or source/metadata) match a regex. ' \\ 'Example: search(\"Worker|Job\") returns all workers and jobs; search(\"^Post\") ' \\ 'returns units starting with \"Post\". Returns [{identifier, type, match_field}]. ' \\ 'Use `lookup` for exact identifiers, `dependencies`/`dependents` for graph traversal. ' \\ 'Gotchas: query is a Ruby regex — literal pipe needs escaping as \\\\|; ' \\ 'types restricts which index directories are scanned (e.g. [\"mailer\"] scans only ' \\ 'the mailers dir); invalid regex falls back to literal match. ' \\ 'For plain prefix/suffix matching on namespaces, prefer exact_prefix / exact_suffix ' \\ '(literal, case-insensitive) over escaping regex anchors.', input_schema: { properties: { query: { type: 'string', description: 'Case-insensitive Ruby regex pattern (e.g. \"Worker|Job\", \"^Post\", \".*Service$\")' }, types: { type: 'array', items: { type: 'string' }, description: 'Restrict scan to these unit types: model, controller, service, job, mailer, etc.' }, fields: { type: 'array', items: { type: 'string' }, description: 'Fields to search: identifier (default), source_code, metadata' }, limit: { type: 'integer', description: 'Maximum results (default: 20)' }, exact_prefix: { type: 'string', description: 'Literal (non-regex) case-insensitive identifier prefix filter. ' \\ 'Use for namespace scoping like \"Next::Settings::\" without escaping regex metacharacters.' }, exact_suffix: { type: 'string', description: 'Literal (non-regex) case-insensitive identifier suffix filter. ' \\ 'Use for suffix matching like \"Controller\" without escaping regex metacharacters.' } } } ) do |server_context:, query: nil, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil| if (query.nil? || query.empty?) && (exact_prefix.nil? || exact_prefix.empty?) && (exact_suffix.nil? || exact_suffix.empty?) next respond_err.call( 'search requires `query` or at least one of `exact_prefix` / `exact_suffix`.', code: :unsupported_argument, tool: 'search', argument: 'query', hint: 'Pass query: \"Worker|Job\" for regex matching, or exact_prefix: \"Next::Settings::\" for literal prefix scoping.' ) end types = coerce.call(types) fields = coerce.call(fields) limit = coerce_int.call(limit) search_result = reader.search( query, types: types, fields: fields || %w[identifier], limit: limit || 20, exact_prefix: exact_prefix, exact_suffix: exact_suffix ) results = search_result[:results] payload = { query: query, result_count: results.size, results: results } payload[:note] = search_result[:note] if search_result[:note] payload[:partial] = true if search_result[:partial] respond.call(renderer.render(:search, payload)) end end"
+        }
+      },
+      {
+        "name": "session_trace",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "session_tracer_wired?",
+          "predicate_logic": "def session_tracer_wired? config = Woods.configuration return false unless config return false unless config.respond_to?(:session_store) store = config.session_store return false if store.nil? %i[read sessions].all? { |m| store.respond_to?(m) } end",
+          "predicate_definitions": {
+            "session_tracer_wired?": "def session_tracer_wired? config = Woods.configuration return false unless config return false unless config.respond_to?(:session_store) store = config.session_store return false if store.nil? %i[read sessions].all? { |m| store.respond_to?(m) } end"
+          },
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_session_trace_tool(server, reader, respond, respond_err) coerce_int = method(:coerce_integer) server.define_tool( name: 'session_trace', description: 'Assemble context from a browser session trace (requires session tracer middleware)', input_schema: { properties: { session_id: { type: 'string', description: 'Session ID to trace' }, budget: { type: 'integer', description: 'Max token budget (default: 8000)' }, depth: { type: 'integer', description: 'Dependency resolution depth (default: 1)' } }, required: ['session_id'] } ) do |session_id:, server_context:, budget: nil, depth: nil| budget = coerce_int.call(budget) depth = coerce_int.call(depth) store = Woods.configuration.session_store unless store next respond_err.call( 'Session tracer is not configured. Assign `session_store` (FileStore, RedisStore, or SolidCacheStore) ' \\ 'and set `session_tracer_enabled = true` in Woods.configure.', code: :not_configured, config_key: 'session_store', doc_link: 'docs/SESSION_TRACER.md', tool: 'session_trace' ) end require_relative '../session_tracer/session_flow_assembler' assembler = Woods::SessionTracer::SessionFlowAssembler.new( store: store, reader: reader ) doc = assembler.assemble(session_id, budget: budget || 8000, depth: depth || 1) respond.call(doc.to_markdown) rescue StandardError => e respond_err.call( \"Session trace failed: #{e.message}\", code: :internal_error, tool: 'session_trace', session_id: session_id ) end end"
+        }
+      },
+      {
+        "name": "snapshot_detail",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) define_list_snapshots_tool(server, snapshot_store, respond, snap_missing) define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing) define_unit_history_tool(server, snapshot_store, respond, snap_missing) define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing) end"
+        }
+      },
+      {
+        "name": "snapshot_diff",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) define_list_snapshots_tool(server, snapshot_store, respond, snap_missing) define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing) define_unit_history_tool(server, snapshot_store, respond, snap_missing) define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing) end"
+        }
+      },
+      {
+        "name": "structure",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_structure_tool(server, reader, respond, renderer) server.define_tool( name: 'structure', description: 'Get codebase structure overview. Returns manifest (counts, versions, git info) and optionally the full summary.', input_schema: { properties: { detail: { type: 'string', enum: %w[summary full], description: '\"summary\" for manifest only, \"full\" to include SUMMARY.md. Default: summary' } } } ) do |server_context:, detail: nil| result = { manifest: reader.manifest, template_engines: reader.template_engines } result[:summary] = reader.summary if (detail || 'summary') == 'full' respond.call(renderer.render(:structure, result)) end end"
+        }
+      },
+      {
+        "name": "trace_flow",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) require_relative '../flow_assembler' require_relative '../flow_document' require_relative '../dependency_graph' coerce_int = method(:coerce_integer) load_precomputed = method(:load_precomputed_flow) server.define_tool( name: 'trace_flow', description: 'Trace execution flow from an entry point through the codebase', input_schema: { properties: { entry_point: { type: 'string', description: 'Entry point (e.g., UsersController#create)' }, depth: { type: 'integer', description: 'Maximum call depth to trace (default: 3)' } }, required: ['entry_point'] } ) do |entry_point:, server_context:, depth: nil| max_depth = coerce_int.call(depth) || 3 flow_doc = load_precomputed.call(index_dir, entry_point) flow_doc ||= begin graph = reader.dependency_graph assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: index_dir) assembler.assemble(entry_point, max_depth: max_depth) end respond.call(renderer.render(:trace_flow, flow_doc.to_h)) rescue StandardError => e if ToolContract.artifact_error?(e) next respond_err.call( 'trace_flow could not read a required Index artifact.', code: :corrupt_artifact, tool: 'trace_flow' ) end respond_err.call( \"trace_flow failed: #{e.message}\", code: :internal_error, data: { entry_point: entry_point, exception: e.class.name } ) end end"
+        }
+      },
+      {
+        "name": "unit_history",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "snapshot_store",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) define_list_snapshots_tool(server, snapshot_store, respond, snap_missing) define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing) define_unit_history_tool(server, snapshot_store, respond, snap_missing) define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing) end"
+        }
+      },
+      {
+        "name": "woods_status",
+        "internal_guards": [],
+        "registration_condition": {
+          "call_site_guard": "always registered",
+          "predicate_logic": null,
+          "predicate_definitions": {},
+          "internal_guards": [],
+          "registration_logic": "def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil, bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil) reader = IndexReader.new(index_dir) reader.warmup! if warmup config = Woods.configuration format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown renderer = ToolResponseRenderer.for(format) resources = build_resources resource_templates = build_resource_templates respond = method(:text_response) respond_err = method(:error_response) op_missing = lambda do |tool| error_response( 'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \\ 'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.', code: :not_configured, config_key: 'operator', doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool ) end fb_missing = lambda do |tool| error_response( 'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \\ 'to enable retrieval feedback capture.', code: :not_configured, config_key: 'feedback_store', doc_link: 'docs/FEEDBACK_STORE.md', tool: tool ) end snap_missing = lambda do |tool| error_response( 'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \\ 'and pass `snapshot_store:` to Woods::MCP::Server.build.', code: :not_configured, config_key: 'enable_snapshots', doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool ) end server = ::MCP::Server.new( name: 'woods', version: Woods::VERSION, resources: resources, resource_templates: resource_templates, configuration: ::MCP::Configuration.new.merge(::MCP.configuration), **ProtocolPolicy.cache_hints ) server.singleton_class.prepend(VersionAwareToolDispatch) server.singleton_class.prepend(Tasks::RequestCapture) task_store = Tasks::Store.new(index_dir) Tasks::Extension.install(server, store: task_store) define_lookup_tool(server, reader, respond, respond_err, renderer) define_search_tool(server, reader, respond, respond_err, renderer) define_traversal_tool(server, reader, respond, renderer, name: 'dependencies', description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.', reader_method: :traverse_dependencies, render_key: :dependencies) define_traversal_tool(server, reader, respond, renderer, name: 'dependents', description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.', reader_method: :traverse_dependents, render_key: :dependents) define_structure_tool(server, reader, respond, renderer) define_graph_analysis_tool(server, reader, respond, renderer) define_domain_clusters_tool(server, reader, respond, renderer) define_pagerank_tool(server, reader, respond, renderer) define_framework_tool(server, reader, respond, renderer) define_recent_changes_tool(server, reader, respond, renderer) define_reload_tool(server, reader, respond, retriever_reloader) define_retrieve_tool(server, retriever, respond, respond_err) define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer) define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired? define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired? define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) register_resource_handler(server, reader) ToolContract.apply!(server) IndexReaderPinning.install(server, reader: reader) ProtocolPolicy.sort_tools!(server) end private\ndef define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond) server.define_tool( name: 'woods_status', description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \\ '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \\ 'bootstrap state (hydrated / degraded / failed + reason), feature flags, and a ready flag. ' \\ 'Call this first on cold connect to learn what the server knows.', input_schema: { type: 'object', properties: {} } ) do |server_context:| _ = server_context status = Woods::MCP::Server.build_status( reader: reader, retriever: retriever, index_dir: index_dir, bootstrap_state: bootstrap_state ) respond.call(JSON.pretty_generate(status)) end end public"
+        }
+      }
+    ],
+    "resources": [
+      {
+        "name": "dependency-graph",
+        "uri": "codebase://graph"
+      },
+      {
+        "name": "manifest",
+        "uri": "codebase://manifest"
+      }
+    ],
+    "resource_templates": [
+      {
+        "name": "unit",
+        "uri_template": "codebase://unit/{identifier}"
+      },
+      {
+        "name": "units-by-type",
+        "uri_template": "codebase://type/{type}"
+      }
+    ]
+  },
+  "console_mcp": {
+    "schemas": [
+      {
+        "name": "console_aggregate",
+        "tier": 1
+      },
+      {
+        "name": "console_association_count",
+        "tier": 1
+      },
+      {
+        "name": "console_cache_stats",
+        "tier": 3
+      },
+      {
+        "name": "console_channel_status",
+        "tier": 3
+      },
+      {
+        "name": "console_check_eligibility",
+        "tier": 2
+      },
+      {
+        "name": "console_check_policy",
+        "tier": 2
+      },
+      {
+        "name": "console_check_setting",
+        "tier": 2
+      },
+      {
+        "name": "console_count",
+        "tier": 1
+      },
+      {
+        "name": "console_data_snapshot",
+        "tier": 2
+      },
+      {
+        "name": "console_decorate",
+        "tier": 2
+      },
+      {
+        "name": "console_diagnose_model",
+        "tier": 2
+      },
+      {
+        "name": "console_error_rates",
+        "tier": 3
+      },
+      {
+        "name": "console_eval",
+        "tier": 4
+      },
+      {
+        "name": "console_find",
+        "tier": 1
+      },
+      {
+        "name": "console_job_failures",
+        "tier": 3
+      },
+      {
+        "name": "console_job_find",
+        "tier": 3
+      },
+      {
+        "name": "console_job_queues",
+        "tier": 3
+      },
+      {
+        "name": "console_job_schedule",
+        "tier": 3
+      },
+      {
+        "name": "console_pluck",
+        "tier": 1
+      },
+      {
+        "name": "console_query",
+        "tier": 4
+      },
+      {
+        "name": "console_recent",
+        "tier": 1
+      },
+      {
+        "name": "console_redis_info",
+        "tier": 3
+      },
+      {
+        "name": "console_sample",
+        "tier": 1
+      },
+      {
+        "name": "console_schema",
+        "tier": 1
+      },
+      {
+        "name": "console_slow_endpoints",
+        "tier": 3
+      },
+      {
+        "name": "console_sql",
+        "tier": 4
+      },
+      {
+        "name": "console_status",
+        "tier": 1
+      },
+      {
+        "name": "console_throughput",
+        "tier": 3
+      },
+      {
+        "name": "console_update_setting",
+        "tier": 2
+      },
+      {
+        "name": "console_validate_record",
+        "tier": 2
+      },
+      {
+        "name": "console_validate_with",
+        "tier": 2
+      }
+    ],
+    "tiers": {
+      "1": 9,
+      "2": 9,
+      "3": 10,
+      "4": 3
+    },
+    "executable_modes": {
+      "embedded": [
+        "console_aggregate",
+        "console_association_count",
+        "console_count",
+        "console_find",
+        "console_pluck",
+        "console_recent",
+        "console_sample",
+        "console_schema",
+        "console_status"
+      ],
+      "embedded_read": [
+        "console_aggregate",
+        "console_association_count",
+        "console_count",
+        "console_find",
+        "console_pluck",
+        "console_query",
+        "console_recent",
+        "console_sample",
+        "console_schema",
+        "console_sql",
+        "console_status"
+      ]
+    }
+  },
+  "tasks_methods": [
+    "build_embed_indexer",
+    "build_resolved_config",
+    "print_embed_stats",
+    "verify_store_dimensions!"
+  ],
+  "adapters": {
+    "embedding_providers": [
+      "fake",
+      "ollama",
+      "openai"
+    ],
+    "vector_stores": [
+      "in_memory",
+      "pgvector",
+      "qdrant"
+    ],
+    "metadata_stores": [
+      "in_memory",
+      "sqlite"
+    ],
+    "graph_stores": [
+      "in_memory"
+    ],
+    "exporters": [
+      {
+        "name": "notion",
+        "class": "Woods::Notion::Exporter",
+        "path": "lib/woods/notion/exporter.rb"
+      },
+      {
+        "name": "obsidian",
+        "class": "Woods::Obsidian::VaultExporter",
+        "path": "lib/woods/obsidian/vault_exporter.rb"
+      },
+      {
+        "name": "unblocked",
+        "class": "Woods::Unblocked::Exporter",
+        "path": "lib/woods/unblocked/exporter.rb"
+      }
+    ]
+  },
+  "public_woods_methods": [
+    "build_retriever",
+    "configuration",
+    "configuration=",
+    "configure",
+    "configure_with_preset",
+    "extract!",
+    "extract_changed!",
+    "resolve_notion_token",
+    "retrieve"
+  ],
+  "counts": {
+    "configuration_attributes": 99,
+    "console_mcp_default_tools": 9,
+    "console_mcp_read_tools": 11,
+    "console_mcp_schemas": 31,
+    "executables": 5,
+    "extractor_registrations": 34,
+    "index_mcp_resource_templates": 2,
+    "index_mcp_resources": 2,
+    "index_mcp_tools": 29,
+    "presets": 4,
+    "public_woods_methods": 9,
+    "rake_tasks": 32,
+    "tasks_methods": 4
+  },
+  "documentation_claims": {
+    "README.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      }
+    ],
+    "docs/AGENT_GUIDE.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/ARCHITECTURE.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "index_mcp_resources",
+        "count": 2
+      },
+      {
+        "surface": "index_mcp_resource_templates",
+        "count": 2
+      }
+    ],
+    "docs/BACKEND_MATRIX.md": [],
+    "docs/CONFIGURATION_REFERENCE.md": [],
+    "docs/CONSOLE_MCP_SETUP.md": [],
+    "docs/DOCKER_SETUP.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_read_tools",
+        "count": 11
+      }
+    ],
+    "docs/EMBEDDING_MODELS.md": [],
+    "docs/EXTRACTOR_REFERENCE.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      }
+    ],
+    "docs/FAQ.md": [],
+    "docs/GETTING_STARTED.md": [],
+    "docs/INCREMENTAL_EXTRACTION.md": [],
+    "docs/MCP_HTTP_TRANSPORT.md": [],
+    "docs/MCP_SERVERS.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "console_mcp_default_tools",
+        "count": 9
+      },
+      {
+        "surface": "console_mcp_read_tools",
+        "count": 11
+      }
+    ],
+    "docs/MCP_TOOL_COOKBOOK.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      }
+    ],
+    "docs/MCP_WORKTREE_SETUP.md": [],
+    "docs/NOTION_INTEGRATION.md": [],
+    "docs/OBSIDIAN_INTEGRATION.md": [],
+    "docs/README.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ],
+    "docs/RETRIEVAL_GUIDE.md": [],
+    "docs/TOKEN_BENCHMARK.md": [],
+    "docs/TROUBLESHOOTING.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      }
+    ],
+    "docs/UNBLOCKED_INTEGRATION.md": [],
+    "docs/UPGRADING_TO_2.md": [],
+    "docs/USE_CASES_AND_FEATURE_GAPS.md": [
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      }
+    ],
+    "docs/WATCH_DAEMON.md": [],
+    "docs/WHY_WOODS.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "index_mcp_tools",
+        "count": 29
+      },
+      {
+        "surface": "console_mcp_schemas",
+        "count": 31
+      }
+    ]
+  }
+}

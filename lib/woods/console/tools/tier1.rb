@@ -28,7 +28,6 @@ module Woods
         # @param columns [Array<String>, nil] Columns to include
         # @return [Hash] Bridge request
         def console_sample(model:, scope: nil, limit: 5, columns: nil)
-          limit = [limit, 25].min
           { tool: 'sample', params: { model: model, scope: scope, limit: limit, columns: columns }.compact }
         end
 
@@ -52,7 +51,6 @@ module Woods
         # @param distinct [Boolean] Return unique values only
         # @return [Hash] Bridge request
         def console_pluck(model:, columns:, scope: nil, limit: 100, distinct: false)
-          limit = [limit, 1000].min
           { tool: 'pluck', params: { model: model, columns: columns, scope: scope,
                                      limit: limit, distinct: distinct }.compact }
         end
@@ -100,7 +98,6 @@ module Woods
         # @return [Hash] Bridge request
         # rubocop:disable Metrics/ParameterLists
         def console_recent(model:, order_by: 'created_at', direction: 'desc', limit: 10, scope: nil, columns: nil)
-          limit = [limit, 50].min
           { tool: 'recent', params: { model: model, order_by: order_by, direction: direction,
                                       limit: limit, scope: scope, columns: columns }.compact }
         end

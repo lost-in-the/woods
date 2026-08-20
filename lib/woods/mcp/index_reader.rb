@@ -54,11 +54,16 @@ module Woods
         raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
 
         @unit_cache = {}
+        @unit_cache_signatures = {}
         @unit_cache_order = []
         @identifier_map = nil
         @auto_refresh = auto_refresh
         @pin_depth = 0
+        @pin_owners = Hash.new(0)
+        @exclusive_waiters = 0
+        @exclusive_owner = nil
         @freshness_mutex = Mutex.new
+        @freshness_condition = ConditionVariable.new
         # Separate from @freshness_mutex: the LRU bookkeeping must not
         # serialize behind a generation check, and a reader that took the
         # freshness lock must be able to touch the caches without deadlocking.
@@ -67,6 +72,10 @@ module Woods
         @loaded_generation = nil
         @loaded_token = nil
         @generation_signature = nil
+        # The directory the loaded generation's payload lives in. nil until a
+        # generation naming a payload is loaded; {#payload_dir} then falls back
+        # to the index root, which is every flat/pre-pointer index.
+        @payload_dir = nil
       end
 
       # The generation this reader's caches were populated from.
@@ -100,7 +109,11 @@ module Woods
       def ensure_fresh!
         return nil unless @auto_refresh
 
-        @freshness_mutex.synchronize { refresh_if_stale }
+        thread = Thread.current
+        @freshness_mutex.synchronize do
+          wait_for_generation_access(thread)
+          refresh_if_stale
+        end
       end
 
       # Suppress cache invalidation for the duration of a block.
@@ -115,11 +128,16 @@ module Woods
       # then holds it — so nothing already cached is dropped and re-read at a
       # newer generation partway through.
       #
-      # **What this does not do:** an artifact that has never been read is
-      # still loaded from whatever is on disk when the block reaches it.
+      # **What this does not do on a flat index:** an artifact that has never
+      # been read is loaded from whatever is on disk when the block reaches it.
       # Guaranteeing more would mean materializing the whole index on entry,
-      # which is what {#warmup!} costs, per request. Closing that last gap
-      # properly needs the payload behind an atomic pointer — see
+      # which is what {#warmup!} costs, per request. When the loaded generation
+      # names an immutable payload directory (its {Woods::Generation} carries a
+      # +payload+ pointer), that gap is closed for free: every read in the
+      # block resolves through {#payload_dir}, which is fixed at pin entry and
+      # names one immutable snapshot, so a never-read artifact still comes from
+      # the pinned generation even as a newer payload is published. A flat
+      # index carries no pointer and keeps the old behaviour — see
       # docs/WATCH_DAEMON.md.
       #
       # Pins are *refcounted*, not a boolean. Under a threaded transport two
@@ -130,21 +148,53 @@ module Woods
       # 0 → 1; nested and overlapping pins ride the generation already held,
       # and invalidation resumes when the last pin releases.
       #
+      # The Index MCP server applies this around reader-backed handlers. Direct
+      # IndexReader callers remain responsible for pinning any multi-read
+      # operation that must not refresh between accessors.
+      #
       # @example
       #   reader.with_pinned_generation { [reader.manifest, reader.find_unit("Post")] }
       #
       # @yield the block to run against a single generation
       # @return [Object] the block's value
       def with_pinned_generation
+        thread = Thread.current
+        exclusive_owner = false
         @freshness_mutex.synchronize do
-          refresh_if_stale if @auto_refresh && @pin_depth.zero?
-          @pin_depth += 1
+          if @exclusive_owner.equal?(thread)
+            exclusive_owner = true
+          else
+            wait_for_generation_access(thread)
+            refresh_if_stale if @auto_refresh && @pin_depth.zero?
+            @pin_depth += 1
+            @pin_owners[thread] += 1
+          end
         end
 
         begin
           yield
         ensure
-          @freshness_mutex.synchronize { @pin_depth -= 1 }
+          release_generation_pin(thread) unless exclusive_owner
+        end
+      end
+
+      # Reload all cached index state while excluding pinned readers.
+      #
+      # Existing pins may finish and nest normally. Once an exclusive reload is
+      # waiting, new pins wait until the reload block has assembled its result.
+      #
+      # @yieldparam manifest [Hash] the manifest loaded after caches are cleared
+      # @return [Object] the block's value
+      # @raise [ThreadError] when upgrading a pin or nesting an exclusive reload
+      def with_exclusive_reload
+        thread = Thread.current
+        acquire_exclusive_generation(thread)
+
+        begin
+          reload!
+          yield manifest
+        ensure
+          release_exclusive_generation(thread)
         end
       end
 
@@ -168,8 +218,11 @@ module Woods
       #
       # @return [void]
       def reload!
-        @unit_cache = {}
-        @unit_cache_order = []
+        @cache_mutex.synchronize do
+          @unit_cache = {}
+          @unit_cache_signatures = {}
+          @unit_cache_order = []
+        end
         @identifier_map = nil
         @index_cache = {}
         @manifest = nil
@@ -201,7 +254,7 @@ module Woods
       def summary
         ensure_fresh!
         @summary ||= begin
-          path = @index_dir.join('SUMMARY.md')
+          path = payload_dir.join('SUMMARY.md')
           path.file? ? path.read : nil
         end
       end
@@ -530,6 +583,48 @@ module Woods
 
       private
 
+      def wait_for_generation_access(thread)
+        @freshness_condition.wait(@freshness_mutex) while generation_access_blocked?(thread)
+      end
+
+      def generation_access_blocked?(thread)
+        return false if @exclusive_owner.equal?(thread) || @pin_owners.key?(thread)
+
+        !@exclusive_owner.nil? || @exclusive_waiters.positive?
+      end
+
+      def release_generation_pin(thread)
+        @freshness_mutex.synchronize do
+          @pin_depth -= 1
+          @pin_owners[thread] -= 1
+          @pin_owners.delete(thread) if @pin_owners[thread].zero?
+          @freshness_condition.broadcast if @pin_depth.zero?
+        end
+      end
+
+      def acquire_exclusive_generation(thread)
+        @freshness_mutex.synchronize do
+          raise ThreadError, 'Cannot start an exclusive reload from a pinned generation' if @pin_owners.key?(thread)
+          raise ThreadError, 'This thread already owns an exclusive reload' if @exclusive_owner.equal?(thread)
+
+          @exclusive_waiters += 1
+          begin
+            @freshness_condition.wait(@freshness_mutex) until @pin_depth.zero? && @exclusive_owner.nil?
+            @exclusive_owner = thread
+          ensure
+            @exclusive_waiters -= 1
+            @freshness_condition.broadcast
+          end
+        end
+      end
+
+      def release_exclusive_generation(thread)
+        @freshness_mutex.synchronize do
+          @exclusive_owner = nil if @exclusive_owner.equal?(thread)
+          @freshness_condition.broadcast
+        end
+      end
+
       # The body of {#ensure_fresh!}. Callers must hold `@freshness_mutex`; it
       # is split out so {#with_pinned_generation} can run it inside the same
       # critical section that increments the pin depth.
@@ -547,8 +642,44 @@ module Woods
         return nil if marker.number.zero? || same_generation?(marker)
 
         reload!
+        @payload_dir = resolve_payload_dir(marker)
         @loaded_token = marker.token
         @loaded_generation = marker.number
+      end
+
+      # The directory the current read resolves payload artifacts against —
+      # manifest, summary, graph, per-type indexes and unit files. It is the
+      # immutable payload directory the loaded generation names, or the index
+      # root for a flat/pre-pointer index. Fixed for the life of a pin (only
+      # {#refresh_if_stale} moves it, and pins suppress refresh), so every
+      # artifact of a pinned read resolves through one generation.
+      #
+      # @return [Pathname]
+      def payload_dir
+        @payload_dir || @index_dir
+      end
+
+      # Resolve a generation's payload pointer to an on-disk directory.
+      #
+      # Returns the index root when there is no pointer (flat index), when the
+      # named directory does not exist (a stale pointer, e.g. a payload pruned
+      # by retention), or when the name would escape the index root — a torn or
+      # tampered pointer must degrade to the flat layout, never read outside the
+      # index. The name is written by Woods and is relative by contract; the
+      # containment check mirrors {IndexArtifact#promote}'s boundary guard.
+      #
+      # @param marker [Woods::Generation::Marker]
+      # @return [Pathname]
+      def resolve_payload_dir(marker)
+        name = marker.payload
+        return @index_dir if name.nil? || name.empty?
+
+        candidate = @index_dir.join(name)
+        root = @index_dir.expand_path.to_s
+        resolved = candidate.expand_path.to_s
+        return @index_dir unless resolved.start_with?("#{root}#{File::SEPARATOR}")
+
+        candidate.directory? ? candidate : @index_dir
       end
 
       # Compare the *token*, not the number.
@@ -679,7 +810,7 @@ module Woods
       def read_index(dir)
         @index_cache ||= {}
         @index_cache[dir] ||= begin
-          path = @index_dir.join(dir, '_index.json')
+          path = payload_dir.join(dir, '_index.json')
           path.file? ? JSON.parse(path.read) : []
         end
       end
@@ -700,39 +831,55 @@ module Woods
       # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
+        path = payload_dir.join(type_dir, filename)
+        open_unit(path.to_s) do |file|
+          signature = unit_file_signature(file.stat)
+          cached = @cache_mutex.synchronize do
+            if @unit_cache.key?(cache_key) && @unit_cache_signatures[cache_key] == signature
+              # Move to end (most recently used)
+              @unit_cache_order.delete(cache_key)
+              @unit_cache_order.push(cache_key)
+              @unit_cache[cache_key]
+            elsif @unit_cache.key?(cache_key)
+              @unit_cache.delete(cache_key)
+              @unit_cache_signatures.delete(cache_key)
+              @unit_cache_order.delete(cache_key)
+              nil
+            end
+          end
+          return cached if cached
 
-        cached = @cache_mutex.synchronize do
-          if @unit_cache.key?(cache_key)
-            # Move to end (most recently used)
+          data = JSON.parse(file.read)
+
+          @cache_mutex.synchronize do
+            # Evict oldest if at capacity
+            if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
+              oldest = @unit_cache_order.shift
+              @unit_cache.delete(oldest)
+              @unit_cache_signatures.delete(oldest)
+            end
+
+            @unit_cache[cache_key] = data
+            @unit_cache_signatures[cache_key] = signature
             @unit_cache_order.delete(cache_key)
             @unit_cache_order.push(cache_key)
-            @unit_cache[cache_key]
           end
+          data
         end
-        return cached if cached
-
-        path = @index_dir.join(type_dir, filename)
-        return nil unless path.file?
-
-        data = JSON.parse(path.read)
-
-        @cache_mutex.synchronize do
-          # Evict oldest if at capacity
-          if @unit_cache.size >= MAX_UNIT_CACHE && !@unit_cache.key?(cache_key)
-            oldest = @unit_cache_order.shift
-            @unit_cache.delete(oldest)
-          end
-
-          @unit_cache[cache_key] = data
-          @unit_cache_order.delete(cache_key)
-          @unit_cache_order.push(cache_key)
-        end
-        data
       end
 
-      # Parse a JSON file relative to the index directory.
+      def unit_file_signature(stat)
+        [stat.dev, stat.ino, stat.size, stat.mtime.to_r, stat.ctime.to_r]
+      end
+
+      def open_unit(path, &block)
+        File.open(path, 'rb', &block)
+      end
+
+      # Parse a JSON payload file (manifest, graph, analysis) resolved through
+      # the loaded generation's {#payload_dir}.
       def parse_json(filename)
-        path = @index_dir.join(filename)
+        path = payload_dir.join(filename)
         JSON.parse(path.read)
       end
 

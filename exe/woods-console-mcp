@@ -1,46 +1,32 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Console MCP server for querying live Rails application state.
+# Launches the real embedded Console MCP server through direct, Docker, or SSH
+# process execution. The child owns stdio and lifecycle directly.
 #
-# Usage:
-#   woods-console-mcp
-#   WOODS_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
-#
-# Connects to a Rails application via a bridge process (Docker exec, direct,
-# or SSH) and exposes read-only query tools via the Model Context Protocol
-# (stdio transport).
-#
-# Disabled by default. Set Woods.configuration.console_mcp_enabled = true
-# in the host application's Woods initializer to enable. Layer 1 blocked
-# tables, Layer 2 credential scanning, and Layer 3 column/EAV redaction are
-# all configured through Woods::Configuration — see docs/CONSOLE_MCP_SETUP.md.
-
-# Suppress json-schema MultiJSON deprecation notice that would otherwise pollute
-# stderr during MCP stdio transport. The deprecation fires the first time
-# +json-schema+ is required — must happen before any Woods require that could
-# transitively pull it in. MCP clients parsing stderr can't tolerate banners.
-begin
-  require 'json-schema'
-  JSON::Validator.use_multi_json = false if defined?(JSON::Validator) && JSON::Validator.respond_to?(:use_multi_json=)
-rescue LoadError
-  # json-schema isn't in every bundle.
-end
+# Configuration precedence:
+#   1. WOODS_CONSOLE_CONFIG, when set (the file must exist)
+#   2. ~/.woods/console.yml, when present
+#   3. direct mode with `bundle exec rake woods:console`
 
 require 'yaml'
-require 'woods'
-require_relative '../lib/woods/console/server'
+require_relative '../lib/woods/console/connection_manager'
 
-unless Woods.configuration.console_mcp_enabled
-  warn 'Woods Console MCP is disabled. Set ' \
-       'Woods.configuration.console_mcp_enabled = true to enable. ' \
-       'See docs/CONSOLE_MCP_SETUP.md for the full security posture.'
+explicit_path = ENV.fetch('WOODS_CONSOLE_CONFIG', nil)
+config_path = explicit_path || File.expand_path('~/.woods/console.yml')
+
+if explicit_path && !File.file?(config_path)
+  warn "[woods-console-mcp] Config file does not exist: #{config_path}"
   exit 1
 end
 
-config_path = ENV.fetch('WOODS_CONSOLE_CONFIG', File.expand_path('~/.woods/console.yml'))
-config = File.exist?(config_path) ? YAML.safe_load_file(config_path) : {}
+begin
+  config = File.file?(config_path) ? YAML.safe_load_file(config_path, aliases: false) : {}
+  config ||= {}
+  raise Woods::Console::ConnectionError, "#{config_path} must contain a YAML mapping" unless config.is_a?(Hash)
 
-server = Woods::Console::Server.build(config: config)
-transport = MCP::Server::Transports::StdioTransport.new(server)
-transport.open
+  Woods::Console::ConnectionManager.new(config: config).replace_process!
+rescue Psych::Exception, Woods::Console::ConnectionError => e
+  warn "[woods-console-mcp] #{e.message}"
+  exit 1
+end

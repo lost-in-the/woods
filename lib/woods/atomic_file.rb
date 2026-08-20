@@ -34,10 +34,17 @@ module Woods
       tmp.fsync
       tmp.close
       File.rename(tmp.path, path)
+      fsync_directory(File.dirname(path))
     rescue StandardError
       tmp&.close
       tmp&.unlink
       raise
+    end
+
+    def fsync_directory(directory)
+      File.open(directory, File::RDONLY, &:fsync)
+    rescue Errno::EINVAL, Errno::ENOTSUP, Errno::EISDIR
+      nil
     end
 
     # Read a file Woods wrote, as UTF-8.

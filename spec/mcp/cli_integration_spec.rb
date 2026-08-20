@@ -10,10 +10,9 @@ require 'tmpdir'
 # is to verify the boundary between the shell wrapper, the Ruby process,
 # and the filesystem.
 #
-# The wrapper (exe/woods-mcp-start) is a bash script, so these specs are
-# the only coverage for its validation logic. The Ruby binary (exe/woods-mcp)
-# is exercised here as a boot-smoke test: we spawn it against a fixture,
-# let it block on stdin, then verify it produced no boot-time errors on stderr.
+# These specs cover the wrapper's validation and protocol environment behavior.
+# The Ruby binary (exe/woods-mcp) is exercised here as a boot-smoke test: we
+# spawn it against a fixture, then verify it produced no boot-time errors.
 RSpec.describe 'MCP CLI integration' do
   # Subprocess output arrives in the locale's default external encoding.
   # Under a POSIX/C locale (common in containers and CI) that's US-ASCII,
@@ -28,7 +27,7 @@ RSpec.describe 'MCP CLI integration' do
   let(:ruby_bin) { File.join(gem_root, 'exe/woods-mcp') }
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
 
-  # ── exe/woods-mcp-start (bash wrapper) ───────────────────────────
+  # ── exe/woods-mcp-start wrapper ──────────────────────────────────
 
   describe 'woods-mcp-start wrapper' do
     it 'exits non-zero with a usage message when no index directory is given' do
@@ -65,19 +64,26 @@ RSpec.describe 'MCP CLI integration' do
     # compatible one. A regression here is silent: everything still works, just
     # four protocol revisions behind.
     describe 'protocol version handling' do
-      # Explicit UTF-8 — the suite runs under LANG=C and the wrapper's comments
-      # contain em dashes, so a bare File.read would tag them US-ASCII and make
-      # `match` raise instead of fail.
-      let(:source) { File.read(wrapper, encoding: Encoding::UTF_8) }
-
-      # `${MCP_PROTOCOL_VERSION:-}` is the presence check and is fine; what must
-      # never come back is a revision date as the default value.
-      it 'does not default MCP_PROTOCOL_VERSION to a pinned revision' do
-        expect(source).not_to match(/MCP_PROTOCOL_VERSION:-\s*\d{4}-\d{2}-\d{2}/)
+      def boot_wrapper(env)
+        stdin, stdout, stderr, wait_thr = Open3.popen3(env, wrapper, fixture_dir)
+        sleep 2
+        Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
+        wait_thr.join(5)
+        error_output = utf8(stderr.read)
+        stdin.close
+        stdout.close
+        stderr.close
+        error_output
       end
 
-      it 'still exports MCP_PROTOCOL_VERSION when the operator sets one' do
-        expect(source).to match(/export MCP_PROTOCOL_VERSION/)
+      it 'leaves protocol negotiation unpinned by default' do
+        expect(boot_wrapper('MCP_PROTOCOL_VERSION' => nil)).not_to include('Pinning MCP protocol version')
+      end
+
+      it 'passes through MCP_PROTOCOL_VERSION when the operator sets one' do
+        output = boot_wrapper('MCP_PROTOCOL_VERSION' => '2025-11-25')
+
+        expect(output).to include('Pinning MCP protocol version to 2025-11-25')
       end
     end
   end
@@ -85,6 +91,14 @@ RSpec.describe 'MCP CLI integration' do
   # ── exe/woods-mcp (Ruby entry point) ─────────────────────────────
 
   describe 'woods-mcp Ruby binary' do
+    it 'pins only the protocol version on the built server configuration' do
+      # encoding: pinned so the multibyte executable source scans under LANG=C
+      source = File.read(ruby_bin, encoding: Encoding::UTF_8)
+
+      expect(source).to include("server.configuration.protocol_version = ENV['MCP_PROTOCOL_VERSION']")
+      expect(source).not_to match(/server\.configuration\s*=/)
+    end
+
     # Booting the binary means requiring the whole gem + Server.build. If
     # anything raises during require/boot, stderr will contain a backtrace.
     # We give the subprocess a short window, kill it, then inspect stderr.

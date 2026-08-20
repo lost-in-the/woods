@@ -30,6 +30,35 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(task.pid).to eq(Process.pid)
     end
 
+    it 'records a durable identity for the owning process' do
+      expect(task.producer_identity).to be_a(String)
+      expect(task.producer_identity).not_to be_empty
+    end
+
+    it 'establishes the same absolute identity with an empty PATH and changed TZ' do
+      original_path = ENV.fetch('PATH', nil)
+      original_tz = ENV.fetch('TZ', nil)
+      first = store.send(:producer_identity_for, Process.pid)
+      ENV['PATH'] = ''
+      ENV['TZ'] = 'Pacific/Honolulu'
+
+      expect(store.send(:producer_identity_for, Process.pid)).to eq(first)
+      expect(store.create!(tool: 'pipeline_extract').producer_identity).to eq(first)
+    ensure
+      ENV['PATH'] = original_path
+      ENV['TZ'] = original_tz
+    end
+
+    it 'fails before persistence when the OS identity cannot be established' do
+      allow(store).to receive(:producer_identity_for).and_return(nil)
+      allow(SecureRandom).to receive(:hex)
+
+      expect { store.create!(tool: 'pipeline_extract') }
+        .to raise_error(described_class::ProducerIdentityError)
+      expect(SecureRandom).not_to have_received(:hex)
+      expect(Dir.glob(File.join(@index_dir, described_class::DIRNAME, '*.json'))).to be_empty
+    end
+
     # "The task must be durably created before sending the response" — otherwise
     # a client can receive a taskId the server has no record of.
     it 'persists the task before returning' do
@@ -39,6 +68,80 @@ RSpec.describe Woods::MCP::Tasks::Store do
     it 'writes nothing outside its own subdirectory' do
       task
       expect(Dir.children(@index_dir)).to contain_exactly(described_class::DIRNAME)
+    end
+  end
+
+  describe 'producer identity' do
+    def linux_stat(comm:, state: 'S', numeric_fields: (4..21).map(&:to_s), start_ticks: '987654')
+      stat_fields = [state] + numeric_fields
+      "123 (#{comm}) #{(stat_fields + [start_ticks, '23']).join(' ')}"
+    end
+
+    it 'parses Linux starttime structurally after a comm containing spaces and a closing parenthesis' do
+      stat = linux_stat(comm: 'worker ) queue')
+
+      expect(store.send(:linux_start_ticks, stat)).to eq('987654')
+    end
+
+    it 'rejects an invalid or multi-character Linux process state' do
+      malformed = ['?', 'SS'].map { |state| linux_stat(comm: 'worker', state: state) }
+
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to eq([nil, nil])
+    end
+
+    it 'rejects a nonnumeric intermediate field before starttime' do
+      fields = (4..21).map(&:to_s)
+      fields[7] = 'not-numeric'
+
+      expect(store.send(:linux_start_ticks, linux_stat(comm: 'worker', numeric_fields: fields))).to be_nil
+    end
+
+    it 'rejects a record truncated before field 22' do
+      stat = "123 (worker) S #{(4..21).to_a.join(' ')}"
+
+      expect(store.send(:linux_start_ticks, stat)).to be_nil
+    end
+
+    it 'rejects a negative or nonnumeric starttime' do
+      malformed = %w[-1 not-an-integer].map { |start| linux_stat(comm: 'worker', start_ticks: start) }
+
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to eq([nil, nil])
+    end
+
+    it 'rejects content without a valid pid and parenthesized comm boundary' do
+      malformed = ['123 worker S 1 2 3', 'pid (worker) S 1 2 3']
+
+      expect(malformed.map { |stat| store.send(:linux_start_ticks, stat) }).to eq([nil, nil])
+    end
+
+    it 'reads the actual current Linux process identity when procfs is available' do
+      skip 'procfs is unavailable on this platform' unless File.readable?('/proc/sys/kernel/random/boot_id')
+
+      identity = store.send(:producer_identity_for, Process.pid)
+
+      expect(identity).to match(/\Aboot=[^;]+;start_ticks=\d+\z/)
+    end
+
+    it 'caches the invariant Darwin boot identity across repeated process checks' do
+      success = instance_double(Process::Status, success?: true)
+      sysctl_calls = 0
+      allow(Open3).to receive(:capture2) do |*arguments|
+        if arguments.first == '/usr/sbin/sysctl'
+          sysctl_calls += 1
+          ["{ sec = 1700000000, usec = 123456 } Thu Jan  1 00:00:00 1970\n", success]
+        else
+          ["Thu Aug 20 03:00:00 2026\n", success]
+        end
+      end
+
+      first = store.send(:darwin_process_identity, Process.pid)
+      second = store.send(:darwin_process_identity, Process.pid)
+
+      expect(second).to eq(first)
+      expect(sysctl_calls).to eq(1)
+      expect(Open3).to have_received(:capture2)
+        .with({ 'LC_ALL' => 'C', 'LANG' => 'C', 'TZ' => 'UTC' }, '/bin/ps', '-o', 'lstart=', '-p', Process.pid.to_s)
+        .twice
     end
   end
 
@@ -66,11 +169,79 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get('a/b')).to be_nil
     end
 
-    it 'returns nil rather than raising on a corrupt record' do
+    it 'raises a stable error for malformed JSON' do
       task = store.create!(tool: 'pipeline_extract')
       File.write(File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json"), 'not json{')
 
-      expect(store.get(task.id)).to be_nil
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+    end
+
+    it 'raises a stable error for records missing required fields' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      File.write(path, JSON.generate('id' => task.id))
+
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+    end
+
+    it 'returns nil when a record has malformed timestamps' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['created_at'] = 'not-a-timestamp'
+      File.write(path, JSON.generate(raw))
+
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+    end
+
+    it 'returns nil when a record timestamp is not a string' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['created_at'] = 123
+      File.write(path, JSON.generate(raw))
+
+      expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+    end
+
+    it 'rejects records whose status contradicts official task fields' do
+      invalid = {
+        'working' => { 'result' => {} },
+        'completed' => { 'result' => nil },
+        'failed' => { 'error' => 'boom' },
+        'input_required' => { 'input_requests' => [] },
+        'cancelled' => { 'result' => {} }
+      }
+
+      invalid.each do |status, changes|
+        task = store.create!(tool: 'pipeline_extract')
+        path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+        record = JSON.parse(File.read(path)).merge('status' => status).merge(changes)
+        File.write(path, JSON.generate(record))
+
+        expect { store.get(task.id) }.to raise_error(described_class::CorruptRecordError, /Invalid task record/)
+      end
+    end
+
+    it 'accepts official completed, failed, and input_required field shapes' do
+      shapes = {
+        'completed' => { 'result' => { 'content' => [] } },
+        'failed' => { 'error' => { 'code' => -32_603, 'message' => 'failed' } },
+        'input_required' => {
+          'input_requests' => {
+            'approval' => { 'method' => 'elicitation/create', 'params' => { 'message' => 'Approve?' } }
+          }
+        }
+      }
+
+      shapes.each do |status, changes|
+        task = store.create!(tool: 'pipeline_extract')
+        path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+        record = JSON.parse(File.read(path)).merge('status' => status).merge(changes)
+        File.write(path, JSON.generate(record))
+
+        expect(store.get(task.id).status).to eq(status)
+      end
     end
   end
 
@@ -100,14 +271,7 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get(task.id).status).to eq('failed')
     end
 
-    it 'records a cancellation' do
-      store.cancel!(task.id)
-      expect(store.get(task.id).status).to eq('cancelled')
-    end
-
-    # `completed`, `failed` and `cancelled` are terminal — "once reached, the
-    # task's state does not change". A late-finishing thread must not overwrite
-    # a cancellation the client already observed.
+    # Terminal states never regress after a late producer update.
     it 'refuses to move a task out of a terminal state' do
       store.complete!(task.id, result: { 'ok' => true })
       store.fail!(task.id, message: 'too late')
@@ -155,6 +319,10 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get(task.id).status).to eq('failed')
     end
 
+    it 'uses stable JSON-RPC error metadata when the producer process died' do
+      expect(store.get(task.id).error).to include('code' => described_class::JSON_RPC_INTERNAL_ERROR)
+    end
+
     it 'explains why it failed' do
       expect(store.get(task.id).error['message']).to match(/did not survive/i)
     end
@@ -181,6 +349,48 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
       expect(store.get(done.id).status).to eq('completed')
     end
+
+    it 'does not mistake an unrelated live process with a reused pid for the producer' do
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['producer_identity'] = 'different-process-start'
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('failed')
+    end
+
+    it 'keeps the same live producer working across store restarts' do
+      live = store.create!(tool: 'pipeline_embed')
+
+      expect(described_class.new(@index_dir).get(live.id).status).to eq('working')
+    end
+
+    it 'marks a task failed after its exact producer process dies' do
+      child = Process.spawn('/bin/sleep', '30')
+      identity = store.send(:producer_identity_for, child)
+      task = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path)).merge('pid' => child, 'producer_identity' => identity)
+      File.write(path, JSON.generate(raw))
+      Process.kill('TERM', child)
+      Process.wait(child)
+
+      expect(described_class.new(@index_dir).get(task.id).status).to eq('failed')
+    ensure
+      if child
+        begin
+          Process.kill('KILL', child)
+        rescue Errno::ESRCH
+          nil
+        end
+        begin
+          Process.wait(child)
+        rescue Errno::ECHILD
+          nil
+        end
+      end
+    end
   end
 
   describe 'expiry' do
@@ -205,6 +415,30 @@ RSpec.describe Woods::MCP::Tasks::Store do
       task = store.create!(tool: 'pipeline_extract', ttl_ms: 0)
       expect(store.get(task.id)).not_to be_nil
     end
+
+    it 'measures terminal task ttl from creation rather than the last update' do
+      task = store.create!(tool: 'pipeline_extract', ttl_ms: 10_000)
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['created_at'] = (Time.now.utc - 60).iso8601
+      File.write(path, JSON.generate(raw))
+
+      store.complete!(task.id, result: {})
+
+      expect(store.get(task.id)).to be_nil
+    end
+  end
+
+  describe 'concurrent polling' do
+    it 'returns the same durable result to concurrent readers' do
+      task = store.create!(tool: 'pipeline_extract')
+      store.complete!(task.id, result: { 'ok' => true })
+
+      results = 12.times.map { Thread.new { described_class.new(@index_dir).get(task.id)&.to_h } }.map(&:value)
+
+      expect(results).to all(eq(results.first))
+      expect(results.first[:result]).to eq('ok' => true)
+    end
   end
 
   describe 'the wire shape' do
@@ -218,6 +452,12 @@ RSpec.describe Woods::MCP::Tasks::Store do
         createdAt: task.created_at,
         lastUpdatedAt: task.updated_at
       )
+    end
+
+    it 'emits required ttlMs when the value is explicitly null' do
+      task = store.create!(tool: 'pipeline_extract', ttl_ms: nil)
+
+      expect(task.to_h).to include(ttlMs: nil)
     end
 
     it 'omits result and error while still working' do

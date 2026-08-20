@@ -180,6 +180,51 @@ RSpec.describe Woods::Retriever do
     end
   end
 
+  # ── Query validation boundary (P1) ────────────────────────────────
+  #
+  # Pre-fix, #retrieve performed no validation: a blank query surfaced as
+  # a raw provider ArgumentError only on the vector path (keyword/graph
+  # paths tolerated it silently), and an oversized query went to the
+  # embedding/metadata providers verbatim to fail as an opaque 400. This
+  # boundary runs first, before classify/execute/rank/assemble, so every
+  # strategy shares one typed, actionable failure mode.
+  describe 'query validation' do
+    it 'rejects a nil query' do
+      expect { retriever.retrieve(nil) }.to raise_error(Woods::InvalidQueryError, /string/i)
+    end
+
+    it 'rejects a non-String query' do
+      expect { retriever.retrieve(42) }.to raise_error(Woods::InvalidQueryError, /string/i)
+    end
+
+    it 'rejects a blank query' do
+      expect { retriever.retrieve('') }.to raise_error(Woods::InvalidQueryError, /blank/i)
+    end
+
+    it 'rejects a whitespace-only query' do
+      expect { retriever.retrieve("   \n\t  ") }.to raise_error(Woods::InvalidQueryError, /blank/i)
+    end
+
+    it 'rejects a query over the byte cap' do
+      oversized = 'a' * (Woods::Retriever::MAX_QUERY_BYTES + 1)
+      expect { retriever.retrieve(oversized) }.to raise_error(Woods::InvalidQueryError, /exceeds/i)
+    end
+
+    it 'does not raise for a normal query' do
+      expect { retriever.retrieve('How does the User model work?') }.not_to raise_error
+    end
+
+    it 'raises a stable error class that is a Woods::Error' do
+      expect(Woods::InvalidQueryError.ancestors).to include(Woods::Error)
+      expect { retriever.retrieve('') }.to raise_error(an_instance_of(Woods::InvalidQueryError))
+    end
+
+    it 'never reaches the classifier when the query fails validation' do
+      expect(classifier_double).not_to receive(:classify)
+      expect { retriever.retrieve('') }.to raise_error(Woods::InvalidQueryError)
+    end
+  end
+
   # ── Type filtering ──────────────────────────────────────────────
 
   describe 'type filtering' do
@@ -560,6 +605,28 @@ RSpec.describe Woods::Retriever do
       expect(result.trace.tokens_used).to eq(120)
       expect(result.trace.elapsed_ms).to be_a(Numeric)
       expect(result.trace.elapsed_ms).to be >= 0
+    end
+
+    it 'carries skipped_missing_metadata through from the assembled context' do
+      stale_assembled_context = Woods::Retrieval::AssembledContext.new(
+        context: assembled_context.context,
+        tokens_used: 120,
+        budget: 8000,
+        sources: [],
+        sections: [],
+        skipped_missing_metadata: 1
+      )
+      allow(assembler_double).to receive(:assemble).and_return(stale_assembled_context)
+
+      result = retriever.retrieve('How does the User model work?')
+
+      expect(result.trace.skipped_missing_metadata).to eq(1)
+    end
+
+    it 'reports zero skipped_missing_metadata when the assembler resolved everything' do
+      result = retriever.retrieve('How does the User model work?')
+
+      expect(result.trace.skipped_missing_metadata).to eq(0)
     end
   end
 

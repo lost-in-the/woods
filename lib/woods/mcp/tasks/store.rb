@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'date'
 require 'securerandom'
 require 'time'
 require 'fileutils'
+require 'open3'
 require_relative '../../atomic_file'
 
 module Woods
@@ -29,6 +31,9 @@ module Woods
       # `pipeline_extract` holds it for the duration of the run, which is
       # exactly when its task record needs updating.
       class Store
+        class CorruptRecordError < StandardError; end
+        class ProducerIdentityError < IOError; end
+
         # Subdirectory of the index directory holding one JSON file per task.
         DIRNAME = 'tasks'
 
@@ -44,15 +49,20 @@ module Woods
 
         # Terminal states: "once reached, the task's state does not change".
         TERMINAL = %w[completed failed cancelled].freeze
+        STATUSES = (%w[working input_required] + TERMINAL).freeze
 
         # A task id is minted by {SecureRandom} and only ever compared against
         # this, so anything that could escape the directory is not a task id.
         SAFE_ID = /\A[a-f0-9]{32}\z/
+        LINUX_PROCESS_STATE = /\A[RSDZTtXxKWPI]\z/
+        LINUX_NUMERIC_FIELD = /\A-?\d+\z/
+        private_constant :LINUX_PROCESS_STATE, :LINUX_NUMERIC_FIELD
 
         # One task record.
         Task = Struct.new(
           :id, :tool, :status, :created_at, :updated_at, :ttl_ms,
           :poll_interval_ms, :status_message, :result, :error, :pid,
+          :producer_identity, :input_requests,
           keyword_init: true
         ) do
           def terminal?
@@ -63,17 +73,19 @@ module Woods
           #
           # @return [Hash]
           def to_h
-            {
+            wire = {
               taskId: id,
               status: status,
-              ttlMs: ttl_ms,
               pollIntervalMs: poll_interval_ms,
               createdAt: created_at,
               lastUpdatedAt: updated_at,
               statusMessage: status_message,
               result: result,
-              error: error
+              error: error,
+              inputRequests: input_requests
             }.compact
+            wire[:ttlMs] = ttl_ms
+            wire
           end
 
           # On-disk shape: every field, snake_case, so a record round-trips
@@ -98,11 +110,15 @@ module Woods
         # @return [Task]
         def create!(tool:, ttl_ms: DEFAULT_TTL_MS, poll_interval_ms: DEFAULT_POLL_INTERVAL_MS)
           sweep_expired!
+          producer_identity = producer_identity_for(Process.pid)
+          raise ProducerIdentityError, 'Could not establish producer process identity.' unless producer_identity
+
           now = Time.now.utc.iso8601
           task = Task.new(
             id: SecureRandom.hex(16), tool: tool, status: 'working',
             created_at: now, updated_at: now, ttl_ms: ttl_ms,
-            poll_interval_ms: poll_interval_ms, pid: Process.pid
+            poll_interval_ms: poll_interval_ms, pid: Process.pid,
+            producer_identity: producer_identity
           )
           write(task)
           task
@@ -139,16 +155,6 @@ module Woods
           end
         end
 
-        # Cancellation is cooperative: this records the intent and the runner
-        # stops when it next checks. The work may still finish first, in which
-        # case the terminal-state guard keeps whichever landed first.
-        #
-        # @param id [String]
-        # @return [Task, nil] the updated record, or nil if it was already terminal
-        def cancel!(id)
-          transition!(id, 'cancelled')
-        end
-
         # Attach a progress message without leaving `working`.
         #
         # @param id [String]
@@ -166,15 +172,6 @@ module Woods
           end
         end
 
-        # Has a cancellation been recorded? Polled by a running task so
-        # cancellation can be honoured between units of work.
-        #
-        # @param id [String]
-        # @return [Boolean]
-        def cancelled?(id)
-          read(id)&.status == 'cancelled'
-        end
-
         private
 
         def path_for(id)
@@ -188,17 +185,18 @@ module Woods
           return nil unless path && File.exist?(path)
 
           data = JSON.parse(Woods::AtomicFile.read(path))
+          raise CorruptRecordError, "Invalid task record #{id}: schema mismatch" unless valid_record?(data, id)
+
           Task.new(
             id: data['id'], tool: data['tool'], status: data['status'],
             created_at: data['created_at'], updated_at: data['updated_at'],
             ttl_ms: data['ttl_ms'], poll_interval_ms: data['poll_interval_ms'],
             status_message: data['status_message'], result: data['result'],
-            error: data['error'], pid: data['pid']
+            error: data['error'], pid: data['pid'],
+            producer_identity: data['producer_identity'], input_requests: data['input_requests']
           )
-        rescue JSON::ParserError, SystemCallError
-          # A torn or unreadable record is indistinguishable from an absent one
-          # for every caller here, and raising would take down a tool call.
-          nil
+        rescue JSON::ParserError, SystemCallError, TypeError => e
+          raise CorruptRecordError, "Invalid task record #{id}: #{e.class}"
         end
 
         # Persisted shape is the struct's own fields, not {Task#to_h} — that is
@@ -206,6 +204,67 @@ module Woods
         def write(task)
           FileUtils.mkdir_p(@dir)
           Woods::AtomicFile.write(path_for(task.id), JSON.pretty_generate(task.to_h_record))
+        end
+
+        def valid_record?(data, expected_id)
+          return false unless data.is_a?(Hash)
+          return false unless data['id'] == expected_id && data['id'].match?(SAFE_ID)
+          return false unless data['tool'].is_a?(String) && !data['tool'].empty?
+          return false unless STATUSES.include?(data['status'])
+          return false unless valid_time?(data['created_at']) && valid_time?(data['updated_at'])
+          return false unless data['ttl_ms'].nil? ||
+                              (data['ttl_ms'].is_a?(Integer) && data['ttl_ms'] >= 0)
+          return false unless data['poll_interval_ms'].nil? ||
+                              (data['poll_interval_ms'].is_a?(Integer) && data['poll_interval_ms'].positive?)
+          return false unless data['status_message'].nil? || data['status_message'].is_a?(String)
+
+          valid_status_fields?(data)
+        end
+
+        def valid_status_fields?(data)
+          case data['status']
+          when 'working'
+            valid_producer?(data) && absent?(data, 'result', 'error', 'input_requests')
+          when 'input_required'
+            valid_producer?(data) && absent?(data, 'result', 'error') && valid_input_requests?(data['input_requests'])
+          when 'completed'
+            data['result'].is_a?(Hash) && absent?(data, 'error', 'input_requests')
+          when 'failed'
+            valid_error?(data['error']) && absent?(data, 'result', 'input_requests')
+          when 'cancelled'
+            absent?(data, 'result', 'error', 'input_requests')
+          else
+            false
+          end
+        end
+
+        def valid_producer?(data)
+          data['pid'].is_a?(Integer) && data['pid'].positive? &&
+            data['producer_identity'].is_a?(String) && !data['producer_identity'].empty?
+        end
+
+        def valid_error?(error)
+          error.is_a?(Hash) && error['code'].is_a?(Integer) &&
+            error['message'].is_a?(String) && !error['message'].empty?
+        end
+
+        def valid_input_requests?(requests)
+          requests.is_a?(Hash) && !requests.empty? && requests.values.all? do |request|
+            request.is_a?(Hash) && request['method'].is_a?(String) && request['params'].is_a?(Hash)
+          end
+        end
+
+        def absent?(data, *keys)
+          keys.all? { |key| data[key].nil? }
+        end
+
+        def valid_time?(value)
+          return false unless value.is_a?(String)
+
+          Time.iso8601(value)
+          true
+        rescue ArgumentError
+          false
         end
 
         # @return [Task, nil] the updated record, or nil when the transition was
@@ -244,7 +303,7 @@ module Woods
           return false unless task.terminal?
           return false if task.ttl_ms.nil?
 
-          Time.now.utc - Time.parse(task.updated_at) > (task.ttl_ms / 1000.0)
+          Time.now.utc - Time.parse(task.created_at) > (task.ttl_ms / 1000.0)
         rescue ArgumentError, TypeError
           false
         end
@@ -254,16 +313,21 @@ module Woods
         # every later reader gets the same answer instead of re-deciding.
         def adopt_orphan(task)
           return task unless task.status == 'working'
-          return task if task.pid && process_alive?(task.pid)
+          return task if producer_alive?(task)
 
           task.status = 'failed'
           task.error = {
+            'code' => JSON_RPC_INTERNAL_ERROR,
             'message' => "The process running this task did not survive (pid #{task.pid}). " \
                          'Re-run the tool; the index is unchanged unless the run had already committed.'
           }
           task.updated_at = Time.now.utc.iso8601
           write(task)
           task
+        end
+
+        def producer_alive?(task)
+          process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
         end
 
         def process_alive?(pid)
@@ -276,6 +340,66 @@ module Woods
           false
         end
 
+        def producer_identity_for(pid)
+          pid = Integer(pid)
+          return linux_process_identity(pid) if File.readable?('/proc/sys/kernel/random/boot_id')
+
+          darwin_process_identity(pid)
+        rescue SystemCallError, ArgumentError, TypeError
+          nil
+        end
+
+        def linux_process_identity(pid)
+          boot_id = File.read('/proc/sys/kernel/random/boot_id').strip
+          start_ticks = linux_start_ticks(File.read("/proc/#{pid}/stat"))
+          return if boot_id.empty? || start_ticks.nil?
+
+          "boot=#{boot_id};start_ticks=#{start_ticks}"
+        rescue Errno::ENOENT
+          nil
+        end
+
+        def linux_start_ticks(stat)
+          boundary = stat.rindex(') ')
+          return unless boundary && stat.match?(/\A\d+ \(/)
+
+          fields = stat[(boundary + 2)..].split
+          return unless fields.length >= 20
+          return unless fields.first.match?(LINUX_PROCESS_STATE)
+
+          numeric_fields = fields[1, 19]
+          return unless numeric_fields.all? { |field| field.match?(LINUX_NUMERIC_FIELD) }
+
+          start_ticks = numeric_fields.last
+          start_ticks if start_ticks.match?(/\A\d+\z/)
+        end
+
+        def darwin_process_identity(pid)
+          environment = { 'LC_ALL' => 'C', 'LANG' => 'C', 'TZ' => 'UTC' }
+          started, ps_status = Open3.capture2(environment, '/bin/ps', '-o', 'lstart=', '-p', pid.to_s)
+          return unless ps_status.success?
+
+          start_epoch = DateTime.strptime(started.strip, '%a %b %e %H:%M:%S %Y').to_time.to_i
+          boot_identity = darwin_boot_identity
+          return unless boot_identity
+
+          "boot=#{boot_identity};start=#{start_epoch}"
+        rescue Date::Error
+          nil
+        end
+
+        def darwin_boot_identity
+          return @darwin_boot_identity if defined?(@darwin_boot_identity)
+
+          booted, status = Open3.capture2('/usr/sbin/sysctl', '-n', 'kern.boottime')
+          return unless status.success?
+
+          boot_match = booted.match(/sec = (\d+), usec = (\d+)/)
+          return unless boot_match
+
+          @darwin_boot_identity = "#{boot_match[1]}.#{boot_match[2]}"
+        end
+
         def sweep_expired!
           return unless Dir.exist?(@dir)
 
@@ -286,7 +410,7 @@ module Woods
 
             File.delete(path)
             FileUtils.rm_f("#{path}.lock")
-          rescue SystemCallError
+          rescue SystemCallError, CorruptRecordError
             # Another process swept it first; nothing to do.
             nil
           end

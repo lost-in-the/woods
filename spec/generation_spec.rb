@@ -62,6 +62,22 @@ RSpec.describe Woods::Generation do
 
       expect(data).to include('number' => 1, 'reason' => 'full')
     end
+
+    it 'records an immutable payload pointer when given one' do
+      generation.bump!(reason: 'full', payload: 'payloads/2026-gen-1')
+
+      expect(generation.current.payload).to eq('payloads/2026-gen-1')
+    end
+
+    # A flat index's generation file must stay byte-for-byte what it always
+    # was, so every existing on-disk index and third-party reader is unaffected.
+    it 'omits the payload key entirely for a flat bump' do
+      generation.bump!(reason: 'full')
+      data = JSON.parse(File.read(File.join(dir, described_class::FILENAME)))
+
+      expect(data).not_to have_key('payload')
+      expect(generation.current.payload).to be_nil
+    end
   end
 
   describe '#newer_than?' do

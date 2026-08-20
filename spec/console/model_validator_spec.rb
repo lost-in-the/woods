@@ -62,6 +62,33 @@ RSpec.describe Woods::Console::ModelValidator do
     end
   end
 
+  describe '#validate_table_column!' do
+    subject(:validator) do
+      described_class.new(registry: registry, table_names: { 'User' => 'users', 'Post' => 'posts' })
+    end
+
+    it 'returns true for a column that exists on the mapped table' do
+      expect(validator.validate_table_column!('users', 'email')).to be true
+    end
+
+    it 'raises ValidationError for a column that does not exist on the mapped table' do
+      expect { validator.validate_table_column!('users', 'password_digest') }
+        .to raise_error(Woods::Console::ValidationError, /Unknown column 'password_digest' on User/)
+    end
+
+    it 'raises ValidationError for a table with no known model mapping' do
+      expect { validator.validate_table_column!('secrets', 'value') }
+        .to raise_error(Woods::Console::ValidationError, /Unknown table 'secrets'/)
+    end
+
+    it 'fails closed when the validator was built without table_names' do
+      bare_validator = described_class.new(registry: registry)
+
+      expect { bare_validator.validate_table_column!('users', 'email') }
+        .to raise_error(Woods::Console::ValidationError, /Unknown table 'users'/)
+    end
+  end
+
   describe '#model_names' do
     it 'returns sorted model names' do
       expect(validator.model_names).to eq(%w[Post User])

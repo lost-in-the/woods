@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'json'
+require 'timeout'
 require 'woods/watch/daemon'
 
 RSpec.describe Woods::Watch::Daemon do
@@ -419,7 +420,7 @@ RSpec.describe Woods::Watch::Daemon do
       allow(daemon).to receive(:settle) { daemon.send(:enqueue, [second]) }
 
       daemon.send(:enqueue, [first])
-      daemon.send(:drain, instance_double(Woods::Watch::PollingWatcher))
+      daemon.send(:drain)
 
       expect(extractor).to have_received(:extract_changed).once do |paths|
         expect(paths).to contain_exactly(
@@ -464,19 +465,18 @@ RSpec.describe Woods::Watch::Daemon do
       end
 
       daemon = build
-      watcher = instance_double(Woods::Watch::PollingWatcher)
       first = touch('app/services/one.rb')
       second = touch('app/services/two.rb')
 
       holder = Thread.new do
         daemon.send(:enqueue, [first])
-        daemon.send(:drain, watcher)
+        daemon.send(:drain)
       end
       in_extraction.pop # the first drain is mid-extraction, holding the guard
 
       racer = Thread.new do
         daemon.send(:enqueue, [second])
-        daemon.send(:drain, watcher)
+        daemon.send(:drain)
       end
       # The racing drain must return promptly — refused, not queued behind the
       # lock, and above all not running a second cycle in parallel.
@@ -536,6 +536,36 @@ RSpec.describe Woods::Watch::Daemon do
       build(watcher: fake_watcher).run
 
       expect(JSON.parse(File.read(pending_file))).to be_empty
+    end
+
+    # Thread#kill bypasses rescue blocks, so a batch #process already drained
+    # from @pending (the popped-but-not-yet-carried-forward window) evaporated
+    # if the thread running it was killed mid-cycle — persist_pending then had
+    # nothing left to write and clobbered the durable file with []. #process
+    # now guards the drained batch with its own ensure, independent of what
+    # killed the thread running it.
+    it 'survives the thread that drained it being killed mid-cycle' do
+      entered = Queue.new
+      release = Queue.new
+      allow(extractor).to receive(:extract_changed) do |paths|
+        entered << true
+        release.pop
+        paths
+      end
+
+      relative = touch('config/locales/en.yml')
+      daemon = build
+
+      worker = Thread.new { daemon.send(:process, [relative]) }
+      Timeout.timeout(5) { entered.pop } # wait until the batch is mid-extraction
+
+      worker.kill
+      raise 'worker thread did not exit after #kill' unless worker.join(5)
+
+      daemon.send(:persist_pending)
+
+      expect(JSON.parse(File.read(pending_file)))
+        .to include(a_string_ending_with('config/locales/en.yml'))
     end
   end
 
@@ -597,6 +627,58 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  # another_daemon_alive? reads Status, which nothing has published to yet
+  # the FIRST time two daemons start concurrently — so the check alone lets
+  # both pass and both publish `running`. Startup must claim the index
+  # atomically, not just check-then-publish.
+  describe 'startup claim atomicity (verified P1 TOCTOU fix)' do
+    def build_racer(**overrides)
+      described_class.new(
+        output_dir: output_dir, root: root, extractor_factory: -> { extractor },
+        reloader: reloader, debounce: 0, catch_up: false, idle_timeout: 0.05, **overrides
+      )
+    end
+
+    it 'lets exactly one of two daemons racing startup win; the loser reports :already_running' do
+      results = Queue.new
+
+      threads = Array.new(2) do
+        Thread.new { results << Timeout.timeout(10) { build_racer.run } }
+      end
+      threads.each_with_index do |thread, i|
+        raise "racer thread #{i} did not finish" unless thread.join(10)
+      end
+
+      outcomes = Array.new(2) { results.pop(true) }
+      expect(outcomes.count(:already_running)).to eq(1)
+      expect(outcomes - [:already_running]).to eq([:idle])
+    end
+
+    it 'does not block a fresh daemon behind a stale claim left by a dead pid' do
+      FileUtils.mkdir_p(output_dir)
+      dead_pid = Process.spawn('true')
+      Process.wait(dead_pid)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: dead_pid, host: Woods::Watch::Status.host_identity))
+
+      reason = Timeout.timeout(10) { build_racer.run }
+
+      expect(reason).not_to eq(:already_running)
+    end
+
+    it 'preserves WOODS_IGNORE_WATCH even when a live claim is already on disk' do
+      FileUtils.mkdir_p(output_dir)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity))
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('WOODS_IGNORE_WATCH').and_return('1')
+
+      reason = Timeout.timeout(10) { build_racer.run }
+
+      expect(reason).not_to eq(:already_running)
+    end
+  end
+
   # Every cycle writes generation.json and status.json, so watching the output
   # directory means each cycle manufactures the events that trigger the next.
   describe 'the output directory' do
@@ -614,6 +696,60 @@ RSpec.describe Woods::Watch::Daemon do
     it 'is left alone when it sits outside the watched tree' do
       expect(build.send(:ignored_directories))
         .to eq(Woods::Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES)
+    end
+  end
+
+  # start_watching's polling fallback reassigns @watcher mid-run (daemon.rb
+  # ~565-574). A local `watcher` variable captured before the fallback goes
+  # stale — the heartbeat's idle-stop kept acting on the discarded pre-fallback
+  # watcher instead of the one actually running, so an idle daemon that fell
+  # back to polling never actually stopped.
+  describe 'watcher fallback keeps @watcher current' do
+    # Raises on #start every time, forcing start_watching's fallback path.
+    class RaisingWatcher # rubocop:disable Lint/ConstantDefinitionInBlock
+      def start(&_on_change)
+        raise Woods::Watch::WatcherError, 'inotify exhausted'
+      end
+
+      def stop; end
+    end
+
+    # Blocks in #start (like a real watcher's event loop) until #stop flips
+    # the flag — the same shape as the FakeWatcher/idle_watcher fixtures
+    # elsewhere in this file.
+    class BlockingWatcher # rubocop:disable Lint/ConstantDefinitionInBlock
+      attr_reader :stop_count
+
+      def initialize
+        @stopped = false
+        @stop_count = 0
+      end
+
+      def start(&_on_change)
+        sleep(0.02) until @stopped
+      end
+
+      def stop
+        @stop_count += 1
+        @stopped = true
+      end
+    end
+
+    it 'stops the fallback watcher on idle, not the watcher captured before the fallback' do
+      initial_watcher = RaisingWatcher.new
+      fallback_watcher = BlockingWatcher.new
+      allow(Woods::Watch::Watcher).to receive(:build).and_return(fallback_watcher)
+
+      daemon = build(watcher: initial_watcher, idle_timeout: 0.1)
+
+      reason = Timeout.timeout(5) { daemon.run }
+
+      expect(reason).to eq(:idle)
+      # >= 1, not ==: shutdown's own `@watcher&.stop` runs unconditionally
+      # after the heartbeat's idle-stop already called it once — a harmless
+      # second call to an idempotent #stop. What matters is that it is the
+      # fallback watcher receiving it at all, not the stale pre-fallback one.
+      expect(fallback_watcher.stop_count).to be >= 1
     end
   end
 end

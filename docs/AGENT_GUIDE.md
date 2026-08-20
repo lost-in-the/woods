@@ -1,6 +1,6 @@
 # Woods Agent Guide
 
-Woods gives AI agents accurate, structured context about a Rails application by running inside it. Instead of guessing from source files, Woods boots the app, introspects every model, controller, route, service, and job using Rails runtime APIs, and writes the result as JSON. Two MCP servers make that data available: the **Index Server** (27 tools, reads pre-extracted JSON, no Rails boot required) and the **Console Server** (31 tools, bridges to a live Rails process for real data queries). This guide covers how to set up both servers, which tools to use for common tasks, and what to avoid.
+Woods gives AI agents accurate, structured context about a Rails application by running inside it. Instead of guessing from source files, Woods boots the app, introspects every model, controller, route, service, and job using Rails runtime APIs, and writes the result as JSON. Two MCP servers make that data available: the **Index Server** (29 tools, reads pre-extracted JSON, no Rails boot required) and the **Console Server** (31 tools, bridges to a live Rails process for real data queries). This guide covers how to set up both servers, which tools to use for common tasks, and what to avoid.
 
 ---
 
@@ -231,7 +231,7 @@ Use `framework` to search the Rails/gem source installed in the app — not docu
 
 ## Tool Quick Reference
 
-### Index Server (27 tools)
+### Index Server (29 tools)
 
 #### Core Query
 

@@ -3,6 +3,8 @@
 require 'json'
 require 'time'
 require 'digest'
+require 'fileutils'
+require_relative '../atomic_file'
 
 module Woods
   module Temporal
@@ -58,7 +60,7 @@ module Woods
         path = snapshot_path(git_sha)
         return nil unless File.exist?(path)
 
-        data = JSON.parse(File.read(path))
+        data = JSON.parse(AtomicFile.read(path))
         symbolize_snapshot(data).except(:units)
       end
 
@@ -176,19 +178,19 @@ module Woods
       end
 
       def write_snapshot(git_sha, data)
-        File.write(snapshot_path(git_sha), JSON.pretty_generate(data))
+        AtomicFile.write(snapshot_path(git_sha), JSON.pretty_generate(data))
       end
 
       def load_snapshot_with_units(git_sha)
         path = snapshot_path(git_sha)
         return nil unless File.exist?(path)
 
-        symbolize_snapshot(JSON.parse(File.read(path)))
+        symbolize_snapshot(JSON.parse(AtomicFile.read(path)))
       end
 
       def load_all_summaries
         Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
-          data = JSON.parse(File.read(path))
+          data = JSON.parse(AtomicFile.read(path))
           symbolize_snapshot(data).except(:units)
         rescue JSON::ParserError => e
           warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
@@ -198,7 +200,7 @@ module Woods
 
       def load_all_with_units
         Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
-          symbolize_snapshot(JSON.parse(File.read(path)))
+          symbolize_snapshot(JSON.parse(AtomicFile.read(path)))
         rescue JSON::ParserError => e
           warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
           nil

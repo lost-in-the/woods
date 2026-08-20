@@ -27,6 +27,18 @@ module Woods
     class PipelineLock
       DEFAULT_STALE_TIMEOUT = 3600 # 1 hour
 
+      # The transaction-guard filename for a lock of +name+, exposed so
+      # cleanup code that empties a lock directory (woods:clean) can skip the
+      # guard during its sweep — deleting a flock'd guard out from under a
+      # contender's critical section would split the flock across two inodes —
+      # and remove it only after the lock is released.
+      #
+      # @param name [String]
+      # @return [String]
+      def self.guard_filename(name)
+        ".#{name}.lock.guard"
+      end
+
       # @param lock_dir [String] Directory for lock files
       # @param name [String] Lock name (used as filename prefix)
       # @param stale_timeout [Integer] Seconds after which a lock is considered stale
@@ -49,25 +61,38 @@ module Woods
       #
       # @return [Boolean] true if lock acquired, false if already held
       def acquire
-        FileUtils.mkdir_p(@lock_dir)
+        with_path_guard do
+          if File.exist?(@lock_path)
+            return false unless stale?
+            # Retire the stale lock atomically. A bare rm_f + create here is
+            # a TOCTOU race: two processes passing the stale check together
+            # could each delete-and-create, the second deleting the first's
+            # FRESH lock — both would then "hold" it.
+            return false unless retire_stale_unlocked == :cleared
+          end
 
-        if File.exist?(@lock_path)
-          return false unless stale?
-          # Retire the stale lock atomically. A bare rm_f + create here is
-          # a TOCTOU race: two processes passing the stale check together
-          # could each delete-and-create, the second deleting the first's
-          # FRESH lock — both would then "hold" it.
-          return false unless retire_stale_lock
+          # Keep O_EXCL even though cooperating implementations hold the guard:
+          # it still fails closed if an external writer creates the path.
+          File.open(@lock_path, File::WRONLY | File::CREAT | File::EXCL) do |file|
+            file.write(lock_content)
+          end
+          @held = true
+          true
         end
-
-        # Atomic lock creation: File::EXCL ensures this fails if file already exists
-        File.open(@lock_path, File::WRONLY | File::CREAT | File::EXCL) do |f|
-          f.write(lock_content)
-        end
-        @held = true
-        true
       rescue Errno::EEXIST
         false
+      end
+
+      # Retire the lock only when the file captured atomically from the public
+      # lock path is genuinely stale.
+      #
+      # @return [Symbol] `:cleared`, `:not_stale`, or `:missing`
+      def retire_stale
+        return :missing unless File.directory?(@lock_dir)
+
+        with_path_guard { retire_stale_unlocked }
+      rescue Errno::ENOENT
+        :missing
       end
 
       # Release the lock.
@@ -81,28 +106,18 @@ module Woods
       def release
         return unless @held
 
-        # Clear @held up front so no later failure can leave this instance
-        # believing it still holds the lock.
+        with_path_guard do
+          next unless @held
+
+          # Clear @held before touching the ownership path so another thread
+          # using this instance cannot begin a heartbeat behind this release.
+          @held = false
+          release_unlocked
+        end
+      rescue Errno::ENOENT
+        nil
+      ensure
         @held = false
-
-        # Rename first, then inspect: a plain read-then-unlink is a TOCTOU —
-        # after we read our own token a takeover could replace the file, and
-        # our unlink would then delete the NEW holder's lock. Renaming
-        # atomically captures whatever is at the path.
-        graveyard = "#{@lock_path}.release.#{Process.pid}.#{SecureRandom.hex(4)}"
-        begin
-          File.rename(@lock_path, graveyard)
-        rescue Errno::ENOENT
-          return # already gone
-        end
-
-        if own_lock?(graveyard)
-          FileUtils.rm_f(graveyard)
-        else
-          # We were legitimately taken over — put the successor's lock back
-          # without clobbering a still-newer holder (see {#restore_lock}).
-          restore_lock(graveyard)
-        end
       end
 
       # Execute a block while holding the lock.
@@ -124,7 +139,11 @@ module Woods
       #
       # @return [Boolean]
       def locked?
-        @held && File.exist?(@lock_path)
+        return false unless @held
+
+        with_path_guard { @held && File.exist?(@lock_path) }
+      rescue SystemCallError
+        false
       end
 
       # Refresh the held lock's mtime so a long but healthy run is not mistaken
@@ -142,8 +161,100 @@ module Woods
       #
       # @return [Boolean] true when the mtime was refreshed
       def touch
-        return false unless locked?
+        return false unless @held
 
+        with_path_guard do
+          next false unless @held && File.exist?(@lock_path)
+
+          touch_unlocked?
+        end
+      rescue SystemCallError
+        # The lock vanished (retired by a non-cooperating contender, or the
+        # directory went away). The next acquire/release resolves it.
+        false
+      end
+
+      private
+
+      def with_path_guard
+        # Ensure the lock directory itself exists — never its parent. A guard
+        # that lived beside @lock_dir needed the parent writable too, which a
+        # deployment that only grants write access to the lock directory
+        # can't satisfy.
+        FileUtils.mkdir_p(@lock_dir)
+        File.open(guard_path, File::RDWR | File::CREAT, 0o600) do |guard|
+          guard.flock(File::LOCK_EX)
+          yield
+        end
+      end
+
+      # The transaction guard, kept inside the owned lock directory so it
+      # resolves through the same symlink the lock file itself does. A guard
+      # computed from `File.expand_path(lock_dir)` split in two: expand_path
+      # normalizes `.`/`..` but never dereferences a symlink, so a real path
+      # and a symlinked alias of the same directory produced two different
+      # sibling guard files — flocks that never contended, defeating every
+      # TOCTOU protection `with_path_guard` exists to provide. Deriving the
+      # guard from `File.realpath` and placing it inside the directory
+      # resolves both aliases to the identical path, the same way `@lock_path`
+      # already does implicitly by living inside `lock_dir`.
+      #
+      # Memoized: only the first caller (which has just ensured the directory
+      # exists via `mkdir_p`) needs to resolve it; every later access reuses
+      # that resolution rather than re-touching the filesystem.
+      #
+      # @return [String]
+      def guard_path
+        @guard_path ||= File.join(canonical_lock_dir, self.class.guard_filename(@name))
+      end
+
+      # @return [String] the lock directory's real path when it exists,
+      #   falling back to a lexical expansion when it does not — realpath
+      #   requires an existing path and callers must never be made to create
+      #   one just to compute a guard location.
+      def canonical_lock_dir
+        File.realpath(@lock_dir)
+      rescue Errno::ENOENT
+        File.expand_path(@lock_dir)
+      end
+
+      def retire_stale_unlocked
+        graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
+        File.rename(@lock_path, graveyard)
+
+        unless stale_file?(graveyard)
+          restore_lock_unlocked(graveyard)
+          return :not_stale
+        end
+
+        FileUtils.rm_f(graveyard)
+        :cleared
+      rescue Errno::ENOENT
+        :missing
+      end
+
+      def release_unlocked
+        # Rename first, then inspect: a plain read-then-unlink is a TOCTOU —
+        # after we read our own token a takeover could replace the file, and
+        # our unlink would then delete the NEW holder's lock. Renaming
+        # atomically captures whatever is at the path.
+        graveyard = "#{@lock_path}.release.#{Process.pid}.#{SecureRandom.hex(4)}"
+        begin
+          File.rename(@lock_path, graveyard)
+        rescue Errno::ENOENT
+          return # already gone
+        end
+
+        if own_lock?(graveyard)
+          FileUtils.rm_f(graveyard)
+        else
+          # We were legitimately taken over — put the successor's lock back
+          # without clobbering a still-newer holder (see {#restore_lock}).
+          restore_lock_unlocked(graveyard)
+        end
+      end
+
+      def touch_unlocked?
         # Ownership, not just presence. `locked?` asks whether *a* lock file
         # exists and this instance thinks it holds one — which stays true after
         # a contender has retired us and put its own lock at the same path. A
@@ -184,13 +295,7 @@ module Woods
           # every writer blocks until the stale window expires.
           false
         end
-      rescue SystemCallError
-        # The lock vanished (retired by a contender, or the dir went away).
-        # Nothing useful to do here; the next acquire/release resolves it.
-        false
       end
-
-      private
 
       # Check if the existing lock file is stale.
       #
@@ -219,23 +324,9 @@ module Woods
       # fresh (someone beat us to the takeover), we put it back and lose the
       # race instead of clobbering a live holder.
       #
-      # @return [Boolean] true if this process retired a genuinely stale lock
-      def retire_stale_lock
-        graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
-        File.rename(@lock_path, graveyard)
-
-        unless stale_file?(graveyard)
-          # We grabbed a lock that is no longer stale — a competitor already
-          # took over. Restore it (without clobbering a still-newer holder)
-          # and back off.
-          restore_lock(graveyard)
-          return false
-        end
-
-        FileUtils.rm_f(graveyard)
-        true
-      rescue Errno::ENOENT
-        false
+      # @return [Boolean] true when a genuinely stale lock was retired
+      def retire_stale_lock?
+        retire_stale == :cleared
       end
 
       # Whether the lock file at +path+ carries this instance's token.
@@ -277,6 +368,10 @@ module Woods
       # @param graveyard [String] path of the renamed-aside lock file
       # @return [void]
       def restore_lock(graveyard)
+        with_path_guard { restore_lock_unlocked(graveyard) }
+      end
+
+      def restore_lock_unlocked(graveyard)
         File.link(graveyard, @lock_path)
       rescue Errno::EEXIST
         # A newer holder already claimed the path — our copy is obsolete.

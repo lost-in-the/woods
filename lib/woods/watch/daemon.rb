@@ -11,6 +11,7 @@ require_relative 'tree_scan'
 require_relative 'watcher'
 require 'json'
 require 'set'
+require 'securerandom'
 
 module Woods
   module Watch
@@ -102,6 +103,12 @@ module Woods
       # sync that fired anyway.
       LOCK_NAME = 'extraction'
 
+      # Name of the O_EXCL claim file that closes the startup TOCTOU: two
+      # daemons that both pass {#another_daemon_alive?} before either has
+      # published a status record would otherwise both proceed. See
+      # {#claim_startup?}.
+      CLAIM_FILENAME = 'watch_claim.json'
+
       # A daemon cycle is milliseconds; a manual full extraction is seconds to
       # minutes. This bounds how long a crashed writer can block the daemon.
       LOCK_STALE_TIMEOUT = 600
@@ -116,6 +123,19 @@ module Woods
       # contending for its lock. A third of the window leaves room for two
       # missed beats.
       HEARTBEAT_INTERVAL = Status::STALE_AFTER / 3.0
+
+      # How long shutdown waits for the heartbeat thread to notice
+      # @stop_reason and exit on its own before falling back to Thread#kill.
+      #
+      # This is not the correctness backstop — #process's own `ensure`
+      # re-merges a batch the heartbeat had drained regardless of whether it
+      # exits cooperatively or gets killed, so a short window is enough. Most
+      # of the time the heartbeat is parked in its own `sleep(heartbeat_tick)`
+      # (up to HEARTBEAT_INTERVAL, minutes, when idle_timeout is unset) and
+      # will not wake up to see @stop_reason inside any bounded wait — this
+      # only pays off when it happens to already be near the end of a cycle,
+      # which most daemon cycles are (a single-file cycle is milliseconds).
+      HEARTBEAT_SHUTDOWN_TIMEOUT = 2
 
       # @return [Woods::Generation]
       attr_reader :generation
@@ -182,6 +202,13 @@ module Woods
         # `woods:incremental` stopped standing down.
         return :already_running if another_daemon_alive?
 
+        # {#another_daemon_alive?} is a plain status READ — cheap, and gives
+        # the useful log message above, but proves nothing under a race: two
+        # daemons starting together can both read "nothing running yet" and
+        # both pass. #claim_startup? is the atomic gate that actually decides
+        # who gets to proceed.
+        return :already_running unless claim_startup?
+
         run_started
       end
 
@@ -205,12 +232,26 @@ module Woods
       #   duration_ms: }`
       def process(paths = [])
         change_set = ChangeSet.new(paths: drain_with(paths), root: @root)
+        cycle_completed = false
 
-        case required_action(change_set)
-        when :ignore then nothing_to_do
-        when :restart then require_restart(change_set)
-        when :reload then attempt_reload ? extract(change_set) : degraded_reload(change_set)
-        else extract(change_set)
+        begin
+          result = case required_action(change_set)
+                   when :ignore then nothing_to_do
+                   when :restart then require_restart(change_set)
+                   when :reload then attempt_reload ? extract(change_set) : degraded_reload(change_set)
+                   else extract(change_set)
+                   end
+          cycle_completed = true
+          result
+        ensure
+          # Thread#kill bypasses rescue, but not ensure — a thread killed
+          # anywhere in this dispatch (mid-extraction, most commonly, when a
+          # shutdown's heartbeat.kill lands on a thread doing real work) would
+          # otherwise lose the batch #drain_with already popped from @pending.
+          # Every branch above that finishes normally already carries its own
+          # paths forward on failure (or intentionally doesn't, e.g. :restart);
+          # this only fires for the abnormal case none of them can catch.
+          carry_forward(change_set) unless cycle_completed
         end
       end
 
@@ -222,22 +263,44 @@ module Woods
       # entering this method, so nothing it does on the way out can clobber
       # the live daemon's records.
       def run_started
-        watcher = @watcher || build_watcher
+        @watcher ||= build_watcher
         publish_status(:running, reason: nil)
         @last_event_at = monotonic_now
-        heartbeat = start_heartbeat(watcher)
+        heartbeat = start_heartbeat
 
-        catch_up(watcher)
-        start_watching(watcher) do |paths|
+        catch_up
+        start_watching do |paths|
           enqueue(paths)
-          drain(watcher)
+          drain
         end
 
         @stop_reason || :stopped
       ensure
-        heartbeat&.kill
+        # The watch loop can end without anything having set a reason — a
+        # `stop` that landed before `start_watching` ran, for instance. Set
+        # one before touching the heartbeat: its loop's own exit check is
+        # `break if @stop_reason`, so a heartbeat that is actually awake right
+        # now (as opposed to parked in its long idle sleep) needs this to see
+        # the run is ending at all. Doesn't affect the method's return value —
+        # that already evaluated on the line above.
+        @stop_reason ||= :stopped
+        # Cooperative first: ask the watcher to stop and give the heartbeat a
+        # chance to notice @stop_reason and exit its loop on its own. #kill
+        # bypasses rescue (not ensure — #process guards the batch it drains
+        # either way), so it is the last resort, not the first move.
+        @watcher&.stop
+        stop_heartbeat(heartbeat)
         persist_pending
         publish_status(:stopped, reason: @stop_reason&.to_s)
+        release_claim
+      end
+
+      # @param heartbeat [Thread, nil]
+      # @return [void]
+      def stop_heartbeat(heartbeat)
+        return unless heartbeat
+
+        heartbeat.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || heartbeat.kill
       end
 
       # What this batch demands, with one escalation applied: an app that cannot
@@ -322,11 +385,11 @@ module Woods
       # calling here), so the winner's loop picks them up; nothing is lost by
       # returning. `try_lock` also returns false on same-thread re-entry, so a
       # synchronous callback fired from inside a cycle cannot deadlock.
-      def drain(watcher)
+      def drain
         return unless @drain_mutex.try_lock
 
         begin
-          drain_cycles(watcher)
+          drain_cycles
         ensure
           # An extraction is work, not idleness. Stamping only on the event
           # would let a cycle longer than `idle_timeout` read as a quiet
@@ -336,13 +399,17 @@ module Woods
         end
       end
 
-      def drain_cycles(watcher)
+      def drain_cycles
         until pending_empty? || @stop_reason
           settle
           result = process
 
           if result[:action] == :restart
-            watcher.stop
+            # @watcher, not a captured local — start_watching's polling
+            # fallback can have reassigned it earlier in this same run
+            # (daemon.rb's start_watching), and stopping the discarded
+            # pre-fallback watcher leaves the one actually running untouched.
+            @watcher&.stop
             break
           end
           # A degraded cycle deliberately carried its paths forward. Retrying
@@ -401,7 +468,7 @@ module Woods
         File.join(@output_dir, 'watch_pending.json')
       end
 
-      def catch_up(watcher)
+      def catch_up
         return unless @catch_up
 
         carried = restore_pending
@@ -414,7 +481,7 @@ module Woods
 
         @logger.info("[Woods] watch: #{paths.size} path(s) changed before startup — catching up")
         enqueue(paths)
-        drain(watcher)
+        drain
       end
 
       # A file deleted while nothing was watching leaves no mtime for the scan
@@ -493,7 +560,7 @@ module Woods
       # Idle stopping is off by default; the heartbeat is not.
       #
       # @return [Thread]
-      def start_heartbeat(watcher)
+      def start_heartbeat
         Thread.new do
           loop do
             sleep(heartbeat_tick)
@@ -502,7 +569,11 @@ module Woods
             if idle_expired?
               @logger.info("[Woods] watch: idle for #{@idle_timeout}s — exiting")
               @stop_reason = :idle
-              watcher.stop
+              # @watcher, not a captured local — see the same note in
+              # #drain_cycles. Idle-stop is exactly the path that missed this:
+              # a daemon that fell back to polling and then went idle never
+              # actually stopped, because it stopped the discarded watcher.
+              @watcher&.stop
               break
             end
 
@@ -511,7 +582,7 @@ module Woods
             # at which point a contender would retire the lock of a run that is
             # still going. The holder has to keep saying it is alive.
             @lock.touch if @lock.respond_to?(:touch)
-            retry_pending(watcher)
+            retry_pending
           end
         end
       end
@@ -526,11 +597,11 @@ module Woods
       # stop typing. The heartbeat is already the right cadence for "try that
       # again": slow enough not to spin, frequent enough that a finished
       # contender is noticed in minutes rather than never.
-      def retry_pending(watcher)
+      def retry_pending
         return if pending_empty? || @stop_reason
 
         @logger.info('[Woods] watch: retrying paths carried forward from an earlier cycle')
-        drain(watcher)
+        drain
       end
 
       def heartbeat_tick
@@ -562,8 +633,8 @@ module Woods
       # Start the watcher, falling back to polling if the native backend cannot
       # start at all (inotify exhaustion being the usual reason). A daemon that
       # costs some CPU beats one that silently never fires.
-      def start_watching(watcher, &on_change)
-        watcher.start(&on_change)
+      def start_watching(&on_change)
+        @watcher.start(&on_change)
       rescue WatcherError => e
         raise if @polling_fallback
 
@@ -777,6 +848,108 @@ module Woods
           'Set WOODS_IGNORE_WATCH=1 to start anyway.'
         )
         true
+      end
+
+      # Atomically claim the right to start, closing the race
+      # {#another_daemon_alive?} cannot: two daemons calling this
+      # concurrently both attempt an `O_EXCL` create of the same claim file,
+      # and the filesystem — not thread scheduling — decides which one
+      # actually creates it. The loser gets `Errno::EEXIST` regardless of
+      # which daemon checked {#another_daemon_alive?} first or which one
+      # would have published its status record first.
+      #
+      # `WOODS_IGNORE_WATCH=1` bypasses the claim the same way it bypasses
+      # {#another_daemon_alive?} — forcing a start must not get blocked by
+      # a still-live claim it was explicitly told to override.
+      #
+      # A claim recorded by a pid that no longer exists is reclaimed rather
+      # than left blocking forever, the same "does the recorded pid still
+      # exist" test {Status#alive?} uses. Bounded to a few attempts so a
+      # claim that keeps reappearing (a pathological retry loop, not the
+      # ordinary single-contender case) fails closed instead of spinning.
+      #
+      # @return [Boolean] true when this instance now holds the claim (or
+      #   was told to skip claiming entirely)
+      def claim_startup?
+        return true if ENV['WOODS_IGNORE_WATCH'] == '1'
+
+        3.times do
+          return true if create_claim
+          return false unless reclaim_if_stale
+        end
+
+        false
+      end
+
+      # @return [Boolean] true when the claim file was created by this call
+      #
+      # Written fully to a temp file first, THEN linked into place — never
+      # `open(O_EXCL)` straight onto +claim_path+ and write after. `File.link`
+      # is atomic and fails closed with `EEXIST` exactly like `O_EXCL` does,
+      # but the instant a reader can see the claim file at all, its content
+      # is already complete. Racing a plain `open`-then-`write` the other way
+      # let a contender's {#stale_claim?} read the file between our create
+      # and our write, see an empty/torn body, misjudge it stale, and delete
+      # the claim we had just won — reintroducing exactly the double-daemon
+      # race this method exists to close.
+      def create_claim
+        FileUtils.mkdir_p(@output_dir)
+        tmp_path = "#{claim_path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
+        File.write(tmp_path, JSON.generate(pid: Process.pid, host: Status.host_identity))
+        File.link(tmp_path, claim_path)
+        @claimed = true
+        true
+      rescue Errno::EEXIST
+        false
+      ensure
+        FileUtils.rm_f(tmp_path)
+      end
+
+      # @return [Boolean] true when a stale claim was cleared and the caller
+      #   should retry {#create_claim}; false when the claim is live (or the
+      #   directory vanished) and the caller should give up
+      def reclaim_if_stale
+        return false unless stale_claim?
+
+        FileUtils.rm_f(claim_path)
+        true
+      rescue Errno::ENOENT
+        false
+      end
+
+      # @return [Boolean] whether the current claim file's recorded pid is
+      #   dead — an unreadable or already-vanished claim counts as stale
+      #   too, since it cannot be a live daemon's claim
+      def stale_claim?
+        record = JSON.parse(File.read(claim_path))
+        !claim_pid_alive?(record['pid'])
+      rescue JSON::ParserError, SystemCallError
+        true
+      end
+
+      # Same semantics as {Status#alive?}'s pid check: signal 0 asks "could I
+      # signal this process?" without sending anything.
+      def claim_pid_alive?(pid)
+        return false unless pid.is_a?(Integer) && pid.positive?
+
+        Process.kill(0, pid)
+        true
+      rescue Errno::ESRCH
+        false
+      rescue Errno::EPERM
+        true
+      end
+
+      # @return [void]
+      def release_claim
+        return unless @claimed
+
+        FileUtils.rm_f(claim_path)
+        @claimed = false
+      end
+
+      def claim_path
+        File.join(@output_dir, CLAIM_FILENAME)
       end
 
       def build_watcher

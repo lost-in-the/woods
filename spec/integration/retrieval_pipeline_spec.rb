@@ -40,7 +40,7 @@ RSpec.describe 'Retrieval Pipeline Integration', :integration do
   # ── Store Setup ──────────────────────────────────────────────────
 
   let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
   let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
 
   # ── Fixture Data ─────────────────────────────────────────────────

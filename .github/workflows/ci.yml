@@ -8,6 +8,7 @@ on:
   # resolution, or a direct push, went green purely by absence of a run (#220).
   push:
     branches: [main]
+    tags: ['v*']
 
 # Least-privilege default: CI only needs to read the checkout.
 # Per-job blocks can opt into stronger scopes if they ever need to.
@@ -91,12 +92,11 @@ jobs:
       - name: Run multi-worktree integration
         run: bundle exec rspec spec/integration/multi_worktree_spec.rb
 
-  # Storage adapters against REAL servers (#220). Every other storage spec uses
-  # doubles, which verify the SQL/HTTP the adapter builds but not what a server
-  # does with it — #181 (PG::CardinalityViolation on a duplicate id inside one
-  # batch) shipped because no lane ever sent a real batch to a real PostgreSQL.
+  # Storage adapters against real servers (#220), plus the session tracer
+  # against the real Solid Cache API. Unit doubles verify requests and SQL but
+  # cannot prove backend locking or transaction behavior.
   live-backends:
-    name: Live backends (pgvector + Qdrant)
+    name: Live backends (pgvector + Qdrant + Solid Cache)
     runs-on: ubuntu-latest
     env:
       BUNDLE_GEMFILE: gemfiles/live_backends.gemfile
@@ -144,7 +144,10 @@ jobs:
           echo "Qdrant did not become ready within 30s"
           exit 1
       - name: Run live-backend contract specs
-        run: bundle exec rspec spec/integration/live_backends_spec.rb
+        run: >-
+          bundle exec rspec
+          spec/integration/live_backends_spec.rb
+          spec/integration/solid_cache_compatibility_spec.rb
 
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with
@@ -158,15 +161,16 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
+      - name: Verify release-v2 public-surface inventory
+        run: bundle exec rake release_v2:verify_surface_inventory
       - name: Run linter
         run: bundle exec rubocop
 
-  # Boots exe/woods-mcp-http as a real subprocess and drives it over a socket.
-  # Its own job because it binds a port and shells out, and because the failure
-  # it exists to catch — the binary not booting at all — is invisible to every
-  # in-process transport spec.
+  # Drives both packaged MCP executables with the official Ruby client and the
+  # pinned Inspector CLI, including a real HTTP socket. Its own job because the
+  # process boundaries and Node dependency are intentionally outside unit specs.
   http-transport:
-    name: HTTP transport (end to end)
+    name: MCP transports (official clients)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
@@ -175,8 +179,22 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Run HTTP end-to-end specs
-        run: WOODS_RUN_HTTP_SERVER=1 bundle exec rspec spec/mcp/http_server_e2e_spec.rb
+      - name: Set up Node 22.19.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - name: Install pinned Inspector
+        run: npm ci --ignore-scripts
+      - name: Run MCP process contracts
+        env:
+          WOODS_RUN_HTTP_SERVER: '1'
+          WOODS_RUN_MCP_INSPECTOR: '1'
+        run: >-
+          bundle exec rspec
+          spec/mcp/http_server_e2e_spec.rb
+          spec/integration/mcp_official_ruby_client_spec.rb
+          spec/integration/mcp_inspector_contract_spec.rb
 
   coverage:
     runs-on: ubuntu-latest
@@ -189,6 +207,17 @@ jobs:
           bundler-cache: true
       - name: Run tests with coverage
         run: COVERAGE=true bundle exec rake spec
+      # Uploaded even when the coverage step above fails its minimum_coverage
+      # gate (spec/spec_helper.rb), so the HTML report is available to
+      # inspect which files/groups dropped, not just the pass/fail number.
+      - name: Publish SimpleCov report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: simplecov-report
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 7
 
   security:
     runs-on: ubuntu-latest
@@ -209,7 +238,28 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '3.3.10'
           bundler-cache: true
-      - name: Build gem
-        run: gem build woods.gemspec
+      - name: Build the release artifact once
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(ruby -Ilib -rwoods/version -e 'print Woods::VERSION')"
+          GEM_NAME="woods-${VERSION}.gem"
+          ARTIFACT_NAME="woods-release-${GITHUB_SHA}"
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          mkdir -p dist
+          gem build --strict --output "dist/${GEM_NAME}" woods.gemspec
+          (cd dist && sha256sum "$GEM_NAME" > "${GEM_NAME}.sha256")
+          echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+          echo "gem-name=${GEM_NAME}" >> "$GITHUB_OUTPUT"
+      - name: Store the gem and SHA-256 manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.artifact-name }}
+          path: |
+            dist/${{ steps.artifact.outputs.gem-name }}
+            dist/${{ steps.artifact.outputs.gem-name }}.sha256
+          if-no-files-found: error
+          retention-days: 7

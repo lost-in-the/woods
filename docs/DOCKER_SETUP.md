@@ -15,16 +15,15 @@ Index Server (29 tools)                 Rails App
         ▲                                         │
         └──── volume mount ◀──────────────────────┘
 
-Console Server — two modes:
+Console Server — two launch paths:
 
   Embedded (9 tools)                    rake woods:console
   MCP client spawns via                   boots Rails, runs MCP in-process
   docker exec -i ────────────────────▶    Tier 1 read-only tools only
 
-  Bridge (31 tools)
-  woods-console-mcp on host          bridge.rb inside container
-  connects via docker exec -i ────────▶  evaluates queries in Rails console
-  all 4 tiers                             rolled-back transactions
+  Configured launcher (same tools)
+  woods-console-mcp on host          rake woods:console
+  execs docker exec -i ──────────────▶  same embedded server
 ```
 
 **Why the split?** The Index Server reads static JSON files — it doesn't need Rails, ActiveRecord, or any of your app's dependencies. Running it on the host avoids container overhead and makes the extraction output available to any MCP client. The Console Server queries live application state, so it must run inside (or connect to) the Rails environment.
@@ -178,17 +177,17 @@ Two gotchas:
 
 ## Console Server Setup
 
-The Console Server queries live Rails state. There are two modes with different trade-offs.
+The Console Server queries live Rails state. There are two launch paths for the same embedded server.
 
 ### Comparison
 
-| | Embedded | Bridge |
+| | Direct Docker command | Configured launcher |
 |---|---|---|
-| **Where it runs** | Inside container via `docker exec -i` | `woods-console-mcp` on host, bridge inside container |
+| **Where it runs** | Inside container via `docker exec -i` | `woods-console-mcp` execs `docker exec -i` |
 | **Config needed** | None (just `.mcp.json`) | `console.yml` + `.mcp.json` |
-| **Tools available** | 9 (Tier 1 — read-only) | 31 (all 4 tiers) |
+| **Tools available** | 9 by default; 11 with read tools enabled | Same 9 or 11 |
 | **Setup complexity** | Minimal | Moderate |
-| **Best for** | Quick setup, basic queries | Full diagnostics, analytics, guarded operations |
+| **Best for** | Quick setup | Reusable launcher config |
 
 ### Option 1: Embedded (9 Tier 1 tools)
 
@@ -226,9 +225,11 @@ If you use `docker exec` (not `docker compose exec`), provide the exact containe
 }
 ```
 
-### Option 2: Bridge (all 31 tools)
+### Option 2: Configured launcher
 
-The `woods-console-mcp` binary runs on the host and connects to a bridge process inside the container via `docker exec -i`. This enables all 4 tool tiers: read-only, domain-aware, analytics, and guarded operations.
+The `woods-console-mcp` binary runs on the host and replaces itself with
+`docker exec -i ... bundle exec rake woods:console`. It exposes the same
+embedded tool surface as Option 1.
 
 **Step 1: Create `console.yml`**
 
@@ -258,7 +259,7 @@ For Docker Compose, names follow the pattern `<project>-<service>-<number>` (e.g
 }
 ```
 
-The bridge reads `~/.woods/console.yml` by default. To use a different path:
+The launcher reads `~/.woods/console.yml` by default. To use a different path:
 
 ```json
 {
@@ -266,7 +267,7 @@ The bridge reads `~/.woods/console.yml` by default. To use a different path:
     "woods-console": {
       "command": "woods-console-mcp",
       "env": {
-        "CODEBASE_CONSOLE_CONFIG": "/path/to/console.yml"
+        "WOODS_CONSOLE_CONFIG": "/path/to/console.yml"
       }
     }
   }
@@ -295,7 +296,8 @@ Both servers configured together for a Docker environment:
 }
 ```
 
-This uses the embedded console (9 tools). To use the bridge (31 tools), replace the `codebase-console` entry:
+This uses the embedded console directly. To use the equivalent configured
+launcher, replace the `woods-console` entry:
 
 ```json
 {
@@ -373,7 +375,7 @@ Then re-run extraction.
 
 **Fix:** Add `-i` to keep stdin open:
 
-```json
+```text
 "args": ["compose", "exec", "-i", "app", ...]
 ```
 
@@ -403,11 +405,15 @@ Then re-run extraction.
 
 **Fix:** The `woods:console` rake task redirects stdout to stderr before Rails boots. If you still see issues, check for `puts` or `print` calls in your initializers that run before the task captures stdout.
 
-### Tier 2-4 tools return "unsupported in embedded mode"
+### A tool from the 31-schema inventory is not listed
 
-**Expected behavior.** The embedded console (Option 1) only supports 9 Tier 1 tools. Switch to the bridge (Option 2) for the full 31 tools.
+**Expected behavior.** Supported servers register 9 Tier 1 tools by default.
+Tier 2, Tier 3, and `console_eval` are inventory only.
 
-Alternatively, to unlock `console_sql` and `console_query` without switching to bridge mode, enable `embedded_read_tools: true` in the Rack middleware. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for details.
+To register `console_sql` and `console_query`, enable
+`console_embedded_read_tools` in Woods configuration or pass
+`embedded_read_tools: true` to the Rack middleware. See
+[CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for details.
 
 ### Woods MCP tools not available in a git worktree
 

@@ -73,11 +73,17 @@ module Woods
     # @param depth [Integer] Current recursion depth
     # @param max_depth [Integer] Maximum recursion depth
     # @param path [Set<String>] Identifiers on the current recursion path
-    def expand(identifier, steps, visited, depth:, max_depth:, path: Set.new)
+    # @param method_name [String, nil] The method the caller actually invoked
+    #   (from the triggering operation's `op[:method]`), for callers that
+    #   resolve to a bare unit id and so cannot encode it in +identifier+
+    #   itself. `identifier`'s own `#method` suffix (entry points) wins when
+    #   both are present.
+    def expand(identifier, steps, visited, depth:, max_depth:, path: Set.new, method_name: nil)
       return if depth > max_depth
 
       # Parse identifier into unit name and optional method
-      unit_id, method_name = parse_identifier(identifier)
+      unit_id, parsed_method = parse_identifier(identifier)
+      method_name = parsed_method || method_name
 
       if path.include?(unit_id)
         # Genuine cycle — the unit is an ancestor of itself on this path.
@@ -130,26 +136,25 @@ module Woods
       end
     end
 
-    # Extract operations from source code for a specific method.
+    # Extract operations from source code for a specific method — or, when no
+    # method is named or the unit does not define one by that name, from the
+    # entire source.
+    #
+    # A named method that isn't found falls back to the whole unit rather
+    # than yielding no operations: {#expand_operation} now threads the
+    # calling operation's `op[:method]` through, and that method need not be
+    # one the callee actually defines locally (inherited, dynamically
+    # defined, or metaprogrammed) — losing the trace entirely would be worse
+    # than over-including it.
     def extract_operations(source_code, method_name, metadata, unit_type)
       operations = []
 
       # For controllers, prepend before_action callbacks
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
-      if method_name
-        # Extract specific method
-        method_node = @method_extractor.extract_method(source_code, method_name)
-        if method_node
-          ops = @operation_extractor.extract(method_node)
-          operations.concat(ops)
-        end
-      else
-        # No specific method - parse entire source
-        root = @parser.parse(source_code)
-        ops = @operation_extractor.extract(root)
-        operations.concat(ops)
-      end
+      scope_node = method_name && @method_extractor.extract_method(source_code, method_name)
+      scope_node ||= @parser.parse(source_code)
+      operations.concat(@operation_extractor.extract(scope_node))
 
       operations
     end
@@ -190,6 +195,15 @@ module Woods
 
     # Recursively expand an operation's target if it resolves to a known unit.
     #
+    # `op[:method]` is threaded into the recursive {#expand} call so the
+    # callee is scoped to the method actually invoked, not its whole source.
+    # When {#resolve_target} answers with an ambiguity marker (several
+    # namespaces share the target's short name) this does not recurse at
+    # all — it mutates +op+ in place with `:ambiguous_candidates` so the
+    # unresolved call is still visible in the flow output, naming every
+    # candidate instead of silently expanding whichever one the graph's
+    # suffix index happened to pick.
+    #
     # @param op [Hash] The operation to potentially expand
     # @param current_unit [String] The identifier of the unit containing this operation
     # @param steps [Array<Hash>] Accumulator for step hashes
@@ -202,10 +216,21 @@ module Woods
         target = op[:target]
         return unless target
 
-        candidate = resolve_target(target)
-        return unless candidate
+        resolution = resolve_target(target)
+        return unless resolution
 
-        expand(candidate, steps, visited, depth: depth + 1, max_depth: max_depth, path: path)
+        if resolution.is_a?(Hash)
+          # Several namespaces share this short name (Tier 1 suffix match) —
+          # record which ones rather than silently expanding whichever the
+          # graph's deterministic-but-arbitrary suffix index picked.
+          op[:ambiguous_candidates] = resolution[:candidates]
+          return
+        end
+
+        expand(
+          resolution, steps, visited,
+          depth: depth + 1, max_depth: max_depth, path: path, method_name: op[:method]
+        )
       when :transaction
         (op[:nested] || []).each do |nested_op|
           expand_operation(nested_op, current_unit, steps, visited, depth: depth, max_depth: max_depth, path: path)
@@ -242,12 +267,16 @@ module Woods
       @resolved_targets[target] = compute_resolved_target(target)
     end
 
+    # @return [String, Hash, nil] a resolved unit identifier; a
+    #   `{ ambiguous: true, candidates: }` marker when several namespaces
+    #   share +target+'s short name; or nil when nothing resolves
     def compute_resolved_target(target)
       # Tier 1: Graph-wide lookup
       return target if @graph.node_exists?(target)
 
-      graph_match = @graph.find_node_by_suffix(target)
-      return graph_match if graph_match
+      suffix_matches = @graph.find_all_by_suffix(target)
+      return suffix_matches.first if suffix_matches.size == 1
+      return { ambiguous: true, candidates: suffix_matches } if suffix_matches.size > 1
 
       # Tier 2: Disk fallback (unit JSON exists but isn't in the graph)
       unit_data = load_unit(target)

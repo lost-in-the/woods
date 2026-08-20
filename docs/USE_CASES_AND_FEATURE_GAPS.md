@@ -1,6 +1,6 @@
 # Woods: Use Cases & Feature Gap Analysis
 
-Comprehensive evaluation of Woods's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 34 extractors, the retrieval pipeline, both MCP servers (28 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
+Comprehensive evaluation of Woods's applicability to Rails applications and identification of remaining feature gaps. Based on analysis of all 34 extractors, the retrieval pipeline, both MCP servers (29 + 31 tools), the embedding/storage/chunking layers, AST analysis, flow tracing, resilience/observability infrastructure, and evaluation harness.
 
 ---
 

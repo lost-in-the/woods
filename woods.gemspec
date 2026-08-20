@@ -21,22 +21,28 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 3.0.0'
 
+  release_ref = "v#{spec.version}"
   spec.metadata['homepage_uri'] = spec.homepage
-  spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/main"
-  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/#{release_ref}"
+  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/#{release_ref}/CHANGELOG.md"
   spec.metadata['bug_tracker_uri'] = "#{spec.homepage}/issues"
-  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/main/docs"
+  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/#{release_ref}/docs"
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
   spec.files = Dir[
     'lib/**/*',
     'exe/*',
+    'docs/**/*',
+    'plugin/**/*',
+    'plugin/.claude-plugin/plugin.json',
+    'assets/woods-wordmark-white-with-bg.png',
     'LICENSE.txt',
     'README.md',
     'CHANGELOG.md',
     'CONTRIBUTING.md',
-    'CODE_OF_CONDUCT.md'
+    'CODE_OF_CONDUCT.md',
+    'SECURITY.md'
   ]
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
@@ -44,8 +50,11 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   # Runtime dependencies
+  # The documented public contract (CHANGELOG, CLAUDE.md, docs/) — an exact
+  # pin blocks patch releases and user dependency resolution; the SDK-internal
+  # touchpoints already guard shape drift defensively.
   spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
-  spec.add_dependency 'msgpack', '>= 1.5'
+  spec.add_dependency 'msgpack', '>= 1.5', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower
@@ -55,5 +64,5 @@ Gem::Specification.new do |spec|
   # MCP serving). The only 6.1-introduced APIs touched (connection_db_config,
   # has_many_inversing) are respond_to?-guarded and degrade on 6.0. The Rails
   # version matrix in CI gates this floor. See #135 / #136.
-  spec.add_dependency 'railties', '>= 6.0'
+  spec.add_dependency 'railties', '>= 6.0', '< 9'
 end

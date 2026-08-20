@@ -292,4 +292,81 @@ RSpec.describe Woods::IndexArtifact do
       expect(File.exist?(nested.config_path)).to be(true)
     end
   end
+
+  # FIX 3 (P1): the vector/metadata dump and the root woods.json used to be
+  # written as two independent atomic operations — write_config, then
+  # promote — so a crash in between published a new config against the old
+  # dump. The config snapshot is now written INSIDE the dump directory as
+  # part of the dump, and #promote is the single commit point for both.
+  describe '#dump_config_path' do
+    it 'returns a Pathname named woods.json under the given dump directory' do
+      dump_dir = artifact.new_dump_dir(now: Time.utc(2026, 4, 23, 3, 42, 17))
+      expect(artifact.dump_config_path(dump_dir)).to eq(dump_dir.join('woods.json'))
+    end
+  end
+
+  describe '#write_dump_config' do
+    let(:dump_dir) { artifact.new_dump_dir(now: Time.utc(2026, 4, 23, 3, 42, 17)) }
+
+    it 'writes JSON into the dump directory, not output_dir root' do
+      artifact.write_dump_config(dump_dir, 'schema_version' => 1)
+
+      expect(File.exist?(artifact.dump_config_path(dump_dir))).to be(true)
+      expect(File.exist?(artifact.config_path)).to be(false)
+    end
+
+    it 'delegates serialization to a #to_snapshot_json object, same as #write_config' do
+      fake_config = Object.new.tap { |o| o.define_singleton_method(:to_snapshot_json) { '{"schema_version":1}' } }
+
+      artifact.write_dump_config(dump_dir, fake_config)
+
+      expect(artifact.dump_config_path(dump_dir).read).to eq('{"schema_version":1}')
+    end
+
+    it 'is atomic — uses tmp file + rename' do
+      rename_calls = []
+      allow(File).to receive(:rename).and_wrap_original do |orig, src, dst|
+        rename_calls << [src, dst]
+        orig.call(src, dst)
+      end
+
+      artifact.write_dump_config(dump_dir, 'schema_version' => 1)
+
+      expect(rename_calls.last[1]).to eq(artifact.dump_config_path(dump_dir).to_s)
+    end
+  end
+
+  describe '#read_config with a promoted dump' do
+    let(:dump_dir) { artifact.new_dump_dir(now: Time.utc(2026, 4, 23, 3, 42, 17)) }
+
+    it 'prefers the promoted dump-embedded config over the root woods.json' do
+      artifact.write_config('schema_version' => 1, 'gem_version' => 'root-stale')
+      artifact.write_dump_config(dump_dir, 'schema_version' => 1, 'gem_version' => 'dump-fresh')
+      artifact.promote(dump_dir)
+
+      expect(artifact.read_config['gem_version']).to eq('dump-fresh')
+    end
+
+    it 'leaves the previous config visible when the dump was written but never promoted (crash simulation)' do
+      artifact.write_config('schema_version' => 1, 'gem_version' => 'root-old')
+      artifact.write_dump_config(dump_dir, 'schema_version' => 1, 'gem_version' => 'dump-new')
+      # promote deliberately skipped — simulates a crash between writing the
+      # dump's config and flipping the latest pointer.
+
+      expect(artifact.read_config['gem_version']).to eq('root-old')
+    end
+
+    it 'falls back to root woods.json when the promoted dump carries no embedded config (pre-existing dump)' do
+      artifact.write_config('schema_version' => 1, 'gem_version' => 'root-only')
+      artifact.promote(dump_dir) # no write_dump_config — mirrors a dump from before this fix
+
+      expect(artifact.read_config['gem_version']).to eq('root-only')
+    end
+
+    it 'returns nil when neither the promoted dump nor the root carries a config' do
+      artifact.promote(dump_dir)
+
+      expect(artifact.read_config).to be_nil
+    end
+  end
 end

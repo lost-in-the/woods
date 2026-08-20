@@ -25,6 +25,39 @@ RSpec.describe Woods::MCP::Server do
       expect(server).to be_a(MCP::Server)
     end
 
+    it 'uses a private copy of the current MCP configuration' do
+      global = MCP.configuration
+      global.validate_tool_call_results = false
+      global.validate_tool_call_arguments = false
+
+      built = described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+      configuration = built.configuration
+
+      expect(configuration).not_to equal(global)
+      expect(configuration.validate_tool_call_arguments?).to be(false)
+      expect(configuration.validate_tool_call_results?).to be(true)
+      expect(global.validate_tool_call_results?).to be(false)
+    ensure
+      global.validate_tool_call_arguments = true
+      global.validate_tool_call_results = false
+    end
+
+    it 'does not change foreign servers or leak between Woods servers' do
+      foreign_before = MCP::Server.new(name: 'before', version: '1')
+      first = described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+      second = described_class.build(index_dir: fixture_dir, response_format: :json, warmup: false)
+      foreign_after = MCP::Server.new(name: 'after', version: '1')
+
+      first.configuration.validate_tool_call_arguments = false
+
+      expect(foreign_before.configuration.validate_tool_call_results?).to be(false)
+      expect(foreign_after.configuration.validate_tool_call_results?).to be(false)
+      expect(foreign_before.configuration).to equal(MCP.configuration)
+      expect(foreign_after.configuration).to equal(MCP.configuration)
+      expect(second.configuration.validate_tool_call_arguments?).to be(true)
+      expect(first.configuration).not_to equal(second.configuration)
+    end
+
     it 'registers 14 tools when no optional collaborators are wired' do
       # Without operator / feedback_store / snapshot_store / session_store /
       # notion config, the 15 collaborator-dependent tools (5 pipeline_*, 4
@@ -580,8 +613,12 @@ RSpec.describe Woods::MCP::Server do
     end
 
     context 'with retriever configured' do
+      let(:mock_result_struct) do
+        Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace, keyword_init: true)
+      end
+
       let(:mock_result) do
-        Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, keyword_init: true).new(
+        mock_result_struct.new(
           context: "## User (model)\nclass User < ApplicationRecord\nend",
           sources: [{ identifier: 'User', type: 'model' }],
           classification: nil,
@@ -637,6 +674,52 @@ RSpec.describe Woods::MCP::Server do
         text = response_text(response)
         expect(text).to include('User (model)')
         expect(text).to include('ApplicationRecord')
+      end
+
+      context 'when every matched candidate is missing from the metadata store (stale index)' do
+        let(:mock_result) do
+          mock_result_struct.new(
+            context: 'Codebase: 12 searchable entries (2 model entries).',
+            sources: [],
+            classification: nil,
+            strategy: :vector,
+            tokens_used: 20,
+            budget: 8000,
+            trace: Woods::Retriever::RetrievalTrace.new(ranked_count: 2, skipped_missing_metadata: 2)
+          )
+        end
+
+        it 'returns a typed, actionable error instead of empty success text' do
+          response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model')
+
+          expect(response.error?).to be(true)
+          text = response_text(response)
+          expect(text).to include('stale')
+          expect(text).to include('woods:embed')
+          expect(response.meta[:error_code]).to eq(:stale_index)
+        end
+      end
+
+      context 'when candidates matched and some resolved (not stale)' do
+        let(:mock_result) do
+          mock_result_struct.new(
+            context: "## User (model)\nclass User < ApplicationRecord\nend",
+            sources: [{ identifier: 'User', type: 'model' }],
+            classification: nil,
+            strategy: :vector,
+            tokens_used: 150,
+            budget: 8000,
+            trace: Woods::Retriever::RetrievalTrace.new(ranked_count: 2, skipped_missing_metadata: 1)
+          )
+        end
+
+        it 'returns the context unchanged rather than the stale-index error' do
+          response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'User model')
+
+          expect(response.error?).to be(false)
+          text = response_text(response)
+          expect(text).to include('User (model)')
+        end
       end
     end
   end
@@ -694,6 +777,7 @@ RSpec.describe Woods::MCP::Server do
         instance_double(Woods::Operator::PipelineGuard).tap do |g|
           allow(g).to receive(:allow?).with(:extraction).and_return(true)
           allow(g).to receive(:record!).with(:extraction)
+          allow(g).to receive(:state_status).and_return(:ok)
         end
       end
 
@@ -712,10 +796,31 @@ RSpec.describe Woods::MCP::Server do
         end
       end
 
-      it 'is rate-limited when guard denies' do
+      it 'is rate-limited when guard denies with verified (:ok) cooldown state' do
         allow(guard).to receive(:allow?).with(:extraction).and_return(false)
         response = call_tool(server_with_operator, 'pipeline_extract')
         expect(response_text(response)).to include('rate-limited')
+        expect(response.meta[:error_code]).to eq(:rate_limited)
+      end
+
+      # PipelineGuard#allow? fails closed on state it cannot verify, which
+      # reads identically to a genuine cooldown from the boolean alone —
+      # `:rate_limited, retry_after_seconds: 300` would be inaccurate public
+      # metadata for state that will never resolve on its own.
+      it 'reports cooldown_state_corrupt instead of rate_limited when guard state is corrupt' do
+        allow(guard).to receive(:allow?).with(:extraction).and_return(false)
+        allow(guard).to receive(:state_status).and_return(:corrupt)
+        response = call_tool(server_with_operator, 'pipeline_extract')
+        expect(response.meta[:error_code]).to eq(:cooldown_state_corrupt)
+        expect(response_text(response)).not_to include('rate-limited')
+      end
+
+      it 'reports cooldown_state_unreadable instead of rate_limited when guard state is permission-denied' do
+        allow(guard).to receive(:allow?).with(:extraction).and_return(false)
+        allow(guard).to receive(:state_status).and_return(:permission_denied)
+        response = call_tool(server_with_operator, 'pipeline_extract')
+        expect(response.meta[:error_code]).to eq(:cooldown_state_unreadable)
+        expect(response_text(response)).not_to include('rate-limited')
       end
     end
   end
@@ -733,6 +838,7 @@ RSpec.describe Woods::MCP::Server do
         instance_double(Woods::Operator::PipelineGuard).tap do |g|
           allow(g).to receive(:allow?).with(:embedding).and_return(true)
           allow(g).to receive(:record!).with(:embedding)
+          allow(g).to receive(:state_status).and_return(:ok)
         end
       end
 
@@ -760,6 +866,7 @@ RSpec.describe Woods::MCP::Server do
   end
 
   describe 'tool: pipeline_extract incremental param' do
+    let(:pipeline_output_dir) { Dir.mktmpdir('woods-mcp-incremental') }
     let(:guard) do
       instance_double(Woods::Operator::PipelineGuard).tap do |g|
         allow(g).to receive(:allow?).with(:extraction).and_return(true)
@@ -784,12 +891,13 @@ RSpec.describe Woods::MCP::Server do
 
     before do
       stub_const('Woods::Extractor', extractor_class)
-      mock_config = Struct.new(:output_dir).new(fixture_dir)
+      mock_config = Struct.new(:output_dir).new(pipeline_output_dir)
       Woods.configuration = mock_config
     end
 
     after do
       Woods.configuration = nil
+      FileUtils.rm_rf(pipeline_output_dir)
     end
 
     it 'calls extract_changed with the supplied changed_files when incremental is true' do
@@ -1609,8 +1717,9 @@ RSpec.describe Woods::MCP::Server do
     end
 
     it 'returns not found for an invalid identifier' do
-      contents = read_resource(server, 'codebase://unit/NonExistent')
-      expect(contents.first[:text]).to include('not found')
+      expect do
+        read_resource(server, 'codebase://unit/NonExistent')
+      end.to raise_error(MCP::Server::ResourceNotFoundError)
     end
   end
 
@@ -1623,9 +1732,9 @@ RSpec.describe Woods::MCP::Server do
     end
 
     it 'returns empty array for unknown type' do
-      contents = read_resource(server, 'codebase://type/nonexistent')
-      data = JSON.parse(contents.first[:text])
-      expect(data).to eq([])
+      expect do
+        read_resource(server, 'codebase://type/nonexistent')
+      end.to raise_error(MCP::Server::ResourceNotFoundError)
     end
   end
 

@@ -1,4 +1,4 @@
-class CreateWoodsTables < ActiveRecord::Migration[7.0]
+class CreateWoodsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
     create_table :woods_units do |t|
       t.string :unit_type, null: false

@@ -119,6 +119,39 @@ RSpec.describe Woods::Evaluation::ReportGenerator do
 
       expect(data['metadata']['query_set']).to eq('test.json')
     end
+
+    it 'omits threshold_report when the evaluation had none (report-only, unchanged shape)' do
+      json = generator.generate(report)
+      data = JSON.parse(json)
+
+      expect(data).not_to have_key('threshold_report')
+    end
+
+    context 'with a threshold_report' do
+      let(:threshold_report) do
+        Woods::Evaluation::Evaluator::ThresholdReport.new(
+          thresholds: { mean_recall: 0.9 },
+          metrics: { mean_recall: { threshold: 0.9, actual: 0.75, delta: -0.15, passed: false } },
+          passed: false
+        )
+      end
+
+      let(:report) do
+        Woods::Evaluation::Evaluator::EvaluationReport.new(
+          results: query_results, aggregates: aggregates, threshold_report: threshold_report
+        )
+      end
+
+      it 'includes a serialized threshold_report section' do
+        json = generator.generate(report)
+        data = JSON.parse(json)
+
+        expect(data['threshold_report']['passed']).to be(false)
+        expect(data['threshold_report']['metrics']['mean_recall']).to include(
+          'threshold' => 0.9, 'actual' => 0.75, 'delta' => -0.15, 'passed' => false
+        )
+      end
+    end
   end
 
   describe '#save' do

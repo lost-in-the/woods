@@ -53,9 +53,7 @@ server = Woods::MCP::Server.build(
 )
 
 # Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
-if ENV['MCP_PROTOCOL_VERSION']
-  server.configuration = MCP::Configuration.new(protocol_version: ENV['MCP_PROTOCOL_VERSION'])
-end
+server.configuration.protocol_version = ENV['MCP_PROTOCOL_VERSION'] if ENV['MCP_PROTOCOL_VERSION']
 
 transport = MCP::Server::Transports::StdioTransport.new(server)
 transport.open

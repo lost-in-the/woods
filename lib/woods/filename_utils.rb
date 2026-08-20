@@ -30,12 +30,41 @@ module Woods
     # (the writer previously left the action raw while the reader allow-listed
     # it, so such flows were written under one name and never found).
     #
+    # A SHA256 digest (the same disambiguation {#collision_safe_filename}
+    # already uses) is appended whenever either segment's transform was
+    # lossy — e.g. `bar.baz` and `bar_baz` both {.safe_segment} to `bar_baz`,
+    # so writing them under one name means the second write clobbers the
+    # first and `flow_index.json` points both entries at that one file. The
+    # ordinary `::` → `__` namespace transform does NOT by itself count as
+    # lossy ({.lossy_segment?} looks past it) — it is the one substitution
+    # every identifier-to-filename convention in this file already makes, so
+    # a namespaced controller keeps its plain name.
+    #
     # @param controller_id [String] e.g. "Admin::UsersController"
     # @param action [String] e.g. "index"
     # @return [String] e.g. "Admin__UsersController_index.json"
     def self.flow_filename(controller_id, action)
-      "#{safe_segment(controller_id)}_#{safe_segment(action)}.json"
+      base = "#{safe_segment(controller_id)}_#{safe_segment(action)}"
+      return "#{base}.json" unless lossy_segment?(controller_id) || lossy_segment?(action)
+
+      digest = Digest::SHA256.hexdigest("#{controller_id}##{action}")[0, 8]
+      "#{base}_#{digest}.json"
     end
+
+    # Whether {.safe_segment} discarded information for +value+ beyond the
+    # `::` → `__` namespace transform — i.e. whether some OTHER character
+    # got folded to `_`. That residual loss is what makes two different
+    # inputs land on the same segment (`bar.baz` and `bar_baz` both become
+    # `bar_baz`); the namespace transform alone does not, since it is
+    # applied uniformly and every caller already expects it.
+    #
+    # @param value [String]
+    # @return [Boolean]
+    def self.lossy_segment?(value)
+      namespaced = value.to_s.gsub('::', '__')
+      namespaced.gsub(/[^a-zA-Z0-9_-]/, '_') != namespaced
+    end
+    private_class_method :lossy_segment?
 
     # Convert an identifier to a safe filename (legacy format).
     #

@@ -14,7 +14,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       'LineItem' => %w[id order_id product_id quantity price]
     }
   end
-  let(:validator)    { Woods::Console::ModelValidator.new(registry: registry) }
+  let(:table_names) { { 'Order' => 'orders', 'LineItem' => 'line_items' } }
+  let(:validator) { Woods::Console::ModelValidator.new(registry: registry, table_names: table_names) }
   let(:connection)   { double('Connection') }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: connection) }
 
@@ -113,6 +114,80 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(relation).to have_received(:having).with('SUM(amount) > ?', 100)
     end
 
+    it 'applies a non-empty Hash HAVING condition' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with({ 'status' => 'paid' })
+    end
+
+    it 'applies a Hash HAVING condition with a qualified column reference' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'orders.amount' => 100 }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with({ 'orders.amount' => 100 })
+    end
+
+    it 'rejects a Hash HAVING condition qualified to a real table but a nonexistent column' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'orders.not_a_real_column' => 100 }
+                                         }
+                                       })
+
+      expect(response['ok']).to be false
+      expect(response['error_type']).to eq('validation')
+      expect(response['error']).to match(/Unknown column 'not_a_real_column'/)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'rejects a Hash HAVING condition with an unsafe column reference' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'bad key' => 2 }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('Invalid arguments:', 'at `/having`', 'does not match pattern')
+      expect(relation).not_to have_received(:having)
+    end
+
+    it 'rejects a two-element array whose template is not executable' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['not executable', 2]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('Invalid arguments:', 'at `/having/0`', 'does not match pattern')
+      expect(relation).not_to have_received(:having)
+    end
+
     it 'rejects raw-string having clauses (SQL fragment injection vector)' do
       response = executor.send_request({
                                          'tool' => 'query',
@@ -126,6 +201,49 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
 
       expect(response['ok']).to be false
       expect(response['error_type']).to eq('validation')
+    end
+
+    it 'rejects arrays with more than one bind value' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', 100, 200]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('Invalid arguments:', 'array size at `/having` is greater than: 2')
+      expect(relation).not_to have_received(:having)
+    end
+
+    it 'rejects a Hash bind value with a typed validation error, not a generic execution failure' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', { 'sneaky' => 1 }]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(relation).not_to have_received(:having)
+    end
+
+    it 'rejects an Array bind value with a typed validation error, not a generic execution failure' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', [1, 2]]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(relation).not_to have_received(:having)
     end
   end
 
@@ -180,6 +298,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
 
     before do
       stub_const('LineItem', line_item_model)
+      allow(order_model).to receive(:reflect_on_association).with(:line_items).and_return(double('line_items'))
+      allow(order_model).to receive(:reflect_on_association).with(:user).and_return(double('user'))
     end
 
     it 'applies joins and where scope together' do
@@ -242,18 +362,20 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
     end
   end
 
-  describe 'limit is capped at MAX_QUERY_LIMIT' do
-    it 'caps limit at 10_000' do
-      executor.send_request({
-                              'tool' => 'query',
-                              'params' => {
-                                'model' => 'Order',
-                                'select' => ['id'],
-                                'limit' => 99_999
-                              }
-                            })
+  describe 'limit validation' do
+    it 'rejects a limit above 10_000 before querying' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['id'],
+                                           'limit' => 99_999
+                                         }
+                                       })
 
-      expect(relation).to have_received(:limit).with(10_000)
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('Invalid arguments:', 'number at `/limit` is greater than: 10000')
+      expect(relation).not_to have_received(:limit)
     end
   end
 

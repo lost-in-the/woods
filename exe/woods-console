@@ -27,6 +27,7 @@ unless protocol_out
   $stdout.reopen($stderr)
 end
 
+require 'woods'
 require 'woods/console/server'
 
 unless Woods.configuration.console_mcp_enabled

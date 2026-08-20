@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'json'
 require 'net/http'
+require 'openssl'
 require 'woods'
 require 'woods/storage/vector_store'
 require 'woods/storage/qdrant'
@@ -34,20 +35,72 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
   end
 
   describe '#ensure_collection!' do
-    it 'sends a PUT request to create the collection' do
-      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":true}')
+    it 'creates an absent collection with the configured dimensions' do
+      absent = instance_double(Net::HTTPNotFound, code: '404', body: '{"status":"not found"}')
+      created = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":true}')
+      allow(absent).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(absent).to receive(:[]).with('Retry-After').and_return(nil)
+      allow(created).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(absent, created)
+
+      store.ensure_collection!(dimensions: 384)
+
+      requests = []
+      expect(http).to have_received(:request).twice do |request|
+        requests << request
+      end
+      expect(requests.map(&:method)).to eq(%w[GET PUT])
+      expect(JSON.parse(requests.last.body)).to eq(
+        'vectors' => { 'size' => 384, 'distance' => 'Cosine' }
+      )
+    end
+
+    it 'keeps a compatible existing collection without recreating it' do
+      body = { result: { config: { params: { vectors: { size: 384, distance: 'Cosine' } } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       allow(http).to receive(:request).and_return(response)
 
       store.ensure_collection!(dimensions: 384)
 
-      expect(http).to have_received(:request) do |req|
-        expect(req).to be_a(Net::HTTP::Put)
-        expect(req.path).to eq('/collections/test_collection')
-        body = JSON.parse(req.body)
-        expect(body['vectors']['size']).to eq(384)
-        expect(body['vectors']['distance']).to eq('Cosine')
+      expect(http).to have_received(:request).once do |request|
+        expect(request).to be_a(Net::HTTP::Get)
       end
+    end
+
+    it 'rejects an existing collection with a different dimension' do
+      body = { result: { config: { params: { vectors: { size: 768, distance: 'Cosine' } } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      expect { store.ensure_collection!(dimensions: 384) }
+        .to raise_error(Woods::ConfigurationError, /dimension mismatch.*384.*768/i)
+    end
+
+    it 'rejects a distance mismatch before any write' do
+      body = { result: { config: { params: { vectors: { size: 384, distance: 'Cosine' } } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+      dot_store = described_class.new(url: 'http://localhost:6333', collection: 'test_collection',
+                                      dimensions: 384, distance: 'Dot', allow_private_hosts: true)
+      allow(dot_store).to receive(:http_client).and_return(http)
+
+      expect { dot_store.ensure_collection!(dimensions: 384) }
+        .to raise_error(Woods::ConfigurationError, /distance mismatch.*Dot.*Cosine/i)
+      expect(http).to have_received(:request).once
+    end
+
+    it 'rejects named vectors because this adapter sends unnamed vectors' do
+      vectors = { text: { size: 384, distance: 'Cosine' } }
+      response_body = { result: { config: { params: { vectors: vectors } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: response_body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      expect { store.ensure_collection!(dimensions: 384) }
+        .to raise_error(Woods::ConfigurationError, /named vectors.*not supported/i)
     end
   end
 
@@ -77,6 +130,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     it 'raises on API error' do
       response = instance_double(Net::HTTPInternalServerError, code: '500', body: 'Internal error')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(response).to receive(:[]).with('Retry-After').and_return(nil)
       allow(http).to receive(:request).and_return(response)
 
       expect { store.store('doc1', [0.1], {}) }.to raise_error(Woods::Error, /Qdrant API error/)
@@ -343,9 +397,20 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     it 'returns nil rather than raising when the collection is absent' do
       response = instance_double(Net::HTTPNotFound, code: '404', body: '{"status":"not found"}')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(response).to receive(:[]).with('Retry-After').and_return(nil)
       allow(http).to receive(:request).and_return(response)
 
       expect(store.stored_dimensions).to be_nil
+    end
+
+    it 'does not disguise an authentication failure as an absent collection' do
+      response = instance_double(Net::HTTPUnauthorized, code: '401', body: '{"status":"unauthorized"}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(response).to receive(:[]).with('Retry-After').and_return(nil)
+      allow(http).to receive(:request).and_return(response)
+
+      expect { store.stored_dimensions }
+        .to raise_error(Woods::Error, /Qdrant API error: 401/)
     end
 
     # Named vectors produce a different shape; this adapter never writes them,
@@ -398,11 +463,130 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(store.count).to eq(0)
     end
 
-    it 'propagates error when retry also fails' do
+    it 'wraps a second read timeout after one safe retry' do
+      allow(http).to receive(:request).and_raise(Net::ReadTimeout)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }
+        .to raise_error(described_class::RequestError) do |error|
+          expect(error).to be_retryable
+          expect(error).not_to be_ambiguous
+        end
+      expect(http).to have_received(:request).twice
+    end
+
+    it 'does not blindly retry an ambiguous upsert timeout' do
+      allow(http).to receive(:request).and_raise(Net::ReadTimeout)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.store('doc1', [0.1, 0.2, 0.3], {}) }
+        .to raise_error(described_class::RequestError) do |error|
+          expect(error).to be_retryable
+          expect(error).to be_ambiguous
+        end
+      expect(http).to have_received(:request).once
+    end
+
+    it 'wraps a write timeout as ambiguous without retrying the write' do
+      allow(http).to receive(:request).and_raise(Net::WriteTimeout)
+
+      expect { store.store('doc1', [0.1, 0.2, 0.3], {}) }
+        .to raise_error(described_class::RequestError) do |error|
+          expect(error).to be_retryable
+          expect(error).to be_ambiguous
+        end
+      expect(http).to have_received(:request).once
+    end
+
+    it 'retries a read after a write timeout with non-ambiguous classification' do
+      allow(http).to receive(:request).and_raise(Net::WriteTimeout)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }
+        .to raise_error(described_class::RequestError) do |error|
+          expect(error).to be_retryable
+          expect(error).not_to be_ambiguous
+        end
+      expect(http).to have_received(:request).twice
+    end
+
+    [Errno::ECONNREFUSED, SocketError].each do |error_class|
+      it "wraps #{error_class} as retryable and non-ambiguous" do
+        allow(http).to receive(:request).and_raise(error_class, 'unavailable')
+        allow(http).to receive(:started?).and_return(true, false, true)
+
+        expect { store.store('doc1', [0.1, 0.2, 0.3], {}) }
+          .to raise_error(described_class::RequestError) do |error|
+            expect(error).to be_retryable
+            expect(error).not_to be_ambiguous
+          end
+        expect(http).to have_received(:request).twice
+      end
+    end
+
+    it 'does not retry an unknown non-idempotent POST after an ambiguous timeout' do
+      allow(http).to receive(:request).and_raise(Net::ReadTimeout)
+
+      expect { store.send(:request, :post, '/collections/test_collection/custom-write', {}) }
+        .to raise_error(described_class::RequestError) { |error| expect(error).to be_ambiguous }
+      expect(http).to have_received(:request).once
+    end
+
+    it 'wraps the error when retry also fails' do
       allow(http).to receive(:request).and_raise(Errno::ECONNRESET)
       allow(http).to receive(:started?).and_return(true, false, true)
 
-      expect { store.count }.to raise_error(Errno::ECONNRESET)
+      expect { store.count }.to raise_error(described_class::RequestError, /connection reset/i)
+    end
+  end
+
+  describe 'HTTP failure classification' do
+    { 401 => Net::HTTPUnauthorized, 403 => Net::HTTPForbidden }.each do |status, response_class|
+      it "reports #{status} as a non-retryable configuration failure" do
+        response = instance_double(response_class, code: status.to_s, body: '{"status":"denied"}')
+        allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+        allow(response).to receive(:[]).with('Retry-After').and_return(nil)
+        allow(http).to receive(:request).and_return(response)
+
+        expect { store.count }
+          .to raise_error(described_class::RequestError) do |error|
+            expect(error.http_status).to eq(status)
+            expect(error).not_to be_retryable
+          end
+      end
+    end
+
+    { 429 => Net::HTTPTooManyRequests, 503 => Net::HTTPServiceUnavailable }.each do |status, response_class|
+      it "reports #{status} as retryable and preserves Retry-After" do
+        response = instance_double(response_class, code: status.to_s, body: '{"status":"busy"}')
+        allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+        allow(response).to receive(:[]).with('Retry-After').and_return('2')
+        allow(http).to receive(:request).and_return(response)
+
+        expect { store.count }
+          .to raise_error(described_class::RequestError) do |error|
+            expect(error.http_status).to eq(status)
+            expect(error.retry_after).to eq('2')
+            expect(error).to be_retryable
+          end
+      end
+    end
+
+    it 'wraps TLS failures without retrying them blindly' do
+      allow(http).to receive(:request).and_raise(OpenSSL::SSL::SSLError, 'certificate verify failed')
+
+      expect { store.count }
+        .to raise_error(described_class::RequestError, /TLS.*certificate verify failed/i)
+      expect(http).to have_received(:request).once
+    end
+
+    it 'wraps malformed JSON success responses with endpoint context' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: 'not-json{{')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      expect { store.count }
+        .to raise_error(described_class::RequestError, %r{malformed JSON.*points/count}i)
     end
   end
 

@@ -445,6 +445,36 @@ RSpec.describe Woods::FlowPrecomputer do
     end
   end
 
+  # ── Collision-safe filenames (verified P1) ─────────────────────────
+  #
+  # FooController actions "bar.baz" and "bar_baz" both safe_segment to
+  # "bar_baz" — the last writer used to win and flow_index.json pointed both
+  # entries at one file.
+
+  describe 'collision-safe flow filenames' do
+    it 'keeps two actions that sanitize to the same segment separately addressable' do
+      controller = make_unit(
+        type: :controller,
+        identifier: 'FooController',
+        file_path: 'app/controllers/foo_controller.rb',
+        metadata: { actions: ['bar.baz', 'bar_baz'] },
+        source_code: "class FooController < ApplicationController\nend"
+      )
+      write_unit_json(controller)
+      graph.register(controller)
+
+      precomputer = described_class.new(units: [controller], graph: graph, output_dir: output_dir)
+      result = precomputer.precompute
+
+      expect(result.keys).to contain_exactly('FooController#bar.baz', 'FooController#bar_baz')
+      expect(result.values.uniq.size).to eq(2)
+      result.each_value { |path| expect(File.exist?(File.join(output_dir, path))).to eq(true) }
+
+      index = JSON.parse(File.read(File.join(output_dir, 'flows', 'flow_index.json')))
+      expect(index['FooController#bar.baz']).not_to eq(index['FooController#bar_baz'])
+    end
+  end
+
   # ── Deterministic output ───────────────────────────────────────────
 
   describe 'deterministic JSON output (J-1)' do

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'fileutils'
 require 'time'
 
 module Woods
@@ -18,7 +19,7 @@ module Woods
     # its methods. The {SQLite} adapter is provided for local persistence.
     #
     # @example Using the SQLite adapter
-    #   store = Woods::Storage::MetadataStore::SQLite.new(":memory:")
+    #   store = Woods::Storage::MetadataStore::SQLite.new(database: ":memory:")
     #   store.store("User", { type: "model", file_path: "app/models/user.rb" })
     #   store.find("User")
     #
@@ -300,15 +301,15 @@ module Woods
       # for efficient filtering. Uses upsert semantics for store operations.
       #
       # @example
-      #   store = SQLite.new(":memory:")
+      #   store = SQLite.new(database: ":memory:")
       #   store.store("User", { type: "model", namespace: "Admin" })
       #   store.find("User")  # => { "type" => "model", "namespace" => "Admin" }
       #
       class SQLite
         include Interface
 
-        # @param db_path [String] Path to the SQLite database file, or ":memory:" for in-memory
-        def initialize(db_path = ':memory:')
+        # @param database [String, Pathname] Database file, or ":memory:" for an explicit in-memory store
+        def initialize(database:)
           begin
             require 'sqlite3'
           rescue LoadError
@@ -317,7 +318,9 @@ module Woods
                   "Add `gem 'sqlite3'` and re-bundle, or set " \
                   "`config.metadata_store = :in_memory` if you don't need cross-process persistence."
           end
-          @db = ::SQLite3::Database.new(db_path)
+          database = database.to_s
+          FileUtils.mkdir_p(File.dirname(File.expand_path(database))) unless database == ':memory:'
+          @db = ::SQLite3::Database.new(database)
           @db.results_as_hash = true
           create_table
         end

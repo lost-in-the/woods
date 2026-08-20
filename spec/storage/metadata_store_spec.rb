@@ -131,7 +131,18 @@ RSpec.describe Woods::Storage::MetadataStore do
   end
 
   describe Woods::Storage::MetadataStore::SQLite do
-    let(:store) { described_class.new(':memory:') }
+    let(:store) { described_class.new(database: ':memory:') }
+
+    describe 'database path configuration' do
+      it 'accepts only the database keyword' do
+        Dir.mktmpdir('woods-metadata-contract') do |dir|
+          database = File.join(dir, 'metadata.sqlite3')
+
+          expect { described_class.new(database: database) }.not_to raise_error
+          expect { described_class.new(database) }.to raise_error(ArgumentError)
+        end
+      end
+    end
 
     describe '#store and #count' do
       it 'stores metadata and tracks count' do
@@ -286,7 +297,7 @@ RSpec.describe Woods::Storage::MetadataStore do
         allow_any_instance_of(Woods::Storage::MetadataStore::SQLite)
           .to receive(:require).with('sqlite3').and_raise(LoadError)
 
-        expect { described_class.new(':memory:') }
+        expect { described_class.new(database: ':memory:') }
           .to raise_error(Woods::ConfigurationError, /sqlite3 gem.+Gemfile.+:in_memory/m)
       ensure
         Kernel.send(:define_method, :require, original_method) if original_method

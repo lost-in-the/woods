@@ -87,12 +87,13 @@ end
 
 ```ruby
 Woods.configure do |config|
-  config.vector_store            = :pgvector
-  config.vector_store_connection = ENV['DATABASE_URL']
-  config.metadata_store          = :sqlite
-  config.embedding_provider      = :openai
-  config.embedding_options       = { api_key: ENV['OPENAI_API_KEY'] }
-  config.embedding_model         = 'text-embedding-3-small'
+  config.vector_store         = :pgvector
+  # pgvector takes a live PostgreSQL connection object, not a URL.
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+  config.metadata_store       = :sqlite
+  config.embedding_provider   = :openai
+  config.embedding_options    = { api_key: ENV['OPENAI_API_KEY'] }
+  config.embedding_model      = 'text-embedding-3-small'
 end
 ```
 

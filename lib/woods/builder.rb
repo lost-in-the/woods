@@ -115,7 +115,7 @@ module Woods
       provider = wrap_with_embedding_cache(provider, cache) if cache
 
       retriever = Retriever.new(
-        vector_store: vector_store || build_vector_store,
+        vector_store: vector_store || build_vector_store(dimensions: vector_dimensions(provider)),
         metadata_store: metadata_store || build_metadata_store,
         graph_store: graph_store || build_graph_store,
         embedding_provider: provider
@@ -132,14 +132,19 @@ module Woods
     # @return [Storage::VectorStore::Interface] Vector store adapter instance
     # @raise [ArgumentError] if the configured type is not recognized
     # @raise [Woods::Error] if the pgvector schema cannot be created
-    def build_vector_store
+    def build_vector_store(dimensions: nil)
       case @config.vector_store
       when :in_memory then Storage::VectorStore::InMemory.new
-      when :pgvector then build_pgvector_store
-      when :qdrant then Storage::VectorStore::Qdrant.new(**(@config.vector_store_options || {}))
+      when :pgvector then build_pgvector_store(dimensions)
+      when :qdrant then build_qdrant_store(dimensions)
       else raise ArgumentError, "Unknown vector_store: #{@config.vector_store}"
       end
     end
+
+    def vector_dimensions(provider)
+      provider.dimensions if %i[pgvector qdrant].include?(@config.vector_store)
+    end
+    private :vector_dimensions
 
     # Instantiate the embedding provider specified by the configuration.
     #
@@ -163,11 +168,11 @@ module Woods
       configured = @config.embedding_provider
       return configured if provider_object?(configured)
 
-      opts = provider_kwargs
+      opts = provider_kwargs(configured)
       case configured
       when :openai then Embedding::Provider::OpenAI.new(**opts)
       when :ollama then Embedding::Provider::Ollama.new(**opts)
-      when :fake then build_fake_provider
+      when :fake then build_fake_provider(opts)
       else
         raise ArgumentError,
               "Unknown embedding_provider: #{configured}. Valid: :openai, :ollama, :fake, " \
@@ -204,18 +209,73 @@ module Woods
       )
     end
 
-    # Kwargs accepted by embedding provider constructors — everything in
-    # `embedding_options` except metadata fields that live there for
-    # ResolvedConfig bookkeeping.
-    SNAPSHOT_ONLY_KEYS = %i[dimension].freeze
-    private_constant :SNAPSHOT_ONLY_KEYS
+    PROVIDER_OPTION_KEYS = {
+      openai: %i[api_key model dimension dimensions],
+      ollama: %i[model host num_ctx read_timeout dimension dimensions],
+      fake: %i[model dims dimension dimensions]
+    }.freeze
+    private_constant :PROVIDER_OPTION_KEYS
 
-    def provider_kwargs
+    def provider_kwargs(configured)
       opts = (@config.embedding_options || {}).transform_keys(&:to_sym)
-      SNAPSHOT_ONLY_KEYS.each { |k| opts.delete(k) }
+      validate_provider_options!(configured, opts)
+      apply_embedding_model!(opts)
+      normalize_dimension_option!(configured, opts)
+      validate_required_provider_options!(configured, opts)
       opts
     end
     private :provider_kwargs
+
+    def validate_provider_options!(configured, opts)
+      allowed = PROVIDER_OPTION_KEYS[configured]
+      return unless allowed
+
+      unknown = opts.keys - allowed
+      return if unknown.empty?
+
+      provider_name = configured.to_s.capitalize
+      noun = unknown.one? ? 'option' : 'options'
+      raise ConfigurationError,
+            "Unknown #{provider_name} embedding #{noun}: #{unknown.join(', ')}. " \
+            "Valid options: #{allowed.join(', ')}"
+    end
+    private :validate_provider_options!
+
+    def validate_required_provider_options!(configured, opts)
+      return unless configured == :openai
+      return unless opts[:api_key].nil? || opts[:api_key].to_s.empty?
+
+      raise ConfigurationError,
+            'OpenAI requires embedding_options[:api_key]. Set it explicitly, typically from OPENAI_API_KEY.'
+    end
+    private :validate_required_provider_options!
+
+    def apply_embedding_model!(opts)
+      return if opts.key?(:model)
+      return unless @config.respond_to?(:embedding_model_explicit?) && @config.embedding_model_explicit?
+
+      opts[:model] = @config.embedding_model
+    end
+    private :apply_embedding_model!
+
+    def normalize_dimension_option!(configured, opts)
+      legacy_dimension = opts.delete(:dimension)
+      dimensions = opts.delete(:dimensions)
+      if conflicting_dimensions?(legacy_dimension, dimensions)
+        raise ConfigurationError, 'embedding_options dimension and dimensions must match when both are provided'
+      end
+
+      dimension = dimensions || legacy_dimension
+      return unless dimension
+
+      opts[configured == :fake ? :dims : :dimensions] ||= dimension
+    end
+    private :normalize_dimension_option!
+
+    def conflicting_dimensions?(legacy_dimension, dimensions)
+      !legacy_dimension.nil? && !dimensions.nil? && legacy_dimension != dimensions
+    end
+    private :conflicting_dimensions?
 
     # True when the configured `embedding_provider` is not a Symbol naming a
     # built-in adapter but an already-constructed provider object (#178).
@@ -242,10 +302,7 @@ module Woods
     # vectors of the recorded dimension.
     #
     # @return [Embedding::Provider::Fake]
-    def build_fake_provider
-      opts = provider_kwargs
-      declared = (@config.embedding_options || {}).transform_keys(&:to_sym)[:dimension]
-      opts[:dims] ||= declared if declared
+    def build_fake_provider(opts)
       Embedding::Provider::Fake.new(**opts)
     end
     private :build_fake_provider
@@ -388,10 +445,17 @@ module Woods
     def build_metadata_store
       case @config.metadata_store
       when :in_memory then Storage::MetadataStore::InMemory.new
-      when :sqlite then Storage::MetadataStore::SQLite.new(**(@config.metadata_store_options || {}))
+      when :sqlite then Storage::MetadataStore::SQLite.new(**sqlite_metadata_options)
       else raise ArgumentError, "Unknown metadata_store: #{@config.metadata_store}"
       end
     end
+
+    def sqlite_metadata_options
+      opts = (@config.metadata_store_options || {}).transform_keys(&:to_sym)
+      opts[:database] ||= File.join(@config.output_dir.to_s, 'metadata.sqlite3')
+      opts
+    end
+    private :sqlite_metadata_options
 
     # Instantiate the graph store adapter specified by the configuration.
     #
@@ -419,10 +483,16 @@ module Woods
     #
     # @return [Storage::VectorStore::Pgvector]
     # @raise [Woods::Error] when the schema cannot be created
-    def build_pgvector_store
-      store = Storage::VectorStore::Pgvector.new(**(@config.vector_store_options || {}))
+    def build_pgvector_store(provider_dimensions)
+      opts = (@config.vector_store_options || {}).transform_keys(&:to_sym)
+      validate_required_store_options!(:pgvector, opts, :connection)
+      opts[:dimensions] = resolve_pgvector_dimensions(provider_dimensions, opts[:dimensions])
+      store = Storage::VectorStore::Pgvector.new(**opts)
       begin
         store.ensure_schema!
+        verify_pgvector_dimensions!(store, opts[:dimensions])
+      rescue ConfigurationError
+        raise
       rescue StandardError => e
         raise Woods::Error,
               "pgvector schema setup failed (#{e.class}: #{e.message}). " \
@@ -431,6 +501,59 @@ module Woods
               '(`rails generate woods:pgvector && rails db:migrate` sets it up via migration).'
       end
       store
+    end
+
+    def verify_pgvector_dimensions!(store, expected)
+      actual = store.stored_dimensions
+      return if actual.nil? || actual == expected
+
+      raise ConfigurationError,
+            "Stored pgvector dimensions #{actual} do not match embedding provider dimensions #{expected}. " \
+            'Use a compatible table or rebuild the index.'
+    end
+
+    def resolve_pgvector_dimensions(provider_dimensions, configured_dimensions)
+      if provider_dimensions && configured_dimensions && provider_dimensions != configured_dimensions
+        raise ConfigurationError,
+              "pgvector dimensions #{configured_dimensions} do not match embedding provider dimensions " \
+              "#{provider_dimensions}"
+      end
+
+      provider_dimensions || configured_dimensions || raise(
+        ConfigurationError,
+        'pgvector requires vector_store_options[:dimensions] when built without an embedding provider'
+      )
+    end
+
+    def build_qdrant_store(provider_dimensions)
+      opts = (@config.vector_store_options || {}).transform_keys(&:to_sym)
+      validate_required_store_options!(:qdrant, opts, :url, :collection)
+      dimensions = resolve_qdrant_dimensions(provider_dimensions, opts[:dimensions])
+      opts[:dimensions] = dimensions
+      store = Storage::VectorStore::Qdrant.new(**opts)
+      store.ensure_collection!(dimensions: dimensions)
+      store
+    end
+
+    def validate_required_store_options!(adapter, opts, *keys)
+      missing = keys.select { |key| opts[key].nil? || opts[key].to_s.empty? }
+      return if missing.empty?
+
+      requirements = missing.map { |key| "vector_store_options[:#{key}]" }.join(' and ')
+      raise ConfigurationError, "#{adapter} requires #{requirements}"
+    end
+
+    def resolve_qdrant_dimensions(provider_dimensions, configured_dimensions)
+      if provider_dimensions && configured_dimensions && provider_dimensions != configured_dimensions
+        raise ConfigurationError,
+              "Qdrant dimensions #{configured_dimensions} do not match embedding provider dimensions " \
+              "#{provider_dimensions}"
+      end
+
+      provider_dimensions || configured_dimensions || raise(
+        ConfigurationError,
+        'Qdrant requires vector_store_options[:dimensions] when built without an embedding provider'
+      )
     end
 
     # Build a cache store from configuration, or nil if caching is disabled.

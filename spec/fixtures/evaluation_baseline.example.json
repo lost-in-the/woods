@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "query_set": "config/eval_queries.json",
+  "captured_at": null,
+  "thresholds": {
+    "mean_precision_at5": 0.0,
+    "mean_recall": 0.0,
+    "mean_mrr": 0.0
+  },
+  "notes": "Format example only, NOT a captured v2 corpus baseline. Thresholds are 0.0 placeholders (a report-only floor that never fails). Capturing the real v2 corpus baseline is future work: run woods:evaluate against the pinned v2 corpus, record the resulting aggregates as thresholds here, and set captured_at."
+}

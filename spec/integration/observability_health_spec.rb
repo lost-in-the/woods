@@ -15,7 +15,7 @@ RSpec.describe 'Observability + Health Integration', :integration do
 
   describe 'HealthCheck' do
     let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
-    let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+    let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
 
     let(:embedding_provider) do
       Class.new do
@@ -209,7 +209,7 @@ RSpec.describe 'Observability + Health Integration', :integration do
       logger = Woods::Observability::StructuredLogger.new(output: output)
 
       vector_store = Woods::Storage::VectorStore::InMemory.new
-      metadata_store = Woods::Storage::MetadataStore::SQLite.new(':memory:')
+      metadata_store = Woods::Storage::MetadataStore::SQLite.new(database: ':memory:')
 
       check = Woods::Observability::HealthCheck.new(
         vector_store: vector_store,

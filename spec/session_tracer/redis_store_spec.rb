@@ -2,11 +2,15 @@
 
 require 'spec_helper'
 require 'json'
+require 'open3'
+require 'rbconfig'
 require 'woods/session_tracer/redis_store'
 
 # Minimal in-memory Redis mock for unit testing.
 # Implements only the subset of Redis commands used by RedisStore.
 class MockRedis
+  attr_reader :data
+
   def initialize
     @data = {}
   end
@@ -22,6 +26,16 @@ class MockRedis
     stop = list.size - 1 if stop == -1
     list[start..stop] || []
   end
+
+  # rubocop:disable Naming/PredicateMethod
+  def ltrim(key, start, stop)
+    list = @data[key] || []
+    start = [list.size + start, 0].max if start.negative?
+    stop = list.size + stop if stop.negative?
+    @data[key] = list[start..stop] || []
+    true
+  end
+  # rubocop:enable Naming/PredicateMethod
 
   # rubocop:disable Naming/PredicateMethod
   def expire(_key, _seconds)
@@ -98,6 +112,14 @@ RSpec.describe Woods::SessionTracer::RedisStore do
     it 'returns empty array for unknown session' do
       expect(store.read('nonexistent')).to eq([])
     end
+
+    it 'keeps formerly colliding session IDs isolated' do
+      store.record('account/a', request_data.merge('action' => 'slash'))
+      store.record('account?a', request_data.merge('action' => 'question'))
+
+      expect(store.read('account/a').first['action']).to eq('slash')
+      expect(store.read('account?a').first['action']).to eq('question')
+    end
   end
 
   describe '#sessions' do
@@ -168,9 +190,53 @@ RSpec.describe Woods::SessionTracer::RedisStore do
   end
 
   describe 'TTL support' do
-    it 'accepts ttl parameter' do
+    it 'applies the TTL to the session list' do
+      allow(redis).to receive(:expire).and_call_original
       store_with_ttl = described_class.new(redis: redis, ttl: 3600)
-      expect { store_with_ttl.record('sess1', request_data) }.not_to raise_error
+      store_with_ttl.record('sess1', request_data)
+
+      expect(redis).to have_received(:expire).with(kind_of(String), 3600)
+    end
+  end
+
+  describe 'retention bounds' do
+    it 'trims each session to the newest requests' do
+      bounded = described_class.new(redis: redis, max_requests_per_session: 2)
+      3.times { |i| bounded.record('sess1', request_data.merge('action' => "action_#{i}")) }
+
+      expect(bounded.read('sess1').map { |entry| entry['action'] }).to eq(%w[action_1 action_2])
+    end
+
+    it 'bounds the active session index' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      3.times { |i| bounded.record("sess#{i}", request_data) }
+
+      expect(bounded.sessions(limit: 10).size).to eq(2)
+    end
+  end
+
+  describe 'dependency and serializer failures' do
+    it 'raises an actionable error when the redis gem is absent' do
+      script = <<~RUBY
+        require 'woods'
+        require 'woods/session_tracer/redis_store'
+        Woods::SessionTracer::RedisStore.new(redis: Object.new)
+      RUBY
+      _stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script
+      )
+
+      expect(status).not_to be_success
+      expect(stderr).to include('redis gem is required')
+    end
+
+    it 'does not push a partial request when serialization fails' do
+      cyclic = {}
+      cyclic['self'] = cyclic
+      allow(redis).to receive(:rpush).and_call_original
+
+      expect { store.record('sess1', cyclic) }.to raise_error(JSON::NestingError)
+      expect(redis).not_to have_received(:rpush)
     end
   end
 end

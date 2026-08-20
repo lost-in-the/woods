@@ -273,6 +273,34 @@ RSpec.describe Woods::SessionTracer::SessionFlowAssembler do
         truncated = doc.context_pool.values.select { |u| u[:source_code]&.start_with?('# source truncated') }
         expect(truncated).to be_empty
       end
+
+      it 'measures the budget against the rendered document' do
+        record_request('sess1', controller: 'OrdersController', action: 'index', path: '/orders')
+
+        doc = assembler.assemble('sess1', budget: 100_000, depth: 1)
+
+        expect(doc.token_count).to eq(Woods::TokenUtils.estimate_tokens(doc.to_context))
+      end
+
+      it 'flags a document whose fully-truncated rendering still exceeds the budget' do
+        record_request('sess1', controller: 'OrdersController', action: 'index', path: '/orders')
+
+        over = assembler.assemble('sess1', budget: 10, depth: 1)
+        under = assembler.assemble('sess1', budget: 100_000, depth: 1)
+
+        expect(over.budget_exceeded?).to be(true)
+        expect(over.token_count).to be > 10
+        expect(under.budget_exceeded?).to be(false)
+      end
+
+      it 'round-trips the budget_exceeded flag through to_h and from_h' do
+        record_request('sess1', controller: 'OrdersController', action: 'index', path: '/orders')
+
+        doc = assembler.assemble('sess1', budget: 10, depth: 1)
+        reloaded = Woods::SessionTracer::SessionFlowDocument.from_h(doc.to_h)
+
+        expect(reloaded.budget_exceeded?).to be(true)
+      end
     end
 
     describe 'output formats' do

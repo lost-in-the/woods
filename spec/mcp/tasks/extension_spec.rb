@@ -20,7 +20,9 @@ RSpec.describe Woods::MCP::Tasks::Extension do
     end
 
     it 'is true when the client declares the tasks extension' do
-      params = meta_with({ 'extensions' => { described_class::EXTENSION_ID => {} } })
+      params = meta_with({ 'extensions' => { described_class::EXTENSION_ID => {} } }).tap do |value|
+        value[:_meta]['io.modelcontextprotocol/protocolVersion'] = '2026-07-28'
+      end
       expect(described_class.client_opted_in?(params)).to be true
     end
 
@@ -28,8 +30,24 @@ RSpec.describe Woods::MCP::Tasks::Extension do
     # symbol keys even though the spec writes them as strings.
     it 'is true for symbolized keys as the transport actually delivers them' do
       capabilities = { extensions: { described_class::EXTENSION_ID.to_sym => {} } }
-      params = { _meta: { described_class::CLIENT_CAPABILITIES_KEY.to_sym => capabilities } }
+      params = {
+        _meta: {
+          described_class::PROTOCOL_VERSION_KEY.to_sym => '2026-07-28',
+          described_class::CLIENT_CAPABILITIES_KEY.to_sym => capabilities
+        }
+      }
       expect(described_class.client_opted_in?(params)).to be true
+    end
+
+    it 'is false when an opted-in request does not carry the modern protocol version' do
+      params = meta_with({ 'extensions' => { described_class::EXTENSION_ID => {} } })
+      expect(described_class.client_opted_in?(params)).to be false
+    end
+
+    it 'is false when a legacy protocol request names the extension' do
+      params = meta_with({ 'extensions' => { described_class::EXTENSION_ID => {} } })
+      params[:_meta]['io.modelcontextprotocol/protocolVersion'] = '2025-11-25'
+      expect(described_class.client_opted_in?(params)).to be false
     end
 
     # "Never return a task to a client that did not declare support." Everything
@@ -137,18 +155,24 @@ RSpec.describe Woods::MCP::Tasks::Extension do
       expect(error['data']).to match(/Unknown or expired/)
     end
 
-    it 'acknowledges tasks/cancel' do
+    it 'reports a corrupt task record with stable protocol metadata' do
       task = store.create!(tool: 'pipeline_extract')
-      call('tasks/cancel', task_params(taskId: task.id))
-      expect(store.get(task.id).status).to eq('cancelled')
+      path = File.join(@index_dir, Woods::MCP::Tasks::Store::DIRNAME, "#{task.id}.json")
+      File.write(path, '{not-json')
+
+      error = call('tasks/get', task_params(taskId: task.id)).fetch('error')
+
+      expect(error['code']).to eq(-32_603)
+      expect(error['data']).to eq('error_code' => 'corrupt_task_record', 'taskId' => task.id)
     end
 
-    # Cancellation is cooperative and idempotent: cancelling something already
-    # finished is not an error, it just does not change the outcome.
-    it 'does not error when cancelling an already-completed task' do
+    it 'returns a stable unsupported-method response for tasks/cancel' do
       task = store.create!(tool: 'pipeline_extract')
-      store.complete!(task.id, result: {})
-      expect(call('tasks/cancel', task_params(taskId: task.id))['error']).to be_nil
+      error = call('tasks/cancel', task_params(taskId: task.id)).fetch('error')
+
+      expect(error).to include('code' => -32_601, 'message' => 'Method not found')
+      expect(error['data']).to eq('Task cancellation is not supported by Woods.')
+      expect(store.get(task.id).status).to eq('working')
     end
 
     # Woods has no task that pauses for input, so `input_required` never occurs
@@ -157,6 +181,24 @@ RSpec.describe Woods::MCP::Tasks::Extension do
     it 'answers tasks/update' do
       task = store.create!(tool: 'pipeline_extract')
       expect(call('tasks/update', task_params(taskId: task.id, inputResponses: {}))['error']).to be_nil
+    end
+
+    it 'rejects tasks/update for an unknown task' do
+      error = call(
+        'tasks/update', task_params(taskId: 'a' * 32, inputResponses: {})
+      ).fetch('error')
+
+      expect(error['code']).to eq(-32_602)
+      expect(error['data']).to match(/Unknown or expired/)
+    end
+
+    it 'rejects task methods for a legacy request even when it names the extension' do
+      task = store.create!(tool: 'pipeline_extract')
+      params = task_params(taskId: task.id)
+      params[:_meta]['io.modelcontextprotocol/protocolVersion'] = '2025-11-25'
+
+      expect(call('tasks/get', params).dig('error', 'code'))
+        .to eq(MCP::ErrorCodes::UNSUPPORTED_PROTOCOL_VERSION)
     end
 
     it 'advertises the extension in server capabilities' do

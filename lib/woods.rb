@@ -120,7 +120,7 @@ module Woods
   # ════════════════════════════════════════════════════════════════════════
 
   class Configuration # rubocop:disable Metrics/ClassLength
-    attr_accessor :embedding_model, :include_framework_sources, :gem_configs,
+    attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
@@ -138,12 +138,13 @@ module Woods
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
                   :dump_retention_count
-    attr_reader :max_context_tokens, :similarity_threshold, :extractors, :pretty_json, :context_format,
-                :cache_enabled
+    attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
+                :context_format, :cache_enabled
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
       @embedding_model = 'text-embedding-3-small'
+      @embedding_model_explicit = false
       @max_context_tokens = 8000
       @similarity_threshold = 0.7
       @include_framework_sources = true
@@ -197,6 +198,15 @@ module Woods
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @dump_retention_count = 3
+    end
+
+    def embedding_model=(value)
+      @embedding_model = value
+      @embedding_model_explicit = true
+    end
+
+    def embedding_model_explicit?
+      @embedding_model_explicit
     end
 
     # @return [Pathname, String] Output directory, defaulting to Rails.root/tmp/woods

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'sqlite3'
+require 'timeout'
 require 'woods/db/migrator'
 require 'woods/temporal/snapshot_store'
 
@@ -130,14 +131,149 @@ RSpec.describe Woods::Temporal::SnapshotStore do
       expect(result[:units_deleted]).to eq(0)
     end
 
-    it 'wraps unit hash inserts in a transaction' do
-      # Verify that insert_unit_hashes calls @db.transaction
-      # by checking that a rollback reverts all inserts atomically.
+    it 'uses one transaction for the complete capture' do
       allow(db).to receive(:transaction).and_call_original
 
       store.capture(manifest_v1, units_v1)
 
-      expect(db).to have_received(:transaction).at_least(:once)
+      expect(db).to have_received(:transaction).with(:immediate).once
+    end
+
+    it 'rolls back the snapshot row, units, pruning, and diff state together' do
+      original = store.capture(manifest_v1, units_v1)
+      allow(db).to receive(:execute).and_call_original
+      allow(db).to receive(:execute)
+        .with(/UPDATE woods_snapshots SET units_added/, anything)
+        .and_raise(SQLite3::SQLException, 'forced diff failure')
+
+      expect { store.capture(manifest_v1, units_v2) }
+        .to raise_error(SQLite3::SQLException, 'forced diff failure')
+
+      snapshot = store.find(manifest_v1.fetch('git_sha'))
+      rows = db.execute(
+        'SELECT identifier, source_hash FROM woods_snapshot_units WHERE snapshot_id = ?',
+        [original.fetch(:id)]
+      )
+      expect(snapshot[:total_units]).to eq(manifest_v1.fetch('total_units'))
+      expect(rows.to_h { |row| [row['identifier'], row['source_hash']] }).to eq(
+        'User' => 'h1',
+        'Post' => 'h2',
+        'AuthService' => 'h3'
+      )
+    end
+
+    it 'keeps concurrent captures complete across separate SQLite connections' do
+      Dir.mktmpdir('woods-temporal-concurrency') do |dir|
+        database = File.join(dir, 'temporal.sqlite3')
+        setup = SQLite3::Database.new(database)
+        Woods::Db::Migrator.new(connection: setup).migrate!
+        setup.close
+
+        connections = 2.times.map do
+          SQLite3::Database.new(database).tap { |connection| connection.results_as_hash = true }
+        end
+        stores = connections.map { |connection| described_class.new(connection: connection) }
+        ready = Queue.new
+        start = Queue.new
+        errors = Queue.new
+        captures = [[stores[0], manifest_v1, units_v1], [stores[1], manifest_v2, units_v2]]
+        threads = captures.map do |capture_store, manifest, units|
+          Thread.new do
+            ready << true
+            start.pop
+            capture_store.capture(manifest, units)
+          rescue StandardError => e
+            errors << e
+          end
+        end
+        2.times { ready.pop }
+        2.times { start << true }
+        threads.each(&:join)
+
+        expect(errors.size).to eq(0), errors.size.times.map { errors.pop.full_message }.join("\n")
+        verifier = connections.first
+        expect(verifier.get_first_value('SELECT COUNT(*) FROM woods_snapshots')).to eq(2)
+        expect(verifier.get_first_value('SELECT COUNT(*) FROM woods_snapshot_units')).to eq(6)
+      ensure
+        connections&.each(&:close)
+      end
+    end
+
+    it 'serializes a second connection before it can read the previous snapshot' do
+      Dir.mktmpdir('woods-temporal-barrier') do |dir|
+        database = File.join(dir, 'temporal.sqlite3')
+        setup = SQLite3::Database.new(database)
+        Woods::Db::Migrator.new(connection: setup).migrate!
+        setup.close
+        first_read, first_ready = IO.pipe
+        release_read, release_first = IO.pipe
+        second_event_read, second_event = IO.pipe
+        first = fork do
+          connection = SQLite3::Database.new(database)
+          connection.results_as_hash = true
+          child_store = described_class.new(connection: connection)
+          original_find = child_store.method(:find_latest)
+          child_store.define_singleton_method(:find_latest) do
+            result = original_find.call
+            first_ready.write('1')
+            release_read.read(1)
+            result
+          end
+          child_store.capture(manifest_v1, units_v1)
+          exit! 0
+        rescue StandardError => e
+          warn e.full_message
+          exit! 1
+        end
+        first_read.read(1)
+        second = fork do
+          connection = SQLite3::Database.new(database)
+          connection.results_as_hash = true
+          child_store = described_class.new(connection: connection)
+          contended = false
+          connection.busy_handler do |_attempt|
+            unless contended
+              second_event.write('C')
+              contended = true
+            end
+            true
+          end
+          original_find = child_store.method(:find_latest)
+          child_store.define_singleton_method(:find_latest) do
+            second_event.write('R')
+            original_find.call
+          end
+          child_store.capture(manifest_v2, units_v2)
+          exit! 0
+        rescue StandardError => e
+          warn e.full_message
+          exit! 1
+        end
+        expect(second_event_read.read(1)).to eq('C')
+        release_first.write('1')
+
+        statuses = Timeout.timeout(5) { [first, second].map { |pid| Process.wait2(pid).last } }
+        expect(statuses).to all(be_success)
+        expect(second_event_read.read(1)).to eq('R')
+        verifier = SQLite3::Database.new(database)
+        verifier.results_as_hash = true
+        verified = described_class.new(connection: verifier).find(manifest_v2.fetch('git_sha'))
+        expect(verified.values_at(:units_added, :units_modified, :units_deleted)).to eq([1, 1, 1])
+      ensure
+        begin
+          release_first&.write('1')
+        rescue IOError
+          nil
+        end
+        [first, second].compact.each do |pid|
+          Process.kill('TERM', pid)
+          Process.wait(pid)
+        rescue Errno::ESRCH, Errno::ECHILD
+          nil
+        end
+        [first_read, first_ready, release_read, release_first, second_event_read, second_event].compact.each(&:close)
+        verifier&.close
+      end
     end
 
     it 'returns nil when git_sha is nil' do

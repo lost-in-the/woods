@@ -27,6 +27,7 @@ module Woods
     # rubocop:disable Metrics/ClassLength
     class SessionFlowAssembler
       ASYNC_TYPES = %w[job mailer].to_set.freeze
+      RENDER_BUDGET_ATTEMPTS = 3
 
       # @param store [Store] Session trace store
       # @param reader [MCP::IndexReader] Index reader for unit lookups
@@ -77,17 +78,11 @@ module Woods
           step[:unit_refs].concat(deps)
         end
 
-        # Apply token budget
-        token_count = apply_budget(context_pool, budget)
-
-        SessionFlowDocument.new(
-          session_id: session_id,
-          steps: steps,
-          context_pool: context_pool,
-          side_effects: side_effects,
-          dependency_map: dependency_map,
-          token_count: token_count
-        )
+        # Apply token budget against the rendered output, not just the pool
+        apply_budget(context_pool, budget)
+        parts = { session_id: session_id, steps: steps, context_pool: context_pool,
+                  side_effects: side_effects, dependency_map: dependency_map }
+        budgeted_document(parts, budget)
       end
       # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength
 
@@ -239,6 +234,54 @@ module Woods
           source = unit[:source_code] || ''
           TokenUtils.estimate_tokens(source) + 20 # overhead for tags/metadata
         end
+      end
+
+      # The budget target is the RENDERED document: the steps timeline, side
+      # effects, dependency map, and markup all cost tokens the pool estimate
+      # never counted, so a document could ship over budget while reporting a
+      # compliant token_count. Measure to_context, tighten the source pool by
+      # the observed overshoot, and re-measure; when nothing truncatable
+      # remains, ship the floor flagged budget_exceeded instead of silently
+      # over budget.
+      def budgeted_document(parts, budget)
+        rendered = rendered_tokens(parts)
+        (RENDER_BUDGET_ATTEMPTS - 1).times do
+          break if rendered <= budget
+          break unless shrink_source_pool?(parts[:context_pool], budget, rendered)
+
+          rendered = rendered_tokens(parts)
+        end
+
+        SessionFlowDocument.new(**parts, token_count: rendered, budget_exceeded: rendered > budget)
+      end
+
+      # to_context embeds the token count itself, so measure to a fixpoint:
+      # the reported number must be the measure of the document printing it.
+      def rendered_tokens(parts)
+        count = 0
+        3.times do
+          probe = SessionFlowDocument.new(**parts, token_count: count)
+          measured = TokenUtils.estimate_tokens(probe.to_context)
+          return measured if measured == count
+
+          count = measured
+        end
+        count
+      end
+
+      # Tighten the source-pool budget by the measured structural overshoot.
+      # Returns false when no truncatable source remains — the floor.
+      def shrink_source_pool?(context_pool, budget, rendered)
+        return false unless context_pool.values.any? { |unit| truncatable_source?(unit) }
+
+        overshoot = rendered - budget
+        apply_budget(context_pool, [estimate_tokens(context_pool) - overshoot, 0].max)
+        true
+      end
+
+      def truncatable_source?(unit)
+        source = unit[:source_code]
+        source && !source.start_with?('# source truncated')
       end
 
       # Build an empty document for sessions with no requests.

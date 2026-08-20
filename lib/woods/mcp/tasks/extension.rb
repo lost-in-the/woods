@@ -13,8 +13,8 @@ module Woods
       #
       # * capability detection, by reading the per-request `_meta` the SDK
       #   passes through untouched, and
-      # * the `tasks/get` / `tasks/cancel` / `tasks/update` RPCs, via
-      #   `define_custom_method`.
+      # * the `tasks/get` / `tasks/update` RPCs, plus a stable unsupported
+      #   response for `tasks/cancel`, via `define_custom_method`.
       #
       # Both are deliberately thin. When the SDK grows native support this
       # collapses to deleting {install} and pointing the pipeline tools at the
@@ -27,6 +27,12 @@ module Woods
 
         # Reserved `_meta` key carrying the client's per-request capabilities.
         CLIENT_CAPABILITIES_KEY = 'io.modelcontextprotocol/clientCapabilities'
+
+        # Tasks are an extension to the stateless lifecycle, not a legacy
+        # initialize capability. Both the version and explicit extension opt-in
+        # must be present on the same request.
+        PROTOCOL_VERSION_KEY = 'io.modelcontextprotocol/protocolVersion'
+        MODERN_PROTOCOL_VERSION = '2026-07-28'
 
         class << self
           # Did this request's client declare support for the Tasks extension?
@@ -45,6 +51,9 @@ module Woods
           # @param params [Hash, nil] the `tools/call` params
           # @return [Boolean]
           def client_opted_in?(params)
+            version = dig_indifferent(params, :_meta, PROTOCOL_VERSION_KEY)
+            return false unless version == MODERN_PROTOCOL_VERSION
+
             extensions = dig_indifferent(params, :_meta, CLIENT_CAPABILITIES_KEY, :extensions)
             return false unless extensions.is_a?(Hash)
 
@@ -67,7 +76,7 @@ module Woods
           def install(server, store:)
             advertise(server)
             define_get(server, store)
-            define_cancel(server, store)
+            define_unsupported_cancel(server)
             define_update(server, store)
             server
           end
@@ -85,7 +94,7 @@ module Woods
           def define_get(server, store)
             server.define_custom_method(method_name: 'tasks/get') do |params, server_context:|
               require_tasks_capability!(params, server_context)
-              task = store.get(task_id_from(params))
+              task = Extension.send(:load_task, store, params)
               unless task
                 raise ::MCP::Server::RequestHandlerError.new(
                   'Unknown or expired taskId.', params, error_type: :invalid_params
@@ -96,14 +105,15 @@ module Woods
             end
           end
 
-          def define_cancel(server, store)
+          def define_unsupported_cancel(server)
             server.define_custom_method(method_name: 'tasks/cancel') do |params, server_context:|
               require_tasks_capability!(params, server_context)
-              # Cancellation is cooperative and idempotent: the server
-              # acknowledges the intent, and a task that already finished simply
-              # keeps its terminal state. Neither case is an error.
-              store.cancel!(task_id_from(params))
-              { resultType: 'complete' }
+              raise ::MCP::Server::RequestHandlerError.new(
+                'Method not found', params,
+                error_type: :method_not_found,
+                error_code: ::JsonRpcHandler::ErrorCode::METHOD_NOT_FOUND,
+                error_data: 'Task cancellation is not supported by Woods.'
+              )
             end
           end
 
@@ -117,13 +127,20 @@ module Woods
               # makes this an acknowledgement. The method exists because the
               # extension advertises it, and a client that probes it should get
               # an answer rather than "method not found".
-              store.get(task_id_from(params))
+              task = Extension.send(:load_task, store, params)
+              unless task
+                raise ::MCP::Server::RequestHandlerError.new(
+                  'Unknown or expired taskId.', params, error_type: :invalid_params
+                )
+              end
+
               { resultType: 'complete' }
             end
           end
 
           def require_tasks_capability!(params, server_context)
-            return if server_context && client_capabilities_include_tasks?(server_context.client_capabilities)
+            return if server_context&.protocol_version == MODERN_PROTOCOL_VERSION &&
+                      client_capabilities_include_tasks?(server_context.client_capabilities)
             return if client_opted_in?(params)
 
             required = { extensions: { EXTENSION_ID => {} } }
@@ -146,6 +163,19 @@ module Woods
             return nil unless params.is_a?(Hash)
 
             params[:taskId] || params['taskId']
+          end
+
+          def load_task(store, params)
+            store.get(task_id_from(params))
+          rescue Store::CorruptRecordError => e
+            task_id = task_id_from(params)
+            raise ::MCP::Server::RequestHandlerError.new(
+              'Task record is unavailable or malformed.', params,
+              error_type: :internal_error,
+              error_code: ::JsonRpcHandler::ErrorCode::INTERNAL_ERROR,
+              error_data: { error_code: 'corrupt_task_record', taskId: task_id },
+              original_error: e
+            )
           end
 
           # Reads a nested value tolerating symbol/string keys at every level.

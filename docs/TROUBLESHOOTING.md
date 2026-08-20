@@ -226,16 +226,15 @@ bundle exec rake woods:console
 
 ---
 
-### Tier 2-4 console tools return "unsupported in embedded mode"
+### A console inventory tool is not listed
 
-**Symptom:** Tools like `console_diagnose_model`, `console_eval`, or `console_sql` return an error saying they are unsupported.
+**Symptom:** A tool from the 31-schema inventory is absent from `tools/list`.
 
-**Cause:** The embedded console mode — launched via `rake woods:console` or `docker compose exec ... rake woods:console` — only exposes the 9 Tier 1 read-only tools. Tiers 2-4 require the bridge architecture.
+**Cause:** Supported servers advertise only executable tools: 9 Tier 1 tools by
+default, plus SQL/query when explicitly enabled.
 
-**Fix:** Switch to the bridge setup. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) Option D for configuration. Briefly:
-
-1. Create `~/.woods/console.yml` with your connection mode
-2. Update `.mcp.json` to use `woods-console-mcp` instead of `docker exec ... rake`
+**Fix:** Enable `console_embedded_read_tools` for `console_sql` and
+`console_query`. Tier 2, Tier 3, and eval remain inventory only.
 
 ---
 
@@ -561,8 +560,8 @@ Update the container name in your configuration to match exactly.
 
 **Fix:** Use the host path in `.mcp.json`. With a standard `.:/app` volume mount, the output is at `./tmp/woods` on the host:
 
-```json
-"args": ["./tmp/woods"]    ✓ host path
+```text
+"args": ["./tmp/woods"]     ✓ host path
 "args": ["/app/tmp/woods"]  ✗ container path — Index Server cannot read this
 ```
 
@@ -640,7 +639,7 @@ config.notion_database_ids = {
 | `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
 | `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
 | `Connection refused (localhost:6333)` | Qdrant not running | Start Qdrant container |
-| `unsupported in embedded mode` | Using embedded console | Switch to bridge architecture (Option D) |
+| Missing `console_sql` / `console_query` | Read tools disabled | Enable `console_embedded_read_tools` |
 | `database is locked` | SQLite concurrent access | Run one extraction at a time |
 | `Dimension mismatch` | Embedding model changed | Full re-index: extract + embed |
 | `401 Unauthorized` (Notion) | Invalid API token | Check `NOTION_API_TOKEN` env var |

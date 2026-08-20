@@ -44,11 +44,14 @@ module Woods
       # @param metadata [Hash] Additional metadata
       # @return [Hash]
       def build_report_hash(report, metadata)
-        {
+        hash = {
           'metadata' => build_metadata(metadata),
           'aggregates' => serialize_aggregates(report.aggregates),
           'results' => report.results.map { |r| serialize_result(r) }
         }
+        threshold_report = report.threshold_report
+        hash['threshold_report'] = serialize_threshold_report(threshold_report) if threshold_report
+        hash
       end
 
       # Build the metadata section.
@@ -70,6 +73,20 @@ module Woods
         aggregates.transform_keys(&:to_s).transform_values do |v|
           v.is_a?(Float) ? v.round(4) : v
         end
+      end
+
+      # Serialize a threshold report (nil-safe values: a missing aggregate has
+      # a nil actual/delta, which JSON renders as null rather than raising).
+      #
+      # @param threshold_report [Evaluator::ThresholdReport]
+      # @return [Hash] String-keyed hash
+      def serialize_threshold_report(threshold_report)
+        {
+          'passed' => threshold_report.passed,
+          'metrics' => threshold_report.metrics.transform_keys(&:to_s).transform_values do |m|
+            m.transform_keys(&:to_s)
+          end
+        }
       end
 
       # Serialize a single query result.

@@ -27,6 +27,9 @@ group :development, :test do
   gem 'bundler', '>= 2.0'
   gem 'bundler-audit', '~> 0.9'
   gem 'debug', '>= 1.0.0'
+  # The official MCP Ruby client's HTTP transport loads Faraday lazily. Keep it
+  # test-only: Woods' HTTP server itself uses Rack and does not require Faraday.
+  gem 'faraday', '~> 2.0'
   # activesupport for specs that don't need full Rails
   gem 'activesupport'
   gem 'rake', '~> 13.0'

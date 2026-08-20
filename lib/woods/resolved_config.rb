@@ -44,6 +44,9 @@ module Woods
     # @return [Hash] Store types — :vector_store, :metadata_store, :graph_store (Symbols)
     attr_reader :stores
 
+    # @return [Hash] Non-secret options required to reopen durable stores
+    attr_reader :store_options
+
     # Parse a +woods.json+ hash into a {ResolvedConfig}.
     #
     # @param raw [Hash] Parsed JSON hash (string or symbol keys)
@@ -58,7 +61,8 @@ module Woods
         gem_version: data[:gem_version].to_s,
         created_at: parse_time(data[:created_at]),
         embedding_provider: parse_provider(data[:embedding_provider] || {}),
-        stores: parse_stores(data[:stores] || {})
+        stores: parse_stores(data[:stores] || {}),
+        store_options: parse_store_options(data[:store_options] || {})
       )
     end
 
@@ -82,17 +86,18 @@ module Woods
     def self.from_configuration(config, gem_version: nil, provider: nil) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
       require_relative 'version'
 
-      opts = config.embedding_options || {}
-      declared_dim = opts[:dimension] || opts['dimension']
-      dim = declared_dim || (provider.respond_to?(:dimensions) ? provider.dimensions : nil)
+      opts = (config.embedding_options || {}).transform_keys(&:to_sym)
+      declared_dim = opts[:dimensions] || opts[:dimension] || opts[:dims]
+      dim = provider.respond_to?(:dimensions) ? provider.dimensions : declared_dim
+      model = provider.respond_to?(:model_name) ? provider.model_name : (opts[:model] || config.embedding_model)
 
       provider_hash = {
         class: resolve_provider_class(config.embedding_provider),
-        model: (opts[:model] || opts['model'] || config.embedding_model).to_s,
+        model: model.to_s,
         dimension: dim.to_i,
-        host: opts[:host] || opts['host'],
-        num_ctx: opts[:num_ctx] || opts['num_ctx'],
-        read_timeout: opts[:read_timeout] || opts['read_timeout']
+        host: opts[:host],
+        num_ctx: opts[:num_ctx],
+        read_timeout: opts[:read_timeout]
       }.compact
 
       new(
@@ -104,7 +109,8 @@ module Woods
           vector_store: config.vector_store,
           metadata_store: config.metadata_store,
           graph_store: config.graph_store
-        }
+        },
+        store_options: durable_store_options(config)
       )
     end
 
@@ -113,18 +119,33 @@ module Woods
     # @param created_at [Time]
     # @param embedding_provider [Hash]
     # @param stores [Hash]
-    def initialize(schema_version:, gem_version:, created_at:, embedding_provider:, stores:)
+    def initialize(schema_version:, gem_version:, created_at:, embedding_provider:, stores:, store_options: {}) # rubocop:disable Metrics/ParameterLists
       @schema_version = schema_version
       @gem_version = gem_version.to_s.freeze
       @created_at = created_at
       @embedding_provider = deep_freeze(embedding_provider)
       @stores = deep_freeze(stores)
+      @store_options = deep_freeze(store_options)
       freeze
     end
 
     # @return [Integer] Embedding dimension declared by the provider
     def dimension
       embedding_provider[:dimension].to_i
+    end
+
+    # Model recorded in +embedding_provider[:model]+.
+    #
+    # {Storage::Snapshotter::Vector.dump} guards its call with
+    # +resolved_config.respond_to?(:model_name)+ before writing the WVF1
+    # header's model field — that guard passed for every {ResolvedConfig}
+    # even with no +#model_name+ defined, so the header's model was always
+    # +''+ and no dump could say which model produced it.
+    #
+    # @return [String, nil] the model name, or nil when absent
+    def model_name
+      model = embedding_provider[:model].to_s
+      model.empty? ? nil : model
     end
 
     # Short string identifying this provider configuration, useful for log
@@ -175,7 +196,8 @@ module Woods
         'gem_version' => gem_version,
         'created_at' => created_at.iso8601,
         'embedding_provider' => embedding_provider.transform_keys(&:to_s),
-        'stores' => stores.transform_keys(&:to_s).transform_values(&:to_s)
+        'stores' => stores.transform_keys(&:to_s).transform_values(&:to_s),
+        'store_options' => stringify_nested_keys(store_options)
       }
     end
 
@@ -185,6 +207,13 @@ module Woods
     end
 
     private
+
+    def stringify_nested_keys(value)
+      return value.transform_keys(&:to_s).transform_values { |item| stringify_nested_keys(item) } if value.is_a?(Hash)
+      return value.map { |item| stringify_nested_keys(item) } if value.is_a?(Array)
+
+      value
+    end
 
     # Recursively freeze a Hash and every Hash/Array/String it transitively
     # holds. The previous shallow `.freeze` left nested Hash values mutable
@@ -277,6 +306,20 @@ module Woods
           metadata_store: data[:metadata_store]&.to_sym,
           graph_store: data[:graph_store]&.to_sym
         }
+      end
+
+      DURABLE_VECTOR_OPTION_KEYS = %i[collection dimensions distance allow_private_hosts table schema].freeze
+      private_constant :DURABLE_VECTOR_OPTION_KEYS
+
+      def durable_store_options(config)
+        vector = normalize_keys(config.vector_store_options || {}).slice(*DURABLE_VECTOR_OPTION_KEYS)
+        vector.empty? ? {} : { vector_store: vector }
+      end
+
+      def parse_store_options(raw)
+        data = normalize_keys(raw)
+        vector = normalize_keys(data[:vector_store] || {}).slice(*DURABLE_VECTOR_OPTION_KEYS)
+        vector.empty? ? {} : { vector_store: vector }
       end
 
       def parse_time(value)

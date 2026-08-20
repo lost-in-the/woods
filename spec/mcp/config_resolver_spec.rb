@@ -77,6 +77,28 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
     end
 
+    # FIX 3 (P1): the config snapshot now lives inside the promoted dump
+    # directory (IndexArtifact#read_config prefers it there). No root
+    # woods.json exists in this scenario at all — read_stored_config must
+    # not skip straight to `:host_config`/autodetect just because
+    # artifact.config_path (the root file) is absent.
+    context 'woods.json present only inside the promoted dump (no root woods.json)' do
+      it 'still resolves from the snapshot' do
+        Dir.mktmpdir do |dir|
+          artifact = Woods::IndexArtifact.new(dir)
+          dump_dir = artifact.new_dump_dir
+          artifact.write_dump_config(dump_dir, woods_json_hash)
+          artifact.promote(dump_dir)
+          expect(artifact.config_path).not_to exist
+
+          config, source = described_class.resolve(ollama_config, artifact: artifact)
+
+          expect(config).to eq(ollama_config)
+          expect(source).to eq(:snapshot)
+        end
+      end
+    end
+
     context 'woods.json present, host has no provider — populates config from snapshot' do
       it 'returns [config, :snapshot] and sets embedding_provider' do
         Dir.mktmpdir do |dir|
@@ -96,6 +118,71 @@ RSpec.describe Woods::MCP::ConfigResolver do
           expect(config.vector_store).to eq(:in_memory)
           expect(config.metadata_store).to eq(:in_memory)
           expect(config.graph_store).to eq(:in_memory)
+        end
+      end
+
+      it 'anchors local artifact paths to the index directory, not the process cwd' do
+        Dir.mktmpdir do |dir|
+          local = woods_json_hash.merge(
+            'stores' => woods_json_hash.fetch('stores').merge('metadata_store' => 'sqlite')
+          )
+          write_woods_json(dir, local)
+          config, = described_class.resolve(blank_config, artifact: Woods::IndexArtifact.new(dir), env: {})
+
+          expect(config.output_dir.to_s).to eq(dir)
+          expect(config.metadata_store_options).to eq(database: File.join(dir, 'metadata.sqlite3'))
+        end
+      end
+
+      it 'restores persisted Qdrant options and serve-time endpoint credentials' do
+        Dir.mktmpdir do |dir|
+          qdrant = woods_json_hash.merge(
+            'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant'),
+            'store_options' => {
+              'vector_store' => { 'collection' => 'docs', 'dimensions' => 768, 'distance' => 'Dot' }
+            }
+          )
+          write_woods_json(dir, qdrant)
+          serve_env = {
+            'WOODS_QDRANT_URL' => 'https://served.test', 'WOODS_QDRANT_API_KEY' => 'token'
+          }
+          config, = described_class.resolve(
+            blank_config,
+            artifact: Woods::IndexArtifact.new(dir),
+            env: serve_env
+          )
+
+          expect(config.vector_store_options).to include(
+            url: 'https://served.test', collection: 'docs', dimensions: 768, distance: 'Dot', api_key: 'token'
+          )
+        end
+      end
+
+      it 'uses WOODS_QDRANT_COLLECTION when the snapshot has no collection' do
+        Dir.mktmpdir do |dir|
+          write_woods_json(dir, woods_json_hash.merge(
+                                  'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant')
+                                ))
+
+          config, = described_class.resolve(
+            blank_config,
+            artifact: Woods::IndexArtifact.new(dir),
+            env: { 'WOODS_QDRANT_URL' => 'https://served.test', 'WOODS_QDRANT_COLLECTION' => 'served-docs' }
+          )
+
+          expect(config.vector_store_options).to include(url: 'https://served.test', collection: 'served-docs')
+        end
+      end
+
+      it 'fails actionably when a legacy Qdrant snapshot has no endpoint' do
+        Dir.mktmpdir do |dir|
+          write_woods_json(dir, woods_json_hash.merge(
+                                  'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant')
+                                ))
+
+          expect do
+            described_class.resolve(blank_config, artifact: Woods::IndexArtifact.new(dir), env: {})
+          end.to raise_error(Woods::MCP::ConfigMismatch, /WOODS_QDRANT_URL/)
         end
       end
 

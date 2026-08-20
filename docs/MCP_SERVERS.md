@@ -7,8 +7,8 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 | | Index Server | Console Server |
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
-| **Requires Rails?** | No — reads JSON from disk | Yes — bridges to a Rails process |
-| **Tools** | 29 (14 always-on + 15 conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion) | 31 (across 4 tiers: 9/9/10/3) |
+| **Requires Rails?** | No — reads JSON from disk | Yes — boots in a Rails process |
+| **Tools** | 29 (14 always-on + 15 conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion) | 9 default, 11 with read tools; 31 schemas inventoried |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
 | **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
@@ -224,7 +224,8 @@ Both tools keep their existing rate limiting (`PipelineGuard`), in-process seria
 
 ## Console Server
 
-The Console Server connects to a live Rails application and provides database queries, model diagnostics, job monitoring, and guarded operations — all within rolled-back transactions.
+The Console Server connects to a live Rails application. It registers 9
+read-only model/schema tools by default and can register SQL/query explicitly.
 
 ### Setup
 
@@ -232,19 +233,16 @@ The Console Server connects to a live Rails application and provides database qu
 woods-console-mcp
 ```
 
-The console server uses a bridge architecture to communicate with a Rails process. Configure the connection in `console.yml`:
+`woods-console-mcp` can launch the embedded server from `console.yml`:
 
 ```yaml
 # console.yml
-connection:
-  mode: direct           # direct, docker, or ssh
-  # For docker mode:
-  # mode: docker
-  # service: web
-  # compose_file: docker-compose.yml
+mode: direct             # direct, docker, or ssh
+directory: /path/to/rails-app
+command: bundle exec rake woods:console
 ```
 
-### Tools (31)
+### Tool inventory (31 schemas; 9 registered by default)
 
 #### Tier 1: Read-Only (9 tools)
 
@@ -262,7 +260,7 @@ Safe, foundational queries against the live database.
 | `console_recent` | Recently created/updated records (max 50) |
 | `console_status` | System health: available models and connection status |
 
-#### Tier 2: Domain-Aware (9 tools)
+#### Tier 2: Domain-Aware (9 inventory schemas; not registered)
 
 Higher-level operations: diagnostics, validation, settings, policies.
 
@@ -278,7 +276,7 @@ Higher-level operations: diagnostics, validation, settings, policies.
 | `console_check_eligibility` | Check feature eligibility for a record |
 | `console_decorate` | Invoke a decorator and return computed attributes |
 
-#### Tier 3: Analytics (10 tools)
+#### Tier 3: Analytics (10 inventory schemas; not registered)
 
 Performance metrics, job monitoring, cache stats.
 
@@ -295,13 +293,13 @@ Performance metrics, job monitoring, cache stats.
 | `console_cache_stats` | Cache store statistics |
 | `console_channel_status` | ActionCable channel status |
 
-#### Tier 4: Guarded (3 tools)
+#### Tier 4: Guarded (2 read opt-in; eval not registered)
 
-Require explicit confirmation or have strict validation.
+SQL and query require explicit read-tool configuration and strict validation.
 
 | Tool | Description |
 |------|-------------|
-| `console_eval` | Execute Ruby code (requires confirmation, 10s timeout) |
+| `console_eval` | Inventory schema only; unavailable in supported modes |
 | `console_sql` | Execute read-only SQL (SELECT only, validated) |
 | `console_query` | Enhanced query builder with joins and grouping |
 
@@ -311,13 +309,13 @@ The Console Server implements defense-in-depth:
 
 1. **SafeContext** — Every operation runs in a database transaction that is always rolled back. Writes are silently discarded.
 2. **SqlValidator** — Rejects DML (INSERT/UPDATE/DELETE) and DDL (CREATE/ALTER/DROP) at the string level before any database interaction.
-3. **Confirmation** — Tier 4 operations and settings updates require explicit human approval.
-4. **AuditLogger** — All operations are logged to a JSONL file for review.
+3. **CredentialScanner** — Redacts credential-shaped response values.
+4. **Column/EAV redaction** — Redacts configured sensitive fields and key/value rows.
 5. **ModelValidator** — Validates model names against `ActiveRecord::Base.descendants` to prevent arbitrary class instantiation.
 
-### Job Backend Adapters
+### Job Backend Adapter Inventory
 
-The console server auto-detects your job backend:
+These adapters remain inventory-only because Tier 3 tools are not registered:
 
 | Backend | Adapter | Supported Operations |
 |---------|---------|---------------------|

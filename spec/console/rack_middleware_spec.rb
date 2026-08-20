@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'rack'
+require 'mcp'
 require 'woods'
 require 'woods/console/rack_middleware'
 require 'woods/console/safe_context'
@@ -27,6 +28,7 @@ end
 RSpec.describe Woods::Console::RackMiddleware do
   let(:pool) { double('ActiveRecord::ConnectionPool') }
   let(:ar_base) { class_double('ActiveRecord::Base').as_stubbed_const }
+  let(:server_double) { instance_double(MCP::Server) }
 
   subject(:middleware) { described_class.new(->(_env) { [200, {}, []] }) }
 
@@ -36,7 +38,6 @@ RSpec.describe Woods::Console::RackMiddleware do
 
     # Stub the heavy parts of server construction — we're only verifying the
     # connection-acquisition API surface, not the server wiring.
-    server_double = instance_double(MCP::Server)
     allow(Woods::Console::Server).to receive(:build_embedded).and_return(server_double)
   end
 
@@ -166,11 +167,92 @@ RSpec.describe Woods::Console::RackMiddleware do
         expect(body).to eq(['console'])
       end
 
+      it 'strips stale session ids in the default stateless mode without mutating the Rack env' do
+        received_request = nil
+        transport = double('transport')
+        allow(transport).to receive(:handle_request) do |request|
+          received_request = request
+          [200, {}, ['console']]
+        end
+        allow(middleware).to receive(:ensure_transport) do
+          middleware.instance_variable_set(:@stateless_mode, true)
+          transport
+        end
+        env = {
+          'REQUEST_METHOD' => 'POST',
+          'PATH_INFO' => '/mcp/console',
+          'HTTP_MCP_SESSION_ID' => 'stale-session'
+        }
+
+        middleware.call(env)
+
+        expect(received_request.env).not_to have_key('HTTP_MCP_SESSION_ID')
+        expect(env['HTTP_MCP_SESSION_ID']).to eq('stale-session')
+      end
+
+      it 'preserves session ids when compatibility mode is explicit' do
+        sessionful = described_class.new(app, stateless: false)
+        received_request = nil
+        transport = double('transport')
+        allow(transport).to receive(:handle_request) do |request|
+          received_request = request
+          [200, {}, ['console']]
+        end
+        allow(sessionful).to receive(:ensure_transport) do
+          sessionful.instance_variable_set(:@stateless_mode, false)
+          transport
+        end
+
+        sessionful.call(
+          'REQUEST_METHOD' => 'POST',
+          'PATH_INFO' => '/mcp/console',
+          'HTTP_MCP_SESSION_ID' => 'live-session'
+        )
+
+        expect(received_request.env['HTTP_MCP_SESSION_ID']).to eq('live-session')
+      end
+
       it 'passes non-matching paths through to the app' do
         status, = middleware.call('PATH_INFO' => '/')
         expect(status).to eq(200)
         expect(app_paths).to eq(['/'])
       end
+    end
+  end
+
+  describe '#ensure_transport' do
+    let(:rails_app) { double('Rails.application', eager_load!: true) }
+    let(:rails) { class_double('Rails', application: rails_app).as_stubbed_const }
+    let(:transport) { instance_double(MCP::Server::Transports::StreamableHTTPTransport) }
+
+    before do
+      rails
+      allow(middleware).to receive(:check_blocked_tables_config!)
+      allow(middleware).to receive(:build_embedded_server).and_return(server_double)
+      allow(server_double).to receive(:transport=)
+    end
+
+    it 'constructs stateless transport by default' do
+      expect(MCP::Server::Transports::StreamableHTTPTransport).to receive(:new)
+        .with(server_double, stateless: true)
+        .and_return(transport)
+
+      middleware.send(:ensure_transport)
+
+      expect(middleware.instance_variable_get(:@stateless_mode)).to be true
+    end
+
+    it 'constructs session transport only with the compatibility setting' do
+      sessionful = described_class.new(->(_env) { [200, {}, []] }, stateless: false)
+      allow(sessionful).to receive(:check_blocked_tables_config!)
+      allow(sessionful).to receive(:build_embedded_server).and_return(server_double)
+      expect(MCP::Server::Transports::StreamableHTTPTransport).to receive(:new)
+        .with(server_double, stateless: false)
+        .and_return(transport)
+
+      sessionful.send(:ensure_transport)
+
+      expect(sessionful.instance_variable_get(:@stateless_mode)).to be false
     end
   end
 

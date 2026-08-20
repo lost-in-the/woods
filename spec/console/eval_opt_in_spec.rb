@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'woods'
 require 'woods/console/server'
 
-RSpec.describe 'console_eval opt-in safety contract' do
+RSpec.describe 'console_eval capability contract' do
   let(:registry) { { 'User' => %w[id email] } }
   let(:validator) { Woods::Console::ModelValidator.new(registry: registry) }
   let(:connection) { double('Connection') }
@@ -18,14 +18,13 @@ RSpec.describe 'console_eval opt-in safety contract' do
     end
     allow(connection).to receive(:execute)
     allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
-    # Clear the flag across tests — it is env-backed and persistent otherwise.
     ENV.delete('WOODS_CONSOLE_UNSAFE_EVAL')
-    Woods.configure { |c| c.console_unsafe_eval_enabled = nil }
+    Woods.configure { |config| config.console_unsafe_eval_enabled = nil }
   end
 
   after do
     ENV.delete('WOODS_CONSOLE_UNSAFE_EVAL')
-    Woods.configure { |c| c.console_unsafe_eval_enabled = nil }
+    Woods.configure { |config| config.console_unsafe_eval_enabled = nil }
   end
 
   describe 'Woods::Console::Server.unsafe_eval_enabled?' do
@@ -33,150 +32,47 @@ RSpec.describe 'console_eval opt-in safety contract' do
       expect(Woods::Console::Server.unsafe_eval_enabled?).to be false
     end
 
-    it 'is true when WOODS_CONSOLE_UNSAFE_EVAL=true in the environment' do
+    it 'recognizes only the exact true environment value' do
       ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'
       expect(Woods::Console::Server.unsafe_eval_enabled?).to be true
-    end
 
-    it 'is false for WOODS_CONSOLE_UNSAFE_EVAL values other than "true"' do
       ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = '1'
       expect(Woods::Console::Server.unsafe_eval_enabled?).to be false
     end
 
-    it 'is true when console_unsafe_eval_enabled is explicitly set in config' do
-      Woods.configure { |c| c.console_unsafe_eval_enabled = true }
-      expect(Woods::Console::Server.unsafe_eval_enabled?).to be true
-    end
-
-    it 'explicit config false overrides the env var' do
+    it 'lets explicit configuration override the environment' do
       ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'
-      Woods.configure { |c| c.console_unsafe_eval_enabled = false }
+      Woods.configure { |config| config.console_unsafe_eval_enabled = false }
+
       expect(Woods::Console::Server.unsafe_eval_enabled?).to be false
     end
   end
 
-  describe 'console_eval tool description' do
-    let(:server) do
-      Woods::Console::Server.build_embedded(model_validator: validator, safe_context: safe_context)
-    end
-    let(:description) { server.instance_variable_get(:@tools)['console_eval'].description }
+  describe 'supported registration' do
+    it 'does not register console_eval in either embedded mode' do
+      default_server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context
+      )
+      read_server = Woods::Console::Server.build_embedded(
+        model_validator: validator, safe_context: safe_context, read_tools_enabled: true
+      )
 
-    it 'states the tool is currently disabled' do
-      expect(description).to match(/disabled|refusal/i)
-    end
-
-    it 'instructs the agent to surface the proposed snippet to the user before invoking' do
-      expect(description).to match(/show|surface|present/i)
-      expect(description).to match(/before|first|manually/i)
-    end
-
-    it 'names console_query and console_sql as the alternatives' do
-      expect(description).to include('console_query')
-      expect(description).to include('console_sql')
+      expect(default_server.instance_variable_get(:@tools)).not_to have_key('console_eval')
+      expect(read_server.instance_variable_get(:@tools)).not_to have_key('console_eval')
     end
   end
 
-  describe 'build_embedded with unsafe eval flag' do
-    context 'when the flag is off (default)' do
-      it 'does not emit a banner' do
-        expect do
-          Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context
-          )
-        end.not_to output(/WOODS_CONSOLE_UNSAFE_EVAL/).to_stderr
-      end
-    end
+  describe 'legacy unsafe-eval flag' do
+    it 'fails closed instead of claiming eval is live' do
+      ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'
 
-    context 'when the flag is on in a non-production environment' do
-      before { ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true' }
-
-      let(:wired_kwargs) do
-        {
-          unsafe_eval_confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
-          unsafe_eval_audit_log_path: '/tmp/audit.jsonl'
-        }
-      end
-
-      it 'emits a loud warning banner to stderr' do
-        expect do
-          Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context, **wired_kwargs
-          )
-        end.to output(/WOODS_CONSOLE_UNSAFE_EVAL/).to_stderr
-      end
-
-      it 'builds the server when collaborators are wired' do
-        server = Woods::Console::Server.build_embedded(
-          model_validator: validator, safe_context: safe_context, **wired_kwargs
-        )
-        expect(server).to be_a(MCP::Server)
-      end
-    end
-
-    context 'when the flag is on in Rails production' do
-      before do
-        ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'
-        rails = class_double('Rails').as_stubbed_const
-        env = double('Rails::Env', production?: true)
-        allow(rails).to receive(:env).and_return(env)
-      end
-
-      it 'refuses to boot and raises a ConfigurationError' do
-        expect do
-          Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context
-          )
-        end.to raise_error(Woods::ConfigurationError, /production/i)
-      end
-    end
-
-    context 'fail-closed: flag on but collaborators missing' do
-      before { ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true' }
-
-      it 'refuses to boot when no Confirmation is provided' do
-        expect do
-          Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context,
-            unsafe_eval_audit_log_path: '/tmp/audit.jsonl'
-          )
-        end.to raise_error(Woods::ConfigurationError, /Confirmation/i)
-      end
-
-      it 'refuses to boot when no audit-log path is provided' do
-        expect do
-          Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context,
-            unsafe_eval_confirmation: Woods::Console::Confirmation.new(mode: :auto_deny)
-          )
-        end.to raise_error(Woods::ConfigurationError, /audit-log/i)
-      end
-
-      it 'boots when both collaborators are provided' do
-        server = Woods::Console::Server.build_embedded(
+      expect do
+        Woods::Console::Server.build_embedded(
           model_validator: validator, safe_context: safe_context,
           unsafe_eval_confirmation: Woods::Console::Confirmation.new(mode: :auto_deny),
           unsafe_eval_audit_log_path: '/tmp/audit.jsonl'
         )
-        expect(server).to be_a(MCP::Server)
-      end
-
-      it 'reads collaborators from Woods.configuration when kwargs are nil' do
-        Woods.configure do |c|
-          c.console_unsafe_eval_confirmation = Woods::Console::Confirmation.new(mode: :auto_deny)
-          c.console_unsafe_eval_audit_log_path = '/tmp/audit.jsonl'
-        end
-
-        expect do
-          Woods::Console::Server.build_embedded(
-            model_validator: validator, safe_context: safe_context
-          )
-        end.not_to raise_error
-      ensure
-        Woods.configure do |c|
-          c.console_unsafe_eval_confirmation = nil
-          c.console_unsafe_eval_audit_log_path = nil
-        end
-      end
+      end.to raise_error(Woods::ConfigurationError, /not available in a supported Console MCP mode/)
     end
   end
 end

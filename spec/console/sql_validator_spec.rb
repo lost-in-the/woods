@@ -265,4 +265,97 @@ RSpec.describe Woods::Console::SqlValidator do
       expect { validator.validate!('EXPLAIN SELECT 1') }.not_to raise_error
     end
   end
+
+  describe 'function allowlist (read-only policy)' do
+    context 'with rejected side-effecting functions' do
+      it 'rejects pg_terminate_backend' do
+        expect { validator.validate!('SELECT pg_terminate_backend(pid) FROM pg_stat_activity') }
+          .to raise_error(Woods::Console::SqlValidationError, /pg_terminate_backend/)
+      end
+
+      it 'rejects pg_advisory_lock' do
+        expect { validator.validate!('SELECT pg_advisory_lock(1)') }
+          .to raise_error(Woods::Console::SqlValidationError, /pg_advisory_lock/)
+      end
+
+      it 'rejects nextval' do
+        expect { validator.validate!("SELECT nextval('users_id_seq')") }
+          .to raise_error(Woods::Console::SqlValidationError, /nextval/)
+      end
+
+      it 'rejects setval' do
+        expect { validator.validate!("SELECT setval('users_id_seq', 1)") }
+          .to raise_error(Woods::Console::SqlValidationError, /setval/)
+      end
+
+      it 'rejects an arbitrary unknown function' do
+        expect { validator.validate!('SELECT some_unknown_function(1)') }
+          .to raise_error(Woods::Console::SqlValidationError, /some_unknown_function/)
+      end
+
+      it 'names the rejected function and how to proceed' do
+        expect { validator.validate!('SELECT pg_terminate_backend(1)') }
+          .to raise_error(Woods::Console::SqlValidationError, /allowlist/i)
+      end
+    end
+
+    context 'with allowed pure/read functions' do
+      [
+        'count(*)', 'sum(amount)', 'avg(amount)', 'min(amount)', 'max(amount)',
+        "coalesce(name,'x')", 'nullif(a,b)', 'lower(name)', 'upper(name)', 'length(name)',
+        'substr(name,1,2)', 'substring(name,1,2)', 'trim(name)', 'abs(amount)', 'round(amount)',
+        'cast(amount as integer)'
+      ].each do |expr|
+        it "accepts #{expr}" do
+          expect { validator.validate!("SELECT #{expr} FROM orders") }.not_to raise_error
+        end
+      end
+    end
+
+    context 'with functions already covered by the dangerous-function denylist' do
+      it 'still rejects pg_sleep with an allowlist-consistent message' do
+        expect { validator.validate!('SELECT pg_sleep(999)') }
+          .to raise_error(Woods::Console::SqlValidationError)
+      end
+    end
+
+    context 'with a quoted identifier wrapping a forbidden function' do
+      [
+        'SELECT "pg_terminate_backend"(12345)',
+        'SELECT pg_catalog."pg_terminate_backend"(12345)',
+        %(SELECT "nextval"('some_seq')),
+        'SELECT "pg_sleep"(10)',
+        'SELECT `pg_sleep`(10)'
+      ].each do |sql|
+        it "does not let #{sql.inspect} bypass the allowlist" do
+          expect { validator.validate!(sql) }
+            .to raise_error(Woods::Console::SqlValidationError, /allowlist/i)
+        end
+      end
+    end
+
+    context 'with backend-agnostic read functions' do
+      [
+        'group_concat(name)', 'string_agg(name, \',\')', 'array_agg(name)',
+        "json_extract(data, '$.x')", "strftime('%Y', created_at)",
+        'row_number() OVER ()', 'rank() OVER (ORDER BY amount)',
+        'replace(name, \'a\', \'b\')', 'left(name, 3)'
+      ].each do |expr|
+        it "accepts #{expr}" do
+          expect { validator.validate!("SELECT #{expr} FROM orders") }.not_to raise_error
+        end
+      end
+    end
+
+    context 'with SQL keywords that use parentheses but are not function calls' do
+      it 'does not misclassify IN (subquery) as a function call' do
+        expect { validator.validate!('SELECT * FROM users WHERE id IN (SELECT user_id FROM posts)') }
+          .not_to raise_error
+      end
+
+      it 'does not misclassify a grouped boolean expression as a function call' do
+        expect { validator.validate!('SELECT * FROM users WHERE (active = true)') }.not_to raise_error
+      end
+    end
+  end
 end

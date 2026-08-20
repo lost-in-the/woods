@@ -7,6 +7,7 @@ require 'mcp'
 require 'open3'
 require 'time'
 require 'set'
+require 'uri'
 require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../tasks'
@@ -14,10 +15,12 @@ require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
+require_relative 'index_reader_pinning'
 require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
 require_relative 'tasks/store'
+require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -115,6 +118,7 @@ module Woods
             version: Woods::VERSION,
             resources: resources,
             resource_templates: resource_templates,
+            configuration: ::MCP::Configuration.new.merge(::MCP.configuration),
             **ProtocolPolicy.cache_hints
           )
           # Rewrite "Tool not found" into version-aware update guidance for agents
@@ -166,6 +170,8 @@ module Woods
           define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired?
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
+          ToolContract.apply!(server)
+          IndexReaderPinning.install(server, reader: reader)
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one
@@ -214,7 +220,17 @@ module Woods
         end
 
         def text_response(text)
-          ::MCP::Tool::Response.new([{ type: 'text', text: text }])
+          structured = { text: text }
+          structured[:data] = JSON.parse(text)
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: text }],
+            structured_content: structured
+          )
+        rescue JSON::ParserError
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: text }],
+            structured_content: structured
+          )
         end
 
         # Build a structured error response that carries machine-readable
@@ -235,6 +251,7 @@ module Woods
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: message }],
             error: true,
+            structured_content: { text: message },
             meta: meta
           )
         end
@@ -500,7 +517,10 @@ module Woods
                   description: 'Filter to these types'
                 },
                 via: {
-                  type: 'array', items: { type: 'string' },
+                  anyOf: [
+                    { type: 'string' },
+                    { type: 'array', items: { type: 'string' } }
+                  ],
                   description: 'Filter by relationship type. Accepts either a single string ' \
                                "(e.g. 'code_reference') or an array " \
                                "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
@@ -723,35 +743,29 @@ module Woods
                          'externally — their counts in the response reflect the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            # Through the pin, not around it. A bare `reload!` under the
-            # threaded HTTP transport drops the caches of a concurrent pinned
-            # sequence mid-flight — the exact tear refcounted pins exist to
-            # prevent. Pinning here also makes the manifest read below describe
-            # the generation this reload just loaded.
-            manifest = reader.with_pinned_generation do
-              reader.reload!
-              reader.manifest
-            end
-            payload = {
-              reloaded: true,
-              extracted_at: manifest['extracted_at'],
-              total_units: manifest['total_units'],
-              counts: manifest['counts']
-            }
-            if retriever_reloader
-              begin
-                payload[:retriever] = retriever_reloader.call
-              rescue StandardError => e
-                payload[:retriever] = { error: "#{e.class}: #{e.message}" }
+            reader.with_exclusive_reload do |manifest|
+              payload = {
+                reloaded: true,
+                extracted_at: manifest['extracted_at'],
+                total_units: manifest['total_units'],
+                counts: manifest['counts']
+              }
+              if retriever_reloader
+                begin
+                  payload[:retriever] = retriever_reloader.call
+                rescue StandardError => e
+                  payload[:retriever] = { error: "#{e.class}: #{e.message}" }
+                end
               end
+              respond.call(JSON.pretty_generate(payload))
             end
-            respond.call(JSON.pretty_generate(payload))
           end
         end
 
         def define_retrieve_tool(server, retriever, respond, respond_err)
           coerce_int = method(:coerce_integer)
           coerce = method(:coerce_array)
+          stale_check = method(:stale_index_result?)
           server.define_tool(
             name: 'codebase_retrieve',
             description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
@@ -819,6 +833,15 @@ module Woods
                 types: types,
                 exclude_types: exclude_types
               )
+              if stale_check.call(result)
+                next respond_err.call(
+                  'The vector index appears stale: matches were found but their source data is ' \
+                  'missing (likely a deleted or renamed unit). Re-run `woods:embed` (or ' \
+                  '`woods:embed_incremental`) to refresh the index, then retry.',
+                  code: :stale_index,
+                  tool: 'codebase_retrieve'
+                )
+              end
               respond.call(result.context)
             else
               respond_err.call(
@@ -833,6 +856,24 @@ module Woods
               )
             end
           end
+        end
+
+        # Detect a stale vector index: candidates matched the query but every
+        # one of them pointed at a unit the metadata store no longer has
+        # (deleted/renamed since the last embed). Distinguishes that case
+        # from a genuine "no matches" so the tool can say what happened
+        # instead of returning near-empty context as clean success.
+        #
+        # @param result [Woods::Retriever::RetrievalResult] (or a test double
+        #   with the same shape — +trace+ may be absent/nil on older doubles)
+        # @return [Boolean]
+        def stale_index_result?(result)
+          trace = result.respond_to?(:trace) ? result.trace : nil
+          return false unless trace
+
+          trace.ranked_count.to_i.positive? &&
+            trace.skipped_missing_metadata.to_i.positive? &&
+            Array(result.sources).empty?
         end
 
         def define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
@@ -878,6 +919,14 @@ module Woods
             # surface it, rather than wrapping the error payload in a
             # successful response — consistent with session_trace and
             # codebase_retrieve.
+            if ToolContract.artifact_error?(e)
+              next respond_err.call(
+                'trace_flow could not read a required Index artifact.',
+                code: :corrupt_artifact,
+                tool: 'trace_flow'
+              )
+            end
+
             respond_err.call(
               "trace_flow failed: #{e.message}",
               code: :internal_error,
@@ -947,6 +996,7 @@ module Woods
         end
 
         def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)
+          cooldown = method(:cooldown_error)
           server.define_tool(
             name: 'pipeline_extract',
             description: 'Trigger a codebase extraction pipeline run. Checks rate limits before proceeding.',
@@ -981,13 +1031,8 @@ module Woods
             end
 
             guard = operator[:pipeline_guard]
-            if guard && !guard.allow?(:extraction)
-              next respond_err.call(
-                'Extraction is rate-limited. Try again later.',
-                code: :rate_limited,
-                tool: 'pipeline_extract',
-                retry_after_seconds: 300
-              )
+            if (blocked = cooldown.call(guard, :extraction, 'pipeline_extract'))
+              next blocked
             end
 
             # Acquire the in-process lock BEFORE recording to the guard.
@@ -1027,9 +1072,6 @@ module Woods
               )
             end
 
-            # Lock acquired — now it's safe to record the run.
-            guard&.record!(:extraction)
-
             run_extraction = lambda do
               # exe/woods-mcp deliberately loads no extraction machinery, so
               # Woods::Extractor is not defined in a standalone index-server
@@ -1044,7 +1086,8 @@ module Woods
             next Woods::MCP::Server.send(
               :run_pipeline_in_background,
               kind: :extraction, tool: 'pipeline_extract', lock: lock,
-              task_store: task_store, respond: respond, runner: run_extraction,
+              task_store: task_store, respond: respond, respond_err: respond_err, runner: run_extraction,
+              started: -> { guard&.record!(:extraction) },
               started_message: 'Extraction pipeline started in background thread'
             )
           end
@@ -1084,7 +1127,52 @@ module Woods
           acquired
         end
 
+        # Build the cooldown-gate error for pipeline_extract/pipeline_embed,
+        # or nil when the operation may proceed.
+        #
+        # `PipelineGuard#allow?` fails closed on state it cannot verify
+        # (corrupt or permission-denied), which reads identically to a
+        # genuine, elapsing cooldown from the boolean alone. Reporting
+        # `:rate_limited, retry_after_seconds: 300` for state that will
+        # never resolve on its own is the inaccurate public metadata this
+        # closes — `PipelineGuard#state_status` distinguishes why, and the
+        # tool error now says so.
+        #
+        # @param guard [Woods::Operator::PipelineGuard, nil]
+        # @param operation [Symbol] :extraction or :embedding
+        # @param tool [String] tool name, for the error payload
+        # @return [MCP::Tool::Response, nil]
+        def cooldown_error(guard, operation, tool)
+          return nil unless guard
+          return nil if guard.allow?(operation)
+
+          case guard.state_status
+          when :corrupt
+            # `pipeline_repair`'s `reset_cooldowns` action deletes state by
+            # key and cannot act on content it cannot parse, so it will not
+            # clear this — the fix is replacing or removing the state file
+            # directly.
+            error_response(
+              'Pipeline cooldown state is corrupt, so the cooldown cannot be verified. ' \
+              'Inspect and replace (or remove) pipeline_guard.json in the operator state directory.',
+              code: :cooldown_state_corrupt, tool: tool
+            )
+          when :permission_denied
+            error_response(
+              'Pipeline cooldown state is unreadable (permission denied), so the cooldown cannot be verified. ' \
+              'Check the operator state directory permissions.',
+              code: :cooldown_state_unreadable, tool: tool
+            )
+          else
+            error_response(
+              "#{operation == :extraction ? 'Extraction' : 'Embedding'} is rate-limited. Try again later.",
+              code: :rate_limited, tool: tool, retry_after_seconds: 300
+            )
+          end
+        end
+
         def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store)
+          cooldown = method(:cooldown_error)
           server.define_tool(
             name: 'pipeline_embed',
             description: 'Trigger embedding generation for extracted units. Checks rate limits before proceeding.',
@@ -1097,13 +1185,8 @@ module Woods
             next op_missing.call('pipeline_embed') unless operator
 
             guard = operator[:pipeline_guard]
-            if guard && !guard.allow?(:embedding)
-              next respond_err.call(
-                'Embedding is rate-limited. Try again later.',
-                code: :rate_limited,
-                tool: 'pipeline_embed',
-                retry_after_seconds: 300
-              )
+            if (blocked = cooldown.call(guard, :embedding, 'pipeline_embed'))
+              next blocked
             end
 
             # Acquire the in-process lock first so a refused "already
@@ -1140,9 +1223,6 @@ module Woods
               )
             end
 
-            # Lock acquired — now it's safe to record the run.
-            guard&.record!(:embedding)
-
             run_embed = lambda do
               # Share the rake-task wiring so the MCP path picks up the
               # provider-tuned TextPreparer + token-aware chunker. Without
@@ -1156,7 +1236,8 @@ module Woods
             next Woods::MCP::Server.send(
               :run_pipeline_in_background,
               kind: :embedding, tool: 'pipeline_embed', lock: lock,
-              task_store: task_store, respond: respond, runner: run_embed,
+              task_store: task_store, respond: respond, respond_err: respond_err, runner: run_embed,
+              started: -> { guard&.record!(:embedding) },
               started_message: 'Embedding pipeline started in background thread'
             )
           end
@@ -1189,8 +1270,10 @@ module Woods
         # @param runner [Proc] the actual work
         # @param started_message [String] legacy fire-and-forget message
         # @return [Hash, MCP::Tool::Response]
-        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, runner:, started_message:)
+        def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, respond_err:, runner:, started:,
+                                       started_message:)
           task = create_pipeline_task(task_store, tool)
+          started.call
 
           Thread.new do
             # Heartbeat, like the rake writers: a full run on a large host can
@@ -1218,26 +1301,28 @@ module Woods
           return Tasks::Extension.create_task_result(task) if task
 
           respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
+        rescue SystemCallError, IOError => e
+          lock&.release
+          Woods::MCP::Server.send(:pipeline_finish, kind)
+          respond_err.call(
+            'The task could not be durably recorded, so the pipeline was not started.',
+            code: :task_store_unavailable,
+            tool: tool,
+            exception: e.class.name
+          )
         end
 
         # Mint a task record, or return nil to take the legacy path.
         #
-        # Nil for the ordinary reason (the client did not opt in) and also when
-        # the record cannot be written: the index directory can legitimately be
-        # a read-only mount for a host-side reader, and a durable handle is an
-        # improvement to the answer, not a precondition for running the
-        # pipeline. Degrading to fire-and-forget keeps the tool working where
-        # raising would turn a read-only mount into a broken tool.
+        # Nil only when the client did not opt in. Once a client opts in, task
+        # durability is part of the response contract; a write failure propagates
+        # to {run_pipeline_in_background}, which fails closed before work starts.
         #
         # @return [Tasks::Store::Task, nil]
         def create_pipeline_task(task_store, tool)
           return nil unless task_store && Tasks::RequestCapture.tasks_requested?
 
           task_store.create!(tool: tool)
-        rescue SystemCallError, IOError => e
-          warn "[woods-mcp] could not record a task handle (#{e.class}); " \
-               'falling back to fire-and-forget for this run.'
-          nil
         end
 
         # What `tasks/get` hands back on success — shaped like the synchronous
@@ -1348,8 +1433,21 @@ module Woods
             when 'clear_locks'
               lock = operator[:pipeline_lock]
               if lock
-                lock.release
-                respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks' }))
+                outcome = lock.retire_stale
+                case outcome
+                when :cleared
+                  respond.call(JSON.pretty_generate({ repaired: true, action: 'clear_locks', outcome: 'cleared' }))
+                when :missing
+                  respond_err.call(
+                    'No pipeline lock exists; nothing was repaired.',
+                    code: :lock_missing, tool: 'pipeline_repair', action: action, repaired: false
+                  )
+                when :not_stale
+                  respond_err.call(
+                    'The pipeline lock is active and was not cleared.',
+                    code: :lock_active, tool: 'pipeline_repair', action: action, repaired: false
+                  )
+                end
               else
                 respond_err.call(
                   'Pipeline lock is not configured.',
@@ -1359,7 +1457,22 @@ module Woods
                 )
               end
             when 'reset_cooldowns'
-              respond.call(JSON.pretty_generate({ repaired: true, action: 'reset_cooldowns' }))
+              guard = operator[:pipeline_guard]
+              if guard.nil?
+                respond_err.call(
+                  'Pipeline guard is not configured.',
+                  code: :not_configured,
+                  config_key: 'operator.pipeline_guard',
+                  tool: 'pipeline_repair'
+                )
+              elsif guard.reset!(:all)
+                respond.call(JSON.pretty_generate({ repaired: true, action: action, outcome: 'reset' }))
+              else
+                respond_err.call(
+                  'No pipeline cooldown state exists; nothing was repaired.',
+                  code: :cooldown_state_missing, tool: 'pipeline_repair', action: action, repaired: false
+                )
+              end
             else
               respond_err.call(
                 "Unknown repair action: #{action}",
@@ -1999,27 +2112,73 @@ module Woods
         def register_resource_handler(server, reader)
           server.resources_read_handler do |params|
             uri = params[:uri]
-            case uri
-            when 'codebase://manifest'
-              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.manifest) }]
-            when 'codebase://graph'
-              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(reader.raw_graph_data) }]
-            when %r{\Acodebase://unit/(.+)\z}
-              identifier = Regexp.last_match(1)
-              unit = reader.find_unit(identifier)
-              if unit
-                [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(unit) }]
-              else
-                [{ uri: uri, mimeType: 'text/plain', text: "Unit not found: #{identifier}" }]
-              end
-            when %r{\Acodebase://type/(.+)\z}
-              type = Regexp.last_match(1)
-              units = reader.list_units(type: type)
-              [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(units) }]
-            else
-              [{ uri: uri, mimeType: 'text/plain', text: "Unknown resource: #{uri}" }]
+            kind, target = parse_resource_uri(uri)
+            raise ::MCP::Server::ResourceNotFoundError.new(uri, params) unless kind
+
+            payload = resource_payload(reader, kind, target)
+            raise ::MCP::Server::ResourceNotFoundError.new(uri, params) if payload.nil?
+
+            [{ uri: uri, mimeType: 'application/json', text: JSON.pretty_generate(payload) }]
+          rescue ::MCP::Server::ResourceNotFoundError
+            raise
+          rescue JSON::ParserError, SystemCallError, IOError, TypeError => e
+            raise corrupt_resource_error(uri, params, e)
+          end
+        end
+
+        def parse_resource_uri(uri)
+          return [:manifest, nil] if uri == 'codebase://manifest'
+          return [:graph, nil] if uri == 'codebase://graph'
+          return unless uri.is_a?(String)
+
+          parsed = URI.parse(uri)
+          return unless parsed.scheme == 'codebase'
+          return unless %w[unit type].include?(parsed.host)
+          return if parsed.userinfo || parsed.port || parsed.query || parsed.fragment || parsed.opaque
+
+          raw_target = parsed.path.to_s.delete_prefix('/')
+          return if raw_target.empty? || raw_target.include?('/')
+
+          target = URI::DEFAULT_PARSER.unescape(raw_target).force_encoding(Encoding::UTF_8)
+          return unless target.valid_encoding?
+          return if target.match?(%r{[%\\/\x00-\x1f\x7f]})
+          return if %w[. ..].include?(target)
+
+          [parsed.host.to_sym, target]
+        rescue URI::InvalidURIError
+          nil
+        end
+
+        def resource_payload(reader, kind, target)
+          case kind
+          when :manifest
+            reader.manifest.tap { |value| raise TypeError unless value.is_a?(Hash) }
+          when :graph
+            reader.raw_graph_data.tap do |value|
+              raise TypeError unless value.is_a?(Hash) && value['nodes'].is_a?(Hash) && value['edges'].is_a?(Hash)
+            end
+          when :unit
+            reader.find_unit(target).tap do |value|
+              raise TypeError if value && (!value.is_a?(Hash) || value['identifier'] != target)
+            end
+          when :type
+            return nil unless IndexReader::TYPE_TO_DIR.key?(target)
+
+            reader.list_units(type: target).tap do |value|
+              raise TypeError unless value.is_a?(Array) && value.all?(Hash)
             end
           end
+        end
+
+        def corrupt_resource_error(uri, params, original_error)
+          ::MCP::Server::RequestHandlerError.new(
+            'Resource artifact is unavailable or malformed.',
+            params,
+            error_type: :internal_error,
+            original_error: original_error,
+            error_code: ::JsonRpcHandler::ErrorCode::INTERNAL_ERROR,
+            error_data: { uri: uri, error_code: 'corrupt_artifact' }
+          )
         end
       end
     end

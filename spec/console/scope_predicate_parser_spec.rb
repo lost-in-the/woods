@@ -52,6 +52,14 @@ RSpec.describe Woods::Console::ScopePredicateParser do
       expect(result).to eq(relation)
       expect(relation).not_to have_received(:where)
     end
+
+    it 'rejects an unknown equality column before relation.where' do
+      expect do
+        parser.parse(relation, { 'unknown' => 'paid' })
+      end.to raise_error(Woods::Console::ValidationError, /Unknown column 'unknown'/)
+
+      expect(relation).not_to have_received(:where)
+    end
   end
 
   # ── Supported suffixes ──────────────────────────────────────────────────────
@@ -240,6 +248,47 @@ RSpec.describe Woods::Console::ScopePredicateParser do
       expect(relation).to have_received(:where).with({ 'status' => 'paid' })
       # Predicate built via Arel
       expect(arel_col).to have_received(:gt).with(0)
+    end
+  end
+
+  # ── Suffix value-type enforcement (truthiness-inversion guard) ─────────────
+
+  describe 'existence-suffix strict boolean enforcement' do
+    %w[transaction_id_null transaction_id_not_null notes_present notes_blank].each do |key|
+      it "raises ValidationError for the string 'false' on #{key} instead of treating it as truthy" do
+        expect do
+          parser.parse(relation, { key => 'false' })
+        end.to raise_error(Woods::Console::ValidationError, /requires a strict boolean value/)
+      end
+
+      it "raises ValidationError for a non-boolean value on #{key}" do
+        expect do
+          parser.parse(relation, { key => 1 })
+        end.to raise_error(Woods::Console::ValidationError, /requires a strict boolean value/)
+      end
+
+      it "accepts a real boolean on #{key}" do
+        allow(arel_table).to receive(:[]).and_return(arel_col)
+
+        expect { parser.parse(relation, { key => true }) }.not_to raise_error
+        expect { parser.parse(relation, { key => false }) }.not_to raise_error
+      end
+    end
+  end
+
+  describe 'comparison-suffix scalar enforcement' do
+    %w[total_gt total_gteq amount_lt amount_lteq].each do |key|
+      it "raises ValidationError for an Array value on #{key}" do
+        expect do
+          parser.parse(relation, { key => [1, 2] })
+        end.to raise_error(Woods::Console::ValidationError, /requires a scalar/)
+      end
+
+      it "raises ValidationError for a Hash value on #{key}" do
+        expect do
+          parser.parse(relation, { key => { 'a' => 1 } })
+        end.to raise_error(Woods::Console::ValidationError, /requires a scalar/)
+      end
     end
   end
 

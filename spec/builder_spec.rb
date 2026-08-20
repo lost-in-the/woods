@@ -9,7 +9,7 @@ RSpec.describe Woods::Builder do
   let(:fake_vector_store) { double('VectorStore') }
   let(:fake_metadata_store) { double('MetadataStore') }
   let(:fake_graph_store) { double('GraphStore') }
-  let(:fake_embedding_provider) { double('EmbeddingProvider') }
+  let(:fake_embedding_provider) { double('EmbeddingProvider', dimensions: 1536) }
   let(:fake_retriever) { instance_double(Woods::Retriever) }
 
   # ── Builder.preset_config ────────────────────────────────────────────
@@ -318,6 +318,21 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  describe '#build_metadata_store with a durable preset' do
+    it 'derives a file-backed SQLite database from output_dir' do
+      Dir.mktmpdir('woods-builder-metadata') do |dir|
+        config = described_class.preset_config(:local)
+        config.output_dir = dir
+
+        store = described_class.new(config).build_metadata_store
+        store.store('User', type: 'model')
+
+        expect(File).to exist(File.join(dir, 'metadata.sqlite3'))
+        expect(store.find('User')).to include('type' => 'model')
+      end
+    end
+  end
+
   # ── Builder#build_chunker — budget guard ──────────────────────────────
 
   describe '#build_chunker budget guard' do
@@ -363,6 +378,7 @@ RSpec.describe Woods::Builder do
       allow(Woods::Storage::VectorStore::Pgvector).to receive(:new)
         .with(connection: fake_connection, dimensions: 3)
         .and_return(pg_store)
+      allow(pg_store).to receive(:stored_dimensions).and_return(nil)
     end
 
     it 'calls ensure_schema! after construction so the woods_vectors table exists' do
@@ -385,6 +401,69 @@ RSpec.describe Woods::Builder do
 
       expect { described_class.new(config).build_vector_store }
         .to raise_error(Woods::Error) { |e| expect(e.cause.message).to eq('no pg_hba.conf entry') }
+    end
+
+    it 'rejects dimensions that disagree with the embedding provider' do
+      expect { described_class.new(config).build_vector_store(dimensions: 4) }
+        .to raise_error(Woods::ConfigurationError, /pgvector dimensions 3.*provider dimensions 4/i)
+    end
+
+    it 'rejects the actual table width before returning a retriever' do
+      allow(pg_store).to receive(:ensure_schema!)
+      allow(pg_store).to receive(:stored_dimensions).and_return(4)
+
+      expect { described_class.new(config).build_vector_store(dimensions: 3) }
+        .to raise_error(Woods::ConfigurationError, /stored pgvector dimensions 4.*provider dimensions 3/i)
+    end
+
+    it 'uses the provider dimensions when vector_store_options omits them' do
+      config.vector_store_options = { connection: fake_connection }
+      expect(Woods::Storage::VectorStore::Pgvector).to receive(:new)
+        .with(connection: fake_connection, dimensions: 4)
+        .and_return(pg_store)
+      expect(pg_store).to receive(:ensure_schema!)
+
+      expect(described_class.new(config).build_vector_store(dimensions: 4)).to eq(pg_store)
+    end
+
+    it 'uses the provider dimensions when build_retriever constructs pgvector' do
+      config.vector_store_options = { connection: fake_connection }
+      config.embedding_provider = Woods::Embedding::Provider::Fake.new(dims: 1536)
+      config.metadata_store = :in_memory
+      config.graph_store = :in_memory
+
+      expect(Woods::Storage::VectorStore::Pgvector).to receive(:new)
+        .with(connection: fake_connection, dimensions: 1536)
+        .and_return(pg_store)
+      expect(pg_store).to receive(:ensure_schema!)
+      allow(Woods::Storage::MetadataStore::InMemory).to receive(:new).and_return(fake_metadata_store)
+      allow(Woods::Storage::GraphStore::Memory).to receive(:new).and_return(fake_graph_store)
+      allow(Woods::Retriever).to receive(:new).and_return(fake_retriever)
+
+      expect(described_class.new(config).build_retriever).to eq(fake_retriever)
+    end
+  end
+
+  describe '#build_vector_store with :qdrant' do
+    let(:qdrant_store) { instance_double(Woods::Storage::VectorStore::Qdrant) }
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.vector_store = :qdrant
+        c.vector_store_options = {
+          url: 'https://qdrant.example.test',
+          collection: 'woods_test',
+          dimensions: 384
+        }
+      end
+    end
+
+    it 'creates or verifies the configured collection during construction' do
+      expect(Woods::Storage::VectorStore::Qdrant).to receive(:new)
+        .with(url: 'https://qdrant.example.test', collection: 'woods_test', dimensions: 384)
+        .and_return(qdrant_store)
+      expect(qdrant_store).to receive(:ensure_collection!).with(dimensions: 384)
+
+      expect(described_class.new(config).build_vector_store).to eq(qdrant_store)
     end
   end
 
@@ -546,6 +625,56 @@ RSpec.describe Woods::Builder do
     end
   end
 
+  describe '#build_embedding_provider configuration' do
+    let(:config) { Woods::Configuration.new }
+    let(:builder) { described_class.new(config) }
+
+    it 'passes an explicitly configured embedding_model to Ollama' do
+      config.embedding_provider = :ollama
+      config.embedding_model = 'mxbai-embed-large'
+
+      expect(builder.build_embedding_provider.model_name).to eq('mxbai-embed-large')
+    end
+
+    it 'keeps the Ollama model default when embedding_model was not explicitly configured' do
+      config.embedding_provider = :ollama
+
+      expect(builder.build_embedding_provider.model_name)
+        .to eq(Woods::Embedding::Provider::Ollama::DEFAULT_MODEL)
+    end
+
+    it 'passes an explicitly configured embedding_model to OpenAI' do
+      config.embedding_provider = :openai
+      config.embedding_model = 'text-embedding-3-large'
+      config.embedding_options = { api_key: 'sk-test' }
+
+      expect(builder.build_embedding_provider.model_name).to eq('text-embedding-3-large')
+    end
+
+    it 'lets provider-specific model configuration override embedding_model' do
+      config.embedding_provider = :ollama
+      config.embedding_model = 'nomic-embed-text'
+      config.embedding_options = { model: 'bge-m3' }
+
+      expect(builder.build_embedding_provider.model_name).to eq('bge-m3')
+    end
+
+    it 'passes dimensions through to the selected provider' do
+      config.embedding_provider = :openai
+      config.embedding_options = { api_key: 'sk-test', dimensions: 256 }
+
+      expect(builder.build_embedding_provider.dimensions).to eq(256)
+    end
+
+    it 'rejects disconnected provider options with an actionable error' do
+      config.embedding_provider = :ollama
+      config.embedding_options = { api_key: 'not-an-ollama-option' }
+
+      expect { builder.build_embedding_provider }
+        .to raise_error(Woods::ConfigurationError, /Unknown Ollama embedding option: api_key/)
+    end
+  end
+
   # ── Builder#build_embedding_provider — injected object (#178) ─────────
 
   describe '#build_embedding_provider with an injected provider object' do
@@ -617,7 +746,7 @@ RSpec.describe Woods::Builder do
         c.vector_store = :qdrant
         c.vector_store_options = { url: 'http://qdrant:6333', collection: 'myapp' }
         c.metadata_store = :sqlite
-        c.metadata_store_options = { db_path: '/tmp/meta.db' }
+        c.metadata_store_options = { database: '/tmp/meta.db' }
         c.graph_store = :in_memory
         c.embedding_provider = :openai
         c.embedding_options = { api_key: 'sk-test' }
@@ -628,13 +757,15 @@ RSpec.describe Woods::Builder do
       allow(Woods::Storage::MetadataStore::SQLite).to receive(:new).and_return(fake_metadata_store)
       allow(Woods::Storage::GraphStore::Memory).to receive(:new).and_return(fake_graph_store)
       allow(Woods::Retriever).to receive(:new).and_return(fake_retriever)
+      allow(fake_vector_store).to receive(:ensure_collection!)
     end
 
     it 'passes vector_store_options to the vector store constructor' do
       expect(Woods::Storage::VectorStore::Qdrant)
         .to receive(:new)
-        .with(url: 'http://qdrant:6333', collection: 'myapp')
+        .with(url: 'http://qdrant:6333', collection: 'myapp', dimensions: 1536)
         .and_return(fake_vector_store)
+      expect(fake_vector_store).to receive(:ensure_collection!).with(dimensions: 1536)
 
       described_class.new(config).build_retriever
     end
@@ -644,7 +775,7 @@ RSpec.describe Woods::Builder do
 
       expect(Woods::Storage::MetadataStore::SQLite)
         .to receive(:new)
-        .with(db_path: '/tmp/meta.db')
+        .with(database: '/tmp/meta.db')
         .and_return(fake_metadata_store)
 
       described_class.new(config).build_retriever

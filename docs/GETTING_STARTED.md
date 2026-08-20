@@ -334,7 +334,10 @@ The most common boot failures are `NameError` from `app/graphql/` referencing an
 
 **"manifest.json not found" from MCP server** — The Index Server path is wrong. It needs the extraction output directory (`tmp/woods`), not the Rails root. Verify with `ls tmp/woods/manifest.json`.
 
-**Console server shows only 9 tools** — Expected behavior in embedded mode (rake task / Docker exec). Use bridge mode for all 31 tools. See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md).
+**Console server shows only 9 tools** — Expected behavior by default. Enable
+`console_embedded_read_tools` to register `console_sql` and `console_query` as
+well. The remaining schemas are inventory only. See
+[CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md).
 
 For more, see [Troubleshooting](TROUBLESHOOTING.md).
 

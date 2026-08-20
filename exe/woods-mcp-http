@@ -26,6 +26,8 @@ begin
 rescue LoadError
   require 'rack'
 end
+require 'bundler'
+require 'uri'
 require_relative '../lib/woods'
 require_relative '../lib/woods/dependency_graph'
 require_relative '../lib/woods/graph_analyzer'
@@ -83,10 +85,19 @@ server = Woods::MCP::Server.build(
 # hatch is transitional — the spec has removed all three. See
 # docs/MCP_HTTP_TRANSPORT.md#statelessness.
 stateless = !%w[0 false no].include?(ENV.fetch('WOODS_MCP_HTTP_STATELESS', '1').strip.downcase)
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, stateless: stateless)
-server.transport = transport
-
 allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
+allowed_hosts = allowed_origins.filter_map do |origin|
+  URI.parse(origin).host
+rescue URI::InvalidURIError
+  nil
+end
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(
+  server,
+  stateless: stateless,
+  allowed_origins: allowed_origins,
+  allowed_hosts: allowed_hosts
+)
+server.transport = transport
 
 inner = proc do |env|
   env = env.dup

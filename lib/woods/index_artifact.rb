@@ -82,16 +82,44 @@ module Woods
       dir.exist? ? dir : nil
     end
 
-    # Reads and parses +woods.json+, returning the raw hash.
+    # Path to a config snapshot embedded inside a dump directory.
     #
-    # Returns +nil+ when the file does not exist. Schema-version validation
-    # is the caller's responsibility (typically {Woods::ResolvedConfig.from_hash}).
+    # The vector/metadata dump and the root +woods.json+ used to be written
+    # as two independent atomic operations (dump, then +write_config+, then
+    # +promote+) — a crash between +write_config+ and +promote+ published a
+    # new config against the old dump. Writing the config snapshot here, as
+    # part of the dump itself, and promoting is what makes +promote+ the
+    # single commit point for both. See {#read_config}.
+    #
+    # @param dump_dir [Pathname, String] a dump directory (need not yet be promoted)
+    # @return [Pathname]
+    def dump_config_path(dump_dir)
+      Pathname.new(dump_dir.to_s).join('woods.json')
+    end
+
+    # Reads and parses the resolved config, returning the raw hash.
+    #
+    # Prefers the config embedded in the *promoted* dump ({#latest_dump_path})
+    # over the root +woods.json+ — the dump's own copy is guaranteed to
+    # describe the vectors that dump holds, since {#promote} is the single
+    # commit point for both. Falls back to the root file for two cases: no
+    # dump has been promoted yet, or the promoted dump predates this fix and
+    # carries no embedded config at all (back-compat for existing dumps).
+    #
+    # Returns +nil+ when neither is present. Schema-version validation is the
+    # caller's responsibility (typically {Woods::ResolvedConfig.from_hash}).
     #
     # @return [Hash, nil]
     def read_config
+      dump_dir = latest_dump_path
+      if dump_dir
+        embedded = dump_config_path(dump_dir)
+        return JSON.parse(embedded.read(encoding: Encoding::UTF_8)) if embedded.exist?
+      end
+
       return nil unless config_path.exist?
 
-      JSON.parse(config_path.read)
+      JSON.parse(config_path.read(encoding: Encoding::UTF_8))
     end
 
     # Creates a new timestamped dump directory and returns its path.
@@ -149,16 +177,31 @@ module Woods
     # @param resolved_config_hash [#to_snapshot_json, Hash]
     # @return [void]
     def write_config(resolved_config_hash)
+      atomic_write(config_path, serialize_config(resolved_config_hash))
+    end
+
+    # Atomically writes a resolved config hash INSIDE a dump directory, as
+    # part of the dump — see {#dump_config_path} for why. Callers write this
+    # before {#promote}, so the config a promoted dump carries is exactly the
+    # config that produced it.
+    #
+    # @param dump_dir [Pathname, String] a dump directory (need not yet be promoted)
+    # @param resolved_config_hash [#to_snapshot_json, Hash]
+    # @return [void]
+    def write_dump_config(dump_dir, resolved_config_hash)
+      atomic_write(dump_config_path(dump_dir), serialize_config(resolved_config_hash))
+    end
+
+    private
+
+    def serialize_config(resolved_config_hash)
       raw = if resolved_config_hash.respond_to?(:to_snapshot_json)
               resolved_config_hash.to_snapshot_json
             else
               resolved_config_hash
             end
-      json = raw.is_a?(String) ? raw : JSON.pretty_generate(raw)
-      atomic_write(config_path, json)
+      raw.is_a?(String) ? raw : JSON.pretty_generate(raw)
     end
-
-    private
 
     def atomic_write(path, content)
       FileUtils.mkdir_p(path.dirname)

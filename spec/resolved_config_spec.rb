@@ -23,6 +23,9 @@ RSpec.describe Woods::ResolvedConfig do
         'vector_store' => 'in_memory',
         'metadata_store' => 'in_memory',
         'graph_store' => 'in_memory'
+      },
+      'store_options' => {
+        'vector_store' => { 'collection' => 'woods_docs', 'distance' => 'Dot', 'dimensions' => 768 }
       }
     }
   end
@@ -36,6 +39,7 @@ RSpec.describe Woods::ResolvedConfig do
       expect(config.dimension).to eq(768)
       expect(config.embedding_provider[:model]).to eq('nomic-embed-text')
       expect(config.stores[:vector_store]).to eq(:in_memory)
+      expect(config.store_options[:vector_store]).to include(collection: 'woods_docs', distance: 'Dot')
     end
 
     it 'accepts symbol keys' do
@@ -88,6 +92,23 @@ RSpec.describe Woods::ResolvedConfig do
     it 'returns the integer dimension from the provider hash' do
       config = described_class.from_hash(v1_hash)
       expect(config.dimension).to eq(768)
+    end
+  end
+
+  describe '#model_name' do
+    # Snapshotter::Vector.dump guards with resolved_config.respond_to?(:model_name)
+    # before writing the WVF1 header — that guard passed for every ResolvedConfig
+    # even though no #model_name method existed (respond_to_missing? was never
+    # defined either), so the header's model field was always ''.
+    it 'returns the model recorded in embedding_provider' do
+      config = described_class.from_hash(v1_hash)
+      expect(config.model_name).to eq('nomic-embed-text')
+    end
+
+    it 'returns nil when embedding_provider has no model' do
+      no_model = v1_hash.merge('embedding_provider' => v1_hash['embedding_provider'].except('model'))
+      config = described_class.from_hash(no_model)
+      expect(config.model_name).to be_nil
     end
   end
 
@@ -242,6 +263,7 @@ RSpec.describe Woods::ResolvedConfig do
       expect(round_tripped.dimension).to eq(config.dimension)
       expect(round_tripped.provider_signature).to eq(config.provider_signature)
       expect(round_tripped.stores).to eq(config.stores)
+      expect(round_tripped.store_options).to eq(config.store_options)
       expect(round_tripped.gem_version).to eq(config.gem_version)
     end
 
@@ -291,27 +313,59 @@ RSpec.describe Woods::ResolvedConfig do
         embedding_options: { host: 'http://ollama:11434' },
         vector_store: :in_memory,
         metadata_store: :in_memory,
-        graph_store: :in_memory
+        graph_store: :in_memory,
+        vector_store_options: {
+          url: 'https://user:path-sentinel@qdrant.example.test/endpoint-sentinel?token=query-sentinel',
+          collection: 'woods', distance: 'Dot',
+          api_key: 'secret', connection: Object.new
+        }, metadata_store_options: { database: '/host/path/metadata.sqlite3' }
       )
     end
 
+    it 'captures only non-secret durable adapter options' do
+      resolved = described_class.from_configuration(host_config)
+
+      expect(resolved.store_options[:vector_store]).to eq(
+        collection: 'woods', distance: 'Dot'
+      )
+      snapshot = JSON.generate(resolved.to_snapshot_json)
+      expect(snapshot).not_to include('secret', '/host/path', 'path-sentinel', 'endpoint-sentinel', 'query-sentinel')
+    end
+
     it 'probes the live provider for its dimension when declared config omits it' do
-      provider = instance_double(Woods::Embedding::Provider::Ollama, dimensions: 768)
+      provider = instance_double(
+        Woods::Embedding::Provider::Ollama,
+        dimensions: 768,
+        model_name: 'actual-ollama-model'
+      )
+
+      resolved = described_class.from_configuration(host_config, provider: provider)
+
+      expect(resolved.dimension).to eq(768)
+      expect(resolved.embedding_provider[:model]).to eq('actual-ollama-model')
+    end
+
+    it 'records the live provider dimension instead of a stale declaration' do
+      declared = host_config.embedding_options.merge(dimensions: 1024)
+      allow(host_config).to receive(:embedding_options).and_return(declared)
+      provider = instance_double(
+        Woods::Embedding::Provider::Ollama,
+        dimensions: 768,
+        model_name: 'nomic-embed-text'
+      )
 
       resolved = described_class.from_configuration(host_config, provider: provider)
 
       expect(resolved.dimension).to eq(768)
     end
 
-    it 'prefers a declared dimension over the live provider probe' do
-      declared = host_config.embedding_options.merge(dimension: 1024)
+    it 'uses a declared dimension when no live provider is available' do
+      declared = host_config.embedding_options.merge(dimensions: 1024)
       allow(host_config).to receive(:embedding_options).and_return(declared)
-      provider = instance_double(Woods::Embedding::Provider::Ollama)
 
-      resolved = described_class.from_configuration(host_config, provider: provider)
+      resolved = described_class.from_configuration(host_config)
 
       expect(resolved.dimension).to eq(1024)
-      expect(provider).not_to have_received(:dimensions) if provider.respond_to?(:dimensions)
     end
 
     it 'falls back to zero when no provider is supplied and config omits dimension' do
@@ -331,7 +385,9 @@ RSpec.describe Woods::ResolvedConfig do
         embedding_options: { dims: 64 },
         vector_store: :in_memory,
         metadata_store: :in_memory,
-        graph_store: :in_memory
+        graph_store: :in_memory,
+        vector_store_options: {},
+        metadata_store_options: {}
       )
       provider = Woods::Embedding::Provider::Fake.new(dims: 64)
 

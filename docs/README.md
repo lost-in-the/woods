@@ -13,6 +13,7 @@ What's next: see [COVERAGE_GAP_ANALYSIS.md](COVERAGE_GAP_ANALYSIS.md) for remain
 | Document | Purpose |
 |----------|---------|
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Install, configure, extract, and inspect — end-to-end walkthrough |
+| [UPGRADING_TO_2.md](UPGRADING_TO_2.md) | Upgrading to Woods 2.0 — breaking identifier changes, clean re-index steps, store/dimension migration, exporter reconciliation, MCP client requirements |
 | [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) | All configuration options with defaults, types, and examples |
 | [MCP_SERVERS.md](MCP_SERVERS.md) | Index server vs console server — full tool catalog, setup for Claude Code / Cursor / Windsurf |
 | [DOCKER_SETUP.md](DOCKER_SETUP.md) | Docker-specific guide — split architecture, volume mounts, path translation, MCP config |

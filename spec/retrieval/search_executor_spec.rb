@@ -6,10 +6,11 @@ require 'woods/storage/metadata_store'
 require 'woods/storage/graph_store'
 require 'woods/retrieval/query_classifier'
 require 'woods/retrieval/search_executor'
+require 'woods/retrieval/ranker'
 
 RSpec.describe Woods::Retrieval::SearchExecutor do
   let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
-  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+  let(:metadata_store) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
   let(:graph_store) { Woods::Storage::GraphStore::Memory.new }
   let(:classifier) { Woods::Retrieval::QueryClassifier.new }
 
@@ -451,12 +452,64 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
       expect(sources).to include(:vector)
     end
 
-    it 'deduplicates candidates across sources' do
-      classification = classifier.classify('Show me everything related to users')
-      result = executor.execute(query: 'Show me everything related to users', classification: classification)
+    # P1 fix: execute_hybrid used to run deduplicate(all).first(limit)
+    # BEFORE the Ranker ever saw the candidates, keeping only the
+    # best-scored source per identifier — so a unit found by both vector
+    # AND keyword search only ever reached the Ranker as one source, and
+    # RRF's cross-source sum (compute_rrf_scores) never accumulated.
+    # "Hybrid" was concatenation, not fusion. Deduplication now happens
+    # once — inside Ranker's RRF merge, which is where cross-source
+    # consensus is computed — not twice.
+    describe 'RRF consensus (P1)' do
+      # Forces classification.keywords so keyword search hits 'User'
+      # directly, and the fixed embedding stub always ranks 'User' first
+      # on the vector side — a real overlap, unlike the natural classifier
+      # output for a broad query, which can miss it entirely depending on
+      # keyword extraction.
+      let(:overlapping_classification) do
+        Woods::Retrieval::QueryClassifier::Classification.new(
+          intent: :understand, scope: :comprehensive, target_type: nil,
+          framework_context: false, keywords: ['user']
+        )
+      end
 
-      identifiers = result.candidates.map(&:identifier)
-      expect(identifiers).to eq(identifiers.uniq)
+      it 'does not pre-deduplicate a candidate found by multiple sources' do
+        result = executor.execute(query: 'user', classification: overlapping_classification, strategy: :hybrid)
+
+        user_entries = result.candidates.select { |c| c.identifier == 'User' }
+        expect(user_entries.map(&:source)).to include(:vector, :keyword)
+      end
+
+      it 'lets a multi-source candidate outrank an equally-scored single-source one after Ranker fusion' do
+        ranker = Woods::Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store)
+        result = executor.execute(query: 'user', classification: overlapping_classification, strategy: :hybrid)
+
+        ranked = ranker.rank(result.candidates, classification: overlapping_classification)
+
+        # UsersController is keyword-only; User is both vector- and
+        # keyword-found. RRF consensus must place User first.
+        expect(ranked.first.identifier).to eq('User')
+        expect(ranked.map(&:identifier).count('User')).to eq(1)
+      end
+
+      it 'keeps a weaker source duplicate of a kept unit through the limit cut' do
+        result = executor.execute(
+          query: 'user', classification: overlapping_classification, strategy: :hybrid, limit: 1
+        )
+
+        user_entries = result.candidates.select { |c| c.identifier == 'User' }
+        expect(user_entries.map(&:source)).to include(:vector, :keyword)
+        unique_units = result.candidates.map { |c| c.identifier.sub(/#chunk_\d+\z/, '') }.uniq
+        expect(unique_units.size).to eq(1)
+      end
+
+      it 'leaves single-strategy (non-hybrid) paths deduplication-free as before' do
+        classification = classifier.classify('Where is the User defined?')
+        result = executor.execute(query: 'Where is the User defined?', classification: classification)
+
+        identifiers = result.candidates.map(&:identifier)
+        expect(identifiers).to eq(identifiers.uniq)
+      end
     end
   end
 
@@ -481,7 +534,7 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
 
   describe 'empty store behavior' do
     let(:empty_vector) { Woods::Storage::VectorStore::InMemory.new }
-    let(:empty_metadata) { Woods::Storage::MetadataStore::SQLite.new(':memory:') }
+    let(:empty_metadata) { Woods::Storage::MetadataStore::SQLite.new(database: ':memory:') }
     let(:empty_graph) { Woods::Storage::GraphStore::Memory.new }
 
     let(:empty_executor) do

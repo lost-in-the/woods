@@ -27,31 +27,41 @@ module Woods
         include Interface
 
         TABLE = 'woods_vectors'
+        TABLE_NAME_PATTERN = /\A[a-z_][a-z0-9_]*\z/
+
+        attr_reader :table, :schema, :dimensions
 
         # @param connection [Object] ActiveRecord database connection
         # @param dimensions [Integer] Size of the embedding vectors
-        def initialize(connection:, dimensions:)
+        # @param table [String] PostgreSQL table name
+        def initialize(connection:, dimensions:, table: TABLE, schema: nil)
           @connection = connection
-          @dimensions = dimensions
+          @dimensions = normalize_dimensions(dimensions)
+          @table = table.to_s
+          @schema = schema&.to_s
+          validate_identifier!(:table, @table, table)
+          validate_identifier!(:schema, @schema, schema) if @schema
         end
 
         # Create the pgvector extension, vectors table, and HNSW index.
         #
         # Safe to call multiple times (uses IF NOT EXISTS).
         def ensure_schema!
-          @connection.execute('CREATE EXTENSION IF NOT EXISTS vector')
-          @connection.execute(<<~SQL)
-            CREATE TABLE IF NOT EXISTS #{TABLE} (
-              id TEXT PRIMARY KEY,
-              embedding vector(#{@dimensions}),
-              metadata JSONB DEFAULT '{}',
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-          SQL
-          @connection.execute(<<~SQL)
-            CREATE INDEX IF NOT EXISTS idx_#{TABLE}_embedding_hnsw
-            ON #{TABLE} USING hnsw (embedding vector_cosine_ops)
-          SQL
+          @connection.transaction do
+            @connection.execute('CREATE EXTENSION IF NOT EXISTS vector')
+            @connection.execute(<<~SQL)
+              CREATE TABLE IF NOT EXISTS #{qualified_table} (
+                id TEXT PRIMARY KEY,
+                embedding vector(#{@dimensions}),
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+              )
+            SQL
+            @connection.execute(<<~SQL)
+              CREATE INDEX IF NOT EXISTS idx_#{@table}_embedding_hnsw
+              ON #{qualified_table} USING hnsw (embedding vector_cosine_ops)
+            SQL
+          end
         end
 
         # Store or update a vector with metadata.
@@ -66,7 +76,7 @@ module Woods
           entry = format_entry(id, vector, metadata)
 
           @connection.execute(<<~SQL)
-            INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
+            INSERT INTO #{qualified_table} (id, embedding, metadata, created_at)
             VALUES #{entry}
             ON CONFLICT (id) DO UPDATE SET
               embedding = EXCLUDED.embedding,
@@ -103,7 +113,7 @@ module Woods
           values = entries.map { |entry| format_entry(entry[:id], entry[:vector], entry[:metadata] || {}) }
 
           execute_upsert(<<~SQL, entries)
-            INSERT INTO #{TABLE} (id, embedding, metadata, created_at)
+            INSERT INTO #{qualified_table} (id, embedding, metadata, created_at)
             VALUES #{values.join(",\n")}
             ON CONFLICT (id) DO UPDATE SET
               embedding = EXCLUDED.embedding,
@@ -126,7 +136,7 @@ module Woods
 
           sql = <<~SQL
             SELECT id, embedding <=> '#{vector_literal}' AS distance, metadata
-            FROM #{TABLE}
+            FROM #{qualified_table}
             #{where_clause}
             ORDER BY distance ASC
             LIMIT #{limit.to_i}
@@ -155,16 +165,16 @@ module Woods
             SELECT a.atttypmod AS dimension
             FROM pg_attribute a
             JOIN pg_class c ON c.oid = a.attrelid
-            WHERE c.relname = '#{TABLE}' AND a.attname = 'embedding' AND a.attnum > 0
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = #{@connection.quote(@table)}
+              AND n.nspname = #{schema_sql}
+              AND a.attname = 'embedding' AND a.attnum > 0
           SQL
           row = rows.first
           return nil unless row
 
           dimension = row['dimension'].to_i
           dimension.positive? ? dimension : nil
-        rescue StandardError
-          # Never let a diagnostic query break the pipeline it is diagnosing.
-          nil
         end
 
         # Iterate over every stored id without loading vectors.
@@ -178,29 +188,53 @@ module Woods
         def each_id(&block)
           return enum_for(:each_id) unless block
 
-          rows = @connection.execute("SELECT id FROM #{TABLE}")
+          rows = @connection.execute("SELECT id FROM #{qualified_table}")
           rows.each { |row| yield(row['id']) }
         end
 
         # @see Interface#delete
         def delete(id)
           quoted_id = @connection.quote(id)
-          @connection.execute("DELETE FROM #{TABLE} WHERE id = #{quoted_id}")
+          @connection.execute("DELETE FROM #{qualified_table} WHERE id = #{quoted_id}")
         end
 
         # @see Interface#delete_by_filter
         def delete_by_filter(filters)
           where_clause = build_where(filters)
-          @connection.execute("DELETE FROM #{TABLE} #{where_clause}")
+          @connection.execute("DELETE FROM #{qualified_table} #{where_clause}")
         end
 
         # @see Interface#count
         def count
-          result = @connection.execute("SELECT COUNT(*) AS count FROM #{TABLE}")
+          result = @connection.execute("SELECT COUNT(*) AS count FROM #{qualified_table}")
           result.first['count'].to_i
         end
 
         private
+
+        def normalize_dimensions(value)
+          return value if value.is_a?(Integer) && value.positive?
+
+          raise ArgumentError, 'dimensions must be a positive Integer'
+        end
+
+        def validate_identifier!(name, value, original)
+          return if TABLE_NAME_PATTERN.match?(value)
+
+          raise ArgumentError, "#{name} must be a PostgreSQL identifier, got #{original.inspect}"
+        end
+
+        def quote_identifier(value)
+          @connection.respond_to?(:quote_table_name) ? @connection.quote_table_name(value) : value
+        end
+
+        def qualified_table
+          [@schema, @table].compact.map { |part| quote_identifier(part) }.join('.')
+        end
+
+        def schema_sql
+          @schema ? @connection.quote(@schema) : 'current_schema()'
+        end
 
         # Collapse duplicate ids within a batch, keeping the LAST occurrence
         # of each id (upsert semantics — the final write wins). Duplicates

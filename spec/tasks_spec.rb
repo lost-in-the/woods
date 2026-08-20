@@ -7,7 +7,7 @@ require 'woods/tasks'
 
 RSpec.describe Woods::Tasks do
   describe '.build_embed_indexer' do
-    let(:fake_provider) { instance_double(Woods::Embedding::Provider::Ollama) }
+    let(:fake_provider) { instance_double(Woods::Embedding::Provider::Ollama, dimensions: 384) }
     let(:fake_vector_store) { instance_double(Woods::Storage::VectorStore::InMemory) }
     let(:fake_text_preparer) { instance_double(Woods::Embedding::TextPreparer) }
     let(:fake_chunker) { instance_double(Woods::Chunking::SemanticChunker) }
@@ -85,6 +85,14 @@ RSpec.describe Woods::Tasks do
         .with(fake_provider).and_return(fake_text_preparer)
       expect_any_instance_of(Woods::Builder).to receive(:build_chunker)
         .with(fake_provider).and_return(fake_chunker)
+
+      described_class.build_embed_indexer
+    end
+
+    it 'passes the provider dimensions when constructing the vector store' do
+      allow(fake_provider).to receive(:dimensions).and_return(384)
+      expect_any_instance_of(Woods::Builder).to receive(:build_vector_store)
+        .with(dimensions: 384).and_return(fake_vector_store)
 
       described_class.build_embed_indexer
     end

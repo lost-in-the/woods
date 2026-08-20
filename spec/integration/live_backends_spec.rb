@@ -22,6 +22,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'net/http'
+require 'securerandom'
 require 'uri'
 require 'woods/embedding/fake'
 require 'woods/embedding/indexer'
@@ -44,7 +45,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
   # using a different width would inherit the previous context's column and
   # fail with `expected N dimensions`.
   def reset_pg_schema!(connection, store)
-    connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+    (@pg_cleanup ||= []) << [connection, store.table]
+    connection.execute("DROP TABLE IF EXISTS #{store.table}")
     store.ensure_schema!
   end
 
@@ -52,9 +54,23 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
   # Qdrant filter, which matches nothing rather than everything — so relying on
   # it to clear state leaks points between examples.
   def reset_qdrant_collection!(url, collection, dimensions, store)
+    (@qdrant_cleanup ||= []) << [url, collection]
     uri = URI.parse("#{url}/collections/#{collection}")
     Net::HTTP.start(uri.host, uri.port) { |http| http.request(Net::HTTP::Delete.new(uri.request_uri)) }
     store.ensure_collection!(dimensions: dimensions)
+  end
+
+  after do
+    Array(@qdrant_cleanup).each do |url, collection|
+      uri = URI.parse("#{url}/collections/#{collection}")
+      Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https') do |http|
+        http.request(Net::HTTP::Delete.new(uri.request_uri))
+      end
+    end
+
+    Array(@pg_cleanup).each do |connection, table|
+      connection.execute("DROP TABLE IF EXISTS #{table}")
+    end
   end
 
   describe 'pgvector against a real PostgreSQL' do
@@ -68,7 +84,10 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       )
       ActiveRecord::Base.connection
     end
-    let(:store) { Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3) }
+    let(:table) { "woods_vectors_#{SecureRandom.hex(8)}" }
+    let(:store) do
+      Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3, table: table)
+    end
 
     before { reset_pg_schema!(connection, store) }
 
@@ -149,11 +168,31 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
 
       expect(store.count).to eq(0)
     end
+
+    it 'rolls a successful write back with its surrounding transaction' do
+      connection.transaction do
+        store.store('User', vec(1, 0, 0), type: 'model')
+        raise ActiveRecord::Rollback
+      end
+
+      expect(store.count).to eq(0)
+    end
+
+    it 'surfaces a read-only transaction error without retaining a partial write' do
+      expect do
+        connection.transaction do
+          connection.execute('SET TRANSACTION READ ONLY')
+          store.store('User', vec(1, 0, 0), type: 'model')
+        end
+      end.to raise_error(ActiveRecord::StatementInvalid, /read-only transaction/i)
+
+      expect(store.count).to eq(0)
+    end
   end
 
   describe 'Qdrant against a real server' do
     let(:qdrant_url) { ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333') }
-    let(:collection) { "woods_live_#{ENV.fetch('GITHUB_RUN_ID', 'local')}" }
+    let(:collection) { "woods_live_#{SecureRandom.hex(8)}" }
     let(:store) do
       Woods::Storage::VectorStore::Qdrant.new(
         url: qdrant_url,
@@ -240,7 +279,11 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       ActiveRecord::Base.connection
     end
     let(:vector_store) do
-      Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: dims)
+      Woods::Storage::VectorStore::Pgvector.new(
+        connection: connection,
+        dimensions: dims,
+        table: "woods_vectors_#{SecureRandom.hex(8)}"
+      )
     end
 
     let(:unit_hashes) do
@@ -362,7 +405,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
 
       # Wipe the store but keep the checkpoint — exactly what pointing
       # vector_store at a fresh pgvector database looks like.
-      connection.execute("TRUNCATE #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+      connection.execute("TRUNCATE #{vector_store.table}")
 
       stats = build_indexer.index_incremental
 
@@ -381,16 +424,16 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
       )
       connection = ActiveRecord::Base.connection
-      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384)
-      connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
-      store.ensure_schema!
+      table = "woods_vectors_dims_#{SecureRandom.hex(8)}"
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384, table: table)
+      reset_pg_schema!(connection, store)
 
       expect(store.stored_dimensions).to eq(384)
 
       # The mismatch this exists to catch: ensure_schema! is CREATE TABLE IF
       # NOT EXISTS, so a differently-configured store leaves the old width in
       # place rather than migrating it.
-      wider = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 768)
+      wider = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 768, table: table)
       wider.ensure_schema!
 
       expect(wider.stored_dimensions).to eq(384)
@@ -403,15 +446,15 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
       )
       connection = ActiveRecord::Base.connection
-      connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
-      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384)
+      table = "woods_vectors_absent_#{SecureRandom.hex(8)}"
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384, table: table)
 
       expect(store.stored_dimensions).to be_nil
     end
 
     it 'reports the width the Qdrant collection was created with' do
       url = ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333')
-      collection = "woods_live_dims_#{ENV.fetch('GITHUB_RUN_ID', 'local')}"
+      collection = "woods_live_dims_#{SecureRandom.hex(8)}"
       store = Woods::Storage::VectorStore::Qdrant.new(
         url: url, collection: collection, dimensions: 384, allow_private_hosts: true
       )
@@ -423,7 +466,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     it 'returns nil for a Qdrant collection that does not exist' do
       store = Woods::Storage::VectorStore::Qdrant.new(
         url: ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'),
-        collection: 'woods_live_definitely_absent', dimensions: 3, allow_private_hosts: true
+        collection: "woods_live_absent_#{SecureRandom.hex(8)}", dimensions: 3, allow_private_hosts: true
       )
 
       expect(store.stored_dimensions).to be_nil
@@ -437,7 +480,11 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
       )
       connection = ActiveRecord::Base.connection
-      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3)
+      store = Woods::Storage::VectorStore::Pgvector.new(
+        connection: connection,
+        dimensions: 3,
+        table: "woods_vectors_ids_#{SecureRandom.hex(8)}"
+      )
       reset_pg_schema!(connection, store)
 
       store.store_batch(
@@ -454,7 +501,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     # payload — otherwise reconciliation would compare UUIDs against Woods
     # identifiers, conclude everything vanished, and delete the whole index.
     it 'enumerates Qdrant ids as Woods identifiers, not point ids' do
-      collection = "woods_live_ids_#{ENV.fetch('GITHUB_RUN_ID', 'local')}"
+      collection = "woods_live_ids_#{SecureRandom.hex(8)}"
       store = Woods::Storage::VectorStore::Qdrant.new(
         url: ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'),
         collection: collection, dimensions: 3, allow_private_hosts: true
@@ -472,7 +519,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
 
     it 'pages through more than one scroll page' do
-      collection = "woods_live_paging_#{ENV.fetch('GITHUB_RUN_ID', 'local')}"
+      collection = "woods_live_paging_#{SecureRandom.hex(8)}"
       store = Woods::Storage::VectorStore::Qdrant.new(
         url: ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333'),
         collection: collection, dimensions: 3, allow_private_hosts: true

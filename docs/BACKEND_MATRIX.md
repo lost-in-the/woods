@@ -68,10 +68,20 @@ The vector store you can use depends on the primary database your Rails app uses
 **Configuration:**
 ```ruby
 config.vector_store = :pgvector
-config.vector_store_connection = ENV["DATABASE_URL"]
-# Or separate database:
-config.vector_store_connection = ENV["VECTOR_DATABASE_URL"]
+# pgvector needs a live PostgreSQL connection object (not a URL string).
+# When your app runs on PostgreSQL, reuse its connection:
+config.vector_store_options = { connection: ActiveRecord::Base.connection }
+
+# Dedicated vector database — e.g. a MySQL app pointing at a separate
+# PostgreSQL store — via an abstract class that owns its own connection:
+# class VectorDatabase < ActiveRecord::Base
+#   self.abstract_class = true
+#   establish_connection(ENV.fetch("VECTOR_DATABASE_URL"))
+# end
+# config.vector_store_options = { connection: VectorDatabase.connection }
 ```
+
+`vector_store_options` also accepts `:table` and `:schema` (both optional); `:dimensions` is inferred from the embedding provider. `Builder#build_pgvector_store` requires `vector_store_options[:connection]` and raises if it is missing.
 
 **Schema:**
 ```sql
@@ -136,11 +146,28 @@ config.vector_store_options = {
   collection: "woods",
   api_key:    ENV["QDRANT_API_KEY"],  # optional; omit for unauthenticated local instances
   dimensions: 1_536,                  # optional; pre-validates vector length client-side
+  distance:   "Cosine",               # Cosine, Dot, Euclid, or Manhattan; verified on reopen
   allow_private_hosts: true           # required for localhost/RFC1918 URLs — the SSRF guard blocks them by default
 }
 ```
 
 The adapter constructor takes these as keyword arguments (`Woods::Storage::VectorStore::Qdrant`); `Builder#build_vector_store` splats `vector_store_options` straight into it. Works identically whether your application database is MySQL or PostgreSQL — Qdrant is a separate service either way.
+
+When an installed `woods-mcp` process reopens `woods.json` without the host
+initializer, non-secret options such as collection, distance, table, schema,
+and dimensions come from the snapshot. Credentials and process-specific
+connections remain serve-time settings:
+
+- `OPENAI_API_KEY` supplies the embedding credential for OpenAI snapshots.
+- Qdrant endpoint URLs and API keys are never stored in `woods.json`.
+  `WOODS_QDRANT_URL` is required when serving a Qdrant index;
+  `WOODS_QDRANT_API_KEY` is optional, and `WOODS_QDRANT_COLLECTION` supplies a
+  collection only when the snapshot does not record one.
+- `WOODS_PG_URL` is required to construct the Active Record connection for a
+  pgvector snapshot outside its host application.
+
+SQLite metadata is always reopened as `metadata.sqlite3` beneath the supplied
+index directory, never relative to the MCP process working directory.
 
 **Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point
 id, so the adapter cannot store a Woods identifier directly. It derives a
@@ -229,6 +256,13 @@ config.vector_store_index = "woods"
 
 ### SQLite-vss / FAISS (Local)
 
+> **Status: planned, not yet implemented.** There is no `:sqlite_faiss`
+> adapter in the shipped gem — the only vector stores `Builder#build_vector_store`
+> accepts are `:in_memory`, `:pgvector`, and `:qdrant`. Setting
+> `config.vector_store = :sqlite_faiss` raises `ArgumentError: Unknown
+> vector_store`. For a zero-dependency local setup today, use `:in_memory`
+> (the `:local` preset). The section below documents the design target.
+
 **What it is:** File-based vector search using SQLite for metadata and FAISS for vector operations.
 
 **Best for:** Local development, zero-dependency setups, evaluation, single-developer use.
@@ -247,10 +281,10 @@ config.vector_store_index = "woods"
 - Limited filtering capabilities
 - No built-in persistence management for FAISS
 
-**Configuration:**
+**Configuration (design target — not runnable today):**
 ```ruby
-config.vector_store = :sqlite_faiss
-# Automatically uses output_dir for storage
+# Planned. Not accepted by the current Builder; use :in_memory instead.
+config.vector_store = :in_memory   # the shipped zero-dependency local store
 ```
 
 **When to use:** Getting started, local development, evaluation, CI testing.

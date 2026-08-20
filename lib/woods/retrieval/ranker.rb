@@ -145,6 +145,13 @@ module Woods
 
       # Compute RRF scores across all sources.
       #
+      # Keyed on the chunk-stripped BASE identifier ({#base_identifier}),
+      # not the raw candidate identifier: a chunked unit's vector hit
+      # arrives as `Identifier#chunk_N` while its keyword hit arrives as
+      # the bare `Identifier` — keying on the raw id treated those as two
+      # unrelated identifiers and they never fused, so chunked corpora
+      # (rails_source-heavy hosts) got zero RRF benefit from hybrid search.
+      #
       # Also accumulates per-identifier metadata (first non-nil wins) and
       # matched fields (union across sources) so the merged candidate keeps
       # the keyword signal — dropping +matched_fields+ here would kill
@@ -160,10 +167,11 @@ module Woods
         candidates.group_by(&:source).each_value do |source_candidates|
           ranked = source_candidates.sort_by { |c| -c.score }
           ranked.each_with_index do |candidate, idx|
+            base_id = base_identifier(candidate.identifier)
             # RRF is 1-based (Cormack et al., 2009): top-ranked doc uses rank 1, not 0.
-            rrf_scores[candidate.identifier] += 1.0 / (RRF_K + idx + 1)
-            metadata_map[candidate.identifier] ||= candidate.metadata
-            merge_matched_fields(matched_fields_map, candidate)
+            rrf_scores[base_id] += 1.0 / (RRF_K + idx + 1)
+            metadata_map[base_id] ||= candidate.metadata
+            merge_matched_fields(matched_fields_map, base_id, candidate)
           end
         end
 
@@ -173,13 +181,14 @@ module Woods
       # Union a candidate's matched fields into the per-identifier map.
       #
       # @param matched_fields_map [Hash{String => Array<String>}] Accumulator (mutated)
+      # @param identifier [String] Chunk-stripped base identifier to accumulate under
       # @param candidate [Candidate]
       # @return [void]
-      def merge_matched_fields(matched_fields_map, candidate)
+      def merge_matched_fields(matched_fields_map, identifier, candidate)
         fields = candidate.respond_to?(:matched_fields) ? candidate.matched_fields : nil
         return unless fields
 
-        matched_fields_map[candidate.identifier] = (matched_fields_map[candidate.identifier] || []) | fields
+        matched_fields_map[identifier] = (matched_fields_map[identifier] || []) | fields
       end
 
       # Min-max normalize a score map to the 0.0–1.0 range.
@@ -200,6 +209,12 @@ module Woods
 
       # Rebuild candidates with merged (normalized) RRF scores.
       #
+      # +identifier+ in +rrf_scores+ is already the chunk-stripped base
+      # identifier (see {#compute_rrf_scores}) — the merged Candidate is
+      # built under that base id, which is also what {#score_candidates}
+      # looks metadata up by, so a fused chunk/base pair scores and
+      # displays as the single unit it represents.
+      #
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map, matched_fields_map)
         # Plain-Ruby `index_by` substitute — the ActiveSupport version
@@ -209,7 +224,7 @@ module Woods
         # final source a given identifier appeared in (relevant when
         # observability/debug tools read `.source` on an RRF result).
         original_by_id = {}
-        candidates.each { |c| original_by_id[c.identifier] = c }
+        candidates.each { |c| original_by_id[base_identifier(c.identifier)] = c }
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(

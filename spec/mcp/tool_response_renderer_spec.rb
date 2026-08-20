@@ -45,6 +45,56 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
     end
   end
 
+  describe 'semantic equivalence across formats' do
+    it 'preserves the same material facts in JSON, Markdown, plain, and Claude output' do
+      cases = {
+        lookup: [unit_fixture, ['Post', 'model', 'app/models/post.rb', 'has_many :comments']],
+        search: [search_fixture.merge('partial' => true, 'note' => 'scan capped'),
+                 ['Post', 'PostsController', '2', 'partial', 'scan capped']],
+        dependencies: [traversal_fixture, %w[Comment Post]],
+        dependents: [traversal_fixture.merge('root' => 'Post'), %w[Post Comment]],
+        structure: [structure_fixture, ['8.1.2', 'abc1234', 'models', '2']],
+        graph_analysis: [graph_analysis_fixture.merge('hubs_total' => 10, 'hubs_truncated' => true),
+                         %w[PostsController Post 10 truncated]],
+        domain_clusters: [domain_clusters_fixture, %w[Billing Invoice PaymentService 2]],
+        pagerank: [pagerank_fixture, ['Post', '0.5', '3']],
+        framework: [framework_fixture, ['ActiveRecord', 'ActiveRecord::Base', 'rails_source']],
+        recent_changes: [recent_changes_fixture, ['Post', '2026-01-15', 'dev@example.com']],
+        trace_flow: [trace_flow_fixture, ['PostsController#create', '/posts', 'Post', 'create!']]
+      }
+
+      aggregate_failures do
+        cases.each do |tool, (payload, facts)|
+          described_class::VALID_FORMATS.each do |format|
+            output = described_class.for(format).render(tool, payload)
+            expect(output).to be_a(String), "#{tool}/#{format}"
+            facts.each { |fact| expect(output).to include(fact), "#{tool}/#{format}: #{fact}" }
+          end
+        end
+      end
+    end
+
+    it 'preserves search match fields and graph pagination offsets in every format' do
+      search = search_fixture
+      search['results'][0]['match_field'] = 'source_code'
+      graph = graph_analysis_fixture.merge(
+        'hubs_total' => 9,
+        'hubs_truncated' => true,
+        'hubs_offset' => 2
+      )
+
+      aggregate_failures do
+        described_class::VALID_FORMATS.each do |format|
+          search_output = described_class.for(format).render(:search, search)
+          graph_output = described_class.for(format).render(:graph_analysis, graph)
+          expect(search_output).to include('source_code'), "search/#{format}"
+          expect(graph_output).to include('offset'), "graph_analysis/#{format}"
+          expect(graph_output).to include('2'), "graph_analysis/#{format}"
+        end
+      end
+    end
+  end
+
   # ── JSON Renderer ──────────────────────────────────────────────────
 
   describe Woods::MCP::Renderers::JsonRenderer do
@@ -415,6 +465,66 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
         { 'identifier' => 'Post', 'type' => 'model', 'score' => 0.5 },
         { 'identifier' => 'Comment', 'type' => 'model', 'score' => 0.3 },
         { 'identifier' => 'PostsController', 'type' => 'controller', 'score' => 0.2 }
+      ]
+    }
+  end
+
+  def domain_clusters_fixture
+    {
+      'total' => 2,
+      'clusters' => [
+        {
+          'name' => 'Billing',
+          'member_count' => 2,
+          'hub' => 'PaymentService',
+          'types' => { 'model' => 1, 'service' => 1 },
+          'members' => %w[Invoice PaymentService]
+        }
+      ]
+    }
+  end
+
+  def framework_fixture
+    {
+      'keyword' => 'ActiveRecord',
+      'result_count' => 1,
+      'results' => [
+        {
+          'identifier' => 'ActiveRecord::Base',
+          'type' => 'rails_source',
+          'file_path' => 'activerecord/lib/active_record/base.rb'
+        }
+      ]
+    }
+  end
+
+  def recent_changes_fixture
+    {
+      'result_count' => 1,
+      'results' => [
+        {
+          'identifier' => 'Post',
+          'type' => 'model',
+          'last_modified' => '2026-01-15',
+          'author' => 'dev@example.com'
+        }
+      ]
+    }
+  end
+
+  def trace_flow_fixture
+    {
+      'entry_point' => 'PostsController#create',
+      'route' => { 'verb' => 'POST', 'path' => '/posts' },
+      'max_depth' => 3,
+      'generated_at' => '2026-08-20T00:00:00Z',
+      'steps' => [
+        {
+          'unit' => 'PostsController#create',
+          'type' => 'controller',
+          'file_path' => 'app/controllers/posts_controller.rb',
+          'operations' => [{ 'type' => 'call', 'target' => 'Post', 'method' => 'create!', 'line' => 7 }]
+        }
       ]
     }
   end

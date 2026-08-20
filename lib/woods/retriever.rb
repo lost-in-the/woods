@@ -12,6 +12,15 @@ require_relative 'embedding/token_counter'
 require_relative 'token_utils'
 
 module Woods
+  # Raised by {Retriever#retrieve} when +query+ fails the validation
+  # boundary at the top of the pipeline: nil, blank, non-String, or over
+  # {Retriever::MAX_QUERY_BYTES}. One shared boundary for every strategy
+  # (keyword/vector/graph/hybrid) — pre-fix, a blank query surfaced as a
+  # raw provider ArgumentError, and only on the vector path; the other
+  # strategies tolerated it silently, and an oversized query went to the
+  # provider verbatim to fail as an opaque 400.
+  class InvalidQueryError < Error; end
+
   # Retriever orchestrates the full retrieval pipeline: classify, execute,
   # rank, and assemble context from a natural language query.
   #
@@ -50,8 +59,14 @@ module Woods
     ).freeze
 
     # Diagnostic trace for retrieval quality analysis.
+    #
+    # +skipped_missing_metadata+ carries {Retrieval::ContextAssembler}'s count
+    # of candidates dropped because the metadata store had no record for
+    # their identifier (a stale vector). See +RetrievalResult+'s docstring
+    # for how callers should read it alongside +sources+.
     RetrievalTrace = Struct.new(:classification, :strategy, :candidate_count,
                                 :ranked_count, :tokens_used, :elapsed_ms,
+                                :skipped_missing_metadata,
                                 keyword_init: true)
 
     # The result of a retrieval operation.
@@ -183,6 +198,16 @@ module Woods
     CHUNK_SUFFIX_PATTERN = /#chunk_\d+\z/
     private_constant :CHUNK_SUFFIX_PATTERN
 
+    # Maximum query size accepted by {#retrieve}, in bytes.
+    #
+    # Configuration/ResolvedConfig have no existing query-length knob
+    # (checked both) — +max_context_tokens+ bounds assembled OUTPUT
+    # context, not the input query. ~8KB comfortably covers any
+    # legitimate natural-language query and fails fast, in-process,
+    # instead of round-tripping an oversized string to an embedding or
+    # metadata provider just to get a 400 back.
+    MAX_QUERY_BYTES = 8 * 1024
+
     # Execute the full retrieval pipeline for a natural language query.
     #
     # Pipeline: classify -> execute -> rank -> filter -> (fallback within-type
@@ -200,6 +225,7 @@ module Woods
     #   exclude. Applied on top of DEFAULT_EXCLUDE_TYPES unless +types:+ is set.
     # @return [RetrievalResult] Complete retrieval result
     def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
+      validate_query!(query)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       classification = @classifier.classify(query)
       execution_result = @executor.execute(query: query, classification: classification)
@@ -221,6 +247,19 @@ module Woods
     end
 
     private
+
+    # Validate +query+ before any classify/execute/rank work happens.
+    #
+    # @param query [Object] The caller-supplied query
+    # @raise [InvalidQueryError] nil, non-String, blank, or over {MAX_QUERY_BYTES}
+    # @return [void]
+    def validate_query!(query)
+      raise InvalidQueryError, "query must be a String, got #{query.class}" unless query.is_a?(String)
+      raise InvalidQueryError, 'query cannot be blank' if query.strip.empty?
+      return unless query.bytesize > MAX_QUERY_BYTES
+
+      raise InvalidQueryError, "query exceeds max size of #{MAX_QUERY_BYTES} bytes (got #{query.bytesize})"
+    end
 
     # Filter ranked candidates by type, using an include-list when +types+
     # is set and an exclude-list otherwise (default: +DEFAULT_EXCLUDE_TYPES+,
@@ -357,7 +396,8 @@ module Woods
         candidate_count: execution_result.candidates.size,
         ranked_count: filtered.size,
         tokens_used: assembled.tokens_used,
-        elapsed_ms: elapsed_ms
+        elapsed_ms: elapsed_ms,
+        skipped_missing_metadata: assembled.skipped_missing_metadata.to_i
       )
     end
 

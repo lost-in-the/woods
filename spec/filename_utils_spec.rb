@@ -30,7 +30,27 @@ RSpec.describe Woods::FilenameUtils do
       controller, action = 'SessionsController#sign_in!'.split('#', 2)
       reader_name = described_class.flow_filename(controller, action)
       expect(writer_name).to eq(reader_name)
-      expect(writer_name).to eq('SessionsController_sign_in_.json')
+      # sign_in! is a lossy sanitization (! is stripped) so a digest is
+      # appended — see the collision-safety spec below.
+      expect(writer_name).to match(/\ASessionsController_sign_in__[0-9a-f]{8}\.json\z/)
+    end
+
+    it 'keeps the plain name when neither segment lost information' do
+      expect(described_class.flow_filename('PostsController', 'create'))
+        .to eq('PostsController_create.json')
+    end
+
+    it 'disambiguates two entry points that sanitize to the same segment (P1)' do
+      # FooController#bar.baz and FooController#bar_baz both safe_segment to
+      # "bar_baz" — without a digest the second write clobbers the first and
+      # flow_index.json points both entries at one file.
+      dotted = described_class.flow_filename('FooController', 'bar.baz')
+      underscored = described_class.flow_filename('FooController', 'bar_baz')
+
+      expect(dotted).not_to eq(underscored)
+      # The lossless one keeps its pretty name; only the lossy one is digested.
+      expect(underscored).to eq('FooController_bar_baz.json')
+      expect(dotted).to match(/\AFooController_bar_baz_[0-9a-f]{8}\.json\z/)
     end
   end
 

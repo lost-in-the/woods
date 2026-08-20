@@ -156,7 +156,7 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
       allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
     end
 
-    it 'isolates extractor failures without crashing other threads' do
+    it 'fails the run closed when one extractor thread raises' do
       Woods.configure { |c| c.concurrent_extraction = true }
 
       Woods::Extractor::EXTRACTORS.each do |type, klass|
@@ -169,12 +169,11 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
         end
       end
 
-      results = extractor.extract_all
-
-      # Models should have empty results (error caught), not crash the whole extraction
-      expect(results[:models]).to eq([])
-      # Other extractors should still succeed
-      expect(results[:services]).to eq([])
+      # Matching sequential behavior: a failed type aborts the run before
+      # anything registers or publishes, instead of substituting [] and
+      # letting a partial index ship as a complete generation.
+      expect { extractor.extract_all }
+        .to raise_error(Woods::ExtractionError, /models/)
     end
   end
 end

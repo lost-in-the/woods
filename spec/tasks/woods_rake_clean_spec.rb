@@ -90,6 +90,9 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
 
         expect(Object.new.send(:woods_clean_index, dir, wait: 0)).to eq(:cleaned)
         expect(Dir.exist?(dir)).to be(false)
+        # The guard now lives inside the lock directory (no sibling artifact),
+        # so a full clean removes it with the directory.
+        expect(File.exist?("#{dir}.extraction.lock.guard")).to be(false)
       end
     end
 

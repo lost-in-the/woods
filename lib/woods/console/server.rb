@@ -22,15 +22,24 @@ require_relative 'dispatch_pipeline'
 require_relative 'tool_specs'
 
 module Woods
+  # Same conditional-define pattern used elsewhere in the gem (e.g.
+  # Storage::MetadataStore) so this file can be required in isolation
+  # without tripping NameError on the raise in Server.build below.
+  class Error < StandardError; end unless defined?(Woods::Error)
+  class ConfigurationError < Error; end unless defined?(Woods::ConfigurationError)
+
   module Console
     # Console MCP Server — queries live Rails application state.
     #
-    # Communicates with a bridge process running inside the Rails environment
-    # via JSON-lines over stdio. Exposes 31 tools across 4 tiers
-    # (9 read-only / 9 domain-aware / 10 analytics / 3 guarded) through MCP.
+    # Executes against a booted Rails application. The default embedded mode
+    # exposes 9 Tier 1 tools; explicit read-tool mode adds console_sql and
+    # console_query. The full 31-tool catalogue remains inventory-only.
     #
     # @example
-    #   server = Woods::Console::Server.build(config: config)
+    #   server = Woods::Console::Server.build_embedded(
+    #     model_validator: validator,
+    #     safe_context: safe_context
+    #   )
     #   transport = MCP::Server::Transports::StdioTransport.new(server)
     #   transport.open
     #
@@ -43,13 +52,8 @@ module Woods
         # changes are deployed. The swap is atomic on MRI (GVL) — in-flight scans see
         # either the old or the new index, never a partial one.
         #
-        # Returns nil when:
-        # - `console_credential_defense_enabled` is false
-        # - No server has been built yet in this process (`build` / `build_embedded`
-        #   have not been called)
-        #
-        # Existing callers of `build` / `build_embedded` are unaffected — this is an
-        # additive class method with no required arguments beyond `rails_app`.
+        # Returns nil when credential defense is disabled or no embedded server
+        # has been built yet in this process.
         #
         # @param rails_app [#credentials] The Rails application to re-read.
         #   Defaults to `Rails.application` when `Rails` is defined, otherwise
@@ -74,16 +78,8 @@ module Woods
           config&.console_credential_defense_enabled ? true : false
         end
 
-        # True when the caller has opted into the unsafe `console_eval`
-        # scaffolding via `WOODS_CONSOLE_UNSAFE_EVAL=true` or an explicit
-        # `config.console_unsafe_eval_enabled = true`. Explicit config wins
-        # over the env var in both directions.
-        #
-        # NOTE: returning true here does not by itself execute anything —
-        # this predicate gates whether Server.build_embedded wires the
-        # EmbeddedExecutor eval path (EvalGuard -> Confirmation ->
-        # SafeContext -> timeout -> AuditLogger), governs the boot-time
-        # banner, and drives the production-environment refusal below.
+        # True when legacy configuration requests the unsupported eval path.
+        # Explicit config wins over the environment in both directions.
         #
         # @return [Boolean]
         def unsafe_eval_enabled?
@@ -94,29 +90,13 @@ module Woods
           ENV['WOODS_CONSOLE_UNSAFE_EVAL'] == 'true'
         end
 
-        # Enforce the `console_eval` opt-in safety contract at boot.
-        #
-        # When `WOODS_CONSOLE_UNSAFE_EVAL` is on:
-        # - refuse outright in `Rails.env.production?` (non-negotiable),
-        # - otherwise emit a LOUD stderr banner so operators know the flag
-        #   is live even though eval remains unimplemented.
-        #
-        # Safe when Rails is not loaded (specs, non-Rails hosts).
-        #
-        # @return [void]
-        # @raise [Woods::ConfigurationError] when the flag is on in production.
-        def enforce_unsafe_eval_contract!
-          return unless unsafe_eval_enabled?
+        # Fail closed because no supported MCP mode registers console_eval.
+        def enforce_unsafe_eval_contract!(legacy_options_present: false)
+          return unless unsafe_eval_enabled? || legacy_options_present
 
-          if defined?(Rails) && Rails.respond_to?(:env) && Rails.env.respond_to?(:production?) &&
-             Rails.env.production?
-            raise Woods::ConfigurationError,
-                  'WOODS_CONSOLE_UNSAFE_EVAL is set but Rails.env.production? is true. ' \
-                  'console_eval cannot be opted into in production. Unset the flag or ' \
-                  'restart in a non-production environment.'
-          end
-
-          warn unsafe_eval_banner
+          raise Woods::ConfigurationError,
+                'WOODS_CONSOLE_UNSAFE_EVAL is set, but console_eval is not available in a ' \
+                'supported Console MCP mode. Unset the flag; use console_query or console_sql.'
         end
 
         # Resolves `Rails.application` when available, else nil.
@@ -126,36 +106,15 @@ module Woods
           Rails.application
         end
 
-        # Build a configured MCP::Server with console tools using the bridge protocol.
-        #
-        # ⚠ Layer 1 limitation in bridge mode:
-        # The server side of the bridge has no access to the remote app's
-        # `ActiveRecord::Base.descendants`, so model_tables and model_reflections
-        # are empty. `TableGate#check_sql!` still fires against the raw SQL
-        # argument of `console_sql`, but `check_model!`, `check_joins!`, and
-        # `check_association!` are effectively no-ops for tools that receive a
-        # model name rather than SQL (find, sample, count, etc.). A bridge-mode
-        # deployment therefore relies on Layer 2 (credential scanning) + Layer 3
-        # (column/EAV redaction) + Layer 4 (SqlValidator + SafeContext rollback)
-        # for non-SQL tool calls. If you need full Layer 1 coverage, use
-        # `build_embedded` (the stdio entry point `exe/woods-console` does this).
-        #
-        # See docs/CONSOLE_MCP_SETUP.md "Bridge vs. embedded defense coverage"
-        # for the full matrix.
-        #
+        # The former JSON-lines bridge never executed live queries. Keep this
+        # entry point fail-closed so legacy callers cannot receive fabricated
+        # empty responses.
         # @param config [Hash] Configuration hash (from YAML or env)
-        # @return [MCP::Server] Configured server ready for transport
-        def build(config:)
-          connection_config = config['console'] || config
-          conn_mgr = ConnectionManager.new(config: connection_config)
-          redacted_columns = Array(config['redacted_columns'] || connection_config['redacted_columns'])
-          redacted_key_values = Array(
-            config['redacted_key_values'] || connection_config['redacted_key_values']
-          )
-          safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
-          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: {}, model_reflections: {})
-
-          build_server(conn_mgr, ctx)
+        # @raise [Woods::ConfigurationError] always
+        def build(config:) # rubocop:disable Lint/UnusedMethodArgument
+          raise Woods::ConfigurationError,
+                'The JSON-lines Console bridge is not supported. Use Server.build_embedded, ' \
+                'rake woods:console, or Woods::Console::RackMiddleware.'
         end
 
         # Build a configured MCP::Server using embedded ActiveRecord execution.
@@ -170,11 +129,9 @@ module Woods
         #   {key_column:, value_column:, sensitive_keys: []}. See SafeContext for semantics.
         # @param connection [Object, nil] Database connection for adapter detection
         # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
-        # @param unsafe_eval_confirmation [Confirmation, nil] Approval callback for
-        #   `console_eval`. Required when the opt-in is on; the server refuses to
-        #   boot without it. Ignored when the opt-in is off.
-        # @param unsafe_eval_audit_log_path [String, Pathname, nil] JSONL audit log
-        #   path for `console_eval`. Required when the opt-in is on.
+        # @param unsafe_eval_confirmation [Confirmation, nil] Retained for API compatibility;
+        #   no supported mode registers console_eval.
+        # @param unsafe_eval_audit_log_path [String, Pathname, nil] Retained for API compatibility.
         # @return [MCP::Server] Configured server ready for transport
         def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists
                            redacted_key_values: [], connection: nil,
@@ -183,142 +140,32 @@ module Woods
                            unsafe_eval_confirmation: nil,
                            unsafe_eval_audit_log_path: nil)
           require_relative 'embedded_executor'
-          enforce_unsafe_eval_contract!
+          enforce_unsafe_eval_contract!(
+            legacy_options_present: unsafe_eval_confirmation || unsafe_eval_audit_log_path
+          )
 
           safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
           ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables,
                                        model_reflections: model_reflections)
 
-          eval_wiring = build_unsafe_eval_wiring(
-            confirmation: unsafe_eval_confirmation,
-            audit_log_path: unsafe_eval_audit_log_path
-          )
-
           # Wire the same TableGate into the executor so sql/query are blocked
           # PRE-execution against console_blocked_tables (previously TableGate
           # was only consulted on the render path, leaving the defense inert
           # for the sql and query tools).
-          table_gate = ctx&.table_gate
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_context,
             connection: connection, read_tools_enabled: read_tools_enabled,
-            table_gate: table_gate,
-            eval_guard: eval_wiring[:eval_guard],
-            confirmation: eval_wiring[:confirmation],
-            audit_logger: eval_wiring[:audit_logger],
-            unsafe_eval_enabled: eval_wiring[:unsafe_eval_enabled]
+            table_gate: ctx&.table_gate
           )
 
-          build_server(executor, ctx)
+          mode = read_tools_enabled ? :embedded_read : :embedded
+          build_server(executor, ctx, tool_names: executable_tool_names(mode))
         end
 
-        # Resolve the three-collaborator eval wiring for the current config.
-        #
-        # When `unsafe_eval_enabled?` is false (default), returns nil for all
-        # three collaborators — the executor keeps its hard refusal and
-        # EvalGuard is never reached.
-        #
-        # When it's true, BOTH a {Confirmation} and an audit-log path MUST be
-        # provided (via kwargs or config); otherwise we raise so a
-        # misconfigured host fails at boot instead of silently running Ruby
-        # without approval or audit. See backlog B-053.
-        #
-        # @param confirmation [Confirmation, nil] Explicit kwarg wins over
-        #   `config.console_unsafe_eval_confirmation`.
-        # @param audit_log_path [String, Pathname, nil] Explicit kwarg wins
-        #   over `config.console_unsafe_eval_audit_log_path`.
-        # @return [Hash] { eval_guard:, confirmation:, audit_logger:, unsafe_eval_enabled: }
-        # @raise [Woods::ConfigurationError] when opt-in is on but either
-        #   collaborator is missing.
-        def build_unsafe_eval_wiring(confirmation:, audit_log_path:)
-          return empty_unsafe_eval_wiring unless unsafe_eval_enabled?
-
-          config = Woods.configuration if Woods.respond_to?(:configuration)
-          confirmation ||= config&.console_unsafe_eval_confirmation
-          audit_log_path ||= config&.console_unsafe_eval_audit_log_path
-          require_unsafe_eval_collaborators!(confirmation, audit_log_path)
-
-          {
-            eval_guard: EvalGuard.new,
-            confirmation: confirmation,
-            audit_logger: AuditLogger.new(path: audit_log_path.to_s),
-            unsafe_eval_enabled: true
-          }
-        end
-
-        def empty_unsafe_eval_wiring
-          { eval_guard: nil, confirmation: nil, audit_logger: nil, unsafe_eval_enabled: false }
-        end
-
-        def require_unsafe_eval_collaborators!(confirmation, audit_log_path)
-          if confirmation.nil?
-            raise Woods::ConfigurationError,
-                  'WOODS_CONSOLE_UNSAFE_EVAL is set but no Confirmation was provided. ' \
-                  'Pass `unsafe_eval_confirmation:` to Server.build_embedded / RackMiddleware ' \
-                  'or set `config.console_unsafe_eval_confirmation`. Fail-closed by design — ' \
-                  'see backlog B-053 / docs/CONSOLE_MCP_SETUP.md.'
-          end
-          return unless audit_log_path.nil? || audit_log_path.to_s.strip.empty?
-
-          raise Woods::ConfigurationError,
-                'WOODS_CONSOLE_UNSAFE_EVAL is set but no audit-log path was provided. ' \
-                'Pass `unsafe_eval_audit_log_path:` to Server.build_embedded / RackMiddleware ' \
-                'or set `config.console_unsafe_eval_audit_log_path`. Every console_eval run ' \
-                'must be audited.'
-        end
-
-        # Register all tool specs for a given tier on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context bundling response-safety layers
-        # @param tier [Integer] Tier number (1-4)
-        # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
-        # @return [void]
-        def register_tier_tools(server, conn_mgr, ctx, tier:, renderer: nil)
-          TOOL_SPECS.select { |spec| spec.tier == tier }.each do |spec|
-            register(spec, server, conn_mgr, ctx, renderer: renderer)
-          end
-        end
-
-        # Register Tier 1 read-only tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier1_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 1, renderer: renderer)
-        end
-
-        # Register Tier 2 domain-aware tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier2_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 2, renderer: renderer)
-        end
-
-        # Register Tier 3 analytics tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier3_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 3, renderer: renderer)
-        end
-
-        # Register Tier 4 guarded tools on the server.
-        #
-        # @param server [MCP::Server] The MCP server instance
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Request executor
-        # @param ctx [ResponseContext, nil] Optional context for column redaction
-        # @return [void]
-        def register_tier4_tools(server, conn_mgr, ctx = nil, renderer: nil)
-          register_tier_tools(server, conn_mgr, ctx, tier: 4, renderer: renderer)
+        # Resolve the exact tool list for a supported embedded mode from the
+        # same matrix used by tests and documentation evidence.
+        def executable_tool_names(mode)
+          CONTRACT_MATRIX.filter_map { |row| row[:name] if row[:executable_modes].include?(mode) }
         end
 
         private
@@ -339,7 +186,7 @@ module Woods
           pipeline = DispatchPipeline.new(
             tool_name: spec.name,
             handler: spec.handler,
-            integer_keys: integer_property_keys(spec.properties),
+            properties: spec.properties,
             conn_mgr: conn_mgr,
             ctx: ctx || NullResponseContext.instance,
             renderer: renderer,
@@ -357,17 +204,7 @@ module Woods
         # @param spec [ToolSpec]
         # @return [Hash]
         def spec_schema(spec)
-          schema = { properties: spec.properties }
-          schema[:required] = spec.required if spec.required&.any?
-          schema
-        end
-
-        # Pre-compute property keys declared as integer in a schema.
-        #
-        # @param properties [Hash] Tool schema properties
-        # @return [Array<Symbol>]
-        def integer_property_keys(properties)
-          properties.select { |_k, v| v[:type] == 'integer' }.keys.map(&:to_sym)
+          spec.input_schema
         end
 
         # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
@@ -468,10 +305,11 @@ module Woods
 
         # Shared server construction used by both build() and build_embedded().
         #
-        # @param conn_mgr [ConnectionManager, EmbeddedExecutor] Any object with send_request(Hash) -> Hash
+        # @param conn_mgr [EmbeddedExecutor] Request executor
         # @param ctx [ResponseContext, nil] Optional context bundling response-safety layers
+        # @param tool_names [Array<String>] Exact executable tool names to advertise
         # @return [MCP::Server]
-        def build_server(conn_mgr, ctx)
+        def build_server(conn_mgr, ctx, tool_names:)
           server = ::MCP::Server.new(
             name: 'woods-console',
             version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0',
@@ -480,32 +318,10 @@ module Woods
 
           renderer = build_console_renderer
 
-          register_tier1_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier2_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier3_tools(server, conn_mgr, ctx, renderer: renderer)
-          register_tier4_tools(server, conn_mgr, ctx, renderer: renderer)
-          # Tier registration is conditional (embedded mode drops sql/query,
-          # tier 4 needs the unsafe-eval opt-in), so the advertised order moves
-          # with configuration unless it is sorted. See ProtocolPolicy.
+          TOOL_SPECS.select { |spec| tool_names.include?(spec.name) }.each do |spec|
+            register(spec, server, conn_mgr, ctx, renderer: renderer)
+          end
           Woods::MCP::ProtocolPolicy.sort_tools!(server)
-        end
-
-        # Loud multi-line banner surfaced to stderr when the opt-in flag is
-        # recognised outside of production. Operators should see this every
-        # boot so an accidentally-persistent env var cannot go unnoticed.
-        #
-        # @return [String]
-        def unsafe_eval_banner
-          <<~BANNER
-
-            ================================================================================
-             WOODS_CONSOLE_UNSAFE_EVAL IS SET
-             console_eval is LIVE on this process. Every run goes through EvalGuard +
-             Confirmation + SafeContext rollback + a wall-clock timeout and is recorded
-             to the audit log. The flag refuses to boot in Rails.env.production?.
-             If you did not mean to set this, unset the env var.
-            ================================================================================
-          BANNER
         end
 
         def structured_logger

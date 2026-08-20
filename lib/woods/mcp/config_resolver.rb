@@ -86,14 +86,22 @@ module Woods
         end
       end
 
-      # Read and parse +woods.json+ if it exists.
+      # Read and parse the resolved config snapshot, if one exists.
+      #
+      # Delegates entirely to {IndexArtifact#read_config}, which prefers the
+      # config embedded in the promoted dump over the root +woods.json+ (#217
+      # / FIX 3 — the two used to be independent atomic writes, so a crash
+      # between them could publish a new config against the old dump). Do
+      # NOT gate on +artifact.config_path.exist?+ here: a promoted dump can
+      # carry its own config with no root +woods.json+ ever having been
+      # written, and that pre-check would skip straight past it.
       #
       # @param artifact [Woods::IndexArtifact, nil]
       # @return [Woods::ResolvedConfig, nil]
       # @raise [Woods::MCP::UnsupportedArtifact] if the file has an unsupported
       #   schema version.
       def self.read_stored_config(artifact)
-        return nil unless artifact&.config_path&.exist?
+        return nil unless artifact
 
         raw = artifact.read_config
         return nil unless raw
@@ -151,9 +159,11 @@ module Woods
       # @param artifact [Woods::IndexArtifact]
       # @return [Woods::Configuration]
       def self.populate_from_stored(config, stored, artifact:, env: ENV)
+        config.output_dir = artifact.output_dir.to_s
         config.vector_store = stored.stores[:vector_store] || :in_memory
         config.metadata_store = stored.stores[:metadata_store] || :in_memory
         config.graph_store = stored.stores[:graph_store] || :in_memory
+        restore_store_options(config, stored, artifact: artifact, env: env)
         provider_sym = provider_symbol(stored.embedding_provider[:class])
         config.embedding_provider = provider_sym
 
@@ -189,6 +199,43 @@ module Woods
         config
       end
       private_class_method :populate_from_stored
+
+      def self.restore_store_options(config, stored, artifact:, env:)
+        if config.metadata_store == :sqlite
+          config.metadata_store_options = { database: artifact.output_dir.join('metadata.sqlite3').to_s }
+        end
+
+        options = stored.store_options.fetch(:vector_store, {}).dup
+        case config.vector_store
+        when :qdrant
+          options.delete(:url)
+          options[:url] = env['WOODS_QDRANT_URL'] unless env['WOODS_QDRANT_URL'].to_s.empty?
+          if options[:collection].to_s.empty? && !env['WOODS_QDRANT_COLLECTION'].to_s.empty?
+            options[:collection] = env['WOODS_QDRANT_COLLECTION']
+          end
+          options[:api_key] = env['WOODS_QDRANT_API_KEY'] unless env['WOODS_QDRANT_API_KEY'].to_s.empty?
+          require_store_setting!(options, :url, 'WOODS_QDRANT_URL', :qdrant)
+          require_store_setting!(options, :collection, 'WOODS_QDRANT_COLLECTION', :qdrant)
+        when :pgvector
+          url = env['WOODS_PG_URL']
+          if url.to_s.empty?
+            raise ConfigMismatch, 'pgvector index requires WOODS_PG_URL when served outside its host application.'
+          end
+
+          require 'active_record'
+          options[:connection] = ActiveRecord::Base.establish_connection(url).connection
+        end
+        config.vector_store_options = options unless options.empty?
+      end
+      private_class_method :restore_store_options
+
+      def self.require_store_setting!(options, key, env_name, adapter)
+        return unless options[key].to_s.empty?
+
+        raise ConfigMismatch,
+              "#{adapter} index is missing #{key}; set #{env_name} or re-embed so woods.json records it."
+      end
+      private_class_method :require_store_setting!
 
       # Convert a fully-qualified provider class name back to the symbol
       # that {Builder} understands.
