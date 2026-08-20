@@ -23,6 +23,9 @@ RSpec.describe Woods::ResolvedConfig do
         'vector_store' => 'in_memory',
         'metadata_store' => 'in_memory',
         'graph_store' => 'in_memory'
+      },
+      'store_options' => {
+        'vector_store' => { 'collection' => 'woods_docs', 'distance' => 'Dot', 'dimensions' => 768 }
       }
     }
   end
@@ -36,6 +39,7 @@ RSpec.describe Woods::ResolvedConfig do
       expect(config.dimension).to eq(768)
       expect(config.embedding_provider[:model]).to eq('nomic-embed-text')
       expect(config.stores[:vector_store]).to eq(:in_memory)
+      expect(config.store_options[:vector_store]).to include(collection: 'woods_docs', distance: 'Dot')
     end
 
     it 'accepts symbol keys' do
@@ -242,6 +246,7 @@ RSpec.describe Woods::ResolvedConfig do
       expect(round_tripped.dimension).to eq(config.dimension)
       expect(round_tripped.provider_signature).to eq(config.provider_signature)
       expect(round_tripped.stores).to eq(config.stores)
+      expect(round_tripped.store_options).to eq(config.store_options)
       expect(round_tripped.gem_version).to eq(config.gem_version)
     end
 
@@ -291,8 +296,21 @@ RSpec.describe Woods::ResolvedConfig do
         embedding_options: { host: 'http://ollama:11434' },
         vector_store: :in_memory,
         metadata_store: :in_memory,
-        graph_store: :in_memory
+        graph_store: :in_memory,
+        vector_store_options: {
+          url: 'https://qdrant.example.test', collection: 'woods', distance: 'Dot',
+          api_key: 'secret', connection: Object.new
+        }, metadata_store_options: { database: '/host/path/metadata.sqlite3' }
       )
+    end
+
+    it 'captures only non-secret durable adapter options' do
+      resolved = described_class.from_configuration(host_config)
+
+      expect(resolved.store_options[:vector_store]).to eq(
+        url: 'https://qdrant.example.test', collection: 'woods', distance: 'Dot'
+      )
+      expect(JSON.generate(resolved.to_snapshot_json)).not_to include('secret', '/host/path')
     end
 
     it 'probes the live provider for its dimension when declared config omits it' do
@@ -348,7 +366,9 @@ RSpec.describe Woods::ResolvedConfig do
         embedding_options: { dims: 64 },
         vector_store: :in_memory,
         metadata_store: :in_memory,
-        graph_store: :in_memory
+        graph_store: :in_memory,
+        vector_store_options: {},
+        metadata_store_options: {}
       )
       provider = Woods::Embedding::Provider::Fake.new(dims: 64)
 

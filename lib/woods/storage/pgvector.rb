@@ -29,18 +29,18 @@ module Woods
         TABLE = 'woods_vectors'
         TABLE_NAME_PATTERN = /\A[a-z_][a-z0-9_]*\z/
 
-        attr_reader :table
+        attr_reader :table, :schema, :dimensions
 
         # @param connection [Object] ActiveRecord database connection
         # @param dimensions [Integer] Size of the embedding vectors
         # @param table [String] PostgreSQL table name
-        def initialize(connection:, dimensions:, table: TABLE)
+        def initialize(connection:, dimensions:, table: TABLE, schema: nil)
           @connection = connection
-          @dimensions = dimensions
+          @dimensions = normalize_dimensions(dimensions)
           @table = table.to_s
-          return if TABLE_NAME_PATTERN.match?(@table)
-
-          raise ArgumentError, "table must be a PostgreSQL identifier, got #{table.inspect}"
+          @schema = schema&.to_s
+          validate_identifier!(:table, @table, table)
+          validate_identifier!(:schema, @schema, schema) if @schema
         end
 
         # Create the pgvector extension, vectors table, and HNSW index.
@@ -50,7 +50,7 @@ module Woods
           @connection.transaction do
             @connection.execute('CREATE EXTENSION IF NOT EXISTS vector')
             @connection.execute(<<~SQL)
-              CREATE TABLE IF NOT EXISTS #{@table} (
+              CREATE TABLE IF NOT EXISTS #{qualified_table} (
                 id TEXT PRIMARY KEY,
                 embedding vector(#{@dimensions}),
                 metadata JSONB DEFAULT '{}',
@@ -59,7 +59,7 @@ module Woods
             SQL
             @connection.execute(<<~SQL)
               CREATE INDEX IF NOT EXISTS idx_#{@table}_embedding_hnsw
-              ON #{@table} USING hnsw (embedding vector_cosine_ops)
+              ON #{qualified_table} USING hnsw (embedding vector_cosine_ops)
             SQL
           end
         end
@@ -76,7 +76,7 @@ module Woods
           entry = format_entry(id, vector, metadata)
 
           @connection.execute(<<~SQL)
-            INSERT INTO #{@table} (id, embedding, metadata, created_at)
+            INSERT INTO #{qualified_table} (id, embedding, metadata, created_at)
             VALUES #{entry}
             ON CONFLICT (id) DO UPDATE SET
               embedding = EXCLUDED.embedding,
@@ -113,7 +113,7 @@ module Woods
           values = entries.map { |entry| format_entry(entry[:id], entry[:vector], entry[:metadata] || {}) }
 
           execute_upsert(<<~SQL, entries)
-            INSERT INTO #{@table} (id, embedding, metadata, created_at)
+            INSERT INTO #{qualified_table} (id, embedding, metadata, created_at)
             VALUES #{values.join(",\n")}
             ON CONFLICT (id) DO UPDATE SET
               embedding = EXCLUDED.embedding,
@@ -136,7 +136,7 @@ module Woods
 
           sql = <<~SQL
             SELECT id, embedding <=> '#{vector_literal}' AS distance, metadata
-            FROM #{@table}
+            FROM #{qualified_table}
             #{where_clause}
             ORDER BY distance ASC
             LIMIT #{limit.to_i}
@@ -165,7 +165,10 @@ module Woods
             SELECT a.atttypmod AS dimension
             FROM pg_attribute a
             JOIN pg_class c ON c.oid = a.attrelid
-            WHERE c.relname = '#{@table}' AND a.attname = 'embedding' AND a.attnum > 0
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = #{@connection.quote(@table)}
+              AND n.nspname = #{schema_sql}
+              AND a.attname = 'embedding' AND a.attnum > 0
           SQL
           row = rows.first
           return nil unless row
@@ -185,29 +188,56 @@ module Woods
         def each_id(&block)
           return enum_for(:each_id) unless block
 
-          rows = @connection.execute("SELECT id FROM #{@table}")
+          rows = @connection.execute("SELECT id FROM #{qualified_table}")
           rows.each { |row| yield(row['id']) }
         end
 
         # @see Interface#delete
         def delete(id)
           quoted_id = @connection.quote(id)
-          @connection.execute("DELETE FROM #{@table} WHERE id = #{quoted_id}")
+          @connection.execute("DELETE FROM #{qualified_table} WHERE id = #{quoted_id}")
         end
 
         # @see Interface#delete_by_filter
         def delete_by_filter(filters)
           where_clause = build_where(filters)
-          @connection.execute("DELETE FROM #{@table} #{where_clause}")
+          @connection.execute("DELETE FROM #{qualified_table} #{where_clause}")
         end
 
         # @see Interface#count
         def count
-          result = @connection.execute("SELECT COUNT(*) AS count FROM #{@table}")
+          result = @connection.execute("SELECT COUNT(*) AS count FROM #{qualified_table}")
           result.first['count'].to_i
         end
 
         private
+
+        def normalize_dimensions(value)
+          dimensions = value.is_a?(String) ? Integer(value, 10) : Integer(value)
+          return dimensions if dimensions.positive?
+
+          raise ArgumentError, 'dimensions must be a positive Integer'
+        rescue TypeError, ArgumentError
+          raise ArgumentError, 'dimensions must be a positive Integer'
+        end
+
+        def validate_identifier!(name, value, original)
+          return if TABLE_NAME_PATTERN.match?(value)
+
+          raise ArgumentError, "#{name} must be a PostgreSQL identifier, got #{original.inspect}"
+        end
+
+        def quote_identifier(value)
+          @connection.respond_to?(:quote_table_name) ? @connection.quote_table_name(value) : value
+        end
+
+        def qualified_table
+          [@schema, @table].compact.map { |part| quote_identifier(part) }.join('.')
+        end
+
+        def schema_sql
+          @schema ? @connection.quote(@schema) : 'current_schema()'
+        end
 
         # Collapse duplicate ids within a batch, keeping the LAST occurrence
         # of each id (upsert semantics — the final write wins). Duplicates

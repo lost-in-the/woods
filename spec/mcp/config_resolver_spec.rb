@@ -99,6 +99,52 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
+      it 'anchors local artifact paths to the index directory, not the process cwd' do
+        Dir.mktmpdir do |dir|
+          local = woods_json_hash.merge(
+            'stores' => woods_json_hash.fetch('stores').merge('metadata_store' => 'sqlite')
+          )
+          write_woods_json(dir, local)
+          config, = described_class.resolve(blank_config, artifact: Woods::IndexArtifact.new(dir), env: {})
+
+          expect(config.output_dir.to_s).to eq(dir)
+          expect(config.metadata_store_options).to eq(database: File.join(dir, 'metadata.sqlite3'))
+        end
+      end
+
+      it 'restores persisted Qdrant options and serve-time credentials' do
+        Dir.mktmpdir do |dir|
+          qdrant = woods_json_hash.merge(
+            'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant'),
+            'store_options' => {
+              'vector_store' => { 'url' => 'https://stored.test', 'collection' => 'docs',
+                                  'dimensions' => 768, 'distance' => 'Dot' }
+            }
+          )
+          write_woods_json(dir, qdrant)
+          config, = described_class.resolve(
+            blank_config, artifact: Woods::IndexArtifact.new(dir),
+            env: { 'WOODS_QDRANT_URL' => 'https://served.test', 'WOODS_QDRANT_API_KEY' => 'token' }
+          )
+
+          expect(config.vector_store_options).to include(
+            url: 'https://served.test', collection: 'docs', dimensions: 768, distance: 'Dot', api_key: 'token'
+          )
+        end
+      end
+
+      it 'fails actionably when a legacy Qdrant snapshot has no endpoint' do
+        Dir.mktmpdir do |dir|
+          write_woods_json(dir, woods_json_hash.merge(
+                                  'stores' => woods_json_hash.fetch('stores').merge('vector_store' => 'qdrant')
+                                ))
+
+          expect do
+            described_class.resolve(blank_config, artifact: Woods::IndexArtifact.new(dir), env: {})
+          end.to raise_error(Woods::MCP::ConfigMismatch, /WOODS_QDRANT_URL/)
+        end
+      end
+
       it 'sets embedding_options with host and model from the snapshot' do
         Dir.mktmpdir do |dir|
           write_woods_json(dir)

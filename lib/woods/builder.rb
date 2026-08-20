@@ -490,6 +490,14 @@ module Woods
       store = Storage::VectorStore::Pgvector.new(**opts)
       begin
         store.ensure_schema!
+        stored_dimensions = store.stored_dimensions
+        if stored_dimensions && stored_dimensions != opts[:dimensions]
+          raise ConfigurationError,
+                "Stored pgvector dimensions #{stored_dimensions} do not match embedding provider dimensions " \
+                "#{opts[:dimensions]}. Use a compatible table or rebuild the index."
+        end
+      rescue ConfigurationError
+        raise
       rescue StandardError => e
         raise Woods::Error,
               "pgvector schema setup failed (#{e.class}: #{e.message}). " \

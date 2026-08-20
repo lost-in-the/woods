@@ -378,6 +378,7 @@ RSpec.describe Woods::Builder do
       allow(Woods::Storage::VectorStore::Pgvector).to receive(:new)
         .with(connection: fake_connection, dimensions: 3)
         .and_return(pg_store)
+      allow(pg_store).to receive(:stored_dimensions).and_return(nil)
     end
 
     it 'calls ensure_schema! after construction so the woods_vectors table exists' do
@@ -405,6 +406,14 @@ RSpec.describe Woods::Builder do
     it 'rejects dimensions that disagree with the embedding provider' do
       expect { described_class.new(config).build_vector_store(dimensions: 4) }
         .to raise_error(Woods::ConfigurationError, /pgvector dimensions 3.*provider dimensions 4/i)
+    end
+
+    it 'rejects the actual table width before returning a retriever' do
+      allow(pg_store).to receive(:ensure_schema!)
+      allow(pg_store).to receive(:stored_dimensions).and_return(4)
+
+      expect { described_class.new(config).build_vector_store(dimensions: 3) }
+        .to raise_error(Woods::ConfigurationError, /stored pgvector dimensions 4.*provider dimensions 3/i)
     end
 
     it 'uses the provider dimensions when vector_store_options omits them' do
