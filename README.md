@@ -312,7 +312,9 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 ### Console Server — Live Rails Queries (Optional)
 
-31 tools for querying real database records, monitoring job queues, running model diagnostics, and checking schema. Connects to a live Rails process. Every query runs in a rolled-back transaction with SQL validation — safe for development use.
+9 tools for read-only model queries and schema inspection, plus optional
+`console_sql` and `console_query`. Connects to a live Rails process and wraps
+supported requests in rolled-back transactions.
 
 ```json
 {
@@ -561,7 +563,7 @@ tmp/woods/
 │                                                                  │
 │                              ┌────────────────────────────────┐  │
 │                              │  Console MCP Server            │  │
-│                              │  31 tools, bridges to Rails    │  │
+│                              │  9 tools (+2 read opt-in)     │  │
 │                              └────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```

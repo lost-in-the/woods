@@ -9,7 +9,7 @@ The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live acces
 | [Stdio via rake](#option-a-stdio-via-rake-recommended) | Rake task boots Rails, runs MCP in-process | Local dev, simplest setup |
 | [Docker](#option-b-docker) | Same rake task, piped through `docker exec -i` | Docker/Compose environments |
 | [HTTP/Rack middleware](#option-c-http-rack-middleware) | Middleware mounts `/mcp/console` endpoint | Shared access, multiple clients |
-| [SSH remote bridge](#option-d-ssh-remote-bridge) | Separate bridge process over stdio | Remote servers, production-adjacent |
+| [Launcher wrapper](#option-d-launcher-wrapper) | Execs the embedded server directly, through Docker, or through SSH | Centralized process-launch config |
 
 ---
 
@@ -71,7 +71,7 @@ rake woods:console
   │
   ├─ capture $stdout before boot
   ├─ Rake::Task[:environment].invoke  (Rails boots)
-  ├─ load exe/codebase-console
+  ├─ load exe/woods-console
   │    ├─ Rails.application.eager_load!
   │    ├─ build model registry from ActiveRecord::Base.descendants
   │    ├─ Server.build_embedded(model_validator:, safe_context:, ...)
@@ -180,6 +180,9 @@ The middleware registers itself automatically via the gem's Railtie when `consol
 config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
 ```
 
+Streamable HTTP is stateless by default. For a legacy client that still
+requires MCP session IDs, pass `stateless: false` explicitly on the middleware.
+
 ### MCP Client Configuration
 
 **Claude Code** (streamable-http transport):
@@ -225,9 +228,11 @@ The HTTP endpoint grants read access to live database data. In production enviro
 
 ---
 
-## Option D: SSH Remote Bridge
+## Option D: Launcher Wrapper
 
-The original bridge architecture for cases where the MCP client cannot spawn a subprocess directly into the Rails environment (remote servers, production-adjacent access, air-gapped apps). The `woods-console-mcp` binary runs on the client side and connects to a bridge process inside the Rails environment.
+`woods-console-mcp` is a process launcher. It replaces itself with the same
+embedded server used by Options A-C, either directly or through `docker exec`
+or `ssh`. It does not enable additional tool tiers.
 
 ### How It Works
 
@@ -237,43 +242,45 @@ MCP client
   ├─ spawns: woods-console-mcp (reads console.yml)
   │
   ▼
-ConnectionManager (on client)
+ConnectionManager
   │
-  │ JSON-lines over stdio (ssh or docker exec)
-  │
-  ▼
-Bridge process (inside Rails environment)
-  │
-  └─ evaluates queries in Rails console
+  └─ exec direct / docker exec -i / ssh
+       └─ bundle exec rake woods:console
 ```
 
 ### Configuration
 
-Create `~/.woods/console.yml` (or point `CODEBASE_CONSOLE_CONFIG` to any YAML file):
+Create `~/.woods/console.yml` (or point `WOODS_CONSOLE_CONFIG` to any YAML file):
+
+Direct:
 
 ```yaml
-# Direct process (same machine, different process)
-connection:
-  mode: direct
+mode: direct
+directory: /path/to/rails-app
+command: bundle exec rake woods:console
+```
 
-# Docker
-connection:
-  mode: docker
-  service: web
-  compose_file: docker-compose.yml
+Docker:
 
-# SSH
-connection:
-  mode: ssh
-  host: app.example.com
-  user: deploy
-  command: cd /app && bundle exec rails runner -
+```yaml
+mode: docker
+container: my_app_web_1
+command: bundle exec rake woods:console
+```
+
+SSH:
+
+```yaml
+mode: ssh
+host: app.example.com
+user: deploy
+command: cd /app && bundle exec rake woods:console
 ```
 
 Override config path with environment variable:
 
 ```bash
-CODEBASE_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
+WOODS_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
 ```
 
 ### MCP Client Configuration
@@ -284,20 +291,24 @@ CODEBASE_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
     "rails-console": {
       "command": "woods-console-mcp",
       "env": {
-        "CODEBASE_CONSOLE_CONFIG": "/path/to/console.yml"
+        "WOODS_CONSOLE_CONFIG": "/path/to/console.yml"
       }
     }
   }
 }
 ```
 
-> **Tier support:** The bridge architecture supports all 31 tools across all 4 tiers. The embedded approach (Options A–C) supports Tier 1 unconditionally, plus the three Tier 4 guarded tools behind explicit opt-ins (`console_sql`/`console_query` via `embedded_read_tools`, `console_eval` via the fail-closed unsafe-eval opt-in); Tier 2–3 remain bridge-only — see [Tool Support by Mode](#tool-support-by-mode).
+> **Tier support:** Every launcher target exposes the embedded surface: 9 Tier 1 tools by default, or 11 tools when `console_sql` and `console_query` are explicitly enabled.
 
 ---
 
 ## Tool Support by Mode
 
-All 31 tools are registered and visible in the MCP server regardless of transport. However, **Tier 2–3 tools return an "unsupported in embedded mode" error** when called via Options A–C (embedded executor) — only the bridge architecture (Option D) supports those tiers. Tier 4 is opt-in in embedded mode: `console_sql`/`console_query` require `embedded_read_tools: true` (or `config.console_embedded_read_tools = true`), and `console_eval` requires the five-control unsafe-eval opt-in (see [`console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)](#console_eval-opt-in-woods_console_unsafe_eval)). Until opted in, the Tier 4 tools return actionable refusals naming the flag to set (`error_type: "unsupported"` for the read tools, `error_type: "eval_disabled"` for eval).
+The codebase keeps schemas for 31 possible tools as an inventory. Supported
+servers register only executable tools: the 9 Tier 1 tools by default, plus
+`console_sql` and `console_query` when `embedded_read_tools: true` (or
+`config.console_embedded_read_tools = true`). Tier 2, Tier 3, and
+`console_eval` are not registered in any supported mode.
 
 ### Tier 1: Read-Only (9 tools) — Supported in all modes
 
@@ -313,7 +324,7 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
-### Tier 2: Domain-Aware (9 tools) — Bridge only
+### Tier 2: Domain-Aware (9 tools) — Inventory only, not executable
 
 | Tool | Description |
 |------|-------------|
@@ -327,7 +338,7 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 | `console_check_eligibility` | Check feature eligibility for a record |
 | `console_decorate` | Invoke a decorator and return computed attributes |
 
-### Tier 3: Analytics (10 tools) — Bridge only
+### Tier 3: Analytics (10 tools) — Inventory only, not executable
 
 | Tool | Description |
 |------|-------------|
@@ -342,15 +353,16 @@ All 31 tools are registered and visible in the MCP server regardless of transpor
 | `console_cache_stats` | Cache store statistics |
 | `console_channel_status` | ActionCable channel status |
 
-### Tier 4: Guarded (3 tools) — Bridge, or embedded with explicit opt-in
+### Tier 4: Guarded (3 tools) — Read tools opt-in; eval inventory only
 
 | Tool | Description |
 |------|-------------|
-| `console_eval` | Execute arbitrary Ruby code (requires confirmation, 10s default timeout) |
+| `console_eval` | Inventory schema only; not registered by supported modes |
 | `console_sql` | Execute read-only SQL — `SELECT` and `WITH...SELECT` only |
 | `console_query` | Enhanced query builder with joins, grouping, and HAVING |
 
-In embedded mode (Options A–C), `console_sql` and `console_query` unlock with `embedded_read_tools: true`; `console_eval` unlocks only via the [unsafe-eval opt-in](#console_eval-opt-in-woods_console_unsafe_eval) and otherwise returns `error_type: "eval_disabled"`.
+`console_sql` and `console_query` register with `embedded_read_tools: true`.
+`console_eval` remains unavailable; legacy unsafe-eval settings fail closed at boot.
 
 ---
 
@@ -361,7 +373,7 @@ Set these in your Rails initializer:
 ```ruby
 Woods.configure do |config|
   # Master on/off switch for the Console MCP feature (Layer 0). Default: false.
-  # Applies to every transport: stdio (rake / rails runner), bridge, and Rack.
+  # Applies to every transport: stdio, launcher wrapper, and Rack.
   # When false, stdio entry points exit with a "disabled" notice and the Rack
   # middleware passes the request through to the host app untouched (the
   # console path is indistinguishable from an unknown route). Set to true only
@@ -389,12 +401,8 @@ Woods.configure do |config|
   config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
   # config.console_disabled_scanner_patterns = %i[all]  # disable scanner entirely
 
-  # Layer 2 augmentations — parse-time eval guard + boot-time credential index.
-  # Default: true. When true:
-  #   - Woods::Console::EvalGuard refuses console_eval payloads that reach
-  #     Rails.application.credentials, ENV, reflection escapes, or credential-
-  #     file reads at parse time (before the bridge sees the snippet).
-  #   - Woods::Console::CredentialIndex walks Rails.application.credentials.config
+  # Layer 2 augmentation — boot-time credential index. Default: true.
+  # Woods::Console::CredentialIndex walks Rails.application.credentials.config
   #     once at server boot and substring-redacts those values from every MCP
   #     response — so credentials whose shape no scanner pattern recognizes
   #     (Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook
@@ -425,7 +433,7 @@ end
 
 Until this flag is `true`, none of the transports route traffic:
 
-- `exe/woods-console-mcp` (bridge stdio) and `exe/woods-console` (embedded stdio) print a notice to stderr and exit 1. MCP clients see the process fail to start.
+- `exe/woods-console` prints a notice to stderr and exits 1. `exe/woods-console-mcp` execs that target, so MCP clients see the same startup failure.
 - `Woods::Console::RackMiddleware` passes the request through to the host app (typically its 404), so a disabled console path is indistinguishable from an unknown route. Non-matching paths always pass through untouched.
 
 Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment — e.g. in `config/environments/development.rb` or a staging-only initializer — once the layers below are configured for that environment's threat model.
@@ -448,15 +456,12 @@ Scanner hits emit a `console.credential_scan.hits` warn-level structured log lin
 
 Setting `console_disabled_scanner_patterns = %i[all]` disables the entire scanner. No layer-2 processing runs — Layer 3 (column + EAV redaction) and Layer 4 (SqlValidator + SafeContext) continue to fire. Use this only when the pattern scanner interferes with a legitimate workflow and the remaining layers cover the threat model; prefer a per-pattern opt-out otherwise.
 
-### `console_credential_defense_enabled` (parse-time eval guard + boot-time credential index)
+### `console_credential_defense_enabled` (boot-time credential index)
 
-Two complementary defenses share this flag, both gating credential exfiltration that the shape-pattern scanner cannot catch on its own:
-
-- **Parse-time eval guard.** `Woods::Console::EvalGuard` walks the normalized AST of every `console_eval` payload and raises before the bridge ever sees it when the snippet reaches `Rails.application.credentials.*`, `Rails.application.secrets.*`, `ENV` (any form), reflection escapes (`eval`, `instance_eval`, `send`, `const_get`, `binding`, etc.), or credential-file reads (`File.read('config/master.key')`, `File.read('config/credentials.yml.enc')`, etc.). Refusal yields a clean MCP error response (`error: true`) — no transport-level exception, no partial output. Unparseable payloads are also refused, since a snippet that won't parse can't be reasoned about.
-
-  **Reachability (v0.2).** EvalGuard is the first of five controls on the embedded `console_eval` opt-in — see [`console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)](#console_eval-opt-in-woods_console_unsafe_eval) below. On hosts that haven't opted in, `console_eval` still short-circuits with the `eval_disabled` refusal and this guard is not reached. Bridge-process mode (in development) will call the same guard before shipping the payload to the remote worker.
-
-- **Boot-time credential index.** `Woods::Console::CredentialIndex` walks `Rails.application.credentials.config` once at server boot, collects every string leaf with length ≥ 12, and substring-redacts those values from every MCP response. This catches credentials whose *shape* the scanner doesn't recognize but whose *exact contents* Rails already knows — Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook signing keys, custom OAuth client secrets. Hits are marked `[REDACTED:credential]` (distinct from the scanner's `[REDACTED]`) and counted under a `:credential_index` key so audit output shows which layer caught the leak.
+`Woods::Console::CredentialIndex` walks `Rails.application.credentials.config`
+once at server boot, collects string leaves with length >= 12, and
+substring-redacts those values from every MCP response. `console_eval` is not
+registered in a supported mode, so this setting does not enable eval.
 
 **Restart required after credential rotation.** The index is built once at process start and held in memory for the lifetime of the MCP process. When a host app rotates Rails credentials (`rails credentials:edit`), the MCP process keeps the pre-rotation secrets in its Set until the process is restarted — new secrets are not picked up automatically. Only the Layer 2 shape-pattern scanner (Stripe `sk_*`, AWS `AKIA*`, etc.) can catch newly-rotated values before restart.
 
@@ -476,9 +481,9 @@ config.console_credential_rotation_warning = false
 
 **Multi-DB / sharded caveat.** The index reflects only the credentials available to the *Rails process* that boots the Console MCP server. A separate database that holds its own secrets (e.g., a vendored CMS app sharing the same Rails host) is not in scope — for those, lean on Layer 3 (`console_redacted_columns` / `console_redacted_key_values`) and Layer 1 (`console_blocked_tables`).
 
-**Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index — the server still boots and the parse-time eval guard plus every other defense layer remain in effect.
+**Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index. The server still boots and the configured table, scanner, and redaction layers remain in effect.
 
-Set the flag to `false` only if a legitimate workflow requires reading credentials through `console_eval`. The bridge-side enforcement (`SafeContext`, `SqlValidator`, blocked tables) remains in place either way.
+Set the flag to `false` only when the host intentionally opts out of exact-value credential indexing and the remaining scanner/redaction layers cover its response data.
 
 ### `console_redacted_columns`
 
@@ -562,17 +567,15 @@ A pattern is skipped silently when its `key_column` or `value_column` is absent 
 
 `console_redacted_columns` and `console_redacted_key_values` run in a single pass — configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
 
-### Bridge mode vs embedded: `console_sql` / `console_query` posture
+### `console_sql` / `console_query` posture
 
 **Embedded mode** (Options A–C) lets you gate the Tier 4 read tools via
 `console_embedded_read_tools`. When that flag is `false` (the default),
 `console_sql` and `console_query` return an `error_type: "unsupported"`
 refusal without ever touching ActiveRecord.
 
-**Bridge mode** (Option D) does **not** respect `console_embedded_read_tools`.
-Those tools are part of the bridge's standard surface as soon as the
-bridge process boots. Your only guards in bridge mode are the ones that
-always run:
+The launcher wrapper (Option D) starts the same embedded server and respects
+the same setting. When read tools are registered, these controls run:
 
 1. `SqlValidator` rejects DML/DDL and most administrative keywords
    (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`,
@@ -588,14 +591,13 @@ always run:
    Console MCP as an admin-trust boundary, not a sandbox.
 4. `CredentialScanner` + column/EAV redaction scrub results.
 
-If your threat model needs embedded-mode read-tool gating, deploy via
-Options A–C and leave `console_embedded_read_tools = false`. Bridge mode
-is appropriate when the host runs in a trusted admin context and you
-need the full 31-tool surface.
+If the host should not expose raw SQL or structured query building, leave
+`console_embedded_read_tools = false`.
 
 ### Unlocking `console_sql` / `console_query` in embedded mode
 
-By default the embedded executor (Options A–C) blocks the Tier 4 read tools `console_sql` and `console_query` — they return an `error_type: "unsupported"` refusal pointing at this flag. To enable them, set `console_embedded_read_tools = true` in `Woods.configure`:
+By default supported servers do not register `console_sql` or `console_query`.
+To register them, set `console_embedded_read_tools = true` in `Woods.configure`:
 
 ```ruby
 # config/initializers/woods.rb
@@ -624,7 +626,8 @@ Security posture with the flag on:
 | `SafeContext` rollback | Every request runs inside a database transaction that is always rolled back, so even side-effecting reads (functions, settings) cannot persist. |
 | Per-request connection pooling | Each HTTP request draws a fresh connection from `ActiveRecord::Base`'s pool — no shared mutable state between requests. |
 
-These three layers make `embedded_read_tools: true` safe for read-only workloads. If your threat model requires stricter process isolation, keep the flag off and use the bridge architecture (Option D) instead, which runs the executor in a separate process.
+These controls define the supported read-tool posture. Keep the flag off when
+the host requires a narrower database capability.
 
 All three embedded transports (Options A, B, and C) honour `console_embedded_read_tools` from `Woods.configure` — stdio rake, rails runner, and Rack middleware each read the flag at startup.
 
@@ -632,7 +635,8 @@ All three embedded transports (Options A, B, and C) honour `console_embedded_rea
 
 ## Safety Model
 
-The Console MCP ships with a five-layer defense-in-depth stack. Each layer is independently tunable and each runs regardless of transport (stdio, Docker, HTTP, bridge) — a misconfigured or disabled layer falls through to the next.
+The executable Console surface uses the following defense layers in every
+supported transport (stdio, Docker/SSH launcher, and HTTP).
 
 | # | Layer | Knob | Fires at | Purpose |
 |---|-------|------|----------|---------|
@@ -644,22 +648,10 @@ The Console MCP ships with a five-layer defense-in-depth stack. Each layer is in
 
 Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks — `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2 — emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
 
-### Confirmation Gates
+### Confirmation and Audit Inventory
 
-Tier 4 tools (`console_eval`, `console_sql`, `console_query`) and any state-mutating Tier 2/3 operations (e.g., `console_update_setting`, retrying a job via `console_job_find`) require explicit confirmation before the executor runs. `Woods::Console::Confirmation` evaluates the request against the configured mode (`:auto_approve` for programmatic use, `:callback` for custom policies) and raises `ConfirmationDeniedError` if the check fails. The confirmation outcome — tool name, params, and granted/denied status — is recorded in the audit log.
-
-### Audit Log
-
-`Woods::Console::AuditLogger` appends a JSONL entry for every Tier 4 tool invocation. Each line records the tool name, parameters, confirmation status, result summary, and a UTC timestamp. The log path is configured when building the server:
-
-```ruby
-Woods::Console::Server.build_embedded(
-  audit_log_path: Rails.root.join('log/console_audit.jsonl'),
-  # ...
-)
-```
-
-This log is separate from the structured observability log lines (Layer 1/2 hooks) — it captures the full parameter set of every privileged call, giving operators an out-of-band audit trail independent of MCP wire traffic.
+No currently executable tool claims a confirmation or privileged audit-log
+contract. Tier 2, Tier 3, and `console_eval` remain unregistered inventory.
 
 ### Rolled-Back Transactions
 
@@ -675,7 +667,6 @@ end
 
 This means:
 
-- `console_eval` running `User.create!(...)` silently discards the write
 - Any accidental mutation from a validation or callback is rolled back
 - The database is left unchanged regardless of what the tool does
 
@@ -719,7 +710,7 @@ Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `
 
 The rake task redirects stdout to stderr before Rails boots specifically to prevent this. If you see JSON parse errors from the MCP client, check:
 
-1. You are using `bundle exec rake woods:console`, not `rails runner exe/codebase-console` directly (the runner path handles this too, but via a different mechanism).
+1. You are using `bundle exec rake woods:console`, not `rails runner exe/woods-console` directly (the runner path handles this too, but via a different mechanism).
 2. No `puts` or `print` calls run at boot in your initializers before the task can capture stdout.
 3. Try running `bundle exec rake woods:console 2>/dev/null` to isolate — the MCP protocol output goes to stdout, Rails noise goes to stderr.
 
@@ -739,68 +730,19 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 - `EXPLAIN` is allowed; `EXPLAIN ANALYZE` runs the query and is also allowed.
 - Queries with semicolons are blocked even if the second statement is a comment — strip trailing semicolons.
 
-### Tier 2–4 tools return "unsupported in embedded mode"
+### A tool from the 31-schema inventory is not listed
 
-The embedded executor (used in Options A–C) implements the 9 Tier 1 tools plus, when opted in, the three Tier 4 guarded tools.
+Supported servers list only executable tools.
 
 - For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
-- For `console_eval`: wire the [unsafe-eval opt-in](#console_eval-opt-in-woods_console_unsafe_eval) — until then it returns `error_type: "eval_disabled"`, not "unsupported".
-- For everything else (`console_diagnose_model`, domain-aware Tier 2 tools, Tier 3 analytics): switch to the bridge architecture (Option D) — the embedded executor does not implement those tools.
+- `console_eval`, Tier 2, and Tier 3 tools are inventory only and are not registered.
 
-### `console_eval` opt-in (`WOODS_CONSOLE_UNSAFE_EVAL`)
+### `console_eval` and `WOODS_CONSOLE_UNSAFE_EVAL`
 
-`console_eval` is disabled by default and returns `error_type: "eval_disabled"` on every embedded-executor transport (Options A–C). Opting in is a deliberate, five-step configuration — the server fails closed on any missing step.
-
-**The five controls (all mandatory; partial wiring is rejected at boot):**
-
-| # | Control | Enforced by |
-|---|---|---|
-| 1 | Env / config flag dual-gate | `ENV['WOODS_CONSOLE_UNSAFE_EVAL'] = 'true'` OR `config.console_unsafe_eval_enabled = true`. Explicit config wins over env in either direction. |
-| 2 | Production refusal | `Server.enforce_unsafe_eval_contract!` raises `Woods::ConfigurationError` when the flag is on and `Rails.env.production?` returns true. Non-negotiable. |
-| 3 | AST denylist | `Woods::Console::EvalGuard#check!` rejects credentials, reflection escapes, network, shell execution, and credential-file reads before any Ruby runs. |
-| 4 | Human-in-the-loop approval | `Woods::Console::Confirmation` — required collaborator. The server refuses to boot with the flag on unless one is supplied. |
-| 5 | JSONL audit log | `Woods::Console::AuditLogger` — required collaborator. Every outcome (guard-refused, denied, ok, error) writes one line with `CredentialScanner` redaction on the payload. |
-
-Every call runs inside a `SafeContext` transaction that rolls back at completion, and is wrapped in `Timeout.timeout(1..30s)`.
-
-#### Minimal opt-in example
-
-```ruby
-# config/initializers/woods_console.rb
-require 'woods/console/confirmation'
-
-# A real deployment should route this through an approval UI — the example
-# below deny-by-default so the gate never passes silently.
-slack_approval = Woods::Console::Confirmation.new(
-  mode: :callback,
-  callback: ->(req) { SlackApproval.request(req[:tool], req[:description]) }
-)
-
-Rails.application.config.middleware.use \
-  Woods::Console::RackMiddleware,
-  path: '/mcp/console',
-  embedded_read_tools: true,
-  unsafe_eval_confirmation: slack_approval,
-  unsafe_eval_audit_log_path: Rails.root.join('log/console_audit.jsonl').to_s
-```
-
-Set `WOODS_CONSOLE_UNSAFE_EVAL=true` in the runtime environment (never in a committed dotenv file). The boot banner on stderr confirms the flag is active.
-
-#### What each control catches
-
-| Threat | Caught by |
-|---|---|
-| `Rails.application.credentials.stripe.secret_key` | EvalGuard (`DENIED_CALL_CHAINS`) |
-| `ENV['AWS_SECRET_ACCESS_KEY']` | EvalGuard (`DENIED_CONSTANTS`) |
-| `File.read('config/master.key')` | EvalGuard (`CREDENTIAL_FILE_READERS`) |
-| `` `rm -rf /` `` / `%x{...}` / `system(...)` / `exec(...)` | EvalGuard (textual backtick check + `DENIED_REFLECTION`) |
-| `Thread.new { ... }` / `Fiber.new { ... }` | EvalGuard (threading escapes `SafeContext`) |
-| `Marshal.load(...)` / `YAML.unsafe_load(...)` | EvalGuard (deserialization) |
-| Writes to application data | `SafeContext` rollback (transaction always rolled back) |
-| Infinite loops / runaway compute | `Timeout.timeout` (1–30s clamp) |
-| Novel credential pattern that bypasses the guard | Operator responsibility — adjust EvalGuard denylist; the audit log records the attempt regardless. |
-
-Operator responsibilities not covered by the gem: routing the approval callback to a real human, rotating the audit log, and alerting on repeated guard refusals.
+`console_eval` is not registered by a supported server mode. Setting
+`WOODS_CONSOLE_UNSAFE_EVAL=true`, enabling the equivalent configuration flag,
+or passing the legacy confirmation/audit options causes server construction to
+fail closed with `Woods::ConfigurationError`.
 
 ### Slow first request on HTTP/Rack middleware
 
