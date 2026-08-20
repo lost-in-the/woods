@@ -236,7 +236,7 @@ RSpec.describe 'Watch daemon multi-instance operation' do
       watcher = instance_spy(Woods::Watch::PollingWatcher)
       daemon = daemon_for(0, marker: 'Persistent', watcher: watcher)
 
-      heartbeat = daemon.send(:start_heartbeat, watcher)
+      heartbeat = daemon.send(:start_heartbeat)
       sleep 0.3
       heartbeat.kill
 
@@ -249,7 +249,7 @@ RSpec.describe 'Watch daemon multi-instance operation' do
       daemon = daemon_for(0, marker: 'Idles', watcher: watcher, idle_timeout: 0.1)
       daemon.instance_variable_set(:@last_event_at, Process.clock_gettime(Process::CLOCK_MONOTONIC) - 5)
 
-      heartbeat = daemon.send(:start_heartbeat, watcher)
+      heartbeat = daemon.send(:start_heartbeat)
       sleep 0.3
       heartbeat.kill
 
