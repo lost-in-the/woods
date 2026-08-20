@@ -77,6 +77,30 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect { store.ensure_collection!(dimensions: 384) }
         .to raise_error(Woods::ConfigurationError, /dimension mismatch.*384.*768/i)
     end
+
+    it 'rejects a distance mismatch before any write' do
+      body = { result: { config: { params: { vectors: { size: 384, distance: 'Cosine' } } } } }.to_json
+      response = instance_double(Net::HTTPSuccess, code: '200', body: body)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+      dot_store = described_class.new(url: 'http://localhost:6333', collection: 'test_collection',
+                                      dimensions: 384, distance: 'Dot', allow_private_hosts: true)
+      allow(dot_store).to receive(:http_client).and_return(http)
+
+      expect { dot_store.ensure_collection!(dimensions: 384) }
+        .to raise_error(Woods::ConfigurationError, /distance mismatch.*Dot.*Cosine/i)
+      expect(http).to have_received(:request).once
+    end
+
+    it 'rejects named vectors because this adapter sends unnamed vectors' do
+      vectors = { text: { size: 384, distance: 'Cosine' } }
+      response = instance_double(Net::HTTPSuccess, code: '200', body: { result: { config: { params: { vectors: vectors } } } }.to_json)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      expect { store.ensure_collection!(dimensions: 384) }
+        .to raise_error(Woods::ConfigurationError, /named vectors.*not supported/i)
+    end
   end
 
   describe '#store' do
@@ -450,7 +474,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(http).to have_received(:request).twice
     end
 
-    it 'reports an ambiguous idempotent upsert after its safe retry also times out' do
+    it 'does not blindly retry an ambiguous upsert timeout' do
       allow(http).to receive(:request).and_raise(Net::ReadTimeout)
       allow(http).to receive(:started?).and_return(true, false, true)
 
@@ -459,7 +483,22 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
           expect(error).to be_retryable
           expect(error).to be_ambiguous
         end
-      expect(http).to have_received(:request).twice
+      expect(http).to have_received(:request).once
+    end
+
+
+    [Errno::ECONNREFUSED, SocketError].each do |error_class|
+      it "wraps #{error_class} as retryable and non-ambiguous" do
+        allow(http).to receive(:request).and_raise(error_class, 'unavailable')
+        allow(http).to receive(:started?).and_return(true, false, true)
+
+        expect { store.store('doc1', [0.1, 0.2, 0.3], {}) }
+          .to raise_error(described_class::RequestError) do |error|
+            expect(error).to be_retryable
+            expect(error).not_to be_ambiguous
+          end
+        expect(http).to have_received(:request).twice
+      end
     end
 
     it 'does not retry an unknown non-idempotent POST after an ambiguous timeout' do

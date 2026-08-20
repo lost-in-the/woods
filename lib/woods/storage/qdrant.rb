@@ -126,6 +126,7 @@ module Woods
         # sizable index costs few round trips, small enough that one response
         # stays comfortably in memory (ids and one payload key only).
         SCROLL_PAGE_SIZE = 1_000
+        DISTANCES = %w[Cosine Dot Euclid Manhattan].freeze
 
         # Payload key holding the original Woods identifier for a point.
         #
@@ -149,12 +150,13 @@ module Woods
         #   by default to block the common SSRF footgun. Set to true when the
         #   operator intentionally runs Qdrant on `localhost:6333` or inside
         #   a private network.
-        def initialize(url:, collection:, api_key: nil, dimensions: nil, allow_private_hosts: false)
+        def initialize(url:, collection:, api_key: nil, dimensions: nil, distance: 'Cosine', allow_private_hosts: false)
           @uri = self.class.validate_url!(url, allow_private_hosts: allow_private_hosts)
           @url = url
           @collection = collection
           @api_key = api_key
           @dimensions = dimensions
+          @distance = normalize_distance(distance)
         end
 
         # Validate a Qdrant endpoint URL — scheme in {ALLOWED_SCHEMES} and,
@@ -436,6 +438,13 @@ module Woods
           dimensions
         end
 
+        def normalize_distance(value)
+          distance = DISTANCES.find { |candidate| candidate.casecmp?(value.to_s) }
+          return distance if distance
+
+          raise ArgumentError, "distance must be one of #{DISTANCES.join(', ')}"
+        end
+
         def validate_configured_dimensions!(dimensions)
           return unless @dimensions && Integer(@dimensions) != dimensions
 
@@ -445,15 +454,22 @@ module Woods
         end
 
         def verify_collection_dimensions!(response, dimensions)
-          existing_dimensions = extract_dimensions(response)
-          unless existing_dimensions
+          vectors = response.dig('result', 'config', 'params', 'vectors')
+          unless vectors.is_a?(Hash) && vectors['size']
             raise Woods::ConfigurationError,
-                  "Qdrant collection #{@collection.inspect} does not use a single unnamed vector"
+                  "Qdrant collection #{@collection.inspect} uses named vectors; named vectors are not supported " \
+                  'by this unnamed-vector adapter.'
           end
-          return if existing_dimensions == dimensions
+          existing_dimensions = vectors['size']
+          if existing_dimensions != dimensions
+            raise Woods::ConfigurationError,
+                  "Qdrant collection dimension mismatch: configured #{dimensions}, existing #{existing_dimensions}. " \
+                  'Use a new collection or rebuild the existing collection.'
+          end
+          return if vectors['distance'] == @distance
 
           raise Woods::ConfigurationError,
-                "Qdrant collection dimension mismatch: configured #{dimensions}, existing #{existing_dimensions}. " \
+                "Qdrant collection distance mismatch: configured #{@distance}, existing #{vectors['distance']}. " \
                 'Use a new collection or rebuild the existing collection.'
         end
 
@@ -461,7 +477,7 @@ module Woods
           request(
             :put,
             "/collections/#{@collection}",
-            vectors: { size: dimensions, distance: 'Cosine' }
+            vectors: { size: dimensions, distance: @distance }
           )
         end
 
@@ -574,11 +590,16 @@ module Woods
           rescue OpenSSL::SSL::SSLError => e
             @http_client = nil
             raise RequestError, "Qdrant TLS error: #{e.message}"
-          rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout, IOError => e
+          rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout => e
             @http_client = nil
-            retry if attempt == 1 && retry_safe?(method, path)
+            retry if attempt == 1
 
-            raise transport_error(e, method, path)
+            raise transport_error(e, ambiguous: false)
+          rescue Errno::ECONNRESET, Net::ReadTimeout, IOError => e
+            @http_client = nil
+            retry if attempt == 1 && retry_safe?(method, path) && !write_request?(method, path)
+
+            raise transport_error(e, ambiguous: write_request?(method, path))
           end
         end
 
@@ -603,11 +624,11 @@ module Woods
           )
         end
 
-        def transport_error(error, method, path)
+        def transport_error(error, ambiguous:)
           RequestError.new(
-            "Qdrant transport error for #{method.to_s.upcase} #{path}: #{error.class}: #{error.message}",
+            "Qdrant transport error: #{error.class}: #{error.message}",
             retryable: true,
-            ambiguous: write_request?(method, path)
+            ambiguous: ambiguous
           )
         end
 
