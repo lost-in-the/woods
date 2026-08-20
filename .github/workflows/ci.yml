@@ -164,12 +164,11 @@ jobs:
       - name: Run linter
         run: bundle exec rubocop
 
-  # Boots exe/woods-mcp-http as a real subprocess and drives it over a socket.
-  # Its own job because it binds a port and shells out, and because the failure
-  # it exists to catch — the binary not booting at all — is invisible to every
-  # in-process transport spec.
+  # Drives both packaged MCP executables with the official Ruby client and the
+  # pinned Inspector CLI, including a real HTTP socket. Its own job because the
+  # process boundaries and Node dependency are intentionally outside unit specs.
   http-transport:
-    name: HTTP transport (end to end)
+    name: MCP transports (official clients)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
@@ -178,8 +177,22 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Run HTTP end-to-end specs
-        run: WOODS_RUN_HTTP_SERVER=1 bundle exec rspec spec/mcp/http_server_e2e_spec.rb
+      - name: Set up Node 22.19.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - name: Install pinned Inspector
+        run: npm ci --ignore-scripts
+      - name: Run MCP process contracts
+        env:
+          WOODS_RUN_HTTP_SERVER: '1'
+          WOODS_RUN_MCP_INSPECTOR: '1'
+        run: >-
+          bundle exec rspec
+          spec/mcp/http_server_e2e_spec.rb
+          spec/integration/mcp_official_ruby_client_spec.rb
+          spec/integration/mcp_inspector_contract_spec.rb
 
   coverage:
     runs-on: ubuntu-latest

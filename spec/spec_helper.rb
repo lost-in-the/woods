@@ -62,6 +62,10 @@ RSpec.configure do |config|
   # from the default suite; opt in with WOODS_RUN_HTTP_SERVER=1.
   config.filter_run_excluding(http_server: true) unless ENV['WOODS_RUN_HTTP_SERVER']
 
+  # The official Inspector contract requires the pinned Node package and boots
+  # both MCP executables. Release validation opts in after `npm ci`.
+  config.filter_run_excluding(mcp_inspector: true) unless ENV['WOODS_RUN_MCP_INSPECTOR']
+
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
   end

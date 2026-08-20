@@ -91,6 +91,13 @@ RSpec.describe 'MCP CLI integration' do
   # ── exe/woods-mcp (Ruby entry point) ─────────────────────────────
 
   describe 'woods-mcp Ruby binary' do
+    it 'pins only the protocol version on the built server configuration' do
+      source = File.read(ruby_bin)
+
+      expect(source).to include("server.configuration.protocol_version = ENV['MCP_PROTOCOL_VERSION']")
+      expect(source).not_to match(/server\.configuration\s*=/)
+    end
+
     # Booting the binary means requiring the whole gem + Server.build. If
     # anything raises during require/boot, stderr will contain a backtrace.
     # We give the subprocess a short window, kill it, then inspect stderr.

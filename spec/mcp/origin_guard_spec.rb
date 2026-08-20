@@ -76,6 +76,13 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(status).to eq(204)
       expect(headers['access-control-allow-methods']).to include('POST')
     end
+
+    it 'allows the modern MCP request metadata headers through browser preflight' do
+      _status, headers, = call(middleware, origin: 'http://localhost', method: 'OPTIONS')
+      allowed = headers.fetch('access-control-allow-headers').split(',').map(&:strip)
+
+      expect(allowed).to include('MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name')
+    end
   end
 
   describe 'explicit allow-list' do

@@ -39,7 +39,7 @@ module Woods
       LOOPBACK_HOSTS = %w[localhost 127.0.0.1 ::1 [::1]].freeze
 
       ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS'
-      ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id'
+      ALLOWED_HEADERS = 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Session-Id'
 
       # Response bodies are emitted as constants so the rejected Origin /
       # Host value is NEVER echoed back to the caller — preventing a

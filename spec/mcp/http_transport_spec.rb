@@ -50,8 +50,11 @@ RSpec.describe 'MCP HTTP Transport' do
     # the encoding here is correct, not a workaround.
     let(:source) { File.read(executable_path, encoding: Encoding::UTF_8) }
 
-    it 'constructs the transport in stateless mode' do
-      expect(source).to match(/StreamableHTTPTransport\.new\(server, stateless: stateless\)/)
+    it 'constructs the transport with stateless and shared rebinding policy' do
+      expect(source).to include('StreamableHTTPTransport.new(')
+      expect(source).to include('stateless: stateless')
+      expect(source).to include('allowed_origins: allowed_origins')
+      expect(source).to include('allowed_hosts: allowed_hosts')
     end
 
     it 'defaults to stateless when the env var is unset' do
