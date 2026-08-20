@@ -136,7 +136,6 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
-
       it 'uses WOODS_QDRANT_COLLECTION when the snapshot has no collection' do
         Dir.mktmpdir do |dir|
           write_woods_json(dir, woods_json_hash.merge(

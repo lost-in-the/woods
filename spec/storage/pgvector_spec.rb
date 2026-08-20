@@ -39,7 +39,6 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       expect(connection).to have_received(:execute).with(/vector\(3\)/)
     end
 
-
     [3.0, '3', true, false, '3); DROP TABLE users; --'].each do |dimensions|
       it "rejects non-Integer dimensions #{dimensions.inspect} before SQL" do
         expect { described_class.new(connection: connection, dimensions: dimensions) }

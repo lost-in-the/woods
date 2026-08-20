@@ -29,7 +29,7 @@ require 'woods/storage/metadata_store'
 # Defined outside the describe block to satisfy Lint/ConstantDefinitionInBlock.
 RoundTripStubConfig = Struct.new(
   :embedding_provider, :embedding_model, :embedding_options,
-  :vector_store, :metadata_store, :graph_store,
+  :vector_store, :vector_store_options, :metadata_store, :graph_store,
   keyword_init: true
 )
 
