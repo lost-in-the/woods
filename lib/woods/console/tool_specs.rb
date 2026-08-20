@@ -16,6 +16,9 @@ module Woods
                        job_schedule redis_info cache_stats channel_status].freeze
       TIER4_TOOLS = %w[eval sql query].freeze
 
+      MIN_INTEGER_INPUT = 1
+      MAX_RECORD_ID = 9_223_372_036_854_775_807
+
       # Value object that holds a single MCP tool's declarative specification.
       #
       # @!attribute [r] name
@@ -61,7 +64,8 @@ module Woods
           description: 'Random sample of records.',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            limit: { type: 'integer', description: 'Max records (default 5, max 25)' },
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 25,
+                     description: 'Max records (default 5, max 25)' },
             columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' },
             scope: { type: 'object', description: 'Filter: {status: "paid", amount_gt: 100}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
@@ -80,7 +84,8 @@ module Woods
           description: 'Find a single record by primary key or unique column',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Primary key value' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Primary key value' },
             by: { type: 'object', description: 'Unique column lookup' },
             columns: { type: 'array', items: { type: 'string' }, description: 'Columns to include' }
           },
@@ -101,7 +106,8 @@ module Woods
             scope: { type: 'object', description: 'Filter: {status_in: ["paid","refunded"], amount_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                                   'Complex queries: use console_query.' },
-            limit: { type: 'integer', description: 'Max records (default 100, max 1000)' },
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 1000,
+                     description: 'Max records (default 100, max 1000)' },
             distinct: { type: 'boolean', description: 'Return unique values only' }
           },
           required: %w[model columns],
@@ -139,7 +145,8 @@ module Woods
           description: 'Count associated records for a specific record.',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Record primary key' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Record primary key' },
             association: { type: 'string', description: 'Association name' },
             scope: { type: 'object', description: 'Filter on association: {status: "paid", amount_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
@@ -173,7 +180,8 @@ module Woods
             model: { type: 'string', description: 'Model name' },
             order_by: { type: 'string', description: 'Column to sort by (default: created_at)' },
             direction: { type: 'string', description: 'Sort direction: asc or desc (default: desc)' },
-            limit: { type: 'integer', description: 'Max records (default 10, max 50)' },
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 50,
+                     description: 'Max records (default 10, max 50)' },
             scope: { type: 'object', description: 'Filter: {status: "paid", total_gt: 0}. ' \
                                                   'Suffixes: _eq _gt _lt _in _null _present. ' \
                                                   'Complex queries: use console_query.' },
@@ -205,7 +213,8 @@ module Woods
           properties: {
             model: { type: 'string', description: 'Model name' },
             scope: { type: 'object', description: 'Filter conditions' },
-            sample_size: { type: 'integer', description: 'Sample records (default 5, max 25)' }
+            sample_size: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 25,
+                           description: 'Sample records (default 5, max 25)' }
           },
           required: ['model'],
           tier: 2,
@@ -220,9 +229,11 @@ module Woods
           description: 'Snapshot a record with associations for debugging',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Record primary key' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Record primary key' },
             associations: { type: 'array', items: { type: 'string' }, description: 'Association names to include' },
-            depth: { type: 'integer', description: 'Association depth (default 1, max 3)' }
+            depth: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 3,
+                     description: 'Association depth (default 1, max 3)' }
           },
           required: %w[model id],
           tier: 2,
@@ -238,7 +249,8 @@ module Woods
           description: 'Run validations on an existing record',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Record primary key' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Record primary key' },
             attributes: { type: 'object', description: 'Attributes to set before validating' }
           },
           required: %w[model id],
@@ -281,8 +293,10 @@ module Woods
           description: 'Check authorization policy for a record and user',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Record primary key' },
-            user_id: { type: 'integer', description: 'User to check' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Record primary key' },
+            user_id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                       description: 'User to check' },
             action: { type: 'string', description: 'Policy action' }
           },
           required: %w[model id user_id action],
@@ -314,7 +328,8 @@ module Woods
           description: 'Check feature eligibility for a record',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Record primary key' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Record primary key' },
             feature: { type: 'string', description: 'Feature name' }
           },
           required: %w[model id feature],
@@ -330,7 +345,8 @@ module Woods
           description: 'Invoke a decorator on a record and return computed attributes',
           properties: {
             model: { type: 'string', description: 'Model name' },
-            id: { type: 'integer', description: 'Record primary key' },
+            id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
+                  description: 'Record primary key' },
             methods: { type: 'array', items: { type: 'string' }, description: 'Decorator methods to call' }
           },
           required: %w[model id],
@@ -345,7 +361,8 @@ module Woods
           name: 'console_slow_endpoints',
           description: 'List slowest endpoints by response time',
           properties: {
-            limit: { type: 'integer', description: 'Max endpoints (default 10, max 100)' },
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 100,
+                     description: 'Max endpoints (default 10, max 100)' },
             period: { type: 'string', description: 'Time period (default: 1h)' }
           },
           required: nil,
@@ -396,7 +413,8 @@ module Woods
           name: 'console_job_failures',
           description: 'List recent job failures',
           properties: {
-            limit: { type: 'integer', description: 'Max failures (default 10, max 100)' },
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 100,
+                     description: 'Max failures (default 10, max 100)' },
             queue: { type: 'string', description: 'Filter by queue name' }
           },
           required: nil,
@@ -420,7 +438,8 @@ module Woods
           name: 'console_job_schedule',
           description: 'List scheduled/upcoming jobs',
           properties: {
-            limit: { type: 'integer', description: 'Max jobs (default 20, max 100)' }
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 100,
+                     description: 'Max jobs (default 20, max 100)' }
           },
           required: nil,
           tier: 3,
@@ -471,7 +490,8 @@ module Woods
           properties: {
             code: { type: 'string',
                     description: 'Ruby code you propose to run (will be surfaced to the user first)' },
-            timeout: { type: 'integer', description: 'Timeout in seconds (default 10, max 30)' }
+            timeout: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 30,
+                       description: 'Timeout in seconds (default 10, max 30)' }
           },
           required: ['code'],
           tier: 4,
@@ -491,7 +511,8 @@ module Woods
           ].join(' '),
           properties: {
             sql: { type: 'string', description: 'SQL query (SELECT or WITH...SELECT only)' },
-            limit: { type: 'integer', description: 'Max rows returned (default unlimited, max 10000)' }
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 10_000,
+                     description: 'Max rows returned (default unlimited, max 10000)' }
           },
           required: ['sql'],
           tier: 4,
@@ -518,13 +539,15 @@ module Woods
                      description: 'Association names to JOIN (e.g. ["line_items", "user"])' },
             group_by: { type: 'array', items: { type: 'string' },
                         description: 'Columns to GROUP BY (e.g. ["status", "user_id"])' },
-            having: { type: 'string',
-                      description: 'HAVING filter applied after GROUP BY (e.g. "COUNT(*) > 5")' },
+            having: { type: %w[object array], minProperties: 1, minItems: 2, maxItems: 2,
+                      prefixItems: [{ type: 'string', minLength: 1 }, {}],
+                      description: 'HAVING condition object or parameterized [template, bind] array' },
             order: { type: 'object',
                      description: 'Order specification as {column => direction} (e.g. {"created_at" => "desc"})' },
             scope: { type: 'object',
                      description: 'WHERE conditions as {column => value} or [sql, bind] array' },
-            limit: { type: 'integer', description: 'Maximum rows to return (default 10000, hard max 10000)' }
+            limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 10_000,
+                     description: 'Maximum rows to return (default 10000, hard max 10000)' }
           },
           required: %w[model select],
           tier: 4,

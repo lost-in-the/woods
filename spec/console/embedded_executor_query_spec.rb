@@ -127,6 +127,21 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(response['ok']).to be false
       expect(response['error_type']).to eq('validation')
     end
+
+    it 'rejects arrays with more than one bind value' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', 100, 200]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('having must contain exactly one template and one bind value')
+      expect(relation).not_to have_received(:having)
+    end
   end
 
   describe 'multi-column group_by' do
@@ -242,18 +257,20 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
     end
   end
 
-  describe 'limit is capped at MAX_QUERY_LIMIT' do
-    it 'caps limit at 10_000' do
-      executor.send_request({
-                              'tool' => 'query',
-                              'params' => {
-                                'model' => 'Order',
-                                'select' => ['id'],
-                                'limit' => 99_999
-                              }
-                            })
+  describe 'limit validation' do
+    it 'rejects a limit above 10_000 before querying' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['id'],
+                                           'limit' => 99_999
+                                         }
+                                       })
 
-      expect(relation).to have_received(:limit).with(10_000)
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to include('limit must be between 1 and 10000')
+      expect(relation).not_to have_received(:limit)
     end
   end
 

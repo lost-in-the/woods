@@ -2,6 +2,7 @@
 
 require 'json'
 require_relative 'response_context'
+require_relative 'input_contract'
 
 module Woods
   module Console
@@ -10,8 +11,7 @@ module Woods
     # Encapsulates everything that happens between MCP's `define_tool` block
     # firing and the `MCP::Tool::Response` returning to the client:
     #
-    #   1. Coerce integer-typed args from strings. MCP clients sometimes send
-    #      `"10"` for an `integer` property — we normalize before dispatch.
+    #   1. Strictly parse integer strings and enforce schema bounds.
     #   2. Run the Layer 1 table gate ({ResponseContext#enforce!}).
     #   3. Translate the tool args into a bridge/executor request via the
     #      handler proc supplied in the {ToolSpec}.
@@ -31,8 +31,7 @@ module Woods
     class DispatchPipeline
       # @param tool_name [String]
       # @param handler [#call] Maps a Hash of tool args to a bridge request Hash.
-      # @param integer_keys [Array<Symbol>] Property keys declared as `integer`
-      #   in the tool schema.
+      # @param properties [Hash] ToolSpec JSON Schema properties.
       # @param conn_mgr [#send_request] ConnectionManager or EmbeddedExecutor.
       # @param ctx [ResponseContext] Bundles the three response-safety layers.
       #   Defaults to the Null context so tests can stub minimally.
@@ -40,11 +39,11 @@ module Woods
       # @param logger [#warn, nil] Structured logger used for credential-scan
       #   and table-gate telemetry. Failures are swallowed so observability
       #   issues never break a tool response.
-      def initialize(tool_name:, handler:, integer_keys:, conn_mgr:, # rubocop:disable Metrics/ParameterLists
+      def initialize(tool_name:, handler:, properties:, conn_mgr:, # rubocop:disable Metrics/ParameterLists
                      ctx: NullResponseContext.instance, renderer: nil, logger: nil)
         @tool_name = tool_name
         @handler = handler
-        @integer_keys = integer_keys
+        @properties = properties
         @conn_mgr = conn_mgr
         @ctx = ctx
         @renderer = renderer
@@ -56,22 +55,18 @@ module Woods
       # @param args [Hash] Tool arguments (symbol keys from MCP).
       # @return [MCP::Tool::Response]
       def call(args)
-        coerce_integer_args!(args)
+        InputContract.normalize!(args, @properties)
         @ctx.enforce!(args)
         request = @handler.call(args).transform_keys(&:to_s)
         send_to_bridge(request)
       rescue TableGateError => e
         log_table_gate_rejection(args, e)
         error_response(e.message)
-      rescue SqlValidationError, ForbiddenExpressionError => e
+      rescue InputContract::ValidationError, SqlValidationError, ForbiddenExpressionError => e
         error_response(e.message)
       end
 
       private
-
-      def coerce_integer_args!(args)
-        @integer_keys.each { |k| args[k] = args[k].to_i if args[k].is_a?(String) }
-      end
 
       def send_to_bridge(request)
         response = @conn_mgr.send_request(request)

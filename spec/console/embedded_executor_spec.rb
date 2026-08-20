@@ -226,7 +226,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/timeout must be a positive integer/)
+        expect(response['error']).to eq('timeout must be an integer')
       end
 
       it 'rejects timeout: 0 instead of silently clamping to 1' do
@@ -236,7 +236,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                          })
 
         expect(response['ok']).to be false
-        expect(response['error']).to match(/timeout must be a positive integer/)
+        expect(response['error']).to eq('timeout must be between 1 and 30')
       end
 
       it 'reduces a complex return value to its class name in the audit summary' do
@@ -620,13 +620,26 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['result']['records']).to eq([{ 'id' => 1, 'email' => 'a@b.com', 'name' => 'Alice' }])
       end
 
-      it 'caps limit at 25' do
-        executor.send_request({
-                                'tool' => 'sample',
-                                'params' => { 'model' => 'User', 'limit' => 100 }
-                              })
+      it 'rejects limits above the schema maximum before querying' do
+        response = executor.send_request({
+                                           'tool' => 'sample',
+                                           'params' => { 'model' => 'User', 'limit' => 100 }
+                                         })
 
-        expect(ordered).to have_received(:limit).with(25)
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to include('limit must be between 1 and 25')
+        expect(ordered).not_to have_received(:limit)
+      end
+
+      it 'rejects malformed integer strings before querying' do
+        response = executor.send_request({
+                                           'tool' => 'sample',
+                                           'params' => { 'model' => 'User', 'limit' => '12junk' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to include('limit must be an integer')
+        expect(ordered).not_to have_received(:limit)
       end
 
       it 'rejects columns that are not real model columns (SQL fragment injection)' do
@@ -949,13 +962,15 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error']).to match(/Unknown column/)
       end
 
-      it 'caps limit at 50' do
-        executor.send_request({
-                                'tool' => 'recent',
-                                'params' => { 'model' => 'Post', 'limit' => 200 }
-                              })
+      it 'rejects limits above the schema maximum before querying' do
+        response = executor.send_request({
+                                           'tool' => 'recent',
+                                           'params' => { 'model' => 'Post', 'limit' => 200 }
+                                         })
 
-        expect(ordered).to have_received(:limit).with(50)
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to include('limit must be between 1 and 50')
+        expect(ordered).not_to have_received(:limit)
       end
     end
 
@@ -1140,17 +1155,20 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
           )
         end
 
-        it 'caps limit at 10000' do
-          allow(connection).to receive(:select_all).and_return(select_result)
+        it 'rejects limits above the schema maximum before querying' do
+          allow(connection).to receive(:select_all)
 
-          executor_with_read.send_request({
-                                            'tool' => 'sql',
-                                            'params' => { 'sql' => 'SELECT id FROM users', 'limit' => 99_999 }
-                                          })
+          response = executor_with_read.send_request({
+                                                       'tool' => 'sql',
+                                                       'params' => {
+                                                         'sql' => 'SELECT id FROM users',
+                                                         'limit' => 99_999
+                                                       }
+                                                     })
 
-          expect(connection).to have_received(:select_all).with(
-            a_string_matching(/LIMIT 10000/)
-          )
+          expect(response).to include('ok' => false, 'error_type' => 'validation')
+          expect(response['error']).to include('limit must be between 1 and 10000')
+          expect(connection).not_to have_received(:select_all)
         end
       end
 

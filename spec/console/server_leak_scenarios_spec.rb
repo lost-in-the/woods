@@ -207,7 +207,7 @@ RSpec.describe 'Woods::Console::Server leak scenarios (fixture-driven)' do
 
   describe 'Scenario D — positional row shape (console_sql response)' do
     it 'redacts secrets in the nested rows array' do
-      server = build
+      server = build(read_tools_enabled: true)
       allow(executor).to receive(:send_request).and_return(
         'ok' => true,
         'result' => {
@@ -231,7 +231,7 @@ RSpec.describe 'Woods::Console::Server leak scenarios (fixture-driven)' do
 
   describe 'Scenario D2 — credential-shaped value echoed in error path' do
     it 'redacts secrets that appear in executor error messages' do
-      server = build
+      server = build(read_tools_enabled: true)
       allow(executor).to receive(:send_request).and_return(
         'ok' => false,
         'error' => "Mysql2::Error: value '#{aws_key}' violates check constraint",

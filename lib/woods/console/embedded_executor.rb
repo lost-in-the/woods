@@ -6,11 +6,14 @@ require_relative 'audit_logger'
 require_relative 'bridge_protocol'
 require_relative 'confirmation'
 require_relative 'eval_guard'
+require_relative 'input_contract'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'scope_predicate_parser'
+require_relative 'sql_validator'
 require_relative 'sql_noise_stripper'
 require_relative 'table_gate'
+require_relative 'tool_specs'
 
 module Woods
   module Console
@@ -33,11 +36,6 @@ module Woods
       # but require explicit opt-in for embedded mode.
       EMBEDDED_READ_TOOLS = %w[sql query].freeze
 
-      MAX_SQL_LIMIT = 10_000
-      MAX_QUERY_LIMIT = 10_000
-
-      MIN_EVAL_TIMEOUT = 1
-      MAX_EVAL_TIMEOUT = 30
       DEFAULT_EVAL_TIMEOUT = 10
 
       # @param model_validator [ModelValidator] Validates model/column names
@@ -93,6 +91,7 @@ module Woods
         refusal = refusal_for(tool)
         return refusal if refusal
 
+        normalize_params!(tool, params)
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         result = @safe_context.execute { dispatch(tool, params) }
         elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
@@ -247,19 +246,8 @@ module Woods
         raise
       end
 
-      # Validate + clamp the user-supplied timeout. Accepts a positive
-      # Integer (or nil → default). Everything else is rejected so a
-      # caller passing `timeout: 0` or `timeout: "forever"` hears about
-      # it instead of silently getting MIN_EVAL_TIMEOUT.
       def eval_timeout_from(raw)
-        return DEFAULT_EVAL_TIMEOUT if raw.nil?
-
-        unless raw.is_a?(Integer) && raw.positive?
-          raise ValidationError,
-                "timeout must be a positive integer (#{MIN_EVAL_TIMEOUT}..#{MAX_EVAL_TIMEOUT})"
-        end
-
-        raw.clamp(MIN_EVAL_TIMEOUT, MAX_EVAL_TIMEOUT)
+        raw || DEFAULT_EVAL_TIMEOUT
       end
 
       def guard_check!(code, audit_params)
@@ -392,6 +380,13 @@ module Woods
         end
       end
 
+      def normalize_params!(tool, params)
+        spec = Server::TOOL_SPECS.find { |candidate| candidate.name == "console_#{tool}" }
+        InputContract.normalize!(params, spec.properties) if spec
+      rescue InputContract::ValidationError => e
+        raise ValidationError, e.message
+      end
+
       # @param params [Hash] Must contain 'model' key
       # @raise [ValidationError]
       def validate_model!(params)
@@ -456,7 +451,7 @@ module Woods
       def handle_sample(params)
         validate_select_columns!(params)
         model = resolve_model(params['model'])
-        limit = [params.fetch('limit', 5).to_i, 25].min
+        limit = params.fetch('limit', 5)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
         records = scope.order(random_function).limit(limit)
@@ -477,7 +472,7 @@ module Woods
         columns = params['columns']
         @model_validator.validate_columns!(params['model'], columns) if columns
         model = resolve_model(params['model'])
-        limit = [params.fetch('limit', 100).to_i, 1000].min
+        limit = params.fetch('limit', 100)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = scope.distinct if params['distinct']
         values = scope.limit(limit).pluck(*columns.map(&:to_sym))
@@ -564,7 +559,7 @@ module Woods
         model = resolve_model(params['model'])
         order_by = params.fetch('order_by', 'created_at')
         direction = params.fetch('direction', 'desc')
-        limit = [params.fetch('limit', 10).to_i, 50].min
+        limit = params.fetch('limit', 10)
 
         @model_validator.validate_column!(params['model'], order_by)
         direction = 'desc' unless %w[asc desc].include?(direction)
@@ -600,7 +595,7 @@ module Woods
         # table even if the sql is otherwise well-formed.
         gate_sql!(sql)
 
-        limit = params['limit'] ? [params['limit'].to_i, MAX_SQL_LIMIT].min : nil
+        limit = params['limit']
         query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
         result = active_connection.select_all(query_sql)
 
@@ -635,7 +630,7 @@ module Woods
       # @return [ActiveRecord::Relation]
       def build_query_relation(model, params)
         relation = apply_query_clauses(model, params)
-        limit = params['limit'] ? [params['limit'].to_i, MAX_QUERY_LIMIT].min : MAX_QUERY_LIMIT
+        limit = params.fetch('limit', 10_000)
         relation.limit(limit)
       end
 
@@ -741,9 +736,11 @@ module Woods
           having.each_key { |k| validate_column_reference!(k.to_s, model_name) }
           [having]
         when Array
-          raise ValidationError, 'having: array must be [sql_with_placeholders, *binds]' if having.empty?
+          unless having.length == 2 && having.first.is_a?(String)
+            raise ValidationError, 'having must contain exactly one template and one bind value'
+          end
 
-          template = having.first.to_s
+          template = having.first
           match = HAVING_AGG_TEMPLATE.match(template)
           raise ValidationError, "having: unsupported SQL template #{template.inspect}" unless match
 

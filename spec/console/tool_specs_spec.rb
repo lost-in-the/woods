@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'mcp'
 
 # tool_specs.rb is a pure data table. Tier 4 `handler:` values use `begin`
 # blocks that instantiate EvalGuard / SqlValidator at require-time, and
@@ -190,8 +191,23 @@ RSpec.describe Woods::Console::Server do
       allowed_types = %w[string integer boolean object array number].freeze
       all_specs.each do |spec|
         spec.properties.each do |prop_name, defn|
-          expect(allowed_types).to include(defn[:type]),
-                                   "#{spec.name}.#{prop_name}: unexpected type '#{defn[:type]}'"
+          types = Array(defn[:type])
+          expect(types).to all(satisfy { |type| allowed_types.include?(type) }),
+                           "#{spec.name}.#{prop_name}: unexpected type '#{defn[:type]}'"
+        end
+      end
+    end
+
+    it 'declares minimum and maximum for every integer property' do
+      all_specs.each do |spec|
+        spec.properties.each do |prop_name, definition|
+          next unless definition[:type] == 'integer'
+
+          expect(definition[:minimum]).to be_an(Integer),
+                                          "#{spec.name}.#{prop_name}: missing integer minimum"
+          expect(definition[:maximum]).to be_an(Integer),
+                                          "#{spec.name}.#{prop_name}: missing integer maximum"
+          expect(definition[:minimum]).to be <= definition[:maximum]
         end
       end
     end
@@ -239,6 +255,29 @@ RSpec.describe Woods::Console::Server do
 
     it 'requires sql' do
       expect(spec.required).to include('sql')
+    end
+  end
+
+  describe 'console_query having schema' do
+    subject(:schema) do
+      spec = all_specs.find { |candidate| candidate.name == 'console_query' }
+      MCP::Tool::InputSchema.new(properties: spec.properties, required: spec.required)
+    end
+
+    it 'accepts a non-empty condition object or a two-element parameterized array' do
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: { count: 2 }) }
+        .not_to raise_error
+      expect { schema.validate_arguments(model: 'Order', select: ['id'], having: ['COUNT(*) > ?', 2]) }
+        .not_to raise_error
+    end
+
+    it 'rejects raw strings, empty objects, and arrays with the wrong shape' do
+      invalid_values = ['COUNT(*) > 2', {}, ['COUNT(*) > ?'], ['COUNT(*) > ?', 2, 3]]
+
+      invalid_values.each do |having|
+        expect { schema.validate_arguments(model: 'Order', select: ['id'], having: having) }
+          .to raise_error(MCP::Tool::InputSchema::ValidationError)
+      end
     end
   end
 
