@@ -11,6 +11,7 @@ require_relative 'tree_scan'
 require_relative 'watcher'
 require 'json'
 require 'set'
+require 'securerandom'
 
 module Woods
   module Watch
@@ -101,6 +102,12 @@ module Woods
       # writer against the *same* index: a manual `woods:extract`, or a hook
       # sync that fired anyway.
       LOCK_NAME = 'extraction'
+
+      # Name of the O_EXCL claim file that closes the startup TOCTOU: two
+      # daemons that both pass {#another_daemon_alive?} before either has
+      # published a status record would otherwise both proceed. See
+      # {#claim_startup?}.
+      CLAIM_FILENAME = 'watch_claim.json'
 
       # A daemon cycle is milliseconds; a manual full extraction is seconds to
       # minutes. This bounds how long a crashed writer can block the daemon.
@@ -195,6 +202,13 @@ module Woods
         # `woods:incremental` stopped standing down.
         return :already_running if another_daemon_alive?
 
+        # {#another_daemon_alive?} is a plain status READ — cheap, and gives
+        # the useful log message above, but proves nothing under a race: two
+        # daemons starting together can both read "nothing running yet" and
+        # both pass. #claim_startup? is the atomic gate that actually decides
+        # who gets to proceed.
+        return :already_running unless claim_startup?
+
         run_started
       end
 
@@ -278,6 +292,7 @@ module Woods
         stop_heartbeat(heartbeat)
         persist_pending
         publish_status(:stopped, reason: @stop_reason&.to_s)
+        release_claim
       end
 
       # @param heartbeat [Thread, nil]
@@ -833,6 +848,108 @@ module Woods
           'Set WOODS_IGNORE_WATCH=1 to start anyway.'
         )
         true
+      end
+
+      # Atomically claim the right to start, closing the race
+      # {#another_daemon_alive?} cannot: two daemons calling this
+      # concurrently both attempt an `O_EXCL` create of the same claim file,
+      # and the filesystem — not thread scheduling — decides which one
+      # actually creates it. The loser gets `Errno::EEXIST` regardless of
+      # which daemon checked {#another_daemon_alive?} first or which one
+      # would have published its status record first.
+      #
+      # `WOODS_IGNORE_WATCH=1` bypasses the claim the same way it bypasses
+      # {#another_daemon_alive?} — forcing a start must not get blocked by
+      # a still-live claim it was explicitly told to override.
+      #
+      # A claim recorded by a pid that no longer exists is reclaimed rather
+      # than left blocking forever, the same "does the recorded pid still
+      # exist" test {Status#alive?} uses. Bounded to a few attempts so a
+      # claim that keeps reappearing (a pathological retry loop, not the
+      # ordinary single-contender case) fails closed instead of spinning.
+      #
+      # @return [Boolean] true when this instance now holds the claim (or
+      #   was told to skip claiming entirely)
+      def claim_startup?
+        return true if ENV['WOODS_IGNORE_WATCH'] == '1'
+
+        3.times do
+          return true if create_claim
+          return false unless reclaim_if_stale
+        end
+
+        false
+      end
+
+      # @return [Boolean] true when the claim file was created by this call
+      #
+      # Written fully to a temp file first, THEN linked into place — never
+      # `open(O_EXCL)` straight onto +claim_path+ and write after. `File.link`
+      # is atomic and fails closed with `EEXIST` exactly like `O_EXCL` does,
+      # but the instant a reader can see the claim file at all, its content
+      # is already complete. Racing a plain `open`-then-`write` the other way
+      # let a contender's {#stale_claim?} read the file between our create
+      # and our write, see an empty/torn body, misjudge it stale, and delete
+      # the claim we had just won — reintroducing exactly the double-daemon
+      # race this method exists to close.
+      def create_claim
+        FileUtils.mkdir_p(@output_dir)
+        tmp_path = "#{claim_path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
+        File.write(tmp_path, JSON.generate(pid: Process.pid, host: Status.host_identity))
+        File.link(tmp_path, claim_path)
+        @claimed = true
+        true
+      rescue Errno::EEXIST
+        false
+      ensure
+        FileUtils.rm_f(tmp_path)
+      end
+
+      # @return [Boolean] true when a stale claim was cleared and the caller
+      #   should retry {#create_claim}; false when the claim is live (or the
+      #   directory vanished) and the caller should give up
+      def reclaim_if_stale
+        return false unless stale_claim?
+
+        FileUtils.rm_f(claim_path)
+        true
+      rescue Errno::ENOENT
+        false
+      end
+
+      # @return [Boolean] whether the current claim file's recorded pid is
+      #   dead — an unreadable or already-vanished claim counts as stale
+      #   too, since it cannot be a live daemon's claim
+      def stale_claim?
+        record = JSON.parse(File.read(claim_path))
+        !claim_pid_alive?(record['pid'])
+      rescue JSON::ParserError, SystemCallError
+        true
+      end
+
+      # Same semantics as {Status#alive?}'s pid check: signal 0 asks "could I
+      # signal this process?" without sending anything.
+      def claim_pid_alive?(pid)
+        return false unless pid.is_a?(Integer) && pid.positive?
+
+        Process.kill(0, pid)
+        true
+      rescue Errno::ESRCH
+        false
+      rescue Errno::EPERM
+        true
+      end
+
+      # @return [void]
+      def release_claim
+        return unless @claimed
+
+        FileUtils.rm_f(claim_path)
+        @claimed = false
+      end
+
+      def claim_path
+        File.join(@output_dir, CLAIM_FILENAME)
       end
 
       def build_watcher

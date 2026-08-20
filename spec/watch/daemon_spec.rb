@@ -627,6 +627,58 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  # another_daemon_alive? reads Status, which nothing has published to yet
+  # the FIRST time two daemons start concurrently — so the check alone lets
+  # both pass and both publish `running`. Startup must claim the index
+  # atomically, not just check-then-publish.
+  describe 'startup claim atomicity (verified P1 TOCTOU fix)' do
+    def build_racer(**overrides)
+      described_class.new(
+        output_dir: output_dir, root: root, extractor_factory: -> { extractor },
+        reloader: reloader, debounce: 0, catch_up: false, idle_timeout: 0.05, **overrides
+      )
+    end
+
+    it 'lets exactly one of two daemons racing startup win; the loser reports :already_running' do
+      results = Queue.new
+
+      threads = Array.new(2) do
+        Thread.new { results << Timeout.timeout(10) { build_racer.run } }
+      end
+      threads.each_with_index do |thread, i|
+        raise "racer thread #{i} did not finish" unless thread.join(10)
+      end
+
+      outcomes = Array.new(2) { results.pop(true) }
+      expect(outcomes.count(:already_running)).to eq(1)
+      expect(outcomes - [:already_running]).to eq([:idle])
+    end
+
+    it 'does not block a fresh daemon behind a stale claim left by a dead pid' do
+      FileUtils.mkdir_p(output_dir)
+      dead_pid = Process.spawn('true')
+      Process.wait(dead_pid)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: dead_pid, host: Woods::Watch::Status.host_identity))
+
+      reason = Timeout.timeout(10) { build_racer.run }
+
+      expect(reason).not_to eq(:already_running)
+    end
+
+    it 'preserves WOODS_IGNORE_WATCH even when a live claim is already on disk' do
+      FileUtils.mkdir_p(output_dir)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity))
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('WOODS_IGNORE_WATCH').and_return('1')
+
+      reason = Timeout.timeout(10) { build_racer.run }
+
+      expect(reason).not_to eq(:already_running)
+    end
+  end
+
   # Every cycle writes generation.json and status.json, so watching the output
   # directory means each cycle manufactures the events that trigger the next.
   describe 'the output directory' do
