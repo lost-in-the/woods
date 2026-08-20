@@ -35,6 +35,15 @@ RSpec.describe Woods::SessionTracer::FileStore do
       expect(results[0]['action']).to eq('create')
     end
 
+    it 'reads and migrates legacy safe session filenames' do
+      legacy = File.join(base_dir, 'legacy_session.jsonl')
+      File.write(legacy, "#{JSON.generate(request_data)}\n")
+
+      expect(store.read('legacy_session')).to contain_exactly(request_data)
+      expect(File.exist?(legacy)).to be(false)
+      expect(store.sessions.first['session_id']).to eq('legacy_session')
+    end
+
     it 'appends multiple requests in order' do
       store.record('sess1', request_data.merge('path' => '/orders', 'action' => 'index'))
       store.record('sess1', request_data.merge('path' => '/orders/new', 'action' => 'new'))
@@ -191,6 +200,16 @@ RSpec.describe Woods::SessionTracer::FileStore do
 
       expect { store.record('sess1', cyclic) }.to raise_error(JSON::NestingError)
       expect(store.read('sess1')).to eq([])
+    end
+
+    it 'preserves the prior live file when atomic replacement fails' do
+      store.record('sess1', request_data.merge('action' => 'old'))
+      allow(File).to receive(:rename).and_call_original
+      allow(File).to receive(:rename).and_raise(Errno::EIO, 'forced rename failure')
+
+      expect { store.record('sess1', request_data.merge('action' => 'new')) }.to raise_error(Errno::EIO)
+      expect(store.read('sess1').map { |entry| entry['action'] }).to eq(['old'])
+      expect(Dir.glob(File.join(base_dir, '.*.tmp'))).to be_empty
     end
   end
 end

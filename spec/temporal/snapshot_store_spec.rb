@@ -135,7 +135,7 @@ RSpec.describe Woods::Temporal::SnapshotStore do
 
       store.capture(manifest_v1, units_v1)
 
-      expect(db).to have_received(:transaction).once
+      expect(db).to have_received(:transaction).with(:immediate).once
     end
 
     it 'rolls back the snapshot row, units, pruning, and diff state together' do

@@ -99,7 +99,7 @@ module Woods
         return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
         captured = nil
-        @db.transaction do
+        @db.transaction(:immediate) do
           previous = find_latest
           upsert_snapshot(manifest, git_sha, unit_hashes.size)
 

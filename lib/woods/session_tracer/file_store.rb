@@ -2,6 +2,7 @@
 
 require 'json'
 require 'fileutils'
+require 'tempfile'
 require_relative 'store'
 
 module Woods
@@ -45,18 +46,12 @@ module Woods
       # @param request_data [Hash] Request metadata to store
       # @return [void]
       def record(session_id, request_data)
-        path = session_path(session_id)
         line = "#{JSON.generate(request_data)}\n"
 
-        @mutex.synchronize do
-          File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
-            file.flock(File::LOCK_EX)
-            lines = file.readlines.last(@max_requests_per_session - 1)
-            lines << line
-            file.rewind
-            file.truncate(0)
-            file.write(lines.join)
-          end
+        with_store_lock do
+          path = migrate_legacy_session!(session_id)
+          lines = File.exist?(path) ? File.readlines(path).last(@max_requests_per_session - 1) : []
+          atomic_replace(path, (lines << line).join)
           prune_sessions!
         end
       end
@@ -66,8 +61,8 @@ module Woods
       # @param session_id [String] The session identifier
       # @return [Array<Hash>] Request records, oldest first
       def read(session_id)
-        path = session_path(session_id)
-        lines = @mutex.synchronize do
+        lines = with_store_lock do
+          path = migrate_legacy_session!(session_id)
           return [] unless File.exist?(path)
 
           if expired?(path)
@@ -75,10 +70,7 @@ module Woods
             return []
           end
 
-          File.open(path, 'r') do |file|
-            file.flock(File::LOCK_SH)
-            file.readlines
-          end
+          File.readlines(path)
         end
         lines.filter_map do |line|
           stripped = line.strip
@@ -95,7 +87,8 @@ module Woods
       # @param limit [Integer] Maximum number of sessions to return
       # @return [Array<Hash>] Session summaries
       def sessions(limit: 20)
-        files = @mutex.synchronize do
+        files = with_store_lock do
+          migrate_legacy_sessions!
           prune_expired!
           session_files.sort_by { |file| -File.mtime(file).to_f }.first(limit)
         end
@@ -111,15 +104,17 @@ module Woods
       # @param session_id [String] The session identifier
       # @return [void]
       def clear(session_id)
-        path = session_path(session_id)
-        @mutex.synchronize { FileUtils.rm_f(path) }
+        with_store_lock do
+          FileUtils.rm_f(session_path(session_id))
+          FileUtils.rm_f(legacy_session_path(session_id))
+        end
       end
 
       # Remove all session data.
       #
       # @return [void]
       def clear_all
-        @mutex.synchronize { session_files.each { |file| File.delete(file) } }
+        with_store_lock { session_files.each { |file| File.delete(file) } }
       end
 
       private
@@ -132,6 +127,64 @@ module Woods
 
       def session_files
         Dir.glob(File.join(@base_dir, '*.jsonl'))
+      end
+
+      def with_store_lock
+        @mutex.synchronize do
+          File.open(File.join(@base_dir, '.woods-session-store.lock'), File::RDWR | File::CREAT, 0o600) do |lock|
+            lock.flock(File::LOCK_EX)
+            yield
+          end
+        end
+      end
+
+      def legacy_session_path(session_id)
+        raw = session_id.to_s
+        return unless raw.match?(/\A[a-zA-Z0-9_-]+\z/)
+
+        File.join(@base_dir, "#{raw}.jsonl")
+      end
+
+      def migrate_legacy_session!(session_id)
+        target = session_path(session_id)
+        legacy = legacy_session_path(session_id)
+        return target unless legacy && File.exist?(legacy)
+
+        if File.exist?(target)
+          atomic_replace(target, File.read(legacy) + File.read(target))
+          FileUtils.rm_f(legacy)
+        else
+          File.rename(legacy, target)
+          fsync_parent
+        end
+        target
+      end
+
+      def migrate_legacy_sessions!
+        session_files.each do |path|
+          basename = File.basename(path, '.jsonl')
+          migrate_legacy_session!(basename) unless basename.start_with?('b64.')
+        end
+      end
+
+      def atomic_replace(path, content)
+        temp = Tempfile.new([".#{File.basename(path)}-", '.tmp'], @base_dir)
+        temp.chmod(0o600)
+        temp.write(content)
+        temp.flush
+        temp.fsync
+        temp.close
+        File.rename(temp.path, path)
+        fsync_parent
+      ensure
+        temp&.close
+        temp&.unlink
+      end
+
+      def fsync_parent
+        File.open(@base_dir, File::RDONLY) { |directory| directory.fsync }
+      rescue Errno::EINVAL, Errno::ENOTSUP, Errno::EISDIR
+        nil
       end
 
       def expired?(path)
