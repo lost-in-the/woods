@@ -82,14 +82,26 @@ module Woods
       # function. This is the authoritative, documented policy: extend it
       # deliberately, not by discovering a false positive and reaching for
       # DANGEROUS_FUNCTIONS instead.
+      # Read-only functions supported across all three backends Woods claims
+      # (MySQL, PostgreSQL, SQLite). Aggregates, window functions, and pure
+      # scalar string/number/date/JSON readers only — nothing that mutates
+      # state, sleeps, or reaches outside the query. Kept backend-agnostic on
+      # purpose: a PG-only list rejected ordinary MySQL/SQLite analytics.
       ALLOWED_FUNCTIONS = %w[
         count sum avg min max coalesce nullif
-        lower upper length char_length octet_length
-        substr substring trim ltrim rtrim btrim concat
-        abs round ceil ceiling floor mod power sqrt greatest least
+        group_concat string_agg array_agg
+        row_number rank dense_rank percent_rank cume_dist ntile
+        lag lead first_value last_value nth_value
+        lower upper length char_length character_length octet_length
+        substr substring trim ltrim rtrim btrim concat concat_ws
+        left right replace reverse repeat lpad rpad
+        position strpos split_part
+        abs round ceil ceiling floor mod power pow sqrt sign greatest least
         cast convert
         extract date_part date_trunc to_char to_date to_timestamp
+        strftime datetime date time julianday unixepoch
         now current_date current_time current_timestamp
+        json_extract json_value json_type json_array_length
         json_extract_path json_extract_path_text
         jsonb_extract_path jsonb_extract_path_text
       ].freeze
@@ -103,12 +115,17 @@ module Woods
         IN EXISTS NOT AND OR VALUES WHERE HAVING ON IS BETWEEN CASE WHEN
         THEN ELSE END FROM JOIN USING WITH SELECT DISTINCT ALL ANY SOME
         UNION INTERSECT EXCEPT ORDER GROUP BY ASC DESC LIMIT OFFSET AS INTO
+        OVER PARTITION FILTER WITHIN RETURNING
       ].freeze
 
-      # Matches an identifier immediately followed by `(`, the function-call
-      # shape. Runs against the noise-stripped SQL (comments and string
-      # literals removed) so literal content can't be misread as a call.
-      FUNCTION_CALL_PATTERN = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/
+      # Matches a function-call shape: an identifier immediately followed by
+      # `(`, where the identifier may be bare, double-quoted (ANSI/PostgreSQL),
+      # or backtick-quoted (MySQL). Quoting the name was the bypass — a bare
+      # `\bword\(` pattern never fired on `"pg_terminate_backend"(`, so a
+      # side-effecting function wrapped in quotes defeated both the allowlist
+      # and the legacy denylist. Runs against the noise-stripped SQL (comments
+      # and string literals removed) so literal content can't be misread.
+      FUNCTION_CALL_PATTERN = /(?:"([^"]+)"|`([^`]+)`|\b([A-Za-z_][A-Za-z0-9_]*))\s*\(/
 
       # Allowed statement prefixes (case-insensitive).
       #
@@ -255,8 +272,13 @@ module Woods
         stripped = SqlNoiseStripper.strip_noise(sql)
 
         stripped.scan(FUNCTION_CALL_PATTERN) do
-          identifier = Regexp.last_match(1)
-          next if FUNCTION_SCAN_EXCLUDED_KEYWORDS.include?(identifier.upcase)
+          match = Regexp.last_match
+          quoted = !(match[1] || match[2]).nil?
+          identifier = match[1] || match[2] || match[3]
+          # A bare keyword before `(` is grammar (IN/EXISTS/…), not a call; a
+          # quoted name before `(` is always a call, so keyword exclusion
+          # applies only to the bare form.
+          next if !quoted && FUNCTION_SCAN_EXCLUDED_KEYWORDS.include?(identifier.upcase)
           next if ALLOWED_FUNCTIONS.include?(identifier.downcase)
 
           raise SqlValidationError,

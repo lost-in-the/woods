@@ -319,6 +319,34 @@ RSpec.describe Woods::Console::SqlValidator do
       end
     end
 
+    context 'with a quoted identifier wrapping a forbidden function' do
+      [
+        'SELECT "pg_terminate_backend"(12345)',
+        'SELECT pg_catalog."pg_terminate_backend"(12345)',
+        %(SELECT "nextval"('some_seq')),
+        'SELECT "pg_sleep"(10)',
+        'SELECT `pg_sleep`(10)'
+      ].each do |sql|
+        it "does not let #{sql.inspect} bypass the allowlist" do
+          expect { validator.validate!(sql) }
+            .to raise_error(Woods::Console::SqlValidationError, /allowlist/i)
+        end
+      end
+    end
+
+    context 'with backend-agnostic read functions' do
+      [
+        'group_concat(name)', 'string_agg(name, \',\')', 'array_agg(name)',
+        "json_extract(data, '$.x')", "strftime('%Y', created_at)",
+        'row_number() OVER ()', 'rank() OVER (ORDER BY amount)',
+        'replace(name, \'a\', \'b\')', 'left(name, 3)'
+      ].each do |expr|
+        it "accepts #{expr}" do
+          expect { validator.validate!("SELECT #{expr} FROM orders") }.not_to raise_error
+        end
+      end
+    end
+
     context 'with SQL keywords that use parentheses but are not function calls' do
       it 'does not misclassify IN (subquery) as a function call' do
         expect { validator.validate!('SELECT * FROM users WHERE id IN (SELECT user_id FROM posts)') }
