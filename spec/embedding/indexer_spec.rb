@@ -516,6 +516,44 @@ RSpec.describe Woods::Embedding::Indexer do
     end
   end
 
+  describe 'chunk-suffix identifier collision' do
+    # Generated embed ids are "#{identifier}#chunk_#{idx}" (#collect_embed_items),
+    # and five call sites elsewhere in the gem strip /#chunk_\d+\z/
+    # unconditionally to recover a base identifier. A real unit whose
+    # identifier already matches that grammar — a controller action
+    # literally named chunk_0, producing "Foo#chunk_0" — would be
+    # mis-collapsed to "Foo" by those sites and have its vector deleted as
+    # a stale chunk by #prune_identifier. The fix reserves the grammar: a
+    # colliding identifier raises instead of being indexed.
+    let(:colliding_unit) { unit_data.merge('identifier' => 'Foo#chunk_0') }
+
+    before do
+      File.write(File.join(output_dir, 'foo.json'), JSON.generate(colliding_unit))
+    end
+
+    it 'raises a typed error naming the unit instead of embedding it' do
+      expect { indexer.index_all }.to raise_error(
+        Woods::Embedding::Indexer::ChunkSuffixCollision, /Foo#chunk_0/
+      )
+    end
+
+    it 'does not store a vector for the colliding unit' do
+      begin
+        indexer.index_all
+      rescue Woods::Embedding::Indexer::ChunkSuffixCollision
+        nil
+      end
+
+      expect(vector_store.count).to eq(0)
+    end
+
+    it 'leaves normal identifiers unaffected' do
+      File.write(File.join(output_dir, 'foo.json'), JSON.generate(unit_data))
+
+      expect { indexer.index_all }.not_to raise_error
+    end
+  end
+
   describe 'empty output directory' do
     it 'returns zero stats when no files exist' do
       stats = indexer.index_all
@@ -743,6 +781,57 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(File.directory?(File.join(output_dir, 'dumps', latest))).to be true
     end
 
+    # FIX 3 (P1): the dump and the root woods.json used to be two independent
+    # atomic writes (write_config, then promote) — a crash between them
+    # published a new config against the old dump. The config snapshot is
+    # now written INSIDE the dump directory before #promote, which becomes
+    # the single commit point; the root copy is written after, for anything
+    # that reads output_dir/woods.json directly rather than through
+    # IndexArtifact#read_config (which prefers the dump-embedded copy).
+    it 'writes the config snapshot inside the dump directory' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+
+      persistent_indexer.index_all
+
+      latest = File.read(File.join(output_dir, 'dumps', 'latest')).strip
+      dump_config = File.join(output_dir, 'dumps', latest, 'woods.json')
+      expect(File.exist?(dump_config)).to be(true)
+      expect(JSON.parse(File.read(dump_config))['schema_version']).to eq(1)
+    end
+
+    it 'leaves the previous config visible when a crash interrupts promote' do
+      # Simulates a crash between writing the dump's embedded config and
+      # flipping the latest pointer. The write-order requirement this proves:
+      # the root woods.json write must happen AFTER promote, or a crash here
+      # would already have overwritten it with the new (unpromoted) config.
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+
+      artifact = Woods::IndexArtifact.new(output_dir)
+      artifact.write_config('schema_version' => 1, 'gem_version' => 'previous-run')
+
+      allow_any_instance_of(Woods::IndexArtifact).to receive(:promote).and_raise(StandardError, 'disk full')
+
+      expect { persistent_indexer.index_all }.to raise_error(StandardError, 'disk full')
+      expect(artifact.read_config['gem_version']).to eq('previous-run')
+    end
+
+    it 'promotes the dump config as the read result after a successful run' do
+      stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+      stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+      allow(vector_snapshotter).to receive(:dump)
+
+      artifact = Woods::IndexArtifact.new(output_dir)
+      artifact.write_config('schema_version' => 1, 'gem_version' => 'previous-run')
+
+      persistent_indexer.index_all
+
+      expect(artifact.read_config['gem_version']).to eq('0.0.1')
+    end
+
     it 'does not call Snapshotter for metadata when metadata_store is nil' do
       stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
       stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
@@ -912,8 +1001,12 @@ RSpec.describe Woods::Embedding::Indexer do
       Woods::Storage::Snapshotter::Vector.load_or_empty(artifact).each_entry.map { |id, _v, _m| id }
     end
 
+    # checkpoint.json is now a versioned shape (schema_version/identity/hashes,
+    # see 'checkpoint identity tracking' below) — unwrap to the flat
+    # identifier=>source_hash map these specs assert against.
     def checkpoint_on_disk
-      JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+      data = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+      data.is_a?(Hash) && data.key?('hashes') ? data['hashes'] : data
     end
 
     # The vanished-unit sweep sits behind a 30% purge guard (B-079 / #191),
@@ -1015,9 +1108,13 @@ RSpec.describe Woods::Embedding::Indexer do
     it 're-embeds a unit the checkpoint claims but the dump does not hold' do
       # Simulates a checkpoint that ran ahead of the durable artifact for any
       # reason (an interrupted dump, a store swap, this very bug in an older
-      # gem version). Trusting it would strand the unit forever.
+      # gem version). Trusting it would strand the unit forever. Written in
+      # the versioned shape with an identity matching `resolved_config` (its
+      # embedding_provider is {}), so this exercises durable-presence
+      # self-heal rather than the identity-mismatch path below.
       File.write(File.join(output_dir, 'checkpoint.json'),
-                 JSON.generate('User' => 'abc123', 'PaymentService' => 'def456'))
+                 JSON.generate('schema_version' => 1, 'identity' => {},
+                               'hashes' => { 'User' => 'abc123', 'PaymentService' => 'def456' }))
 
       indexer = fresh_indexer
       allow(indexer).to receive(:warn)
@@ -1154,6 +1251,131 @@ RSpec.describe Woods::Embedding::Indexer do
 
       expect { indexer.index_incremental }.to raise_error(Woods::Error, /provider died/)
       expect(checkpoint_on_disk).to eq(before_checkpoint)
+    end
+  end
+
+  # FIX 2 (P1): checkpoint.json used to carry zero identity — just
+  # identifier=>source_hash. A same-dimension model switch changes neither
+  # of those, so every checkpoint hit passed and old-model vectors were
+  # never re-embedded. checkpoint.json now stamps the provider class, model,
+  # and dimension that produced it (versioned shape:
+  # {schema_version, identity, hashes}); a run whose resolved_config
+  # disagrees with the stamp discards the whole checkpoint rather than
+  # trusting individual hits it cannot verify against the new identity.
+  describe 'checkpoint identity tracking' do
+    require 'woods/index_artifact'
+    require 'woods/storage/snapshotter'
+
+    def resolved_config_for(model)
+      double("ResolvedConfig(#{model})",
+             to_snapshot_json: { 'schema_version' => 1, 'gem_version' => '0.0.1',
+                                 'created_at' => '2026-04-22T00:00:00Z',
+                                 'embedding_provider' => { 'class' => 'Woods::Embedding::Provider::Fake',
+                                                           'model' => model, 'dimension' => 2 },
+                                 'stores' => {} })
+    end
+
+    def indexer_for(model)
+      described_class.new(
+        provider: provider, text_preparer: text_preparer,
+        vector_store: Woods::Storage::VectorStore::InMemory.new,
+        output_dir: output_dir, batch_size: 2,
+        resolved_config: resolved_config_for(model)
+      )
+    end
+
+    before do
+      File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
+    end
+
+    it 'stamps the checkpoint with the provider identity that produced it' do
+      indexer_for('model-a').index_all
+
+      checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+      expect(checkpoint['identity']).to eq(
+        'class' => 'Woods::Embedding::Provider::Fake', 'model' => 'model-a', 'dimension' => 2
+      )
+      expect(checkpoint['hashes']).to eq('User' => 'abc123')
+    end
+
+    it 'unchanged config still honors checkpoint hits' do
+      indexer_for('model-a').index_all
+      embed_calls_before = provider.embed_batch_calls
+
+      stats = indexer_for('model-a').index_incremental
+
+      expect(stats[:skipped]).to eq(1)
+      expect(stats[:processed]).to eq(0)
+      expect(provider.embed_batch_calls).to eq(embed_calls_before)
+    end
+
+    it 'a same-dimension model switch invalidates every checkpoint hit' do
+      indexer_for('model-a').index_all
+
+      stats = indexer_for('model-b').index_incremental
+
+      expect(stats[:processed]).to eq(1)
+      expect(stats[:skipped]).to eq(0)
+    end
+
+    it 'logs why it discarded the checkpoint on a model switch' do
+      indexer_for('model-a').index_all
+      switched = indexer_for('model-b')
+      allow(switched).to receive(:warn)
+
+      switched.index_incremental
+
+      expect(switched).to have_received(:warn).with(/different embedding identity/)
+    end
+
+    it 'loads a pre-identity-tracking (flat) checkpoint without crashing' do
+      indexer_for('model-a').index_all # real dump + versioned checkpoint on disk
+      File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate('User' => 'abc123'))
+      indexer = indexer_for('model-a')
+      allow(indexer).to receive(:warn)
+
+      expect { indexer.index_incremental }.not_to raise_error
+    end
+
+    it 'treats a flat (identity-unknown) checkpoint as wholly unsatisfied and re-embeds, ' \
+       'even though the dump already durably holds the vector' do
+      indexer_for('model-a').index_all # real dump holding 'User' — rules out the durable-presence self-heal
+      File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate('User' => 'abc123'))
+      indexer = indexer_for('model-a')
+      allow(indexer).to receive(:warn)
+
+      stats = indexer.index_incremental
+
+      expect(stats[:processed]).to eq(1)
+      expect(stats[:skipped]).to eq(0)
+    end
+
+    it 'stamps identity on the checkpoint it writes after a flat-checkpoint re-embed' do
+      File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate('User' => 'abc123'))
+      indexer = indexer_for('model-a')
+      allow(indexer).to receive(:warn)
+
+      indexer.index_incremental
+
+      checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+      expect(checkpoint['identity']).to eq(
+        'class' => 'Woods::Embedding::Provider::Fake', 'model' => 'model-a', 'dimension' => 2
+      )
+    end
+
+    it 'skips identity tracking entirely when the indexer carries no resolved_config' do
+      # Backward compatibility for hosts that never pass resolved_config —
+      # the flat shape is written and read exactly as before.
+      no_identity_indexer = described_class.new(
+        provider: provider, text_preparer: text_preparer,
+        vector_store: Woods::Storage::VectorStore::InMemory.new,
+        output_dir: output_dir, batch_size: 2
+      )
+
+      no_identity_indexer.index_all
+
+      checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+      expect(checkpoint).to eq('User' => 'abc123')
     end
   end
 

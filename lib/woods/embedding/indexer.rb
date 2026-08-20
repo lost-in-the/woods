@@ -28,6 +28,30 @@ module Woods
     # which is why +checkpoint.json+ is written last, after the dump is
     # promoted. See the invariant note on {#process_units}.
     class Indexer # rubocop:disable Metrics/ClassLength
+      # Raised when a unit's real identifier already matches the grammar
+      # {#collect_embed_items} uses to generate ids for split units
+      # ("identifier#chunk_N"). Five call sites elsewhere in the gem
+      # (retrieval/, {Retriever}, {MCP::Bootstrapper}) strip
+      # +/#chunk_\d+\z/+ unconditionally to recover a base identifier — so a
+      # genuine unit named e.g. "Foo#chunk_0" (a controller action literally
+      # named +chunk_0+) would be silently collapsed to "Foo" by those sites,
+      # and {#prune_identifier} would then delete its vector as a superseded
+      # chunk. The grammar is reserved rather than escaped: escaping would
+      # require touching those five strip sites, several of which this task
+      # is not permitted to change.
+      class ChunkSuffixCollision < Woods::Error
+        def initialize(identifier)
+          super(
+            "Unit identifier #{identifier.inspect} matches the embedding pipeline's " \
+            'chunk-suffix grammar (/#chunk_\d+\z/), reserved for generated ids like ' \
+            '"identifier#chunk_0". Rename the underlying unit (the file, method, or ' \
+            'route that produced this identifier) so it does not end in "#chunk_<N>" ' \
+            '— indexing cannot proceed safely otherwise, since retrieval strips that ' \
+            'suffix unconditionally to recover the base identifier.'
+          )
+        end
+      end
+
       # @param chunker [Chunking::SemanticChunker, nil] Splits oversize units
       #   into semantically coherent chunks before embedding. +nil+ disables
       #   chunking — units go to the provider whole (useful in tests).
@@ -447,6 +471,8 @@ module Woods
 
       def process_batch(batch, checkpoint, stats, incremental:)
         to_embed = batch.each_with_object([]) do |unit_data, items|
+          reject_chunk_suffix_collision!(unit_data['identifier'])
+
           # Every unit passes through here, embedded or skipped, so this is the
           # authoritative "what the index holds this run" set.
           @current_identifiers << unit_data['identifier']
@@ -505,6 +531,18 @@ module Woods
         return unless @metadata_store
 
         @metadata_store.store(unit_data['identifier'], unit_data)
+      end
+
+      # Refuse to index a unit whose real identifier already matches the
+      # chunk-suffix grammar. See {ChunkSuffixCollision}. Checked ahead of
+      # {#collect_embed_items} — an unchunked unit whose identifier already
+      # ends in "#chunk_0" would sail through with +embed_id == identifier+
+      # and never visibly generate the suffix itself, so the check can't
+      # live downstream of chunking.
+      def reject_chunk_suffix_collision!(identifier)
+        return unless identifier.to_s.match?(CHUNK_SUFFIX_PATTERN)
+
+        raise ChunkSuffixCollision, identifier
       end
 
       def collect_embed_items(unit_data, items)
@@ -729,7 +767,7 @@ module Woods
         path = File.join(@output_dir, 'checkpoint.json')
         return {} unless File.exist?(path)
 
-        JSON.parse(AtomicFile.read(path))
+        checkpoint_hashes(JSON.parse(AtomicFile.read(path)))
       rescue JSON::ParserError, EncodingError
         {}
       end
@@ -738,7 +776,82 @@ module Woods
       # checkpoint intact, never a torn partial — a truncated checkpoint reads
       # as "no checkpoint" and silently re-embeds everything.
       def save_checkpoint(checkpoint)
-        AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+        AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint_payload(checkpoint)))
+      end
+
+      # Schema of the on-disk checkpoint payload when {#resolved_config} is
+      # tracked. Bump only alongside a reader change in {#checkpoint_hashes}.
+      CHECKPOINT_SCHEMA_VERSION = 1
+      private_constant :CHECKPOINT_SCHEMA_VERSION
+
+      # The provider/model/dimension triple checkpoint.json is stamped with,
+      # or +nil+ when this indexer was built without a +resolved_config+ (no
+      # identity to stamp or compare against — see {#checkpoint_payload} and
+      # {#checkpoint_hashes}, both of which treat +nil+ as "skip identity
+      # tracking entirely" for full backward compatibility with callers that
+      # never pass one).
+      #
+      # Reads {ResolvedConfig#to_snapshot_json} rather than calling
+      # +#embedding_provider+/+#dimension+ directly so a test double only
+      # needs to stub the one method the WVF1 header path already requires.
+      #
+      # @return [Hash, nil]
+      def current_checkpoint_identity
+        return nil unless @resolved_config
+
+        provider = @resolved_config.to_snapshot_json['embedding_provider'] || {}
+        provider.transform_keys(&:to_s).slice('class', 'model', 'dimension')
+      end
+
+      # Wrap the flat identifier=>source_hash map with its identity stamp for
+      # writing, or leave it flat when this run tracks no identity.
+      def checkpoint_payload(checkpoint)
+        identity = current_checkpoint_identity
+        return checkpoint if identity.nil?
+
+        { 'schema_version' => CHECKPOINT_SCHEMA_VERSION, 'identity' => identity, 'hashes' => checkpoint }
+      end
+
+      # Recover the flat identifier=>source_hash map {#checkpoint_satisfied?}
+      # consumes from whichever on-disk shape was parsed. Two shapes:
+      #
+      # - versioned (carries a top-level "hashes" key): written by this gem
+      #   version, stamped with the provider/model/dimension identity that
+      #   produced it (see #checkpoint_payload). A stamped identity that
+      #   disagrees with {#current_checkpoint_identity} — a same-dimension
+      #   model switch, the P1 finding this exists to close — means nothing
+      #   here can say which individual hits are still good, so the *whole*
+      #   checkpoint is discarded rather than trusted per-unit.
+      # - flat (every checkpoint written before this gem version): carries no
+      #   identity at all. When this run tracks identity (a resolved_config
+      #   was given), "no identity recorded" is indistinguishable from "the
+      #   identity that produced this changed" — so it is discarded the same
+      #   way: one full re-embed, after which every checkpoint this gem
+      #   writes is stamped and can be trusted again. When this run has no
+      #   resolved_config either there is nothing to compare against, and the
+      #   flat map is trusted exactly as every prior gem version did.
+      def checkpoint_hashes(data)
+        return data unless data.is_a?(Hash)
+
+        current = current_checkpoint_identity
+        return checkpoint_hashes_versioned(data, current) if data.key?('hashes')
+        return data if current.nil?
+
+        warn '[woods] checkpoint.json predates embedding-identity tracking and cannot be ' \
+             'verified against the current provider/model — discarding it and re-embedding ' \
+             'every unit once so future checkpoints are stamped and can be trusted safely.'
+        {}
+      end
+
+      def checkpoint_hashes_versioned(data, current)
+        stamped = data['identity']
+        return data['hashes'] || {} if current.nil? || stamped == current
+
+        warn '[woods] checkpoint.json was stamped for a different embedding identity ' \
+             "(#{stamped.inspect} vs current #{current.inspect}) — the provider or model " \
+             'changed since the last run. Discarding the checkpoint and re-embedding every ' \
+             'unit so no stale-model vector survives.'
+        {}
       end
 
       # Returns true when the vector store can actually be dumped to
@@ -797,9 +910,20 @@ module Woods
           Storage::Snapshotter::Metadata.dump(@metadata_store, artifact, dump_dir)
         end
 
-        artifact.write_config(@resolved_config) if @resolved_config
+        # Written INSIDE the dump directory, as part of the dump, so #promote
+        # below is the single commit point for the vectors/metadata AND the
+        # config that describes them — a crash between this write and
+        # #promote leaves the previous promoted dump (and its own config)
+        # untouched. See IndexArtifact#read_config, which prefers this copy.
+        artifact.write_dump_config(dump_dir, @resolved_config) if @resolved_config
 
         artifact.promote(dump_dir)
+
+        # Written AFTER promote so the commit point stays the promotion
+        # above — this root copy is for anything that reads
+        # output_dir/woods.json directly instead of through
+        # IndexArtifact#read_config.
+        artifact.write_config(@resolved_config) if @resolved_config
 
         prune_old_dumps(artifact)
       end
