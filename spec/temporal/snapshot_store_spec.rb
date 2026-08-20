@@ -207,8 +207,7 @@ RSpec.describe Woods::Temporal::SnapshotStore do
         setup.close
         first_read, first_ready = IO.pipe
         release_read, release_first = IO.pipe
-        second_read, second_reached_read = IO.pipe
-        second_attempt_read, second_attempted = IO.pipe
+        second_event_read, second_event = IO.pipe
         first = fork do
           connection = SQLite3::Database.new(database)
           connection.results_as_hash = true
@@ -231,25 +230,31 @@ RSpec.describe Woods::Temporal::SnapshotStore do
           connection = SQLite3::Database.new(database)
           connection.results_as_hash = true
           child_store = described_class.new(connection: connection)
+          contended = false
+          connection.busy_handler do |_attempt|
+            unless contended
+              second_event.write('C')
+              contended = true
+            end
+            true
+          end
           original_find = child_store.method(:find_latest)
           child_store.define_singleton_method(:find_latest) do
-            second_reached_read.write('1')
+            second_event.write('R')
             original_find.call
           end
-          second_attempted.write('1')
           child_store.capture(manifest_v2, units_v2)
           exit! 0
         rescue StandardError => e
           warn e.full_message
           exit! 1
         end
-        second_attempt_read.read(1)
-        expect(second_read.wait_readable(0.1)).to be_nil
+        expect(second_event_read.read(1)).to eq('C')
         release_first.write('1')
 
         statuses = Timeout.timeout(5) { [first, second].map { |pid| Process.wait2(pid).last } }
         expect(statuses).to all(be_success)
-        expect(second_read.read(1)).to eq('1')
+        expect(second_event_read.read(1)).to eq('R')
         verifier = SQLite3::Database.new(database)
         verifier.results_as_hash = true
         verified = described_class.new(connection: verifier).find(manifest_v2.fetch('git_sha'))
@@ -266,8 +271,7 @@ RSpec.describe Woods::Temporal::SnapshotStore do
         rescue Errno::ESRCH, Errno::ECHILD
           nil
         end
-        [first_read, first_ready, release_read, release_first, second_read,
-         second_reached_read, second_attempt_read, second_attempted].compact.each(&:close)
+        [first_read, first_ready, release_read, release_first, second_event_read, second_event].compact.each(&:close)
         verifier&.close
       end
     end
