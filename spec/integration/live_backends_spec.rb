@@ -45,7 +45,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
   # using a different width would inherit the previous context's column and
   # fail with `expected N dimensions`.
   def reset_pg_schema!(connection, store)
-    connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+    (@pg_cleanup ||= []) << [connection, store.table]
+    connection.execute("DROP TABLE IF EXISTS #{store.table}")
     store.ensure_schema!
   end
 
@@ -67,10 +68,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       end
     end
 
-    if defined?(ActiveRecord::Base) && ActiveRecord::Base.connected?
-      ActiveRecord::Base.connection.execute(
-        "DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}"
-      )
+    Array(@pg_cleanup).each do |connection, table|
+      connection.execute("DROP TABLE IF EXISTS #{table}")
     end
   end
 
@@ -85,7 +84,10 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       )
       ActiveRecord::Base.connection
     end
-    let(:store) { Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3) }
+    let(:table) { "woods_vectors_#{SecureRandom.hex(8)}" }
+    let(:store) do
+      Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3, table: table)
+    end
 
     before { reset_pg_schema!(connection, store) }
 
@@ -277,7 +279,11 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       ActiveRecord::Base.connection
     end
     let(:vector_store) do
-      Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: dims)
+      Woods::Storage::VectorStore::Pgvector.new(
+        connection: connection,
+        dimensions: dims,
+        table: "woods_vectors_#{SecureRandom.hex(8)}"
+      )
     end
 
     let(:unit_hashes) do
@@ -399,7 +405,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
 
       # Wipe the store but keep the checkpoint — exactly what pointing
       # vector_store at a fresh pgvector database looks like.
-      connection.execute("TRUNCATE #{Woods::Storage::VectorStore::Pgvector::TABLE}")
+      connection.execute("TRUNCATE #{vector_store.table}")
 
       stats = build_indexer.index_incremental
 
@@ -418,16 +424,16 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
       )
       connection = ActiveRecord::Base.connection
-      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384)
-      connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
-      store.ensure_schema!
+      table = "woods_vectors_dims_#{SecureRandom.hex(8)}"
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384, table: table)
+      reset_pg_schema!(connection, store)
 
       expect(store.stored_dimensions).to eq(384)
 
       # The mismatch this exists to catch: ensure_schema! is CREATE TABLE IF
       # NOT EXISTS, so a differently-configured store leaves the old width in
       # place rather than migrating it.
-      wider = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 768)
+      wider = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 768, table: table)
       wider.ensure_schema!
 
       expect(wider.stored_dimensions).to eq(384)
@@ -440,8 +446,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
       )
       connection = ActiveRecord::Base.connection
-      connection.execute("DROP TABLE IF EXISTS #{Woods::Storage::VectorStore::Pgvector::TABLE}")
-      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384)
+      table = "woods_vectors_absent_#{SecureRandom.hex(8)}"
+      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 384, table: table)
 
       expect(store.stored_dimensions).to be_nil
     end
@@ -474,7 +480,11 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test')
       )
       connection = ActiveRecord::Base.connection
-      store = Woods::Storage::VectorStore::Pgvector.new(connection: connection, dimensions: 3)
+      store = Woods::Storage::VectorStore::Pgvector.new(
+        connection: connection,
+        dimensions: 3,
+        table: "woods_vectors_ids_#{SecureRandom.hex(8)}"
+      )
       reset_pg_schema!(connection, store)
 
       store.store_batch(

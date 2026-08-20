@@ -12,6 +12,22 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
     it 'stores the connection and dimensions' do
       expect(store).to be_a(described_class)
     end
+
+    it 'accepts a validated table name for isolated live namespaces' do
+      isolated = described_class.new(
+        connection: connection,
+        dimensions: 3,
+        table: 'woods_vectors_a1b2c3'
+      )
+
+      expect(isolated.table).to eq('woods_vectors_a1b2c3')
+    end
+
+    it 'rejects table names that could alter SQL structure' do
+      expect do
+        described_class.new(connection: connection, dimensions: 3, table: 'woods_vectors; DROP TABLE users')
+      end.to raise_error(ArgumentError, /table must be a PostgreSQL identifier/)
+    end
   end
 
   describe '#ensure_schema!' do
@@ -41,6 +57,20 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       store.ensure_schema!
 
       expect(connection).to have_received(:execute).with(/vector\(3\)/)
+    end
+
+    it 'creates an explicitly isolated table and index' do
+      allow(connection).to receive(:execute)
+      isolated = described_class.new(
+        connection: connection,
+        dimensions: 3,
+        table: 'woods_vectors_a1b2c3'
+      )
+
+      isolated.ensure_schema!
+
+      expect(connection).to have_received(:execute).with(/CREATE TABLE IF NOT EXISTS woods_vectors_a1b2c3/)
+      expect(connection).to have_received(:execute).with(/ON woods_vectors_a1b2c3 USING hnsw/)
     end
   end
 
