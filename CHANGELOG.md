@@ -80,6 +80,17 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Units of different types no longer collapse onto one graph node (#225).** A Scenic
+  view `reports` and a factory `reports` are two units and the index has always written
+  them to two files, but `DependencyGraph` keyed nodes on the bare identifier, so
+  registering the second destroyed the first's reverse edges, `file_map` entry and
+  `type_index` entry. Both now coexist as typed nodes. Deleting one type's source file
+  removes that type's node and its JSON only; incremental re-extraction, git enrichment
+  and the `dependents` rewrite fan out over every type an identifier names; and the MCP
+  traversal tools follow both units' edges and report `types` when an identifier is
+  ambiguous instead of picking one silently. **No re-index is required** — the persisted
+  graph is unchanged for any index with no shared identifier, and identifiers that are
+  shared add a `variants` array that older graphs simply do not carry.
 - **Release-hardening batch (2026-08-07, #211–#218, #220):**
   - *Embedding durability:* every pgvector/Qdrant embed run crashed at the very end and
     discarded its work — `Indexer#persistable?` asked `respond_to?(:each_entry)`, which

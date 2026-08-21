@@ -513,6 +513,62 @@ RSpec.describe Woods::MCP::IndexReader do
         expect(result[:nodes]['Order'][:deps]).to eq([])
       end
     end
+
+    # `nodes` and `edges` carry the primary type; an identifier naming units
+    # of several types puts the rest in `variants`. A traversal reading only
+    # the primary reports one unit's dependencies as the identifier's whole
+    # out-edge set.
+    describe 'an identifier naming units of several types' do
+      let(:tmp_dir) { Dir.mktmpdir('woods-traverse-variants') }
+      let(:reader) { described_class.new(tmp_dir) }
+
+      before do
+        File.write(File.join(tmp_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        File.write(
+          File.join(tmp_dir, 'dependency_graph.json'),
+          JSON.pretty_generate(
+            nodes: {
+              'reports' => { 'type' => 'database_view' },
+              'Order' => { 'type' => 'model' },
+              'Report' => { 'type' => 'model' }
+            },
+            edges: { 'reports' => [{ 'target' => 'Order', 'via' => 'code_reference' }] },
+            reverse: { 'Order' => ['reports'], 'Report' => ['reports'] },
+            variants: [
+              { 'identifier' => 'reports', 'type' => 'factory',
+                'file_path' => 'spec/factories/reports.rb',
+                'edges' => [{ 'target' => 'Report', 'via' => 'code_reference' }] }
+            ]
+          )
+        )
+      end
+
+      after { FileUtils.remove_entry(tmp_dir) if File.directory?(tmp_dir) }
+
+      it 'follows the edges of every type the identifier names' do
+        result = reader.traverse_dependencies('reports', depth: 1)
+
+        expect(result[:nodes]['reports'][:deps]).to contain_exactly('Order', 'Report')
+      end
+
+      it 'names every type rather than reporting one of them silently' do
+        result = reader.traverse_dependencies('reports', depth: 1)
+
+        expect(result[:nodes]['reports'][:types]).to eq(%w[database_view factory])
+      end
+
+      it 'omits the types key for an unambiguous identifier' do
+        result = reader.traverse_dependencies('reports', depth: 1)
+
+        expect(result[:nodes]['Order']).not_to have_key(:types)
+      end
+
+      it 'matches a type filter against any of the identifier\'s types' do
+        result = reader.traverse_dependents('Report', depth: 1, types: ['factory'])
+
+        expect(result[:nodes]['Report'][:deps]).to eq(['reports'])
+      end
+    end
   end
 
   describe '#traverse_dependents' do

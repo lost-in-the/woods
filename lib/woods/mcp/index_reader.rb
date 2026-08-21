@@ -231,6 +231,7 @@ module Woods
         @graph_analysis = nil
         @raw_graph_data = nil
         @normalized_graph_edges = nil
+        @graph_node_types = nil
       end
 
       # @return [Hash] Parsed manifest.json
@@ -782,8 +783,51 @@ module Woods
 
       # Memoized normalized edges — converts bare strings (old format) to hashes once.
       # Cleared by reload! alongside raw_graph_data.
+      #
+      # `edges` holds one type's edges per identifier. Where an identifier
+      # names units of several types the rest live in `variants`, and a
+      # traversal that read only the primary would report a unit as having no
+      # dependencies at all. They are unioned here so traversal follows the
+      # identifier's whole out-edge set.
       def normalized_graph_edges
-        @normalized_graph_edges ||= normalize_all_edges(raw_graph_data['edges'] || {})
+        @normalized_graph_edges ||= begin
+          edges = normalize_all_edges(raw_graph_data['edges'] || {})
+          variant_records.each do |record|
+            identifier = record['identifier']
+            next unless identifier
+
+            extra = normalize_all_edges(identifier => Array(record['edges']))
+            edges[identifier] = ((edges[identifier] || []) + extra[identifier]).uniq
+          end
+          edges
+        end
+      end
+
+      # Every unit type registered under each identifier, sorted.
+      #
+      # One entry for all but the handful of identifiers a codebase reuses
+      # across types; those get one per coexisting unit.
+      #
+      # @return [Hash{String => Array<String>}]
+      def graph_node_types
+        @graph_node_types ||= begin
+          types = (raw_graph_data['nodes'] || {}).transform_values { |node| [node['type']].compact }
+          variant_records.each do |record|
+            identifier = record['identifier']
+            next unless identifier && record['type']
+
+            (types[identifier] ||= []) << record['type']
+          end
+          types.transform_values { |list| list.uniq.sort }
+        end
+      end
+
+      # @return [Array<Hash>] the graph's `variants` section, empty when the
+      #   graph has no identifier shared across types (and for every graph
+      #   written before the section existed)
+      def variant_records
+        records = raw_graph_data['variants']
+        records.is_a?(Array) ? records.grep(Hash) : []
       end
 
       # Build identifier → { type_dir, filename } map from all _index.json files.
@@ -919,12 +963,12 @@ module Woods
                         resolve_reverse_neighbors(graph_data, normalized_edges, current, via_set)
                       end
 
-          # Filter by node type if requested
+          # Filter by node type if requested. An identifier naming units of
+          # several types matches when any of them does — excluding it because
+          # the type that happens to sort first is not the requested one would
+          # hide a unit the filter asked for.
           filtered = if type_set
-                       neighbors.select do |n|
-                         node_meta = nodes_data[n]
-                         node_meta && type_set.include?(node_meta['type'])
-                       end
+                       neighbors.select { |n| graph_node_types[n]&.any? { |t| type_set.include?(t) } }
                      else
                        neighbors
                      end
@@ -934,11 +978,16 @@ module Woods
           # node's deps list already shows this node as a child.
           will_expand = current_depth < depth
           node_meta = nodes_data[current]
-          result_nodes[current] = {
+          entry = {
             type: node_meta&.dig('type'),
             depth: current_depth,
             deps: will_expand ? filtered : []
           }
+          # Only when the identifier is genuinely ambiguous, so the shape is
+          # unchanged for every node in an index with no shared identifiers.
+          node_types = graph_node_types[current] || []
+          entry[:types] = node_types if node_types.size > 1
+          result_nodes[current] = entry
 
           next unless will_expand
 
