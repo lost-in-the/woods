@@ -218,11 +218,10 @@ The first run after upgrading publishes a payload directory and the index
 becomes atomic from then on. Flat artifacts left at the root are stale but
 harmless; `woods:clean` removes them.
 
-**Open question for review:** whether the payload writer ships on by default in
-2.0 or behind a config flag for one release. Default-on is the honest fix and
-the reader half already tolerates both; default-off means shipping 2.0 with the
-gap still live. Recommendation: default-on, since the layout change is confined
-to the output directory and every in-repo reader is migrated in step 3 below.
+**Decided (maintainer, 2026-08-20): default-on.** The reader half already
+tolerates both layouts, the change is confined to the output directory, and
+every in-repo reader is migrated in step 3 below. Shipping it behind a flag
+would mean shipping 2.0 with the gap still live.
 
 ### Files
 
@@ -259,7 +258,7 @@ honestly, in two parts:
 Rewriting a pinned reproducer to make it pass is normally the wrong move. It is
 right here only because the comment on that example says explicitly that it
 pins *remaining work*, and the remaining work is a layout the example does not
-use. **Flagged for maintainer review before step 1 lands.**
+use. **Approved by the maintainer, 2026-08-20.**
 
 ### Steps (TDD, one commit each)
 
