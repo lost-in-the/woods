@@ -1,7 +1,13 @@
 # v2.0.0 launch blockers — implementation plan
 
-Status: draft, 2026-08-20. Covers GitHub issues #225, #226, #229.
+Status: 2026-08-20. Covers GitHub issues #225, #226, #229.
 Base: `main` at `75288f2` (merge of PR #224).
+Branch: `fix/225-typed-graph-identity`.
+
+**#225 is complete** (steps 1-6, commits `a458702`, `ff9aded`, `57b0f33`).
+Verified: full suite 6870/0/6 pending, rubocop clean on 570 files, incremental
+equivalence oracle 18/0 under `gemfiles/rails_7.1.gemfile` including its three
+randomized 60-operation sequences. #226 is next.
 
 ## Bottom line
 
