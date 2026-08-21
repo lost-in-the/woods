@@ -80,6 +80,24 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **A generation's payload is published atomically (#226).** `generation.json` was
+  bumped atomically and last, but it named the output root — a directory of
+  independently-written files — so a reader refreshing mid-publish could load a
+  unit from generation N+1 beside a manifest from N. Extraction now publishes
+  into `payloads/gen-<N>/` and names that directory from `generation.json`, so
+  the single atomic write of that file commits the whole payload; a reader sees
+  one generation whole, including artifacts it had not read yet. Incremental
+  runs seed their directory from the published one with hardlinks, so an
+  unchanged artifact costs a directory entry rather than a copy. Three
+  generations are retained by default (`WOODS_PAYLOAD_RETENTION`).
+  **This changes the on-disk layout.** No re-index is required — the first run
+  after upgrading publishes a payload and reading is unaffected, since every
+  Woods reader resolves the pointer — but anything outside Woods that reads
+  `tmp/woods/manifest.json`, `tmp/woods/dependency_graph.json` or
+  `tmp/woods/<type>/*.json` directly must now read `generation.json`, take its
+  `payload` value, and resolve relative to the index directory. Files left at
+  the root by a pre-2.0 run are stale from the first payload publish onward;
+  `woods:clean` removes them.
 - **Units of different types no longer collapse onto one graph node (#225).** A Scenic
   view `reports` and a factory `reports` are two units and the index has always written
   them to two files, but `DependencyGraph` keyed nodes on the bare identifier, so
