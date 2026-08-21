@@ -516,7 +516,7 @@ The `trace` intent in `RETRIEVAL_ARCHITECTURE.md` is designed for queries like "
 
 With FlowAssembler, the `trace` intent can delegate to `FlowAssembler` for entry points that resolve to a specific controller action or service method:
 
-```ruby
+```text
 # In Retrieval::StrategySelector (future)
 when :trace
   if entry_point = resolve_entry_point(classification)

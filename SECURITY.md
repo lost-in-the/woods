@@ -2,9 +2,19 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | Yes       |
+| Version | Supported | Until |
+|---------|-----------|-------|
+| 2.0.x   | Yes — all fixes | Current release line |
+| 1.6.x   | Security fixes only | 2027-02-20 |
+| < 1.6   | No | — |
+| 0.x     | No | — |
+
+Only the newest patch release of a supported line receives fixes. A report
+against 1.6.x is assessed against `main` first; if the current release line is
+unaffected, the 1.6.x backport is still issued until the date above.
+
+Upgrading from 1.x to 2.0 requires one clean re-index — see the Upgrade Notes in
+[CHANGELOG.md](CHANGELOG.md) and [docs/UPGRADING_TO_2.md](docs/UPGRADING_TO_2.md).
 
 ## Reporting a Vulnerability
 
@@ -12,12 +22,21 @@ If you discover a security vulnerability in Woods, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, email **info@leah.wtf** with:
+Preferred: use GitHub's private vulnerability reporting — the **Report a
+vulnerability** button under the repository's
+[Security tab](https://github.com/lost-in-the/woods/security/advisories/new).
+It keeps the report, the discussion and the eventual advisory in one place, and
+it does not expose anything publicly until an advisory is published.
+
+If you cannot use GitHub, email **info@leah.wtf** instead.
+
+Either way, please include:
 
 1. A description of the vulnerability
 2. Steps to reproduce
 3. The potential impact
-4. Any suggested fix (optional)
+4. The Woods version and Rails version you observed it on
+5. Any suggested fix (optional)
 
 ## What to Expect
 

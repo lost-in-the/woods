@@ -173,7 +173,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO codebase_rea
 
 Configure in the bridge:
 
-```ruby
+```yaml
 # config/database.yml (or environment variable)
 console_readonly:
   adapter: mysql2  # or postgresql
