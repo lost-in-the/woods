@@ -1740,13 +1740,11 @@ module Woods
       covered_keys = rules.to_set(&:extractor_key)
       removed = Set.new
 
-      @dependency_graph.identifiers_for_path(absolute_path).each do |identifier|
+      @dependency_graph.units_for_path(absolute_path).each do |identifier, node_type|
         next if produced.include?(identifier)
-
-        node_type = @dependency_graph.node(identifier)&.fetch(:type, nil)
         next unless covered_keys.include?(TYPE_TO_EXTRACTOR_KEY[node_type])
 
-        removed.add(identifier) if remove_unit(identifier, affected_types)
+        removed.add(identifier) if remove_unit(identifier, affected_types, type: node_type)
       end
 
       removed
@@ -1808,7 +1806,7 @@ module Woods
 
       Rails.logger.info "[Woods] removing #{stale.size} #{spec[:type]} unit(s) whose class no longer exists"
       stale.each_with_object(Set.new) do |identifier, removed|
-        removed.add(identifier) if remove_unit(identifier, affected_types)
+        removed.add(identifier) if remove_unit(identifier, affected_types, type: spec[:type])
       end
     end
 
@@ -1851,11 +1849,11 @@ module Woods
 
       live = discovered.to_set(&:name)
       known.reject { |identifier| live.include?(identifier) }
-           # Not redundant with `units_of_type`. The graph keys nodes on the
-           # bare identifier (B-062), so a same-named unit of another type can
-           # overwrite this node while the type index still lists it — and
-           # removing it here would delete that other unit instead.
-           .select { |identifier| @dependency_graph.node(identifier)&.fetch(:type, nil) == type }
+           # Not redundant with `units_of_type`: an identifier can be listed in
+           # this type's index while also naming a unit of another type, and
+           # the caller removes by (identifier, type), so it has to be told
+           # which node it is allowed to take.
+           .select { |identifier| @dependency_graph.node_types(identifier).include?(type) }
     end
 
     # Re-run whole-app extractors whose trigger paths changed, replacing that
@@ -2024,10 +2022,10 @@ module Woods
         next unless path.to_s.start_with?(root_prefix)
         next if File.exist?(path)
 
-        @dependency_graph.identifiers_for_path(path).each do |identifier|
-          next if !class_based && convention_path_unit?(identifier)
+        @dependency_graph.units_for_path(path).each do |identifier, type|
+          next if !class_based && convention_path_unit?(type)
 
-          removed.add(identifier) if remove_unit(identifier, affected_types)
+          removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
       end
     end
@@ -2083,13 +2081,10 @@ module Woods
     # spare only the units that never had one. That needs the graph node to carry
     # the flag, so it is a serialization change rather than a predicate tweak.
     #
-    # @param identifier [String]
+    # @param type [Symbol, nil] the unit type the caller is about to remove
     # @return [Boolean]
-    def convention_path_unit?(identifier)
-      node = @dependency_graph.node(identifier)
-      return false unless node
-
-      CLASS_BASED.key?(node[:type])
+    def convention_path_unit?(type)
+      CLASS_BASED.key?(type)
     end
 
     # Is this GraphQL unit's recorded path the convention derived from its
@@ -2141,15 +2136,36 @@ module Woods
 
     # Remove a unit from the graph and delete its JSON from the index.
     #
+    # Callers that know which type they mean must say so. An identifier can
+    # name units of several types (a Scenic view `reports` and a factory
+    # `reports`), each with its own `<extractor_key>/<identifier>.json`, and
+    # removing the identifier wholesale takes the sibling with it.
+    #
     # @param identifier [String]
     # @param affected_types [Set<Symbol>]
+    # @param type [Symbol, nil] remove only this type; without it, every type
+    #   registered under the identifier
     # @return [String, nil] the identifier when it existed and was removed
-    def remove_unit(identifier, affected_types)
-      node = @dependency_graph.node(identifier)
-      return nil unless node
+    def remove_unit(identifier, affected_types, type: nil)
+      types = type ? [type] : @dependency_graph.node_types(identifier)
+      types = types.select { |t| @dependency_graph.node(identifier, type: t) }
+      return nil if types.empty?
 
-      extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]]
+      # Before the removals: this reads the identifier's forward edges, which
+      # go with the nodes.
       mark_dependents_dirty(identifier)
+
+      types.each { |t| remove_unit_of_type(identifier, t, affected_types) }
+      Rails.logger.debug { "[Woods] Removed #{identifier}" }
+      identifier
+    end
+
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param affected_types [Set<Symbol>]
+    # @return [void]
+    def remove_unit_of_type(identifier, type, affected_types)
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
 
       if extractor_key
         affected_types&.add(extractor_key)
@@ -2157,9 +2173,7 @@ module Woods
         FileUtils.rm_f(path)
       end
 
-      @dependency_graph.remove(identifier)
-      Rails.logger.debug { "[Woods] Removed #{identifier}" }
-      identifier
+      @dependency_graph.remove(identifier, type: type)
     end
 
     # Record that a unit's edges changed, so every target it points at (and
@@ -2205,10 +2219,24 @@ module Woods
     # @param git [Hash, nil] git metadata for the unit's file, if any
     # @return [void]
     def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git:)
-      node = @dependency_graph.node(identifier)
-      return unless node
+      @dependency_graph.node_types(identifier).each do |type|
+        rewrite_unit_json_of_type(identifier, type, affected_types,
+                                  refresh_dependents: refresh_dependents, git: git)
+      end
+    end
 
-      extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]]
+    # One (identifier, type) pair's JSON. The `dependents` list is a property
+    # of the identifier, not of the type, so every file the identifier owns
+    # gets the same refreshed list — which is what a full extraction writes.
+    #
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param affected_types [Set<Symbol>]
+    # @param refresh_dependents [Boolean]
+    # @param git [Hash, nil]
+    # @return [void]
+    def rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents:, git:)
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
       return unless extractor_key
 
       path = @output_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
@@ -2242,11 +2270,12 @@ module Woods
     def incremental_git_data(identifiers)
       return {} if identifiers.empty? || !git_available?
 
-      paths = identifiers.filter_map do |identifier|
-        node = @dependency_graph.node(identifier)
-        next if node.nil? || %i[rails_source gem_source].include?(node[:type])
+      paths = identifiers.flat_map do |identifier|
+        @dependency_graph.nodes_for(identifier).filter_map do |node|
+          next if %i[rails_source gem_source].include?(node[:type])
 
-        node[:file_path] if node[:file_path] && File.exist?(node[:file_path])
+          node[:file_path] if node[:file_path] && File.exist?(node[:file_path])
+        end
       end
 
       batch_git_data(paths.uniq)
@@ -2272,12 +2301,26 @@ module Woods
         return nil
       end
 
-      # Find the unit's type from the graph
-      node = @dependency_graph.node(unit_id)
-      return nil unless node
+      # An identifier can name units of several types, each with its own
+      # extractor and its own file; re-extracting one and calling it done would
+      # leave the others frozen at the pre-change extraction.
+      types = @dependency_graph.node_types(unit_id)
+      return nil if types.empty?
 
-      type = node[:type]&.to_sym
-      file_path = node[:file_path]
+      re_extracted = types.count { |type| re_extract_unit_of_type(unit_id, type, affected_types) }
+      return nil if re_extracted.zero?
+
+      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
+      unit_id
+    end
+
+    # @param unit_id [String]
+    # @param type [Symbol]
+    # @param affected_types [Set<Symbol>, nil]
+    # @return [String, nil] the identifier when this type was re-extracted and written
+    def re_extract_unit_of_type(unit_id, type, affected_types)
+      node = @dependency_graph.node(unit_id, type: type)
+      file_path = node && node[:file_path]
 
       # A vanished file is not re-extractable; {#prune_vanished_units} owns it.
       return nil unless file_path && File.exist?(file_path)
@@ -2288,29 +2331,39 @@ module Woods
       extractor = extractor_for(extractor_key)
       return nil unless extractor
 
-      unit = if (method = CLASS_BASED[type])
-               klass = if unit_id.match?(/\A[A-Z][A-Za-z0-9_:]*\z/)
-                         begin
-                           unit_id.constantize
-                         rescue StandardError
-                           nil
-                         end
-                       end
-               extractor.public_send(method, klass) if klass
-             elsif (method = FILE_BASED[type])
-               extract_file_based_unit(extractor, method, file_path, extractor_key)
-             elsif GRAPHQL_TYPES.include?(type)
-               extractor.extract_graphql_file(file_path)
-             end
-
       # File-based extractors can return several units from one file (a .rake
       # file defining multiple tasks, etc.); class-based extractors return one.
-      units = Array(unit).compact
+      units = Array(re_extracted_units(extractor, type, unit_id, file_path, extractor_key)).compact
       return nil if units.empty?
 
       register_and_write(extractor_key, units, affected_types)
-      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
       unit_id
+    end
+
+    # Dispatch one re-extraction to the right extractor entry point.
+    #
+    # @return [ExtractedUnit, Array<ExtractedUnit>, nil]
+    def re_extracted_units(extractor, type, unit_id, file_path, extractor_key)
+      if (method = CLASS_BASED[type])
+        klass = constant_for_identifier(unit_id)
+        klass && extractor.public_send(method, klass)
+      elsif (method = FILE_BASED[type])
+        extract_file_based_unit(extractor, method, file_path, extractor_key)
+      elsif GRAPHQL_TYPES.include?(type)
+        extractor.extract_graphql_file(file_path)
+      end
+    end
+
+    # @param unit_id [String]
+    # @return [Class, nil] the constant an identifier names, when it names one
+    def constant_for_identifier(unit_id)
+      return nil unless unit_id.match?(/\A[A-Z][A-Za-z0-9_:]*\z/)
+
+      begin
+        unit_id.constantize
+      rescue StandardError
+        nil
+      end
     end
 
     # Invoke a file-based extraction method, supplying the extra arguments

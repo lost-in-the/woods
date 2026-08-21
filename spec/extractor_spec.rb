@@ -682,9 +682,10 @@ RSpec.describe Woods::Extractor do
       rake_dir = File.join(tmpdir, 'output', 'rake_tasks')
       FileUtils.mkdir_p(rake_dir)
 
-      node = { type: 'rake_task', file_path: rake_path }
+      node = { type: :rake_task, file_path: rake_path }
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:node).with('things:one').and_return(node)
+      allow(graph).to receive(:node_types).with('things:one').and_return([:rake_task])
+      allow(graph).to receive(:node).with('things:one', type: :rake_task).and_return(node)
       allow(graph).to receive(:register).and_call_original
 
       unit_one = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:one', file_path: rake_path)
@@ -1454,6 +1455,43 @@ RSpec.describe Woods::Extractor do
 
       expect(prune([])).to be_empty
     end
+
+    # Both units are named `reports` and live in different files. Deleting the
+    # view's file must not take the factory with it, and the factory's JSON
+    # lives at a different path so the delete has to be per type.
+    it 'removes only the type whose file vanished when an identifier names two units' do
+      register(type: :service, identifier: 'reports', relative_path: 'app/services/reports.rb')
+      surviving = File.join(tmpdir, 'app/models/reports.rb')
+      FileUtils.mkdir_p(File.dirname(surviving))
+      FileUtils.touch(surviving)
+      register(type: :model, identifier: 'reports', relative_path: 'app/models/reports.rb')
+
+      expect(prune(['app/services/reports.rb'])).to contain_exactly('reports')
+
+      expect(extractor.dependency_graph.node_types('reports')).to eq([:model])
+      expect(extractor.dependency_graph.units_of_type(:service)).not_to include('reports')
+      expect(extractor.dependency_graph.identifiers_for_path(surviving)).to include('reports')
+    end
+
+    it 'deletes only the vanished type\'s unit JSON' do
+      %w[services models].each { |d| FileUtils.mkdir_p(File.join(tmpdir, 'output', d)) }
+      service_json = File.join(tmpdir, 'output', 'services',
+                               extractor.send(:collision_safe_filename, 'reports'))
+      model_json = File.join(tmpdir, 'output', 'models',
+                             extractor.send(:collision_safe_filename, 'reports'))
+      [service_json, model_json].each { |f| File.write(f, '{}') }
+
+      register(type: :service, identifier: 'reports', relative_path: 'app/services/reports.rb')
+      surviving = File.join(tmpdir, 'app/models/reports.rb')
+      FileUtils.mkdir_p(File.dirname(surviving))
+      FileUtils.touch(surviving)
+      register(type: :model, identifier: 'reports', relative_path: 'app/models/reports.rb')
+
+      prune(['app/services/reports.rb'])
+
+      expect(File.exist?(service_json)).to be(false)
+      expect(File.exist?(model_json)).to be(true)
+    end
   end
 
   # ── reconcile_class_based_types — removals ───────────────────────────
@@ -1512,14 +1550,15 @@ RSpec.describe Woods::Extractor do
         expect(reconcile).to be_empty
       end
 
-      # The graph keys nodes on the bare identifier (B-062), so a factory named
-      # `Sidecar` can overwrite the model node while the model type index still
-      # lists it. Removing it as a stale model would delete the factory.
-      it 'leaves an identifier whose node another type has taken over' do
+      # A factory named `Sidecar` is a second node under the same identifier,
+      # not a replacement for the model node. Removing the stale model must
+      # take that node and only that node.
+      it 'removes the stale model without taking a same-named unit of another type' do
         register(type: :factory, identifier: 'Sidecar')
 
-        expect(reconcile).to be_empty
-        expect(extractor.dependency_graph.node_exists?('Sidecar')).to be(true)
+        expect(reconcile).to contain_exactly('Sidecar')
+        expect(extractor.dependency_graph.node_types('Sidecar')).to eq([:factory])
+        expect(extractor.dependency_graph.units_of_type(:model)).not_to include('Sidecar')
       end
     end
 

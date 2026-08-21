@@ -347,13 +347,19 @@ module Woods
     # vanished file needs to know *which* node that path registered, or it
     # deletes the same-named unit of another type too.
     #
+    # An identifier whose nodes name no matching `file_path` still yields every
+    # one of its types. The file map is the authority on which identifiers a
+    # path defines — a persisted graph can carry a file-map key that does not
+    # match its node's recorded path, and dropping the identifier there would
+    # make this see *less* than {#identifiers_for_path} does.
+    #
     # @param file_path [String] Absolute file path as registered
     # @return [Array<Array(String, Symbol)>] `[identifier, type]` pairs
     def units_for_path(file_path)
       (@file_map[file_path] || []).flat_map do |identifier|
-        sorted_nodes(@nodes[identifier] || {})
-          .select { |_, node| node[:file_path] == file_path }
-          .map { |type, _| [identifier, type] }
+        nodes = sorted_nodes(@nodes[identifier] || {})
+        at_path = nodes.select { |_, node| node[:file_path] == file_path }
+        (at_path.empty? ? nodes : at_path).map { |type, _| [identifier, type] }
       end
     end
 
