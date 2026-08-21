@@ -51,7 +51,7 @@ module Woods
       def initialize(index_dir, auto_refresh: true)
         @index_dir = Pathname.new(index_dir)
         raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
-        raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
+        raise ArgumentError, "No manifest.json found in: #{index_dir}" unless manifest_present?
 
         @unit_cache = {}
         @unit_cache_signatures = {}
@@ -234,6 +234,24 @@ module Woods
         @graph_node_types = nil
       end
 
+      # The directory the current read resolves payload artifacts against —
+      # manifest, summary, graph, per-type indexes, unit files and precomputed
+      # flows. It is the immutable payload directory the loaded generation
+      # names, or the index root for a flat/pre-pointer index.
+      #
+      # Fixed for the life of a pin (only {#refresh_if_stale} moves it, and
+      # pins suppress refresh), so every artifact of a pinned read resolves
+      # through one generation. Public because callers that read payload files
+      # without going through this reader — the flow assembler, the
+      # precomputed-flow loader — have to resolve to the same generation this
+      # reader is serving, not to whatever is published when they look.
+      #
+      # @return [Pathname]
+      def payload_dir
+        ensure_fresh!
+        current_payload_dir
+      end
+
       # @return [Hash] Parsed manifest.json
       def manifest
         ensure_fresh!
@@ -255,7 +273,7 @@ module Woods
       def summary
         ensure_fresh!
         @summary ||= begin
-          path = payload_dir.join('SUMMARY.md')
+          path = current_payload_dir.join('SUMMARY.md')
           path.file? ? path.read : nil
         end
       end
@@ -648,39 +666,43 @@ module Woods
         @loaded_generation = marker.number
       end
 
-      # The directory the current read resolves payload artifacts against —
-      # manifest, summary, graph, per-type indexes and unit files. It is the
-      # immutable payload directory the loaded generation names, or the index
-      # root for a flat/pre-pointer index. Fixed for the life of a pin (only
-      # {#refresh_if_stale} moves it, and pins suppress refresh), so every
-      # artifact of a pinned read resolves through one generation.
+      # Is there an index here at all?
+      #
+      # A flat index answers with the manifest at the root. An index that
+      # publishes per-generation payloads has no manifest there — every payload
+      # artifact lives in the directory the published generation names — so the
+      # pointer is followed before concluding the directory is not an index.
+      #
+      # @return [Boolean]
+      def manifest_present?
+        return true if @index_dir.join('manifest.json').file?
+
+        marker = Woods::Generation.new(output_dir: @index_dir).current
+        resolve_payload_dir(marker).join('manifest.json').file?
+      end
+
+      # The loaded generation's payload directory, without a freshness check.
+      #
+      # Internal reads call this rather than {#payload_dir}: they are already
+      # inside a public read that checked freshness once, and re-checking per
+      # artifact would take the freshness mutex and stat generation.json for
+      # every unit file a request touches.
       #
       # @return [Pathname]
-      def payload_dir
+      def current_payload_dir
         @payload_dir || @index_dir
       end
 
       # Resolve a generation's payload pointer to an on-disk directory.
       #
-      # Returns the index root when there is no pointer (flat index), when the
-      # named directory does not exist (a stale pointer, e.g. a payload pruned
-      # by retention), or when the name would escape the index root — a torn or
-      # tampered pointer must degrade to the flat layout, never read outside the
-      # index. The name is written by Woods and is relative by contract; the
-      # containment check mirrors {IndexArtifact#promote}'s boundary guard.
+      # Delegates to {Woods::Generation#payload_dir} so every reader of a
+      # payload artifact — the exporters, the validator, the daemon and this
+      # reader — follows the pointer by exactly the same rules.
       #
       # @param marker [Woods::Generation::Marker]
       # @return [Pathname]
       def resolve_payload_dir(marker)
-        name = marker.payload
-        return @index_dir if name.nil? || name.empty?
-
-        candidate = @index_dir.join(name)
-        root = @index_dir.expand_path.to_s
-        resolved = candidate.expand_path.to_s
-        return @index_dir unless resolved.start_with?("#{root}#{File::SEPARATOR}")
-
-        candidate.directory? ? candidate : @index_dir
+        Woods::Generation.new(output_dir: @index_dir).payload_dir(marker)
       end
 
       # Compare the *token*, not the number.
@@ -854,7 +876,7 @@ module Woods
       def read_index(dir)
         @index_cache ||= {}
         @index_cache[dir] ||= begin
-          path = payload_dir.join(dir, '_index.json')
+          path = current_payload_dir.join(dir, '_index.json')
           path.file? ? JSON.parse(path.read) : []
         end
       end
@@ -875,7 +897,7 @@ module Woods
       # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
-        path = payload_dir.join(type_dir, filename)
+        path = current_payload_dir.join(type_dir, filename)
         open_unit(path.to_s) do |file|
           signature = unit_file_signature(file.stat)
           cached = @cache_mutex.synchronize do
@@ -923,7 +945,7 @@ module Woods
       # Parse a JSON payload file (manifest, graph, analysis) resolved through
       # the loaded generation's {#payload_dir}.
       def parse_json(filename)
-        path = payload_dir.join(filename)
+        path = current_payload_dir.join(filename)
         JSON.parse(path.read)
       end
 

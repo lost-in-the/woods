@@ -516,7 +516,8 @@ module Woods
       # written before #166 as well as genuinely out-of-tree paths (gem sources)
       # that the caller's prefix check is there to exclude.
       def persisted_registered_paths
-        graph = File.join(@output_dir, 'dependency_graph.json')
+        payload = Woods::Generation.new(output_dir: @output_dir).payload_dir
+        graph = File.join(payload.to_s, 'dependency_graph.json')
         file_map = JSON.parse(AtomicFile.read(graph))['file_map']
         return [] unless file_map.is_a?(Hash)
 

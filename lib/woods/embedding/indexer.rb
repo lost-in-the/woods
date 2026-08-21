@@ -6,6 +6,7 @@ require 'fileutils'
 require 'set'
 
 require_relative '../atomic_file'
+require_relative '../generation'
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
 
@@ -116,8 +117,21 @@ module Woods
 
       private
 
+      # Where this run's units are read from — the published generation's
+      # payload, or the output root for a flat index.
+      #
+      # Globbing the output root would walk `payloads/` and ingest every
+      # retained generation, so each unit would be embedded once per retained
+      # payload. It also picks up `dumps/`, which holds no unit JSON but is
+      # needlessly large to walk.
+      #
+      # @return [String]
+      def units_dir
+        Woods::Generation.new(output_dir: @output_dir).payload_dir.to_s
+      end
+
       def load_units
-        Dir.glob(File.join(@output_dir, '**', '*.json')).filter_map do |path|
+        Dir.glob(File.join(units_dir, '**', '*.json')).filter_map do |path|
           next if File.basename(path) == 'checkpoint.json'
 
           # AtomicFile.read, not File.read: a bare read tags the bytes with the

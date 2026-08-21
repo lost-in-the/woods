@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'pathname'
 require 'digest'
 require 'securerandom'
 
@@ -125,6 +126,38 @@ module Woods
       )
       AtomicFile.write(@path, JSON.generate(marker.to_h))
       marker
+    end
+
+    # The directory a generation's payload artifacts live in.
+    #
+    # Returns the index root when there is no pointer (an index written flat,
+    # which is every index written before payloads existed), when the named
+    # directory is gone (a stale pointer — a payload retention pruned), or
+    # when the name would escape the index root. A torn or tampered pointer
+    # must degrade to the flat layout, never read outside the index; the name
+    # is written by Woods and is relative by contract.
+    #
+    # Every reader of a payload artifact resolves through this, so the pointer
+    # is followed identically wherever it is read.
+    #
+    # @param marker [Marker] the generation to resolve; defaults to the
+    #   published one. Pass an already-loaded marker to avoid re-reading, and
+    #   to resolve a generation a caller has pinned rather than the current one.
+    # @return [Pathname]
+    def payload_dir(marker = current)
+      name = marker.payload
+      return root if name.nil? || name.empty?
+
+      candidate = root.join(name)
+      resolved = candidate.expand_path.to_s
+      return root unless resolved.start_with?("#{root.expand_path}#{File::SEPARATOR}")
+
+      candidate.directory? ? candidate : root
+    end
+
+    # @return [Pathname] the index directory this generation lives in
+    def root
+      @root ||= Pathname.new(File.dirname(@path))
     end
 
     # Has the published generation moved past the one a caller last saw?

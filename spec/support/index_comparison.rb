@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'woods/generation'
 
 # Compares two Woods index directories and reports every way they differ.
 #
@@ -123,7 +124,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   # name/content mismatch now shows up as a field difference rather than
   # vanishing.
   def unit_snapshot(dir)
-    Dir[File.join(dir, '*', '*.json')].each_with_object({}) do |path, snapshot|
+    Dir[File.join(payload_dir(dir), '*', '*.json')].each_with_object({}) do |path, snapshot|
       next if File.basename(path) == '_index.json'
 
       data = JSON.parse(File.read(path)).except(*VOLATILE_UNIT_KEYS)
@@ -133,7 +134,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   end
 
   def index_snapshot(dir)
-    Dir[File.join(dir, '*', '_index.json')].each_with_object({}) do |path, snapshot|
+    Dir[File.join(payload_dir(dir), '*', '_index.json')].each_with_object({}) do |path, snapshot|
       entries = JSON.parse(File.read(path)).sort_by { |entry| entry['identifier'].to_s }
       snapshot[File.basename(File.dirname(path))] = entries
     end
@@ -191,8 +192,16 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
 
   # ── Utilities ────────────────────────────────────────────────────────────
 
+  # Resolve the published generation's payload the way a reader does. An
+  # extraction publishes its artifacts into an immutable per-generation
+  # directory and names it from generation.json; comparing the flat root would
+  # compare whatever a pre-payload run happened to leave there.
+  def payload_dir(dir)
+    Woods::Generation.new(output_dir: dir).payload_dir.to_s
+  end
+
   def read_json(dir, relative)
-    path = File.join(dir, relative)
+    path = File.join(payload_dir(dir), relative)
     File.exist?(path) ? JSON.parse(File.read(path)) : nil
   end
 

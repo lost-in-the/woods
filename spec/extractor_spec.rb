@@ -844,7 +844,9 @@ RSpec.describe Woods::Extractor do
 
       extractor.refresh(:routes)
 
-      graph = JSON.parse(File.read(File.join(tmpdir, 'output', 'dependency_graph.json')))
+      index_dir = File.join(tmpdir, 'output')
+      payload = JSON.parse(File.read(File.join(index_dir, 'generation.json')))['payload']
+      graph = JSON.parse(File.read(File.join(index_dir, payload, 'dependency_graph.json')))
       expect(graph['nodes']).to have_key('GET /posts')
     end
   end
@@ -1129,6 +1131,25 @@ RSpec.describe Woods::Extractor do
     let(:output_dir) { File.join(tmpdir, 'output') }
     let(:models_dir) { File.join(output_dir, 'models') }
     let(:rails_source_dir) { File.join(output_dir, 'rails_source') }
+
+    # Seeds go into the flat output root; a run clones it into the payload it
+    # publishes, so assertions resolve through the pointer the way a reader
+    # does rather than assuming a layout.
+    def payload_root
+      marker = File.join(output_dir, 'generation.json')
+      return output_dir unless File.exist?(marker)
+
+      name = JSON.parse(File.read(marker))['payload']
+      name ? File.join(output_dir, name) : output_dir
+    end
+
+    def published_models_dir
+      File.join(payload_root, 'models')
+    end
+
+    def published_rails_source_dir
+      File.join(payload_root, 'rails_source')
+    end
     let(:framework_id) { 'rails/activerecord/lib/active_record/enum.rb' }
 
     let(:current_unit) do
@@ -1193,27 +1214,27 @@ RSpec.describe Woods::Extractor do
 
       extractor.extract_all
 
-      expect(File.exist?(File.join(models_dir, filename_for('User')))).to be(true)
-      expect(File.exist?(File.join(models_dir, filename_for('Ghost')))).to be(false)
-      expect(File.exist?(File.join(models_dir, 'Legacy.json'))).to be(false)
-      expect(File.exist?(File.join(models_dir, 'User.json'))).to be(false)
+      expect(File.exist?(File.join(published_models_dir, filename_for('User')))).to be(true)
+      expect(File.exist?(File.join(published_models_dir, filename_for('Ghost')))).to be(false)
+      expect(File.exist?(File.join(published_models_dir, 'Legacy.json'))).to be(false)
+      expect(File.exist?(File.join(published_models_dir, 'User.json'))).to be(false)
 
-      index = JSON.parse(File.read(File.join(models_dir, '_index.json')))
+      index = JSON.parse(File.read(File.join(published_models_dir, '_index.json')))
       expect(index.map { |e| e['identifier'] }).to eq(['User'])
-      expect(File.exist?(File.join(output_dir, 'manifest.json'))).to be(true)
+      expect(File.exist?(File.join(payload_root, 'manifest.json'))).to be(true)
     end
 
     it 'touches only *.json inside the type dirs — never non-JSON files or the output root' do
       seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
-      File.write(File.join(models_dir, 'notes.txt'), 'not woods output')
+      File.write(File.join(published_models_dir, 'notes.txt'), 'not woods output')
       FileUtils.mkdir_p(File.join(output_dir, 'dumps'))
       File.write(File.join(output_dir, 'dumps', 'stale_vector.json'), '{}')
       File.write(File.join(output_dir, 'woods.json'), '{}')
 
       extractor.extract_all
 
-      expect(File.exist?(File.join(models_dir, 'notes.txt'))).to be(true)
-      expect(File.exist?(File.join(models_dir, '_index.json'))).to be(true)
+      expect(File.exist?(File.join(published_models_dir, 'notes.txt'))).to be(true)
+      expect(File.exist?(File.join(published_models_dir, '_index.json'))).to be(true)
       expect(File.exist?(File.join(output_dir, 'dumps', 'stale_vector.json'))).to be(true)
       expect(File.exist?(File.join(output_dir, 'woods.json'))).to be(true)
     end
@@ -1227,7 +1248,7 @@ RSpec.describe Woods::Extractor do
 
       extractor.extract_all
 
-      expect(File.exist?(File.join(rails_source_dir, filename_for(framework_id)))).to be(true)
+      expect(File.exist?(File.join(published_rails_source_dir, filename_for(framework_id)))).to be(true)
     end
 
     # The gate is the @results key, not the type name: with the knob on, the
@@ -1238,7 +1259,7 @@ RSpec.describe Woods::Extractor do
 
       extractor.extract_all
 
-      expect(File.exist?(File.join(rails_source_dir, filename_for(framework_id)))).to be(false)
+      expect(File.exist?(File.join(published_rails_source_dir, filename_for(framework_id)))).to be(false)
     end
 
     it 'sweeps under concurrent extraction too' do
@@ -1251,8 +1272,8 @@ RSpec.describe Woods::Extractor do
 
       extractor.extract_all
 
-      expect(File.exist?(File.join(models_dir, 'Legacy.json'))).to be(false)
-      expect(File.exist?(File.join(models_dir, filename_for('User')))).to be(true)
+      expect(File.exist?(File.join(published_models_dir, 'Legacy.json'))).to be(false)
+      expect(File.exist?(File.join(published_models_dir, filename_for('User')))).to be(true)
     end
 
     # The worsening half of #177, end to end: before the sweep, the orphan the
@@ -1265,7 +1286,7 @@ RSpec.describe Woods::Extractor do
       extractor.extract_all
       extractor.send(:regenerate_type_index, :models) # the incremental path's disk-glob rebuild
 
-      index = JSON.parse(File.read(File.join(models_dir, '_index.json')))
+      index = JSON.parse(File.read(File.join(published_models_dir, '_index.json')))
       expect(index.map { |e| e['identifier'] }).to eq(['User'])
 
       counts, = extractor.send(:persisted_counts)
@@ -1282,7 +1303,7 @@ RSpec.describe Woods::Extractor do
       expect(extractor).not_to receive(:sweep_orphaned_unit_files)
       extractor.extract_changed([])
 
-      expect(File.exist?(File.join(models_dir, filename_for('Ghost')))).to be(true)
+      expect(File.exist?(File.join(published_models_dir, filename_for('Ghost')))).to be(true)
     end
   end
 
