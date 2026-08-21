@@ -4,10 +4,27 @@ Status: 2026-08-20. Covers GitHub issues #225, #226, #229.
 Base: `main` at `75288f2` (merge of PR #224).
 Branch: `fix/225-typed-graph-identity`.
 
-**#225 is complete** (steps 1-6, commits `a458702`, `ff9aded`, `57b0f33`).
-Verified: full suite 6870/0/6 pending, rubocop clean on 570 files, incremental
-equivalence oracle 18/0 under `gemfiles/rails_7.1.gemfile` including its three
-randomized 60-operation sequences. #226 is next.
+**#225, #226 and #229 are all complete.** Commits `a458702`, `ff9aded`,
+`57b0f33` (#225); `52df2af`, `9437437` (#226); `54c7a8f` (#229).
+
+Verified after the last of them:
+
+| Check | Result |
+|---|---|
+| Full suite | 6887 / 0 failures / 5 pending |
+| Rubocop | clean, 572 files |
+| Incremental equivalence oracle | 18 / 0, incl. 3 randomized 60-op sequences |
+| Booted extraction | 11 / 0 |
+| Public-surface inventory | regenerated, one line (the `trace_flow` wiring) |
+
+Both pinned reproducers are un-pended. The 5 remaining pending examples are
+the documented environment-gated ones (tokenizers absent, tiktoken_ruby
+absent, a Linux-only process-identity probe), not deferred work.
+
+**What is left is #232 only** — the release gate, which is a review-and-decide
+step, not code. It needs a maintainer decision and explicit authorization to
+tag or publish, and the `release` environment still needs protection rules
+before its validator will pass.
 
 ## Bottom line
 
