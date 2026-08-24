@@ -1,0 +1,7 @@
+name: pii-check
+on: [pull_request, push]
+jobs:
+  pii-check:
+    uses: lost-in-the/.github/.github/workflows/pii-check.yml@main
+    secrets:
+      PII_PATTERNS: ${{ secrets.PII_PATTERNS }}
