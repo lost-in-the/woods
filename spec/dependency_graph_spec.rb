@@ -5,6 +5,14 @@ require 'json'
 
 RSpec.describe Woods::DependencyGraph do
   let(:graph) { described_class.new }
+  let(:colliding_view) do
+    make_unit(type: :database_view, identifier: 'reports', file_path: '/db/views/reports.sql',
+              dependencies: [{ type: :model, target: 'Order', via: :code_reference }])
+  end
+  let(:colliding_factory) do
+    make_unit(type: :factory, identifier: 'reports', file_path: '/spec/factories/reports.rb',
+              dependencies: [{ type: :model, target: 'Report', via: :code_reference }])
+  end
 
   # Helper to create a minimal ExtractedUnit-like object
   def make_unit(type:, identifier:, file_path: nil, dependencies: [])
@@ -384,7 +392,7 @@ RSpec.describe Woods::DependencyGraph do
                      ))
 
       edges = graph.instance_variable_get(:@edges)
-      expect(edges['Order']).to eq([{ target: 'User', via: :belongs_to }])
+      expect(edges['Order']).to eq(model: [{ target: 'User', via: :belongs_to }])
     end
 
     it 'stores nil via when dependency has no via key' do
@@ -394,7 +402,7 @@ RSpec.describe Woods::DependencyGraph do
                      ))
 
       edges = graph.instance_variable_get(:@edges)
-      expect(edges['Order']).to eq([{ target: 'User', via: nil }])
+      expect(edges['Order']).to eq(model: [{ target: 'User', via: nil }])
     end
   end
 
@@ -570,7 +578,7 @@ RSpec.describe Woods::DependencyGraph do
       expect(restored.dependents_of('User')).to eq(['Order'])
 
       edges = restored.instance_variable_get(:@edges)
-      expect(edges['Order']).to eq([{ target: 'User', via: nil }])
+      expect(edges['Order']).to eq(model: [{ target: 'User', via: nil }])
     end
 
     it 'widens a single-valued file_map from a pre-migration graph (#164 gap 3)' do
@@ -802,26 +810,13 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
-  # Known, pre-existing bug (see CLAUDE.md Gotchas): the graph keys nodes on
-  # the bare identifier, so two units of *different types* sharing one
-  # identifier collapse onto a single node — the second #register call
-  # unregisters the first's side effects (reverse edges, file_map entry,
-  # type_index entry) before overwriting @nodes/@edges, so the first unit's
-  # data is gone, not merely shadowed.
-  #
-  # Left pending rather than fixed: @nodes/@edges are `Hash<identifier,
-  # value>` in both the in-memory form and the persisted to_h/from_h shape
-  # that IndexReader and every persisted dependency_graph.json already
-  # depend on. A Hash key holds one value, so representing two distinct
-  # nodes under one identifier needs a wire-format change (a composite key
-  # in the persisted JSON, not just internally) plus a type-aware
-  # node()/dependencies_of()/dependents_of() API — both of which reach past
-  # this file into IndexReader and every reader of the current identifier-keyed
-  # shape.
+  # Two units of different types can share one identifier — a Scenic view
+  # `reports` and a factory `reports`. The index has always written them to
+  # two files (`database_view/reports.json`, `factory/reports.json`); the
+  # graph now holds them as two nodes under one identifier rather than
+  # letting the second registration unregister the first's side effects.
   describe 'identifier collision across types' do
-    it "destroys the first unit's node, edges, file_map entry, and type-index entry" do
-      pending 'requires a wire-format change (composite type+identifier keys); out of scope here'
-
+    it "keeps both units' nodes, edges, file_map entries, and type-index entries" do
       view = make_unit(
         type: :database_view, identifier: 'reports', file_path: '/db/views/reports.sql',
         dependencies: [{ type: :model, target: 'Order', via: :code_reference }]
@@ -839,6 +834,122 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.identifiers_for_path('/db/views/reports.sql')).to include('reports')
       expect(graph.identifiers_for_path('/spec/factories/reports.rb')).to include('reports')
       expect(graph.dependencies_of('reports')).to include('Order')
+    end
+
+    it 'answers each colliding unit separately when the type is named' do
+      graph.register(colliding_view)
+      graph.register(colliding_factory)
+
+      expect(graph.node('reports', type: :database_view)[:file_path]).to eq('/db/views/reports.sql')
+      expect(graph.node('reports', type: :factory)[:file_path]).to eq('/spec/factories/reports.rb')
+      expect(graph.dependencies_of('reports', type: :database_view)).to eq(['Order'])
+      expect(graph.dependencies_of('reports', type: :factory)).to eq(['Report'])
+    end
+
+    it 'reports every registered type, sorted' do
+      graph.register(colliding_view)
+      graph.register(colliding_factory)
+
+      expect(graph.node_types('reports')).to eq(%i[database_view factory])
+    end
+
+    it 'attributes each path to the type that registered it' do
+      graph.register(colliding_view)
+      graph.register(colliding_factory)
+
+      expect(graph.units_for_path('/db/views/reports.sql')).to eq([['reports', :database_view]])
+      expect(graph.units_for_path('/spec/factories/reports.rb')).to eq([['reports', :factory]])
+    end
+
+    it 'removes only the named type, leaving the other unit whole' do
+      graph.register(colliding_view)
+      graph.register(colliding_factory)
+
+      graph.remove('reports', type: :database_view)
+
+      expect(graph.node_types('reports')).to eq([:factory])
+      expect(graph.units_of_type(:database_view)).to be_empty
+      expect(graph.units_of_type(:factory)).to include('reports')
+      expect(graph.identifiers_for_path('/db/views/reports.sql')).to be_empty
+      expect(graph.dependencies_of('reports')).to eq(['Report'])
+    end
+
+    it 'keeps a shared dependent registered while either type still points at it' do
+      graph.register(make_unit(type: :database_view, identifier: 'reports',
+                               file_path: '/db/views/reports.sql',
+                               dependencies: [{ type: :model, target: 'Order', via: :code_reference }]))
+      graph.register(make_unit(type: :factory, identifier: 'reports',
+                               file_path: '/spec/factories/reports.rb',
+                               dependencies: [{ type: :model, target: 'Order', via: :code_reference }]))
+
+      graph.remove('reports', type: :database_view)
+
+      expect(graph.dependents_of('Order')).to include('reports')
+    end
+  end
+
+  describe 'variant serialization' do
+    let(:colliding_graph) do
+      described_class.new.tap do |g|
+        g.register(colliding_view)
+        g.register(colliding_factory)
+      end
+    end
+
+    it 'omits the variants key entirely when no identifier is shared across types' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+
+      expect(graph.to_h).not_to have_key(:variants)
+    end
+
+    it 'serializes the sorted-first type as the primary node' do
+      expect(colliding_graph.to_h[:nodes]['reports'][:type]).to eq(:database_view)
+    end
+
+    it 'carries every non-primary node in variants with its own edges' do
+      variants = colliding_graph.to_h[:variants]
+
+      expect(variants.size).to eq(1)
+      expect(variants.first).to include(
+        identifier: 'reports',
+        type: :factory,
+        file_path: '/spec/factories/reports.rb',
+        edges: [{ target: 'Report', via: :code_reference }]
+      )
+    end
+
+    it 'counts units rather than identifiers in stats' do
+      expect(colliding_graph.to_h[:stats][:node_count]).to eq(2)
+      expect(colliding_graph.to_h[:stats][:edge_count]).to eq(2)
+    end
+
+    it 'round-trips both units through JSON' do
+      restored = described_class.from_h(JSON.parse(JSON.generate(colliding_graph.to_h)))
+
+      expect(restored.node_types('reports')).to eq(%i[database_view factory])
+      expect(restored.node('reports', type: :factory)[:file_path]).to eq('/spec/factories/reports.rb')
+      expect(restored.dependencies_of('reports', type: :database_view)).to eq(['Order'])
+      expect(restored.dependencies_of('reports', type: :factory)).to eq(['Report'])
+      expect(restored.units_of_type(:database_view)).to include('reports')
+      expect(restored.units_of_type(:factory)).to include('reports')
+    end
+
+    it 'loads a graph persisted before variants existed without conversion' do
+      legacy = {
+        'nodes' => { 'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb' } },
+        'edges' => { 'User' => [{ 'target' => 'Account', 'via' => 'belongs_to' }] },
+        'reverse' => { 'Account' => ['User'] },
+        'file_map' => { 'app/models/user.rb' => ['User'] },
+        'type_index' => { 'model' => ['User'] }
+      }
+
+      restored = described_class.from_h(legacy)
+
+      expect(restored.node('User')[:type]).to eq(:model)
+      expect(restored.node_types('User')).to eq([:model])
+      expect(restored.dependencies_of('User')).to eq(['Account'])
+      expect(restored.dependents_of('Account')).to eq(['User'])
+      expect(restored.to_h).not_to have_key(:variants)
     end
   end
 end

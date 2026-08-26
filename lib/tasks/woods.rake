@@ -123,6 +123,19 @@ namespace :woods do
   # the extraction lock like every other writer, delete everything EXCEPT the
   # lock file itself, and let release remove the lock last.
   #
+  # The directory the published generation's payload lives in.
+  #
+  # Read-side tasks resolve through this rather than the output root: an index
+  # publishing per-generation payloads keeps only `generation.json`, `dumps/`,
+  # `payloads/` and the lock files at the root. A flat index resolves to the
+  # root unchanged.
+  #
+  # @param output_dir [Pathname, String] index directory
+  # @return [Pathname]
+  def woods_payload_dir(output_dir)
+    Woods::Generation.new(output_dir: output_dir).payload_dir
+  end
+
   # @param output_dir [Pathname, String] index directory
   # @param wait [Numeric, nil] seconds to wait for the lock (default: the
   #   shared writer wait; injectable so a spec need not sit out the window)
@@ -486,7 +499,8 @@ namespace :woods do
       exit 1
     end
 
-    manifest_path = output_dir.join('manifest.json')
+    payload_dir = woods_payload_dir(output_dir)
+    manifest_path = payload_dir.join('manifest.json')
     unless manifest_path.exist?
       puts 'ERROR: Manifest not found. Run extraction first.'
       exit 1
@@ -505,7 +519,7 @@ namespace :woods do
 
     # Check each type directory
     manifest['counts'].each do |type, expected_count|
-      type_dir = output_dir.join(type)
+      type_dir = payload_dir.join(type)
       unless type_dir.exist?
         errors << "Missing directory: #{type}"
         next
@@ -542,7 +556,7 @@ namespace :woods do
     end
 
     # Check dependency graph
-    graph_path = output_dir.join('dependency_graph.json')
+    graph_path = payload_dir.join('dependency_graph.json')
     if graph_path.exist?
       begin
         JSON.parse(File.read(graph_path))
@@ -586,7 +600,8 @@ namespace :woods do
       exit 1
     end
 
-    manifest_path = output_dir.join('manifest.json')
+    payload_dir = woods_payload_dir(output_dir)
+    manifest_path = payload_dir.join('manifest.json')
     manifest = manifest_path.exist? ? JSON.parse(File.read(manifest_path)) : {}
 
     puts 'Woods Index Statistics'
@@ -606,7 +621,7 @@ namespace :woods do
     total_chunks = 0
 
     (manifest['counts'] || {}).each do |type, count|
-      type_dir = output_dir.join(type)
+      type_dir = payload_dir.join(type)
       next unless type_dir.exist?
 
       type_size = Dir[type_dir.join('*.json')].sum { |f| File.size(f) }
@@ -630,7 +645,7 @@ namespace :woods do
     puts
 
     # Dependency graph stats
-    graph_path = output_dir.join('dependency_graph.json')
+    graph_path = payload_dir.join('dependency_graph.json')
     if graph_path.exist?
       graph = JSON.parse(File.read(graph_path))
       stats = graph['stats'] || {}
@@ -847,7 +862,7 @@ namespace :woods do
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
-    graph_path = File.join(output_dir, 'dependency_graph.json')
+    graph_path = File.join(woods_payload_dir(output_dir).to_s, 'dependency_graph.json')
 
     unless File.exist?(graph_path)
       puts "ERROR: Dependency graph not found at #{graph_path}"
@@ -859,7 +874,7 @@ namespace :woods do
     graph = Woods::DependencyGraph.from_h(graph_data)
 
     max_depth = ENV.fetch('MAX_DEPTH', 5).to_i
-    assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: output_dir)
+    assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: woods_payload_dir(output_dir).to_s)
     flow = assembler.assemble(entry_point, max_depth: max_depth)
 
     format = ENV.fetch('FORMAT', 'markdown').downcase

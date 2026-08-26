@@ -22,6 +22,43 @@ queries, external notes, exported Notion pages, exported Obsidian/Unblocked
 documents, and any MCP client holding an identifier list. There is no
 compatibility shim — the fix is a clean re-index.
 
+### The output directory layout has changed
+
+Extraction now publishes each generation's artifacts into an immutable
+directory and names it from `generation.json`, so that one atomic write
+commits the whole payload and a reader can never load a unit from one
+generation beside a manifest from another.
+
+```
+tmp/woods/
+├── generation.json          → {"number": 42, "payload": "payloads/gen-42", ...}
+└── payloads/
+    ├── gen-41/              (superseded, retained, still whole)
+    └── gen-42/              manifest.json, dependency_graph.json,
+                             graph_analysis.json, SUMMARY.md, <type>/*.json
+```
+
+**No re-index is required for this**, and nothing inside Woods is affected —
+the MCP servers, the exporters, the validator, the watch daemon and every rake
+task resolve the pointer. It matters only if you have **your own** tooling
+reading the index files directly. Read `generation.json`, take its `payload`
+value, and resolve it relative to the index directory:
+
+```ruby
+marker = JSON.parse(File.read(File.join(index_dir, 'generation.json')))
+payload = File.join(index_dir, marker['payload'] || '.')
+manifest = JSON.parse(File.read(File.join(payload, 'manifest.json')))
+```
+
+A missing `payload` key means a flat index — resolve to the index directory
+itself, which is what a pre-2.0 index and any run whose payload directory
+could not be created will give you.
+
+Woods retains three generations. Set `WOODS_PAYLOAD_RETENTION` to keep more
+(useful when long-running readers hold a generation open for a while) or
+fewer. The files a pre-2.0 run left at the index root are stale from the
+first payload publish onward; `woods:clean` removes them.
+
 ## Clean Re-Indexing
 
 Run these against your Rails app, in order:

@@ -51,7 +51,7 @@ module Woods
       def initialize(index_dir, auto_refresh: true)
         @index_dir = Pathname.new(index_dir)
         raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
-        raise ArgumentError, "No manifest.json found in: #{index_dir}" unless @index_dir.join('manifest.json').file?
+        raise ArgumentError, "No manifest.json found in: #{index_dir}" unless manifest_present?
 
         @unit_cache = {}
         @unit_cache_signatures = {}
@@ -231,6 +231,25 @@ module Woods
         @graph_analysis = nil
         @raw_graph_data = nil
         @normalized_graph_edges = nil
+        @graph_node_types = nil
+      end
+
+      # The directory the current read resolves payload artifacts against —
+      # manifest, summary, graph, per-type indexes, unit files and precomputed
+      # flows. It is the immutable payload directory the loaded generation
+      # names, or the index root for a flat/pre-pointer index.
+      #
+      # Fixed for the life of a pin (only {#refresh_if_stale} moves it, and
+      # pins suppress refresh), so every artifact of a pinned read resolves
+      # through one generation. Public because callers that read payload files
+      # without going through this reader — the flow assembler, the
+      # precomputed-flow loader — have to resolve to the same generation this
+      # reader is serving, not to whatever is published when they look.
+      #
+      # @return [Pathname]
+      def payload_dir
+        ensure_fresh!
+        current_payload_dir
       end
 
       # @return [Hash] Parsed manifest.json
@@ -254,7 +273,7 @@ module Woods
       def summary
         ensure_fresh!
         @summary ||= begin
-          path = payload_dir.join('SUMMARY.md')
+          path = current_payload_dir.join('SUMMARY.md')
           path.file? ? path.read : nil
         end
       end
@@ -647,39 +666,43 @@ module Woods
         @loaded_generation = marker.number
       end
 
-      # The directory the current read resolves payload artifacts against —
-      # manifest, summary, graph, per-type indexes and unit files. It is the
-      # immutable payload directory the loaded generation names, or the index
-      # root for a flat/pre-pointer index. Fixed for the life of a pin (only
-      # {#refresh_if_stale} moves it, and pins suppress refresh), so every
-      # artifact of a pinned read resolves through one generation.
+      # Is there an index here at all?
+      #
+      # A flat index answers with the manifest at the root. An index that
+      # publishes per-generation payloads has no manifest there — every payload
+      # artifact lives in the directory the published generation names — so the
+      # pointer is followed before concluding the directory is not an index.
+      #
+      # @return [Boolean]
+      def manifest_present?
+        return true if @index_dir.join('manifest.json').file?
+
+        marker = Woods::Generation.new(output_dir: @index_dir).current
+        resolve_payload_dir(marker).join('manifest.json').file?
+      end
+
+      # The loaded generation's payload directory, without a freshness check.
+      #
+      # Internal reads call this rather than {#payload_dir}: they are already
+      # inside a public read that checked freshness once, and re-checking per
+      # artifact would take the freshness mutex and stat generation.json for
+      # every unit file a request touches.
       #
       # @return [Pathname]
-      def payload_dir
+      def current_payload_dir
         @payload_dir || @index_dir
       end
 
       # Resolve a generation's payload pointer to an on-disk directory.
       #
-      # Returns the index root when there is no pointer (flat index), when the
-      # named directory does not exist (a stale pointer, e.g. a payload pruned
-      # by retention), or when the name would escape the index root — a torn or
-      # tampered pointer must degrade to the flat layout, never read outside the
-      # index. The name is written by Woods and is relative by contract; the
-      # containment check mirrors {IndexArtifact#promote}'s boundary guard.
+      # Delegates to {Woods::Generation#payload_dir} so every reader of a
+      # payload artifact — the exporters, the validator, the daemon and this
+      # reader — follows the pointer by exactly the same rules.
       #
       # @param marker [Woods::Generation::Marker]
       # @return [Pathname]
       def resolve_payload_dir(marker)
-        name = marker.payload
-        return @index_dir if name.nil? || name.empty?
-
-        candidate = @index_dir.join(name)
-        root = @index_dir.expand_path.to_s
-        resolved = candidate.expand_path.to_s
-        return @index_dir unless resolved.start_with?("#{root}#{File::SEPARATOR}")
-
-        candidate.directory? ? candidate : @index_dir
+        Woods::Generation.new(output_dir: @index_dir).payload_dir(marker)
       end
 
       # Compare the *token*, not the number.
@@ -782,8 +805,51 @@ module Woods
 
       # Memoized normalized edges — converts bare strings (old format) to hashes once.
       # Cleared by reload! alongside raw_graph_data.
+      #
+      # `edges` holds one type's edges per identifier. Where an identifier
+      # names units of several types the rest live in `variants`, and a
+      # traversal that read only the primary would report a unit as having no
+      # dependencies at all. They are unioned here so traversal follows the
+      # identifier's whole out-edge set.
       def normalized_graph_edges
-        @normalized_graph_edges ||= normalize_all_edges(raw_graph_data['edges'] || {})
+        @normalized_graph_edges ||= begin
+          edges = normalize_all_edges(raw_graph_data['edges'] || {})
+          variant_records.each do |record|
+            identifier = record['identifier']
+            next unless identifier
+
+            extra = normalize_all_edges(identifier => Array(record['edges']))
+            edges[identifier] = ((edges[identifier] || []) + extra[identifier]).uniq
+          end
+          edges
+        end
+      end
+
+      # Every unit type registered under each identifier, sorted.
+      #
+      # One entry for all but the handful of identifiers a codebase reuses
+      # across types; those get one per coexisting unit.
+      #
+      # @return [Hash{String => Array<String>}]
+      def graph_node_types
+        @graph_node_types ||= begin
+          types = (raw_graph_data['nodes'] || {}).transform_values { |node| [node['type']].compact }
+          variant_records.each do |record|
+            identifier = record['identifier']
+            next unless identifier && record['type']
+
+            (types[identifier] ||= []) << record['type']
+          end
+          types.transform_values { |list| list.uniq.sort }
+        end
+      end
+
+      # @return [Array<Hash>] the graph's `variants` section, empty when the
+      #   graph has no identifier shared across types (and for every graph
+      #   written before the section existed)
+      def variant_records
+        records = raw_graph_data['variants']
+        records.is_a?(Array) ? records.grep(Hash) : []
       end
 
       # Build identifier → { type_dir, filename } map from all _index.json files.
@@ -810,7 +876,7 @@ module Woods
       def read_index(dir)
         @index_cache ||= {}
         @index_cache[dir] ||= begin
-          path = payload_dir.join(dir, '_index.json')
+          path = current_payload_dir.join(dir, '_index.json')
           path.file? ? JSON.parse(path.read) : []
         end
       end
@@ -831,7 +897,7 @@ module Woods
       # Values are unaffected either way: both threads parse the same file.
       def load_unit(type_dir, filename)
         cache_key = "#{type_dir}/#{filename}"
-        path = payload_dir.join(type_dir, filename)
+        path = current_payload_dir.join(type_dir, filename)
         open_unit(path.to_s) do |file|
           signature = unit_file_signature(file.stat)
           cached = @cache_mutex.synchronize do
@@ -879,7 +945,7 @@ module Woods
       # Parse a JSON payload file (manifest, graph, analysis) resolved through
       # the loaded generation's {#payload_dir}.
       def parse_json(filename)
-        path = payload_dir.join(filename)
+        path = current_payload_dir.join(filename)
         JSON.parse(path.read)
       end
 
@@ -919,12 +985,12 @@ module Woods
                         resolve_reverse_neighbors(graph_data, normalized_edges, current, via_set)
                       end
 
-          # Filter by node type if requested
+          # Filter by node type if requested. An identifier naming units of
+          # several types matches when any of them does — excluding it because
+          # the type that happens to sort first is not the requested one would
+          # hide a unit the filter asked for.
           filtered = if type_set
-                       neighbors.select do |n|
-                         node_meta = nodes_data[n]
-                         node_meta && type_set.include?(node_meta['type'])
-                       end
+                       neighbors.select { |n| graph_node_types[n]&.any? { |t| type_set.include?(t) } }
                      else
                        neighbors
                      end
@@ -934,11 +1000,16 @@ module Woods
           # node's deps list already shows this node as a child.
           will_expand = current_depth < depth
           node_meta = nodes_data[current]
-          result_nodes[current] = {
+          entry = {
             type: node_meta&.dig('type'),
             depth: current_depth,
             deps: will_expand ? filtered : []
           }
+          # Only when the identifier is genuinely ambiguous, so the shape is
+          # unchanged for every node in an index with no shared identifiers.
+          node_types = graph_node_types[current] || []
+          entry[:types] = node_types if node_types.size > 1
+          result_nodes[current] = entry
 
           next unless will_expand
 

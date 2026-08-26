@@ -96,12 +96,11 @@ module Woods
         # @param scope [Hash, nil] Filter conditions
         # @param columns [Array<String>, nil] Columns to include
         # @return [Hash] Bridge request
-        # rubocop:disable Metrics/ParameterLists
+        # rubocop:disable-next Metrics/ParameterLists
         def console_recent(model:, order_by: 'created_at', direction: 'desc', limit: 10, scope: nil, columns: nil)
           { tool: 'recent', params: { model: model, order_by: order_by, direction: direction,
                                       limit: limit, scope: scope, columns: columns }.compact }
         end
-        # rubocop:enable Metrics/ParameterLists
 
         # System health check.
         #

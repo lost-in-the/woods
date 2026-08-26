@@ -30,7 +30,8 @@ module Woods
     #   stats = exporter.sync_all
     #   # => { data_models: 10, columns: 45, skipped: 0, errors: [] }
     #
-    class Exporter # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
+    class Exporter
       MAX_ERRORS = 100
 
       # Manifest scope for the Data Models database.
@@ -64,7 +65,7 @@ module Woods
       #   every page goes through the full find-by-title path (results are
       #   still recorded). Defaults to the {FORCE_ENV_VAR} env flag.
       # @raise [ConfigurationError] if notion_api_token is not configured
-      # rubocop:disable Metrics/ParameterLists -- injectable collaborators, mirrors Unblocked::Exporter
+      # rubocop:disable-next Metrics/ParameterLists -- injectable collaborators, mirrors Unblocked::Exporter
       def initialize(index_dir:, config: Woods.configuration, client: nil, reader: nil,
                      manifest: nil, force_full: nil)
         # A non-blank NOTION_API_TOKEN overrides the configured token
@@ -83,7 +84,6 @@ module Woods
         @force_full = force_full.nil? ? env_force? : force_full
         @page_id_cache = {}
       end
-      # rubocop:enable Metrics/ParameterLists
 
       # Sync all configured databases. Idempotent — safe to re-run; a re-run
       # against an unchanged index issues zero API calls (see class docs).

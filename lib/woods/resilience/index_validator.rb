@@ -4,6 +4,8 @@ require 'json'
 require 'set'
 require_relative '../filename_utils'
 
+require_relative '../generation'
+
 module Woods
   module Resilience
     # Validates the integrity of a codebase index output directory.
@@ -59,8 +61,12 @@ module Woods
           return ValidationReport.new(valid?: false, warnings: warnings, errors: errors)
         end
 
-        type_dirs = Dir.children(@index_dir).filter_map do |name|
-          full_path = File.join(@index_dir, name)
+        # Resolve the published generation's payload: an index that publishes
+        # per-generation payloads keeps `payloads/`, `dumps/` and `tasks/`
+        # beside them at the root, none of which are type directories.
+        payload = Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
+        type_dirs = Dir.children(payload).filter_map do |name|
+          full_path = File.join(payload, name)
           full_path if File.directory?(full_path)
         end
 

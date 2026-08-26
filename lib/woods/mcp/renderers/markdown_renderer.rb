@@ -382,8 +382,12 @@ module Woods
           nodes.each do |id, info|
             depth = fetch_key(info, :depth) || 0
             deps = fetch_key(info, :deps, [])
+            # Present only where one identifier names units of several types,
+            # so the reader is told rather than shown one of them silently.
+            types = fetch_key(info, :types)
             indent = '  ' * depth
-            lines << "#{indent}- **#{id}**"
+            suffix = types ? " (#{Array(types).join(', ')})" : ''
+            lines << "#{indent}- **#{id}**#{suffix}"
             deps.each { |d| lines << "#{indent}  - #{d}" }
           end
 

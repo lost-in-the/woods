@@ -90,17 +90,24 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     ENV.delete('WOODS_DUMMY_DB')
   end
 
-  let(:manifest) { JSON.parse(File.read(File.join(@output_dir, 'manifest.json'))) }
+  let(:manifest) { JSON.parse(File.read(File.join(payload_dir, 'manifest.json'))) }
+
+  # Extraction publishes into an immutable per-generation payload directory
+  # named by generation.json; resolve it the way a reader does rather than
+  # reading the index root.
+  def payload_dir
+    Woods::Generation.new(output_dir: @output_dir).payload_dir.to_s
+  end
 
   # Output directories are keyed by the (plural) result type, e.g. models/,
   # controllers/, jobs/ — each holding per-unit JSON plus an _index.json.
   def index_for(type)
-    path = File.join(@output_dir, type.to_s, '_index.json')
+    path = File.join(payload_dir, type.to_s, '_index.json')
     File.exist?(path) ? JSON.parse(File.read(path)) : []
   end
 
   def units_in(type)
-    Dir[File.join(@output_dir, type.to_s, '*.json')]
+    Dir[File.join(payload_dir, type.to_s, '*.json')]
       .reject { |p| File.basename(p) == '_index.json' }
       .map { |p| JSON.parse(File.read(p)) }
   end
@@ -135,7 +142,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     targets = (post_unit['dependencies'] || []).map { |d| d['target'] }
     expect(targets).to include('Comment')
 
-    graph = JSON.parse(File.read(File.join(@output_dir, 'dependency_graph.json')))
+    graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
     expect(graph).not_to be_empty
   end
 

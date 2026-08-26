@@ -89,7 +89,7 @@ RSpec.describe Woods::SessionTracer::SessionFlowAssembler do
   end
 
   # Set up a basic index with Orders and Posts
-  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  # rubocop:disable-next Metrics/AbcSize, Metrics/MethodLength
   def setup_basic_index
     controller_src = "class OrdersController < ApplicationController\n  def index; end\n  def create; end\nend"
     write_index_unit('OrdersController', type: 'controller',
@@ -128,7 +128,6 @@ RSpec.describe Woods::SessionTracer::SessionFlowAssembler do
 
     write_graph(graph)
   end
-  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
   describe '#assemble' do
     before { setup_basic_index }

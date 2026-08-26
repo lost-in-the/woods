@@ -18,7 +18,7 @@ require 'woods/session_tracer/session_flow_assembler'
 
 RSpec.describe 'Index MCP tool contracts' do
   # Exact response literals are intentionally kept beside each tool contract.
-  # rubocop:disable Layout/LineLength
+  # rubocop:disable-next Layout/LineLength
   let(:contract_oracle) do
     {
       'codebase_retrieve' => contract(:always, { 'query' => 'How does Post work?' },
@@ -333,7 +333,6 @@ RSpec.describe 'Index MCP tool contracts' do
                                               ))
     }
   end
-  # rubocop:enable Layout/LineLength
 
   let(:source_fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:runtime_root) { Dir.mktmpdir('woods-tool-contract') }

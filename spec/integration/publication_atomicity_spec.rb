@@ -7,6 +7,7 @@ require 'digest'
 require 'json'
 require 'woods/atomic_file'
 require 'woods/generation'
+require 'woods/payload_store'
 require 'woods/mcp/index_reader'
 
 # Publication atomicity — the boundary between "which generation is published"
@@ -170,25 +171,12 @@ RSpec.describe 'Publication atomicity', type: :integration do
     end
   end
 
-  # The production gap that REMAINS after this change. The extractor still
-  # writes its payload as flat files under the index root (blockers below), so
-  # a real index carries no payload pointer and a reader can still straddle a
-  # partial publish. Closing it needs the WRITER to publish immutable
-  # per-generation payload directories — cross-file work outside this task's
-  # scope. Documented here so the interleaving and the remaining work are
-  # pinned to a running example.
-  #
-  # Blockers (all outside lib/woods/generation.rb, index_artifact.rb,
-  # extractor.rb, mcp/index_reader.rb):
-  #   * embedding/indexer.rb globs `output_dir/**/*.json`, so any per-unit JSON
-  #     snapshot under output_dir is ingested as duplicate units.
-  #   * obsidian/vault_exporter.rb (note bodies), unblocked/exporter.rb,
-  #     notion, resilience/index_validator.rb and watch/daemon.rb read the flat
-  #     `<output_dir>/<type>/<unit>.json` layout directly and would all have to
-  #     resolve through the pointer.
-  it 'a flat index has no atomic boundary across a partial publish' do
-    pending 'writer-side immutable payload directories are deferred cross-file work (see comment)'
-
+  # A flat index has no atomic boundary, and never will — that is the whole
+  # reason the payload layout exists. Kept as a running example rather than a
+  # comment: it is what the writer-driven example below is measured against,
+  # and it is the behaviour a reader still gets from an index written before
+  # payloads or by a run whose payload directory could not be opened.
+  it 'cannot bound a partial publish on a flat index' do
     write_payload(dir, total_units: 1, post_body: 'v1')
     Woods::AtomicFile.write(
       File.join(dir, Woods::Generation::FILENAME),
@@ -199,14 +187,75 @@ RSpec.describe 'Publication atomicity', type: :integration do
 
     straddle = reader.with_pinned_generation do
       manifest_units = reader.manifest['total_units']
-      # A partial publish rewrites the flat unit file in place (no pointer to
-      # flip). generation.json is unchanged, so the pin does not refresh.
+      # A partial publish rewrites the flat unit file in place — there is no
+      # pointer to flip, so generation.json is unchanged and the pin does not
+      # refresh. The manifest is cached from before; the unit is not.
       File.write(File.join(dir, 'models', unit_filename('Post')),
                  JSON.generate('identifier' => 'Post', 'source_code' => 'v2'))
       [manifest_units, reader.find_unit('Post')['source_code']]
     end
 
-    # What we WANT (and cannot yet guarantee on a flat index): whole old.
-    expect(straddle).to eq([1, 'v1'])
+    expect(straddle).to eq([1, 'v2'])
+  end
+
+  # The writer half. A generation publishes into its own immutable directory
+  # and the single atomic write of generation.json commits it, so a reader
+  # inside a pinned read sees one generation whole — including artifacts it had
+  # not read yet when the next publish landed.
+  describe 'a payload published per generation' do
+    it 'serves the whole old generation across a complete later publish' do
+      publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
+      reader = Woods::MCP::IndexReader.new(dir)
+      reader.manifest
+
+      straddle = reader.with_pinned_generation do
+        manifest_units = reader.manifest['total_units']
+        publish('gen-2', number: 2, total_units: 2, post_body: 'v2')
+        [manifest_units, reader.find_unit('Post')['source_code']]
+      end
+
+      expect(straddle).to eq([1, 'v1'])
+    end
+
+    # The half a flat index cannot give: `manifest` was read before the second
+    # publish, `find_unit` was not. Both must answer from generation 1.
+    it 'serves an artifact first read after the later publish from the pinned generation' do
+      publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
+      reader = Woods::MCP::IndexReader.new(dir)
+
+      never_read = reader.with_pinned_generation do
+        publish('gen-2', number: 2, total_units: 2, post_body: 'v2')
+        reader.find_unit('Post')['source_code']
+      end
+
+      expect(never_read).to eq('v1')
+    end
+
+    it 'moves to the new generation once the pin is released' do
+      publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
+      reader = Woods::MCP::IndexReader.new(dir)
+      reader.with_pinned_generation { reader.manifest }
+
+      publish('gen-2', number: 2, total_units: 2, post_body: 'v2')
+
+      expect(reader.find_unit('Post')['source_code']).to eq('v2')
+      expect(reader.manifest['total_units']).to eq(2)
+    end
+
+    # Writing generation N+1's payload cannot disturb generation N, because
+    # every writer renames a fresh tempfile over the path rather than editing
+    # the inode a hardlinked clone shares.
+    it 'leaves the previous payload intact when a clone is rewritten' do
+      publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
+      store = Woods::PayloadStore.new(dir)
+      target = store.create(2)
+      store.clone(File.join(dir, 'payloads', 'gen-1'), target)
+
+      Woods::AtomicFile.write(target.join('models', unit_filename('Post')),
+                              JSON.generate('identifier' => 'Post', 'source_code' => 'v2'))
+
+      previous = File.read(File.join(dir, 'payloads', 'gen-1', 'models', unit_filename('Post')))
+      expect(JSON.parse(previous)['source_code']).to eq('v1')
+    end
   end
 end

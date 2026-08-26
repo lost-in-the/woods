@@ -156,7 +156,7 @@ module Woods
           define_recent_changes_tool(server, reader, respond, renderer)
           define_reload_tool(server, reader, respond, retriever_reloader)
           define_retrieve_tool(server, retriever, respond, respond_err)
-          define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
+          define_trace_flow_tool(server, reader, respond, respond_err, renderer)
           # Conditionally register collaborator-dependent tools. Historically
           # all 15 stubs were registered unconditionally and returned
           # isError: true when the wiring was missing — that added token
@@ -876,7 +876,7 @@ module Woods
             Array(result.sources).empty?
         end
 
-        def define_trace_flow_tool(server, reader, index_dir, respond, respond_err, renderer)
+        def define_trace_flow_tool(server, reader, respond, respond_err, renderer)
           require_relative '../flow_assembler'
           require_relative '../flow_document'
           require_relative '../dependency_graph'
@@ -906,10 +906,10 @@ module Woods
             # extraction (gated on `config.precompute_flows`) — it avoids
             # re-parsing source on every request. Fall back to query-time
             # reassembly when no precomputed document exists.
-            flow_doc = load_precomputed.call(index_dir, entry_point)
+            flow_doc = load_precomputed.call(reader.payload_dir, entry_point)
             flow_doc ||= begin
               graph = reader.dependency_graph
-              assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: index_dir)
+              assembler = Woods::FlowAssembler.new(graph: graph, extracted_dir: reader.payload_dir.to_s)
               assembler.assemble(entry_point, max_depth: max_depth)
             end
 

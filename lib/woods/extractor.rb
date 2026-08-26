@@ -12,6 +12,7 @@ require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'dependency_graph'
+require_relative 'payload_store'
 require_relative 'git_provenance'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
@@ -334,13 +335,39 @@ module Woods
       view_templates
     ].freeze
 
+    # Payload artifacts that live at the top of a payload directory rather
+    # than inside a per-type directory. Used when seeding a payload from a
+    # flat index — the output root also holds `generation.json`, `dumps/`,
+    # `tasks/`, `woods.sqlite3` and `payloads/` itself, none of which belong
+    # to a generation's payload.
+    PAYLOAD_FILES = %w[manifest.json dependency_graph.json graph_analysis.json SUMMARY.md].freeze
+
+    # Payload directories that are not per-type unit directories.
+    PAYLOAD_DIRS = %w[flows].freeze
+
     attr_reader :output_dir, :dependency_graph
 
     def initialize(output_dir: nil)
       @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/woods'))
+      @payload_store = PayloadStore.new(@output_dir)
+      @payload_dir = nil
+      @payload_generation = nil
       @dependency_graph = DependencyGraph.new
       @results = {}
       @extractors = {}
+    end
+
+    # Where this run reads and writes payload artifacts.
+    #
+    # A run publishes into an immutable per-generation directory, so that the
+    # single atomic write of `generation.json` commits the whole payload at
+    # once. Falls back to the output root when no payload directory could be
+    # opened — a flat index is non-atomic but perfectly readable, and failing
+    # the extraction over it would be worse.
+    #
+    # @return [Pathname]
+    def payload_dir
+      @payload_dir || @output_dir
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -353,6 +380,7 @@ module Woods
     def extract_all
       setup_output_directory
       ModelNameCache.reset!
+      begin_payload!
 
       # Eager load once — all extractors need loaded classes for introspection.
       safe_eager_load!
@@ -565,7 +593,8 @@ module Woods
     #
     # @return [void]
     def prepare_incremental_run
-      graph_path = @output_dir.join('dependency_graph.json')
+      begin_payload!
+      graph_path = payload_dir.join('dependency_graph.json')
       @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path))) if graph_path.exist?
 
       ModelNameCache.reset!
@@ -626,7 +655,10 @@ module Woods
     # @param reason [String] what produced this generation
     # @return [void]
     def publish_generation(reason)
-      Generation.new(output_dir: @output_dir).bump!(reason: reason)
+      generation = Generation.new(output_dir: @output_dir)
+      marker = generation.bump!(reason: reason, payload: publishable_payload_name(generation))
+      prune_payloads(marker.number)
+      marker
     rescue StandardError => e
       # A failed bump must not fail the extraction that produced a perfectly
       # good index. But "readers keep their current view until the next run" is
@@ -637,6 +669,116 @@ module Woods
       # the number actually moved so the daemon reports degraded rather than
       # running.
       Rails.logger.error "[Woods] Could not publish generation: #{e.message}"
+    end
+
+    # Open the payload directory this run publishes into, seeded from the
+    # generation currently on disk.
+    #
+    # Seeding is what lets a run that touches ten files publish a whole
+    # generation: the unchanged artifacts are hardlinked in, and the run
+    # overwrites only what it changed. It also means every payload read during
+    # the run — the persisted graph, the per-type indexes, the unit JSON an
+    # incremental run patches — sees the previous generation, exactly as it
+    # did when the index was flat.
+    #
+    # A failure here degrades to the flat layout rather than failing the run.
+    # The index is then non-atomic, which is what it was before payloads
+    # existed, and the next successful run restores the boundary.
+    #
+    # @return [void]
+    def begin_payload!
+      marker = Generation.new(output_dir: @output_dir).current
+      @payload_generation = marker.number + 1
+      @payload_dir = @payload_store.create(@payload_generation)
+      seed_payload(marker)
+    rescue StandardError => e
+      Rails.logger.warn(
+        "[Woods] Could not open a payload directory (#{e.class}: #{e.message}) — publishing flat"
+      )
+      @payload_dir = nil
+      @payload_generation = nil
+    end
+
+    # Copy the published generation's payload into this run's directory.
+    #
+    # Two sources. A generation that already names a payload directory is
+    # cloned wholesale — by construction it holds payload artifacts and
+    # nothing else. A flat index (every index written before payloads, and any
+    # index whose last run degraded) is cloned entry by entry from an
+    # allowlist, because the output root also holds `generation.json`,
+    # `dumps/`, `tasks/`, `woods.sqlite3` and `payloads/` itself.
+    #
+    # @param marker [Woods::Generation::Marker] the published generation
+    # @return [void]
+    def seed_payload(marker)
+      if marker.payload && (source = @output_dir.join(marker.payload)).directory?
+        @payload_store.clone(source, @payload_dir)
+      else
+        seed_payload_from_flat_root
+      end
+    end
+
+    # @return [void]
+    def seed_payload_from_flat_root
+      (PAYLOAD_FILES + payload_entry_dirs).each do |entry|
+        source = @output_dir.join(entry)
+        next unless source.exist?
+
+        @payload_store.clone(source, @payload_dir.join(entry)) if source.directory?
+        FileUtils.ln(source.to_s, @payload_dir.join(entry).to_s) if source.file?
+      end
+    end
+
+    # @return [Array<String>] every directory name a payload can contain
+    def payload_entry_dirs
+      EXTRACTORS.keys.map(&:to_s) + PAYLOAD_DIRS
+    end
+
+    # The pointer to publish, or nil when this run built no payload directory.
+    #
+    # The directory was named from the generation number this run expected to
+    # publish as. Writers serialize on `PipelineLock`, so that prediction holds
+    # — but if it ever did not, the pointer would name a directory belonging to
+    # a different generation, so the directory is renamed to match rather than
+    # published under a name that lies.
+    #
+    # @param generation [Woods::Generation]
+    # @return [String, nil]
+    def publishable_payload_name(generation)
+      return nil unless @payload_dir
+
+      actual = generation.current.number + 1
+      if actual != @payload_generation
+        @payload_dir = rename_payload(actual)
+        @payload_generation = actual
+      end
+
+      PayloadStore.name_for(@payload_generation)
+    end
+
+    # @param number [Integer] the generation number actually being published
+    # @return [Pathname] the payload directory under its corrected name
+    def rename_payload(number)
+      destination = @payload_store.path_for(number)
+      FileUtils.rm_rf(destination.to_s)
+      FileUtils.mv(@payload_dir.to_s, destination.to_s)
+      destination
+    end
+
+    # @param published [Integer] the generation just published
+    # @return [void]
+    def prune_payloads(published)
+      return unless @payload_dir
+
+      @payload_store.prune(keep: payload_retention, protect: published)
+    rescue StandardError => e
+      Rails.logger.warn "[Woods] Payload retention failed: #{e.message}"
+    end
+
+    # @return [Integer] how many payload generations to keep on disk
+    def payload_retention
+      value = ENV.fetch('WOODS_PAYLOAD_RETENTION', nil).to_i
+      value.positive? ? value : PayloadStore::DEFAULT_RETENTION
     end
 
     # Recompute graph_analysis.json after an incremental graph write.
@@ -832,7 +974,7 @@ module Woods
     def setup_output_directory
       FileUtils.mkdir_p(@output_dir)
       EXTRACTORS.each_key do |type|
-        FileUtils.mkdir_p(@output_dir.join(type.to_s))
+        FileUtils.mkdir_p(payload_dir.join(type.to_s))
       end
     end
 
@@ -884,7 +1026,7 @@ module Woods
 
     def precompute_flows
       all_units = @results.values.flatten(1)
-      precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: @output_dir.to_s)
+      precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: payload_dir.to_s)
       flow_map = precomputer.precompute
       rewrite_flow_annotated_units
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
@@ -908,7 +1050,7 @@ module Woods
         annotated = units.select { |u| u.metadata[:flow_paths] }
         next if annotated.empty?
 
-        type_dir = @output_dir.join(type.to_s)
+        type_dir = payload_dir.join(type.to_s)
         annotated.each do |unit|
           AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
@@ -1179,7 +1321,7 @@ module Woods
 
     def write_results
       @results.each do |type, units|
-        type_dir = @output_dir.join(type.to_s)
+        type_dir = payload_dir.join(type.to_s)
 
         units.each do |unit|
           AtomicFile.write(
@@ -1242,7 +1384,7 @@ module Woods
     # @return [void]
     def sweep_orphaned_unit_files
       @results.each do |type, units|
-        type_dir = @output_dir.join(type.to_s)
+        type_dir = payload_dir.join(type.to_s)
         next unless type_dir.directory?
 
         keep = units.to_set { |unit| collision_safe_filename(unit.identifier) }
@@ -1286,7 +1428,7 @@ module Woods
       graph_data[:pagerank] = @dependency_graph.pagerank
 
       AtomicFile.write(
-        @output_dir.join('dependency_graph.json'),
+        payload_dir.join('dependency_graph.json'),
         json_serialize(graph_data)
       )
     end
@@ -1297,12 +1439,12 @@ module Woods
       enriched = @graph_analysis.merge(
         generated_at: Time.current.iso8601,
         graph_sha: Digest::SHA256.hexdigest(
-          File.read(@output_dir.join('dependency_graph.json'))
+          File.read(payload_dir.join('dependency_graph.json'))
         )
       )
 
       AtomicFile.write(
-        @output_dir.join('graph_analysis.json'),
+        payload_dir.join('graph_analysis.json'),
         json_serialize(enriched)
       )
     end
@@ -1347,7 +1489,7 @@ module Woods
       }
 
       AtomicFile.write(
-        @output_dir.join('manifest.json'),
+        payload_dir.join('manifest.json'),
         json_serialize(manifest)
       )
     end
@@ -1361,7 +1503,7 @@ module Woods
       counts = {}
       chunks = 0
 
-      Dir[@output_dir.join('*/_index.json').to_s].each do |index_path|
+      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
         entries = JSON.parse(File.read(index_path))
         counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
         chunks += entries.sum { |e| e['chunk_count'].to_i }
@@ -1386,7 +1528,7 @@ module Woods
     def capture_snapshot
       return unless Woods.configuration.enable_snapshots
 
-      manifest_path = @output_dir.join('manifest.json')
+      manifest_path = payload_dir.join('manifest.json')
       return unless manifest_path.exist?
 
       manifest = JSON.parse(File.read(manifest_path))
@@ -1494,13 +1636,13 @@ module Woods
       summary << ''
 
       AtomicFile.write(
-        @output_dir.join('SUMMARY.md'),
+        payload_dir.join('SUMMARY.md'),
         summary.join("\n")
       )
     end
 
     def regenerate_type_index(type_key)
-      type_dir = @output_dir.join(type_key.to_s)
+      type_dir = payload_dir.join(type_key.to_s)
       return unless type_dir.directory?
 
       # Scan existing unit JSON files (exclude _index.json)
@@ -1740,13 +1882,11 @@ module Woods
       covered_keys = rules.to_set(&:extractor_key)
       removed = Set.new
 
-      @dependency_graph.identifiers_for_path(absolute_path).each do |identifier|
+      @dependency_graph.units_for_path(absolute_path).each do |identifier, node_type|
         next if produced.include?(identifier)
-
-        node_type = @dependency_graph.node(identifier)&.fetch(:type, nil)
         next unless covered_keys.include?(TYPE_TO_EXTRACTOR_KEY[node_type])
 
-        removed.add(identifier) if remove_unit(identifier, affected_types)
+        removed.add(identifier) if remove_unit(identifier, affected_types, type: node_type)
       end
 
       removed
@@ -1808,7 +1948,7 @@ module Woods
 
       Rails.logger.info "[Woods] removing #{stale.size} #{spec[:type]} unit(s) whose class no longer exists"
       stale.each_with_object(Set.new) do |identifier, removed|
-        removed.add(identifier) if remove_unit(identifier, affected_types)
+        removed.add(identifier) if remove_unit(identifier, affected_types, type: spec[:type])
       end
     end
 
@@ -1851,11 +1991,11 @@ module Woods
 
       live = discovered.to_set(&:name)
       known.reject { |identifier| live.include?(identifier) }
-           # Not redundant with `units_of_type`. The graph keys nodes on the
-           # bare identifier (B-062), so a same-named unit of another type can
-           # overwrite this node while the type index still lists it — and
-           # removing it here would delete that other unit instead.
-           .select { |identifier| @dependency_graph.node(identifier)&.fetch(:type, nil) == type }
+           # Not redundant with `units_of_type`: an identifier can be listed in
+           # this type's index while also naming a unit of another type, and
+           # the caller removes by (identifier, type), so it has to be told
+           # which node it is allowed to take.
+           .select { |identifier| @dependency_graph.node_types(identifier).include?(type) }
     end
 
     # Re-run whole-app extractors whose trigger paths changed, replacing that
@@ -2024,10 +2164,10 @@ module Woods
         next unless path.to_s.start_with?(root_prefix)
         next if File.exist?(path)
 
-        @dependency_graph.identifiers_for_path(path).each do |identifier|
-          next if !class_based && convention_path_unit?(identifier)
+        @dependency_graph.units_for_path(path).each do |identifier, type|
+          next if !class_based && convention_path_unit?(type)
 
-          removed.add(identifier) if remove_unit(identifier, affected_types)
+          removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
       end
     end
@@ -2083,13 +2223,10 @@ module Woods
     # spare only the units that never had one. That needs the graph node to carry
     # the flag, so it is a serialization change rather than a predicate tweak.
     #
-    # @param identifier [String]
+    # @param type [Symbol, nil] the unit type the caller is about to remove
     # @return [Boolean]
-    def convention_path_unit?(identifier)
-      node = @dependency_graph.node(identifier)
-      return false unless node
-
-      CLASS_BASED.key?(node[:type])
+    def convention_path_unit?(type)
+      CLASS_BASED.key?(type)
     end
 
     # Is this GraphQL unit's recorded path the convention derived from its
@@ -2122,7 +2259,7 @@ module Woods
       return Set.new if units.empty?
 
       affected_types&.add(extractor_key)
-      type_dir = @output_dir.join(extractor_key.to_s)
+      type_dir = payload_dir.join(extractor_key.to_s)
       FileUtils.mkdir_p(type_dir)
 
       units.each_with_object(Set.new) do |unit, written|
@@ -2141,25 +2278,44 @@ module Woods
 
     # Remove a unit from the graph and delete its JSON from the index.
     #
+    # Callers that know which type they mean must say so. An identifier can
+    # name units of several types (a Scenic view `reports` and a factory
+    # `reports`), each with its own `<extractor_key>/<identifier>.json`, and
+    # removing the identifier wholesale takes the sibling with it.
+    #
     # @param identifier [String]
     # @param affected_types [Set<Symbol>]
+    # @param type [Symbol, nil] remove only this type; without it, every type
+    #   registered under the identifier
     # @return [String, nil] the identifier when it existed and was removed
-    def remove_unit(identifier, affected_types)
-      node = @dependency_graph.node(identifier)
-      return nil unless node
+    def remove_unit(identifier, affected_types, type: nil)
+      types = type ? [type] : @dependency_graph.node_types(identifier)
+      types = types.select { |t| @dependency_graph.node(identifier, type: t) }
+      return nil if types.empty?
 
-      extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]]
+      # Before the removals: this reads the identifier's forward edges, which
+      # go with the nodes.
       mark_dependents_dirty(identifier)
+
+      types.each { |t| remove_unit_of_type(identifier, t, affected_types) }
+      Rails.logger.debug { "[Woods] Removed #{identifier}" }
+      identifier
+    end
+
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param affected_types [Set<Symbol>]
+    # @return [void]
+    def remove_unit_of_type(identifier, type, affected_types)
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
 
       if extractor_key
         affected_types&.add(extractor_key)
-        path = @output_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
+        path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
         FileUtils.rm_f(path)
       end
 
-      @dependency_graph.remove(identifier)
-      Rails.logger.debug { "[Woods] Removed #{identifier}" }
-      identifier
+      @dependency_graph.remove(identifier, type: type)
     end
 
     # Record that a unit's edges changed, so every target it points at (and
@@ -2205,13 +2361,27 @@ module Woods
     # @param git [Hash, nil] git metadata for the unit's file, if any
     # @return [void]
     def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git:)
-      node = @dependency_graph.node(identifier)
-      return unless node
+      @dependency_graph.node_types(identifier).each do |type|
+        rewrite_unit_json_of_type(identifier, type, affected_types,
+                                  refresh_dependents: refresh_dependents, git: git)
+      end
+    end
 
-      extractor_key = TYPE_TO_EXTRACTOR_KEY[node[:type]]
+    # One (identifier, type) pair's JSON. The `dependents` list is a property
+    # of the identifier, not of the type, so every file the identifier owns
+    # gets the same refreshed list — which is what a full extraction writes.
+    #
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param affected_types [Set<Symbol>]
+    # @param refresh_dependents [Boolean]
+    # @param git [Hash, nil]
+    # @return [void]
+    def rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents:, git:)
+      extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
       return unless extractor_key
 
-      path = @output_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
+      path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
       return unless File.exist?(path)
 
       data = JSON.parse(File.read(path))
@@ -2242,11 +2412,12 @@ module Woods
     def incremental_git_data(identifiers)
       return {} if identifiers.empty? || !git_available?
 
-      paths = identifiers.filter_map do |identifier|
-        node = @dependency_graph.node(identifier)
-        next if node.nil? || %i[rails_source gem_source].include?(node[:type])
+      paths = identifiers.flat_map do |identifier|
+        @dependency_graph.nodes_for(identifier).filter_map do |node|
+          next if %i[rails_source gem_source].include?(node[:type])
 
-        node[:file_path] if node[:file_path] && File.exist?(node[:file_path])
+          node[:file_path] if node[:file_path] && File.exist?(node[:file_path])
+        end
       end
 
       batch_git_data(paths.uniq)
@@ -2272,12 +2443,26 @@ module Woods
         return nil
       end
 
-      # Find the unit's type from the graph
-      node = @dependency_graph.node(unit_id)
-      return nil unless node
+      # An identifier can name units of several types, each with its own
+      # extractor and its own file; re-extracting one and calling it done would
+      # leave the others frozen at the pre-change extraction.
+      types = @dependency_graph.node_types(unit_id)
+      return nil if types.empty?
 
-      type = node[:type]&.to_sym
-      file_path = node[:file_path]
+      re_extracted = types.count { |type| re_extract_unit_of_type(unit_id, type, affected_types) }
+      return nil if re_extracted.zero?
+
+      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
+      unit_id
+    end
+
+    # @param unit_id [String]
+    # @param type [Symbol]
+    # @param affected_types [Set<Symbol>, nil]
+    # @return [String, nil] the identifier when this type was re-extracted and written
+    def re_extract_unit_of_type(unit_id, type, affected_types)
+      node = @dependency_graph.node(unit_id, type: type)
+      file_path = node && node[:file_path]
 
       # A vanished file is not re-extractable; {#prune_vanished_units} owns it.
       return nil unless file_path && File.exist?(file_path)
@@ -2288,29 +2473,39 @@ module Woods
       extractor = extractor_for(extractor_key)
       return nil unless extractor
 
-      unit = if (method = CLASS_BASED[type])
-               klass = if unit_id.match?(/\A[A-Z][A-Za-z0-9_:]*\z/)
-                         begin
-                           unit_id.constantize
-                         rescue StandardError
-                           nil
-                         end
-                       end
-               extractor.public_send(method, klass) if klass
-             elsif (method = FILE_BASED[type])
-               extract_file_based_unit(extractor, method, file_path, extractor_key)
-             elsif GRAPHQL_TYPES.include?(type)
-               extractor.extract_graphql_file(file_path)
-             end
-
       # File-based extractors can return several units from one file (a .rake
       # file defining multiple tasks, etc.); class-based extractors return one.
-      units = Array(unit).compact
+      units = Array(re_extracted_units(extractor, type, unit_id, file_path, extractor_key)).compact
       return nil if units.empty?
 
       register_and_write(extractor_key, units, affected_types)
-      Rails.logger.info "[Woods] Re-extracted #{unit_id}"
       unit_id
+    end
+
+    # Dispatch one re-extraction to the right extractor entry point.
+    #
+    # @return [ExtractedUnit, Array<ExtractedUnit>, nil]
+    def re_extracted_units(extractor, type, unit_id, file_path, extractor_key)
+      if (method = CLASS_BASED[type])
+        klass = constant_for_identifier(unit_id)
+        klass && extractor.public_send(method, klass)
+      elsif (method = FILE_BASED[type])
+        extract_file_based_unit(extractor, method, file_path, extractor_key)
+      elsif GRAPHQL_TYPES.include?(type)
+        extractor.extract_graphql_file(file_path)
+      end
+    end
+
+    # @param unit_id [String]
+    # @return [Class, nil] the constant an identifier names, when it names one
+    def constant_for_identifier(unit_id)
+      return nil unless unit_id.match?(/\A[A-Z][A-Za-z0-9_:]*\z/)
+
+      begin
+        unit_id.constantize
+      rescue StandardError
+        nil
+      end
     end
 
     # Invoke a file-based extraction method, supplying the extra arguments

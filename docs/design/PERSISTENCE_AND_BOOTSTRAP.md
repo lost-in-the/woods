@@ -357,7 +357,7 @@ If a persistent adapter is ever wired into the Snapshotter path by a bug, it rai
 
 ### 5.4 `BootstrapState`
 
-```ruby
+```text
 state = Woods::MCP::BootstrapState.new
 state.status    # → :initializing | :hydrating | :hydrated | :degraded | :failed
 state.reason    # → Exception or nil

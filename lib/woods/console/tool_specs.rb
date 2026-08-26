@@ -10,7 +10,7 @@ require_relative 'scope_predicate_parser'
 # Metrics/ModuleLength is disabled here because the module body is almost
 # entirely declarative data, not imperative logic. Decomposition would just
 # scatter the tool catalogue across many files with no readability gain.
-# rubocop:disable Metrics/ModuleLength
+# rubocop:disable-next Metrics/ModuleLength
 module Woods
   module Console
     module Server
@@ -853,7 +853,7 @@ module Woods
       # names, constraints, and representative schema cases come directly
       # from TOOL_SPECS. Only output semantics and control behavior that cannot
       # be inferred from JSON Schema are declared above.
-      # rubocop:disable Metrics/BlockLength
+      # rubocop:disable-next Metrics/BlockLength
       CONTRACT_MATRIX = TOOL_SPECS.map do |spec|
         modes = EXECUTABLE_MODES.filter_map { |mode, names| mode if names.include?(spec.name) }.freeze
         executable = modes.any?
@@ -911,8 +911,6 @@ module Woods
           audit: AUDIT_REQUIREMENTS.fetch(spec.name, executable ? :not_recorded : :not_active_unregistered)
         }.freeze
       end.freeze
-      # rubocop:enable Metrics/BlockLength
     end
   end
 end
-# rubocop:enable Metrics/ModuleLength

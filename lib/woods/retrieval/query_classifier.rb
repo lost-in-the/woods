@@ -30,9 +30,8 @@ module Woods
         debug: /\b(bug|error|fix|broken|failing|wrong|issue|problem|crash|exception)\b/i,
         implement: /\b(implement|add|create|build|write|make|generate)\b/i,
         compare: /\b(compare|difference|vs|versus|between|contrast)\b/i,
-        # rubocop:disable Layout/LineLength
+        # rubocop:disable-next Layout/LineLength
         framework: /\b(how does rails|what does rails|rails .+ work|work.+\brails\b|in rails\b|activerecord|actioncontroller|activejob|actionmailer|actioncable|actiontext|activestorage|solid_queue|solid_cache|solid_cable|kamal|propshaft|importmap|hotwire|turbo|stimulus|zeitwerk)\b/i,
-        # rubocop:enable Layout/LineLength
         reference: /\b(show me|what is|what are|list|options for|api|interface|signature)\b/i,
         understand: /\b(how|why|explain|understand|what happens|describe|overview)\b/i
       }.freeze
@@ -59,9 +58,8 @@ module Woods
         controller: /\b(controller|action|route|endpoint|api|request|response|filter|callback)\b/i,
         service: /\b(service|interactor|operation|command|use.?case|business.?logic)\b/i,
         job: /\b(job|worker|background|async|sidekiq|queue|perform.?(later|now|async))\b/i,
-        # rubocop:disable Layout/LineLength
+        # rubocop:disable-next Layout/LineLength
         mailer: /\b(mailer|mail|send.?mail|deliver.?(later|now)|notification\s+email|email\s+(template|notification|deliver\w*)|send\w*\s+(an\s+)?email)\b/i,
-        # rubocop:enable Layout/LineLength
         graphql: /\b(graphql|mutation|resolver)\b/i,
         concern: /\b(concern|mixin|module|included|extend)\b/i,
         # Lowercase get/post/put/patch/delete are ordinary verbs ("how do we

@@ -23,7 +23,7 @@ module Woods
     #   doc.to_markdown   # => human-readable document
     #   doc.to_context    # => LLM XML format
     #
-    # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
     class SessionFlowDocument
       attr_reader :session_id, :steps, :context_pool, :side_effects,
                   :dependency_map, :token_count, :generated_at
@@ -38,7 +38,7 @@ module Woods
       #   rendering exceeds the requested budget, so callers see an honest
       #   flag instead of a silently over-budget document
       # @param generated_at [String, nil] ISO8601 timestamp (defaults to now)
-      # rubocop:disable Metrics/ParameterLists
+      # rubocop:disable-next Metrics/ParameterLists
       def initialize(session_id:, steps: [], context_pool: {}, side_effects: [],
                      dependency_map: {}, token_count: 0, budget_exceeded: false, generated_at: nil)
         @session_id = session_id
@@ -50,7 +50,6 @@ module Woods
         @budget_exceeded = budget_exceeded
         @generated_at = generated_at || Time.now.utc.iso8601
       end
-      # rubocop:enable Metrics/ParameterLists
 
       # @return [Boolean]
       def budget_exceeded?
@@ -97,7 +96,7 @@ module Woods
       # Render as human-readable Markdown.
       #
       # @return [String]
-      # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       def to_markdown
         lines = []
         lines << "## Session: #{@session_id}"
@@ -157,14 +156,13 @@ module Woods
 
         lines.join("\n")
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
       # Render as LLM-consumable XML context.
       #
       # Follows the format from docs/CONTEXT_AND_CHUNKING.md.
       #
       # @return [String]
-      # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       def to_context
         lines = []
         header = "<session_context session_id=\"#{@session_id}\" requests=\"#{@steps.size}\" " \
@@ -212,7 +210,6 @@ module Woods
         lines << '</session_context>'
         lines.join("\n")
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
       # @api private
       def self.deep_symbolize_keys(obj)
@@ -229,6 +226,5 @@ module Woods
       end
       private_class_method :deep_symbolize_keys
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

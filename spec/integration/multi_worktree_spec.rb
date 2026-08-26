@@ -142,7 +142,8 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
   end
 
   def identifiers_in(output, type)
-    path = File.join(output, type, '_index.json')
+    payload_dir = Woods::Generation.new(output_dir: output).payload_dir
+    path = File.join(payload_dir, type, '_index.json')
     return [] unless File.exist?(path)
 
     JSON.parse(File.read(path)).map { |entry| entry['identifier'] }

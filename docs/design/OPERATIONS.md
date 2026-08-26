@@ -136,7 +136,7 @@ end
 
 For use as a standalone tool or in non-Rails Ruby projects:
 
-```ruby
+```bash
 # Rake task handles schema directly
 rake woods:db:setup          # Create tables
 rake woods:db:migrate        # Run pending migrations
@@ -863,12 +863,12 @@ end
 
 Example log lines:
 
-```json
+```jsonl
 {"timestamp":"2025-02-08T14:30:00.087Z","level":"info","event":"woods.retrieval.vector_search","query":"checkout","candidates":12,"duration_ms":85.3,"store":"qdrant"}
 {"timestamp":"2025-02-08T14:30:00.247Z","level":"info","event":"woods.retrieval.completed","query":"checkout","tokens":6841,"sources":7,"duration_ms":247.3,"degraded":false}
 ```
 
-```json
+```jsonl
 {"timestamp":"2025-02-08T14:31:15.003Z","level":"warn","event":"woods.storage.circuit_opened","name":"qdrant","failure_count":5,"last_error":"Connection refused - connect(2) for \"localhost\" port 6333"}
 {"timestamp":"2025-02-08T14:31:15.050Z","level":"warn","event":"woods.retrieval.completed","query":"order validation","tokens":2100,"sources":3,"duration_ms":52.1,"degraded":true,"tier":2}
 ```
