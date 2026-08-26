@@ -32,7 +32,6 @@ class MockCache
     value
   end
 
-  # rubocop:disable Naming/PredicateMethod
   def write(key, value, **options)
     @before_write&.call(key, value)
     @mutex.synchronize do
@@ -67,6 +66,8 @@ class MockCache
     @mutex.synchronize { @data.keys.dup }
   end
 
+  # Cache write/delete APIs return backend success rather than acting as predicates.
+  # rubocop:disable-next Naming/PredicateMethod
   def delete(key)
     @before_delete_attempt&.call(key)
     @mutex.synchronize do
@@ -87,7 +88,6 @@ class MockCache
       true
     end
   end
-  # rubocop:enable Naming/PredicateMethod
 
   def exist?(key)
     !read(key).nil?
@@ -665,13 +665,12 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
   describe 'atomic increment requirement' do
     it 'fails clearly when the backend cannot atomically increment' do
       # Cache write/delete APIs return backend success rather than acting as predicates.
-      # rubocop:disable Naming/PredicateMethod
+      # rubocop:disable-next Naming/PredicateMethod
       unsupported = Class.new do
         def read(*) = nil
         def write(*) = true
         def delete(*) = true
       end.new
-      # rubocop:enable Naming/PredicateMethod
 
       expect { described_class.new(cache: unsupported) }
         .to raise_error(ArgumentError, /atomic #increment/)
@@ -679,7 +678,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
     it 'fails clearly when a generic backend cannot conditionally delete' do
       # Cache mutation APIs return backend success rather than acting as predicates.
-      # rubocop:disable Naming/PredicateMethod
+      # rubocop:disable-next Naming/PredicateMethod
       unsupported = Class.new do
         def read(*) = nil
         def write(*) = true
@@ -687,7 +686,6 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         def increment(*) = 1
         def delete(*) = true
       end.new
-      # rubocop:enable Naming/PredicateMethod
 
       expect { described_class.new(cache: unsupported) }
         .to raise_error(ArgumentError, /atomic #delete_if_equal/)
@@ -695,7 +693,7 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
     it 'fails clearly when a generic backend cannot atomically create keys' do
       # Cache mutation APIs return backend success rather than acting as predicates.
-      # rubocop:disable Naming/PredicateMethod
+      # rubocop:disable-next Naming/PredicateMethod
       unsupported = Class.new do
         def read(*) = nil
         def write(*) = true
@@ -703,7 +701,6 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         def delete(*) = true
         def delete_if_equal(*) = true
       end.new
-      # rubocop:enable Naming/PredicateMethod
 
       expect { described_class.new(cache: unsupported) }
         .to raise_error(ArgumentError, /atomic #write_if_absent/)

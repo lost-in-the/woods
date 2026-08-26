@@ -7,7 +7,7 @@ ENV['WOODS_DUMMY_DB'] ||= File.join(Dir.tmpdir, "woods-console-contract-#{Proces
 require_relative 'support/booted_console_app' if ENV['WOODS_RUN_BOOTED_APP']
 require 'woods/console/server'
 
-# rubocop:disable Metrics/ModuleLength
+# rubocop:disable-next Metrics/ModuleLength
 module ConsoleContractMatrixRuntime
   POST_STATUS_INDEX = {
     'name' => 'index_posts_on_status_for_console_contract',
@@ -308,7 +308,6 @@ module ConsoleContractMatrixRuntime
     ]
   }.transform_values(&:freeze).freeze
 end
-# rubocop:enable Metrics/ModuleLength
 
 RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
   let(:models) { [Post, Comment] }

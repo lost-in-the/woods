@@ -86,7 +86,8 @@ module Woods
     # @example A dedicated daemon
     #   Woods::Watch::Daemon.new(output_dir: Rails.root.join("tmp/woods")).run
     #
-    class Daemon # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
+    class Daemon
       # Seconds of quiet before a batch is considered settled. An editor
       # save, a formatter rewriting the file, and a linter touching it again
       # should be one cycle, not three.
@@ -159,7 +160,7 @@ module Woods
       #   right choice across a container bind mount, where native FS events
       #   do not propagate
       # @param logger [#info, #warn, #error]
-      # rubocop:disable Metrics/ParameterLists -- every collaborator is
+      # rubocop:disable-next Metrics/ParameterLists -- every collaborator is
       # injectable on purpose; that is what makes the daemon placement-agnostic
       # and drivable from a spec without Rails.
       def initialize(output_dir:, root: nil, extractor_factory: nil, reloader: nil, watcher: nil,
@@ -183,7 +184,6 @@ module Woods
         @lock = lock || default_lock
         reset_cycle_state
       end
-      # rubocop:enable Metrics/ParameterLists
 
       # Watch until stopped, a restart is required, or the idle timeout fires.
       #
@@ -796,7 +796,7 @@ module Woods
                      "(> #{@full_extraction_threshold}) — full extraction instead of incremental")
       end
 
-      # rubocop:disable Metrics/ParameterLists -- the shape of one cycle's result.
+      # rubocop:disable-next Metrics/ParameterLists -- the shape of one cycle's result.
       def outcome(action, state, reason: nil, count: 0, duration_ms: nil, generation: nil, touched: nil)
         generation ||= @generation.current.number
         # Remembered so an `:ignore` batch cannot advertise recovery, and so the
@@ -809,7 +809,6 @@ module Woods
         { action: action, state: state, reason: reason, generation: generation,
           count: count, duration_ms: duration_ms, touched: touched }
       end
-      # rubocop:enable Metrics/ParameterLists
 
       def publish_status(state, reason:, generation: nil, **details)
         record = { state: state, reason: reason,

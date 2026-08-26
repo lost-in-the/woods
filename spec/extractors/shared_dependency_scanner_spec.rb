@@ -76,9 +76,8 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
     end
 
     it 'still matches references inside string interpolation' do
-      # rubocop:disable Lint/InterpolationCheck -- the #{} is source under test, not spec interpolation
+      # rubocop:disable-next Lint/InterpolationCheck -- the #{} is source under test, not spec interpolation
       source = 'label = "owner: #{User.find(id).name}"'
-      # rubocop:enable Lint/InterpolationCheck
       targets = scanner.scan_model_dependencies(source).map { |d| d[:target] }
       expect(targets).to eq(['User'])
     end

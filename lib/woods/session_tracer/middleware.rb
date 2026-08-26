@@ -85,7 +85,7 @@ module Woods
       # @param env [Hash] Rack environment
       # @param status [Integer] HTTP response status
       # @param duration_ms [Integer] Request duration in milliseconds
-      # rubocop:disable Metrics/MethodLength
+      # rubocop:disable-next Metrics/MethodLength
       def record_request(env, status, duration_ms)
         path = env['PATH_INFO'] || ''
         return if excluded?(path)
@@ -116,7 +116,6 @@ module Woods
 
         @store.record(session_id, request_data)
       end
-      # rubocop:enable Metrics/MethodLength
 
       # Extract session ID: X-Trace-Session header first, then session cookie, then fallback.
       #

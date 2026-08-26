@@ -60,7 +60,7 @@ module Woods
         # @param scope [Hash, nil] Filter conditions
         # @param limit [Integer, nil] Row limit (max 10000)
         # @return [Hash] Bridge request
-        # rubocop:disable Metrics/ParameterLists
+        # rubocop:disable-next Metrics/ParameterLists
         def console_query(model:, select:, joins: nil, group_by: nil, having: nil, order: nil, scope: nil, limit: nil)
           {
             tool: 'query',
@@ -76,7 +76,6 @@ module Woods
             }.compact
           }
         end
-        # rubocop:enable Metrics/ParameterLists
       end
     end
   end

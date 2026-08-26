@@ -27,7 +27,7 @@ class MockRedis
     list[start..stop] || []
   end
 
-  # rubocop:disable Naming/PredicateMethod
+  # rubocop:disable-next Naming/PredicateMethod
   def ltrim(key, start, stop)
     list = @data[key] || []
     start = [list.size + start, 0].max if start.negative?
@@ -35,14 +35,12 @@ class MockRedis
     @data[key] = list[start..stop] || []
     true
   end
-  # rubocop:enable Naming/PredicateMethod
 
-  # rubocop:disable Naming/PredicateMethod
+  # rubocop:disable-next Naming/PredicateMethod
   def expire(_key, _seconds)
     # No-op for tests (TTL not simulated)
     true
   end
-  # rubocop:enable Naming/PredicateMethod
 
   def sadd(key, member)
     @data[key] ||= []

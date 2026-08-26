@@ -1101,7 +1101,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
   describe '#extract_associations' do
     let(:model) { double('Model', name: 'Post') }
 
-    # rubocop:disable Metrics/AbcSize
+    # rubocop:disable-next Metrics/AbcSize
     def make_assoc(name, class_name: name.to_s.classify)
       a = double("Assoc(#{name})")
       allow(a).to receive(:name).and_return(name)
@@ -1113,7 +1113,6 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(a).to receive(:inverse_of).and_return(nil)
       a
     end
-    # rubocop:enable Metrics/AbcSize
 
     it 'skips a broken association and returns the rest' do
       good1 = make_assoc(:comments)
