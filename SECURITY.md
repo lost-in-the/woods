@@ -28,7 +28,7 @@ vulnerability** button under the repository's
 It keeps the report, the discussion and the eventual advisory in one place, and
 it does not expose anything publicly until an advisory is published.
 
-If you cannot use GitHub, email **info@leah.wtf** instead.
+If you cannot use GitHub, contact the maintainer privately through the address listed in the gem metadata.
 
 Either way, please include:
 
