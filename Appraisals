@@ -5,8 +5,14 @@
 # extraction path (spec/integration/booted_extraction_spec.rb). The unit suite
 # stubs Rails and runs once on the base Gemfile (the `test` job), not per row.
 #
-# Regenerate the gemfiles after editing this file:
-#   bundle exec appraisal generate
+# The gemfiles under gemfiles/ are hand-maintained, not generated from this
+# file: `bundle exec appraisal generate` can't produce them, because it has
+# no way to express the base Gemfile's conditional ENV['WOODS_SQLITE3_REQ']
+# logic, and running it anyway clobbers the WOODS_SQLITE3_REQ and
+# concurrent-ruby pins each gemfile carries for its Rails row. Edit this file
+# to record which Rails version a row targets, then hand-edit the matching
+# gemfiles/rails_X.Y.gemfile to match — see any existing gemfile's own header
+# comment for the pins it must keep.
 #
 # Install and run a single row:
 #   BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle install

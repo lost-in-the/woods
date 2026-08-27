@@ -70,8 +70,10 @@ module Woods
       def schema_error_message(detail)
         'SnapshotStore requires the `woods_snapshots` and ' \
           '`woods_snapshot_units` tables (migrations 004 + 005 under ' \
-          '`lib/woods/db/migrations/`). Run `rake woods:migrate` on the ' \
-          "metadata DB and retry. Underlying error: #{detail}"
+          '`lib/woods/db/migrations/`). These run automatically on woods-mcp ' \
+          'boot (Bootstrapper.build_snapshot_store auto-migrates), or run them ' \
+          'directly with `Woods::Db::Migrator.new(connection: db).migrate!`. ' \
+          "Underlying error: #{detail}"
       end
 
       public

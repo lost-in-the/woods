@@ -109,11 +109,15 @@ Woods.configure do |config|
   # documentation in docs/CONSOLE_MCP_SETUP.md.
   #
   # Defense layers (all active by default when the server is on):
-  #   Layer 1 — SqlValidator: rejects DML/DDL before any DB interaction.
-  #   Layer 2 — SafeContext: wraps every request in a rolled-back transaction;
-  #              writes are silently discarded even if Layer 1 is bypassed.
-  #   Layer 3 — Column redaction: credential columns are replaced with
-  #              [REDACTED] in every tool response.
+  #   Layer 1 — Table gate: rejects tool calls that touch a blocked table.
+  #   Layer 2 — Credential scanner: redacts credential-shaped content (API
+  #              keys, JWTs, etc.) from the response, by shape, not by name.
+  #   Layer 3 — Column + EAV redaction: named credential columns and
+  #              key/value pairs are replaced with [REDACTED].
+  #   Layer 4 — SqlValidator + SafeContext (always on, no config): rejects
+  #              DML/DDL before any DB interaction, and wraps every request
+  #              in a rolled-back transaction so a write is discarded even if
+  #              SqlValidator is bypassed.
 
   # config.console_mcp_enabled = false
   # config.console_mcp_path    = '/mcp/console'
@@ -127,8 +131,12 @@ Woods.configure do |config|
   # Key-value pairs where the value should be redacted (e.g., env var names).
   # config.console_redacted_key_values = []
 
-  # Tables completely blocked from queries.
-  # config.console_blocked_tables = []
+  # Tables completely blocked from queries (Layer 1).
+  # Starts from a safe default list (sessions, api_keys, credentials, ...).
+  # Extend: Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[my_secret_table]
+  # An empty array DISABLES this layer entirely — it does not mean "add
+  # nothing to the defaults". Override entirely only if you mean that:
+  # config.console_blocked_tables = %w[only_this_table]
 
   # Disable specific scanner patterns (rare — prefer blocked_tables).
   # config.console_disabled_scanner_patterns = []

@@ -30,10 +30,19 @@ Gem::Specification.new do |spec|
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
+  #
+  # `lib/woods/release_v2/**` and `lib/tasks/release_v2.rake` are the audit
+  # ledger's own machinery (findings.json, surface-inventory tooling) — repo
+  # CI runs them straight from source via `release_v2:verify_surface_inventory`,
+  # which is unaffected by packaging exclusion. `docs/design`, `docs/security`,
+  # `docs/self-analysis`, `docs/specs`, `docs/superpowers`, and `docs/backlog.json`
+  # are process/planning artifacts, not user-facing reference docs — excluded so
+  # the packaged gem ships the same `docs/*.md` a user reads on GitHub, not the
+  # audit trail that produced them.
   spec.files = Dir[
     'lib/**/*',
     'exe/*',
-    'docs/**/*',
+    'docs/*.md',
     'plugin/**/*',
     'plugin/.claude-plugin/plugin.json',
     'assets/woods-wordmark-white-with-bg.png',
@@ -43,7 +52,7 @@ Gem::Specification.new do |spec|
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md',
     'SECURITY.md'
-  ]
+  ] - (Dir['lib/tasks/release_v2.rake'] + Dir['lib/woods/release_v2', 'lib/woods/release_v2/**/*'])
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
                         woods-mcp-http]

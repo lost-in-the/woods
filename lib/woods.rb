@@ -120,8 +120,13 @@ module Woods
   # ════════════════════════════════════════════════════════════════════════
 
   class Configuration # rubocop:disable Metrics/ClassLength
+    # The set every full extraction always runs, regardless of `extractors=`.
+    # See the {#extractors=} YARD note: this knob does not gate extraction.
+    DEFAULT_EXTRACTORS = %i[models controllers services components view_components jobs mailers graphql
+                            serializers managers policies validators rails_source].freeze
+
     attr_accessor :include_framework_sources, :gem_configs,
-                  :vector_store, :metadata_store, :graph_store, :embedding_provider, :log_level,
+                  :vector_store, :metadata_store, :graph_store, :embedding_provider,
                   :vector_store_options, :metadata_store_options, :embedding_options,
                   :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
                   :session_tracer_enabled, :session_tracer_allow_production,
@@ -149,8 +154,7 @@ module Woods
       @similarity_threshold = 0.7
       @include_framework_sources = true
       @gem_configs = {}
-      @extractors = %i[models controllers services components view_components jobs mailers graphql serializers
-                       managers policies validators rails_source]
+      @extractors = DEFAULT_EXTRACTORS.dup
       @pretty_json = true
       @concurrent_extraction = false
       @precompute_flows = false
@@ -245,11 +249,20 @@ module Woods
       @similarity_threshold = float_val
     end
 
+    # Accepted for forward compatibility. Extraction always runs all 34
+    # extractors; this array is not consulted anywhere in the extraction
+    # path. Setting it to anything other than {DEFAULT_EXTRACTORS} warns.
+    #
     # @param value [Array<Symbol>] List of extractor names
     # @raise [ConfigurationError] if value is not an Array of Symbols
     def extractors=(value)
       unless value.is_a?(Array) && value.all?(Symbol)
         raise ConfigurationError, "extractors must be an Array of Symbols, got #{value.inspect}"
+      end
+
+      if value.sort_by(&:to_s) != DEFAULT_EXTRACTORS.sort_by(&:to_s)
+        warn 'config.extractors is accepted for forward compatibility but extractor selection is not ' \
+             'implemented; all extractors run.'
       end
 
       @extractors = value

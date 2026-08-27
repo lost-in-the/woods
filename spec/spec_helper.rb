@@ -67,6 +67,12 @@ RSpec.configure do |config|
   config.order = :random
   Kernel.srand config.seed
 
+  # A WOODS_RUN_* env-var name drift (opt-in CI lanes: booted_app,
+  # live_backends, http_server, mcp_inspector, packaged_gem, perf) would
+  # otherwise filter every example out of a run and still exit 0 — a silent
+  # green job that tested nothing.
+  config.fail_if_no_examples = true
+
   # Perf-tagged specs (see spec/performance/) are wall-clock regression
   # guards — measurably jittery on shared CI runners. Excluded from the
   # default suite; opt in with `rspec --tag perf` from a dedicated job

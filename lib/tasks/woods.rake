@@ -15,6 +15,13 @@
 #   bundle exec rake woods:self_analyze      # Analyze gem's own source
 #   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
 
+# Reading Woods JSON artifacts with a bare File.read tags the result with the
+# process's default external encoding — US-ASCII under LANG=C, the common
+# case in CI and Docker — so a non-ASCII byte (e.g. a git branch name in the
+# manifest) raises Encoding::InvalidByteSequenceError. AtomicFile.write is
+# binmode, so the read side must go through AtomicFile.read to match.
+require 'woods/atomic_file'
+
 namespace :woods do
   # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
   #
@@ -259,7 +266,7 @@ namespace :woods do
   task extract: :environment do
     require 'woods/extractor'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     puts 'Starting full codebase extraction...'
     puts "Output directory: #{output_dir}"
@@ -287,7 +294,7 @@ namespace :woods do
   task incremental: :environment do
     require 'woods/extractor'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     # Determine changed files from CI environment or git
     require 'open3'
@@ -355,7 +362,7 @@ namespace :woods do
     require 'woods/extractor'
     require 'woods/watch/daemon'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     daemon = Woods::Watch::Daemon.new(
       output_dir: output_dir,
@@ -442,7 +449,7 @@ namespace :woods do
       exit 1
     end
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
     extractor = Woods::Extractor.new(output_dir: output_dir)
 
     # A refresh is a fourth writer against this index, and it rewrites the whole
@@ -468,7 +475,7 @@ namespace :woods do
   task extract_framework: :environment do
     require 'woods/extractor'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     puts 'Extracting Rails and gem framework sources...'
     puts "Rails version: #{Rails.version}"
@@ -492,7 +499,7 @@ namespace :woods do
 
   desc 'Validate extracted index integrity'
   task validate: :environment do
-    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     unless output_dir.exist?
       puts "ERROR: Index directory does not exist: #{output_dir}"
@@ -506,7 +513,7 @@ namespace :woods do
       exit 1
     end
 
-    manifest = JSON.parse(File.read(manifest_path))
+    manifest = JSON.parse(Woods::AtomicFile.read(manifest_path))
 
     puts 'Validating index...'
     puts "  Extracted at: #{manifest['extracted_at']}"
@@ -534,7 +541,7 @@ namespace :woods do
         next if file.end_with?('_index.json')
 
         begin
-          data = JSON.parse(File.read(file))
+          data = JSON.parse(Woods::AtomicFile.read(file))
           errors << "#{file}: missing identifier" unless data['identifier']
           errors << "#{file}: missing source_code" unless data['source_code']
           # The #169 staleness class, caught generally: a file_path that
@@ -559,7 +566,7 @@ namespace :woods do
     graph_path = payload_dir.join('dependency_graph.json')
     if graph_path.exist?
       begin
-        JSON.parse(File.read(graph_path))
+        JSON.parse(Woods::AtomicFile.read(graph_path))
       rescue JSON::ParserError
         errors << 'dependency_graph.json: invalid JSON'
       end
@@ -593,7 +600,7 @@ namespace :woods do
 
   desc 'Show index statistics'
   task stats: :environment do
-    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     unless output_dir.exist?
       puts 'Index directory does not exist. Run extraction first.'
@@ -602,7 +609,7 @@ namespace :woods do
 
     payload_dir = woods_payload_dir(output_dir)
     manifest_path = payload_dir.join('manifest.json')
-    manifest = manifest_path.exist? ? JSON.parse(File.read(manifest_path)) : {}
+    manifest = manifest_path.exist? ? JSON.parse(Woods::AtomicFile.read(manifest_path)) : {}
 
     puts 'Woods Index Statistics'
     puts '=' * 50
@@ -632,7 +639,7 @@ namespace :woods do
       index_path = type_dir.join('_index.json')
       type_chunks = 0
       if index_path.exist?
-        index = JSON.parse(File.read(index_path))
+        index = JSON.parse(Woods::AtomicFile.read(index_path))
         type_chunks = index.sum { |u| u['chunk_count'] || 0 }
         total_chunks += type_chunks
       end
@@ -647,7 +654,7 @@ namespace :woods do
     # Dependency graph stats
     graph_path = payload_dir.join('dependency_graph.json')
     if graph_path.exist?
-      graph = JSON.parse(File.read(graph_path))
+      graph = JSON.parse(Woods::AtomicFile.read(graph_path))
       stats = graph['stats'] || {}
       puts 'Dependency Graph'
       puts '-' * 50
@@ -661,7 +668,7 @@ namespace :woods do
 
   desc 'Clean extracted index'
   task clean: :environment do
-    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     if output_dir.exist?
       puts "Removing #{output_dir}..."
@@ -861,7 +868,7 @@ namespace :woods do
       exit 1
     end
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
     graph_path = File.join(woods_payload_dir(output_dir).to_s, 'dependency_graph.json')
 
     unless File.exist?(graph_path)
@@ -870,7 +877,7 @@ namespace :woods do
       exit 1
     end
 
-    graph_data = JSON.parse(File.read(graph_path))
+    graph_data = JSON.parse(Woods::AtomicFile.read(graph_path))
     graph = Woods::DependencyGraph.from_h(graph_data)
 
     max_depth = ENV.fetch('MAX_DEPTH', 5).to_i
