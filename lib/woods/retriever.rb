@@ -235,7 +235,9 @@ module Woods
       filtered, fallback_ran = apply_type_filter(
         ranked, query, classification, types: types, type_list: type_list, exclude_types: exclude_types
       )
-      type_rank_context = type_list ? build_type_rank_context(ranked, type_list, fallback_ran: fallback_ran) : nil
+      type_rank_context = if type_list
+                            build_type_rank_context(ranked, type_list, filtered, fallback_ran: fallback_ran)
+                          end
 
       assembled = assemble_context(filtered, classification, budget)
       trace = build_trace(classification, execution_result, filtered, assembled, start_time)
@@ -278,9 +280,9 @@ module Woods
       allowed = normalize_type_list(types)
       return candidates.select { |c| allowed.include?(candidate_type(c)) } if allowed
 
+      # DEFAULT_EXCLUDE_TYPES is always non-empty, so `excluded` here can
+      # never be empty — no early-return-candidates-unchanged branch exists.
       excluded = (normalize_type_list(exclude_types) || Set.new) | DEFAULT_EXCLUDE_TYPES.to_set
-      return candidates if excluded.empty?
-
       candidates.reject { |c| excluded.include?(candidate_type(c)) }
     end
 
@@ -413,9 +415,13 @@ module Woods
     #
     # @param ranked [Array<Candidate>]
     # @param type_list [Set<String>]
+    # @param filtered [Array<Candidate>] The post-fallback candidate list
+    #   {#retrieve} is about to assemble — used to confirm the fallback
+    #   actually surfaced a candidate OF this specific type, not just that
+    #   fallback ran.
     # @param fallback_ran [Boolean] Whether rank-within-type fallback ran
     # @return [Hash{String => Hash}]
-    def build_type_rank_context(ranked, type_list, fallback_ran:)
+    def build_type_rank_context(ranked, type_list, filtered, fallback_ran:)
       global_k = ranked.size
       type_list.to_h do |type|
         match_index = ranked.index { |c| candidate_type(c) == type }
@@ -424,7 +430,7 @@ module Woods
         [
           type,
           {
-            source: type_source(top_rank, total, fallback_ran: fallback_ran),
+            source: type_source(top_rank, total, filtered, type, fallback_ran: fallback_ran),
             top_of_type_global_rank: top_rank,
             global_k: global_k,
             total_of_type: total
@@ -435,10 +441,16 @@ module Woods
 
     # Pick the :source enum value for a single type based on where its
     # candidate ended up. See RetrievalResult's docstring for the enum.
-    def type_source(top_rank, total, fallback_ran:)
+    #
+    # +:within_type_fallback+ requires the fallback to have actually
+    # returned a candidate of THIS type — a multi-type fallback (e.g.
+    # +types: %w[service mailer]+) can run and surface candidates for only
+    # some of the requested types, and the type(s) it missed are
+    # +:outside_top_k+, not falsely reported as a weak fallback match.
+    def type_source(top_rank, total, filtered, type, fallback_ran:)
       return :in_top_k if top_rank
       return :absent if total.to_i.zero?
-      return :within_type_fallback if fallback_ran
+      return :within_type_fallback if fallback_ran && filtered.any? { |c| candidate_type(c) == type }
 
       :outside_top_k
     end

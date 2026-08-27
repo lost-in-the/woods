@@ -145,10 +145,8 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_class_name(file_path, source)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
-
-        # Fall back to convention
-        file_path
+        # Position-aware (SourceNesting, #174), then convention.
+        qualified_first_class_name(source) || file_path
           .sub("#{Rails.root}/", '')
           .sub(%r{^app/(serializers|blueprinters|decorators)/}, '')
           .sub('.rb', '')

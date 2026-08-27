@@ -3,6 +3,7 @@
 require 'json'
 require 'set'
 require_relative '../filename_utils'
+require_relative '../atomic_file'
 
 require_relative '../generation'
 
@@ -31,7 +32,7 @@ module Woods
     #   validator = IndexValidator.new(index_dir: "tmp/woods")
     #   report = validator.validate
     #   puts report.errors if !report.valid?
-    class IndexValidator
+    class IndexValidator # rubocop:disable Metrics/ClassLength
       include Woods::FilenameUtils
 
       # Report produced by {#validate}.
@@ -45,8 +46,13 @@ module Woods
       ValidationReport = Struct.new(:valid?, :warnings, :errors, keyword_init: true)
 
       # @param index_dir [String] Path to the codebase index output directory
-      def initialize(index_dir:)
+      # @param app_root [String, nil] the host application root; when given,
+      #   a unit whose +file_path+ resolves neither as written nor under it
+      #   is reported (the #169 staleness class: extracted elsewhere, or the
+      #   source has since vanished)
+      def initialize(index_dir:, app_root: nil)
         @index_dir = index_dir
+        @app_root = app_root
       end
 
       # Validate the index directory and return a report.
@@ -61,23 +67,124 @@ module Woods
           return ValidationReport.new(valid?: false, warnings: warnings, errors: errors)
         end
 
-        # Resolve the published generation's payload: an index that publishes
-        # per-generation payloads keeps `payloads/`, `dumps/` and `tasks/`
-        # beside them at the root, none of which are type directories.
-        payload = Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
-        type_dirs = Dir.children(payload).filter_map do |name|
-          full_path = File.join(payload, name)
-          full_path if File.directory?(full_path)
-        end
-
-        type_dirs.each do |type_dir|
+        payload_type_dirs(errors).each do |type_dir|
           validate_type_directory(type_dir, warnings, errors)
         end
+        validate_against_manifest(warnings, errors)
 
         ValidationReport.new(valid?: errors.empty?, warnings: warnings, errors: errors)
       end
 
+      # The checks `woods:validate` used to carry inline: manifest counts
+      # against the files on disk, every unit file parseable with an
+      # identifier and source, file paths that resolve, and a parseable
+      # dependency graph. Skipped when there is no manifest, so a bare
+      # type-directory tree (older fixtures, partial writes) still validates
+      # on the structural checks alone.
+      #
+      # @param warnings [Array<String>]
+      # @param errors [Array<String>]
+      def validate_against_manifest(warnings, errors)
+        payload = payload_dir
+        manifest_path = File.join(payload, 'manifest.json')
+        return unless File.exist?(manifest_path)
+
+        manifest = JSON.parse(Woods::AtomicFile.read(manifest_path))
+        unresolvable = Hash.new { |hash, key| hash[key] = [] }
+
+        (manifest['counts'] || {}).each do |type, expected_count|
+          validate_manifest_type(payload, type, expected_count, unresolvable, warnings, errors)
+        end
+
+        unresolvable.each do |type, identifiers|
+          sample = identifiers.first(3).join(', ')
+          warnings << "#{type}: #{identifiers.size} unit(s) whose file_path resolves nowhere " \
+                      "(e.g. #{sample}). Extracted in a different environment? Re-run extraction."
+        end
+
+        validate_dependency_graph(payload, errors)
+      end
+
+      # rubocop:disable-next Metrics/ParameterLists
+      def validate_manifest_type(payload, type, expected_count, unresolvable, warnings, errors)
+        type_dir = File.join(payload, type)
+        unless File.directory?(type_dir)
+          errors << "Missing directory: #{type}"
+          return
+        end
+
+        unit_files = Dir[File.join(type_dir, '*.json')].reject { |f| f.end_with?('_index.json') }
+        warnings << "#{type}: expected #{expected_count}, found #{unit_files.size}" if unit_files.size != expected_count
+        unit_files.each { |file| validate_unit_file(file, type, unresolvable, errors) }
+      end
+
+      # @param file [String] unit JSON path
+      # @param type [String] type directory name
+      # @param unresolvable [Hash{String => Array<String>}] identifiers whose
+      #   file_path resolves nowhere, keyed by type
+      # @param errors [Array<String>]
+      def validate_unit_file(file, type, unresolvable, errors)
+        data = JSON.parse(Woods::AtomicFile.read(file))
+        errors << "#{file}: missing identifier" unless data['identifier']
+        errors << "#{file}: missing source_code" unless data['source_code']
+        return if path_resolvable?(data['file_path'])
+
+        unresolvable[type] << (data['identifier'] || File.basename(file))
+      rescue JSON::ParserError => e
+        errors << "#{file}: invalid JSON - #{e.message}"
+      end
+
+      # True when the check is off (no +app_root+), the unit has no path, or
+      # the path exists as written or under the app root.
+      def path_resolvable?(file_path)
+        return true if @app_root.nil? || file_path.nil?
+
+        File.exist?(file_path) || File.exist?(File.join(@app_root, file_path))
+      rescue StandardError
+        false
+      end
+
+      def validate_dependency_graph(payload, errors)
+        graph_path = File.join(payload, 'dependency_graph.json')
+        unless File.exist?(graph_path)
+          errors << 'Missing dependency_graph.json'
+          return
+        end
+
+        JSON.parse(Woods::AtomicFile.read(graph_path))
+      rescue JSON::ParserError
+        errors << 'dependency_graph.json: invalid JSON'
+      end
+
+      def payload_dir
+        Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
+      end
+
       private
+
+      # Resolve the published generation's payload and list its type
+      # directories (e.g. models/, controllers/) — an index that publishes
+      # per-generation payloads keeps `payloads/`, `dumps/` and `tasks/`
+      # beside them at the root, none of which are type directories.
+      #
+      # @param errors [Array<String>] accumulated errors; appended to if the
+      #   payload directory named by the published generation isn't on disk
+      # @return [Array<String>] absolute paths to type directories
+      def payload_type_dirs(errors)
+        payload = payload_dir
+        Dir.children(payload).filter_map do |name|
+          full_path = File.join(payload, name)
+          full_path if File.directory?(full_path)
+        end
+      rescue Errno::ENOENT
+        # A published `generation.json` pointing at a payload directory
+        # that isn't actually on disk (e.g. a generation bump raced a
+        # promote, or the payload was manually removed) is an index
+        # integrity problem this validator exists to report — not a
+        # crash for its caller to catch.
+        errors << "Payload directory does not exist: #{payload}"
+        []
+      end
 
       # Validate a single type directory (e.g., models/, controllers/).
       #
@@ -93,7 +200,7 @@ module Woods
           return
         end
 
-        index_entries = JSON.parse(File.read(index_path))
+        index_entries = JSON.parse(Woods::AtomicFile.read(index_path))
         indexed_identifiers = Set.new
 
         index_entries.each do |entry|
@@ -144,7 +251,7 @@ module Woods
       # @param identifier [String] The unit identifier (for error messages)
       # @param errors [Array<String>] Accumulated errors
       def validate_content_hash(unit_file, identifier, errors)
-        data = JSON.parse(File.read(unit_file))
+        data = JSON.parse(Woods::AtomicFile.read(unit_file))
         source_code = data['source_code']
         stored_hash = data['source_hash']
 

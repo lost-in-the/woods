@@ -1,6 +1,6 @@
 ---
 name: woods-diagnose
-description: Systematic troubleshooting for Woods — diagnose extraction, MCP, embedding, and storage issues
+description: Systematic troubleshooting for Woods: diagnose extraction, MCP, embedding, and storage issues
 ---
 
 # Woods Diagnosis Workflow
@@ -17,11 +17,10 @@ Confirm which Woods version is installed and diagnose only against it:
 bundle info woods        # installed version + path
 ```
 
-This workflow targets **Woods ≥ 2.0.0**. Tool counts and behaviors below (29-tool index
-server, 31-tool console, embedding dimension preflight) assume a current gem. If the
-installed version is older, some tools, flags, or diagnostics mentioned here may not
-exist — before treating their absence as a bug, check the installed version and, if
-outdated, advise the user to update (`bundle update woods`).
+This guide targets **Woods 2.0.0 or later**.
+
+- Older gem: some commands, tools, or config keys below will not exist. Tell the user to run `bundle update woods` first.
+- Newer release on RubyGems: mention it so the user can pick it up.
 
 ---
 
@@ -41,7 +40,7 @@ docker compose exec app bundle exec rails runner 'puts Rails.version'
 
 **If this fails:** Fix the Rails boot error before continuing. Common causes: missing environment variables, database not running, syntax error in an initializer.
 
-Check for `NameError` during eager loading — this is a frequent cause of partial extractions:
+Check for `NameError` during eager loading. This is a frequent cause of partial extractions:
 
 ```bash
 bundle exec rails runner 'Rails.application.eager_load!; puts "OK"' 2>&1 | head -40
@@ -55,8 +54,14 @@ If you see `NameError` mentioning a graphql or other gem, that directory is fail
 
 ```bash
 ls -la tmp/woods/
-cat tmp/woods/manifest.json
+gen=$(jq -r '.payload // empty' tmp/woods/generation.json 2>/dev/null)
+cat "tmp/woods/${gen:-.}/manifest.json"
 ```
+
+(Extraction publishes into `tmp/woods/payloads/gen-<N>/` and `generation.json`
+points at the current one. A bare `cat tmp/woods/manifest.json` will miss it
+except on an index written before payloads existed, where `${gen:-.}` falls
+back to the flat root.)
 
 **If `manifest.json` is missing:** Extraction never completed. Run it and watch for errors:
 
@@ -66,7 +71,7 @@ bundle exec rake woods:extract 2>&1 | tee /tmp/extraction.log
 
 Look for `ExtractionError` or `NameError` lines in the output.
 
-**If `total_units` is 0 or very low:** Rails booted but eager loading failed to load your models. See [Models missing from extraction](#models-missing-from-extraction) below.
+**If `total_units` is 0 or very low:** Rails booted but eager loading failed to load your models. See [Extraction empty → check eager_load](#extraction-empty--check-eager_load) in the Decision Tree below.
 
 **If counts look right:** Continue to Step 3.
 
@@ -86,9 +91,15 @@ Test the Index Server directly:
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | woods-mcp-start ./tmp/woods
 ```
 
-**Expected:** A JSON response with a `tools` array containing 27+ entries.
+**Expected:** A JSON response with a `tools` array holding at least the 14 always-on tools:
 
-**If you get "manifest.json not found":** The path is wrong. Check that `./tmp/woods/manifest.json` exists and that you're running from the Rails app root.
+- Query: `lookup`, `search`, `dependencies`, `dependents`, `structure`, `framework`, `recent_changes`
+- Graph: `graph_analysis`, `domain_clusters`, `pagerank`, `trace_flow`
+- Retrieval and ops: `codebase_retrieve`, `reload`, `woods_status`
+
+Never expect all 29 by default. The other 15 register only when their collaborator (operator, feedback store, snapshots, Notion) is configured.
+
+**If you get "manifest.json not found":** The path is wrong, or the index is payload-born and nothing is reading `generation.json`'s pointer. Check that `./tmp/woods/generation.json` (or the older flat `./tmp/woods/manifest.json`) exists and that you're running from the Rails app root.
 
 **If you get no response at all:** The binary may not be in your PATH. Try:
 
@@ -140,7 +151,7 @@ bundle exec rake woods:extract   # re-extract to reset unit files
 bundle exec rake woods:embed     # re-embed all units
 ```
 
-Woods raises `Woods::MCP::DimensionMismatch` on a dimension mismatch — `rake
+Woods raises `Woods::MCP::DimensionMismatch` on a dimension mismatch. `rake
 woods:embed` refuses before embedding anything, and the MCP server refuses at
 boot. The message names the stored dimension, the provider dimension, and the
 remedy.
@@ -157,7 +168,7 @@ total_units == 0?
   │   └─ Fix Rails boot error first
   └─ boots OK?
       ├─ rails runner 'Rails.application.eager_load!; puts "OK"' raises NameError?
-      │   └─ A directory is failing to load — check app/graphql/, app/admin/, etc.
+      │   └─ A directory is failing to load. Check app/graphql/, app/admin/, etc.
       └─ eager_load OK but models still missing?
           └─ Check that models inherit ActiveRecord::Base and table exists
 ```
@@ -176,9 +187,17 @@ tools/list returns empty or error?
 
 ### Console shows only 9 tools (Tier 1 only)
 
-This is expected behavior for embedded mode (rake task / Docker). Tier 2–4 tools (`console_diagnose_model`, `console_eval`, `console_sql`, etc.) require bridge mode.
+This is expected in every mode. The rake task, Docker exec, and the launcher wrapper all start the same embedded server.
 
-To get all 31 tools, switch to Option D (SSH/bridge) from [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md).
+| Tier | Registers? | Example |
+|---|---|---|
+| Tier 1 (9 tools) | Always | `console_count`, `console_schema` |
+| `console_sql`, `console_query` | With `config.console_embedded_read_tools = true` (11 total) | `console_sql` |
+| Tier 2 | Never (schema only) | `console_diagnose_model` |
+| Tier 3 | Never (schema only) | `console_slow_endpoints` |
+| `console_eval` | Never | |
+
+Don't chase a "bridge" or a higher tier; none ships. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#tool-support-by-mode).
 
 ### MCP client shows "connection refused" on HTTP transport
 
@@ -189,7 +208,7 @@ console_mcp_enabled set to true?
       ├─ No → Start the server
       └─ Yes → curl http://localhost:3000/mcp/console
                200 or 405 = middleware mounted ✓
-               404 = path mismatch — check console_mcp_path config
+               404 = path mismatch. Check console_mcp_path config
 ```
 
 ### Slow response times / timeouts

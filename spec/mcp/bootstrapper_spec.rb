@@ -90,6 +90,33 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    context 'when the directory has a payload-born index (#164 payloads)' do
+      it 'resolves through the generation pointer when the root has no manifest.json' do
+        Dir.mktmpdir do |dir|
+          payload_dir = File.join(dir, 'payloads', 'gen-1')
+          FileUtils.mkdir_p(payload_dir)
+          FileUtils.touch(File.join(payload_dir, 'manifest.json'))
+          File.write(File.join(dir, 'generation.json'),
+                     JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+
+          result = described_class.resolve_index_dir([dir])
+          expect(result).to eq(dir)
+        end
+      end
+
+      it 'still rejects a directory with neither a root manifest nor a resolvable payload manifest' do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, 'generation.json'),
+                     JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+
+          expect do
+            described_class.resolve_index_dir([dir])
+          end.to output(/No manifest\.json found in/).to_stderr
+             .and raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
+        end
+      end
+    end
+
     context 'when argv is empty and WOODS_DIR is unset (Dir.pwd fallback)' do
       around do |example|
         old = ENV.delete('WOODS_DIR')
@@ -808,6 +835,52 @@ RSpec.describe Woods::MCP::Bootstrapper do
     end
   end
 
+  describe 'failure-mode: reload backfill must not raise on durable vector stores (B-108)' do
+    # populate_reloaded_vector_metadata reaches whatever vector_store the
+    # retriever holds LIVE -- including a durable adapter, when the reload
+    # tool runs against a pgvector/Qdrant configuration. Before the fix the
+    # guard was `respond_to?(:each_entry)`, which every adapter answers true
+    # for because Storage::VectorStore::Interface DEFINES each_entry as a
+    # raising stub -- so this crashed the stdio server the first time
+    # `reload` ran against a durable backend (NotImplementedError is a
+    # ScriptError; it unwinds straight through `rescue StandardError`).
+    let(:durable_vector_store_class) do
+      Class.new do
+        include Woods::Storage::VectorStore::Interface
+
+        def each_id
+          [].each
+        end
+
+        def store(id, _vector, _metadata = {})
+          id
+        end
+      end
+    end
+
+    it 'skips the metadata back-fill instead of calling the raising each_entry stub' do
+      durable_vs = durable_vector_store_class.new
+      metadata_store = instance_double(Woods::Storage::MetadataStore::InMemory, find: {})
+
+      expect do
+        described_class.send(:populate_vector_metadata, durable_vs, metadata_store)
+      end.not_to raise_error
+    end
+
+    it 'is reachable via populate_reloaded_vector_metadata on a retriever holding a durable store' do
+      durable_vs = durable_vector_store_class.new
+      retriever = instance_double(
+        Woods::Retriever,
+        vector_store: durable_vs,
+        metadata_store: instance_double(Woods::Storage::MetadataStore::InMemory, find: {})
+      )
+
+      expect do
+        described_class.send(:populate_reloaded_vector_metadata, retriever)
+      end.not_to raise_error
+    end
+  end
+
   describe 'failure-mode: durable backends bypass Snapshotter' do
     # When config.vector_store is not :in_memory (e.g. :pgvector), the
     # hydrated_vector_store helper returns nil early. Snapshotter::Vector.load_or_empty
@@ -995,6 +1068,37 @@ RSpec.describe Woods::MCP::Bootstrapper do
         }
         File.write(File.join(dir, 'dependency_graph.json'), JSON.generate(graph_data))
 
+        store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
+
+        expect(store).to be_a(Woods::Storage::GraphStore::Memory)
+        expect(store.dependencies_of('User')).to include('Organization')
+        expect(store.dependents_of('Organization')).to include('User')
+      end
+    end
+
+    it 'hydrates from a payload directory when dependency_graph.json lives only there (#164 payloads)' do
+      require 'woods/index_artifact'
+      require 'woods/storage/graph_store'
+
+      Woods.configuration.graph_store = :in_memory
+
+      Dir.mktmpdir do |dir|
+        payload_dir = File.join(dir, 'payloads', 'gen-1')
+        FileUtils.mkdir_p(payload_dir)
+        graph_data = {
+          'nodes' => {
+            'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb', 'namespace' => nil },
+            'Organization' => { 'type' => 'model', 'file_path' => 'app/models/organization.rb', 'namespace' => nil }
+          },
+          'edges' => { 'User' => [{ 'target' => 'Organization', 'via' => 'belongs_to' }] },
+          'reverse' => { 'Organization' => ['User'] },
+          'type_index' => { 'model' => %w[User Organization] }
+        }
+        File.write(File.join(payload_dir, 'dependency_graph.json'), JSON.generate(graph_data))
+        File.write(File.join(dir, 'generation.json'),
+                   JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+
+        artifact = Woods::IndexArtifact.new(dir)
         store = described_class.send(:hydrated_graph_store, Woods.configuration, artifact)
 
         expect(store).to be_a(Woods::Storage::GraphStore::Memory)

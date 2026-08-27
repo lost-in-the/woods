@@ -251,6 +251,32 @@ RSpec.describe Woods::Configuration do
     it 'raises on mixed array' do
       expect { config.extractors = [:models, 'controllers'] }.to raise_error(Woods::ConfigurationError)
     end
+
+    it 'warns that extractor selection is not implemented when set to a non-default value' do
+      expect { config.extractors = %i[models controllers] }
+        .to output(/extractor selection is not implemented/).to_stderr
+    end
+
+    it 'does not warn when set to the default list, reordered' do
+      expect { config.extractors = Woods::Configuration::DEFAULT_EXTRACTORS.reverse }.not_to output.to_stderr
+    end
+
+    it 'does not warn on initialize (the default assignment bypasses the setter)' do
+      expect { described_class.new }.not_to output.to_stderr
+    end
+  end
+
+  describe '#add_gem' do
+    it 'records the gem under gem_configs' do
+      config.add_gem('foo_gem', paths: ['lib/foo'], priority: :high)
+
+      expect(config.gem_configs).to eq('foo_gem' => { paths: ['lib/foo'], priority: :high })
+    end
+
+    it 'warns that gem configs are not used' do
+      expect { config.add_gem('foo_gem', paths: ['lib/foo']) }
+        .to output(/gem configs are not used/).to_stderr
+    end
   end
 
   describe '#pretty_json=' do

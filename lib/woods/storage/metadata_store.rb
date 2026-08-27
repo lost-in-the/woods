@@ -217,9 +217,7 @@ module Woods
         #
         # Matching is literal substring inclusion — `%` and `_` in the query
         # have no special meaning here, and the SQLite adapter escapes them
-        # so the two adapters agree. (Known, deliberate divergence: this
-        # adapter is case-sensitive while SQLite's LIKE is ASCII
-        # case-insensitive — not widened, not fixed here.)
+        # so the two adapters agree.
         #
         # @raise [ArgumentError] if a field name fails {SEARCH_FIELD_NAME}
         def search(query, fields: nil)
@@ -230,7 +228,12 @@ module Woods
           # different results depending on which backend a host had configured.
           needle = query.to_s.downcase
           @data.each_with_object([]) do |(id, record), out|
-            haystacks = fields ? fields.map { |f| record[f] } : [JSON.generate(record)]
+            # `updated_at` is excluded from the whole-record haystack: SQLite's
+            # `data` column never carries it (it's a store-level column there,
+            # not part of the JSON blob), so leaving it in here made a query
+            # that only matched a timestamp (e.g. "2026-08") return every
+            # record on InMemory and none on SQLite.
+            haystacks = fields ? fields.map { |f| record[f] } : [JSON.generate(record.except('updated_at'))]
             next unless haystacks.compact.any? { |h| h.to_s.downcase.include?(needle) }
 
             out << record.except('updated_at').merge('id' => id)

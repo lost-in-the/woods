@@ -9,15 +9,25 @@ module Woods
     # storage adapters to/from disk.
     #
     # Two adapters live here:
-    # - {Snapshotter::Vector} — handles {VectorStore::InMemory} round-trips via +pack("e*")+.
-    # - {Snapshotter::Metadata} — handles {MetadataStore::InMemory} round-trips via MessagePack.
+    # - {Snapshotter::Vector} — handles {VectorStore::InMemory} round-trips via
+    #   a raw +pack("e*")+ binary format (+vectors.bin+ / +vectors.idx+).
+    # - {Snapshotter::Metadata} — handles {MetadataStore::InMemory} round-trips
+    #   via MessagePack (+metadata.msgpack+).
     #
     # Persistent backends (pgvector, Qdrant, SQLite) never touch the Snapshotter.
     # Passing one to {Snapshotter::Vector.dump} or {Snapshotter::Metadata.dump} raises
-    # {InapplicableBackend} immediately.
+    # {InapplicableBackend} immediately — see each adapter's +validate_store!+,
+    # which checks *ownership* of the persistence-seam methods rather than
+    # +respond_to?+ (B-108): both are defined as stubs on
+    # {VectorStore::Interface} / {MetadataStore::Interface}, so a durable
+    # adapter that merely includes the interface would otherwise pass.
     #
-    # PR 2 ships stub implementations: +load_or_empty+ always returns an empty store
-    # and +dump+ is a validated no-op. PR 3 wires in the real serialization paths.
+    # {Woods::Embedding::Indexer#persist_snapshot} is the write-side caller,
+    # invoked at the end of a successful {Woods::Embedding::Indexer#index_all}
+    # or +#index_incremental+ run when the configured vector store is
+    # in-memory. {Snapshotter::Vector.load_or_empty} is the read-side
+    # counterpart, used both by an incremental run (to hydrate before
+    # embedding) and by the MCP server at boot.
     module Snapshotter
     end
   end

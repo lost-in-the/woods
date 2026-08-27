@@ -75,10 +75,17 @@ module Woods
 
       # Read a file safely, returning nil on failure.
       #
+      # Ruby source defaults to UTF-8, so the read is pinned to UTF-8
+      # rather than the process default external encoding. Under LANG=C
+      # (US-ASCII) a bare File.read tags multibyte source, such as an em
+      # dash in a comment, as invalid and JSON generation raises
+      # Encoding::InvalidByteSequenceError out of the analysis.
+      #
       # @param path [String] File path
       # @return [String, nil] File contents or nil
       def read_file(path)
-        File.read(path)
+        content = File.read(path, encoding: Encoding::UTF_8)
+        content.valid_encoding? ? content : content.scrub
       rescue StandardError
         nil
       end

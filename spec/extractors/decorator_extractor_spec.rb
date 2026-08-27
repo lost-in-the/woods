@@ -115,6 +115,32 @@ RSpec.describe Woods::Extractors::DecoratorExtractor do
       expect(unit.namespace).to eq('Admin')
     end
 
+    it 'ignores a module nested inside the class (#174)' do
+      path = create_file('app/decorators/user_decorator.rb', <<~RUBY)
+        class UserDecorator < Draper::Decorator
+          module Formatting
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_decorator_file(path)
+      expect(unit.identifier).to eq('UserDecorator')
+      expect(unit.namespace).to be_nil
+    end
+
+    it 'ignores a sibling module that closed before the class opened (#174)' do
+      path = create_file('app/decorators/user_decorator.rb', <<~RUBY)
+        module Helpers
+        end
+
+        class UserDecorator < Draper::Decorator
+        end
+      RUBY
+
+      unit = described_class.new.extract_decorator_file(path)
+      expect(unit.identifier).to eq('UserDecorator')
+    end
+
     it 'returns nil for module-only files' do
       path = create_file('app/decorators/base.rb', <<~RUBY)
         module Decoratable

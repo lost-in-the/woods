@@ -83,13 +83,20 @@ module Woods
 
       # Delegate the per-provider input cap. The retry wrapper does not
       # change the provider's budget, so just hand through whatever the
-      # inner provider reports. Without this, `respond_to?` returns true
-      # via Interface but the call raises NotImplementedError.
+      # inner provider reports. `respond_to?` alone is the wrong guard
+      # here: {Woods::Embedding::Provider::Interface} *defines*
+      # +max_input_tokens+ as a +NotImplementedError+ stub, so a provider
+      # that merely includes the interface without overriding it still
+      # answers +respond_to?+ with +true+ (B-108) and raises when called.
+      # A provider with no such method at all still needs the
+      # +respond_to?+ guard to avoid a bare +NoMethodError+.
       #
       # @return [Integer, nil]
       def max_input_tokens
-        return @provider.max_input_tokens if @provider.respond_to?(:max_input_tokens)
+        return nil unless @provider.respond_to?(:max_input_tokens)
 
+        @provider.max_input_tokens
+      rescue NotImplementedError
         nil
       end
 

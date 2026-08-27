@@ -149,6 +149,25 @@ RSpec.describe Woods::Extractors::EngineExtractor do
       end
     end
 
+    context 'excluding the host application class' do
+      let(:real_engine) { build_mock_engine('Devise::Engine', 'devise') }
+
+      before do
+        stub_const('Rails::Engine', engine_base_class)
+        # Rails::Application is itself a direct Rails::Engine subclass —
+        # `Rails::Engine.subclasses` includes it in a real app, producing a
+        # phantom "engine" unit for the host app.
+        stub_const('Rails::Application', Class.new(Rails::Engine))
+        allow(Rails::Engine).to receive(:subclasses).and_return([Rails::Application, real_engine])
+        stub_rails_application(engines: [real_engine])
+      end
+
+      it 'excludes Rails::Application from the discovered engines' do
+        units = extractor.extract_all
+        expect(units.map(&:identifier)).to contain_exactly('Devise::Engine')
+      end
+    end
+
     context 'with mounted engines' do
       let(:engine_class) { build_mock_engine('Devise::Engine', 'devise') }
 
@@ -313,7 +332,14 @@ RSpec.describe Woods::Extractors::EngineExtractor do
   def build_mount_routes(mounts)
     mounts.map do |engine, path|
       route = double('mount_route')
-      allow(route).to receive(:app).and_return(engine)
+      # Rails wraps a mounted engine's route in an
+      # ActionDispatch::Routing::Mapper::Constraints object — route.app is
+      # that wrapper, and the wrapper's own .app is the engine class.
+      # Stubbing route.app directly to the engine skipped the unwrap step
+      # extract_engine relies on in a real app.
+      wrapper = double('constraints_wrapper')
+      allow(wrapper).to receive(:app).and_return(engine)
+      allow(route).to receive(:app).and_return(wrapper)
       app_path = path ? double('path', spec: double(to_s: path)) : nil
       allow(route).to receive(:path).and_return(app_path)
       allow(route).to receive(:defaults).and_return({})

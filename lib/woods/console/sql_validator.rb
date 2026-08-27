@@ -43,8 +43,12 @@ module Woods
       #   `RELEASE`, `START`) — SafeContext already owns the surrounding
       #   transaction; inner tx control would corrupt it.
       # - File I/O vectors (`LOAD`, `HANDLER`, `COPY`).
+      # - Write vector (`MERGE`) — an upsert statement that can INSERT/UPDATE/
+      #   DELETE depending on match, on databases that support it. Already
+      #   caught by the allowed-prefix check (it isn't SELECT/WITH/EXPLAIN),
+      #   but listed here too for defense in depth against a body-scan bypass.
       FORBIDDEN_KEYWORDS = %w[
-        INSERT UPDATE DELETE DROP ALTER TRUNCATE CREATE GRANT REVOKE
+        INSERT UPDATE DELETE MERGE DROP ALTER TRUNCATE CREATE GRANT REVOKE
         DO CALL SET RESET LISTEN NOTIFY
         VACUUM ANALYZE CLUSTER REINDEX REFRESH LOCK
         PREPARE EXECUTE DEALLOCATE
@@ -115,9 +119,12 @@ module Woods
         IN EXISTS NOT AND OR VALUES WHERE HAVING ON IS BETWEEN CASE WHEN
         THEN ELSE END FROM JOIN USING WITH SELECT DISTINCT ALL ANY SOME
         UNION INTERSECT EXCEPT ORDER GROUP BY ASC DESC LIMIT OFFSET AS INTO
-        OVER PARTITION FILTER WITHIN RETURNING
+        OVER PARTITION FILTER WITHIN RETURNING EXPLAIN
       ].freeze
 
+      # EXPLAIN is a statement leader, so `EXPLAIN (FORMAT JSON) SELECT` is an
+      # option list, not a call; ALLOWED_PREFIXES already refuses ANALYZE inside
+      # that list (B-125).
       # Matches a function-call shape: an identifier immediately followed by
       # `(`, where the identifier may be bare, double-quoted (ANSI/PostgreSQL),
       # or backtick-quoted (MySQL). Quoting the name was the bypass — a bare
@@ -131,14 +138,16 @@ module Woods
       #
       # `EXPLAIN ANALYZE` actually executes the planned query on PostgreSQL
       # (and the MySQL 8.0+ `EXPLAIN ANALYZE` does the same) — explicitly
-      # reject the `ANALYZE` variant. PostgreSQL also accepts an option-list
+      # reject the `ANALYZE` variant, and PostgreSQL's `ANALYSE` spelling
+      # alias for it (both are accepted by the server; rejecting only one
+      # left the other as a bypass). PostgreSQL also accepts an option-list
       # form `EXPLAIN (ANALYZE, FORMAT JSON) SELECT …` where `ANALYZE` follows
-      # `(` rather than whitespace; the `(?!\s*\(?\s*ANALYZE)` lookahead
-      # rejects both spellings so SafeContext doesn't silently trust
-      # "we're just planning, not running" for what is a side-effectful
-      # execution. `EXPLAIN (…)` without `ANALYZE` is still permitted
-      # (e.g. `EXPLAIN (FORMAT JSON) SELECT 1`).
-      ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN(?!\s+ANALYZE)(?!\s*\([^)]*\bANALYZE\b))\b/i
+      # `(` rather than whitespace; the `(?!\s*\(?\s*ANALY[SZ]E)` lookahead
+      # rejects both spellings in both positions so SafeContext doesn't
+      # silently trust "we're just planning, not running" for what is a
+      # side-effectful execution. `EXPLAIN (…)` without `ANALYZE`/`ANALYSE`
+      # is still permitted (e.g. `EXPLAIN (FORMAT JSON) SELECT 1`).
+      ALLOWED_PREFIXES = /\A\s*(SELECT|WITH|EXPLAIN(?!\s+ANALY[SZ]E)(?!\s*\([^)]*\bANALY[SZ]E\b))\b/i
 
       # Frozen map of forbidden keyword => regex matching the keyword at statement start.
       # Used by {#check_forbidden_keywords!} and {#check_forbidden_keywords_in_body!}.
@@ -152,10 +161,26 @@ module Woods
         [kw, /\b#{kw}\b/i]
       end.freeze
 
-      # Frozen map of forbidden keyword => regex matching the keyword anywhere in the body.
-      # Used by {#check_forbidden_keywords_in_body!} for the whole-body scan.
+      # Frozen map of forbidden keyword => regex matching the keyword as a
+      # statement leader: at the very start of the SQL, or immediately after
+      # a `;` or a newline. Used by {#check_forbidden_keywords_in_body!}.
+      #
+      # A live `;` never reaches this check unescaped — #validate! rejects
+      # multiple statements earlier — so a `;` match here only ever comes
+      # from inside a comment that {SqlNoiseStripper} stripped. The same is
+      # true of the newline: every comment flavor (`--`, `#`, `/* ... */`)
+      # leaves one behind in place of its own content specifically so a
+      # comment-hidden statement (`SELECT 1 --;\nDELETE FROM users`,
+      # `SELECT 1 /*;*/ DELETE FROM users`) still reads as following a
+      # boundary once the comment is gone.
+      #
+      # Matching anywhere (the previous behavior) rejected a column
+      # legitimately named after a forbidden keyword — `WHERE do = 1`,
+      # `release`, `lock`, `handler` are all plausible column names, none of
+      # them a statement. Anchoring to leader positions is what tells the
+      # two apart.
       FORBIDDEN_BODY_REGEXES = FORBIDDEN_KEYWORDS.to_h do |kw|
-        [kw, /\b#{kw}\b/i]
+        [kw, /(?:\A|[;\n])\s*#{kw}\b/i]
       end.freeze
 
       # Frozen map of dangerous function name => regex matching a call to that function.
@@ -236,31 +261,51 @@ module Woods
 
       # Check if the SQL contains forbidden keywords anywhere in the body.
       #
+      # Scans the noise-stripped SQL (comments and string literals removed),
+      # not the raw input. A raw scan misreads English words that happen to
+      # match a keyword inside a data literal — `WHERE body = 'please update
+      # the record'` contains the substring UPDATE but is not a write.
+      #
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_body_forbidden_keywords!(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql)
+
         BODY_FORBIDDEN_REGEXES.each do |keyword, pattern|
-          raise SqlValidationError, "Rejected: #{keyword} is not allowed" if sql.match?(pattern)
+          raise SqlValidationError, "Rejected: #{keyword} is not allowed" if stripped.match?(pattern)
         end
       end
 
       # Check if the SQL contains writable CTEs (WITH...DELETE/UPDATE/INSERT).
       #
+      # Matches `WITH [RECURSIVE] name AS (...)` — `RECURSIVE` is optional
+      # syntax that sits between `WITH` and the CTE name, and without it in
+      # the pattern a recursive writable CTE fell through to the generic
+      # body-keyword scan, which still rejects it but with a less specific
+      # error message. Scans noise-stripped input for the same reason as
+      # {#check_body_forbidden_keywords!}.
+      #
       # @param sql [String]
       # @raise [SqlValidationError] if a writable CTE is found
       def check_writable_ctes!(sql)
-        return unless sql.match?(/WITH\s+\w+\s+AS\s*\(\s*(DELETE|UPDATE|INSERT)\b/i)
+        stripped = SqlNoiseStripper.strip_noise(sql)
+        return unless stripped.match?(/WITH\s+(?:RECURSIVE\s+)?\w+\s+AS\s*\(\s*(DELETE|UPDATE|INSERT)\b/i)
 
         raise SqlValidationError, 'Rejected: writable CTEs are not allowed'
       end
 
       # Check if the SQL calls dangerous functions.
       #
+      # Scans the noise-stripped SQL so a function name that only appears
+      # inside a comment or string literal isn't misread as a call.
+      #
       # @param sql [String]
       # @raise [SqlValidationError] if a dangerous function is found
       def check_dangerous_functions!(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql)
+
         DANGEROUS_FUNCTION_REGEXES.each do |func, pattern|
-          raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if sql.match?(pattern)
+          raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if stripped.match?(pattern)
         end
       end
 
@@ -287,24 +332,26 @@ module Woods
         end
       end
 
-      # Check if the SQL contains forbidden keywords anywhere in the body after stripping comments.
-      # This catches comment-hidden injections like "SELECT 1 --;\nDELETE FROM users".
+      # Check if the SQL contains a forbidden keyword at a statement-leader
+      # position after stripping comments and string literals. This catches
+      # comment-hidden injections like "SELECT 1 --;\nDELETE FROM users",
+      # and — by also stripping literals, not just comments — avoids
+      # rejecting a legitimate value like `body = 'please update the
+      # record'`, where UPDATE is English prose inside data, not SQL.
+      # {FORBIDDEN_BODY_REGEXES} only matches leader positions (start of the
+      # SQL, or right after a `;`/newline), so a column legitimately named
+      # after a forbidden keyword (`WHERE do = 1`) is not misread as one.
       #
       # @param sql [String]
-      # @raise [SqlValidationError] if a forbidden keyword is found
+      # @raise [SqlValidationError] if a forbidden keyword is found as a
+      #   statement leader
       def check_forbidden_keywords_in_body!(sql)
-        stripped = SqlNoiseStripper.strip_comments(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql)
 
-        # Check if any forbidden keyword appears anywhere (not just at start)
-        FORBIDDEN_BODY_REGEXES.each do |keyword, body_pattern|
-          # Look for keyword as a whole word anywhere in the stripped SQL
-          next unless stripped.match?(body_pattern)
+        FORBIDDEN_BODY_REGEXES.each do |keyword, leader_pattern|
+          next unless stripped.match?(leader_pattern)
 
-          # Make sure it's not at the very start (already checked)
-          unless stripped.match?(FORBIDDEN_PREFIX_REGEXES[keyword])
-            raise SqlValidationError,
-                  "Rejected: #{keyword} statements are not allowed (found in SQL body)"
-          end
+          raise SqlValidationError, "Rejected: #{keyword} statements are not allowed (found in SQL body)"
         end
       end
     end

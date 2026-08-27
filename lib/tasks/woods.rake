@@ -15,6 +15,14 @@
 #   bundle exec rake woods:self_analyze      # Analyze gem's own source
 #   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
 
+# Reading Woods JSON artifacts with a bare File.read tags the result with the
+# process's default external encoding — US-ASCII under LANG=C, the common
+# case in CI and Docker — so a non-ASCII byte (e.g. a git branch name in the
+# manifest) raises Encoding::InvalidByteSequenceError. AtomicFile.write is
+# binmode, so the read side must go through AtomicFile.read to match.
+require 'woods/atomic_file'
+require 'woods/generation'
+
 namespace :woods do
   # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
   #
@@ -186,27 +194,6 @@ namespace :woods do
     nil
   end
 
-  # Does a unit's recorded file_path point at anything in THIS environment?
-  #
-  # Framework units carry absolute gem paths — deliberately
-  # environment-specific, see RailsSourceExtractor — and those resolve fine
-  # in the environment that extracted them. What this catches is the #169
-  # failure class generally: units whose absolute path was written by a
-  # different environment (a container's /app/...) and whose relative form
-  # doesn't exist under Rails.root either — an index a reader can retrieve
-  # from but never open a source file for.
-  #
-  # For an absolute path `Rails.root.join` returns the path itself, so one
-  # expression covers both forms.
-  #
-  # @param file_path [String]
-  # @return [Boolean]
-  def woods_path_resolvable?(file_path)
-    File.exist?(file_path) || File.exist?(Rails.root.join(file_path))
-  rescue StandardError
-    false
-  end
-
   # Changed paths across a git range, for `woods:incremental`'s CI branches.
   #
   # `git diff --name-only` split on lines corrupted three things at once: a
@@ -259,7 +246,7 @@ namespace :woods do
   task extract: :environment do
     require 'woods/extractor'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     puts 'Starting full codebase extraction...'
     puts "Output directory: #{output_dir}"
@@ -287,7 +274,7 @@ namespace :woods do
   task incremental: :environment do
     require 'woods/extractor'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     # Determine changed files from CI environment or git
     require 'open3'
@@ -355,7 +342,7 @@ namespace :woods do
     require 'woods/extractor'
     require 'woods/watch/daemon'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     daemon = Woods::Watch::Daemon.new(
       output_dir: output_dir,
@@ -442,7 +429,7 @@ namespace :woods do
       exit 1
     end
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
     extractor = Woods::Extractor.new(output_dir: output_dir)
 
     # A refresh is a fourth writer against this index, and it rewrites the whole
@@ -468,7 +455,7 @@ namespace :woods do
   task extract_framework: :environment do
     require 'woods/extractor'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     puts 'Extracting Rails and gem framework sources...'
     puts "Rails version: #{Rails.version}"
@@ -492,82 +479,34 @@ namespace :woods do
 
   desc 'Validate extracted index integrity'
   task validate: :environment do
-    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
+    require 'woods/resilience/index_validator'
+
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     unless output_dir.exist?
       puts "ERROR: Index directory does not exist: #{output_dir}"
       exit 1
     end
 
-    payload_dir = woods_payload_dir(output_dir)
-    manifest_path = payload_dir.join('manifest.json')
+    manifest_path = woods_payload_dir(output_dir).join('manifest.json')
     unless manifest_path.exist?
       puts 'ERROR: Manifest not found. Run extraction first.'
       exit 1
     end
 
-    manifest = JSON.parse(File.read(manifest_path))
+    manifest = JSON.parse(Woods::AtomicFile.read(manifest_path))
 
     puts 'Validating index...'
     puts "  Extracted at: #{manifest['extracted_at']}"
     puts "  Git SHA: #{manifest['git_sha']}"
     puts
 
-    errors = []
-    warnings = []
-    unresolvable = Hash.new { |hash, key| hash[key] = [] }
+    # One implementation of the check (B-128): the class the worktree
+    # integration spec asserts through is the one this task runs.
+    report = Woods::Resilience::IndexValidator.new(index_dir: output_dir.to_s, app_root: Rails.root.to_s).validate
+    errors = report.errors
+    warnings = report.warnings
 
-    # Check each type directory
-    manifest['counts'].each do |type, expected_count|
-      type_dir = payload_dir.join(type)
-      unless type_dir.exist?
-        errors << "Missing directory: #{type}"
-        next
-      end
-
-      actual_count = Dir[type_dir.join('*.json')].reject { |f| f.end_with?('_index.json') }.size
-
-      warnings << "#{type}: expected #{expected_count}, found #{actual_count}" if actual_count != expected_count
-
-      # Validate each unit file is valid JSON
-      Dir[type_dir.join('*.json')].each do |file|
-        next if file.end_with?('_index.json')
-
-        begin
-          data = JSON.parse(File.read(file))
-          errors << "#{file}: missing identifier" unless data['identifier']
-          errors << "#{file}: missing source_code" unless data['source_code']
-          # The #169 staleness class, caught generally: a file_path that
-          # resolves neither as written nor under Rails.root was recorded by
-          # a different environment (or its source has since vanished).
-          if data['file_path'] && !woods_path_resolvable?(data['file_path'])
-            unresolvable[type] << (data['identifier'] || File.basename(file))
-          end
-        rescue JSON::ParserError => e
-          errors << "#{file}: invalid JSON - #{e.message}"
-        end
-      end
-    end
-
-    unresolvable.each do |type, identifiers|
-      sample = identifiers.first(3).join(', ')
-      warnings << "#{type}: #{identifiers.size} unit(s) whose file_path resolves nowhere " \
-                  "(e.g. #{sample}) — extracted in a different environment? Re-run extraction."
-    end
-
-    # Check dependency graph
-    graph_path = payload_dir.join('dependency_graph.json')
-    if graph_path.exist?
-      begin
-        JSON.parse(File.read(graph_path))
-      rescue JSON::ParserError
-        errors << 'dependency_graph.json: invalid JSON'
-      end
-    else
-      errors << 'Missing dependency_graph.json'
-    end
-
-    # Report
     if errors.any?
       puts 'ERRORS:'
       errors.each { |e| puts "  ✗ #{e}" }
@@ -593,7 +532,7 @@ namespace :woods do
 
   desc 'Show index statistics'
   task stats: :environment do
-    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     unless output_dir.exist?
       puts 'Index directory does not exist. Run extraction first.'
@@ -602,7 +541,7 @@ namespace :woods do
 
     payload_dir = woods_payload_dir(output_dir)
     manifest_path = payload_dir.join('manifest.json')
-    manifest = manifest_path.exist? ? JSON.parse(File.read(manifest_path)) : {}
+    manifest = manifest_path.exist? ? JSON.parse(Woods::AtomicFile.read(manifest_path)) : {}
 
     puts 'Woods Index Statistics'
     puts '=' * 50
@@ -632,7 +571,7 @@ namespace :woods do
       index_path = type_dir.join('_index.json')
       type_chunks = 0
       if index_path.exist?
-        index = JSON.parse(File.read(index_path))
+        index = JSON.parse(Woods::AtomicFile.read(index_path))
         type_chunks = index.sum { |u| u['chunk_count'] || 0 }
         total_chunks += type_chunks
       end
@@ -647,7 +586,7 @@ namespace :woods do
     # Dependency graph stats
     graph_path = payload_dir.join('dependency_graph.json')
     if graph_path.exist?
-      graph = JSON.parse(File.read(graph_path))
+      graph = JSON.parse(Woods::AtomicFile.read(graph_path))
       stats = graph['stats'] || {}
       puts 'Dependency Graph'
       puts '-' * 50
@@ -661,7 +600,7 @@ namespace :woods do
 
   desc 'Clean extracted index'
   task clean: :environment do
-    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods')))
+    output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     if output_dir.exist?
       puts "Removing #{output_dir}..."
@@ -861,7 +800,7 @@ namespace :woods do
       exit 1
     end
 
-    output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
     graph_path = File.join(woods_payload_dir(output_dir).to_s, 'dependency_graph.json')
 
     unless File.exist?(graph_path)
@@ -870,7 +809,7 @@ namespace :woods do
       exit 1
     end
 
-    graph_data = JSON.parse(File.read(graph_path))
+    graph_data = JSON.parse(Woods::AtomicFile.read(graph_path))
     graph = Woods::DependencyGraph.from_h(graph_data)
 
     max_depth = ENV.fetch('MAX_DEPTH', 5).to_i

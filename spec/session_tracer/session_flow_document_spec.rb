@@ -227,5 +227,34 @@ RSpec.describe Woods::SessionTracer::SessionFlowDocument do
       expect(xml).to include('OrdersController → Order, OrderPolicy')
       expect(xml).to include('</dependencies>')
     end
+
+    describe 'escaping client-controlled values' do
+      it 'escapes a session_id that attempts to break out of the attribute' do
+        malicious = described_class.new(session_id: '"><evil injected="true">')
+        xml = malicious.to_context
+
+        expect(xml).not_to include('"><evil')
+        expect(xml).to include('&quot;&gt;&lt;evil injected=&quot;true&quot;&gt;')
+      end
+
+      it 'escapes unit identifier, type, and file_path attributes' do
+        malicious_pool = {
+          '"><injected>' => { type: '"><injected>', file_path: '"><injected>', source_code: 'ok' }
+        }
+        malicious = described_class.new(session_id: 'sess', context_pool: malicious_pool)
+        xml = malicious.to_context
+
+        expect(xml).not_to include('"><injected>')
+        expect(xml).to include('&quot;&gt;&lt;injected&gt;')
+      end
+
+      it 'escapes & and < in unit source content' do
+        pool = { 'Foo' => { type: 'model', file_path: 'foo.rb', source_code: 'a < b && c' } }
+        doc_with_source = described_class.new(session_id: 'sess', context_pool: pool)
+        xml = doc_with_source.to_context
+
+        expect(xml).to include('a &lt; b &amp;&amp; c')
+      end
+    end
   end
 end

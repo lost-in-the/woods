@@ -159,18 +159,24 @@ RSpec.describe Woods::Unblocked::Exporter do
       expect(stats[:synced]).to eq(1)
     end
 
-    it 'stops on "daily budget exhausted" without attempting further documents' do
+    # The message-match fallback (see #note_budget_exhaustion) exists for
+    # injected clients that signal budget exhaustion via a plain
+    # Woods::Error rather than the real Unblocked::RateLimiter::
+    # BudgetExhaustedError — this pins it to the actual substring
+    # RateLimiter raises ("budget exhausted for this run"), not a
+    # fabricated string the fallback never actually matches in production.
+    it 'stops on "budget exhausted for this run" without attempting further documents' do
       unit_a = { 'identifier' => 'A', 'type' => 'model' }
       unit_b = { 'identifier' => 'B', 'type' => 'model' }
       allow(reader).to receive(:list_units).and_return([])
       allow(reader).to receive(:list_units).with(type: 'model').and_return([unit_a, unit_b])
       allow(reader).to receive(:find_unit).and_return({ 'type' => 'model', 'identifier' => 'X',
                                                         'file_path' => 'x.rb' })
-      allow(client).to receive(:put_document).and_raise(Woods::Error, 'daily budget exhausted')
+      allow(client).to receive(:put_document).and_raise(Woods::Error, 'budget exhausted for this run')
 
       stats = exporter.sync_all
       expect(stats[:errors]).not_to be_empty
-      expect(stats[:errors].first).to include('daily budget exhausted')
+      expect(stats[:errors].first).to include('budget exhausted for this run')
       expect(client).to have_received(:put_document).once
     end
   end
@@ -295,7 +301,7 @@ RSpec.describe Woods::Unblocked::Exporter do
 
       it 'does not purge (current set is incomplete)' do
         stub_single_user
-        allow(client).to receive(:put_document).and_raise(Woods::Error, 'daily budget exhausted')
+        allow(client).to receive(:put_document).and_raise(Woods::Error, 'budget exhausted for this run')
         stats = exporter.sync_all
         expect(client).not_to have_received(:delete_document)
         expect(stats[:deleted]).to eq(0)

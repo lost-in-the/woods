@@ -132,5 +132,44 @@ RSpec.describe Woods::PayloadStore do
     it 'is a no-op when no payloads have been published' do
       expect { store.prune(keep: 2, protect: 1) }.not_to raise_error
     end
+
+    # If generation.json is ever lost and the counter restarts lower, stale
+    # high-numbered directories from before the reset must not be mistaken
+    # for the newest generations — `sort.last(keep)` alone would retain them
+    # forever while pruning the genuinely-previous one.
+    it 'removes directories numbered above the protected generation as superseded leftovers' do
+      [1, 2, 5, 6].each { |n| store.create(n) }
+
+      removed = store.prune(keep: 2, protect: 2)
+
+      expect(removed).to contain_exactly(5, 6)
+      expect(store.root.children.map { |c| c.basename.to_s }.sort).to eq(%w[gen-1 gen-2])
+    end
+  end
+
+  describe '#link_or_copy' do
+    it 'hardlinks by default' do
+      source = Pathname.new(tmpdir).join('source.json')
+      File.write(source, '{}')
+      destination = Pathname.new(tmpdir).join('destination.json')
+
+      store.link_or_copy(source, destination)
+
+      expect(destination.stat.ino).to eq(source.stat.ino)
+    end
+
+    # The same fallback #clone relies on for a payload spanning a device
+    # boundary. Extractor#seed_payload_from_flat_root routes its file-level
+    # linking through this method rather than a bare FileUtils.ln so it gets
+    # the fallback too.
+    it 'copies instead of raising when the filesystem refuses a hardlink' do
+      source = Pathname.new(tmpdir).join('source.json')
+      File.write(source, '{"a":1}')
+      destination = Pathname.new(tmpdir).join('destination.json')
+      allow(FileUtils).to receive(:ln).and_raise(Errno::EXDEV, 'cross-device link')
+
+      expect { store.link_or_copy(source, destination) }.not_to raise_error
+      expect(destination.read).to eq('{"a":1}')
+    end
   end
 end

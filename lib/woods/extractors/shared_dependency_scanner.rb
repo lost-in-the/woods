@@ -227,9 +227,15 @@ module Woods
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
       # Match form_with/form_for with a named route helper as the action/url.
-      # Scans only within the form opening tag (up to the first `do`, `%>`, or `end`)
-      # to avoid matching unrelated _path/_url helpers that appear after the form.
-      FORM_ACTION_HELPER = /form_(with|for)\b[^%]*?(\w+)_(path|url)/
+      # Scans only within the form opening tag (up to the first `do`, `%>`, or
+      # `end`) to avoid matching unrelated _path/_url helpers that appear
+      # after the form. The negative lookahead (rather than a `[^%]`
+      # character class) is what actually enforces that boundary: a
+      # `[^%]*?` scan has nothing bounding it in plain-Ruby sources (Phlex,
+      # ViewComponent, mailers) that contain no `%` at all, so a
+      # `form_with` with no route-helper argument ran past its own `do`
+      # block and matched the next unrelated `_path` call in the method.
+      FORM_ACTION_HELPER = /form_(with|for)\b(?:(?!%>|\bdo\b|\bend\b)[\s\S])*?(\w+)_(path|url)/
 
       # Scan source for named route helpers and resolve them to controller targets.
       #

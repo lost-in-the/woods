@@ -14,13 +14,15 @@ module Woods
     #
     # ## Reachability (v0.2)
     #
-    # EvalGuard is the first of five controls on the embedded `console_eval`
-    # opt-in path. `EmbeddedExecutor#handle_eval` calls `check!` before
-    # anything else — ahead of the Confirmation prompt, the SafeContext
-    # rollback, the timeout, and the audit log. When the opt-in is off
-    # (the default), `refusal_for('eval')` still short-circuits with the
-    # `eval_disabled` payload and this guard is not reached. See
-    # docs/CONSOLE_MCP_SETUP.md "console_eval opt-in" and backlog B-053.
+    # `EmbeddedExecutor#send_request` already wraps every dispatched tool —
+    # `console_eval` included — inside `SafeContext#execute`'s rolled-back
+    # transaction before `handle_eval` runs at all. Within that,
+    # `handle_eval` calls `EvalGuard#check!` before anything else it
+    # controls: ahead of the Confirmation prompt, the timeout, and the audit
+    # log. When the opt-in is off (the default), `refusal_for('eval')` still
+    # short-circuits with the `eval_disabled` payload and this guard is not
+    # reached. See docs/CONSOLE_MCP_SETUP.md "console_eval opt-in" and
+    # backlog B-053.
     #
     # Bridge-process mode (in development) will call the same guard before
     # shipping the payload to the remote Rails worker.
@@ -98,24 +100,29 @@ module Woods
       #   `remove_method` / `method_defined?` / `prepend` / `include_module`
       #   reflection family.
       # - State mutation: `instance_variable_set` / `instance_variable_get`,
-      #   `class_variable_set` / `class_variable_get` / `freeze` / `taint`.
+      #   `class_variable_set` / `class_variable_get`.
       # - Object-space escapes: `_id2ref`, `each_object`, `const_source_location`.
       # - System / process: `system`, `exec`, `spawn`, `fork`, `popen`, `%x{}`
       #   (AST method name `backtick` / xstr) so they can't be invoked
       #   implicitly.
-      # - File / IO: `open` (bare Kernel#open — the File-specific reader is
-      #   handled separately via CREDENTIAL_FILE_READERS, but the bare
-      #   `Kernel.open("|shell-command")` form is how most shellshock-style
-      #   escapes slip through).
-      # - Network: `URI.open` (when called as `open` on URI, the AST method
-      #   name is `open` so the string match above catches it). HTTP / Socket
-      #   constants are denied separately via DENIED_CONSTANTS.
-      # - Loader: `load`, `require`, `require_relative`, `autoload`.
+      # - Loader: `require`, `require_relative`, `autoload`. Bare `load` is
+      #   NOT in this list (Marshal.load/YAML.load call sites are the ones
+      #   worth denying, and those go through the constant gate below).
       # - Unsafe deserialization: `unsafe_load` / `_load` (Marshal.load and
-      #   YAML.load are denied via DENIED_CONSTANTS + method gate below).
-      # - Threading escapes from SafeContext's rollback: `new` on Thread /
-      #   Fiber / Process is denied via DENIED_CONSTANTS so the
-      #   {Kernel.fork, Thread.new} pair can't slip past.
+      #   YAML.load are denied via DENIED_CONSTANTS on the `Marshal`/`YAML`
+      #   receiver, not through this list).
+      # - Legacy taint-mode escapes: `taint` / `untaint`.
+      #
+      # Bare `open` (Kernel#open, e.g. `open("|shell-command")`) is NOT in
+      # this list and is NOT denied — a receiver-less call has no receiver
+      # for {#refuse_credential_file_read!} to match either. `File.open` /
+      # `IO.open` / `Pathname.new(...).open` are caught only when the
+      # argument looks like a credential path, via CREDENTIAL_FILE_READERS
+      # below. `URI.open` is denied, but via `URI` being a denied receiver
+      # in DENIED_CONSTANTS ({#refuse_denied_constant_receiver!}), not via an
+      # `open` entry here. Threading escapes from SafeContext's rollback
+      # (`Thread.new`, `Fiber.new`, `Process.fork`, ...) are denied the same
+      # way, via their receiver constants.
       DENIED_REFLECTION = %w[
         eval instance_eval class_eval module_eval binding
         instance_exec class_exec module_exec

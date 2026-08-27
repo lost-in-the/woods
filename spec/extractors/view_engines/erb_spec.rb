@@ -68,6 +68,20 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
       )
     end
 
+    it 'extracts render :partial => "path" (hash-rocket) form' do
+      source = "<%= render :partial => 'shared/header' %>"
+      expect(engine.scan_partials(source)).to eq(['shared/header'])
+    end
+
+    it 'never records the option key itself (partial/template/layout) as a partial name' do
+      source = <<~ERB
+        <%= render :partial => 'shared/header' %>
+        <%= render :template => 'shared/full_page' %>
+        <%= render :layout => 'application' %>
+      ERB
+      expect(engine.scan_partials(source)).not_to include('partial', 'template', 'layout')
+    end
+
     it 'returns an empty array for source with no render calls' do
       expect(engine.scan_partials('<h1>No renders</h1>')).to eq([])
     end

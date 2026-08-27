@@ -18,6 +18,7 @@ TRUSTED_CI_WORKFLOW_PATH = '.github/workflows/ci.yml'
 TRUSTED_CI_WORKFLOW_NAME = 'CI'
 REQUIRED_CI_JOBS = {
   'test' => 'Unit specs (Ruby ',
+  'rails-matrix' => 'Booted extraction (Ruby ',
   'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache)',
   'http-transport' => 'MCP transports (official clients)',
   'coverage' => 'coverage',

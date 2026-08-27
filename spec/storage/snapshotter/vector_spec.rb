@@ -108,6 +108,30 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       end
     end
 
+    context 'when store includes the real Interface but only implements #each_id (B-108)' do
+      # Mirrors what a durable adapter (Pgvector, Qdrant) actually looks
+      # like: it includes VectorStore::Interface for the shared contract,
+      # implements the reconciliation seam (#each_id), and inherits
+      # #each_entry from the Interface's NotImplementedError stub. A
+      # respond_to?(:each_entry) check answers true here even though the
+      # store cannot be dumped — this is the regression #validate_store!
+      # must reject with the typed error, not a bare NotImplementedError.
+      let(:durable_adapter) do
+        Class.new do
+          include Woods::Storage::VectorStore::Interface
+
+          def each_id
+            [].each
+          end
+        end.new
+      end
+
+      it 'raises InapplicableBackend rather than falling through to NotImplementedError' do
+        expect { described_class.dump(durable_adapter, artifact, dump_dir) }
+          .to raise_error(Woods::Storage::InapplicableBackend)
+      end
+    end
+
     context 'when dump_dir is outside artifact.dumps_root' do
       let(:store) { Woods::Storage::VectorStore::InMemory.new }
       let(:outside_dir) { Dir.mktmpdir }
@@ -193,6 +217,17 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       empty = Woods::Storage::VectorStore::InMemory.new
       loaded = dump_and_load(empty)
       expect(loaded.count).to eq(0)
+    end
+
+    it 'does not raise DimensionMismatch for an empty dump against a configured provider dimension' do
+      empty = Woods::Storage::VectorStore::InMemory.new
+      dump_dir = artifact.new_dump_dir
+      artifact.promote(dump_dir)
+      described_class.dump(empty, artifact, dump_dir)
+
+      config = double('rc', dimension: 8)
+      expect { described_class.load_or_empty(artifact, resolved_config: config) }
+        .not_to raise_error
     end
   end
 

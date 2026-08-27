@@ -221,6 +221,27 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       expect(result.context).to include('PRIMARY')
       expect(result.context).to include('EXPANDED')
     end
+
+    # Behavior change: the supporting section only ever holds
+    # :graph_expansion candidates, so a query with none reserves a
+    # supporting budget it can never spend. That reservation now rolls
+    # into primary instead of going unused.
+    it 'reclaims an unused supporting budget into primary when no graph_expansion candidates exist' do
+      sized_assembler = described_class.new(metadata_store: metadata_store, budget: 1000)
+      # ~715 estimated tokens: over the un-reclaimed 65% primary share
+      # (650) but within the reclaimed 100% share (1000).
+      allow(metadata_store).to receive(:find).with('Big').and_return(
+        unit_data(identifier: 'Big', source_code: 'x' * 2800)
+      )
+
+      result = sized_assembler.assemble(
+        candidates: [candidate(identifier: 'Big', score: 0.9, source: :vector)],
+        classification: classification
+      )
+
+      expect(result.sections).to eq(%i[primary])
+      expect(result.context).not_to include('... [truncated]')
+    end
   end
 
   # ── Framework context ──────────────────────────────────────────────
@@ -307,6 +328,9 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       end
 
       it 'moves a graph-expansion framework candidate out of supporting into framework' do
+        # metadata: {} matches what SearchExecutor#execute_graph actually
+        # produces for a graph-expansion candidate — the type comes from
+        # the unit cache (via `find`), not the candidate's inline metadata.
         allow(metadata_store).to receive(:find).with('Expanded').and_return(
           unit_data(identifier: 'Expanded', source_code: 'EXPANDED_TEXT')
         )
@@ -317,10 +341,8 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
 
         result = assembler.assemble(
           candidates: [
-            candidate(identifier: 'Expanded', score: 0.6, source: :graph_expansion,
-                      metadata: { type: 'model' }),
-            candidate(identifier: 'ActionController::Base', score: 0.5, source: :graph_expansion,
-                      metadata: { type: 'rails_source' })
+            candidate(identifier: 'Expanded', score: 0.6, source: :graph_expansion, metadata: {}),
+            candidate(identifier: 'ActionController::Base', score: 0.5, source: :graph_expansion, metadata: {})
           ],
           classification: classification(framework_context: true)
         )
@@ -468,7 +490,7 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
   # ── Deduplication ──────────────────────────────────────────────────
 
   describe 'deduplication' do
-    it 'includes source attribution for each section a candidate appears in' do
+    it 'collapses duplicate candidates to the highest-scoring source, placing it in one section only' do
       allow(metadata_store).to receive(:find).with('User').and_return(
         unit_data(identifier: 'User')
       )
@@ -481,9 +503,12 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
         classification: classification
       )
 
-      # User appears in both primary and supporting sections
-      identifiers = result.sources.map { |s| s[:identifier] }
-      expect(identifiers).to include('User')
+      # collapse_chunk_candidates keeps only the higher-scoring (:vector)
+      # duplicate before section partitioning, so this unit can land in
+      # exactly one section — never both primary and supporting.
+      expect(result.sections).to eq(%i[primary])
+      expect(result.sources.size).to eq(1)
+      expect(result.sources.first[:identifier]).to eq('User')
     end
   end
 
@@ -528,8 +553,19 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       expect(described_class::DEFAULT_BUDGET).to eq(8000)
     end
 
-    it 'has budget allocation summing to 1.0' do
-      expect(described_class::BUDGET_ALLOCATION.values.sum).to be_within(0.001).of(1.0)
+    it 'reserves structural at 10% of the TOTAL budget' do
+      expect(described_class::BUDGET_ALLOCATION[:structural]).to eq(0.10)
+    end
+
+    # primary/supporting/framework fractions apply to what's left AFTER
+    # structural is carved out (see compute_section_budgets), so they sum
+    # to 1.0 on their own — not combined with the structural fraction.
+    it 'has framework-active allocation summing to 1.0 of the remaining budget' do
+      expect(described_class::FRAMEWORK_ACTIVE_ALLOCATION.values.sum).to be_within(0.001).of(1.0)
+    end
+
+    it 'has framework-inactive allocation summing to 1.0 of the remaining budget' do
+      expect(described_class::FRAMEWORK_INACTIVE_ALLOCATION.values.sum).to be_within(0.001).of(1.0)
     end
 
     it 'has minimum useful tokens threshold' do

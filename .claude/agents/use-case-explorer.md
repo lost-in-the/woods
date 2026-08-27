@@ -36,8 +36,9 @@ Analyze a host Rails app's structure against the current extractors to find unco
 Given what Woods already extracts, brainstorm what AI-assisted workflows it could power beyond the ones already designed.
 
 **Process:**
-1. Read `docs/design/AGENTIC_STRATEGY.md` for currently planned use cases.
-2. Read `docs/design/PROPOSAL.md` for the project vision.
+1. Read `docs/AGENT_GUIDE.md` for currently supported agent workflows.
+2. Read `docs/WHY_WOODS.md` for the project vision. (The original build-phase proposal and
+   agentic-strategy ADRs were removed for 2.0 — see `git log --follow -- docs/design/`.)
 3. Identify uses not covered: code review automation, onboarding guides, migration planning, dead code detection, API documentation generation, test gap analysis, etc.
 
 **Output per use case:**

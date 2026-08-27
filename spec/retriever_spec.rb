@@ -412,6 +412,33 @@ RSpec.describe Woods::Retriever do
       )
     end
 
+    it 'reports :outside_top_k for a requested type the fallback did not surface, even though fallback ran' do
+      # Both types are absent from the global top-K, so fallback runs with
+      # BOTH in type_filter. The stubbed fallback only returns a mailer
+      # candidate: job's :source must reflect that miss, not the mere fact
+      # that fallback ran.
+      allow(metadata_store).to receive(:find_by_type).with('job').and_return(Array.new(5))
+      mailer_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'UserMailer', score: 0.4, source: :vector,
+        metadata: { type: 'mailer' }
+      )
+      fallback_result = instance_double(
+        Woods::Retrieval::SearchExecutor::ExecutionResult,
+        candidates: [mailer_candidate], strategy: :vector, query: 'how does auth work?'
+      )
+      allow(executor_double).to receive(:execute).and_return(fallback_result)
+      allow(ranker_double).to receive(:rank).and_return(ranked_candidates, [mailer_candidate])
+
+      result = retriever.retrieve('how does auth work?', types: %w[mailer job])
+
+      expect(result.type_rank_context['mailer'][:source]).to eq(:within_type_fallback)
+      expect(result.type_rank_context['job']).to include(
+        source: :outside_top_k,
+        top_of_type_global_rank: nil,
+        total_of_type: 5
+      )
+    end
+
     it 'falls back to rank-within-type when the global top-K has no candidate of the requested type' do
       # mailer has zero candidates in the global ranked list. The executor
       # should be called a second time with type_filter so we return a

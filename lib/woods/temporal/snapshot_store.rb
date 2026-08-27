@@ -70,8 +70,10 @@ module Woods
       def schema_error_message(detail)
         'SnapshotStore requires the `woods_snapshots` and ' \
           '`woods_snapshot_units` tables (migrations 004 + 005 under ' \
-          '`lib/woods/db/migrations/`). Run `rake woods:migrate` on the ' \
-          "metadata DB and retry. Underlying error: #{detail}"
+          '`lib/woods/db/migrations/`). These run automatically on woods-mcp ' \
+          'boot (Bootstrapper.build_snapshot_store auto-migrates), or run them ' \
+          'directly with `Woods::Db::Migrator.new(connection: db).migrate!`. ' \
+          "Underlying error: #{detail}"
       end
 
       public
@@ -99,19 +101,48 @@ module Woods
         return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
         captured = nil
-        @db.transaction(:immediate) do
-          previous = find_latest
-          upsert_snapshot(manifest, git_sha, unit_hashes.size)
+        with_lock_retry do
+          @db.transaction(:immediate) do
+            previous = find_latest
+            upsert_snapshot(manifest, git_sha, unit_hashes.size)
 
-          snapshot_id = fetch_snapshot_id(git_sha)
-          @db.execute('DELETE FROM woods_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
-          prune_orphaned_units
-          insert_unit_hashes(snapshot_id, unit_hashes)
+            snapshot_id = fetch_snapshot_id(git_sha)
+            @db.execute('DELETE FROM woods_snapshot_units WHERE snapshot_id = ?', [snapshot_id])
+            prune_orphaned_units
+            insert_unit_hashes(snapshot_id, unit_hashes)
 
-          update_diff_stats(snapshot_id, previous)
-          captured = find(git_sha)
+            update_diff_stats(snapshot_id, previous)
+            captured = find(git_sha)
+          end
         end
         captured
+      end
+
+      # Attempts for {#with_lock_retry}, including the first.
+      LOCK_ATTEMPTS = 3
+
+      # SQLite skips the busy handler when it detects a lock-order deadlock
+      # (this connection holds SHARED and asks for RESERVED while another
+      # already holds RESERVED), so `BEGIN IMMEDIATE` can raise "database is
+      # locked" at once despite busy_timeout. Two extractions capturing into
+      # one metadata database hit that on CI. A short bounded retry lets the
+      # other writer finish; anything else, or a non-SQLite connection,
+      # raises straight through.
+      def with_lock_retry
+        attempt = 0
+        begin
+          attempt += 1
+          yield
+        rescue StandardError => e
+          raise unless sqlite_busy?(e) && attempt < LOCK_ATTEMPTS
+
+          sleep(0.05 * attempt)
+          retry
+        end
+      end
+
+      def sqlite_busy?(error)
+        defined?(SQLite3::BusyException) && error.is_a?(SQLite3::BusyException)
       end
 
       # List snapshots, optionally filtered by branch.

@@ -34,6 +34,42 @@ RSpec.describe Woods::Extractors::RouteExtractor do
     end
   end
 
+  # ── B-127: routes that share a verb and path ─────────────────────────
+
+  describe 'routes differing only by constraint (B-127)' do
+    def stub_routes(routes)
+      routes_collection = double('RoutesCollection', routes: routes)
+      application = double('Application', routes: routes_collection)
+      stub_const('Rails', double('Rails', application: application, logger: logger))
+      allow(Rails).to receive(:respond_to?).with(:application).and_return(true)
+    end
+
+    it 'folds request constraints into the identifier so both routes survive' do
+      stub_routes([
+                    build_route(verb: 'GET', path: '/users', controller: 'users', action: 'index'),
+                    build_route(verb: 'GET', path: '/users', controller: 'api_users', action: 'index',
+                                constraints: { subdomain: 'api' })
+                  ])
+      ids = described_class.new.extract_all.map(&:identifier)
+      expect(ids).to eq(['GET /users', 'GET /users [subdomain=api]'])
+    end
+
+    it 'does not qualify a route by a path-segment requirement' do
+      stub_routes([build_route(verb: 'GET', path: '/users/:id', controller: 'users', action: 'show',
+                               constraints: { id: /\d+/ })])
+      expect(described_class.new.extract_all.first.identifier).to eq('GET /users/:id')
+    end
+
+    it 'numbers routes that still collide after constraints are applied' do
+      stub_routes([
+                    build_route(verb: 'GET', path: '/users', controller: 'users', action: 'index'),
+                    build_route(verb: 'GET', path: '/users', controller: 'legacy', action: 'index')
+                  ])
+      ids = described_class.new.extract_all.map(&:identifier)
+      expect(ids).to eq(['GET /users', 'GET /users #2'])
+    end
+  end
+
   # ── extract_all ──────────────────────────────────────────────────────
 
   describe '#extract_all' do

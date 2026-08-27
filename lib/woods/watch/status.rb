@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'fileutils'
 require 'time'
 require 'socket'
 
@@ -113,14 +112,6 @@ module Woods
         @host_identity ||= Socket.gethostname
       rescue StandardError
         'unknown'
-      end
-
-      # Remove the status file. Used on a clean shutdown by callers that would
-      # rather leave no record than a stale "running" one.
-      #
-      # @return [void]
-      def clear
-        FileUtils.rm_f(@path)
       end
 
       private

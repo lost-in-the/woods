@@ -36,6 +36,7 @@ RSpec.describe 'release CI workflow contract' do
     [
       { 'name' => 'Unit specs (Ruby 3.0)', 'conclusion' => 'success' },
       { 'name' => 'Unit specs (Ruby 4.0)', 'conclusion' => 'success' },
+      { 'name' => 'Booted extraction (Ruby 4.0 / Rails 8.1)', 'conclusion' => 'success' },
       { 'name' => 'Live backends (pgvector + Qdrant + Solid Cache)', 'conclusion' => 'success' },
       { 'name' => 'MCP transports (official clients)', 'conclusion' => 'success' },
       { 'name' => 'coverage', 'conclusion' => 'success' },

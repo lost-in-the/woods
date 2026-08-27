@@ -16,18 +16,19 @@ into identifiers. Concretely:
 | `Payment::aasm` | `Billing::Payment::aasm` |
 | `IssueInvoice` | `Billing::IssueInvoice` |
 | `ClassMethods` (concern unit) | correctly named after its owning concern |
+| `GET /users` (a route with a subdomain, format, or callable constraint) | `GET /users [subdomain=api]`; unconstrained routes are unchanged |
 
 Anything that cached the old shape will miss silently: saved retrieval
 queries, external notes, exported Notion pages, exported Obsidian/Unblocked
 documents, and any MCP client holding an identifier list. There is no
-compatibility shim — the fix is a clean re-index.
+compatibility shim. The fix is a clean re-index.
 
 ### The output directory layout has changed
 
 Extraction now publishes each generation's artifacts into an immutable
-directory and names it from `generation.json`, so that one atomic write
-commits the whole payload and a reader can never load a unit from one
-generation beside a manifest from another.
+directory named by `generation.json`. One atomic write commits the whole
+payload, so a reader can never load a unit from one generation beside a
+manifest from another.
 
 ```
 tmp/woods/
@@ -38,11 +39,11 @@ tmp/woods/
                              graph_analysis.json, SUMMARY.md, <type>/*.json
 ```
 
-**No re-index is required for this**, and nothing inside Woods is affected —
-the MCP servers, the exporters, the validator, the watch daemon and every rake
-task resolve the pointer. It matters only if you have **your own** tooling
-reading the index files directly. Read `generation.json`, take its `payload`
-value, and resolve it relative to the index directory:
+**No re-index is required for this.** Everything inside Woods (MCP servers,
+exporters, validator, watch daemon, rake tasks) resolves the pointer. It
+matters only if **your own** tooling reads the index files directly. Read
+`generation.json`, take its `payload` value, and resolve it relative to the
+index directory:
 
 ```ruby
 marker = JSON.parse(File.read(File.join(index_dir, 'generation.json')))
@@ -50,9 +51,9 @@ payload = File.join(index_dir, marker['payload'] || '.')
 manifest = JSON.parse(File.read(File.join(payload, 'manifest.json')))
 ```
 
-A missing `payload` key means a flat index — resolve to the index directory
-itself, which is what a pre-2.0 index and any run whose payload directory
-could not be created will give you.
+A missing `payload` key means a flat index: resolve to the index directory
+itself. A pre-2.0 index, or a run whose payload directory could not be
+created, gives you that shape.
 
 Woods retains three generations. Set `WOODS_PAYLOAD_RETENTION` to keep more
 (useful when long-running readers hold a generation open for a while) or
@@ -70,28 +71,29 @@ bundle exec rake woods:embed          # only if you embed for semantic search
 ```
 
 If you sync to Notion, Obsidian, or Unblocked, re-run that export afterward
-(`woods:notion_sync`, `woods:obsidian`, `woods:unblocked_sync`) — see
+(`woods:notion_sync`, `woods:obsidian`, `woods:unblocked_sync`). See
 [Exporter Reconciliation](#exporter-reconciliation) below for what happens to
 renamed units.
 
 ## Back Up Before Upgrading
 
 `woods:clean` only removes the extraction/index directory (`tmp/woods` by
-default, or `WOODS_OUTPUT`) — extraction output is always disposable, since a
-fresh `woods:extract` regenerates it. What is *not* disposable is a durable
-vector store, because the first embed after upgrading deletes vectors (see
-below). Back that up first if it holds anything you can't afford to lose:
+default, or `WOODS_OUTPUT`). That output is disposable: a fresh
+`woods:extract` regenerates it.
+
+A durable vector store is *not* disposable. The first embed after upgrading
+deletes vectors (see below). Back it up first if it holds anything you can't
+afford to lose:
 
 | Vector store | Applies to | Backup method |
 |---|---|---|
 | pgvector | PostgreSQL-only, in-database | `pg_dump` the table backing the connection you pass as `vector_store_options[:connection]`, or a schema-level snapshot of that database |
 | Qdrant | Required for MySQL/MariaDB/Aurora MySQL stacks; also usable on PostgreSQL | Qdrant's own collection snapshot API |
 
-The `:local` and `:shared_filesystem` presets need no separate backup step —
-their vectors live in `dumps/` under the output directory, and Woods retains
-the last `dump_retention_count` (default 3) automatically. Those dumps are
-still removed by `woods:clean`, so if you rely on one, copy the directory out
-first.
+The `:local` and `:shared_filesystem` presets need no separate backup step.
+Their vectors live in `dumps/` under the output directory, and Woods keeps the
+last `dump_retention_count` (default 3). `woods:clean` still removes those
+dumps, so copy the directory out first if you rely on one.
 
 ## Store and Dimension Migration
 
@@ -108,17 +110,18 @@ override, once you've confirmed the deletion is intentional:
 WOODS_ALLOW_PURGE=1 bundle exec rake woods:embed
 ```
 
-Treat that override as a one-way door for whatever it deletes — there is no
+Treat that override as a one-way door for whatever it deletes. There is no
 undo short of restoring the backup above.
 
-Separately, `woods:embed` now checks the embedding provider's dimension
-against what the store actually holds before embedding anything, raising
-`Woods::MCP::DimensionMismatch` with both widths instead of failing per-row
-partway through. The same check runs at MCP server boot for the `:local`/
-`:shared_filesystem` presets, comparing the WVF1 dump header against your
-resolved configuration. If you changed `embedding_model` at some point and it
-"worked", this check may now surface a latent mismatch the old code silently
-tolerated:
+Separately, `woods:embed` now compares the provider's dimension against what
+the store holds before it embeds anything. A mismatch raises
+`Woods::MCP::DimensionMismatch` with both widths, instead of failing per row
+partway through.
+
+- The same check runs at MCP server boot for the `:local` and
+  `:shared_filesystem` presets (WVF1 dump header vs resolved configuration).
+- If you changed `embedding_model` at some point and it "worked", this check
+  may now surface a latent mismatch the old code tolerated:
 
 ```ruby
 # config/initializers/woods.rb
@@ -134,81 +137,72 @@ the new width. There is no in-place dimension conversion.
 
 Notion, Obsidian, and Unblocked exports track what they last pushed and
 reconcile against current extraction output. A renamed unit is not detected
-as "the same document under a new name" — it is a delete of the old
-identifier plus an add of the new one, same as any other rename.
+as "the same document under a new name". It is a delete of the old identifier
+plus an add of the new one, same as any other rename.
 
 | Exporter | Tracks state via | Mass-deletion guard |
 |---|---|---|
-| Notion | Database properties, matched by unit identifier | none documented; runs the mapped Data Models/Columns sync each time |
+| Notion | `<output_dir>/notion_sync_manifest.json` (content hash + page id) | Not applicable. There is no delete path: a renamed or removed unit's old page stays in Notion; only its manifest entry is pruned |
 | Obsidian | `.woods-vault` sentinel + stale-note sweep over the vault | refuses beyond 30% of managed notes; `WOODS_OBSIDIAN_FORCE_PURGE` overrides |
 | Unblocked | `<output_dir>/unblocked_sync_manifest.json` | refuses beyond 30% of a manifest tracking 10+ documents; `UNBLOCKED_FORCE_PURGE` overrides |
 
-On a rename-heavy upgrade, expect to need the relevant force-purge variable
-once, for the same reason `WOODS_ALLOW_PURGE` is needed for the vector store:
-the guard is doing its job by refusing a deletion that looks like a partial
-index, and a full re-index after a rename-shape change is exactly that
-deletion, legitimately.
+On a rename-heavy upgrade, expect to need each force-purge variable once:
+
+- The guard refuses a deletion that looks like a partial index. A full
+  re-index after a rename-shape change is exactly that deletion, legitimately.
+- This is the same reason `WOODS_ALLOW_PURGE` is needed for the vector store.
+- Notion never deletes pages, so it has no guard to trip. Set
+  `WOODS_NOTION_FORCE=1` to re-check every page instead of skipping unchanged
+  content hashes.
 
 ## MCP Client Requirements
 
-Woods 2.0 depends on the `mcp` gem at `>= 1.2, < 2.0` (see `woods.gemspec`;
-`Gemfile.lock` resolves `1.2.0`) — 1.2 added the 2026-07-28 protocol revision:
-`server/discover`, stateless Streamable HTTP, and the request-envelope
-validation the Index Server relies on.
+Woods 2.0 depends on the `mcp` gem at `>= 1.2, < 2.0` (see `woods.gemspec`).
+1.2 added the 2026-07-28 protocol revision: `server/discover`, stateless
+Streamable HTTP, and the request-envelope validation the Index Server uses.
 
 `woods-mcp-start` no longer defaults `MCP_PROTOCOL_VERSION` to `2024-11-05`.
-The underlying SDK server answers `initialize` for legacy clients and serves
-`server/discover` plus per-request metadata for modern ones in the same
-process, so leaving the variable unset is the more compatible choice, not a
-regression. **Never set `MCP_PROTOCOL_VERSION`** unless a specific client
-requires the older negotiation path — it collapses the server to a single
-era. The variable still works as an escape hatch and now announces itself on
-stderr when set. No action is required for this change: no on-disk artifact
-format changed, and no re-extraction or re-embedding is implied by it alone.
+
+- The SDK server answers `initialize` for legacy clients and serves
+  `server/discover` for modern ones in the same process.
+- Leaving the variable unset is the more compatible choice, not a regression.
+- **Never set `MCP_PROTOCOL_VERSION`** unless one client needs the older
+  negotiation path. Setting it collapses the server to a single era. When
+  set, it announces itself on stderr.
+- No action is required: no on-disk format changed, and no re-extraction or
+  re-embedding follows from this alone.
 
 ## Known Limitations
 
-The `mcp` gem does not yet implement the Tasks extension's push notifications
-or `subscriptions/listen`; Woods supplies durable `tasks/*` polling locally as
-a substitute, but a client cannot be pushed a change notification when the
-index regenerates. `woods-mcp-http` running in its default stateless mode has
-no notification channel at all, by design — `IndexReader#ensure_fresh!`
-remains the correctness path for freshness on that transport, and push was
-only ever an optimization on top of it.
+- The `mcp` gem does not yet implement Tasks push notifications or
+  `subscriptions/listen`. Woods supplies durable `tasks/*` polling instead.
+- A client cannot be pushed a change notification when the index regenerates.
+- `woods-mcp-http` in its default stateless mode has no notification channel
+  at all, by design. `IndexReader#ensure_fresh!` remains the correctness path
+  for freshness; push was only ever an optimization.
 
 ## Rollback and Downgrade
 
-Downgrading is not a metadata revert. If you roll back to a pre-2.0 gem
-version after running a clean re-index, the 2.0-shaped identifiers on disk
-and in any durable vector store do not translate back — the old identifier
-shape is gone once you've re-indexed under 2.0 and is only recoverable by
-re-indexing again from the old gem version against your source tree. Keep
-that in mind before upgrading a shared or production index in place.
+Downgrading is not a metadata revert.
+
+1. After a clean re-index under 2.0, the identifiers on disk and in any
+   durable vector store have the 2.0 shape.
+2. A pre-2.0 gem cannot translate them back.
+3. The only way back is to re-index again from the old gem version against
+   your source tree.
+
+Keep that in mind before upgrading a shared or production index in place.
 
 ## Failure Recovery
 
 An interrupted `woods:extract` or `woods:incremental` leaves the index on its
-last complete generation: the generation marker is bumped only after a run
-finishes successfully, so a reader never sees a half-written extraction.
-Re-run the task; there is nothing to clean up first.
+last complete generation. The generation marker is bumped only after a run
+finishes, so a reader never sees a half-written extraction. Re-run the task;
+there is nothing to clean up first.
 
 An interrupted `woods:embed` or `woods:embed_incremental` is safe to re-run
-too. The checkpoint only advances over a unit once its vector is durably
-stored, so a checkpoint that ran ahead of what's actually on disk (a killed
-process, an interrupted dump promote) self-heals: the next run re-embeds that
-unit and reports it on stderr, rather than silently leaving it stranded.
+too. The checkpoint advances over a unit only once its vector is durably
+stored. A checkpoint that ran ahead of disk (a killed process, an interrupted
+dump promote) self-heals: the next run re-embeds that unit and reports it on
+stderr.
 
-<!--
-Sources:
-CHANGELOG.md - 2.0.0 Upgrade Notes, Added, Changed sections (identifier reshape, clean re-index remedy, durable-store reconciliation + 30% purge guard, DimensionMismatch, MCP protocol changes)
-CLAUDE.md - Gotchas: DimensionMismatch / verify_store_dimensions! / WVF1 header; checkpoint self-heal (#148); Generation bumped last and only on success; mcp gem pin and MCP_PROTOCOL_VERSION guidance
-lib/tasks/woods.rake - task names verified by grep: extract, clean, embed, embed_incremental, notion_sync, obsidian, unblocked_sync
-woods.gemspec - mcp dependency at the documented >= 1.2, < 2.0 range
-Gemfile.lock - confirms mcp (1.2.0) resolved, within the gemspec range
-docs/BACKEND_MATRIX.md - MySQL requires an external vector backend (:qdrant); PostgreSQL can use pgvector in-database
-docs/OBSIDIAN_INTEGRATION.md - .woods-vault sentinel, stale-note sweep, 30% guard, WOODS_OBSIDIAN_FORCE_PURGE
-docs/UNBLOCKED_INTEGRATION.md - sync manifest, 30% guard on 10+ document manifests, UNBLOCKED_FORCE_PURGE
-lib/woods.rb - output_dir default (tmp/woods), dump_retention_count default (3), embedding_model config accessor
-lib/woods/embedding/indexer.rb - WOODS_ALLOW_PURGE env var and purge-guard messages
-exe/woods-mcp-start - MCP_PROTOCOL_VERSION handling and stderr announcement
--->

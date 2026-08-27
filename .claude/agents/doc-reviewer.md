@@ -24,11 +24,11 @@ You review whether documentation is in sync with the current implementation.
 |---|---|
 | Extractor behavior | `CLAUDE.md` Architecture/Gotchas, `.claude/rules/extractors.md` |
 | New extractor added | `CLAUDE.md` Architecture tree, `.claude/rules/extractors.md` |
-| MCP server tools | `docs/MCP_SERVERS.md`, `docs/design/AGENTIC_STRATEGY.md` |
+| MCP server tools | `docs/MCP_SERVERS.md`, `docs/AGENT_GUIDE.md` |
 | Configuration options | `docs/CONFIGURATION_REFERENCE.md`, `CLAUDE.md` Commands |
-| Dependency graph changes | `docs/design/RETRIEVAL_ARCHITECTURE.md` graph traversal section |
-| Output format changes | `docs/design/CONTEXT_AND_CHUNKING.md` |
-| Backlog item completed | `docs/backlog.json` — flip `status` to `resolved` (see `.claude/skills/backlog-workflow/SKILL.md`). `docs/design/OPTIMIZATION_BACKLOG.md` is an **archived design document from the gem's initial build phase** — do not update it when closing backlog items. The live tracker is `docs/backlog.json`. |
+| Dependency graph changes | `docs/RETRIEVAL_GUIDE.md` graph traversal / ranking sections |
+| Output format changes | `docs/RETRIEVAL_GUIDE.md` context assembly / token budget sections |
+| Backlog item completed | `docs/backlog.json` — flip `status` to `resolved` (see `.claude/skills/backlog-workflow/SKILL.md`). The gem's build-phase design docs were removed for 2.0 (see `git log --follow -- docs/design/`) — `docs/backlog.json` is the only live tracker. |
 
 ## What You Don't Do
 

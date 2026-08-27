@@ -9,6 +9,7 @@ require_relative 'provider_probe'
 require_relative '../index_artifact'
 require_relative '../builder'
 require_relative '../resolved_config'
+require_relative '../generation'
 require_relative '../storage/snapshotter'
 require_relative '../storage/inapplicable_backend'
 
@@ -33,7 +34,7 @@ module Woods
           exit 1
         end
 
-        unless File.exist?(File.join(dir, 'manifest.json'))
+        unless manifest_present?(dir)
           warn "Error: No manifest.json found in: #{dir}"
           warn 'Run `bundle exec rake woods:extract` in your Rails app first.'
           exit 1
@@ -41,6 +42,26 @@ module Woods
 
         dir
       end
+
+      # Is there a manifest this index would resolve one from?
+      #
+      # A flat index (pre-payload, or never bumped) answers with
+      # +manifest.json+ directly under +dir+. A payload-born index (#164
+      # payloads) has none there — every artifact lives under the directory
+      # +generation.json+'s +payload+ pointer names — so the pointer is
+      # followed before concluding there is no index at all. Mirrors
+      # {Woods::MCP::IndexReader#manifest_present?} exactly; keep the two in
+      # agreement.
+      #
+      # @param dir [String] candidate index directory
+      # @return [Boolean]
+      def self.manifest_present?(dir)
+        return true if File.exist?(File.join(dir, 'manifest.json'))
+
+        generation = Woods::Generation.new(output_dir: dir)
+        generation.payload_dir(generation.current).join('manifest.json').file?
+      end
+      private_class_method :manifest_present?
 
       # Build a snapshot store for temporal tracking.
       #
@@ -133,14 +154,6 @@ module Woods
         warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})"
 
         [retriever, state]
-      end
-
-      # Backwards-compatible wrapper — existing callers (exe/woods-mcp and
-      # exe/woods-mcp-http) just want the retriever. They rescue typed
-      # BootstrapError at their own top level; we do not catch here.
-      def self.build_retriever_compat(index_dir: nil)
-        retriever, _state = build_retriever(index_dir: index_dir)
-        retriever
       end
 
       # Refresh a live retriever's in-memory stores from the latest dumps on
@@ -367,6 +380,14 @@ module Woods
       # Builder falls back to a fresh empty store — the pre-fix behaviour for
       # hosts that haven't run an extraction yet.
       #
+      # Resolved through {Woods::Generation#payload_dir}, same as every other
+      # payload artifact reader: a payload-born index (#164 payloads) keeps
+      # +dependency_graph.json+ only under +payloads/gen-N/+, never at the
+      # index root, so reading the root path unconditionally hydrated an
+      # empty graph and silently no-op'd PageRank / graph expansion. Resolves
+      # to the root itself for a flat (pre-payload) index, so this is a no-op
+      # change for every index that predates payloads.
+      #
       # @param config [Woods::Configuration]
       # @param artifact [Woods::IndexArtifact, nil]
       # @return [Woods::Storage::GraphStore::Memory, nil]
@@ -375,7 +396,8 @@ module Woods
       def self.hydrated_graph_store(config, artifact)
         return nil unless artifact
 
-        graph_json = artifact.output_dir.join('dependency_graph.json')
+        generation = Woods::Generation.new(output_dir: artifact.output_dir)
+        graph_json = generation.payload_dir(generation.current).join('dependency_graph.json')
         return nil unless graph_json.exist?
 
         require_relative '../dependency_graph'
@@ -412,9 +434,11 @@ module Woods
       # Back-fill the vector store's per-entry metadata hashes from the
       # metadata store. Only makes sense when both are in-memory — durable
       # backends return nil from the hydration helpers and never reach
-      # this path.
+      # this path on boot. {.populate_reloaded_vector_metadata} reaches a
+      # LIVE store directly, though, so the guard below still has to hold
+      # even when +vector_store+ turns out to be a durable adapter.
       def self.populate_vector_metadata(vector_store, metadata_store)
-        return unless vector_store.respond_to?(:each_entry) && vector_store.respond_to?(:store)
+        return unless implements_own?(vector_store, :each_entry) && vector_store.respond_to?(:store)
         return unless metadata_store.respond_to?(:find)
 
         # Collect (id, vector) pairs in one pass; overwriting via #store
@@ -430,6 +454,31 @@ module Woods
         end
       end
       private_class_method :populate_vector_metadata
+
+      # Does +object+ define +method_name+ itself, rather than merely
+      # inheriting {Storage::VectorStore::Interface}'s default
+      # {NotImplementedError} stub?
+      #
+      # Never test for this with a bare +respond_to?+ — the interface module
+      # *defines* every method as a raising stub, so every adapter (including
+      # pgvector/Qdrant, which implement +each_id+ but not +each_entry+)
+      # answers +true+. That was B-108: {.populate_reloaded_vector_metadata}'s
+      # guard used to be +respond_to?(:each_entry)+, which crashed the +reload+
+      # tool the moment a durable backend was configured — +NotImplementedError+
+      # is a +ScriptError+, which escapes every +rescue StandardError+ between
+      # here and the stdio transport loop and killed the server. Mirrors
+      # {Woods::Embedding::Indexer#implements_own?}.
+      #
+      # @param object [Object]
+      # @param method_name [Symbol]
+      # @return [Boolean]
+      def self.implements_own?(object, method_name)
+        return false unless object.respond_to?(method_name)
+        return true unless defined?(Storage::VectorStore::Interface)
+
+        object.method(method_name).owner != Storage::VectorStore::Interface
+      end
+      private_class_method :implements_own?
 
       # Reduce a metadata-store record to the SYMBOL-keyed subset the live
       # embed path writes per vector — see

@@ -7,10 +7,7 @@ require 'woods/storage/vector_store'
 require 'woods/storage/metadata_store'
 require 'woods/storage/graph_store'
 require 'woods/retriever'
-require 'woods/formatting/claude_adapter'
-require 'woods/formatting/gpt_adapter'
 require 'woods/formatting/human_adapter'
-require 'woods/formatting/generic_adapter'
 
 RSpec.describe 'Retrieval + Formatting Integration', :integration do
   # ── Fake Embedding Provider ──────────────────────────────────────
@@ -99,92 +96,6 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
     )
   end
 
-  # ── ClaudeAdapter ────────────────────────────────────────────────
-
-  describe Woods::Formatting::ClaudeAdapter do
-    let(:adapter) { described_class.new }
-
-    it 'produces XML-formatted output' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('<codebase-context>')
-      expect(output).to include('</codebase-context>')
-    end
-
-    it 'includes a meta tag with token and budget info' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('<meta')
-      expect(output).to match(/tokens="#{assembled_context.tokens_used}"/)
-      expect(output).to match(/budget="#{assembled_context.budget}"/)
-    end
-
-    it 'includes a content section' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('<content>')
-      expect(output).to include('</content>')
-    end
-
-    it 'includes a sources section' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('<sources>')
-      expect(output).to include('</sources>')
-    end
-
-    it 'includes source elements for each source' do
-      output = adapter.format(assembled_context)
-
-      assembled_context.sources.each do |source|
-        expect(output).to include("identifier=\"#{source[:identifier]}\"")
-      end
-    end
-
-    it 'escapes XML special characters in content' do
-      # The context might contain characters that need escaping
-      output = adapter.format(assembled_context)
-
-      # The content section should not contain unescaped < or > from Ruby code
-      content_section = output[%r{<content>(.*?)</content>}m, 1]
-      expect(content_section).not_to match(%r{<(?!/content>)}) if content_section
-    end
-  end
-
-  # ── GptAdapter ───────────────────────────────────────────────────
-
-  describe Woods::Formatting::GptAdapter do
-    let(:adapter) { described_class.new }
-
-    it 'produces Markdown-formatted output' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('## Codebase Context')
-    end
-
-    it 'includes token usage in bold' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include("**Tokens:** #{assembled_context.tokens_used}/#{assembled_context.budget}")
-    end
-
-    it 'wraps content in a Ruby code fence' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('```ruby')
-      expect(output).to include('```')
-    end
-
-    it 'includes a Sources section with bullet items' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('### Sources')
-      assembled_context.sources.each do |source|
-        expect(output).to include("**#{source[:identifier]}**")
-      end
-    end
-  end
-
   # ── HumanAdapter ─────────────────────────────────────────────────
 
   describe Woods::Formatting::HumanAdapter do
@@ -216,67 +127,6 @@ RSpec.describe 'Retrieval + Formatting Integration', :integration do
 
       assembled_context.sources.each do |source|
         expect(output).to include(source[:identifier].to_s)
-      end
-    end
-  end
-
-  # ── GenericAdapter ───────────────────────────────────────────────
-
-  describe Woods::Formatting::GenericAdapter do
-    let(:adapter) { described_class.new }
-
-    it 'produces plain text output' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('=== CODEBASE CONTEXT ===')
-    end
-
-    it 'includes token usage line' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include("Tokens: #{assembled_context.tokens_used} / #{assembled_context.budget}")
-    end
-
-    it 'includes content between dividers' do
-      output = adapter.format(assembled_context)
-
-      expect(output).to include('---')
-    end
-
-    it 'includes sources in bracket notation' do
-      output = adapter.format(assembled_context)
-
-      assembled_context.sources.each do |source|
-        expect(output).to include("[Source: #{source[:identifier]}")
-      end
-    end
-  end
-
-  # ── Cross-adapter consistency ────────────────────────────────────
-
-  describe 'cross-adapter consistency' do
-    let(:adapters) do
-      [
-        Woods::Formatting::ClaudeAdapter.new,
-        Woods::Formatting::GptAdapter.new,
-        Woods::Formatting::HumanAdapter.new,
-        Woods::Formatting::GenericAdapter.new
-      ]
-    end
-
-    it 'all adapters produce non-empty output' do
-      adapters.each do |adapter|
-        output = adapter.format(assembled_context)
-        expect(output).not_to be_empty, "#{adapter.class} produced empty output"
-      end
-    end
-
-    it 'all adapters include content from the assembled context' do
-      adapters.each do |adapter|
-        output = adapter.format(assembled_context)
-        # Each adapter should include at least some content from the context
-        expect(output.length).to be > assembled_context.context.length / 2,
-                                 "#{adapter.class} output is suspiciously short"
       end
     end
   end

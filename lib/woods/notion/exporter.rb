@@ -2,7 +2,10 @@
 
 require 'woods'
 require_relative 'client'
-require_relative 'mapper'
+require_relative 'mappers/shared'
+require_relative 'mappers/model_mapper'
+require_relative 'mappers/column_mapper'
+require_relative 'mappers/migration_mapper'
 require_relative 'rate_limiter'
 require_relative 'sync_manifest'
 

@@ -12,14 +12,18 @@ end
 
 ## Common Configuration Patterns
 
-### CI-Only Extraction (Subset of Extractors)
+### CI-Only Extraction (Skip Framework Sources)
+
+`config.extractors` cannot select a subset of extractors, it's accepted for
+forward compatibility only (see [Extractors](#extractors) below). To speed up
+CI, skip the one extractor that's actually optional instead:
 
 ```ruby
 Woods.configure do |config|
   config.output_dir = Rails.root.join('tmp/woods')
 
-  # In CI, only extract models and controllers for faster builds
-  config.extractors = %i[models controllers services] if ENV['CI']
+  # In CI, skip Rails/gem framework source extraction for faster builds
+  config.include_framework_sources = false if ENV['CI']
 end
 ```
 
@@ -28,7 +32,7 @@ end
 ```ruby
 Woods.configure do |config|
   # Inside Docker, /app is the Rails root
-  config.output_dir = ENV.fetch('WOODS_OUTPUT_DIR', Rails.root.join('tmp/woods'))
+  config.output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
 end
 ```
 
@@ -59,27 +63,27 @@ end
 Columns:
 
 - **User-settable**: a direct `Woods.configure { |c| c.<option> = ... }` writes the value verbatim.
-- **Preset-derived**: set by `Builder.preset_config(:local | :postgresql | :production)` as a group. You can override any preset value afterwards in the `configure` block — later writes win.
+- **Preset-derived**: set by `Builder.preset_config(:local | :shared_filesystem | :postgresql | :production)` as a group. You can override any preset value afterwards in the `configure` block, later writes win.
 - **Computed**: derived from other options at read time (or at `build_*` time by `Woods::Builder`). Writing directly has no effect; change the inputs instead.
 
 | Option | Type | Default | Role | Description |
 |--------|------|---------|------|-------------|
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
-| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | user-settable | List of enabled extractors (see [Extractors](#extractors) below) |
+| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
 | `max_context_tokens` | Integer | `8000` | user-settable | Maximum tokens for retrieval context windows |
 | `similarity_threshold` | Float | `0.7` | user-settable | Minimum similarity score (0.0-1.0) for retrieval results |
 | `context_format` | Symbol | `:markdown` | user-settable | Output format for retrieval: `:claude`, `:markdown`, `:plain`, `:json` |
 | `include_framework_sources` | Boolean | `true` | user-settable | Extract Rails and gem source code |
 | `concurrent_extraction` | Boolean | `false` | user-settable | Enable parallel extraction (experimental) |
-| `vector_store` / `metadata_store` / `graph_store` / `embedding_provider` | Symbol | — | preset-derived | Adapter types. Set by presets; override individually to mix stacks. |
+| `vector_store` / `metadata_store` / `graph_store` / `embedding_provider` | Symbol | n/a | preset-derived | Adapter types. Set by presets; override individually to mix stacks. |
 | chars-per-token ratio (used by ContextAssembler, TextPreparer, Builder, cost_model) | Float | `4.0` (OpenAI) / `1.5` (Ollama) | computed | Derived from the active embedding provider via `Woods::TokenUtils.chars_per_token_for(...)`. Not directly user-settable; change `embedding_provider` to change the ratio. |
 
 ## Embedding Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `embedding_provider` | Symbol or Object | — | Embedding backend: `:openai`, `:ollama`, `:fake` (deterministic, offline — see below), or an already-constructed provider object responding to `#embed`/`#embed_batch` |
+| `embedding_provider` | Symbol or Object | n/a | Embedding backend: `:openai`, `:ollama`, `:fake` (deterministic, offline, see below), or an already-constructed provider object responding to `#embed`/`#embed_batch` |
 | `embedding_model` | String | `'text-embedding-3-small'` | Model name for the embedding provider |
 | `embedding_options` | Hash | `nil` | Provider-specific options (see below) |
 
@@ -101,11 +105,11 @@ config.embedding_provider = :ollama
 config.embedding_options = {
   model: 'nomic-embed-text',
   host: 'http://localhost:11434'
-  # num_ctx: 2048  # Optional override — see below
+  # num_ctx: 2048  # Optional override, see below
 }
 ```
 
-The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `snowflake-arctic-embed2` → 8192, `mxbai-embed-large` → 512, `all-minilm` → 256). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
+The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `mxbai-embed-large` → 512, `snowflake-arctic-embed` → 512, `snowflake-arctic-embed2` → 8192, `all-minilm` → 512). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
 
 **Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
 
@@ -125,11 +129,11 @@ config.embedding_provider = :fake
 config.embedding_options = { dims: 128 }  # optional; default 128
 ```
 
-`:fake` wires `Woods::Embedding::Provider::Fake` — a deterministic bag-of-words hashing provider that needs no network endpoint, so `rake woods:embed` and `rake woods:retrieve` run in CI, sandboxes, and offline hosts. Vectors are L2-normalized, so cosine similarity stays mechanically meaningful (texts sharing vocabulary rank closer), but they are **not semantically meaningful embeddings** — use `:fake` for pipeline smoke tests, never for production retrieval quality. It pairs with any configured store stack: `:in_memory` everywhere for a self-contained smoke run, or the same pgvector/Qdrant + SQLite stores a real provider would use (MySQL-backed hosts pair with Qdrant exactly as in the [backend matrix](BACKEND_MATRIX.md); the provider itself never touches the database).
+`:fake` wires `Woods::Embedding::Provider::Fake`, a deterministic bag-of-words hashing provider that needs no network endpoint, so `rake woods:embed` and `rake woods:retrieve` run in CI, sandboxes, and offline hosts. Vectors are L2-normalized, so cosine similarity stays mechanically meaningful (texts sharing vocabulary rank closer), but they are **not semantically meaningful embeddings**: use `:fake` for pipeline smoke tests, never for production retrieval quality. It pairs with any configured store stack: `:in_memory` everywhere for a self-contained smoke run, or the same pgvector/Qdrant + SQLite stores a real provider would use (MySQL-backed hosts pair with Qdrant exactly as in the [backend matrix](BACKEND_MATRIX.md); the provider itself never touches the database).
 
 ### Injecting a Provider Object
 
-Anything responding to `#embed` and `#embed_batch` can be assigned directly — it is used as-is and wrapped in the same retry/circuit-breaker resilience stack as the built-in adapters:
+Anything responding to `#embed` and `#embed_batch` can be assigned directly, it is used as-is and wrapped in the same retry/circuit-breaker resilience stack as the built-in adapters:
 
 ```ruby
 config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
@@ -139,11 +143,11 @@ config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `vector_store` | Symbol | — | Vector backend: `:in_memory`, `:pgvector`, `:qdrant` |
+| `vector_store` | Symbol | n/a | Vector backend: `:in_memory`, `:pgvector`, `:qdrant` |
 | `vector_store_options` | Hash | `nil` | Backend-specific connection options |
-| `metadata_store` | Symbol | — | Metadata backend: `:in_memory`, `:sqlite` |
+| `metadata_store` | Symbol | n/a | Metadata backend: `:in_memory`, `:sqlite` |
 | `metadata_store_options` | Hash | `nil` | Backend-specific options |
-| `graph_store` | Symbol | — | Graph backend: `:in_memory` |
+| `graph_store` | Symbol | n/a | Graph backend: `:in_memory` |
 
 ### pgvector (PostgreSQL)
 
@@ -183,7 +187,7 @@ config.metadata_store_options = {
 ```
 
 Requires the `sqlite3` gem in your host bundle. Rails apps backed by
-MySQL or PostgreSQL won't have it by default — selecting `:sqlite`
+MySQL or PostgreSQL won't have it by default, selecting `:sqlite`
 without it raises `Woods::ConfigurationError` with install
 instructions. For MySQL/Postgres-only hosts, use `:in_memory` (below)
 unless cross-process metadata persistence matters.
@@ -194,15 +198,14 @@ unless cross-process metadata persistence matters.
 config.metadata_store = :in_memory
 ```
 
-Pure-Ruby hash-backed store. No external dependencies, no persistence
-— vectors and metadata both live in the building process and die with
+Pure-Ruby hash-backed store. No external dependencies, no persistence, vectors and metadata both live in the building process and die with
 it. The `_index.json` manifest under `output_dir` is the durable
 metadata for the index MCP server, so this is a reasonable default
 for hosts that don't bundle `sqlite3`.
 
 ## Deployment Shapes
 
-Woods supports three deployment shapes — pick the preset that matches yours.
+Woods supports three deployment shapes, pick the preset that matches yours.
 
 | Shape | When | Preset |
 |---|---|---|
@@ -217,12 +220,12 @@ Woods.configure_with_preset(:shared_filesystem) do |config|
   config.output_dir = Rails.root.join('tmp/woods')
   config.embedding_options = {
     model: 'nomic-embed-text',
-    host:  ENV.fetch('WOODS_OLLAMA_URL', 'http://localhost:11434')
+    host:  ENV.fetch('OLLAMA_HOST', 'http://localhost:11434') # your own variable; Woods reads none
   }
 end
 ```
 
-The embed run writes `woods.json` + `dumps/<ISO8601>/vectors.bin` + `metadata.msgpack` under `output_dir`. The MCP server reads them at boot — no sqlite3 gem required, no pgvector/Qdrant service needed. Dump retention defaults to the last 3 (configurable via `config.dump_retention_count`).
+The embed run writes `woods.json` + `dumps/<ISO8601>/vectors.bin` + `metadata.msgpack` under `output_dir`. The MCP server reads them at boot, no sqlite3 gem required, no pgvector/Qdrant service needed. Dump retention defaults to the last 3 (configurable via `config.dump_retention_count`).
 
 Requirements:
 - `output_dir` must be set and readable by both the embed process and the MCP server.
@@ -233,20 +236,20 @@ Requirements:
 For quick setup, use named presets that configure storage + embedding together:
 
 ```ruby
-# Local development — no external services needed (requires sqlite3 gem)
+# Local development: no external services needed (requires sqlite3 gem)
 Woods.configure_with_preset(:local)
 # → in_memory vectors, SQLite metadata, in_memory graph, Ollama embeddings
 
-# Shared filesystem — rake embed → separate MCP server reads the dump.
+# Shared filesystem: rake embed → separate MCP server reads the dump.
 # No sqlite3 gem needed; works on MySQL/Postgres-only hosts.
 Woods.configure_with_preset(:shared_filesystem)
 # → in_memory everything + Snapshotter-based persistence via output_dir
 
-# PostgreSQL — requires pgvector extension and OpenAI API key
+# PostgreSQL: requires pgvector extension and OpenAI API key
 Woods.configure_with_preset(:postgresql)
 # → pgvector vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 
-# Production — requires Qdrant server and OpenAI API key
+# Production: requires Qdrant server and OpenAI API key
 Woods.configure_with_preset(:production)
 # → Qdrant vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 ```
@@ -278,6 +281,8 @@ end
 | `session_exclude_paths` | Array&lt;String&gt; | `[]` | Path patterns to exclude from tracing |
 
 ```ruby
+require 'woods/session_tracer/file_store' # the stores are not autoloaded
+
 config.session_tracer_enabled = true
 config.session_store = Woods::SessionTracer::FileStore.new(
   Rails.root.join('tmp/session_traces')
@@ -287,34 +292,46 @@ config.session_exclude_paths = ['/health', '/metrics', '/assets']
 
 ## Gem Indexing
 
-Register additional gems to extract source from:
-
-```ruby
-config.add_gem 'devise', paths: ['lib/devise/models'], priority: :high
-config.add_gem 'pundit', paths: ['lib/pundit'], priority: :medium
-config.add_gem 'sidekiq', paths: ['lib/sidekiq/worker', 'lib/sidekiq/job'], priority: :high
-```
+`config.add_gem` is accepted for forward compatibility but **not implemented**: nothing in the
+extraction path reads the registered gem configs, and calling it emits a warning.
+`RailsSourceExtractor` indexes a fixed set of Rails framework paths only.
 
 Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when framework source is relevant to a query.
 
 ## Extractors
 
-The `extractors` config accepts an array of symbols. Default set:
+`config.extractors` accepts an array of symbols but **extractor selection is
+not implemented**. All 34 extractors always run during a full extraction,
+regardless of what this array holds, nothing in the extraction path reads
+it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
+config). Setting `extractors` to anything other than its default value emits
+a warning:
 
 ```ruby
-config.extractors = %i[
-  models controllers services components view_components
-  jobs mailers graphql serializers managers policies validators
-  rails_source
-]
+config.extractors = %i[models controllers services]
+# => warns: "config.extractors is accepted for forward compatibility but
+#    extractor selection is not implemented; all extractors run."
 ```
 
-Additional extractors available (not in default set):
+The array exists for forward compatibility with a future selection knob.
+Leave it at its default. The full list of what always runs:
 
 | Symbol | Extractor | What it adds |
 |--------|-----------|-------------|
+| `:models` | ModelExtractor | ActiveRecord models, with concerns inlined and schema prepended |
+| `:controllers` | ControllerExtractor | Controllers with route context and filter chains |
+| `:services` | ServiceExtractor | Service/interactor/operation objects |
+| `:components` | PhlexExtractor | Phlex components |
+| `:view_components` | ViewComponentExtractor | ViewComponent classes |
+| `:jobs` | JobExtractor | ActiveJob/Sidekiq workers |
+| `:mailers` | MailerExtractor | ActionMailer classes |
+| `:graphql` | GraphQLExtractor | GraphQL types, mutations, resolvers, queries |
+| `:serializers` | SerializerExtractor | AMS/Blueprinter/Alba/Draper serializers |
+| `:managers` | ManagerExtractor | SimpleDelegator wrapper classes |
+| `:policies` | PolicyExtractor | Non-Pundit domain policy classes |
+| `:validators` | ValidatorExtractor | Custom ActiveModel validators |
 | `:concerns` | ConcernExtractor | ActiveSupport::Concern modules |
-| `:routes` | RouteExtractor | Rails routes (auto-included) |
+| `:routes` | RouteExtractor | Rails routes |
 | `:middleware` | MiddlewareExtractor | Rack middleware stack |
 | `:i18n` | I18nExtractor | Locale translation files |
 | `:pundit_policies` | PunditExtractor | Pundit authorization policies |
@@ -332,8 +349,11 @@ Additional extractors available (not in default set):
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
 | `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
+| `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
 | `:libs` | LibExtractor | Ruby files in lib/ |
+
+See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
 ## Console MCP Options
 
@@ -344,12 +364,12 @@ deployment guide including defense layers.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, the Railtie does not mount the Console MCP middleware. |
-| `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every Console HTTP request. **Required in production** — the Railtie raises `Woods::ConfigurationError` when `console_mcp_enabled` is true but no token is set. In non-production a missing token warns at boot and every Console request fails closed with `401 Unauthorized`. A configured token shorter than 32 characters raises `Woods::ConfigurationError` at boot in every environment. Generate with `SecureRandom.hex(32)`. |
+| `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every Console HTTP request. **Required in production**: the Railtie raises `Woods::ConfigurationError` when `console_mcp_enabled` is true but no token is set. In non-production a missing token warns at boot and every Console request fails closed with `401 Unauthorized`. A configured token shorter than 32 characters raises `Woods::ConfigurationError` at boot in every environment. Generate with `SecureRandom.hex(32)`. |
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
 | `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
-| `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses. |
+| `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses, and which are refused as aggregate, scope, find, and order inputs. |
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
 | `console_credential_defense_enabled` | Boolean | `true` | Layer 5 toggle for the CredentialScanner. Leave on unless you have a specific reason to disable. |
 | `console_credential_rotation_warning` | Boolean | `true` | Emit a structured log warning when any Rails credentials file is modified after process start. |
@@ -359,20 +379,75 @@ deployment guide including defense layers.
 
 ## Environment Variables
 
-These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block — most exist so the MCP servers can self-configure when no explicit config is available.
+These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block, most exist so the MCP servers, rake tasks, and exporters can self-configure or override config without an initializer edit.
 
-| Variable | Read by | Default | Purpose |
-|----------|---------|---------|---------|
-| `WOODS_DIR` | `woods-mcp` bootstrapper | `Dir.pwd` | Path to the extraction output directory. |
-| `WOODS_REQUIRE_INDEX` | `woods-mcp` bootstrapper | unset | Set to `"1"` to fail closed: the Index Server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host (ran `woods:extract`, no embedding provider) boots in pattern/structural mode without it. |
-| `WOODS_ALLOW_AUTODETECT` | `woods-mcp` bootstrapper | unset | **Deprecated no-op.** Auto-detect is now the default when no `woods.json` and no provider are present; this flag is still accepted for backward compatibility but has no effect. |
-| `WOODS_SEARCH_MAX_SCAN` | `woods-mcp` `search` tool | `500` | Cap on the number of unit files loaded during a phase-2 (metadata/source_code) search. When the cap is hit, the response includes `partial: true`. Set empty or unset to use the default. |
-| `WOODS_SNAPSHOTS` | `woods-mcp` bootstrapper | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
-| `WOODS_CONSOLE_CONFIG` | `woods-console-mcp` launcher | `~/.woods/console.yml` when present | Explicit launcher YAML path. An explicit missing path fails startup. |
-| `WOODS_CONSOLE_UNSAFE_EVAL` | Console server | unset | Legacy setting. The exact value `true` requests unavailable eval capability and therefore fails server construction closed. |
-| `OPENAI_API_KEY` | `woods-mcp` bootstrapper | — | When set and no embedding provider is configured, the MCP server auto-enables OpenAI-backed semantic search with in-memory stores. |
-| `OLLAMA_BASE_URL` | `woods-mcp` bootstrapper auto-detect | `http://localhost:11434` | Base URL the bootstrapper probes (`GET /api/tags`, 500ms timeout) when no embedding provider is configured. A reachable Ollama instance auto-enables local semantic search. |
-| `OLLAMA_EMBED_MODEL` | `woods-mcp` bootstrapper auto-detect | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
+### Index Server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_DIR` | `Dir.pwd` | Path to the extraction output directory. |
+| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. |
+| `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
+| `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
+| `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
+| `WOODS_ALLOW_PURGE` | unset | Set to `"1"` to override the 30%-deletion purge guard in `woods:embed`/`woods:embed_incremental`. |
+| `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain. |
+| `WOODS_MCP_CACHE_TTL_MS` | `10000` | Cache TTL advertised in tool result `_meta`. `0` disables caching. |
+| `WOODS_NO_UPDATE_CHECK` | unset | Set to `"1"` to skip the `woods_status` RubyGems version check. |
+| `OPENAI_API_KEY` | n/a | When set and no embedding provider is configured, the server auto-enables OpenAI-backed semantic search with in-memory stores. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Probed (`GET /api/tags`, 500ms timeout) when no embedding provider is configured. A reachable instance auto-enables local semantic search. |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
+| `WOODS_QDRANT_URL`, `WOODS_QDRANT_COLLECTION`, `WOODS_QDRANT_API_KEY` | n/a | Override/require Qdrant connection settings when a pgvector/Qdrant-backed index is served outside its host application (no `Woods.configuration` available). |
+| `WOODS_PG_URL` | n/a | Required when a pgvector-backed index is served outside its host application. |
+
+### HTTP transport (`woods-mcp-http`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. |
+| `WOODS_MCP_HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated origin allow-list. |
+| `WOODS_MCP_HTTP_STATELESS` | `1` (stateless) | Set to `0`/`false`/`no` to restore session-based mode. |
+
+### Console Server (`woods-console-mcp`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_CONSOLE_CONFIG` | `~/.woods/console.yml` when present | Explicit launcher YAML path. An explicit missing path fails startup. |
+| `WOODS_CONSOLE_MCP_TOKEN` | unset | Bearer token for the embedded Rack middleware; see `console_mcp_token` above. |
+| `WOODS_CONSOLE_UNSAFE_EVAL` | unset | Legacy setting. The exact value `true` requests unavailable eval capability and fails server construction closed. |
+
+### Watch daemon (`woods:watch`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. |
+| `WOODS_LOCK_WAIT` | `Watch::Daemon::LOCK_STALE_TIMEOUT` (600s) | How long a rake writer waits for `PipelineLock` before exiting non-zero. |
+| `WOODS_WATCH_POLL` | auto-detected | Set to `"1"`/`"0"` to force/disable polling mode (vs. `listen` gem, e.g. in a container without inotify). |
+| `WOODS_WATCH_DEBOUNCE` | `0.4` (seconds) | Delay before processing a batch of file-change events. |
+| `WOODS_WATCH_FULL_THRESHOLD` | `50` | Number of changed paths in one batch that triggers a full extraction instead of incremental. |
+| `WOODS_WATCH_IDLE_TIMEOUT` | unset (no timeout) | Seconds of inactivity before the daemon exits. |
+| `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
+
+### Extraction rake tasks
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for `woods:extract`/`woods:incremental`/`woods:watch` without editing the initializer. |
+| `RAILS_ENV`, `GITHUB_BASE_REF` | n/a | Read by `woods:incremental`'s changed-file detection in CI. |
+
+### Exporters
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NOTION_API_TOKEN` | `config.notion_api_token` | Overrides the configured Notion token. |
+| `WOODS_NOTION_FORCE` | unset | Set to `"1"` (or pass `force_full: true`) to ignore the Notion sync manifest for one run and re-check every page. |
+| `UNBLOCKED_API_TOKEN`, `UNBLOCKED_COLLECTION_ID`, `UNBLOCKED_REPO_URL` | `config.unblocked_*` | Overrides the configured Unblocked connection settings. |
+| `UNBLOCKED_DAILY_BUDGET` | `1000` | Per-run call cap for `woods:unblocked_sync`. |
+| `UNBLOCKED_FORCE_FULL_SYNC` | unset | Set to `"1"` to re-push every Unblocked document, ignoring the unchanged-hash skip. |
+| `UNBLOCKED_FORCE_PURGE` | unset | Set to `"1"` to bypass the Unblocked 30%-deletion guard. |
+| `WOODS_OBSIDIAN_VAULT` | `<output_dir>/obsidian_vault` | Vault output path for `woods:obsidian`. |
+| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK`, `WOODS_OBSIDIAN_INCLUDE_SOURCE` | `false` | Include framework units / full source in the exported vault. |
+| `WOODS_OBSIDIAN_FORCE_PURGE` | unset | Bypass the Obsidian 30%-deletion guard on the stale-note sweep. |
 
 The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 
@@ -380,7 +455,7 @@ The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicatin
 
 All storage options work with both MySQL and PostgreSQL, except:
 
-- **pgvector** — PostgreSQL only (requires the pgvector extension)
-- **SQLite metadata store** — uses a standalone SQLite database file, independent of your app's database
+- **pgvector**: PostgreSQL only (requires the pgvector extension)
+- **SQLite metadata store**: uses a standalone SQLite database file, independent of your app's database
 
 See [BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.

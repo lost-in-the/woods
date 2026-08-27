@@ -2,9 +2,7 @@
 
 ## Purpose
 
-This document provides deep analysis of every backend option Woods supports, with tradeoffs, performance characteristics, and guidance for selecting the right combination for a given environment.
-
-The goal is that an agent or developer reading this document can make an informed backend selection without external research.
+Decision guidance for picking a vector store, metadata store, graph store, and embedding provider. Covers what's implemented today, what's still a design target, and how the three shipped presets map to `lib/woods/builder.rb`.
 
 ---
 
@@ -16,7 +14,7 @@ Every backend combination falls into one of three shapes based on how data survi
 |---|---|---|---|---|
 | **Single-process** | `:in_memory` | `:in_memory` or `:sqlite` | Lives and dies with the Ruby VM | `:local` |
 | **Shared filesystem** | `:in_memory` + `Snapshotter` dump to `output_dir` | `:in_memory` + `Snapshotter` dump to `output_dir` | Process-local, hydrated from disk on MCP boot; dumps retained per `dump_retention_count` (default 3) | `:shared_filesystem` |
-| **Distributed** | `:pgvector`, `:qdrant` | `:sqlite` (or future `:mysql`/`:postgresql`) | Fully external; multiple processes read/write concurrently | `:postgresql`, `:production` |
+| **Distributed** | `:pgvector`, `:qdrant` | `:sqlite` | Fully external; multiple processes read/write concurrently | `:postgresql`, `:production` |
 
 The shape determines the capability matrix:
 
@@ -27,7 +25,9 @@ The shape determines the capability matrix:
 | Requires sqlite3 gem in host | With `:local` | No | With `:local`/`:postgresql`/`:production` |
 | Requires external service | No | No | Yes |
 | Cross-machine query | No | No | Yes |
-| `woods.json` schema-versioned config snapshot | — | Yes | Host config used directly |
+| `woods.json` schema-versioned config snapshot | n/a | Yes | Host config used directly |
+
+`Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:postgresql`, `:production`, no others exist.
 
 ---
 
@@ -39,10 +39,10 @@ The vector store you can use depends on the primary database your Rails app uses
 
 | Primary database | Supported vector stores | Required? |
 |---|---|---|
-| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant` (external); `:in_memory` (local dev only); `:pinecone` planned | Yes — MySQL has no native vector extension |
-| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`; `:in_memory` (local dev only); `:pinecone` planned | No — `:pgvector` runs inside the same database |
+| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant` (external); `:in_memory` (local dev only) | Yes. MySQL has no native vector extension |
+| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`; `:in_memory` (local dev only) | No, `:pgvector` runs inside the same database |
 
-**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of the InnoDB / MyISAM storage engines and cannot be added via plugin. Woods does not emulate vector search in MySQL — the gem only ships adapters that delegate to a real vector engine. The recommended pairing today is `:qdrant` for vectors with Woods' own `:sqlite` metadata store (Woods never stores metadata in your application database; a native `:mysql` metadata adapter is a documented design target — see the [Metadata Stores status note](#metadata-stores)). The [MySQL section below](#mysql) covers the design-target stack end to end.
+**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of InnoDB / MyISAM and cannot be added via plugin. Woods does not emulate vector search in MySQL, the gem only ships adapters that delegate to a real vector engine. The shipped pairing for MySQL apps is `:qdrant` for vectors with Woods' own `:sqlite` metadata store; Woods never stores metadata in your application database.
 
 ### pgvector (PostgreSQL Extension)
 
@@ -54,13 +54,11 @@ The vector store you can use depends on the primary database your Rails app uses
 - Zero additional infrastructure if you're on PostgreSQL
 - Transactional consistency with metadata (same database)
 - Familiar SQL interface, works with ActiveRecord
-- Supports HNSW and IVFFlat indexing
-- Filtered search via standard WHERE clauses
+- Supports HNSW indexing
 - Backed by strong open-source community
 
 **Weaknesses:**
 - Search performance degrades at high scale (>100K vectors) without careful tuning
-- IVFFlat requires periodic reindexing after large batch inserts
 - HNSW index builds are memory-intensive
 - Competes for resources with your application database
 - No built-in sharding for vectors
@@ -72,8 +70,8 @@ config.vector_store = :pgvector
 # When your app runs on PostgreSQL, reuse its connection:
 config.vector_store_options = { connection: ActiveRecord::Base.connection }
 
-# Dedicated vector database — e.g. a MySQL app pointing at a separate
-# PostgreSQL store — via an abstract class that owns its own connection:
+# Dedicated vector database: e.g. a MySQL app pointing at a separate
+# PostgreSQL store: via an abstract class that owns its own connection:
 # class VectorDatabase < ActiveRecord::Base
 #   self.abstract_class = true
 #   establish_connection(ENV.fetch("VECTOR_DATABASE_URL"))
@@ -81,33 +79,25 @@ config.vector_store_options = { connection: ActiveRecord::Base.connection }
 # config.vector_store_options = { connection: VectorDatabase.connection }
 ```
 
-`vector_store_options` also accepts `:table` and `:schema` (both optional); `:dimensions` is inferred from the embedding provider. `Builder#build_pgvector_store` requires `vector_store_options[:connection]` and raises if it is missing.
+`vector_store_options` also accepts `:table` (default `woods_vectors`) and `:schema` (both optional); `:dimensions` is inferred from the embedding provider. `Builder#build_pgvector_store` requires `vector_store_options[:connection]` and raises if it is missing.
 
-**Schema:**
+**Schema** (what `Woods::Storage::VectorStore::Pgvector#ensure_schema!` actually creates, safe to call repeatedly, uses `IF NOT EXISTS`):
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE woods_embeddings (
+CREATE TABLE IF NOT EXISTS woods_vectors (
   id TEXT PRIMARY KEY,
   embedding vector(1536),
-  metadata JSONB NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- HNSW index (preferred for < 1M vectors)
-CREATE INDEX ON woods_embeddings
-  USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64);
-
--- GIN index on metadata for filtered queries
-CREATE INDEX ON woods_embeddings
-  USING gin (metadata jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_woods_vectors_embedding_hnsw
+  ON woods_vectors USING hnsw (embedding vector_cosine_ops);
 ```
 
 **Performance notes:**
 - HNSW: ~5ms search at 10K vectors, ~20ms at 100K. Memory: ~1.5x vector size.
-- IVFFlat: Faster builds, slower search. Better for bulk insert then query patterns.
 - For codebase indexing (~1000-5000 units, potentially 5000-20000 chunks), HNSW is appropriate.
 - Recommend a separate database from your application if running in production.
 
@@ -129,13 +119,10 @@ CREATE INDEX ON woods_embeddings
 - Built-in quantization for memory efficiency
 - Excellent Docker support, trivial to add to docker-compose
 - gRPC and REST APIs
-- Snapshot and backup support
-- Handles batch operations well
 
 **Weaknesses:**
 - Additional infrastructure to manage
 - Separate from your application database (no transactional consistency)
-- Ruby client library is less mature than PostgreSQL tooling
 - Overkill for small codebases
 
 **Configuration:**
@@ -147,39 +134,21 @@ config.vector_store_options = {
   api_key:    ENV["QDRANT_API_KEY"],  # optional; omit for unauthenticated local instances
   dimensions: 1_536,                  # optional; pre-validates vector length client-side
   distance:   "Cosine",               # Cosine, Dot, Euclid, or Manhattan; verified on reopen
-  allow_private_hosts: true           # required for localhost/RFC1918 URLs — the SSRF guard blocks them by default
+  allow_private_hosts: true           # required for localhost/RFC1918 URLs, the SSRF guard blocks them by default
 }
 ```
 
-The adapter constructor takes these as keyword arguments (`Woods::Storage::VectorStore::Qdrant`); `Builder#build_vector_store` splats `vector_store_options` straight into it. Works identically whether your application database is MySQL or PostgreSQL — Qdrant is a separate service either way.
+The adapter constructor takes these as keyword arguments (`Woods::Storage::VectorStore::Qdrant`); `Builder#build_vector_store` splats `vector_store_options` straight into it. Works identically whether your application database is MySQL or PostgreSQL. Qdrant is a separate service either way.
 
-When an installed `woods-mcp` process reopens `woods.json` without the host
-initializer, non-secret options such as collection, distance, table, schema,
-and dimensions come from the snapshot. Credentials and process-specific
-connections remain serve-time settings:
+When an installed `woods-mcp` process reopens `woods.json` without the host initializer, non-secret options such as collection, distance, table, schema, and dimensions come from the snapshot. Credentials and process-specific connections remain serve-time settings:
 
 - `OPENAI_API_KEY` supplies the embedding credential for OpenAI snapshots.
-- Qdrant endpoint URLs and API keys are never stored in `woods.json`.
-  `WOODS_QDRANT_URL` is required when serving a Qdrant index;
-  `WOODS_QDRANT_API_KEY` is optional, and `WOODS_QDRANT_COLLECTION` supplies a
-  collection only when the snapshot does not record one.
-- `WOODS_PG_URL` is required to construct the Active Record connection for a
-  pgvector snapshot outside its host application.
+- Qdrant endpoint URLs and API keys are never stored in `woods.json`. `WOODS_QDRANT_URL` is required when serving a Qdrant index; `WOODS_QDRANT_API_KEY` is optional, and `WOODS_QDRANT_COLLECTION` supplies a collection only when the snapshot does not record one.
+- `WOODS_PG_URL` is required to construct the Active Record connection for a pgvector snapshot outside its host application.
 
-SQLite metadata is always reopened as `metadata.sqlite3` beneath the supplied
-index directory, never relative to the MCP process working directory.
+SQLite metadata is always reopened as `metadata.sqlite3` beneath the supplied index directory, never relative to the MCP process working directory.
 
-**Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point
-id, so the adapter cannot store a Woods identifier directly. It derives a
-deterministic UUIDv5 from the identifier over a pinned namespace
-(`Qdrant::POINT_ID_NAMESPACE`) and carries the identifier in the payload
-under `woods_identifier`; `#search` reverse-maps hits back to identifiers
-and `#delete` translates through the same function, so a delete always
-names the point the upsert wrote. The translation lives entirely inside the
-Qdrant adapter — pgvector and the in-memory store keep using identifiers as
-ids. The namespace must never change: a v5 id is what makes re-embedding an
-unchanged unit *replace* its point instead of adding a second one, and a new
-namespace would orphan every existing vector. See #147.
+**Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point id, so the adapter cannot store a Woods identifier directly. It derives a deterministic UUIDv5 from the identifier over a pinned namespace (`Qdrant::POINT_ID_NAMESPACE`) and carries the identifier in the payload under `woods_identifier`; `#search` reverse-maps hits back to identifiers and `#delete` translates through the same function. The namespace must never change: a v5 id is what makes re-embedding an unchanged unit *replace* its point instead of adding a second one. See #147.
 
 **Docker Compose:**
 ```yaml
@@ -206,7 +175,6 @@ volumes:
 - ~2ms search at 10K vectors, ~5ms at 100K
 - Memory: ~100MB for 10K 1536-dim vectors with HNSW
 - Quantization can reduce memory by 4x with minimal quality loss
-- Batch upsert: ~1000 vectors/second
 
 **When to use:** Docker infrastructure, self-hosted, need for filtered search, multi-codebase, or want separation of concerns between app DB and vector search.
 
@@ -214,136 +182,16 @@ volumes:
 
 ---
 
-### Pinecone
+### Not implemented
 
-> **Status: planned, not yet implemented.** There is no `lib/woods/storage/pinecone.rb`
-> adapter in the shipped gem. The section below documents the design target.
-> Track progress in #83 or open a new issue if you need this sooner. Current
-> shipped vector stores: `:pgvector`, `:qdrant`, `:in_memory`.
+These are aspirational; setting `config.vector_store` to any of them raises `ArgumentError: Unknown vector_store`, and there is no `vector_store_api_key` / `vector_store_environment` / `vector_store_index` accessor on `Configuration`, code written against the examples below will not run against the shipped gem. The interface a real adapter must implement is `Woods::Storage::VectorStore::Interface` (`store`, `search`, `delete`, `each_id`); see `Woods::Storage::VectorStore::Pgvector` or `Qdrant` for a working example to model a new adapter on.
 
-**What it is:** Fully managed cloud vector database.
-
-**Best for:** Teams that prefer managed services and don't want to operate vector infrastructure.
-
-**Strengths:**
-- Zero operational overhead
-- Scales automatically
-- Good SDK and documentation
-- Metadata filtering
-- Serverless pricing option (pay per query)
-
-**Weaknesses:**
-- Vendor lock-in
-- Data leaves your infrastructure
-- Latency depends on region
-- Cost scales with usage
-- No self-hosted option
-- Free tier is limited
-
-**Configuration:**
-```ruby
-config.vector_store = :pinecone
-config.vector_store_api_key = ENV["PINECONE_API_KEY"]
-config.vector_store_environment = "us-east-1"
-config.vector_store_index = "woods"
-```
-
-**When to use:** Cloud-native teams, no ops capacity for self-hosting, data sensitivity is not a concern.
-
-**When to avoid:** Self-hosted requirements, cost sensitivity at scale, data must stay on-premise.
-
----
-
-### SQLite-vss / FAISS (Local)
-
-> **Status: planned, not yet implemented.** There is no `:sqlite_faiss`
-> adapter in the shipped gem — the only vector stores `Builder#build_vector_store`
-> accepts are `:in_memory`, `:pgvector`, and `:qdrant`. Setting
-> `config.vector_store = :sqlite_faiss` raises `ArgumentError: Unknown
-> vector_store`. For a zero-dependency local setup today, use `:in_memory`
-> (the `:local` preset). The section below documents the design target.
-
-**What it is:** File-based vector search using SQLite for metadata and FAISS for vector operations.
-
-**Best for:** Local development, zero-dependency setups, evaluation, single-developer use.
-
-**Strengths:**
-- Zero external dependencies
-- No network latency
-- Works offline
-- Trivial setup
-- Good for testing and development
-
-**Weaknesses:**
-- Single-process access (no concurrent writes)
-- No network access (can't share across services)
-- FAISS index must fit in memory
-- Limited filtering capabilities
-- No built-in persistence management for FAISS
-
-**Configuration (design target — not runnable today):**
-```ruby
-# Planned. Not accepted by the current Builder; use :in_memory instead.
-config.vector_store = :in_memory   # the shipped zero-dependency local store
-```
-
-**When to use:** Getting started, local development, evaluation, CI testing.
-
-**When to avoid:** Multi-user access, production workloads, CI pipelines that need shared state.
-
----
-
-### Chroma
-
-> **Status: planned, not yet implemented.** No `lib/woods/storage/chroma.rb`
-> adapter in the shipped gem. The section below documents the design target.
-
-**What it is:** Open-source embedding database with a focus on developer experience.
-
-**Best for:** Prototyping, Python-heavy teams (Ruby client exists but is third-party).
-
-**Strengths:**
-- Simple API
-- Built-in embedding functions
-- Document-oriented (stores text alongside vectors)
-- Good developer experience
-
-**Weaknesses:**
-- Ruby client is community-maintained
-- Less mature than Qdrant for production use
-- Limited filtering compared to Qdrant/pgvector
-- Performance characteristics less documented
-
-**When to use:** Prototyping, if you're already using Chroma elsewhere.
-
-**When to avoid:** Production Rails apps, when Ruby-native tooling matters.
-
----
-
-### Milvus
-
-> **Status: planned, not yet implemented.** No `lib/woods/storage/milvus.rb`
-> adapter in the shipped gem. The section below documents the design target.
-
-**What it is:** Open-source vector database designed for massive scale.
-
-**Best for:** Very large deployments, multi-tenant indexing across many codebases.
-
-**Strengths:**
-- Handles billions of vectors
-- GPU-accelerated search
-- Multi-tenancy support
-- Rich indexing options
-
-**Weaknesses:**
-- Complex to deploy (requires etcd, MinIO, Pulsar)
-- Overkill for single-codebase use
-- Operational complexity
-- Ruby client is third-party
-
-**When to use:** Indexing dozens of large codebases, enterprise deployment.
-
-**When to avoid:** Single codebase, minimal infrastructure preference.
+| Backend | Status | Notes |
+|---|---|---|
+| Pinecone | Planned (#83) | Managed cloud vector DB. Would suit teams that want zero ops and accept vendor lock-in and data leaving the infrastructure. |
+| SQLite-vss / FAISS | Planned | File-based local vector search. `:in_memory` (the `:local` preset) already covers the zero-dependency local case today. |
+| Chroma | Not planned | Ruby client is third-party and less mature than the Qdrant/pgvector tooling already shipped. |
+| Milvus | Not planned | Massive-scale, multi-tenant vector DB. Only worth building if a host needs billions of vectors or GPU-accelerated search across many codebases, well beyond single-codebase indexing. |
 
 ---
 
@@ -373,18 +221,6 @@ config.vector_store = :in_memory   # the shipped zero-dependency local store
 
 **Best for:** When retrieval quality is paramount and cost is not a concern.
 
-### Voyage Code 3 / Code 2
-
-**Dimensions:** 1024 (Code 3) / 1536 (Code 2)
-**Max tokens:** 32000 (Code 3) / 16000 (Code 2)
-**Cost:** ~$0.06 per 1M tokens (verify current pricing for Code 3)
-**Latency:** ~120ms single
-
-**Strengths:** Specifically trained on code. Code 3's 32K context window means even very large units can be embedded without truncation. Code 3 uses 1024 dimensions (smaller vectors, less storage) while maintaining strong retrieval quality. Benchmarks show strong performance on code retrieval tasks.
-**Weaknesses:** Smaller community than OpenAI. API availability/reliability less battle-tested.
-
-**Best for:** Code-specific retrieval where embedding quality matters. Code 3's 32K token window is significant — many extracted units exceed 8K tokens, especially with inlined concerns. The lower dimensionality (1024 vs 1536) also reduces vector storage costs.
-
 ### Ollama (Self-hosted)
 
 | Model | Native context | Dimensions | Weights | Notes |
@@ -399,310 +235,82 @@ config.vector_store = :in_memory   # the shipped zero-dependency local store
 **Latency:** ~200ms single (GPU), ~2s single (CPU)
 
 **Strengths:** Fully self-hosted, no data leaves infrastructure, no API costs, works offline.
-**Weaknesses:** Requires GPU for reasonable performance (CPU is 10× slower). `nomic-embed-text`'s 2048-token ceiling requires chunking most real-world Rails units — switch to `bge-m3` for fewer chunks if disk space allows.
+**Weaknesses:** Requires GPU for reasonable performance (CPU is 10x slower). `nomic-embed-text`'s 2048-token ceiling requires chunking most real-world Rails units, switch to `bge-m3` for fewer chunks if disk space allows.
 
 **Best for:** Security-sensitive environments, air-gapped networks, cost-sensitive at scale.
 
-> Ollama's `/api/embed` enforces the model's native context length regardless of the `options.num_ctx` override ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). Woods advertises the native ceiling per model so the chunker sizes inputs correctly — see [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md).
+> Ollama's `/api/embed` enforces the model's native context length regardless of the `options.num_ctx` override ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). Woods advertises the native ceiling per model so the chunker sizes inputs correctly, see [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md).
 
-### Anthropic Embeddings
+### Not implemented
 
-**Note:** Anthropic does not currently offer a standalone embedding API. If this changes, it would be a natural fit given the system's agentic focus. Monitor for availability.
+`Builder#build_embedding_provider` accepts exactly `:openai` and `:ollama`, anything else raises `ArgumentError`. Voyage Code 3/2 and Anthropic embeddings are not wired up:
 
-### Embedding Selection Guidance
+- **Voyage Code 3 / Code 2**: code-specialized embeddings (1024/1536 dims, up to 32K token context). Would be the best-quality option for code retrieval if implemented; there is no `Woods::Embedding::Provider::Voyage` today.
+- **Anthropic**: Anthropic does not currently offer a standalone embedding API. Monitor for availability.
+
+### Embedding Selection Guidance (implemented providers only)
 
 | Priority | Recommendation |
 |----------|---------------|
-| **Best quality for code** | Voyage Code 3 |
 | **Best general-purpose** | OpenAI text-embedding-3-small |
-| **Best for large units** | Voyage Code 3 (32K context) |
-| **Lowest cost** | Ollama + nomic-embed-text |
-| **No external dependencies** | Ollama + nomic-embed-text |
-| **Self-hosted + large units** | Ollama + bge-m3 |
+| **Lowest cost / no external dependencies** | Ollama + `nomic-embed-text` |
+| **Self-hosted + large units** | Ollama + `bge-m3` (8192-token context vs. 2048) |
 | **Maximum quality** | OpenAI text-embedding-3-large |
 
-**Critical consideration:** Embedding dimensions must match across your entire index. Changing embedding providers requires a full re-index. Choose carefully at the start.
+**Critical consideration:** Embedding dimensions must match across your entire index. Changing embedding providers or models requires a full re-index, `rake woods:embed` raises `Woods::MCP::DimensionMismatch` before embedding anything when the configured provider's dimension disagrees with the store's.
 
 ---
 
 ## Metadata Stores
 
-> **Status note.** The shipped gem implements two metadata adapters:
-> `:sqlite` (file-based SQLite) and `:in_memory`. The PostgreSQL and MySQL
-> sections below document the design targets — they describe the schema
-> shape a future adapter would use. For MySQL- or PostgreSQL-backed
-> deployments today, pair `:sqlite` metadata with your preferred vector
-> store (`:pgvector` or `:qdrant`). See
-> [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for the
-> implemented symbols.
-
-### PostgreSQL
-
-**Best for:** Most production deployments. JSON operators for metadata queries, full-text search for keywords, recursive CTEs for graph traversal (can double as graph store).
-
-**Key features:**
-- JSONB columns with GIN indexes for fast metadata filtering
-- `ts_vector` / `ts_query` for full-text keyword search
-- Recursive CTEs for graph operations (can serve as graph store too)
-- Familiar to Rails developers
-- Works with ActiveRecord
-
-**Dual use as graph store:** PostgreSQL can handle both metadata and graph storage with recursive CTEs, eliminating the need for a separate graph backend at moderate scale (~5000 nodes).
-
-```sql
--- Recursive CTE for dependency traversal
-WITH RECURSIVE deps AS (
-  SELECT target_id, 1 as depth
-  FROM edges
-  WHERE source_id = 'Order'
-  UNION ALL
-  SELECT e.target_id, d.depth + 1
-  FROM edges e
-  JOIN deps d ON e.source_id = d.target_id
-  WHERE d.depth < 3
-)
-SELECT * FROM deps;
-```
-
-### MySQL
-
-**Best for:** Teams already on MySQL who don't want to add PostgreSQL. This is common — MySQL (including Percona, MariaDB, Aurora) remains the most prevalent Rails database in production.
-
-**Key features:**
-- JSON functions for metadata (`JSON_EXTRACT`, `JSON_CONTAINS`, `JSON_OVERLAPS`)
-- Generated columns for indexable JSON extraction
-- Full-text indexes with `MATCH ... AGAINST` for keyword search
-- Recursive CTEs in 8.0+ for graph traversal (dual-use as graph store)
-- Familiar to Rails developers, works with ActiveRecord
-
-**Schema:**
-```sql
-CREATE TABLE woods_units (
-  id VARCHAR(255) PRIMARY KEY,
-  unit_type VARCHAR(50) NOT NULL,
-  namespace VARCHAR(255),
-  file_path VARCHAR(500),
-  source_code MEDIUMTEXT,
-  metadata JSON NOT NULL,
-  
-  -- Generated columns for indexable fields extracted from JSON
-  change_frequency VARCHAR(20) GENERATED ALWAYS AS (
-    JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.git.change_frequency'))
-  ) STORED,
-  importance VARCHAR(20) GENERATED ALWAYS AS (
-    JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.importance'))
-  ) STORED,
-  association_count INT GENERATED ALWAYS AS (
-    JSON_LENGTH(JSON_EXTRACT(metadata, '$.associations'))
-  ) STORED,
-  
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  INDEX idx_type (unit_type),
-  INDEX idx_namespace (namespace),
-  INDEX idx_change_freq (change_frequency),
-  INDEX idx_importance (importance),
-  FULLTEXT idx_fulltext (id, file_path, source_code)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-```
-
-**Keyword search:**
-```sql
--- Full-text search across identifiers and source
-SELECT id, MATCH(id, file_path, source_code) AGAINST('checkout payment' IN BOOLEAN MODE) AS relevance
-FROM woods_units
-WHERE MATCH(id, file_path, source_code) AGAINST('checkout payment' IN BOOLEAN MODE)
-ORDER BY relevance DESC
-LIMIT 20;
-
--- JSON-based method name search
-SELECT id FROM woods_units
-WHERE JSON_CONTAINS(
-  JSON_EXTRACT(metadata, '$.method_names'),
-  '"process_payment"'
-);
-
--- Multi-value filter on metadata
-SELECT id FROM woods_units
-WHERE unit_type IN ('model', 'service')
-  AND change_frequency IN ('hot', 'active')
-  AND JSON_OVERLAPS(
-    JSON_EXTRACT(metadata, '$.dependencies'),
-    JSON_ARRAY('Order', 'Payment')
-  );
-```
-
-**Graph traversal (MySQL 8.0+ recursive CTEs):**
-```sql
-CREATE TABLE woods_edges (
-  source_id VARCHAR(255) NOT NULL,
-  target_id VARCHAR(255) NOT NULL,
-  relationship VARCHAR(50) NOT NULL,
-  PRIMARY KEY (source_id, target_id, relationship),
-  INDEX idx_target (target_id),
-  INDEX idx_relationship (relationship)
-) ENGINE=InnoDB;
-
--- Forward dependency traversal
-WITH RECURSIVE deps AS (
-  SELECT target_id, relationship, 1 AS depth
-  FROM woods_edges
-  WHERE source_id = 'Order'
-  UNION ALL
-  SELECT e.target_id, e.relationship, d.depth + 1
-  FROM woods_edges e
-  INNER JOIN deps d ON e.source_id = d.target_id
-  WHERE d.depth < 3
-)
-SELECT DISTINCT target_id, MIN(depth) as min_depth
-FROM deps
-GROUP BY target_id
-ORDER BY min_depth;
-
--- Reverse: who depends on Order?
-WITH RECURSIVE dependents AS (
-  SELECT source_id, relationship, 1 AS depth
-  FROM woods_edges
-  WHERE target_id = 'Order'
-  UNION ALL
-  SELECT e.source_id, e.relationship, d.depth + 1
-  FROM woods_edges e
-  INNER JOIN dependents d ON e.target_id = d.source_id
-  WHERE d.depth < 3
-)
-SELECT DISTINCT source_id, MIN(depth) as min_depth
-FROM dependents
-GROUP BY source_id
-ORDER BY min_depth;
-```
-
-**Dual use as graph store:** MySQL 8.0+ supports recursive CTEs, so it can serve as both metadata and graph store — same pattern as PostgreSQL. Performance is adequate for ~5000 nodes. For Percona Cluster / Group Replication setups, the graph table should use InnoDB with appropriate row-level locking.
-
-**MariaDB note:** MariaDB 10.2+ supports recursive CTEs and JSON functions but the syntax diverges slightly from MySQL 8.0 (e.g., `JSON_VALUE` vs `JSON_EXTRACT`). Generated columns are supported. If targeting MariaDB, test JSON function compatibility.
-
-**Vector search with MySQL:** MySQL has no native vector extension equivalent to pgvector. For MySQL-primary stacks, vector search must use a separate backend:
-- **Qdrant** — Best fit for Docker/self-hosted MySQL environments
-- **Pinecone** — Best fit for managed/cloud MySQL environments
-- **FAISS** — Best fit for local development alongside MySQL
-
-This is the primary architectural difference from PostgreSQL: MySQL handles metadata and graph, but vectors live elsewhere.
-
-**Configuration:**
-```ruby
-config.metadata_store = :mysql
-config.metadata_store_connection = ENV["DATABASE_URL"]
-# Or use the application's existing ActiveRecord connection:
-config.metadata_store_connection = :active_record
-
-# Vector store must be separate (shipped today: :qdrant; :pinecone is planned)
-config.vector_store = :qdrant
-```
-
-**Performance notes:**
-- Generated columns + B-tree indexes make filtered queries fast without parsing JSON at query time
-- `JSON_CONTAINS` and `JSON_OVERLAPS` on unindexed JSON paths do full scans — use generated columns for frequently filtered fields
-- Full-text search with `MATCH ... AGAINST` is fast but requires InnoDB full-text indexes (available since 5.6)
-- Recursive CTEs in MySQL 8.0 are ~20-40% slower than PostgreSQL for deep traversals but adequate for codebase-scale graphs
-- For Percona XtraDB Cluster, writes to codebase tables should use a dedicated connection to avoid certification conflicts with application writes
-
-**When to use:** MySQL/Percona/Aurora is your primary database, team has MySQL expertise, you don't want to introduce PostgreSQL.
-
-**When to avoid:** You need vector search in the same database (use PostgreSQL + pgvector instead), or you're on MySQL < 8.0 (no recursive CTEs, limited JSON support).
+`build_metadata_store` accepts `:in_memory` and `:sqlite`. Nothing else is implemented.
 
 ### SQLite
 
-**Best for:** Local development, zero-dependency setups, testing.
+**Best for:** Local development, zero-dependency setups, testing, and every shipped preset except pure in-memory.
 
 **Key features:**
 - JSON1 extension for metadata queries
 - FTS5 for full-text search
-- Zero setup
-- Single-file database
+- Zero setup, single-file database (`metadata.sqlite3` under `output_dir`)
 
 **Limitations:**
 - Single writer at a time
 - No network access
-- Limited JSON querying compared to PostgreSQL
 
 ### In-Memory
 
 **Best for:** Testing, evaluation, small codebases.
 
-Loads from extracted JSON files on startup. All queries run against in-memory hash maps. Fast but ephemeral.
+Loads from extracted JSON files on startup. All queries run against in-memory hash maps. Fast but ephemeral, nothing survives a process restart without the `Snapshotter` dump (see the Persistence Story table above).
+
+### Not implemented
+
+A PostgreSQL or MySQL metadata store (JSONB/JSON columns, generated columns, full-text search, recursive-CTE graph dual-use) is a plausible future adapter, `config.metadata_store = :postgresql` or `:mysql` today raises `ArgumentError: Unknown metadata_store`, and `metadata_store_connection` is not a `Configuration` accessor. For MySQL- or PostgreSQL-backed deployments today, pair `:sqlite` metadata with your vector store of choice (`:pgvector` or `:qdrant`).
 
 ---
 
 ## Graph Stores
 
-### In-Memory (Default)
+`build_graph_store` accepts `:in_memory` only.
+
+### In-Memory (the only shipped graph store)
 
 Loads `dependency_graph.json` into a Ruby hash structure. Supports BFS traversal with visited set, PageRank scoring, and structural analysis via `GraphAnalyzer` (orphan detection, dead-end detection, hub identification, cycle detection, bridge detection). Suitable for up to ~5000 nodes.
 
 **Memory:** ~10MB for 2000 nodes with average 5 edges each.
 **Traversal:** < 1ms for depth-2 BFS.
-**Analysis:** GraphAnalyzer provides `orphans`, `dead_ends`, `hubs(limit:)`, `cycles`, `bridges(limit:, sample_size:)`, and a combined `analyze` method.
+**Analysis:** `GraphAnalyzer` provides `orphans`, `dead_ends`, `hubs(limit:)`, `cycles`, `bridges(limit:, sample_size:)`, `domain_clusters`, and a combined `analyze` method.
 
-### MySQL 8.0+ (Recursive CTEs)
+### Not implemented
 
-Same pattern as PostgreSQL — stores edges in a table, traverses with recursive queries. MySQL 8.0 introduced recursive CTEs (`WITH RECURSIVE`), making this viable for MySQL-primary stacks.
-
-```sql
-CREATE TABLE woods_edges (
-  source_id VARCHAR(255) NOT NULL,
-  target_id VARCHAR(255) NOT NULL,
-  relationship VARCHAR(50) NOT NULL,
-  PRIMARY KEY (source_id, target_id, relationship),
-  INDEX idx_target (target_id),
-  INDEX idx_relationship (relationship)
-) ENGINE=InnoDB;
-
--- Forward traversal
-WITH RECURSIVE deps AS (
-  SELECT target_id, 1 AS depth
-  FROM woods_edges WHERE source_id = 'Order'
-  UNION ALL
-  SELECT e.target_id, d.depth + 1
-  FROM woods_edges e
-  INNER JOIN deps d ON e.source_id = d.target_id
-  WHERE d.depth < 3
-)
-SELECT DISTINCT target_id, MIN(depth) as min_depth
-FROM deps GROUP BY target_id ORDER BY min_depth;
-```
-
-**Performance:** MySQL's CTE optimizer is less mature than PostgreSQL's. Expect ~20-40% slower deep traversals. Adequate for single-codebase graphs up to ~5000 nodes. For graphs larger than that, consider in-memory with MySQL as fallback, or PostgreSQL.
-
-**Percona/MariaDB:** Percona Server 8.0 uses the same MySQL CTE implementation. MariaDB 10.2+ has its own CTE implementation with slightly different optimization characteristics — test with your distribution.
-
-**When to use:** MySQL 8.0+ is your primary database and you want graph storage without adding infrastructure.
-
-### PostgreSQL (Recursive CTEs)
-
-Stores edges in a table, traverses with recursive queries. PostgreSQL's CTE optimizer is more mature, with better query planning for deep recursive traversals. Suitable for up to ~50000 nodes.
-
-```sql
-CREATE TABLE woods_edges (
-  source_id TEXT NOT NULL,
-  target_id TEXT NOT NULL,
-  relationship TEXT NOT NULL,
-  PRIMARY KEY (source_id, target_id, relationship)
-);
-
-CREATE INDEX ON woods_edges (target_id);  -- For reverse traversal
-```
-
-### Neo4j (Advanced)
-
-Full graph database. Only needed for cross-repo analysis or very large monoliths where traversal patterns are complex (paths with conditions, weighted shortest path, community detection).
-
-**When to use:** > 50000 nodes, cross-repository tracing, need for graph algorithms beyond what GraphAnalyzer provides in-memory. Note that basic graph analytics (betweenness centrality via bridge detection, cycle detection, hub identification, PageRank) are now available in-memory via `GraphAnalyzer` and `DependencyGraph#pagerank`, so Neo4j is only warranted for very large graphs or advanced algorithms like community detection and weighted shortest path.
+A recursive-CTE graph store (MySQL 8.0+ or PostgreSQL, storing edges in a table and traversing with `WITH RECURSIVE`) or Neo4j would only matter past ~50,000 nodes, or for cross-repository tracing and algorithms beyond PageRank/hub/bridge/cycle detection (weighted shortest path, community detection). Neither exists in the shipped gem; `config.graph_store` set to anything but `:in_memory` raises.
 
 ---
 
 ## Background Job Integration
 
-Indexing can be triggered synchronously (rake task, inline) or asynchronously (background job). The system supports:
+Indexing can be triggered synchronously (rake task, inline) or from a background job. The pipeline itself is job-system-agnostic, it's synchronous Ruby, and the wrapper below is just scheduling and concurrency control. Use `Woods.extract!` for a full run; incremental runs need a changed-file list, so a job usually just shells out to `rake woods:incremental` (which computes that list from git) rather than calling `Woods.extract_changed!` directly.
 
 ### Sidekiq
 
@@ -713,8 +321,8 @@ class WoodsJob
 
   def perform(mode = "full")
     case mode
-    when "full" then Woods.index!
-    when "incremental" then Woods.index_incremental!
+    when "full" then Woods.extract!
+    when "incremental" then Rake::Task["woods:incremental"].invoke
     end
   end
 end
@@ -729,8 +337,8 @@ class WoodsJob < ApplicationJob
 
   def perform(mode = "full")
     case mode
-    when "full" then Woods.index!
-    when "incremental" then Woods.index_incremental!
+    when "full" then Woods.extract!
+    when "incremental" then Rake::Task["woods:incremental"].invoke
     end
   end
 end
@@ -744,7 +352,7 @@ class WoodsJob < ApplicationJob
   retry_on StandardError, wait: :polynomially_longer, attempts: 3
 
   def perform(mode = "full")
-    # Same interface
+    # Same interface as above
   end
 end
 ```
@@ -753,10 +361,8 @@ end
 
 ```ruby
 # No job system needed
-Woods.index!
+Woods.extract!
 ```
-
-The key point: the indexing pipeline itself is agnostic to job system. It's a synchronous Ruby operation. The job wrapper is just scheduling and concurrency control.
 
 ---
 
@@ -793,7 +399,8 @@ Woods.configure_with_preset(:postgresql)
 ### MySQL + Qdrant (Classic Rails)
 
 ```ruby
-# Note: :mysql preset is not yet implemented. Use :production preset + manual config
+# No dedicated :mysql preset exists. Use :production and reuse your MySQL
+# connection for the app itself: Woods' own metadata store stays SQLite.
 Woods.configure_with_preset(:production)
 # Vector: Qdrant
 # Metadata: SQLite
@@ -802,154 +409,35 @@ Woods.configure_with_preset(:production)
 # Jobs: Sidekiq
 ```
 
-**Setup:** Add Qdrant to docker-compose, create codebase tables in existing MySQL
-**Tradeoff:** Leverages existing MySQL infrastructure for metadata + graph. Qdrant handles vector search (which MySQL can't do natively). Most natural fit for established Rails apps on MySQL/Percona with Docker and Sidekiq.
-
-### Docker-Native
-
-```ruby
-# Note: :docker preset is not yet implemented. Use :production preset (Qdrant + SQLite + OpenAI)
-Woods.configure_with_preset(:production)
-# Vector: Qdrant
-# Metadata: SQLite
-# Graph: In-memory
-# Embedding: OpenAI
-# Jobs: Sidekiq or Solid Queue
-```
-
-**Setup:** Add Qdrant to docker-compose
-**Tradeoff:** Additional service, but purpose-built vector search. Best performance/flexibility ratio.
+**Setup:** Add Qdrant to docker-compose.
+**Tradeoff:** Leverages existing MySQL infrastructure for the app; Qdrant handles vector search, which MySQL can't do natively. Most natural fit for established Rails apps on MySQL/Percona with Docker and Sidekiq.
 
 ### Fully Self-Hosted
 
 ```ruby
-# Note: :self_hosted preset is not yet implemented.
-# Use :production preset with Ollama as embedding provider via manual config.
+# No dedicated :self_hosted preset exists. Use :production, then override
+# embedding_provider to :ollama.
 Woods.configure_with_preset(:production)
+Woods.configure { |c| c.embedding_provider = :ollama }
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory
-# Embedding: Ollama (nomic-embed-text or custom)
-# Jobs: Any
+# Embedding: Ollama (nomic-embed-text or bge-m3)
 ```
 
-**Setup:** Qdrant + Ollama in docker-compose
+**Setup:** Qdrant + Ollama in docker-compose.
 **Tradeoff:** No external API calls, all data stays on-premise. Works with either database. Embedding quality depends on model choice.
-
-### Enterprise / Multi-Repo
-
-```ruby
-# Note: :enterprise preset is not yet implemented. Multi-repo / Milvus / Neo4j adapters are aspirational.
-# Vector: Milvus or Weaviate (not yet implemented)
-# Metadata: PostgreSQL (not yet implemented — current adapter: SQLite)
-# Graph: Neo4j (not yet implemented — current adapter: InMemory)
-# Embedding: OpenAI or Azure OpenAI (Azure not yet implemented)
-# Jobs: Any
-```
-
-**Setup:** Significant infrastructure
-**Tradeoff:** Maximum capability, maximum operational cost.
 
 ---
 
-## Cost Modeling
+## Cost and Scale Guidance
 
-Different stack combinations have very different cost profiles. This section provides rough estimates so teams can budget before committing to an architecture. All prices are approximate as of early 2025 and will change.
+Embedding and vector-storage cost are not the bottleneck for a single-codebase index, the numbers below are the reasoning, not a budgeting exercise.
 
-### Variables That Drive Cost
+- **Embedding cost is driven by token count, not unit count.** Each unit produces roughly 1–4 chunks (hierarchical chunking: one summary chunk plus semantic sub-chunks), each with a small context prefix. At OpenAI's `text-embedding-3-small` price (~$0.02/1M tokens), a full re-index of a codebase in the thousands-of-units range costs cents, not dollars. Ollama costs nothing per token but requires GPU time.
+- **Incremental re-embedding is cheaper still.** Chunk checksumming means only chunks whose source actually changed get re-embedded, a typical merge touches a handful of units.
+- **Query-time embedding cost scales with query volume, not index size.** One embedding call per `codebase_retrieve` query; even four-digit daily query volumes stay cheap with the small model.
+- **Vector storage is `dimensions × 4 bytes` per vector**, plus adapter overhead. At 1536 dimensions and a few thousand chunks, this is single-digit megabytes, negligible next to the database or Qdrant container it lives in.
+- **Infrastructure cost is the real variable.** `:local` and `:postgresql` add no new service. `:production` (Qdrant) adds one container (~300MB RAM) or a managed-cloud free tier.
 
-| Variable | Range | Impact |
-|----------|-------|--------|
-| Codebase size (models + services + controllers + GraphQL types + jobs) | 50–2000+ units | Linear on embedding cost, linear on storage |
-| Chunk multiplier (chunks per unit, avg) | 1.5–4x | Multiplies embedding cost |
-| Embedding dimensions | 256–3072 | Multiplies vector storage |
-| Re-index frequency | Weekly / per-merge / per-commit | Multiplies embedding cost over time |
-| Retrieval volume | 10–1000 queries/day | Multiplies query-time embedding cost |
-| Infrastructure model | Shared app DB / dedicated / managed cloud | Determines hosting cost |
-
-### Embedding Cost per Full Index
-
-Assumptions: average unit produces ~400 tokens of embeddable text. Hierarchical chunking produces ~2.5 chunks per unit on average (1 summary + 1–3 semantic chunks). Each chunk has a ~50-token context prefix.
-
-| Codebase Size | Total Chunks | Embedding Tokens | OpenAI 3-small ($0.02/1M) | OpenAI 3-large ($0.13/1M) | Voyage Code 3 ($0.06/1M) | Ollama (local) |
-|--------------|-------------|-----------------|---------------------------|---------------------------|--------------------------|----------------|
-| 50 units | ~125 | ~56K | $0.001 | $0.007 | $0.003 | $0 |
-| 200 units | ~500 | ~225K | $0.005 | $0.029 | $0.014 | $0 |
-| 500 units | ~1,250 | ~562K | $0.011 | $0.073 | $0.034 | $0 |
-| 1000 units | ~2,500 | ~1.1M | $0.022 | $0.146 | $0.068 | $0 |
-
-A full index of a 1000-unit codebase costs about two cents with OpenAI's small model. A production Rails app may have ~993 models and 2000+ total units when including controllers, services, jobs, GraphQL types, and mailers. Even at that scale, embedding cost is not the bottleneck.
-
-### Incremental Re-embedding Cost
-
-With chunk checksumming (only re-embed changed chunks), a typical merge touches 2–10 units. Assuming 5 changed units, ~12 chunks:
-
-| Scenario | Tokens | OpenAI 3-small | OpenAI 3-large | Voyage Code 3 |
-|----------|--------|----------------|----------------|----------------|
-| Single merge (5 units) | ~5.4K | $0.0001 | $0.0007 | $0.0003 |
-| Daily (10 merges) | ~54K | $0.001 | $0.007 | $0.003 |
-| Monthly (200 merges) | ~1.1M | $0.022 | $0.143 | $0.066 |
-| Yearly (2400 merges) | ~13M | $0.26 | $1.69 | $0.78 |
-
-Even with aggressive per-merge re-indexing, the yearly embedding cost for a 1000-unit codebase is under $2 with OpenAI's small model. At the target scale of 2000+ units, multiply these figures by ~2x — still well under $5/year.
-
-### Query-Time Embedding Cost
-
-Each retrieval query must be embedded to perform vector search. One embedding call per query.
-
-| Daily Queries | Monthly Tokens (~100 tokens/query) | OpenAI 3-small | OpenAI 3-large | Voyage Code 3 |
-|--------------|-----------------------------------|----------------|----------------|----------------|
-| 10 | ~30K | $0.001 | $0.004 | $0.002 |
-| 100 | ~300K | $0.006 | $0.039 | $0.018 |
-| 1000 | ~3M | $0.060 | $0.390 | $0.180 |
-
-Query volume matters more than index size for ongoing costs, but even 1000 queries/day is cheap.
-
-### Vector Storage Cost
-
-Storage cost depends on embedding dimensions × number of vectors.
-
-Bytes per vector: `dimensions × 4` (float32). With metadata overhead, estimate `dimensions × 4 × 1.3`.
-
-| Codebase (chunks) | 256-dim | 1024-dim | 1536-dim | 3072-dim |
-|-------------------|---------|----------|----------|----------|
-| 125 | 0.16 MB | 0.65 MB | 0.97 MB | 1.9 MB |
-| 500 | 0.64 MB | 2.6 MB | 3.8 MB | 7.7 MB |
-| 1,250 | 1.6 MB | 6.4 MB | 9.6 MB | 19 MB |
-| 2,500 | 3.2 MB | 13 MB | 19 MB | 38 MB |
-
-**pgvector / MySQL:** Uses your existing database storage. No additional cost beyond disk. At these sizes, vector storage is negligible.
-
-**Qdrant (self-hosted):** Docker container, ~200MB base RAM. For codebases under 5,000 chunks, memory usage is under 100MB for vectors. Total container footprint: ~300MB RAM.
-
-**Qdrant Cloud:** Free tier covers up to 1M vectors. A codebase would need to be enormous to exceed this.
-
-**Pinecone:** Free tier: 1 index, 100K vectors. Starter ($8/mo): more indexes. No codebase will exceed free tier vector counts, but you pay for the pod.
-
-### Infrastructure Hosting Cost
-
-| Component | Shared (use app infra) | Dedicated (self-hosted) | Managed Cloud |
-|-----------|----------------------|------------------------|---------------|
-| Vector store | $0 (pgvector in app DB) | $5–15/mo (Qdrant VPS) | $0–70/mo (free tiers exist) |
-| Metadata store | $0 (app database) | $0 (app database) | $0 (app database) |
-| Embedding | — | $5–20/mo (GPU for Ollama) | $0.02–2/yr (API) |
-| Background jobs | $0 (app job system) | $0 (app job system) | $0 (app job system) |
-
-### Cost per Preset
-
-| Preset | Setup Cost | Monthly Ongoing | Notes |
-|--------|-----------|----------------|-------|
-| **local** (InMemory VectorStore + SQLite + Ollama) | $0 | $0 | Requires local GPU for decent embedding speed. CPU works but slow. |
-| **postgresql** (pgvector + SQLite + OpenAI) | $0 | $0.05–0.50 | pgvector for vectors, SQLite for metadata. Good quality, API dependency for embeddings. |
-| **production** (Qdrant + SQLite + OpenAI) | $0 | $0.05–0.50 | Qdrant for vectors, SQLite for metadata. Slightly better vector search, more infra. |
-| **MySQL / Self-hosted / Enterprise** (not yet implemented) | — | — | Aspirational presets. Use :production preset with manual configuration overrides. |
-
-### The Real Cost: Developer Time
-
-Infrastructure and API costs are noise for single-codebase use. The actual cost is:
-
-- **Setup time:** 1–4 hours depending on preset complexity
-- **Tuning time:** 4–20 hours to evaluate embedding models, chunk strategies, and ranking weights
-- **Maintenance time:** 1–2 hours/month for monitoring, occasional re-tuning
-
-Choose the preset that minimizes setup and maintenance time for your team's existing infrastructure. The cheapest option is always the one that uses what you already run.
+The actual cost driver is developer time: initial setup (an hour or so per preset), and occasional tuning of chunking/ranking if retrieval quality needs adjustment. Choose the preset that fits infrastructure you already run, the numbers above rarely change that decision.

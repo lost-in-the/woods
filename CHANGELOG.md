@@ -69,6 +69,24 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Changed
 
+- **Dead code removed.** The unwired formatting adapters (Claude, GPT, Generic),
+  console job/cache adapters, `StubBridge`, `HealthCheck`, `Instrumentation`,
+  `Notion::Mapper`, and a dozen spec-only methods are gone. `config.add_gem`
+  now warns like `config.extractors`: accepted, not implemented.
+- **Docs rewritten for readability**: shorter sentences, tables for
+  comparisons, no em-dashes, one owner per fact. The MCP 2026 handoff document
+  was folded into the strategy ADR.
+
+- **The packaged gem ships only user-facing files.** Internal release machinery
+  (`lib/tasks/release_v2.rake`, `lib/woods/release_v2/`) and non-user-facing
+  documentation subdirectories are excluded from the package; the repo keeps
+  them for CI. Historical build-phase design documents were removed from
+  `docs/` for the release and remain in git history.
+- **The Claude plugin releases with the gem.** `plugin.json` is 2.0.0.
+- **`config.extractors` warns when set.** The knob is accepted for forward
+  compatibility but extractor selection is not implemented; all extractors run.
+  Docs no longer teach it as a live setting. The unused `log_level` accessor
+  is removed.
 - **`woods-mcp-start` no longer pins the MCP protocol version.** It defaulted
   `MCP_PROTOCOL_VERSION` to `2024-11-05` — the oldest revision there is — which silently
   opted every user out of four protocol revisions. The SDK server is dual-era, answering
@@ -80,6 +98,166 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Console SQL gate no longer has MySQL comment and dollar-quote blind spots.**
+  `SqlNoiseStripper` did not know `#` line comments or `/*! ... */` executable
+  comments (both live SQL on MySQL), and treated a `$` inside a PostgreSQL
+  identifier as a dollar-quote opener, so a blocked table could be hidden from
+  `TableGate`. The `TABLE name` statement form was never scanned at all. All
+  four are closed, with the `#` rule gated on the MySQL dialect.
+- **Redacted columns are refused as query inputs, not only masked on output.**
+  `console_aggregate(column:)`, scope keys (including `_matches`), `find(by:)`,
+  and `recent(order_by:)` accepted `console_redacted_columns`, which gave a
+  plaintext aggregate or a comparison oracle over a secret.
+- **The MySQL console timeout no longer leaks into the host's connection pool.**
+  `SET max_execution_time` is session-scoped and survives rollback; the prior
+  value is now read and restored in `ensure`.
+- **Console SQL validation stops rejecting columns named `do`, `start`,
+  `lock`, `release`, or `handler`.** Forbidden statement keywords now match only
+  at a statement-leader position. `EXPLAIN ANALYSE` (the PostgreSQL spelling) is
+  rejected like `ANALYZE`. `console_association_count` gates the rendered SQL, so
+  a blocked `through` table is refused.
+- **Long-running MCP tasks no longer expire the moment they complete.** Terminal
+  task ttl is measured from the terminal transition, not from creation. A task
+  minted under a different boot identity (a container) is left alone by a host
+  reader instead of being marked failed.
+- **Extractor accuracy batch.** `permitted_params` no longer leaks across method
+  bodies (and reads Rails 8 `params.expect`); GraphQL complexity is read from a
+  real match; per-file GraphQL classification agrees with the runtime pass;
+  `form_action` edges stop at `do`/`end`; `SourceNesting` pops on `end.freeze`;
+  `render :partial => 'x'` resolves the real partial; a rake task whose name
+  contains `do` no longer swallows its neighbours; inline-namespaced migrations
+  are extracted; mounted engines are unwrapped from `Mapper::Constraints` so
+  `mounted_path` is populated, and `Rails::Application` is no longer reported as
+  an engine.
+- **An empty vector dump no longer refuses to boot.** `woods:embed` over an empty
+  payload wrote `dimension = 0` and every later boot raised `DimensionMismatch`.
+- **Storage hardening.** Interface stubs are no longer probed with `respond_to?`
+  (B-108) in the retryable provider, builder, indexer, and ranker; Notion
+  read-only POSTs retry on a network failure; the watch daemon's stale-claim
+  reclaim checks the claim inode before removing it and falls back to an
+  exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
+  honours array filters like `#search`.
+- **Task orphan detection compares pid namespaces, not only boot ids.** Docker
+  on Linux shares the host kernel boot id, so a host reader could judge a
+  container's task by an unrelated host pid. The producer identity now carries
+  `/proc/<pid>/ns/pid`, and a task from another namespace is left alone.
+- **Daemon claim reclaim runs under an `flock`.** A byte comparison before the
+  delete still left a read-then-unlink window where two starters could both
+  end up as claim owners; the whole reclaim-and-create loop is now one
+  critical section on a sidecar lock file, released by the kernel on death.
+- **Snapshot capture retries a locked SQLite database.** SQLite skips the busy
+  handler in its deadlock-avoidance case, so two concurrent captures could
+  fail at `BEGIN IMMEDIATE` despite `busy_timeout`. Three bounded attempts.
+- **`woods:clean` and `woods:validate` no longer raise `NameError` in a host
+  app.** `woods.rake` reached `Woods::Generation` through the extractor, which
+  those tasks never load. Caught by every woods-testbed variant.
+- **The daemon's stale-claim race guard compares bytes, not the inode.** Linux
+  reuses a freed inode for the next file in the directory, so the inode check
+  let a just-replaced live claim be deleted. Failed on CI, passed on macOS.
+- **Routes that differ only by constraint are all indexed.** The identifier is
+  `VERB /path`, qualified by request constraints when the route has any:
+  `GET /users [subdomain=api]`, `GET /users [format=json]`, `constraint=proc`
+  for a callable. Routes that still collide are numbered in route order
+  (`GET /users #2`) instead of being dropped. Unconstrained routes keep their
+  old identifier; a constrained one changes, so the clean re-index above
+  covers it.
+- **A rake task reopened in two `.rake` files is one unit**, the way Rake sees
+  it: its source carries every definition, `metadata.defined_in` lists the
+  files, and a per-file incremental run produces the same merged unit as a
+  full run. Previously the second file overwrote the first.
+- **`woods:validate` and `Resilience::IndexValidator` are one implementation.**
+  The task now runs the class, which gained the task's manifest-count,
+  unit-file, file-path, and dependency-graph checks (`app_root:` opts into
+  the file-path check).
+- **`EXPLAIN (FORMAT JSON) SELECT` is accepted.** The option list was read as
+  a call to a function named `EXPLAIN`. `EXPLAIN ANALYZE` in any form is
+  still refused.
+- **Class names are position-aware in every file-scanning extractor.** Jobs,
+  serializers, decorators, policies, Pundit policies, managers, and validators
+  took the first `class` token in the file, so `module Billing; class ChargeJob`
+  indexed as bare `ChargeJob` (and the class-based second pass then added a
+  duplicate `Billing::ChargeJob`), while the decorator scanner joined every
+  `module` token, including helpers nested inside the class. All of them now
+  go through `SourceNesting#qualified_first_class_name` (#174).
+- **Policy `evaluated_models` no longer invents models from parameter syntax.**
+  `def initialize(order, user = nil, strict: false)` produced `Nil`, `Strict`,
+  and `False` model edges; only bare positional parameters are read now.
+- **The release gate requires the booted-extraction matrix.**
+  `script/validate-release-run` did not list the `rails-matrix` CI job, so a
+  red Rails 6.0 to 8.1 row could not block a release.
+- **Spec order no longer leaks a nil `Woods.configuration`.** Four spec files
+  nil it out in `after` hooks; `spec_helper` now restores whatever each example
+  started with, which fixes two seed-dependent failures in `extractor_spec`.
+
+- **Every MCP entry point boots a payload-layout index.** The #226 layout moved
+  `manifest.json` into `payloads/gen-<N>/`, but `woods-mcp`, `woods-mcp-http`,
+  `woods-mcp-start`, the retriever's graph hydration, and the operator status
+  reporter still looked for root-level artifacts: a fresh 2.0 extract was refused
+  at boot with "Run `rake woods:extract` first", the retriever's graph store
+  hydrated empty (silent loss of PageRank and graph expansion), and status read
+  `:not_extracted`. All five now resolve through the generation pointer, with the
+  legacy flat layout still accepted.
+- **MCP `reload` no longer crashes the stdio server on pgvector/Qdrant.** The
+  reload metadata backfill guarded on `respond_to?(:each_entry)`, which the
+  vector-store interface answers true for while raising `NotImplementedError`
+  (the B-108 anti-pattern); on stdio that unwound the transport loop and killed
+  the process. The guard is now an ownership check.
+- **Wholesale replacement prunes by `(identifier, type)`.** The #225 typed-graph
+  work missed one call site: a factories (or any wholesale) re-run removing a
+  vanished unit deleted every type sharing the identifier, so a same-named
+  Scenic view's node and JSON file vanished from the index until a full run.
+  Colliding identifiers also now serialize dependents on every sharing unit and
+  carry each type's own git metadata instead of one type's history.
+- **Incremental runs abort instead of publishing a collapsed index.** When
+  payload creation failed over a payload-born index, the degrade path published
+  a near-empty flat root and redirected readers to it. Incremental and refresh
+  runs now raise without bumping the generation; full runs keep the flat
+  fallback (their write set is complete). Payload seeding also gained the
+  cross-device copy fallback, and payload pruning survives a restarted
+  generation counter.
+- **Woods artifacts are read encoding-safely everywhere.** Twelve remaining bare
+  `File.read` sites (extractor incremental path, rake validate/stats/flow, the
+  index validator) crashed with `Encoding::InvalidByteSequenceError` under
+  `LANG=C` (the documented daemon container environment) on any multibyte byte.
+  All now use `AtomicFile.read`.
+- **Extraction-family rake tasks honor `config.output_dir`.** They hardcoded
+  `tmp/woods` while the embed and export families used the configured
+  directory, so a host that set `output_dir` split its index in two silently.
+- **The watch daemon captures files changed during startup catch-up.** The
+  watcher started only after catch-up finished, so a save during a long
+  catch-up extraction was lost until the next edit. The watcher now starts
+  first. A dead container daemon's startup claim also no longer blocks a
+  host-side daemon forever (host identity is compared before trusting pid
+  liveness), and a lock-release failure after a successful cycle no longer
+  relabels the cycle as a lock failure.
+- **Retrieval ranking and budgeting defects.** RRF source merging demoted
+  strong cross-source hits into the supporting section; the framework partition
+  never fired for real graph-expansion candidates; empty metadata could shadow
+  real metadata; `:within_type_fallback` was reported for types the fallback
+  never returned; an empty supporting section stranded ~35% of the token budget;
+  keyword scores encoded arbitrary database row order as the dominant ranking
+  signal. All fixed; keyword scores now derive from matched-field counts.
+- **Console SQL validation stops rejecting English.** Body keyword scans ran
+  over string literals, so `WHERE body = 'please update the record'` was refused
+  as an UPDATE; scans now run over noise-stripped SQL while comment-hidden
+  injections stay caught. `MERGE` joined the forbidden set, recursive writable
+  CTEs get the specific error, and the stdio transport passes the table map so
+  qualified `table.column` references validate like they do over HTTP.
+- **Exporter clients treat ambiguous 503s honestly.** A 503 for a
+  non-idempotent create (Notion `create_page`, Unblocked `create_collection`)
+  can arrive from an intermediary after the origin committed, so those now
+  raise the ambiguous-outcome error instead of retrying into a duplicate; 429
+  and idempotent requests retry as before. Notion's `query_all` gained the
+  nil-cursor loop guard, and the two clients' retry budgets now agree.
+- **Session tracer fairness and hygiene.** The Redis store evicted arbitrary
+  sessions at the cap (now oldest-first, matching the file store), and
+  client-controlled header values are escaped before landing in the
+  session-context document served to agents.
+- **Storage edge paths.** Dump-capability detection uses ownership checks
+  (typed `InapplicableBackend` instead of a bare `NotImplementedError`), the
+  in-memory metadata search no longer matches on injected timestamps, dump
+  pruning can never delete the just-promoted dump after a backward clock step,
+  and the tasks store sweeps corrupt records older than the TTL.
 - **A generation's payload is published atomically (#226).** `generation.json` was
   bumped atomically and last, but it named the output root — a directory of
   independently-written files — so a reader refreshing mid-publish could load a

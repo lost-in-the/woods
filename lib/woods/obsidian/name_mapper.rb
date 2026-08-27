@@ -43,27 +43,10 @@ module Woods
         build(id_to_dir)
       end
 
-      # @return [Array<String>] exported identifiers, sorted
-      def ids
-        @map.keys
-      end
-
-      # @param id [String]
-      # @return [Boolean] whether this id has an emitted note
-      def known?(id)
-        @map.key?(id)
-      end
-
       # @param id [String]
       # @return [String, nil] vault-relative note path ("models/User.md")
       def path_for(id)
         @map[id]&.fetch(:path)
-      end
-
-      # @param id [String]
-      # @return [String, nil] wikilink target with no extension ("models/User")
-      def target_for(id)
-        @map[id]&.fetch(:target)
       end
 
       # @param id [String]

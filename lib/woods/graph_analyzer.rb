@@ -438,13 +438,6 @@ module Woods
       @graph_nodes ||= graph_data[:nodes]
     end
 
-    # Access graph forward edges from cached graph data.
-    #
-    # @return [Hash] identifier => [dependency identifiers]
-    def graph_edges
-      @graph_edges ||= graph_data[:edges]
-    end
-
     # ──────────────────────────────────────────────────────────────────────
     # Cycle Detection (Three-Color DFS)
     # ──────────────────────────────────────────────────────────────────────

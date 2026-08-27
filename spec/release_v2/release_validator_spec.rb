@@ -100,6 +100,7 @@ RSpec.describe 'release validation' do
   def contract_job_names
     {
       'test' => 'Unit specs (Ruby 4.0)',
+      'rails-matrix' => 'Booted extraction (Ruby 4.0 / Rails 8.1)',
       'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache)',
       'http-transport' => 'MCP transports (official clients)',
       'coverage' => 'coverage',

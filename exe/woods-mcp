@@ -52,7 +52,11 @@ server = Woods::MCP::Server.build(
   bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
 )
 
-# Pin protocol version for broad client compatibility (Claude Code, Cursor, etc.)
+# Never pin by default: the SDK server answers `initialize` for legacy
+# clients AND serves `server/discover` for modern ones, so pinning collapses
+# it to one era. MCP_PROTOCOL_VERSION exists only as an operator escape
+# hatch for a client that can't negotiate — see the "never pin
+# MCP_PROTOCOL_VERSION" gotcha in CLAUDE.md.
 server.configuration.protocol_version = ENV['MCP_PROTOCOL_VERSION'] if ENV['MCP_PROTOCOL_VERSION']
 
 transport = MCP::Server::Transports::StdioTransport.new(server)

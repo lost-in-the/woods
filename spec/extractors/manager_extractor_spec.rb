@@ -64,6 +64,23 @@ RSpec.describe Woods::Extractors::ManagerExtractor do
 
   # ── extract_manager_file ─────────────────────────────────────────────
 
+  describe 'block-namespaced classes (#174)' do
+    it 'qualifies a class declared inside a module block' do
+      path = create_file('app/managers/admin/order_manager.rb', <<~RUBY)
+        module Admin
+          class OrderManager < SimpleDelegator
+            def call; end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_manager_file(path)
+      expect(unit).not_to be_nil
+      expect(unit.identifier).to eq('Admin::OrderManager')
+      expect(unit.namespace).to eq('Admin')
+    end
+  end
+
   describe '#extract_manager_file' do
     it 'extracts SimpleDelegator metadata' do
       path = create_file('app/managers/order_manager.rb', <<~RUBY)

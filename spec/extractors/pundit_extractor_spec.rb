@@ -89,6 +89,24 @@ RSpec.describe Woods::Extractors::PunditExtractor do
 
   # ── extract_pundit_file ────────────────────────────────────────────
 
+  describe 'block-namespaced classes (#174)' do
+    it 'qualifies a class declared inside a module block' do
+      path = create_file('app/policies/admin/order_policy.rb', <<~RUBY)
+        module Admin
+          class OrderPolicy < ApplicationPolicy
+            def initialize(user, record); end
+            def show?; true; end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_pundit_file(path)
+      expect(unit).not_to be_nil
+      expect(unit.identifier).to eq('Admin::OrderPolicy')
+      expect(unit.namespace).to eq('Admin')
+    end
+  end
+
   describe '#extract_pundit_file' do
     it 'extracts authorization actions' do
       path = create_file('app/policies/post_policy.rb', <<~RUBY)

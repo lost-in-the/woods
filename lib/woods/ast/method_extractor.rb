@@ -38,15 +38,6 @@ module Woods
         end
       end
 
-      # Extract all method definition nodes from source.
-      #
-      # @param source [String] Ruby source code
-      # @return [Array<Ast::Node>] All :def and :defs nodes
-      def extract_all_methods(source)
-        root = @parser.parse(source)
-        root.find_all(:def) + root.find_all(:defs)
-      end
-
       # Extract the raw source text of a method, including def...end.
       #
       # This is the key replacement for `extract_action_source` in the controller

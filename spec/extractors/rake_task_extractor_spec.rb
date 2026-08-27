@@ -21,6 +21,50 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     end
   end
 
+  # ── B-126: one task reopened in two files ──────────────────────────
+
+  describe 'a task defined in two .rake files (B-126)' do
+    before do
+      create_file('lib/tasks/a_seed.rake', <<~RAKE)
+        namespace :db do
+          desc 'Seed the base data'
+          task seed: :environment do
+            puts 'base'
+          end
+        end
+      RAKE
+      create_file('lib/tasks/b_seed.rake', <<~RAKE)
+        namespace :db do
+          task seed: :environment do
+            Rake::Task['db:extra'].invoke
+          end
+        end
+      RAKE
+    end
+
+    it 'merges both definitions into one unit on a full run' do
+      units = described_class.new.extract_all.select { |u| u.identifier == 'db:seed' }
+      expect(units.size).to eq(1)
+      unit = units.first
+      expect(unit.metadata[:defined_in]).to eq(%w[lib/tasks/a_seed.rake lib/tasks/b_seed.rake])
+      expect(unit.source_code).to include("puts 'base'").and include("Rake::Task['db:extra']")
+      expect(unit.dependencies).to include(hash_including(target: 'db:extra', via: :task_invoke))
+    end
+
+    it 'produces the same merged unit from either file on a per-file run' do
+      extractor = described_class.new
+      from_a = extractor.extract_rake_file(File.join(tmp_dir, 'lib/tasks/a_seed.rake')).find do |u|
+        u.identifier == 'db:seed'
+      end
+      from_b = extractor.extract_rake_file(File.join(tmp_dir, 'lib/tasks/b_seed.rake')).find do |u|
+        u.identifier == 'db:seed'
+      end
+      expect(from_b.file_path).to eq(from_a.file_path)
+      expect(from_b.source_code).to eq(from_a.source_code)
+      expect(from_b.metadata[:defined_in]).to eq(from_a.metadata[:defined_in])
+    end
+  end
+
   # ── extract_all ──────────────────────────────────────────────────────
 
   describe '#extract_all' do
@@ -332,6 +376,7 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(meta[:arguments]).to eq(['days'])
       expect(meta[:has_environment_dependency]).to be true
       expect(meta[:source_lines]).to be_a(Integer)
+      expect(meta[:line_number]).to eq(3)
     end
 
     it 'sets has_environment_dependency to false when no :environment dep' do
@@ -471,6 +516,25 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(units.first.metadata[:task_dependencies]).to contain_exactly('environment', 'setup')
     end
 
+    # `extract_task_block` used to gate on a bare `include?('do')`, so a
+    # blockless task whose own name contains the substring "do" (`docs`)
+    # looked like it opened a block and swallowed the next task's body.
+    it 'does not let a blockless task named "docs" swallow the next task as its own body' do
+      path = create_file('lib/tasks/docs.rake', <<~RAKE)
+        task docs: :environment
+        task :other do
+          DocsService.call
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      docs = units.find { |u| u.identifier == 'docs' }
+      other = units.find { |u| u.identifier == 'other' }
+
+      expect(docs.dependencies.map { |d| d[:target] }).not_to include('DocsService')
+      expect(other.dependencies.map { |d| d[:target] }).to include('DocsService')
+    end
+
     it 'extracts a label-form task without a do block' do
       path = create_file('lib/tasks/modern.rake', <<~RAKE)
         task setup: :environment
@@ -539,6 +603,34 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
 
       generate = units.find { |u| u.identifier == 'admin:reports:generate' }
       expect(generate.namespace).to eq('admin:reports')
+    end
+  end
+
+  # ── Chained `end` and namespace depth tracking ──────────────────────
+
+  describe 'chained end lines' do
+    # An exact `stripped == 'end'` check missed `end.freeze`, so the
+    # depth counter never returned to the level `namespace :admin do`
+    # opened at, and the namespace was never popped for tasks that follow.
+    it 'keeps namespace depth in sync when a block end is chained (end.freeze)' do
+      path = create_file('lib/tasks/admin.rake', <<~RAKE)
+        namespace :admin do
+          LIST = %w[a b].map do |x|
+            x
+          end.freeze
+
+          task :cleanup do
+            puts "cleaning"
+          end
+        end
+
+        task :outer do
+          puts "outer"
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.map(&:identifier)).to contain_exactly('admin:cleanup', 'outer')
     end
   end
 

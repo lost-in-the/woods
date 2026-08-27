@@ -17,7 +17,7 @@ How was this tested? Include relevant specs or manual verification steps.
 ## Checklist
 
 - [ ] Tests added/updated
-- [ ] `bundle exec rake spec` passes
-- [ ] `bundle exec rubocop` passes
+- [ ] `bin/rake spec` passes
+- [ ] `bin/rubocop` passes
 - [ ] CHANGELOG.md updated (if user-facing change)
 - [ ] Documentation updated (if applicable)

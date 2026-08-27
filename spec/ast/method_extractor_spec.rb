@@ -60,29 +60,6 @@ RSpec.describe Woods::Ast::MethodExtractor do
     end
   end
 
-  describe '#extract_all_methods' do
-    it 'returns all def and defs nodes' do
-      source = <<~RUBY
-        class Foo
-          def bar; end
-          def baz; end
-          def self.build; end
-        end
-      RUBY
-
-      methods = extractor.extract_all_methods(source)
-
-      expect(methods.size).to eq(3)
-      expect(methods.map(&:method_name)).to contain_exactly('bar', 'baz', 'build')
-    end
-
-    it 'returns empty array for source with no methods' do
-      source = 'class Foo; end'
-
-      expect(extractor.extract_all_methods(source)).to eq([])
-    end
-  end
-
   describe '#extract_method_source' do
     it 'returns exact text of a method' do
       source = <<~RUBY

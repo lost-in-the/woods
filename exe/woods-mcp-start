@@ -18,7 +18,36 @@ unless File.directory?(index_dir)
   exit 1
 end
 
-unless File.file?(File.join(index_dir, 'manifest.json'))
+# Mirrors Woods::Generation#payload_dir + Woods::MCP::Bootstrapper.manifest_present?
+# (lib/woods/generation.rb, lib/woods/mcp/bootstrapper.rb) without requiring
+# the gem: this pre-flight runs before the `exec` below, so pulling in the
+# whole library just to check one file is wasted work on every boot. A
+# payload-born index has no manifest.json at the root — it lives under the
+# directory generation.json's `payload` pointer names — so the pointer is
+# followed here too, with the same escape guard, before concluding the
+# directory holds no index. woods-mcp re-checks this properly through
+# Bootstrapper regardless; this is just an early, friendlier exit.
+def manifest_present?(index_dir)
+  return true if File.file?(File.join(index_dir, 'manifest.json'))
+
+  generation_path = File.join(index_dir, 'generation.json')
+  return false unless File.file?(generation_path)
+
+  require 'json'
+  require_relative '../lib/woods/atomic_file'
+  payload_name = JSON.parse(Woods::AtomicFile.read(generation_path))['payload']
+  return false if payload_name.nil? || payload_name.empty?
+
+  root = File.expand_path(index_dir)
+  candidate = File.expand_path(File.join(root, payload_name))
+  return false unless candidate.start_with?("#{root}#{File::SEPARATOR}")
+
+  File.file?(File.join(candidate, 'manifest.json'))
+rescue JSON::ParserError, SystemCallError
+  false
+end
+
+unless manifest_present?(index_dir)
   warn "Error: No manifest.json in: #{index_dir}"
   warn 'Run extraction first: bundle exec rake woods:extract'
   exit 1

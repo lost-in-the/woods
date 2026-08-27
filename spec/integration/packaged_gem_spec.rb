@@ -23,6 +23,10 @@ module PackagedGemSpec
     CODE_OF_CONDUCT.md
     SECURITY.md
   ].freeze
+  # The audit ledger's own machinery — findings.json, surface-inventory
+  # tooling — is deliberately excluded from the packaged gem (it has no
+  # purpose outside this repo's own CI, which runs it straight from source).
+  RELEASE_V2_MACHINERY = %r{\Alib/(tasks/release_v2\.rake|woods/release_v2/)}
   SEMANTIC_REOPEN_BOOTSTRAP = <<~'RUBY'
     require 'json'
     require 'woods'
@@ -97,17 +101,26 @@ RSpec.describe 'packaged gem' do
     end
   end
 
-  it 'contains every runtime file and the exact five executables' do
-    runtime_files = Dir[File.join(PackagedGemSpec::ROOT, 'lib/**/*')]
-                    .select { |path| File.file?(path) }
-                    .map do |path|
-                      Pathname(path).relative_path_from(Pathname(PackagedGemSpec::ROOT)).to_s
-                    end
+  it 'contains every runtime file (excluding release_v2 audit machinery) and the exact five executables' do
+    relative_lib_files = Dir[File.join(PackagedGemSpec::ROOT, 'lib/**/*')]
+                         .select { |path| File.file?(path) }
+                         .map { |path| Pathname(path).relative_path_from(Pathname(PackagedGemSpec::ROOT)).to_s }
+    runtime_files = relative_lib_files.grep_v(PackagedGemSpec::RELEASE_V2_MACHINERY)
 
+    expect(runtime_files).not_to be_empty
     expect(package_files).to include(*runtime_files)
     expect(@package.spec.executables).to contain_exactly(*PackagedGemSpec::EXECUTABLES)
     expected_executables = PackagedGemSpec::EXECUTABLES.map { |name| "exe/#{name}" }
     expect(package_files.grep(%r{\Aexe/})).to contain_exactly(*expected_executables)
+  end
+
+  it 'excludes the release_v2 audit machinery from the packaged gem' do
+    expect(package_files.grep(PackagedGemSpec::RELEASE_V2_MACHINERY)).to be_empty
+  end
+
+  it 'excludes internal planning docs but keeps user-facing docs/*.md' do
+    expect(package_files.grep(%r{\Adocs/}).grep_v(%r{\Adocs/[^/]+\.md\z})).to be_empty
+    expect(package_files).to include('docs/README.md')
   end
 
   it 'contains the license and community files' do

@@ -53,21 +53,6 @@ module Woods
         calls.sort_by { |c| c[:line] }
       end
 
-      # Extract only significant call sites, filtering out noise.
-      #
-      # @param node [Ast::Node] The AST node to search
-      # @param known_units [Array<String>] Known unit identifiers for relevance filtering
-      # @return [Array<Hash>] Filtered call site hashes
-      def extract_significant(node, known_units: [])
-        calls = extract(node)
-        known_set = Set.new(known_units)
-
-        calls.reject do |call|
-          INSIGNIFICANT_METHODS.include?(call[:method_name]) &&
-            (known_units.empty? || !known_set.include?(call[:receiver]))
-        end
-      end
-
       private
 
       def collect_calls(node, calls)

@@ -1,6 +1,6 @@
 # Console MCP Server Setup
 
-The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live access to your Rails application: real database counts, record lookups, schema inspection, and job monitoring — all inside rolled-back transactions.
+The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live access to your Rails application: real database counts, record lookups, schema inspection, and job monitoring, all inside rolled-back transactions.
 
 ## Transport Options at a Glance
 
@@ -15,7 +15,7 @@ The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live acces
 
 ## Option A: Stdio via Rake (Recommended)
 
-The simplest setup. The `woods:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. All queries run in-process via ActiveRecord — no separate bridge process needed.
+The simplest setup. The `woods:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. All queries run in-process via ActiveRecord, no separate bridge process needed.
 
 ### Prerequisites
 
@@ -26,7 +26,7 @@ The simplest setup. The `woods:console` rake task boots Rails, then starts the e
 
 The rake task does two things before starting the MCP server:
 
-1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC — they break the protocol. The rake task redirects stdout → stderr immediately, saves the real stdout fd, and restores it after boot completes.
+1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC, they break the protocol. The rake task redirects stdout → stderr immediately, saves the real stdout fd, and restores it after boot completes.
 2. **Calls `Rails.application.eager_load!`** to load all application models. Without eager loading, only the models that happen to be autoloaded before the first query appear in the registry.
 
 ### MCP Client Configuration
@@ -315,7 +315,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 `config.console_embedded_read_tools = true`). Tier 2, Tier 3, and
 `console_eval` are not registered in any supported mode.
 
-### Tier 1: Read-Only (9 tools) — Supported in all modes
+### Tier 1: Read-Only (9 tools): Supported in all modes
 
 | Tool | Description |
 |------|-------------|
@@ -329,7 +329,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
-### Tier 2: Domain-Aware (9 tools) — Inventory only, not executable
+### Tier 2: Domain-Aware (9 tools): Inventory only, not executable
 
 | Tool | Description |
 |------|-------------|
@@ -343,7 +343,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_check_eligibility` | Check feature eligibility for a record |
 | `console_decorate` | Invoke a decorator and return computed attributes |
 
-### Tier 3: Analytics (10 tools) — Inventory only, not executable
+### Tier 3: Analytics (10 tools): Inventory only, not executable
 
 | Tool | Description |
 |------|-------------|
@@ -358,12 +358,12 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_cache_stats` | Cache store statistics |
 | `console_channel_status` | ActionCable channel status |
 
-### Tier 4: Guarded (3 tools) — Read tools opt-in; eval inventory only
+### Tier 4: Guarded (3 tools): Read tools opt-in; eval inventory only
 
 | Tool | Description |
 |------|-------------|
 | `console_eval` | Inventory schema only; not registered by supported modes |
-| `console_sql` | Execute read-only SQL — `SELECT` and `WITH...SELECT` only |
+| `console_sql` | Execute read-only SQL, `SELECT` and `WITH...SELECT` only |
 | `console_query` | Enhanced query builder with joins, grouping, and HAVING |
 
 `console_sql` and `console_query` register with `embedded_read_tools: true`.
@@ -388,13 +388,14 @@ Woods.configure do |config|
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
   config.console_mcp_path = '/mcp/console'
 
-  # Layer 1 — Table names that must never appear in a response. Default: [].
+  # Layer 1. Table names that must never appear in a response.
+  # Default: Woods::DEFAULT_CONSOLE_BLOCKED_TABLES (8 tables, see below).
   # Matched against :model (resolved via ActiveRecord), :table, and :sql args.
-  # A blocked table rejects the tool call at dispatch — before the executor runs.
+  # A blocked table rejects the tool call at dispatch, before the executor runs.
   # Case-insensitive.
-  config.console_blocked_tables = %w[authorizations credentials]
+  config.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[authorizations]
 
-  # Layer 2 — Content-shape credential scanner. Walks the final response tree
+  # Layer 2. Content-shape credential scanner. Walks the final response tree
   # and replaces credential-shaped substrings (Stripe sk_*, AWS AKIA*, GCP
   # private keys, GitHub ghp_*, generic high-entropy tokens) with "[REDACTED]".
   # Runs regardless of column naming, so it catches leaks that column-based
@@ -406,21 +407,22 @@ Woods.configure do |config|
   config.console_disabled_scanner_patterns = %i[stripe_publishable_key]
   # config.console_disabled_scanner_patterns = %i[all]  # disable scanner entirely
 
-  # Layer 2 augmentation — boot-time credential index. Default: true.
+  # Layer 2 augmentation, boot-time credential index. Default: true.
   # Woods::Console::CredentialIndex walks Rails.application.credentials.config
   #     once at server boot and substring-redacts those values from every MCP
-  #     response — so credentials whose shape no scanner pattern recognizes
+  #     response, so credentials whose shape no scanner pattern recognizes
   #     (Twilio auth tokens, hand-rolled HMAC seeds, third-party webhook
   #     signing keys) are still caught when their exact contents appear.
   # See "console_credential_defense_enabled" section below for scope and
   # multi-DB caveats.
   config.console_credential_defense_enabled = true
 
-  # Layer 3 — Column names to redact from all query results. Default: [].
-  # Replaced with "[REDACTED]" in output.
-  config.console_redacted_columns = %w[password_digest encrypted_password api_key ssn token]
+  # Layer 3. Column names to redact from all query results.
+  # Default: Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS (~30 credential-shaped
+  # columns, see below). Replaced with "[REDACTED]" in output.
+  config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[ssn]
 
-  # Layer 3 — EAV (key-value) redaction patterns. Default: [].
+  # Layer 3, EAV (key-value) redaction patterns. Default: [].
   # See `console_redacted_key_values` section below for the pattern contract.
   config.console_redacted_key_values = [
     { key_column: 'key', value_column: 'value',
@@ -434,16 +436,16 @@ Woods.configure do |config|
 end
 ```
 
-### `console_mcp_enabled` (Layer 0 — feature gate)
+### `console_mcp_enabled` (Layer 0: feature gate)
 
 Until this flag is `true`, none of the transports route traffic:
 
 - `exe/woods-console` prints a notice to stderr and exits 1. `exe/woods-console-mcp` execs that target, so MCP clients see the same startup failure.
 - `Woods::Console::RackMiddleware` passes the request through to the host app (typically its 404), so a disabled console path is indistinguishable from an unknown route. Non-matching paths always pass through untouched.
 
-Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment — e.g. in `config/environments/development.rb` or a staging-only initializer — once the layers below are configured for that environment's threat model.
+Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment, e.g. in `config/environments/development.rb` or a staging-only initializer, once the layers below are configured for that environment's threat model.
 
-### `console_blocked_tables` (Layer 1 — table gate)
+### `console_blocked_tables` (Layer 1: table gate)
 
 Entries are lowercased table names. A tool call is rejected at dispatch time when:
 
@@ -451,15 +453,35 @@ Entries are lowercased table names. A tool call is rejected at dispatch time whe
 - `:table` argument names a blocked table
 - `:sql` argument references a blocked table (matched on identifier tokens, case-insensitive)
 
-Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture — EAV credential stores (`authorizations`, `settings` with secrets), audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
+**Ships with a curated default list** (`Woods::DEFAULT_CONSOLE_BLOCKED_TABLES`, 8 tables) covering common auth/credential storage across Devise, Doorkeeper, Rodauth, Sorcery, OmniAuth, and hand-rolled token systems: `sessions`, `api_keys`, `credentials`, `oauth_applications`, `oauth_access_tokens`, `oauth_refresh_tokens`, `identities`, `active_storage_blobs`.
 
-### `console_disabled_scanner_patterns` (Layer 2 — content scanner)
+`users` / `accounts` are intentionally excluded, many apps expose safe columns from these and should decide explicitly, as are PII-heavy but auth-unrelated tables (`payments`, `addresses`), which are an org-specific compliance concern.
 
-The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss — e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
+Extend or override rather than reassigning blindly:
 
-Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling a rule — per-pattern opt-outs are an escape hatch, not a primary knob.
+```ruby
+# Extend: keep all defaults plus app-specific tables
+config.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[authorizations settings]
 
-Setting `console_disabled_scanner_patterns = %i[all]` disables the entire scanner. No layer-2 processing runs — Layer 3 (column + EAV redaction) and Layer 4 (SqlValidator + SafeContext) continue to fire. Use this only when the pattern scanner interferes with a legitimate workflow and the remaining layers cover the threat model; prefer a per-pattern opt-out otherwise.
+# Remove a default that over-blocks in your app
+config.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES - %w[active_storage_blobs]
+
+# Replace entirely: only do this if you've audited the default list against your schema
+config.console_blocked_tables = %w[only_this]
+
+# Disable Layer 1 entirely (other layers still apply)
+config.console_blocked_tables = []
+```
+
+Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture, EAV credential stores, audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
+
+### `console_disabled_scanner_patterns` (Layer 2: content scanner)
+
+The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss, e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
+
+Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling a rule, per-pattern opt-outs are an escape hatch, not a primary knob.
+
+Setting `console_disabled_scanner_patterns = %i[all]` disables the entire scanner. No layer-2 processing runs. Layer 3 (column + EAV redaction) and Layer 4 (SqlValidator + SafeContext) continue to fire. Use this only when the pattern scanner interferes with a legitimate workflow and the remaining layers cover the threat model; prefer a per-pattern opt-out otherwise.
 
 ### `console_credential_defense_enabled` (boot-time credential index)
 
@@ -468,7 +490,7 @@ once at server boot, collects string leaves with length >= 12, and
 substring-redacts those values from every MCP response. `console_eval` is not
 registered in a supported mode, so this setting does not enable eval.
 
-**Restart required after credential rotation.** The index is built once at process start and held in memory for the lifetime of the MCP process. When a host app rotates Rails credentials (`rails credentials:edit`), the MCP process keeps the pre-rotation secrets in its Set until the process is restarted — new secrets are not picked up automatically. Only the Layer 2 shape-pattern scanner (Stripe `sk_*`, AWS `AKIA*`, etc.) can catch newly-rotated values before restart.
+**Restart required after credential rotation.** The index is built once at process start and held in memory for the lifetime of the MCP process. When a host app rotates Rails credentials (`rails credentials:edit`), the MCP process keeps the pre-rotation secrets in its Set until the process is restarted, new secrets are not picked up automatically. Only the Layer 2 shape-pattern scanner (Stripe `sk_*`, AWS `AKIA*`, etc.) can catch newly-rotated values before restart.
 
 **Rebuild hook for rotation jobs.** If you rotate credentials from a Rake task or a deployment hook and want to avoid a full restart, call:
 
@@ -476,7 +498,7 @@ registered in a supported mode, so this setting does not enable eval.
 Woods::Console::Server.rebuild_credential_index(rails_app: Rails.application)
 ```
 
-This rebuilds the index from the current credentials and hot-swaps it into the active scanner. The swap is atomic on MRI — in-flight scans see either the old or the new index, never a partial one. The method is a no-op (returns `nil`) when no server has been built yet or when `console_credential_defense_enabled` is `false`.
+This rebuilds the index from the current credentials and hot-swaps it into the active scanner. The swap is atomic on MRI, in-flight scans see either the old or the new index, never a partial one. The method is a no-op (returns `nil`) when no server has been built yet or when `console_credential_defense_enabled` is `false`.
 
 **Rotation warning.** At boot time, Woods checks whether any credentials file (`config/credentials.yml.enc`, `config/credentials/<env>.yml.enc`) was modified *after* the process started. When it detects this, it emits a `console.credential_index.stale` warn-level structured log line with the file path, mtime, and a hint to restart or call `rebuild_credential_index`. This check is on by default; disable it with:
 
@@ -484,7 +506,7 @@ This rebuilds the index from the current credentials and hot-swaps it into the a
 config.console_credential_rotation_warning = false
 ```
 
-**Multi-DB / sharded caveat.** The index reflects only the credentials available to the *Rails process* that boots the Console MCP server. A separate database that holds its own secrets (e.g., a vendored CMS app sharing the same Rails host) is not in scope — for those, lean on Layer 3 (`console_redacted_columns` / `console_redacted_key_values`) and Layer 1 (`console_blocked_tables`).
+**Multi-DB / sharded caveat.** The index reflects only the credentials available to the *Rails process* that boots the Console MCP server. A separate database that holds its own secrets (e.g., a vendored CMS app sharing the same Rails host) is not in scope, for those, lean on Layer 3 (`console_redacted_columns` / `console_redacted_key_values`) and Layer 1 (`console_blocked_tables`).
 
 **Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index. The server still boots and the configured table, scanner, and redaction layers remain in effect.
 
@@ -492,14 +514,16 @@ Set the flag to `false` only when the host intentionally opts out of exact-value
 
 ### `console_redacted_columns`
 
-Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive — use the exact names from your database schema.
+Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive, use the exact names from your database schema.
+
+Redacted columns are also **refused as query inputs**: as the `column` of `console_aggregate`, as a scope or `by:` key (including `_matches` forms), and as `order_by`. Masking output alone would leave a comparison oracle over the secret.
 
 **Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, ~30 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.
 
 Extend or override rather than reassigning blindly:
 
 ```ruby
-# Extend — keep all defaults plus app-specific columns
+# Extend: keep all defaults plus app-specific columns
 config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[cart_token share_token]
 
 # Add PII on top of the credential defaults
@@ -508,15 +532,15 @@ config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[e
 # Remove a default that over-redacts in your app (e.g., `token` is a non-secret slug)
 config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS - %w[token]
 
-# Replace entirely — only do this if you've audited the default list against your schema
+# Replace entirely: only do this if you've audited the default list against your schema
 config.console_redacted_columns = %w[password_digest api_key]
 ```
 
 Columns intentionally **excluded** from the default list because they cause over-redaction in apps that use them legitimately:
 
-- `key` — ActiveStorage blob keys, EAV key columns, translation keys
-- `name` — universal non-secret identifier
-- PII columns (`ssn`, `tax_id`, `dob`) — org-specific compliance concern, prefer explicit opt-in
+- `key`: ActiveStorage blob keys, EAV key columns, translation keys
+- `name`: universal non-secret identifier
+- PII columns (`ssn`, `tax_id`, `dob`), org-specific compliance concern, prefer explicit opt-in
 
 Redaction is shape-aware and covers every tool that returns row data:
 
@@ -524,20 +548,20 @@ Redaction is shape-aware and covers every tool that returns row data:
 | ------------------------------------- | --------------------------------------------------------- | --------------------- |
 | `console_find`                        | `{record: Hash}`                                          | Redacted column keys are replaced inside the nested record |
 | `console_sample`, `console_recent`    | `{records: [Hash, ...]}`                                  | Each record hash is redacted |
-| `console_sql`, `console_query`        | `{columns: [...], rows: [[...], ...], count: N}`          | Positional — rows are redacted by matching the `columns` header |
-| `console_pluck`                       | `{columns: [...], values: [[...], ...]}` or `{values: [...]}` for a single column | Positional — multi-column rows and flat single-column arrays both covered |
+| `console_sql`, `console_query`        | `{columns: [...], rows: [[...], ...], count: N}`          | Positional, rows are redacted by matching the `columns` header |
+| `console_pluck`                       | `{columns: [...], values: [[...], ...]}` or `{values: [...]}` for a single column | Positional, multi-column rows and flat single-column arrays both covered |
 | `console_count`, `console_aggregate`, `console_association_count`, `console_schema` | No row data | Nothing to redact |
 
-Redaction is defense-in-depth — prefer not storing plaintext secrets in database columns in the first place — but it keeps configured credential columns out of the agent's transcript when `console_sample`, `console_find`, or the Tier 4 read tools return matching rows.
+Redaction is defense-in-depth, prefer not storing plaintext secrets in database columns in the first place, but it keeps configured credential columns out of the agent's transcript when `console_sample`, `console_find`, or the Tier 4 read tools return matching rows.
 
 ### `console_redacted_key_values`
 
-Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table — e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
+Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table, e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
 
 `console_redacted_key_values` takes one or more patterns that describe "when a row has `key_column` set to one of these names, redact its `value_column`":
 
 ```ruby
-# Example: an `authorizations` table — pattern works on both MySQL and PostgreSQL.
+# Example: an `authorizations` table: pattern works on both MySQL and PostgreSQL.
 config.console_redacted_key_values = [
   {
     key_column:     'key',
@@ -550,7 +574,7 @@ config.console_redacted_key_values = [
 
 ```ruby
 # An app with a generic `settings` table on MySQL or PostgreSQL uses a different
-# column layout — patterns stack without interfering.
+# column layout: patterns stack without interfering.
 config.console_redacted_key_values = [
   { key_column: 'name', value_column: 'value',
     sensitive_keys: %w[smtp_password slack_webhook_url] },
@@ -563,47 +587,22 @@ Behavior:
 
 | Response shape                                                        | EAV redaction applies when                                          |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `console_find` — `{record: {..., key: ..., value: ...}}`              | `record[key_column]` ∈ `sensitive_keys` → `record[value_column] = "[REDACTED]"` |
-| `console_sample`, `console_recent` — `{records: [{key:, value:}, ...]}` | Per-row — each record is evaluated against every configured pattern |
-| `console_sql`, `console_query` — `{columns: [...], rows: [[...]]}`    | Positional — `key_column` and `value_column` resolved to indexes once, per row lookup afterwards |
-| `console_pluck` — `{columns: [...], values: [[...]]}`                 | Same positional logic as `rows`                                     |
+| `console_find`, `{record: {..., key: ..., value: ...}}`              | `record[key_column]` ∈ `sensitive_keys` → `record[value_column] = "[REDACTED]"` |
+| `console_sample`, `console_recent`, `{records: [{key:, value:}, ...]}` | Per-row, each record is evaluated against every configured pattern |
+| `console_sql`, `console_query`, `{columns: [...], rows: [[...]]}`    | Positional, `key_column` and `value_column` resolved to indexes once, per row lookup afterwards |
+| `console_pluck`, `{columns: [...], values: [[...]]}`                 | Same positional logic as `rows`                                     |
 
 A pattern is skipped silently when its `key_column` or `value_column` is absent from the current `columns` header, so unrelated queries pay nothing for the configuration. Comparison is case-sensitive and coerces the key cell through `to_s` before matching, so `:stripe_access_token` and `"stripe_access_token"` both fire.
 
-`console_redacted_columns` and `console_redacted_key_values` run in a single pass — configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
+`console_redacted_columns` and `console_redacted_key_values` run in a single pass, configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
 
-### `console_sql` / `console_query` posture
+### Unlocking `console_sql` / `console_query`
 
-**Embedded mode** (Options A–C) lets you gate the Tier 4 read tools via
-`console_embedded_read_tools`. When that flag is `false` (the default),
-`console_sql` and `console_query` return an `error_type: "unsupported"`
-refusal without ever touching ActiveRecord.
-
-The launcher wrapper (Option D) starts the same embedded server and respects
-the same setting. When read tools are registered, these controls run:
-
-1. `SqlValidator` rejects DML/DDL and most administrative keywords
-   (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`,
-   `PREPARE`, transaction control, and `EXPLAIN ANALYZE`) at the string
-   level, and enforces a read-only **function allowlist** — any function
-   not on `ALLOWED_FUNCTIONS` is rejected by name.
-2. `TableGate` refuses any SQL, model, or join that touches a
-   `console_blocked_tables` entry.
-3. `SafeContext` wraps every request in a rolled-back transaction with
-   a short statement timeout. **It does NOT cover async side effects** —
-   ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP
-   egress, `Thread.new`-spawned work, `after_rollback` callbacks, and
-   writes through a different shard all execute as live. Treat the
-   Console MCP as an admin-trust boundary, not a sandbox.
-4. `CredentialScanner` + column/EAV redaction scrub results.
-
-If the host should not expose raw SQL or structured query building, leave
-`console_embedded_read_tools = false`.
-
-### Unlocking `console_sql` / `console_query` in embedded mode
-
-By default supported servers do not register `console_sql` or `console_query`.
-To register them, set `console_embedded_read_tools = true` in `Woods.configure`:
+All three embedded transports (Options A, B, C) and the launcher wrapper
+(Option D) start the same embedded server, so they all read one setting:
+`console_embedded_read_tools`. Default `false`, `console_sql` and
+`console_query` return an `error_type: "unsupported"` refusal without ever
+touching ActiveRecord, and neither is registered in `tools/list`.
 
 ```ruby
 # config/initializers/woods.rb
@@ -611,25 +610,19 @@ Woods.configure do |config|
   config.console_mcp_enabled           = true     # mount the Rack middleware via Railtie
   config.console_mcp_token             = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
   config.console_embedded_read_tools   = true     # unlock console_sql / console_query
-  config.console_redacted_columns      = %w[password_digest encrypted_password api_key token]
+  config.console_redacted_columns      = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS
 end
 ```
 
-This flag flows through to both the Railtie Rack middleware (Option C) and the
-stdio transports (Options A and B) automatically.
+With the flag on, every request through `console_sql` / `console_query` runs
+these controls, in order:
 
-Security posture with the flag on:
+1. `SqlValidator` rejects DML/DDL (`INSERT`/`UPDATE`/`DELETE`/`DROP`/`TRUNCATE`/`ALTER`/`CREATE`/`REPLACE`), `UNION`/`INTO`/`COPY`, multi-statement and comment-hidden injections, and most administrative keywords (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`, `PREPARE`, transaction control, `EXPLAIN ANALYZE`) at the string level. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`), anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass.
+2. `TableGate` refuses any SQL, model, or join that touches a `console_blocked_tables` entry.
+3. `SafeContext` wraps every request in a rolled-back transaction with a short statement timeout. **It does NOT cover async side effects**: ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP egress, `Thread.new`-spawned work, `after_rollback` callbacks, and writes through a different shard all execute as live. Treat the Console MCP as an admin-trust boundary, not a sandbox.
+4. `CredentialScanner` + column/EAV redaction scrub results.
 
-| Layer | What it enforces |
-|-------|------------------|
-| `SqlValidator` | Rejects write prefixes (INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / REPLACE), `UNION` / `INTO` / `COPY`, multi-statement, and comment-hidden injections before any DB interaction. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`) — anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass. |
-| `SafeContext` rollback | Every request runs inside a database transaction that is always rolled back, so even side-effecting reads (functions, settings) cannot persist. |
-| Per-request connection pooling | Each HTTP request draws a fresh connection from `ActiveRecord::Base`'s pool — no shared mutable state between requests. |
-
-These controls define the supported read-tool posture. Keep the flag off when
-the host requires a narrower database capability.
-
-All three embedded transports (Options A, B, and C) honour `console_embedded_read_tools` from `Woods.configure` — stdio rake, rails runner, and Rack middleware each read the flag at startup.
+Keep the flag off when the host requires a narrower database capability.
 
 ---
 
@@ -640,13 +633,13 @@ supported transport (stdio, Docker/SSH launcher, and HTTP).
 
 | # | Layer | Knob | Fires at | Purpose |
 |---|-------|------|----------|---------|
-| 0 | Feature gate | `console_mcp_enabled` | Process start / request entry | Master on/off switch — feature is inert until an operator opts in |
+| 0 | Feature gate | `console_mcp_enabled` | Process start / request entry | Master on/off switch, feature is inert until an operator opts in |
 | 1 | Blocked tables | `console_blocked_tables` | Tool dispatch, before executor | Reject any tool call that touches a named table (model, table, or sql arg) |
 | 2 | Credential scanner | `console_disabled_scanner_patterns` (`[:all]` to disable entirely) | After executor, before render | Content-shape redaction of credential-shaped strings anywhere in the response tree |
 | 3 | Column + EAV redaction | `console_redacted_columns`, `console_redacted_key_values` | After executor, before Layer 2 | Identity-based redaction by column name and by key/value row shape |
 | 4 | SqlValidator + SafeContext | built-in | Inside executor | SQL deny-list for `console_sql`; transaction-rollback for every request |
 
-Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks — `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2 — emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
+Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks, `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2, emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
 
 ### Confirmation and Audit Inventory
 
@@ -679,17 +672,17 @@ Each transaction sets a statement timeout before any query runs. The default is 
 | Adapter | Mechanism | Scope |
 |---------|-----------|-------|
 | PostgreSQL | `SET statement_timeout = '5000ms'` | All statement types |
-| MySQL | `SET max_execution_time = 5000` | SELECT only (MySQL limitation) |
-| Other | Best-effort (skipped gracefully) | — |
+| MySQL | `SET max_execution_time = 5000` (session scope; the prior value is restored after the transaction) | SELECT only (MySQL limitation) |
+| Other | Best-effort (skipped gracefully) | n/a |
 
 ### SQL Validation (Tier 4 `console_sql`)
 
 `SqlValidator` rejects non-read-only SQL at the string level, before any database interaction:
 
-- **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected — it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
+- **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected, it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
 - **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`
 - **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`
-- **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS` — a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
+- **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS`, a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
 - **Rejected patterns:** multiple statements (semicolons), writable CTEs (`WITH ... AS (DELETE/UPDATE/INSERT ...)`), comment-hidden injections
 
 ### Model and Column Validation
@@ -698,7 +691,7 @@ Before any query runs, the model name is checked against the registry built from
 
 For `console_query`, a schema-qualified column reference such as `orders.total` is validated for **ownership**: the table side is gated through `TableGate` (a blocked table is refused) and the column must actually exist on that table, so a blocked-table column cannot be smuggled through `select`, `order`, or `having`. Bare columns validate against the active model.
 
-Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) — see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.
+Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`), see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.
 
 ---
 
@@ -707,7 +700,7 @@ Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `
 ### MCP client shows no tools or "connection refused"
 
 - **Rake/Docker:** Check that `cwd` in MCP config points to the Rails app root (where `Rakefile` lives).
-- **HTTP:** Check that the Rails server is running and listening on the expected port. Try `curl http://localhost:3000/mcp/console` — a 200 or 405 means the middleware is mounted.
+- **HTTP:** Check that the Rails server is running and listening on the expected port. Try `curl http://localhost:3000/mcp/console`, a 200 or 405 means the middleware is mounted.
 - **All modes:** Run `bundle exec rake woods:console` directly in a terminal. It should hang (waiting for MCP protocol input) rather than exit immediately. If it exits, check the error output.
 
 ### Rails boot noise breaks MCP protocol
@@ -716,31 +709,30 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 
 1. You are using `bundle exec rake woods:console`, not `rails runner exe/woods-console` directly (the runner path handles this too, but via a different mechanism).
 2. No `puts` or `print` calls run at boot in your initializers before the task can capture stdout.
-3. Try running `bundle exec rake woods:console 2>/dev/null` to isolate — the MCP protocol output goes to stdout, Rails noise goes to stderr.
+3. Try running `bundle exec rake woods:console 2>/dev/null` to isolate, the MCP protocol output goes to stdout, Rails noise goes to stderr.
 
 ### Models not visible to `console_status`
 
 `console_status` returns the list of models registered at startup. If a model is missing:
 
 1. Check that it inherits from `ActiveRecord::Base` (not from an intermediate abstract class that doesn't itself inherit AR).
-2. Check that `model.table_exists?` returns true — models for tables that don't exist are excluded.
+2. Check that `model.table_exists?` returns true, models for tables that don't exist are excluded.
 3. Check that `eager_load!` succeeds. If your app has a directory that fails to load (e.g., `app/graphql/` requiring an uninstalled gem), Zeitwerk may abort early and skip models defined later alphabetically. Look for `NameError` in the boot output.
 
 ### `console_sql` rejects my query
 
 `SqlValidator` is conservative by design. If a valid read-only query is rejected:
 
-- `UNION` in any position is blocked — use `console_query` with joins instead.
+- `UNION` in any position is blocked, use `console_query` with joins instead.
 - Plain `EXPLAIN` is allowed; `EXPLAIN ANALYZE` is **rejected** because it executes the query rather than just planning it.
-- A function is rejected unless it is on the read-only allowlist (`ALLOWED_FUNCTIONS`). If a legitimate pure/read function is missing, that is the list to extend — deliberately.
-- Queries with semicolons are blocked even if the second statement is a comment — strip trailing semicolons.
+- A function is rejected unless it is on the read-only allowlist (`ALLOWED_FUNCTIONS`). If a legitimate pure/read function is missing, that is the list to extend, deliberately.
+- Queries with semicolons are blocked even if the second statement is a comment, strip trailing semicolons.
 
 ### A tool from the 31-schema inventory is not listed
 
-Supported servers list only executable tools.
-
-- For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
-- `console_eval`, Tier 2, and Tier 3 tools are inventory only and are not registered.
+See [Tool Support by Mode](#tool-support-by-mode): only 9 (or 11 with
+`console_embedded_read_tools`) are ever registered. For `console_sql` /
+`console_query`, see [Unlocking `console_sql` / `console_query`](#unlocking-console_sql--console_query). Tier 2, Tier 3, and `console_eval` are inventory-only in every mode, no flag registers them.
 
 ### `console_eval` and `WOODS_CONSOLE_UNSAFE_EVAL`
 

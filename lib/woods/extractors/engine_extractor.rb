@@ -46,16 +46,40 @@ module Woods
           Rails.application.respond_to?(:routes)
       end
 
-      # Retrieve Engine subclasses, compatible with Ruby 3.0+.
-      # Class#subclasses was added in Ruby 3.1; fall back to descendants filtering.
+      # Retrieve Engine subclasses.
+      #
+      # `Class#subclasses` is available on every supported Rails version
+      # (native since Ruby 3.1, backported by ActiveSupport's
+      # `core_ext/class/subclasses` before that, which every booted Rails
+      # app loads) — the ObjectSpace fallback below is defensive for the
+      # unlikely case that core_ext hasn't loaded, not a Ruby-version gap.
+      #
+      # Excludes {#host_application_class?} — Rails::Application is itself a
+      # Rails::Engine subclass (and the ObjectSpace fallback also reaches the
+      # host app's own concrete Application class), neither of which is an
+      # installed engine.
       #
       # @return [Array<Class>]
       def engine_subclasses
-        if Rails::Engine.respond_to?(:subclasses)
-          Rails::Engine.subclasses
-        else
-          ObjectSpace.each_object(Class).select { |klass| klass < Rails::Engine }
-        end
+        classes = if Rails::Engine.respond_to?(:subclasses)
+                    Rails::Engine.subclasses
+                  else
+                    ObjectSpace.each_object(Class).select { |klass| klass < Rails::Engine }
+                  end
+        classes.reject { |klass| host_application_class?(klass) }
+      end
+
+      # Whether a class is Rails::Application itself, or the host app's own
+      # concrete subclass of it (e.g. MyApp::Application). Both descend from
+      # Rails::Engine but represent the host app, not an installed engine —
+      # including them produced a phantom "engine" unit for the app itself.
+      #
+      # @param klass [Class]
+      # @return [Boolean]
+      def host_application_class?(klass)
+        return false unless klass.is_a?(Module)
+
+        defined?(Rails::Application) && klass <= Rails::Application
       end
 
       # Build a mapping from engine class to mounted path by scanning app routes.
@@ -64,7 +88,7 @@ module Woods
       def build_mount_map
         map = {}
         Rails.application.routes.routes.each do |route|
-          app = route.app
+          app = unwrap_mounted_app(route.app)
           next unless engine_class?(app)
 
           path = extract_mount_path(route)
@@ -75,6 +99,27 @@ module Woods
         map
       rescue StandardError
         {}
+      end
+
+      # Unwrap a mounted route's app down to the actual engine class.
+      #
+      # For a mounted engine, `route.app` is an
+      # `ActionDispatch::Routing::Mapper::Constraints` wrapper, not the
+      # engine itself — the engine is `route.app.app`. {#engine_class?}
+      # never matched the wrapper, so `mounted_path` was always nil in a
+      # live app. Bounded to a handful of unwraps rather than an open-ended
+      # loop, since a route app is never nested more than a level or two
+      # deep in practice.
+      #
+      # @param app [Object] The route's `.app` value
+      # @return [Object] The unwrapped app, or the original value unchanged
+      def unwrap_mounted_app(app)
+        5.times do
+          break if engine_class?(app) || !app.respond_to?(:app)
+
+          app = app.app
+        end
+        app
       end
 
       # Check if an object is a Rails::Engine subclass.

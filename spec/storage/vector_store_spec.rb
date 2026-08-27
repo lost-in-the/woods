@@ -263,6 +263,22 @@ RSpec.describe Woods::Storage::VectorStore do
 
         expect(store.count).to eq(1)
       end
+
+      # #search honors an Array filter value as membership ("any of") via
+      # #filter_match?; #delete_by_filter used a bare `==` instead, so the
+      # same filter that would match a unit in #search silently matched
+      # nothing here.
+      it 'removes vectors matching an Array (membership) filter, like #search does' do
+        store.store('m1', [1.0], { type: 'model' })
+        store.store('c1', [0.5], { type: 'controller' })
+        store.store('s1', [0.0], { type: 'service' })
+
+        store.delete_by_filter({ type: %w[model controller] })
+
+        expect(store.count).to eq(1)
+        results = store.search([0.0])
+        expect(results.first.id).to eq('s1')
+      end
     end
 
     # ── Persistence seams ───────────────────────────────────────────

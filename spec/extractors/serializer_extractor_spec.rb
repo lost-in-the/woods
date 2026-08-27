@@ -90,6 +90,22 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
 
   # ── extract_serializer_file ──────────────────────────────────────────
 
+  describe 'block-namespaced serializers (#174)' do
+    it 'qualifies a class declared inside a module block' do
+      path = create_file('app/serializers/api/user_serializer.rb', <<~RUBY)
+        module Api
+          class UserSerializer < ActiveModel::Serializer
+            attributes :id
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_serializer_file(path)
+      expect(unit.identifier).to eq('Api::UserSerializer')
+      expect(unit.namespace).to eq('Api')
+    end
+  end
+
   describe '#extract_serializer_file' do
     it 'extracts AMS serializer metadata' do
       path = create_file('app/serializers/post_serializer.rb', <<~RUBY)

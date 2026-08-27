@@ -597,7 +597,7 @@ module Woods
             raise transport_error(e, ambiguous: false)
           rescue Errno::ECONNRESET, Net::ReadTimeout, Net::WriteTimeout, IOError => e
             @http_client = nil
-            retry if attempt == 1 && retry_safe?(method, path) && !write_request?(method, path)
+            retry if attempt == 1 && !write_request?(method, path)
 
             raise transport_error(e, ambiguous: write_request?(method, path))
           end
@@ -632,17 +632,10 @@ module Woods
           )
         end
 
-        def retry_safe?(method, path)
-          return true if %i[get put delete].include?(method)
-
-          method == :post && idempotent_post?(path)
-        end
-
-        def idempotent_post?(path)
-          path_without_query = path.split('?').first
-          %w[/search /count /scroll /delete].any? { |suffix| path_without_query.end_with?(suffix) }
-        end
-
+        # Only GET and read-only POST (search/count/scroll) retry a
+        # mid-exchange network failure — every other verb, and every other
+        # POST (upsert, delete), may already have committed server-side, so
+        # a blind retry risks double-applying it.
         def write_request?(method, path)
           return false if method == :get
           return false if method == :post && read_only_post?(path)

@@ -50,17 +50,6 @@ RSpec.describe Woods::Db::Migrator do
     end
   end
 
-  describe '#pending_versions' do
-    it 'returns all versions when none applied' do
-      expect(migrator.pending_versions).to eq([1, 2, 3, 4, 5, 6])
-    end
-
-    it 'returns only unapplied versions' do
-      migrator.migrate!
-      expect(migrator.pending_versions).to eq([])
-    end
-  end
-
   describe 'woods_units schema' do
     before { migrator.migrate! }
 

@@ -152,7 +152,7 @@ module Woods
       # unrelated identifiers and they never fused, so chunked corpora
       # (rails_source-heavy hosts) got zero RRF benefit from hybrid search.
       #
-      # Also accumulates per-identifier metadata (first non-nil wins) and
+      # Also accumulates per-identifier metadata (first non-empty wins) and
       # matched fields (union across sources) so the merged candidate keeps
       # the keyword signal — dropping +matched_fields+ here would kill
       # {#keyword_score} on exactly the multi-source (hybrid) path where
@@ -170,7 +170,12 @@ module Woods
             base_id = base_identifier(candidate.identifier)
             # RRF is 1-based (Cormack et al., 2009): top-ranked doc uses rank 1, not 0.
             rrf_scores[base_id] += 1.0 / (RRF_K + idx + 1)
-            metadata_map[base_id] ||= candidate.metadata
+            # `||=` alone is wrong here: a graph-expansion candidate's `{}`
+            # is truthy, so it would permanently shadow a real metadata hash
+            # arriving from a later-processed source. Only lock in a value
+            # once it's actually non-empty.
+            existing = metadata_map[base_id]
+            metadata_map[base_id] = candidate.metadata if existing.nil? || existing.empty?
             merge_matched_fields(matched_fields_map, base_id, candidate)
           end
         end
@@ -217,14 +222,7 @@ module Woods
       #
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map, matched_fields_map)
-        # Plain-Ruby `index_by` substitute — the ActiveSupport version
-        # isn't loaded when the gem runs outside a Rails boot. Preserve
-        # last-wins semantics to match ActiveSupport's `Enumerable#index_by`
-        # so the merged candidate's `source` continues to reflect the
-        # final source a given identifier appeared in (relevant when
-        # observability/debug tools read `.source` on an RRF result).
-        original_by_id = {}
-        candidates.each { |c| original_by_id[base_identifier(c.identifier)] = c }
+        original_by_id = pick_merged_source(candidates)
         rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(
@@ -235,6 +233,33 @@ module Woods
             matched_fields: matched_fields_map[identifier]
           )
         end
+      end
+
+      # Pick the representative candidate (for +source+ attribution) per
+      # base identifier across every source that hit it.
+      #
+      # +:graph_expansion+ never wins this pick over a vector/keyword/direct
+      # duplicate: a unit strongly hit by vector search AND reached via
+      # graph expansion is a real primary result, not incidental context,
+      # and {ContextAssembler#add_result_sections} routes solely on
+      # +candidate.source+ to decide primary vs. supporting placement.
+      # Plain last-wins (the prior behavior, matching ActiveSupport's
+      # +Enumerable#index_by+) let whichever duplicate the source-grouping
+      # loop visited last silently demote it. Within a precedence tier,
+      # last-wins is preserved.
+      #
+      # @param candidates [Array<Candidate>]
+      # @return [Hash{String => Candidate}]
+      def pick_merged_source(candidates)
+        original_by_id = {}
+        candidates.each do |c|
+          id = base_identifier(c.identifier)
+          existing = original_by_id[id]
+          next if existing && existing.source != :graph_expansion && c.source == :graph_expansion
+
+          original_by_id[id] = c
+        end
+        original_by_id
       end
 
       # Score each candidate across all signals.
@@ -314,6 +339,14 @@ module Woods
         end
       end
 
+      # The unit identifier behind a possibly chunk-suffixed candidate id.
+      #
+      # @param identifier [String]
+      # @return [String]
+      def base_identifier(identifier)
+        identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
+      end
+
       # Importance score based on PageRank / structural importance.
       #
       # Prefers live PageRank from the graph store (rank-percentile 0.0–1.0) when
@@ -324,14 +357,6 @@ module Woods
       # @param unit [Hash, nil] Unit metadata from store
       # @param identifier [String] Candidate identifier (matched against PageRank keys)
       # @return [Float] 0.0 to 1.0
-      # The unit identifier behind a possibly chunk-suffixed candidate id.
-      #
-      # @param identifier [String]
-      # @return [String]
-      def base_identifier(identifier)
-        identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
-      end
-
       def importance_score(unit, identifier)
         pagerank = pagerank_importance_map[identifier]
         return pagerank if pagerank
@@ -360,6 +385,12 @@ module Woods
 
       # Compute rank-percentile scores from the graph store's PageRank hash.
       #
+      # `respond_to?` alone is the wrong guard: {Storage::GraphStore::Interface}
+      # *defines* +#pagerank+ as a +NotImplementedError+ stub, so an adapter
+      # that merely includes the interface without overriding it still
+      # answers +respond_to?+ with +true+ (B-108) — and +NotImplementedError+
+      # is a +ScriptError+, which the rescue below does not catch on its own.
+      #
       # @return [Hash{String => Float}] Empty hash when no graph store or no scores.
       def compute_pagerank_importance_map
         return {} unless @graph_store.respond_to?(:pagerank)
@@ -372,7 +403,7 @@ module Woods
         ranked.each_with_index.to_h do |(identifier, _score), rank|
           [identifier, 1.0 - (rank / total)]
         end
-      rescue StandardError
+      rescue StandardError, NotImplementedError
         {}
       end
 

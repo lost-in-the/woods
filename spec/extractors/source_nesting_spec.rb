@@ -164,6 +164,42 @@ RSpec.describe Woods::Extractors::SourceNesting do
       expect(scanner.qualified_first_class_name(source)).to eq('Billing::Payment')
     end
 
+    it 'pops a block whose `end` is chained (`end.freeze`), not left dangling' do
+      # An exact `stripped == 'end'` check misses `end.freeze`, so the `do`
+      # block's frame was never popped and the enclosing module's own `end`
+      # popped that stale frame instead of the module — leaving `Helpers`
+      # open on the stack for everything that followed.
+      source = <<~RUBY
+        module Helpers
+          LIST = %w[a b].map do |x|
+            x
+          end.freeze
+        end
+
+        module Mutations
+          class CreateUser
+          end
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Mutations::CreateUser')
+    end
+
+    it 'pops a block whose `end` is followed by a closing delimiter (`end)`)' do
+      source = <<~RUBY
+        module Helpers
+          result = begin
+            1
+          end)
+        end
+
+        class Payment
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Payment')
+    end
+
     it 'returns nil when the source has no class declaration' do
       source = <<~RUBY
         module Billing

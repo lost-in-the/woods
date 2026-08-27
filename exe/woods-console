@@ -37,8 +37,19 @@ unless Woods.configuration.console_mcp_enabled
   exit 1
 end
 
-# Ensure all application models are loaded for the registry.
-Rails.application.eager_load!
+# Ensure all application models are loaded for the registry. A NameError
+# here (e.g. app/graphql/ referencing an uninstalled gem) would otherwise
+# crash the whole server before it can even report why — warn and continue
+# with whatever eager_load! managed to load, mirroring the extractor's own
+# eager_load! fallback (Extractor#safe_eager_load!). The registry below is
+# then built from whatever's in ActiveRecord::Base.descendants, so a partial
+# load just means a partial registry, not a dead server.
+begin
+  Rails.application.eager_load!
+rescue NameError => e
+  warn "[Woods Console] eager_load! hit NameError: #{e.message}. " \
+       'Continuing with a possibly incomplete model registry.'
+end
 
 registry = ActiveRecord::Base.descendants.each_with_object({}) do |model, hash|
   next if model.abstract_class?
@@ -79,13 +90,29 @@ rescue StandardError
   next
 end
 
-validator = Woods::Console::ModelValidator.new(registry: registry)
+validator = Woods::Console::ModelValidator.new(registry: registry, table_names: model_tables)
 safe_context = Woods::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
 
 config = Woods.configuration
 redacted_columns = Array(config.console_redacted_columns)
 redacted_key_values = Array(config.console_redacted_key_values)
 read_tools_enabled = config.console_embedded_read_tools
+
+# Mirrors Woods::Console::RackMiddleware#check_blocked_tables_config! — the
+# stdio server wires the same TableGate config, so it needs the same loud
+# warning (or hard failure in production) when Layer 1 is inactive.
+if Array(config.console_blocked_tables).empty?
+  blocked_tables_message =
+    '[Woods Console] console_blocked_tables is empty — Layer 1 (table gate) is INACTIVE. ' \
+    'All tables are reachable via the Console MCP. ' \
+    'Set console_blocked_tables in your Woods initializer to restrict access. ' \
+    'Example: Woods.configure { |c| c.console_blocked_tables = ' \
+    'Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[your_table] }'
+
+  raise Woods::ConfigurationError, blocked_tables_message if Rails.env.production?
+
+  warn blocked_tables_message
+end
 
 server = Woods::Console::Server.build_embedded(
   model_validator: validator,

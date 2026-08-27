@@ -67,6 +67,12 @@ RSpec.configure do |config|
   config.order = :random
   Kernel.srand config.seed
 
+  # A WOODS_RUN_* env-var name drift (opt-in CI lanes: booted_app,
+  # live_backends, http_server, mcp_inspector, packaged_gem, perf) would
+  # otherwise filter every example out of a run and still exit 0 — a silent
+  # green job that tested nothing.
+  config.fail_if_no_examples = true
+
   # Perf-tagged specs (see spec/performance/) are wall-clock regression
   # guards — measurably jittery on shared CI runners. Excluded from the
   # default suite; opt in with `rspec --tag perf` from a dedicated job
@@ -100,6 +106,19 @@ RSpec.configure do |config|
 
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
+  end
+
+  # Several spec files nil out Woods.configuration in their own after hooks
+  # and never restore it, so any later example that reads the global (for
+  # example Extractor#json_serialize) fails under a seed that orders it
+  # after them. Restore whatever the example started with.
+  config.around(:each) do |example|
+    # Some spec files load only one lib file, before Woods.configuration exists.
+    restorable = Woods.respond_to?(:configuration=)
+    previous = Woods.configuration if restorable
+    example.run
+  ensure
+    Woods.configuration = previous if restorable
   end
 
   # Keep the RubyGems update check hermetic and deterministic across the suite:

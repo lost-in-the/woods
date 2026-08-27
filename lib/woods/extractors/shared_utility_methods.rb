@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'source_nesting'
+
 module Woods
   module Extractors
     # Utility methods shared across multiple extractors.
@@ -20,6 +22,8 @@ module Woods
     #   end
     #
     module SharedUtilityMethods
+      include SourceNesting
+
       # Glob files matching a pattern across a list of directories.
       #
       # Centralizes the `Dir[dir.join('**/*.rb')]` loop duplicated across
@@ -94,9 +98,11 @@ module Woods
       #   (e.g., "policies", "validators", "(?:services|interactors|operations|commands|use_cases)")
       # @return [String] The class name
       def extract_class_name(file_path, source, dir_prefix)
-        return ::Regexp.last_match(1) if source =~ /^\s*class\s+([\w:]+)/
-
-        file_path.sub("#{Rails.root}/", '').sub(%r{^app/#{dir_prefix}/}, '').sub('.rb', '').camelize
+        # Position-aware (SourceNesting, #174): `module Admin; class Foo`
+        # names Admin::Foo, and a helper module nested inside the class
+        # does not leak into the identifier.
+        qualified_first_class_name(source) ||
+          file_path.sub("#{Rails.root}/", '').sub(%r{^app/#{dir_prefix}/}, '').sub('.rb', '').camelize
       end
 
       # Extract the parent class name from a class definition.

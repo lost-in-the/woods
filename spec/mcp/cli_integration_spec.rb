@@ -57,6 +57,44 @@ RSpec.describe 'MCP CLI integration' do
       end
     end
 
+    # A payload-born index has no manifest.json at the root — it lives under
+    # the directory generation.json's `payload` pointer names. The pre-flight
+    # check must follow that pointer (mirroring Woods::Generation#payload_dir
+    # / Bootstrapper.manifest_present?) rather than reject a perfectly valid,
+    # freshly-extracted index.
+    it 'passes preflight for a payload-born index with no manifest.json at the root' do
+      Dir.mktmpdir do |dir|
+        payload_dir = File.join(dir, 'payloads', 'gen-1')
+        FileUtils.mkdir_p(payload_dir)
+        FileUtils.touch(File.join(payload_dir, 'manifest.json'))
+        File.write(File.join(dir, 'generation.json'),
+                   JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+
+        stdin, stdout, stderr, wait_thr = Open3.popen3(wrapper, dir)
+        sleep 2
+        Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
+        wait_thr.join(5)
+        error_output = utf8(stderr.read)
+        stdin.close
+        stdout.close
+        stderr.close
+
+        expect(error_output).not_to match(/No manifest\.json/)
+      end
+    end
+
+    it 'still rejects a directory with neither a root manifest nor a resolvable payload manifest' do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, 'generation.json'),
+                   JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+
+        _out, err, status = Open3.capture3(wrapper, dir)
+
+        expect(status.exitstatus).to eq(1)
+        expect(utf8(err)).to match(/No manifest\.json/)
+      end
+    end
+
     # The wrapper used to default MCP_PROTOCOL_VERSION to 2024-11-05. The mcp
     # gem's server is dual-era — it answers `initialize` for legacy clients and
     # serves per-request metadata for modern ones — and pinning is the single

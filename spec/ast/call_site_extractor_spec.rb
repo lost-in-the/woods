@@ -115,38 +115,4 @@ RSpec.describe Woods::Ast::CallSiteExtractor do
       )
     end
   end
-
-  describe '#extract_significant' do
-    it 'filters out insignificant methods' do
-      source = <<~RUBY
-        def process
-          user = User.find(id)
-          user.nil?
-          user.present?
-          user.to_s
-          UserService.call(user)
-        end
-      RUBY
-
-      root = parser.parse(source)
-      calls = extractor.extract_significant(root)
-
-      method_names = calls.map { |c| c[:method_name] }
-      expect(method_names).to include('find')
-      expect(method_names).to include('call')
-      expect(method_names).not_to include('nil?')
-      expect(method_names).not_to include('present?')
-      expect(method_names).not_to include('to_s')
-    end
-
-    it 'keeps insignificant methods when receiver is a known unit' do
-      source = 'MyService.new'
-
-      root = parser.parse(source)
-      calls = extractor.extract_significant(root, known_units: ['MyService'])
-
-      method_names = calls.map { |c| c[:method_name] }
-      expect(method_names).to include('new')
-    end
-  end
 end

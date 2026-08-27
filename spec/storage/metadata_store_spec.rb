@@ -93,6 +93,19 @@ RSpec.describe Woods::Storage::MetadataStore do
       it 'returns nothing when the query matches no record' do
         expect(store.search('nonexistent-token', fields: ['description'])).to be_empty
       end
+
+      # `updated_at` is a store-managed timestamp, not caller-supplied data —
+      # SQLite's `data` column never includes it, so a whole-record query that
+      # only matched the timestamp used to return every record on InMemory
+      # (which serialized it into the JSON haystack) and none on SQLite.
+      # `#find`/`#search` both strip `updated_at` from what they return, so
+      # there's no public accessor for the stored value — the ISO date
+      # `#store` wrote it with (Time.now.iso8601, same instant as the
+      # `before` block above) is reconstructed here instead.
+      it 'does not match on the store-managed updated_at timestamp (all-fields path)' do
+        today_fragment = Time.now.strftime('%Y-%m-%d')
+        expect(store.search(today_fragment)).to be_empty
+      end
     end
   end
 

@@ -425,7 +425,7 @@ module Woods
       # message match remains as a fallback for injected clients that raise
       # plain Woods::Error.
       def note_budget_exhaustion(error)
-        return false unless error.is_a?(BudgetExhaustedError) || error.message.include?('daily budget exhausted')
+        return false unless error.is_a?(BudgetExhaustedError) || error.message.include?('budget exhausted for this run')
 
         @budget_exhausted = true
       end

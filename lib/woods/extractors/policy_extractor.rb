@@ -31,9 +31,6 @@ module Woods
         app/policies
       ].freeze
 
-      # Method name patterns that indicate decision/eligibility logic
-      DECISION_METHOD_PATTERN = /\b(allowed|eligible|valid|permitted|can_\w+|should_\w+|qualifies|meets_\w+|satisfies)\?/
-
       def initialize
         @directories = POLICY_DIRECTORIES.map { |d| Rails.root.join(d) }
                                          .select(&:directory?)
@@ -144,8 +141,12 @@ module Woods
 
         # From initialize params
         if source =~ /def\s+initialize\s*\(([^)]*)\)/
-          params = ::Regexp.last_match(1)
-          params.scan(/(\w+)/).flatten.each do |param|
+          # One parameter per comma. Keyword arguments (`strict: false`),
+          # default values (`user = nil`), and splats name no model, so only
+          # a bare positional identifier survives.
+          ::Regexp.last_match(1).split(',').each do |raw|
+            param = raw.strip[/\A(?:\*\*?|&)?([a-z_]\w*)\s*(?:=|\z)/, 1]
+            next if param.nil? || raw.strip.start_with?('*', '&')
             # Skip generic param names
             next if %w[args options params attributes context].include?(param)
 

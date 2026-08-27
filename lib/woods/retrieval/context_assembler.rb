@@ -8,14 +8,12 @@ module Woods
     # Transforms ranked search candidates into a token-budgeted context string
     # for LLM consumption.
     #
-    # Allocates a fixed token budget across four sections:
-    # - Structural (10%): Always-included codebase overview
-    # - Primary (50%): Direct query results
-    # - Supporting (25%): Dependencies and related context
-    # - Framework (15%): Rails/gem source when query has framework context
-    #
-    # When framework context is not needed, primary and supporting sections
-    # receive the framework allocation proportionally.
+    # Allocates a fixed token budget in two passes:
+    # - Structural (10% of the total budget): Always-included codebase overview
+    # - Everything else splits what's LEFT after structural is carved out
+    #   ({#compute_section_budgets}), not the total budget directly:
+    #   - Framework context active: Primary 55%, Supporting 25%, Framework 20%
+    #   - Framework context inactive: Primary 65%, Supporting 35%, Framework 0%
     #
     # @example
     #   assembler = ContextAssembler.new(metadata_store: store)
@@ -27,11 +25,30 @@ module Woods
     class ContextAssembler
       DEFAULT_BUDGET = 8000 # tokens
 
+      # Only +:structural+ is read directly ({#add_structural_section}) — it
+      # is a fraction of the TOTAL budget. The other sections split what
+      # remains after structural is carved out and have two different
+      # fraction sets depending on +classification.framework_context+, which
+      # a single flat hash can't express; see {FRAMEWORK_ACTIVE_ALLOCATION}
+      # and {FRAMEWORK_INACTIVE_ALLOCATION}.
       BUDGET_ALLOCATION = {
-        structural: 0.10,
-        primary: 0.50,
+        structural: 0.10
+      }.freeze
+
+      # Fractions of the REMAINING (post-structural) budget when the query
+      # has framework context. Read by {#compute_section_budgets}.
+      FRAMEWORK_ACTIVE_ALLOCATION = {
+        primary: 0.55,
         supporting: 0.25,
-        framework: 0.15
+        framework: 0.20
+      }.freeze
+
+      # Fractions of the REMAINING (post-structural) budget when the query
+      # has no framework context — the framework section gets nothing, and
+      # its share isn't proportionally added to primary/supporting.
+      FRAMEWORK_INACTIVE_ALLOCATION = {
+        primary: 0.65,
+        supporting: 0.35
       }.freeze
 
       # Minimum token count for a section to be worth including.
@@ -195,11 +212,27 @@ module Woods
                              [[], candidates]
                            end
 
-        add_candidate_section(sections, sources, :primary,
-                              local.reject { |c| c.source == :graph_expansion }, budgets[:primary])
-        add_candidate_section(sections, sources, :supporting,
-                              local.select { |c| c.source == :graph_expansion }, budgets[:supporting])
+        supporting_candidates, primary_candidates = local.partition { |c| c.source == :graph_expansion }
+        budgets = reclaim_empty_supporting_budget(budgets, supporting_candidates)
+
+        add_candidate_section(sections, sources, :primary, primary_candidates, budgets[:primary])
+        add_candidate_section(sections, sources, :supporting, supporting_candidates, budgets[:supporting])
         add_candidate_section(sections, sources, :framework, framework, budgets[:framework]) if framework_active
+      end
+
+      # The supporting section only ever holds :graph_expansion candidates
+      # ({#add_result_sections}), so a query where no graph expansion ran
+      # reserves a supporting budget it can never spend. Rolling that
+      # reservation into primary before assembly recovers it instead of
+      # stranding it.
+      #
+      # @param budgets [Hash<Symbol, Integer>]
+      # @param supporting_candidates [Array<Candidate>]
+      # @return [Hash<Symbol, Integer>]
+      def reclaim_empty_supporting_budget(budgets, supporting_candidates)
+        return budgets unless supporting_candidates.empty?
+
+        budgets.merge(primary: budgets[:primary] + budgets[:supporting], supporting: 0)
       end
 
       # Add a candidate-based section if candidates produce content.
@@ -215,24 +248,18 @@ module Woods
         sources.concat(section_sources)
       end
 
-      # Compute token budgets for primary/supporting/framework sections.
+      # Compute token budgets for primary/supporting/framework sections from
+      # {FRAMEWORK_ACTIVE_ALLOCATION} / {FRAMEWORK_INACTIVE_ALLOCATION}.
       #
       # @param remaining [Integer] Tokens available after structural
       # @param classification [QueryClassifier::Classification]
       # @return [Hash<Symbol, Integer>]
       def compute_section_budgets(remaining, classification)
         if classification.framework_context
-          {
-            primary: (remaining * 0.55).to_i,
-            supporting: (remaining * 0.25).to_i,
-            framework: (remaining * 0.20).to_i
-          }
+          FRAMEWORK_ACTIVE_ALLOCATION.transform_values { |fraction| (remaining * fraction).to_i }
         else
-          {
-            primary: (remaining * 0.65).to_i,
-            supporting: (remaining * 0.35).to_i,
-            framework: 0
-          }
+          FRAMEWORK_INACTIVE_ALLOCATION.transform_values { |fraction| (remaining * fraction).to_i }
+                                       .merge(framework: 0)
         end
       end
 
@@ -325,14 +352,36 @@ module Woods
 
       # Check if a candidate is framework source.
       #
+      # Reads +candidate.metadata+ first, then falls back to the assembled
+      # +@unit_cache+ entry. A real graph-expansion candidate always carries
+      # +metadata: {}+ (see {SearchExecutor#execute_graph}), so relying on
+      # +candidate.metadata+ alone silently misses every graph-expanded
+      # framework unit — they'd never partition out of primary/supporting
+      # into the framework section.
+      #
       # @param candidate [Candidate]
       # @return [Boolean]
       def framework_candidate?(candidate)
-        metadata = candidate.metadata
-        return false unless metadata
-
-        type = metadata[:type] || metadata['type']
+        type = type_from_candidate_metadata(candidate) || type_from_unit_cache(candidate)
         %w[rails_source gem_source].include?(type.to_s)
+      end
+
+      # @param candidate [Candidate]
+      # @return [String, Symbol, nil]
+      def type_from_candidate_metadata(candidate)
+        metadata = candidate.metadata
+        return nil unless metadata
+
+        metadata[:type] || metadata['type']
+      end
+
+      # @param candidate [Candidate]
+      # @return [String, Symbol, nil]
+      def type_from_unit_cache(candidate)
+        unit = @unit_cache[candidate.identifier]
+        return nil unless unit
+
+        unit_field(unit, :type)
       end
 
       # Truncate text to fit within a token budget.

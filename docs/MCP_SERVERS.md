@@ -7,7 +7,7 @@ Woods ships two MCP (Model Context Protocol) servers that integrate with AI deve
 | | Index Server | Console Server |
 |---|---|---|
 | **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
-| **Requires Rails?** | No — reads JSON from disk | Yes — boots in a Rails process |
+| **Requires Rails?** | No, reads JSON from disk | Yes, boots in a Rails process |
 | **Tools** | 29 (14 always-on + 15 conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion) | 9 default, 11 with read tools; 31 schemas inventoried |
 | **Transport** | Stdio (default), HTTP | Stdio |
 | **Data source** | `tmp/woods/` output | Live database + application state |
@@ -36,7 +36,7 @@ For detailed examples with parameters and expected output, see [MCP Tool Cookboo
 
 ## Index Server
 
-The Index Server reads pre-extracted data from disk and serves it via MCP. No Rails boot required — it works with the JSON output from `rake woods:extract`.
+The Index Server reads pre-extracted data from disk and serves it via MCP. No Rails boot required, it works with the JSON output from `rake woods:extract`.
 
 ### Setup
 
@@ -51,9 +51,9 @@ woods-mcp-start /path/to/rails-app/tmp/woods
 woods-mcp-http /path/to/rails-app/tmp/woods
 ```
 
-**Extract-only works out of the box.** If you've run `rake woods:extract` but not `rake woods:embed` (no embedding provider configured), the server still boots and serves all pattern/regex/structural tools — `lookup`, `search`, `dependencies`, `structure`, `graph_analysis`, `pagerank`, and the rest. Only `codebase_retrieve` (semantic search) needs embeddings, and it activates automatically once a provider is configured and `woods:embed` has run. No environment variable is required.
+**Extract-only works out of the box.** If you've run `rake woods:extract` but not `rake woods:embed` (no embedding provider configured), the server still boots and serves all pattern/regex/structural tools, `lookup`, `search`, `dependencies`, `structure`, `graph_analysis`, `pagerank`, and the rest. Only `codebase_retrieve` (semantic search) needs embeddings, and it activates automatically once a provider is configured and `woods:embed` has run. No environment variable is required.
 
-To fail closed instead — refuse to boot unless a real index (`woods.json`) is present — set `WOODS_REQUIRE_INDEX=1`. (The legacy `WOODS_ALLOW_AUTODETECT` flag is now a no-op; auto-detect is the default.)
+To fail closed instead, refuse to boot unless a real index (`woods.json`) is present, set `WOODS_REQUIRE_INDEX=1`. (The legacy `WOODS_ALLOW_AUTODETECT` flag is now a no-op; auto-detect is the default.)
 
 ### Claude Code Configuration
 
@@ -96,13 +96,23 @@ The Index Server runs on the **host**, not inside Docker. It reads static JSON f
 }
 ```
 
-Do **not** use the container path (e.g., `/app/tmp/woods`) — the server cannot access it. The `woods-mcp-start` wrapper validates the directory and `manifest.json` before starting.
+Do **not** use the container path (e.g., `/app/tmp/woods`), the server cannot access it. The `woods-mcp-start` wrapper validates the directory and `manifest.json` before starting.
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
 
-### Tools (29 — 14 always-on + 15 conditional)
+### Tools (29 - 14 always-on + 15 conditional)
 
-Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`, `snapshot.*`, and `notion.*` register conditionally (on session-tracer wiring, operator host presence, feedback store config, snapshot store enabled, Notion credentials), so `tools/list` reflects the *current* wiring rather than the total theoretical surface. The unconditional core is 14 tools — the breakdown below includes every tool the index server can register.
+Tool visibility depends on wiring. `tools/list` shows the current wiring, not the full theoretical surface. The unconditional core is 14 tools. The other 15 register only when their collaborator is present:
+
+| Group | Tools | Registers when |
+|---|---|---|
+| Pipeline | `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_repair`, `pipeline_health` | An operator host is wired |
+| Retrieval feedback | `retrieval_*` (4) | A feedback store is configured |
+| Snapshots | `list_snapshots`, `snapshot_detail`, `snapshot_diff`, `unit_history` | Snapshots are enabled |
+| Session trace | `session_trace` | A session tracer is wired |
+| Notion | `notion_sync` | Notion credentials are set |
+
+The breakdown below lists every tool the index server can register.
 
 #### Core Query (6)
 
@@ -120,8 +130,8 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 | Tool | Description |
 |------|-------------|
 | `graph_analysis` | Structural analysis: orphans, dead ends, hubs, cycles, bridges. |
-| `domain_clusters` | Group units into semantic domains by namespace and graph connectivity — clusters with hub nodes, entry points, boundary edges, and type breakdowns. |
-| `pagerank` | PageRank importance scores — higher means more structurally central. |
+| `domain_clusters` | Group units into semantic domains by namespace and graph connectivity, clusters with hub nodes, entry points, boundary edges, and type breakdowns. |
+| `pagerank` | PageRank importance scores, higher means more structurally central. |
 | `framework` | Search Rails/gem framework source by concept keyword (e.g., "has_many", "before_action"). |
 
 #### Flow & Session (2)
@@ -161,7 +171,7 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
 | Tool | Description |
 |------|-------------|
 | `list_snapshots` | List past extraction snapshots with timestamps and branch info. |
-| `snapshot_diff` | Compare two snapshots — added, modified, deleted units. |
+| `snapshot_diff` | Compare two snapshots, added, modified, deleted units. |
 | `unit_history` | Track how a single unit changed across snapshots. |
 | `snapshot_detail` | Full metadata for a specific snapshot by git SHA. |
 
@@ -208,17 +218,17 @@ Tool visibility is wiring-dependent: `session_trace`, `operator.*`, `feedback.*`
   "pollIntervalMs": 2000 }
 ```
 
-Poll it with `tasks/get`; cancel with `tasks/cancel`. The record lives in `<index_dir>/tasks/` — on disk, not in the process — which is what makes three things work that did not before:
+Poll it with `tasks/get`; cancel with `tasks/cancel`. The record lives in `<index_dir>/tasks/`, on disk, not in the process, which is what makes three things work that did not before:
 
 - **A real completion signal.** The task reaches `completed` or `failed`, and a failure carries its error. Previously the tool reported `started` and the error only reached a log the agent cannot read.
-- **Disconnect survival.** The handle outlives the connection *and* the process. A client that drops mid-run can reconnect — even to a restarted server — and still collect the result.
+- **Disconnect survival.** The handle outlives the connection *and* the process. A client that drops mid-run can reconnect, even to a restarted server, and still collect the result.
 - **Crash detection.** A record still marked `working` whose owning process is gone resolves to `failed` with an explanation, instead of leaving an agent polling a run that no longer exists.
 
-**Clients that do not declare the extension** get exactly the previous behaviour — `{"status": "started"}` and nothing else. This is required, not a courtesy: a client that does not understand a task handle would read it as the final result and report a run that had not happened.
+**Clients that do not declare the extension** get exactly the previous behaviour, `{"status": "started"}` and nothing else. This is required, not a courtesy: a client that does not understand a task handle would read it as the final result and report a run that had not happened.
 
 Both tools keep their existing rate limiting (`PipelineGuard`), in-process serialization, and cross-process `PipelineLock` acquisition regardless of which path is taken.
 
-> The task store writes to the index directory. If that directory is read-only — a legitimate setup for a host-side reader on a mounted volume — task creation is skipped with a warning on stderr and the tool falls back to fire-and-forget rather than failing.
+> The task store writes to the index directory. If that directory is read-only, a legitimate setup for a host-side reader on a mounted volume, task creation is skipped with a warning on stderr and the tool falls back to fire-and-forget rather than failing.
 
 ---
 
@@ -254,7 +264,7 @@ Safe, foundational queries against the live database.
 | `console_sample` | Random sample of records (max 25) |
 | `console_find` | Find a single record by primary key or unique column |
 | `console_pluck` | Extract column values with optional distinct (max 1000 rows) |
-| `console_aggregate` | Run sum/avg/min/max on a column |
+| `console_aggregate` | Run sum/average/minimum/maximum on a column (count needs no column) |
 | `console_association_count` | Count associated records for a specific record |
 | `console_schema` | Database schema for a model with optional index info |
 | `console_recent` | Recently created/updated records (max 50) |
@@ -307,18 +317,8 @@ SQL and query require explicit read-tool configuration and strict validation.
 
 The Console Server implements defense-in-depth:
 
-1. **SafeContext** — Every operation runs in a database transaction that is always rolled back. Writes are silently discarded.
-2. **SqlValidator** — Rejects DML (INSERT/UPDATE/DELETE) and DDL (CREATE/ALTER/DROP) at the string level before any database interaction.
-3. **CredentialScanner** — Redacts credential-shaped response values.
-4. **Column/EAV redaction** — Redacts configured sensitive fields and key/value rows.
-5. **ModelValidator** — Validates model names against `ActiveRecord::Base.descendants` to prevent arbitrary class instantiation.
-
-### Job Backend Adapter Inventory
-
-These adapters remain inventory-only because Tier 3 tools are not registered:
-
-| Backend | Adapter | Supported Operations |
-|---------|---------|---------------------|
-| Sidekiq | SidekiqAdapter | Queue stats, failures, find, retry, schedule |
-| Solid Queue | SolidQueueAdapter | Queue stats, failures, find, retry, schedule |
-| GoodJob | GoodJobAdapter | Queue stats, failures, find, retry, schedule |
+1. **SafeContext**: Every operation runs in a database transaction that is always rolled back. Writes are silently discarded.
+2. **SqlValidator**: Rejects DML (INSERT/UPDATE/DELETE) and DDL (CREATE/ALTER/DROP) at the string level before any database interaction.
+3. **CredentialScanner**: Redacts credential-shaped response values.
+4. **Column/EAV redaction**: Redacts configured sensitive fields and key/value rows.
+5. **ModelValidator**: Validates model names against `ActiveRecord::Base.descendants` to prevent arbitrary class instantiation.

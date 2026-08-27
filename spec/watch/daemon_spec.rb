@@ -227,6 +227,27 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  # The lock-acquire rescue used to wrap the whole cycle, including #release
+  # in the ensure that follows a successful #run_extraction. A release that
+  # raised there was indistinguishable from an acquire failure: it mislabeled
+  # a completed, successful cycle as "could not take the extraction lock" and
+  # carried the batch forward — discarding a good outcome over a lock file
+  # that only failed to *delete*, not to matter.
+  describe 'a lock release failure after a successful cycle' do
+    it 'keeps the successful outcome and does not carry paths forward' do
+      lock = instance_double(Woods::Coordination::PipelineLock, acquire: true)
+      allow(lock).to receive(:release).and_raise(StandardError, 'release boom')
+      touch('config/locales/en.yml')
+      daemon = build(lock: lock)
+
+      result = daemon.process(['config/locales/en.yml'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(result[:state]).to eq(:running)
+      expect(daemon.send(:pending_empty?)).to be(true)
+    end
+  end
+
   # `Extractor#publish_generation` rescues its own failures so a good index is
   # not thrown away over an unwritable marker. That is right, but the marker is
   # the freshness contract: without it every reader keeps serving the previous
@@ -402,6 +423,93 @@ RSpec.describe Woods::Watch::Daemon do
       build(watcher: fake_watcher, catch_up: true).run
 
       expect(extractor).not_to have_received(:extract_changed)
+    end
+  end
+
+  # catch_up used to run to completion BEFORE the watcher backend even
+  # existed. A file saved while that (potentially minutes-long, storm-sized)
+  # run was in flight was lost twice over: no watcher yet to report it as an
+  # event, and PollingWatcher takes its baseline snapshot inside #start —
+  # after the save — so the first diff already excludes it. Worse, the save's
+  # mtime predates the generation bump catch_up's own extraction publishes at
+  # the end, so a *later* restart's watermark check reads the file as already
+  # covered. Starting the watcher first, before catch_up runs, closes the
+  # window.
+  describe 'catch-up ordering versus the watcher' do
+    # Signals when #start is invoked and hands the captured on_change block
+    # back to the example, then blocks — like a real watcher's event loop —
+    # until #stop flips the flag.
+    class LiveWatcher # rubocop:disable Lint/ConstantDefinitionInBlock
+      attr_reader :on_change
+
+      def initialize
+        @started = Queue.new
+        @stopped = false
+      end
+
+      def start(&on_change)
+        @on_change = on_change
+        @started << true
+        sleep(0.02) until @stopped
+      end
+
+      def stop
+        @stopped = true
+      end
+
+      # Bounded so a daemon that never starts the watcher at all (the bug
+      # this spec proves against) fails this example with a clear timeout
+      # instead of hanging the suite.
+      def wait_until_started(timeout: 5)
+        Timeout.timeout(timeout) { @started.pop }
+      end
+    end
+
+    it 'processes a path the watcher delivers while catch-up is still running' do
+      touch('app/services/predates_daemon.rb')
+      live_watcher = LiveWatcher.new
+      catch_up_entered = Queue.new
+      release_catch_up = Queue.new
+      second_cycle_done = Queue.new
+      call_count = 0
+
+      allow(extractor).to receive(:extract_changed) do |paths|
+        call_count += 1
+        if call_count == 1
+          catch_up_entered << true
+          release_catch_up.pop
+        end
+        publish_generation('incremental')
+        second_cycle_done << true if call_count == 2
+        paths
+      end
+
+      daemon = build(watcher: live_watcher, catch_up: true)
+      run_thread = Thread.new { daemon.run }
+
+      # Proves the watcher was started ahead of catch_up (the fix), not only
+      # after it returns (the bug): under the bug #start is never called
+      # until catch_up's blocked extraction unblocks, which nothing does
+      # until after this returns — so the bug reproduces as a timeout here.
+      live_watcher.wait_until_started
+      Timeout.timeout(5) { catch_up_entered.pop }
+
+      live_path = touch('app/services/live_during_catchup.rb')
+      # Stands in for the watcher's own thread delivering a real event while
+      # catch_up's extraction is still in flight.
+      live_watcher.on_change.call([File.join(root, live_path)])
+
+      release_catch_up << true
+      # Wait for the drain loop to actually pick up the live path before
+      # stopping — #stop's @stop_reason is checked at the top of the same
+      # loop, so stopping any earlier races it out from under the assertion
+      # rather than exercising the daemon's own carry-forward behaviour.
+      Timeout.timeout(5) { second_cycle_done.pop }
+      daemon.stop
+      raise 'daemon did not stop' unless run_thread.join(5)
+
+      expect(extractor).to have_received(:extract_changed)
+        .with(array_including(a_string_ending_with('live_during_catchup.rb')))
     end
   end
 
@@ -666,6 +774,21 @@ RSpec.describe Woods::Watch::Daemon do
       expect(reason).not_to eq(:already_running)
     end
 
+    # A pid is only meaningful inside the namespace that issued it — the same
+    # reasoning {Status#alive?} already applies to the status file. Without
+    # mirroring it here, a dead container daemon's claim (container pid 47)
+    # reads as live forever to a host-side daemon, because host pid 47 almost
+    # always exists too.
+    it 'does not trust a cross-host claim on pid evidence alone, even when the pid is locally alive' do
+      FileUtils.mkdir_p(output_dir)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: Process.pid, host: 'a-different-namespace'))
+
+      reason = Timeout.timeout(10) { build_racer.run }
+
+      expect(reason).not_to eq(:already_running)
+    end
+
     it 'preserves WOODS_IGNORE_WATCH even when a live claim is already on disk' do
       FileUtils.mkdir_p(output_dir)
       claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
@@ -676,6 +799,102 @@ RSpec.describe Woods::Watch::Daemon do
       reason = Timeout.timeout(10) { build_racer.run }
 
       expect(reason).not_to eq(:already_running)
+    end
+
+    # `tmp_path` is assigned only after `mkdir_p` succeeds, so a raise from
+    # `mkdir_p` itself used to leave `ensure`'s `FileUtils.rm_f(tmp_path)`
+    # running against `nil` — a TypeError that replaced whatever `mkdir_p`
+    # actually raised.
+    it 'does not mask a create_claim mkdir failure with an unrelated TypeError' do
+      allow(FileUtils).to receive(:mkdir_p).and_raise(Errno::EACCES, 'denied')
+
+      expect { build.send(:create_claim) }.to raise_error(Errno::EACCES)
+    end
+
+    # Two starters can both read the same dead-pid claim and both judge it
+    # stale before either deletes it. Without a re-check immediately before
+    # the delete, the second starter's `rm_f` can remove the claim the first
+    # starter already replaced with its own live one.
+    # The reclaim-then-create loop runs under an exclusive flock on a
+    # sidecar file, so two starters cannot interleave a staleness check
+    # with each other's delete and create.
+    it 'holds the claim lock for the whole reclaim-and-create loop' do
+      daemon = build
+      lock_path = "#{File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)}.lock"
+      locked_during_create = nil
+      allow(daemon).to receive(:create_claim) do
+        File.open(lock_path, File::RDWR | File::CREAT) do |probe|
+          locked_during_create = (probe.flock(File::LOCK_EX | File::LOCK_NB) == false)
+        end
+        true
+      end
+
+      expect(daemon.send(:claim_startup?)).to be true
+      expect(locked_during_create).to be true
+
+      File.open(lock_path, File::RDWR) do |after|
+        expect(after.flock(File::LOCK_EX | File::LOCK_NB)).to eq(0)
+      end
+    end
+
+    it 'warns and still claims when the filesystem refuses the claim lock' do
+      logger = instance_double(Logger, info: nil, warn: nil, error: nil, debug: nil)
+      daemon = build(logger: logger)
+      allow_any_instance_of(File).to receive(:flock).and_raise(Errno::ENOTSUP)
+
+      expect(daemon.send(:claim_startup?)).to be true
+      expect(logger).to have_received(:warn).with(/claim lock unavailable/)
+    end
+
+    it 'does not delete a claim that was replaced between the staleness check and the delete' do
+      FileUtils.mkdir_p(output_dir)
+      dead_pid = Process.spawn('true')
+      Process.wait(dead_pid)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: dead_pid, host: Woods::Watch::Status.host_identity))
+
+      daemon = build
+      raced = false
+      winner_content = JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity)
+      allow(File).to receive(:read).and_wrap_original do |original, path, *args|
+        result = original.call(path, *args)
+        if path == claim_path && !raced
+          raced = true
+          # Simulate a second starter's create_claim winning the race right
+          # after we've read (and judged stale) the original claim.
+          FileUtils.rm_f(claim_path)
+          File.write(claim_path, winner_content)
+        end
+        result
+      end
+
+      expect(daemon.send(:reclaim_if_stale)).to be false
+      expect(File.read(claim_path)).to eq(winner_content)
+    end
+
+    # `File.link` raises EPERM/ENOTSUP (rather than the documented EEXIST)
+    # on filesystems that don't support hard links at all — some bind
+    # mounts and network shares. Without a fallback, the daemon can never
+    # start on those filesystems even with no competing claim.
+    it 'falls back to an exclusive create when the filesystem rejects File.link' do
+      allow(File).to receive(:link).and_raise(Errno::EPERM, 'Operation not permitted')
+
+      daemon = build
+      expect(daemon.send(:create_claim)).to be true
+
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      recorded = JSON.parse(File.read(claim_path))
+      expect(recorded['pid']).to eq(Process.pid)
+    end
+
+    it 'still refuses a second claim after the File.link fallback (EEXIST from the exclusive create)' do
+      allow(File).to receive(:link).and_raise(Errno::ENOTSUP, 'Operation not supported')
+
+      first = build
+      expect(first.send(:create_claim)).to be true
+
+      second = build
+      expect(second.send(:create_claim)).to be false
     end
   end
 

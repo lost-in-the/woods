@@ -79,8 +79,7 @@ module Woods
             header, data_offset = parse_header(bin_data, bin_path)
             validate_magic!(header[:magic], bin_path)
             validate_schema_version!(header[:schema_version], bin_path)
-            dim = resolved_config.respond_to?(:dimension) ? resolved_config.dimension : nil
-            validate_dimension!(header[:dimension], dim, bin_path) if dim
+            validate_dimension_if_present!(header, resolved_config, bin_path)
             floats = bin_data.byteslice(data_offset, header[:vector_count] * header[:dimension] * 4)
                              .unpack("e#{header[:vector_count] * header[:dimension]}")
             hydrate_store(parse_idx(idx_path), floats, header[:dimension])
@@ -167,6 +166,18 @@ module Woods
             )
           end
 
+          # An empty dump writes dimension=0 in the header (build_header has
+          # no vector to measure) — that's not a real mismatch against the
+          # provider's dimension, just the absence of data. Skip the check
+          # rather than raising DimensionMismatch on every embed of an
+          # empty payload.
+          def validate_dimension_if_present!(header, resolved_config, path)
+            return unless header[:vector_count].positive?
+
+            dim = resolved_config.respond_to?(:dimension) ? resolved_config.dimension : nil
+            validate_dimension!(header[:dimension], dim, path) if dim
+          end
+
           def validate_dimension!(stored, expected, path)
             return if stored == expected
 
@@ -223,11 +234,33 @@ module Woods
             raise
           end
 
+          # +respond_to?+ is the wrong question here: {VectorStore::Interface}
+          # *defines* both +#each_entry+ and +#bulk_load+ (as stubs — the
+          # former raises +NotImplementedError+, the latter delegates to
+          # +#store_batch+), and every adapter includes that module. Durable
+          # adapters (Pgvector, Qdrant) therefore answered +respond_to?+ with
+          # +true+ despite implementing neither, passed this guard, and hit
+          # the bare +NotImplementedError+ from +#each_entry+ instead of the
+          # typed error this method promises (B-108, see
+          # `Indexer#implements_own?`). Ask who *owns* the method instead.
           def validate_store!(store)
-            return if store.respond_to?(:each_entry) && store.respond_to?(:bulk_load)
+            return if implements_own?(store, :each_entry) && store.respond_to?(:bulk_load)
 
             raise InapplicableBackend,
                   "backend #{store.class} is already durable — Snapshotter should not have been invoked"
+          end
+
+          # Does +object+ define +method_name+ itself, rather than inheriting
+          # {VectorStore::Interface}'s default stub?
+          #
+          # @param object [Object] the adapter under test
+          # @param method_name [Symbol]
+          # @return [Boolean]
+          def implements_own?(object, method_name)
+            return false unless object.respond_to?(method_name)
+            return true unless defined?(VectorStore::Interface)
+
+            object.method(method_name).owner != VectorStore::Interface
           end
 
           def validate_dump_dir!(artifact, dump_path)

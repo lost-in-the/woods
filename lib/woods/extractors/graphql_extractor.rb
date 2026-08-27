@@ -128,8 +128,14 @@ module Woods
         return nil unless class_name
         return nil unless graphql_class?(source)
 
-        unit_type = classify_unit_type(file_path, source)
         runtime_class = class_name.safe_constantize
+        # Classify from the resolved runtime class first, matching
+        # {#extract_from_runtime_type}'s classifier. Keeps the two passes
+        # from disagreeing on a type's unit_type (a mutation that looks like
+        # a type by path/regex) and leaving a stale duplicate unit behind.
+        # Falls back to the source/path heuristic when nothing resolves
+        # (gem not loaded, autoloading not booted).
+        unit_type = runtime_class ? classify_runtime_type(runtime_class) : classify_unit_type(file_path, source)
 
         unit = ExtractedUnit.new(
           type: unit_type,
@@ -207,16 +213,6 @@ module Woods
         !@schema_class.nil?
       end
 
-      # Is graphql-ruby loaded in this process?
-      #
-      # Only the runtime-introspection pass needs this; nothing about file
-      # discovery does.
-      #
-      # @return [Boolean]
-      def graphql_runtime_available?
-        defined?(GraphQL::Schema) ? true : false
-      end
-
       # Find the application's schema class (descendant of GraphQL::Schema)
       #
       # @return [Class, nil]
@@ -250,18 +246,10 @@ module Woods
         {}
       end
 
-      # Determine the source file for a runtime-loaded class, validating that
-      # paths are within Rails.root to avoid returning graphql gem internals.
-      #
-      # Convention path first, then introspection via {#resolve_source_location}
-      # which filters out vendor/node_modules paths.
-      #
-      # @param klass [Class]
-      # @return [String] Absolute path to the source file
       # Locate the file this type was defined in, or nil when there is none.
       #
-      # **nil, not a fabricated convention path** (B-070). A runtime-defined type
-      # — built by a schema builder or DSL — has no file, and inventing
+      # nil, not a fabricated convention path. A runtime-defined type
+      # (built by a schema builder or DSL) has no file, and inventing
       # `app/graphql/<constant>.rb` for it created a unit indistinguishable from a
       # file-defined one whose file had since been deleted. That ambiguity is
       # unresolvable downstream: the conventional location of `Types::FooType`
@@ -720,9 +708,11 @@ module Woods
           complexities << { field: name, complexity: value.strip }
         end
 
-        # Max complexity on schema level
-        if source.match?(/max_complexity\s+(\d+)/)
-          complexities << { field: :schema, complexity: ::Regexp.last_match(1).to_i }
+        # Max complexity on schema level. `match`, not `match?` — the latter
+        # never populates `$~`/`Regexp.last_match`, so the capture always
+        # read back as 0 (or a stale match from elsewhere in the method).
+        if (schema_match = source.match(/max_complexity\s+(\d+)/))
+          complexities << { field: :schema, complexity: schema_match[1].to_i }
         end
 
         complexities

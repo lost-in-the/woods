@@ -13,8 +13,10 @@ module Woods
     #
     # Safety layers:
     # - Every query runs inside a transaction that is always rolled back
-    # - Statement timeout uses `SET LOCAL` so it cannot leak to the next
-    #   pool consumer
+    # - Statement timeout cannot leak to the next pool consumer: PostgreSQL
+    #   uses `SET LOCAL`, which self-discards at transaction end; MySQL has
+    #   no LOCAL equivalent, so its session-scoped `max_execution_time` is
+    #   read before the override and restored in an `ensure` instead
     # - Column redaction replaces sensitive values with "[REDACTED]"
     #
     # == What SafeContext does NOT cover
@@ -190,17 +192,21 @@ module Woods
       # clears the thread-local in ensure so a raise mid-block cannot leak
       # a stale connection reference into the next request on this thread.
       def run_with_timeout(connection)
-        previous = Thread.current[LEASED_CONNECTION_KEY]
+        previous_lease = Thread.current[LEASED_CONNECTION_KEY]
         Thread.current[LEASED_CONNECTION_KEY] = connection
         result = nil
         connection.transaction do
-          set_timeout(connection)
-          result = yield(connection)
+          restore_timeout = set_timeout(connection)
+          begin
+            result = yield(connection)
+          ensure
+            restore_timeout&.call
+          end
           raise ActiveRecord::Rollback
         end
         result
       ensure
-        Thread.current[LEASED_CONNECTION_KEY] = previous
+        Thread.current[LEASED_CONNECTION_KEY] = previous_lease
       end
 
       def normalize_key_value_patterns(patterns)
@@ -241,14 +247,25 @@ module Woods
       # request, background job, etc.). Safe here because every #execute
       # is wrapped in a transaction.
       #
-      # MySQL uses `SET max_execution_time` (applies to SELECT only — DDL
-      # and DML statements cannot be time-limited via this variable).
+      # MySQL has no per-statement equivalent of `SET LOCAL`: `SET
+      # max_execution_time` (applies to SELECT only — DDL and DML statements
+      # cannot be time-limited via this variable) is SESSION scope and
+      # survives ROLLBACK, so left alone it would leak onto the next request
+      # served from the same pooled connection. {#set_mysql_timeout} reads
+      # the session's current value first and returns a Proc that restores
+      # it; the caller runs that Proc in an +ensure+ around the yielded
+      # block.
+      #
+      # @return [Proc, nil] a restore callback for MySQL, or nil when no
+      #   restoration is needed (PostgreSQL's LOCAL scope self-discards; an
+      #   unsupported adapter sets nothing to restore).
       def set_timeout(connection, timeout_ms = @timeout_ms)
         adapter = connection.adapter_name.downcase
         if adapter.include?('mysql')
-          connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
+          set_mysql_timeout(connection, timeout_ms)
         else
           connection.execute("SET LOCAL statement_timeout = '#{timeout_ms.to_i}ms'")
+          nil
         end
       rescue StandardError => e
         # Unsupported adapter (SQLite, Trilogy on unsupported version, Oracle) —
@@ -257,6 +274,19 @@ module Woods
         # Rails.logger when available; otherwise swallow as before.
         warn_timeout_unsupported(adapter, e)
         nil
+      end
+
+      # Read MySQL's current session-scoped `max_execution_time`, override
+      # it, and return a Proc that restores the value read here. There is no
+      # per-statement `SET LOCAL` on MySQL, so the override otherwise
+      # outlives this transaction's rollback and bleeds onto whatever the
+      # pooled connection serves next.
+      #
+      # @return [Proc] restores the previous session value
+      def set_mysql_timeout(connection, timeout_ms)
+        previous_value = connection.select_value('SELECT @@SESSION.max_execution_time').to_i
+        connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
+        -> { connection.execute("SET max_execution_time = #{previous_value}") }
       end
 
       def warn_timeout_unsupported(adapter, error)

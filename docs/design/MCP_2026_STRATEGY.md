@@ -23,16 +23,16 @@ what the shipped implementation changed.
 > **It does not give us:**
 >
 > * **The Tasks extension.** No `tasks/*` methods. Woods implements them on
->   `define_custom_method` — see phase 3.
+>   `define_custom_method`, see phase 3.
 > * **`subscriptions/listen`.** Not implemented, and this is what blocks the
->   last piece of phase 4 — see below.
+>   last piece of phase 4, see below.
 
 ---
 
 ## 1. The headline
 
-Woods writes very little protocol code. Both servers — `Woods::MCP::Server`
-(index, 29 tools) and `Woods::Console::Server` (console, 31 tools) — are
+Woods writes very little protocol code. Both servers, `Woods::MCP::Server`
+(index, 29 tools) and `Woods::Console::Server` (console, 31 tools), are
 `MCP::Server` instances from the official `mcp` gem, driven by
 `StdioTransport` or `StreamableHTTPTransport`. Lifecycle, framing, capability
 negotiation, error codes and version headers are the SDK's. The local protocol
@@ -44,7 +44,7 @@ That means the migration is not "implement a new protocol". It is:
 1. **Lift one version pin** (`mcp >= 0.9.2, < 1.0` in the gemspec).
 2. **Stop pinning the protocol backwards** (`exe/woods-mcp-start` hard-defaults
    `MCP_PROTOCOL_VERSION=2024-11-05`).
-3. **Opt in to the four new capabilities that pay for themselves** — statelessness,
+3. **Opt in to the four new capabilities that pay for themselves**: statelessness,
    Tasks, cache hints, subscriptions.
 
 The gem cap is the whole blocker. `mcp` 1.2.0 (2026-08-15) completes the
@@ -61,9 +61,9 @@ the surface we have to touch is small:
 | 1.1.0 | 2026-08-01 | **2026-07-28 as the latest protocol version** |
 | 1.2.0 | 2026-08-15 | **Finalized 2026-07-28 stateless lifecycle, request envelopes, resultType, header validation** |
 
-The APIs Woods actually calls — `MCP::Server.new(name:, version:, resources:,
+The APIs Woods actually calls, `MCP::Server.new(name:, version:, resources:,
 resource_templates:)`, `server.define_tool`, `MCP::Tool::Response`,
-`MCP::Configuration.new(protocol_version:)`, both transports — are unchanged
+`MCP::Configuration.new(protocol_version:)`, both transports, are unchanged
 across that range. The removals in 0.10.0 (`notify_progress` broadcast,
 undocumented handler overrides) and 0.15.0 (`MCP::Transports`) predate our
 floor. **We are already past every breaking change on the path.**
@@ -106,7 +106,7 @@ floor. **We are already past every breaking change on the path.**
 
 - `CacheableResult`: **`ttlMs` and `cacheScope` are now required** on `tools/list`,
   `prompts/list`, `resources/list`, `resources/read` and `resources/templates/list`.
-- Servers **SHOULD** return `tools/list` in deterministic order — explicitly to
+- Servers **SHOULD** return `tools/list` in deterministic order, explicitly to
   improve client caching and LLM prompt-cache hit rates.
 - `Mcp-Method` and `Mcp-Name` headers required on Streamable HTTP POSTs;
   optional `x-mcp-header` mirrors tool parameters into `Mcp-Param-*`.
@@ -126,7 +126,7 @@ Roots, Sampling, Logging; the HTTP+SSE transport; `includeContext` values
 and `exe/` finds no `sampling`, `roots/list`, `logging/setLevel`, `ping`, or
 `elicitation` usage. Every hit is an unrelated substring. Woods logs to `stderr`
 already, which is exactly the suggested migration for the Logging feature. This
-is a genuinely clean position — the deprecation window costs us nothing.
+is a genuinely clean position, the deprecation window costs us nothing.
 
 ---
 
@@ -177,7 +177,7 @@ agent finds out at its next tool call.
 Four workstreams shipped, ordered here by the ratio of payoff to risk. Each
 maps to at least one of the acceptance axes in the brief.
 
-### Phase 1 — Unblock and stop pinning backwards
+### Phase 1: Unblock and stop pinning backwards
 *Axes: disconnect/reconnect, performance, features (all of them are gated on this)*
 
 - Lift the gemspec pin to `mcp >= 1.2, < 2.0`. Dropping `>= 0.9.2` compatibility
@@ -185,8 +185,8 @@ maps to at least one of the acceptance axes in the brief.
   within a major, and supporting both 0.x and 1.x means branching on SDK
   internals for no user benefit.
 - Delete the `MCP_PROTOCOL_VERSION` default from `exe/woods-mcp-start`. Keep the
-  env var as an **escape hatch** — a user on a stubborn legacy client can still
-  pin — but the default must be "let the SDK negotiate".
+  env var as an **escape hatch**: a user on a stubborn legacy client can still
+  pin, but the default must be "let the SDK negotiate".
 - Verify the Ruby floor holds. `mcp` 1.2.0 declares `required_ruby_version >= 2.7.0`;
   Woods declares `>= 3.0.0`. **No floor change.** The `rails-6.0` testbed variant
   boots on Ruby 3.0 and stays supported. Add a CI row that asserts this rather
@@ -198,7 +198,7 @@ maps to at least one of the acceptance axes in the brief.
 unmodified `woods-mcp` process; `server/discover` returns Woods' capabilities;
 no Ruby or Rails floor moves.
 
-### Phase 2 — Stateless HTTP
+### Phase 2: Stateless HTTP
 *Axis: disconnect/reconnect (the big one)*
 
 - Pass `stateless: true` to `StreamableHTTPTransport` in `exe/woods-mcp-http`,
@@ -210,23 +210,23 @@ no Ruby or Rails floor moves.
 
 What this buys: a restart of `woods-mcp-http` becomes **invisible to clients**.
 No session to invalidate, no re-initialize, no 404-then-reconnect dance. It also
-makes the HTTP server horizontally deployable for the first time — any POST can
-land on any instance — which matters for the Docker split-architecture and
+makes the HTTP server horizontally deployable for the first time, any POST can
+land on any instance, which matters for the Docker split-architecture and
 multi-worktree setups where several consumers read one volume-mounted index.
 
 The honest cost: **losing SSE resumability**. For Woods this is close to free.
 Every index tool is a short JSON read; the only long operations are
 `pipeline_extract`/`pipeline_embed`, which are already fire-and-forget and are
-about to become Tasks — which survive disconnects *better* than resumable SSE did.
+about to become Tasks, which survive disconnects *better* than resumable SSE did.
 
-### Phase 3 — Tasks for the pipeline tools
+### Phase 3: Tasks for the pipeline tools
 *Axes: disconnect/reconnect, code bloat, features*
 
 Advertise `io.modelcontextprotocol/tasks`. When a client declares support,
 `pipeline_extract` and `pipeline_embed` return a `CreateTaskResult` with a durable
 `taskId`, `ttlMs` and `pollIntervalMs` instead of `{status: "started"}`. Serve
 `tasks/get`, `tasks/update` and `tasks/cancel`. When the client does *not*
-declare support, fall back to today's behaviour verbatim — the spec requires
+declare support, fall back to today's behaviour verbatim, the spec requires
 never returning a task to a client that did not opt in, and that fallback is our
 old-client compatibility story.
 
@@ -236,7 +236,7 @@ What this buys:
   failed, with the error, instead of polling `pipeline_status` and guessing.
 - **Disconnect survival.** A task ID is durable. Client restarts, resumes polling,
   gets the result. Today a dropped client plus a dead server loses the run silently.
-- **Cooperative cancellation** — `tasks/cancel` against a `LockHeartbeat`-guarded
+- **Cooperative cancellation**: `tasks/cancel` against a `LockHeartbeat`-guarded
   extraction, which we cannot express at all right now.
 - **Deletion of bespoke machinery.** `@pipeline_in_flight`, `pipeline_start`/
   `pipeline_finish` and the `already_running` error path become the task registry's
@@ -246,10 +246,9 @@ What this buys:
 Sequencing note: the durable task store must outlive the process to deliver the
 crash-resilience claim. The obvious substrate is the index directory Woods
 already owns and already writes atomically (`AtomicFile`, `Generation`,
-`status.json`). Any new writer against that directory **must take `PipelineLock`** —
-see the CLAUDE.md gotcha; unlocked writers are how #169/#170 happened.
+`status.json`). Any new writer against that directory **must take `PipelineLock`**, see the CLAUDE.md gotcha; unlocked writers are how #169/#170 happened.
 
-### Phase 4 — Cache hints, deterministic ordering, subscriptions
+### Phase 4: Cache hints, deterministic ordering, subscriptions
 *Axes: performance, features*
 
 **Cache hints and ordering** are the cheapest performance win available:
@@ -258,8 +257,7 @@ see the CLAUDE.md gotcha; unlocked writers are how #169/#170 happened.
   LLM prompt-cache hit rates. Woods registers 14 always-on tools plus up to 15
   wiring-conditional ones, so today's order is a function of which integrations
   happen to be configured.
-- Set `ttlMs` from `Generation`. Woods knows *exactly* when the index changed —
-  that is what the generation counter is for. Tool and resource lists are stable
+- Set `ttlMs` from `Generation`. Woods knows *exactly* when the index changed, that is what the generation counter is for. Tool and resource lists are stable
   between generations.
 - Set `cacheScope: "private"` everywhere, without exception. Woods' resources
   expose the user's own source code and dependency graph; `"public"` would
@@ -270,14 +268,14 @@ see the CLAUDE.md gotcha; unlocked writers are how #169/#170 happened.
 daemon bumps the generation, push `notifications/resources/updated` instead of
 waiting for the agent's next read to discover it via `ensure_fresh!`.
 
-**Not implemented — blocked, and worth being precise about why.** Two
+**Not implemented, blocked, and worth being precise about why.** Two
 independent walls, either of which alone would be enough:
 
 1. **Stateless HTTP has no notification channel at all.** The SDK's
    `send_notification` opens with `return false if @stateless`. There is no
    session, no standalone GET stream, and nothing to push on. Having just made
-   statelessness the default in phase 2 — for a much larger and more certain
-   win — the push mechanism is unavailable on that transport by construction.
+   statelessness the default in phase 2, for a much larger and more certain
+   win, the push mechanism is unavailable on that transport by construction.
 2. **There is no opt-in channel, and the spec forbids pushing without one.**
    `subscriptions/listen` is how a 2026-07-28 client subscribes, and the server
    **MUST NOT** send notification types the client has not explicitly
@@ -285,12 +283,12 @@ independent walls, either of which alone would be enough:
    a client to ask. Pushing anyway would violate that MUST.
 
 Implementing it regardless would mean building a long-lived SSE response stream
-inside a transport explicitly built to hold none — forking SDK transport
+inside a transport explicitly built to hold none, forking SDK transport
 internals to re-add the thing the revision removed, in order to deliver an
 optimisation. Not worth it.
 
 The cost of not having it is small and bounded: `IndexReader#ensure_fresh!` is
-the *correctness* path and is untouched — it stats `generation.json` at the top
+the *correctness* path and is untouched, it stats `generation.json` at the top
 of every read, so an agent never sees a stale index, it just learns about a
 change on its next call rather than immediately. That is precisely the
 relationship the `reload` tool already has. Revisit when the SDK ships
@@ -305,7 +303,7 @@ relationship the `reload` tool already has. Revisit when the SDK ships
 
 One flagged opportunity, deliberately not scheduled: the **console server's Tier 4
 guarded tools** currently confirm out-of-band via `Console::Confirmation`
-(`:auto_approve` / `:auto_deny` / `:callback`) — there is no way to ask the actual
+(`:auto_approve` / `:auto_deny` / `:callback`), there is no way to ask the actual
 human. MRTR elicitation, or Tasks' `input_required` state, is the right shape for
 that. It is a real improvement to a real gap, but it is a console-server feature
 rather than a protocol migration, so it belongs in its own item.
@@ -316,14 +314,14 @@ rather than a protocol migration, so it belongs in its own item.
 
 The spec's compatibility matrix has exactly one failing combination that we
 control: **legacy client + modern-only server**. Legacy clients have no
-fall-forward mechanism — they send `initialize`, get an error, and stop.
+fall-forward mechanism, they send `initialize`, get an error, and stop.
 
 The mitigation is to be **dual-era, never modern-only**, and the Ruby SDK server
 is dual-era by construction: it serves `server/discover` and per-request `_meta`
 for modern clients while still answering `initialize` for legacy ones. Woods gets
 this by upgrading the gem and *not* pinning a protocol version. The corollary is
 that the `MCP_PROTOCOL_VERSION` default in `woods-mcp-start` is not merely
-suboptimal — pinning is the one action that could turn a working dual-era server
+suboptimal, pinning is the one action that could turn a working dual-era server
 into a single-era one.
 
 | Environment | Impact |
@@ -332,11 +330,11 @@ into a single-era one.
 | Modern MCP client | Gains `server/discover`, cache hints, negotiation; no config change. |
 | Ruby 3.0 / 3.1 hosts | **No change.** `mcp` 1.2.0 needs `>= 2.7.0`; Woods stays `>= 3.0.0`. |
 | Rails 6.0 testbed variant (Ruby 3.0) | **No change.** Still within the floor. |
-| stdio users (`woods-mcp`, `woods-console-mcp`) | Unaffected mechanically; gain faster restart recovery — no handshake to redo. |
+| stdio users (`woods-mcp`, `woods-console-mcp`) | Unaffected mechanically; gain faster restart recovery, no handshake to redo. |
 | Docker split architecture (host reads volume-mounted output) | Unaffected; benefits from stateless HTTP if using the HTTP server. |
 | Multi-worktree setups | Benefit. Stateless HTTP means a restarted server does not invalidate other worktrees' clients. |
 | `woods-mcp-http` users relying on `Mcp-Session-Id` | **The one real break.** GET becomes `405`, DELETE is a stateless no-op, and the header disappears by default. Mitigated by keeping session mode behind a flag for a deprecation window. |
-| Clients relying on SSE `Last-Event-ID` resumability | Removed by the spec, not by us. Low impact — Woods tool calls are short; long operations move to Tasks. |
+| Clients relying on SSE `Last-Event-ID` resumability | Removed by the spec, not by us. Low impact. Woods tool calls are short; long operations move to Tasks. |
 
 Two things worth being explicit about, because they are easy to assume away:
 
@@ -348,10 +346,31 @@ Two things worth being explicit about, because they are easy to assume away:
 
 ---
 
-## 6. Suggested backlog items
+## 6. Open follow-ups
 
-Added to `docs/backlog.json` as B-111 through B-114, one per phase, so they can
-be picked up independently. B-111 gates the other three.
+Everything in this ADR shipped in 2.0.0. Two items stay open, both bounded by
+the `mcp` gem rather than by Woods:
+
+- **Generation-driven change notifications: blocked.** Stateless HTTP has no
+  notification channel (the SDK's `send_notification` returns false when
+  stateless), and `subscriptions/listen`, the only conforming client opt-in,
+  is not implemented in the SDK. Do not build a side channel for it.
+  `IndexReader#ensure_fresh!` is the correctness path; push was only ever an
+  optimisation. Revisit when the SDK ships `subscriptions/listen`: the signal
+  (`Generation`, bumped last and only on success) already exists.
+- **Upstream the gaps.** `Tasks::Extension` was written to be deletable: when
+  the SDK ships native tasks, `install` goes away and the durable `Store`
+  stays. File issues against
+  [`modelcontextprotocol/ruby-sdk`](https://github.com/modelcontextprotocol/ruby-sdk)
+  rather than adding compensation code here.
+
+Two accepted divergences, recorded so nobody "fixes" them:
+
+- `DELETE` answers `200 {"success": true}` in stateless mode, not the `405`
+  the spec suggests. There is no session to terminate either way; it is the
+  SDK's call.
+- `@pipeline_in_flight` stays. The task registry replaced the status-reporting
+  half, but the mutex is still the cheapest correct same-process exclusion.
 
 ---
 

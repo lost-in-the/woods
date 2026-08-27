@@ -63,10 +63,9 @@ module Woods
       # this returns an Array because each schedule file contains multiple entries.
       #
       # @param file_path [String] Path to the schedule file
-      # @param format [Symbol, nil] One of :solid_queue, :sidekiq_cron, :whenever (inferred from filename if nil)
+      # @param format [Symbol] One of :solid_queue, :sidekiq_cron, :whenever
       # @return [Array<ExtractedUnit>] List of scheduled job units
-      def extract_scheduled_job_file(file_path, format = nil)
-        format ||= infer_format(file_path)
+      def extract_scheduled_job_file(file_path, format)
         case format
         when :solid_queue, :sidekiq_cron
           extract_yaml_schedule(file_path, format)
@@ -287,22 +286,6 @@ module Woods
         unit.dependencies = build_dependencies(block[:job_class])
 
         unit
-      end
-
-      # ──────────────────────────────────────────────────────────────────────
-      # Format Detection
-      # ──────────────────────────────────────────────────────────────────────
-
-      # Infer the schedule format from the file path.
-      #
-      # @param file_path [String] Path to the schedule file
-      # @return [Symbol] One of :solid_queue, :sidekiq_cron, :whenever
-      def infer_format(file_path)
-        basename = File.basename(file_path)
-        SCHEDULE_FILES.each do |relative, fmt|
-          return fmt if basename == File.basename(relative)
-        end
-        :unknown
       end
 
       # ──────────────────────────────────────────────────────────────────────

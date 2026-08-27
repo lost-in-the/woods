@@ -108,6 +108,21 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
     expect(status).to be_success
   end
 
+  it 'validates a qualified table.column reference across a join on the stdio transport' do
+    start_process
+    initialize_session
+
+    query = call_tool(
+      'console_query',
+      'model' => 'Post', 'select' => %w[posts.title comments.body], 'joins' => ['comments']
+    )
+    expect(query).to include('**count:** 0')
+    expect(query).not_to include('Unknown table')
+
+    @stdin.close
+    expect(Timeout.timeout(10) { @wait.value }).to be_success
+  end
+
   it 'executes a real query through the default 9-tool mode' do
     start_process(read_tools: false)
     initialize_session

@@ -26,6 +26,13 @@ module Woods
       # Namespaces to exclude from extraction (this gem's own tasks)
       EXCLUDED_NAMESPACES = %w[woods].freeze
 
+      # Matches a line-leading `end` that closes a block, whether it stands
+      # alone or is followed by a method chain (`end.freeze`) or a closing
+      # delimiter (`end)`, `end]`, `end,`). An exact `== 'end'` check misses
+      # those, leaving the namespace/task depth counters out of sync with
+      # blocks that never get popped.
+      END_LINE = /\Aend\b/
+
       def initialize
         @directories = RAKE_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
       end
@@ -34,7 +41,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of rake task units
       def extract_all
-        find_files_in_directories(@directories, '**/*.rake').flat_map { |file| extract_rake_file(file) }
+        rake_files.flat_map { |file| extract_rake_file(file) }.uniq(&:identifier)
       end
 
       # Extract rake tasks from a single .rake file.
@@ -53,7 +60,7 @@ module Woods
         tasks.filter_map do |task_data|
           next if excluded_namespace?(task_data[:full_name])
 
-          build_unit(task_data, file_path, source)
+          build_unit(task_data, file_path, source, sibling_definitions(task_data[:full_name], file_path))
         end
       rescue StandardError => e
         Rails.logger.error("Failed to extract rake tasks from #{file_path}: #{e.message}")
@@ -61,6 +68,35 @@ module Woods
       end
 
       private
+
+      def rake_files
+        find_files_in_directories(@directories, '**/*.rake').map(&:to_s).sort
+      end
+
+      # Every definition of every task across the rake directories, keyed by
+      # full name (B-126). Rake merges a task reopened in two files into one
+      # task, so the index does the same: one unit whose source carries every
+      # definition. Built lazily once per extractor instance, which the
+      # orchestrator rebuilds per run.
+      #
+      # @return [Hash{String => Array<Hash>}] `{ full_name => [{ file:, task:, source: }] }`
+      def all_definitions
+        @all_definitions ||= rake_files.each_with_object(Hash.new { |h, k| h[k] = [] }) do |file, index|
+          source = File.read(file)
+          parse_tasks(source).each do |task_data|
+            index[task_data[:full_name]] << { file: file, task: task_data, source: source }
+          end
+        rescue StandardError => e
+          Rails.logger.error("Failed to scan rake tasks in #{file}: #{e.message}")
+        end
+      end
+
+      # Definitions of +full_name+ in files other than +file_path+.
+      #
+      # @return [Array<Hash>]
+      def sibling_definitions(full_name, file_path)
+        all_definitions[full_name].reject { |definition| definition[:file] == file_path.to_s }
+      end
 
       # Parse task definitions from rake source using a line-by-line state machine.
       #
@@ -118,7 +154,7 @@ module Woods
           depth += 1 if block_opener?(stripped)
 
           # Track end keywords
-          next unless stripped == 'end'
+          next unless stripped.match?(END_LINE)
 
           depth -= 1
           # Pop namespace if we've returned to the depth where it was opened
@@ -245,7 +281,12 @@ module Woods
       # @return [String] The block body source
       def extract_task_block(lines, task_line_index)
         task_line = lines[task_line_index]
-        return '' unless task_line&.include?('do')
+        # `block_opener?`, not a bare `include?('do')` substring check — a
+        # task named `docs` (`task docs: :environment`) contains the
+        # substring "do" in its own name, which made a blockless task look
+        # like it opened a `do` block and swallowed the following task's
+        # lines as its own body.
+        return '' unless task_line && block_opener?(task_line.strip)
 
         depth = 1
         body_lines = []
@@ -255,7 +296,7 @@ module Woods
           stripped = line.strip
 
           depth += 1 if block_opener?(stripped)
-          depth -= 1 if stripped == 'end'
+          depth -= 1 if stripped.match?(END_LINE)
 
           break if depth.zero?
 
@@ -291,19 +332,28 @@ module Woods
       # @param file_path [String] Path to the .rake file
       # @param file_source [String] Full file source
       # @return [ExtractedUnit]
-      def build_unit(task_data, file_path, file_source)
+      def build_unit(task_data, file_path, file_source, siblings = [])
+        definitions = ([{ file: file_path.to_s, task: task_data, source: file_source }] + siblings)
+                      .sort_by { |definition| definition[:file] }
+        primary = definitions.first
+
         unit = ExtractedUnit.new(
           type: :rake_task,
           identifier: task_data[:full_name],
-          file_path: file_path
+          file_path: primary[:file]
         )
 
         unit.namespace = task_data[:task_namespace]
-        unit.source_code = build_source_annotation(task_data, file_source)
-        unit.metadata = build_metadata(task_data)
-        unit.dependencies = extract_dependencies(task_data, file_source)
+        unit.source_code = definitions.map { |d| build_source_annotation(d[:task], d[:source]) }.join("\n\n")
+        unit.metadata = build_metadata(primary[:task])
+        unit.metadata[:defined_in] = definitions.map { |d| relative_path(d[:file]) } if definitions.size > 1
+        unit.dependencies = definitions.flat_map { |d| extract_dependencies(d[:task], d[:source]) }.uniq
 
         unit
+      end
+
+      def relative_path(file)
+        file.to_s.sub("#{Rails.root}/", '')
       end
 
       # Build annotated source code for the unit.
@@ -330,7 +380,8 @@ module Woods
           task_dependencies: task_data[:task_dependencies],
           arguments: task_data[:arguments],
           has_environment_dependency: task_data[:task_dependencies].include?('environment'),
-          source_lines: (task_data[:block_source] || '').lines.size
+          source_lines: (task_data[:block_source] || '').lines.size,
+          line_number: task_data[:line_number]
         }
       end
 

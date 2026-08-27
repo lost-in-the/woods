@@ -591,11 +591,18 @@ module Woods
     # calling either without this leaves `@dependents_dirty` and
     # `@incremental_written` holding a previous run's state.
     #
+    # `begin_payload!(strict: true)`: an incremental write set is only the
+    # touched units, so a degrade to flat here (see {#begin_payload!}) would
+    # both read the wrong baseline graph below and publish an index missing
+    # every unit it didn't touch. Raises rather than degrading; the caller
+    # sees {Woods::ExtractionError} and the generation is left unbumped.
+    #
     # @return [void]
+    # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run
-      begin_payload!
+      begin_payload!(strict: true)
       graph_path = payload_dir.join('dependency_graph.json')
-      @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path))) if graph_path.exist?
+      @dependency_graph = DependencyGraph.from_h(JSON.parse(AtomicFile.read(graph_path))) if graph_path.exist?
 
       ModelNameCache.reset!
       safe_eager_load!
@@ -611,9 +618,15 @@ module Woods
     # The manifest is rewritten only when the run actually changed something.
     # `staleness_seconds` is derived from the manifest timestamp, so touching
     # it after a no-op run reports the index as freshly synced when nothing
-    # was re-read — the misleading half of #164 gap 4. The graph is written
-    # unconditionally: it is cheap, idempotent, and carries the PageRank
-    # recomputation.
+    # was re-read — the misleading half of #164 gap 4. The graph write itself
+    # is unconditional, but on a no-op run it is inert, not meaningful: under
+    # payloads it lands in this run's not-yet-published directory, and a
+    # no-op run returns below before {#publish_generation}, so nothing ever
+    # points at what it just wrote — the next run's {PayloadStore#create}
+    # empties that same (unbumped-generation-numbered) directory before
+    # writing into it again. The graph's content is unchanged on a no-op run
+    # regardless (no touched units, no new edges), so nothing is lost; it is
+    # the write itself, not the recomputation, that goes nowhere.
     #
     # No `capture_snapshot` here: snapshots must hash the FULL unit set, and
     # incremental runs only hold changed units in memory — capturing would
@@ -681,17 +694,46 @@ module Woods
     # incremental run patches — sees the previous generation, exactly as it
     # did when the index was flat.
     #
-    # A failure here degrades to the flat layout rather than failing the run.
-    # The index is then non-atomic, which is what it was before payloads
-    # existed, and the next successful run restores the boundary.
+    # A failure here degrades to the flat layout rather than failing the run
+    # — but only when a flat publish can actually be complete. A full
+    # extraction's write set is every unit in the app, so a flat publish from
+    # it is a whole index; the next successful run restores the payload
+    # boundary. `strict:` opts out of that degrade for {#extract_changed} and
+    # {#refresh}, whose write set is only the units they touched: over a
+    # payload-born index (`marker.payload` set), the flat root holds nothing
+    # newer than the last time this index was flat — possibly nothing at all
+    # — so publishing there would both compute the wrong incremental baseline
+    # ({#prepare_incremental_run} reads its graph from wherever `payload_dir`
+    # resolves to) and, even with the right baseline, redirect every reader
+    # to a near-empty directory missing every untouched unit. There is no
+    # complete flat index an incremental degrade can produce, so this raises
+    # instead — see {Woods::ExtractionError}. The generation is never bumped
+    # over a raised run, so readers keep serving the last good index.
     #
+    # @param strict [Boolean] raise instead of degrading to a flat publish
+    #   when the published generation names a payload
     # @return [void]
-    def begin_payload!
+    # @raise [Woods::ExtractionError] when `strict` and a payload-born index's
+    #   payload directory could not be opened for this run
+    def begin_payload!(strict: false)
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
       @payload_dir = @payload_store.create(@payload_generation)
       seed_payload(marker)
     rescue StandardError => e
+      if strict && marker&.payload
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          Could not open a payload directory for this incremental run
+          (#{e.class}: #{e.message}), and generation #{marker.number}'s payload
+          lives in #{marker.payload} rather than the flat output root. An
+          incremental run only writes the units it touched, so publishing flat
+          here would produce an index missing every untouched unit. Fix the
+          underlying filesystem issue (permissions, free space, a broken
+          mount), or run a full `woods:extract` to rebuild a complete flat
+          index before incremental runs resume.
+        MSG
+      end
+
       Rails.logger.warn(
         "[Woods] Could not open a payload directory (#{e.class}: #{e.message}) — publishing flat"
       )
@@ -718,6 +760,14 @@ module Woods
       end
     end
 
+    # Uses {PayloadStore#link_or_copy} rather than a bare +FileUtils.ln+ for
+    # the same reason {PayloadStore#clone} does: a filesystem that disallows
+    # hardlinks (EXDEV/EPERM/EMLINK/NotImplementedError) must still seed the
+    # payload, just by copying. Before this, that raise was caught by
+    # {#begin_payload!}'s rescue and degraded every run on such a filesystem
+    # to a flat publish — the fallback existed in {PayloadStore} but this,
+    # the only other file-level linker, never reached it.
+    #
     # @return [void]
     def seed_payload_from_flat_root
       (PAYLOAD_FILES + payload_entry_dirs).each do |entry|
@@ -725,7 +775,7 @@ module Woods
         next unless source.exist?
 
         @payload_store.clone(source, @payload_dir.join(entry)) if source.directory?
-        FileUtils.ln(source.to_s, @payload_dir.join(entry).to_s) if source.file?
+        @payload_store.link_or_copy(source, @payload_dir.join(entry)) if source.file?
       end
     end
 
@@ -982,24 +1032,32 @@ module Woods
     # Dependency Resolution
     # ──────────────────────────────────────────────────────────────────────
 
+    # `unit_map` is identifier => Array<unit>, not identifier => unit (#225).
+    # An identifier is not unique across types (a Scenic view and a factory
+    # can both be `reports`), so a single-valued map let the later
+    # registration overwrite the earlier one and every dependent land on
+    # whichever unit happened to be indexed last — the other unit serialized
+    # `dependents: []` forever. {#rewrite_unit_json_of_type} already treats
+    # `dependents` as a property of the identifier and writes the same list
+    # to every type that identifier owns; this brings the full-extraction
+    # path into agreement with it.
     def resolve_dependents
       # Build complete unit map first (cross-type dependencies require all units indexed).
-      unit_map = @results.each_with_object({}) do |(_type, units), map|
-        units.each { |u| map[u.identifier] = u }
+      unit_map = @results.each_with_object(Hash.new { |h, k| h[k] = [] }) do |(_type, units), map|
+        units.each { |u| map[u.identifier] << u }
       end
 
       # Resolve dependents using the complete map.
       @results.each_value do |units|
         units.each do |unit|
           unit.dependencies.each do |dep|
-            target_unit = unit_map[dep[:target]]
-            next unless target_unit
-
-            target_unit.dependents ||= []
-            target_unit.dependents << {
-              type: unit.type,
-              identifier: unit.identifier
-            }
+            unit_map[dep[:target]].each do |target_unit|
+              target_unit.dependents ||= []
+              target_unit.dependents << {
+                type: unit.type,
+                identifier: unit.identifier
+              }
+            end
           end
         end
       end
@@ -1504,7 +1562,7 @@ module Woods
       chunks = 0
 
       Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
-        entries = JSON.parse(File.read(index_path))
+        entries = JSON.parse(AtomicFile.read(index_path))
         counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
         chunks += entries.sum { |e| e['chunk_count'].to_i }
       rescue JSON::ParserError => e
@@ -1531,7 +1589,7 @@ module Woods
       manifest_path = payload_dir.join('manifest.json')
       return unless manifest_path.exist?
 
-      manifest = JSON.parse(File.read(manifest_path))
+      manifest = JSON.parse(AtomicFile.read(manifest_path))
       # Snapshots are keyed on the commit SHA — an unresolvable provenance
       # ("unknown", see GitProvenance/#137) must not key or collide a snapshot.
       git_sha = manifest['git_sha']
@@ -1589,7 +1647,11 @@ module Woods
       return if @results.empty?
 
       total_units    = @results.values.sum(&:size)
-      total_chunks   = @results.sum { |_, units| units.sum { |u| [u.chunks.size, 1].max } }
+      # Matches the manifest's count (`write_manifest`/`persisted_counts`
+      # both sum `u.chunks.size` directly) — the previous `[size, 1].max`
+      # floor made SUMMARY.md disagree with manifest.json for every
+      # unchunked unit.
+      total_chunks   = @results.sum { |_, units| units.sum { |u| u.chunks.size } }
       category_count = @results.count { |_, units| units.any? }
 
       summary = []
@@ -1649,7 +1711,7 @@ module Woods
       index = Dir[type_dir.join('*.json')].filter_map do |file|
         next if File.basename(file) == '_index.json'
 
-        data = JSON.parse(File.read(file))
+        data = JSON.parse(AtomicFile.read(file))
         {
           identifier: data['identifier'],
           file_path: data['file_path'],
@@ -2077,6 +2139,27 @@ module Woods
     # them, the type may hold stale units, and an operator chasing a ghost
     # unit needs to know which run declined to delete it and why.
     #
+    # `fresh` is computed PER unit_type, not once for the whole extractor key
+    # (#225). An identifier is not unique across types — a Scenic view and a
+    # factory can both be named `reports` — so a single identifier-level
+    # `fresh` set let a factories re-run's `database_view` deletion pass see
+    # the surviving `factories` identifier as "still fresh" and skip removing
+    # nothing, then later delete both nodes anyway once `remove_unit` was
+    # called without `type:` (the same call also had to be fixed — see
+    # below). A per-type set also covers a unit reclassified between two
+    # types this same key owns (GraphQL's four): the old type's identifier is
+    # absent from ITS OWN fresh set even though the identifier as a whole is
+    # still "fresh" under the new type, so the stale old-type node is
+    # correctly dropped instead of surviving because the identifier still
+    # exists somewhere in the extractor's output.
+    #
+    # `remove_unit` is called WITH `type: unit_type` for the same reason:
+    # `DependencyGraph#remove`'s own doc warns that a typeless removal fans
+    # over every type registered under the identifier, so calling it here
+    # without `type:` deleted the sibling type's node and JSON file too —
+    # reproduced live as a factories re-run deleting a same-named Scenic-view
+    # unit.
+    #
     # @param key [Symbol] extractor key
     # @param units [Array<ExtractedUnit>] the fresh extraction
     # @param affected_types [Set<Symbol>]
@@ -2090,10 +2173,10 @@ module Woods
         return Set.new
       end
 
-      fresh = units.to_set(&:identifier)
       EXTRACTOR_KEY_TO_TYPES.fetch(key, []).each_with_object(Set.new) do |unit_type, removed|
+        fresh = units.select { |u| u.type == unit_type }.to_set(&:identifier)
         (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
-          removed.add(stale) if remove_unit(stale, affected_types)
+          removed.add(stale) if remove_unit(stale, affected_types, type: unit_type)
         end
       end
     end
@@ -2229,20 +2312,6 @@ module Woods
       CLASS_BASED.key?(type)
     end
 
-    # Is this GraphQL unit's recorded path the convention derived from its
-    # constant, rather than a file it was read out of?
-    #
-    # Keying the whole question on unit *type* was wrong (B-070 / #171): the
-    # property is per-unit. `GRAPHQL_TYPES` is equally true of units the static
-    # file pass produced, whose `file_path` is a real file — so sparing the type
-    # wholesale meant a deleted `app/graphql/**.rb` survived an unnamed-path
-    # sweep forever, with the daemon's empty-change-set catch-up as the exposed
-    # caller.
-    #
-    # `GraphQLExtractor#source_file_for_class` derives exactly one fallback:
-    # `app/graphql/#{constant.underscore}.rb`. A unit whose path is that
-    # fallback has no file behind it and must be spared; any other path came
-    # from the file pass and is sweepable like anything else.
     # Register a batch of freshly-extracted units and write their JSON.
     #
     # Registration happens BEFORE path normalization — the graph's file map
@@ -2348,7 +2417,7 @@ module Woods
       (dependents_dirty | git_dirty.keys).each do |identifier|
         rewrite_unit_json(identifier, affected_types,
                           refresh_dependents: dependents_dirty.include?(identifier),
-                          git: git_dirty.key?(identifier) ? git_data[git_dirty[identifier]] : nil)
+                          git_data: git_dirty.key?(identifier) ? git_data : nil)
       end
     end
 
@@ -2358,12 +2427,14 @@ module Woods
     # @param identifier [String]
     # @param affected_types [Set<Symbol>]
     # @param refresh_dependents [Boolean]
-    # @param git [Hash, nil] git metadata for the unit's file, if any
+    # @param git_data [Hash{String => Hash}, nil] batch git data keyed by
+    #   relative path (per {#batch_git_data}), or nil when this identifier
+    #   isn't git-dirty this run
     # @return [void]
-    def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git:)
+    def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git_data:)
       @dependency_graph.node_types(identifier).each do |type|
         rewrite_unit_json_of_type(identifier, type, affected_types,
-                                  refresh_dependents: refresh_dependents, git: git)
+                                  refresh_dependents: refresh_dependents, git_data: git_data)
       end
     end
 
@@ -2371,20 +2442,29 @@ module Woods
     # of the identifier, not of the type, so every file the identifier owns
     # gets the same refreshed list — which is what a full extraction writes.
     #
+    # Git metadata is NOT a property of the identifier (#225): a colliding
+    # identifier's types each have their own `file_path` (a Scenic view and a
+    # factory both named `reports` live in different files with different
+    # histories), so this resolves git data against THIS type's own node
+    # rather than a single pre-resolved hash shared across every type — the
+    # previous shape let one type's commit history land in every colliding
+    # type's `metadata.git`, keyed by whichever type {#register_and_write}
+    # happened to touch last for that identifier.
+    #
     # @param identifier [String]
     # @param type [Symbol]
     # @param affected_types [Set<Symbol>]
     # @param refresh_dependents [Boolean]
-    # @param git [Hash, nil]
+    # @param git_data [Hash{String => Hash}, nil]
     # @return [void]
-    def rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents:, git:)
+    def rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents:, git_data:)
       extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
       return unless extractor_key
 
       path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
       return unless File.exist?(path)
 
-      data = JSON.parse(File.read(path))
+      data = JSON.parse(AtomicFile.read(path))
       # Serialized comparison, not `data.dup`: the git patch mutates the
       # nested metadata hash in place, which a shallow copy would follow.
       before = JSON.generate(data)
@@ -2393,6 +2473,8 @@ module Woods
         data['dependents'] = @dependency_graph.dependents_detail(identifier)
                                               .map { |d| { 'type' => d[:type].to_s, 'identifier' => d[:identifier] } }
       end
+
+      git = git_data && git_for_type(identifier, type, git_data)
       (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git)) if git
 
       return if JSON.generate(data) == before
@@ -2401,6 +2483,20 @@ module Woods
       affected_types&.add(extractor_key)
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
+    end
+
+    # This (identifier, type) pair's own git data, looked up by its own
+    # `file_path` rather than by identifier — see {#rewrite_unit_json_of_type}.
+    #
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param git_data [Hash{String => Hash}] keyed by relative path
+    # @return [Hash, nil]
+    def git_for_type(identifier, type, git_data)
+      node = @dependency_graph.node(identifier, type: type)
+      return nil unless node && node[:file_path]
+
+      git_data[normalize_file_path(node[:file_path])]
     end
 
     # Batch-fetch git metadata for the units written by this run, in a single

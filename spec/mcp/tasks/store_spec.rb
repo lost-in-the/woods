@@ -119,7 +119,7 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
       identity = store.send(:producer_identity_for, Process.pid)
 
-      expect(identity).to match(/\Aboot=[^;]+;start_ticks=\d+\z/)
+      expect(identity).to match(/\Aboot=[^;]+;(?:ns=pid:\[\d+\];)?start_ticks=\d+\z/)
     end
 
     it 'caches the invariant Darwin boot identity across repeated process checks' do
@@ -291,17 +291,6 @@ RSpec.describe Woods::MCP::Tasks::Store do
     end
   end
 
-  describe '#note_progress!' do
-    it 'attaches a human-readable status message without leaving working' do
-      task = store.create!(tool: 'pipeline_extract')
-      store.note_progress!(task.id, 'extracting models')
-      reloaded = store.get(task.id)
-
-      expect(reloaded.status).to eq('working')
-      expect(reloaded.status_message).to eq('extracting models')
-    end
-  end
-
   # The crash-resilience claim. Today a pipeline_extract thread dies with its
   # process and the agent is left polling a run that no longer exists; a task
   # whose owner is gone must resolve to a terminal state instead of `working`
@@ -366,6 +355,51 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(described_class.new(@index_dir).get(live.id).status).to eq('working')
     end
 
+    # A task minted in a different boot/pid namespace (e.g. a container) can't
+    # be judged by this reader's own pid table at all: a host-side reader would
+    # otherwise see a namespaced pid as "not running" and fail a task that is
+    # actually still working. pid 2**30 stands in for "would read as dead if
+    # the process table were consulted" to prove the boot check short-circuits
+    # before it gets there.
+    it 'leaves a task alone when its producer identity records a foreign boot' do
+      allow(store).to receive(:producer_identity_for).and_return('boot=test-boot;start_ticks=1')
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['producer_identity'] = 'boot=not-this-hosts-boot;start_ticks=1'
+      raw['pid'] = 2**30
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('working')
+    end
+
+    it 'leaves a task alone when its producer identity records another pid namespace on this boot' do
+      allow(store).to receive_messages(producer_identity_for: 'boot=test-boot;ns=pid:[1];start_ticks=1',
+                                       current_boot_identity: 'test-boot',
+                                       current_pid_namespace: 'pid:[1]')
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['producer_identity'] = 'boot=test-boot;ns=pid:[4026532000];start_ticks=1'
+      raw['pid'] = 2**30
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('working')
+    end
+
+    it 'still judges a same-boot, same-namespace producer by its pid' do
+      allow(store).to receive_messages(producer_identity_for: 'boot=test-boot;ns=pid:[1];start_ticks=1',
+                                       current_boot_identity: 'test-boot',
+                                       current_pid_namespace: 'pid:[1]')
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['pid'] = 2**30
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('failed')
+    end
+
     it 'marks a task failed after its exact producer process dies' do
       child = Process.spawn('/bin/sleep', '30')
       identity = store.send(:producer_identity_for, child)
@@ -416,16 +450,60 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get(task.id)).not_to be_nil
     end
 
-    it 'measures terminal task ttl from creation rather than the last update' do
+    # A pipeline that runs longer than its own ttl (the default is 1h) must not
+    # have its result evaporate the instant complete! writes it: ttl for a
+    # terminal record measures from the transition itself, not from creation.
+    it 'measures terminal task ttl from the last update rather than creation' do
+      allow(store).to receive(:producer_identity_for).and_return('boot=test-boot;start_ticks=1')
       task = store.create!(tool: 'pipeline_extract', ttl_ms: 10_000)
       path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
       raw = JSON.parse(File.read(path))
-      raw['created_at'] = (Time.now.utc - 60).iso8601
+      raw['created_at'] = (Time.now.utc - 3600).iso8601
       File.write(path, JSON.generate(raw))
 
       store.complete!(task.id, result: {})
 
-      expect(store.get(task.id)).to be_nil
+      expect(store.get(task.id)).not_to be_nil
+    end
+
+    describe 'sweeping a corrupt record' do
+      # A corrupt record is not a race between two sweepers — a valid record
+      # does not spontaneously fail schema validation. It is (almost always)
+      # permanent: a version upgrade, a hand-edit. Left alone it gets
+      # re-parsed and re-fails on every sweep forever, so age is the signal
+      # sweep_expired! uses to tell "permanently broken" from "a write still
+      # in flight" (which would also read as corrupt for the brief window
+      # between truncate and rename).
+      def corrupt_a_record(ttl_ms: 10_000)
+        task = store.create!(tool: 'pipeline_extract', ttl_ms: ttl_ms)
+        path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+        File.write(path, 'not json{')
+        path
+      end
+
+      it 'deletes a corrupt record older than the default expiry window' do
+        path = corrupt_a_record
+        old_time = Time.now - (described_class::DEFAULT_TTL_MS / 1000.0) - 60
+        File.utime(old_time, old_time, path)
+
+        store.send(:sweep_expired!)
+
+        expect(File.exist?(path)).to be false
+      end
+
+      it 'leaves a corrupt record younger than the default expiry window untouched' do
+        path = corrupt_a_record
+
+        store.send(:sweep_expired!)
+
+        expect(File.exist?(path)).to be true
+      end
+
+      it 'does not raise when sweeping a directory holding only a corrupt record' do
+        corrupt_a_record
+
+        expect { store.send(:sweep_expired!) }.not_to raise_error
+      end
     end
   end
 

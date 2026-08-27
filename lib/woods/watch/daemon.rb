@@ -262,37 +262,87 @@ module Woods
       # daemon that actually started. A stand-down returns from {#run} without
       # entering this method, so nothing it does on the way out can clobber
       # the live daemon's records.
+      #
+      # The watcher starts on its own thread BEFORE {#catch_up} runs, not
+      # after — see {#launch_watcher}. {#catch_up} still runs to completion
+      # on this thread; only once it returns do we park alongside the
+      # watcher, waiting for its next event or a stop.
       def run_started
         @watcher ||= build_watcher
         publish_status(:running, reason: nil)
         @last_event_at = monotonic_now
         heartbeat = start_heartbeat
 
-        catch_up
-        start_watching do |paths|
+        watcher_thread = launch_watcher do |paths|
           enqueue(paths)
           drain
         end
+        catch_up
+        watcher_thread.join
+        raise @watcher_failure if @watcher_failure
 
         @stop_reason || :stopped
       ensure
+        shut_down(heartbeat, watcher_thread)
+      end
+
+      # @param heartbeat [Thread, nil]
+      # @param watcher_thread [Thread, nil]
+      # @return [void]
+      def shut_down(heartbeat, watcher_thread)
         # The watch loop can end without anything having set a reason — a
-        # `stop` that landed before `start_watching` ran, for instance. Set
+        # `stop` that landed before the watcher noticed it, for instance. Set
         # one before touching the heartbeat: its loop's own exit check is
         # `break if @stop_reason`, so a heartbeat that is actually awake right
         # now (as opposed to parked in its long idle sleep) needs this to see
-        # the run is ending at all. Doesn't affect the method's return value —
-        # that already evaluated on the line above.
+        # the run is ending at all. Doesn't affect {#run_started}'s return
+        # value — that already evaluated before this `ensure` ran.
         @stop_reason ||= :stopped
-        # Cooperative first: ask the watcher to stop and give the heartbeat a
-        # chance to notice @stop_reason and exit its loop on its own. #kill
-        # bypasses rescue (not ensure — #process guards the batch it drains
-        # either way), so it is the last resort, not the first move.
+        # Cooperative first: ask the watcher to stop and let its thread notice
+        # and exit on its own. #kill bypasses rescue (not ensure — #process
+        # guards the batch it drains either way), so it is the last resort,
+        # not the first move.
         @watcher&.stop
+        # A no-op when {#run_started}'s body already joined normally; this
+        # only does real work when something raised (from #catch_up, most
+        # plausibly) before reaching that line, and it must still happen
+        # before #persist_pending — otherwise a watcher thread still draining
+        # a batch races the shutdown snapshot of @pending.
+        watcher_thread&.join
         stop_heartbeat(heartbeat)
         persist_pending
         publish_status(:stopped, reason: @stop_reason&.to_s)
         release_claim
+      end
+
+      # Start the watcher backend on its own thread, ahead of {#catch_up}.
+      #
+      # A file saved while catch_up's reconciliation (potentially a
+      # minutes-long, storm-triggered full extraction) was running used to be
+      # lost twice over: no watcher existed yet to report it as an event, and
+      # {PollingWatcher} takes its baseline snapshot inside `start` — after
+      # the save, so the first diff already excludes it. Worse, the save's
+      # mtime predates the generation bump catch_up's own extraction publishes
+      # at the end, so a future restart's watermark check reads the file as
+      # already covered — permanently. Starting the watcher first closes that
+      # window: {#enqueue} and {#drain} already tolerate the duplicate paths
+      # this produces against whatever catch_up finds on its own via the tree
+      # scan.
+      #
+      # Exceptions are captured here rather than left to `Thread`'s own
+      # unhandled-exception handling, so {#run_started} can re-raise the
+      # *same* error exactly once — after giving catch_up its turn — instead
+      # of `Thread#join` re-raising it again on every subsequent join,
+      # including the defensive one in this method's `ensure`.
+      #
+      # @yieldparam paths [Array<String>] absolute paths from one watcher batch
+      # @return [Thread]
+      def launch_watcher(&on_change)
+        Thread.new do
+          start_watching(&on_change)
+        rescue StandardError => e
+          @watcher_failure = e
+        end
       end
 
       # @param heartbeat [Thread, nil]
@@ -423,14 +473,6 @@ module Woods
         @pending_mutex.synchronize { @pending.empty? }
       end
 
-      # Reconcile changes that predate this daemon.
-      #
-      # The generation file is rewritten as the last act of every successful
-      # extraction, so its mtime is "when this index was last known good".
-      # Anything modified since is uncovered, whoever made the change and
-      # whether or not a daemon was watching at the time. With no generation
-      # file at all there is no index, and every file is uncovered — which the
-      # storm threshold correctly turns into one full extraction.
       # Carry the pending set across a restart.
       #
       # Within a run, carried paths survive; at shutdown they were dropped, and
@@ -468,6 +510,16 @@ module Woods
         File.join(@output_dir, 'watch_pending.json')
       end
 
+      # Reconcile changes that predate this daemon.
+      #
+      # The generation file is rewritten as the last act of every successful
+      # extraction, so its mtime is "when this index was last known good".
+      # Anything modified since is uncovered, whoever made the change and
+      # whether or not a daemon was watching at the time. With no generation
+      # file at all there is no index, and every file is uncovered — which the
+      # storm threshold correctly turns into one full extraction.
+      #
+      # @return [void]
       def catch_up
         return unless @catch_up
 
@@ -680,23 +732,46 @@ module Woods
 
       def extract(change_set)
         started = monotonic_now
-        # Acquiring is itself IO and can fail (a read-only or full output dir).
-        # Outside the failure posture that raised straight through the watcher
-        # callback and killed the loop.
-        acquired = @lock.acquire
+        acquired = acquire_lock_for(change_set, started)
+        return acquired if acquired.is_a?(Hash) # a raising acquire already built its own degraded outcome
         return contended(change_set, started) unless acquired
 
         begin
           run_extraction(change_set, started)
         ensure
-          @lock.release
+          # Best-effort: {#run_extraction} already decided the outcome (which
+          # this `ensure` must not touch), so a release that raises here is
+          # logged, not escalated. It used to share the method-level rescue
+          # below with the acquire — which mislabeled a release failure after
+          # a *successful* run as "could not take the extraction lock" and,
+          # because an exception raised in `ensure` replaces whatever the
+          # `begin` block was about to return, silently discarded that good
+          # outcome along with it.
+          release_lock_quietly
         end
+      end
+
+      # Acquiring is itself IO and can fail (a read-only or full output dir).
+      # Scoped to just the acquire call so a failure here is never confused
+      # with a failure in the extraction or the release that follows it.
+      #
+      # @return [Boolean, Hash] the acquire result, or a ready-made degraded
+      #   {#outcome} when acquiring itself raised
+      def acquire_lock_for(change_set, started)
+        @lock.acquire
       rescue ScriptError, StandardError => e
         carry_forward(change_set)
         reason = "could not take the extraction lock: #{e.class}: #{e.message}"
         @logger.error("[Woods] watch: #{reason}")
         outcome(:extract, :degraded, reason: reason, count: change_set.size,
                                      duration_ms: elapsed_ms(started))
+      end
+
+      # @return [void]
+      def release_lock_quietly
+        @lock.release
+      rescue ScriptError, StandardError => e
+        @logger.warn("[Woods] watch: could not release the extraction lock — #{e.message}")
       end
 
       # Another writer holds the extraction lock — a manual `woods:extract`,
@@ -873,12 +948,46 @@ module Woods
       def claim_startup?
         return true if ENV['WOODS_IGNORE_WATCH'] == '1'
 
-        3.times do
-          return true if create_claim
-          return false unless reclaim_if_stale
-        end
+        with_claim_lock do
+          3.times do
+            return true if create_claim
+            return false unless reclaim_if_stale
+          end
 
-        false
+          false
+        end
+      end
+
+      # Serializes reclaim-then-create across starters. Without it the
+      # sequence is read-then-unlink: starter A judges claim S stale and
+      # pauses, B deletes S and publishes its live claim, A resumes and
+      # unlinks B's claim, and both return as owners. An `flock` on a
+      # sidecar file makes the whole loop one critical section; the kernel
+      # releases it if the holder dies. Where the filesystem refuses the
+      # lock (some network mounts) the loop runs unserialized, as before.
+      def with_claim_lock
+        lock = open_claim_lock
+        yield
+      ensure
+        lock&.close
+      end
+
+      def open_claim_lock
+        FileUtils.mkdir_p(@output_dir)
+        # Held open on purpose: the descriptor is the lock; closed in
+        # with_claim_lock's ensure.
+        file = File.open(claim_lock_path, File::RDWR | File::CREAT, 0o644) # rubocop:disable Style/FileOpen
+        file.flock(File::LOCK_EX)
+        file
+      rescue SystemCallError => e
+        file&.close
+        @logger.warn("[Woods] watch: claim lock unavailable on #{@output_dir} (#{e.class}: #{e.message}); " \
+                     'startup claims are not serialized here, so two simultaneous starters can both win')
+        nil
+      end
+
+      def claim_lock_path
+        "#{claim_path}.lock"
       end
 
       # @return [Boolean] true when the claim file was created by this call
@@ -894,22 +1003,50 @@ module Woods
       # race this method exists to close.
       def create_claim
         FileUtils.mkdir_p(@output_dir)
+        content = JSON.generate(pid: Process.pid, host: Status.host_identity)
         tmp_path = "#{claim_path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
-        File.write(tmp_path, JSON.generate(pid: Process.pid, host: Status.host_identity))
-        File.link(tmp_path, claim_path)
+        File.write(tmp_path, content)
+        begin
+          File.link(tmp_path, claim_path)
+        rescue Errno::EPERM, Errno::ENOTSUP
+          # Some filesystems (certain bind mounts, network shares) don't
+          # support hard links at all — that raises EPERM/ENOTSUP rather
+          # than the EEXIST a real conflict would raise. Fall back to a
+          # plain O_EXCL create so the daemon can still start there; this
+          # loses the tmp-write-then-link guarantee that content is
+          # complete before a reader can see the file exist, but the
+          # content here is a few bytes written in one syscall.
+          File.open(claim_path, File::WRONLY | File::CREAT | File::EXCL) { |f| f.write(content) }
+        end
         @claimed = true
         true
       rescue Errno::EEXIST
         false
       ensure
-        FileUtils.rm_f(tmp_path)
+        # `tmp_path` is assigned after `mkdir_p`, so a raise from `mkdir_p`
+        # itself leaves it `nil` — `FileUtils.rm_f(nil)` is a TypeError that
+        # would otherwise replace whatever `mkdir_p` actually raised.
+        FileUtils.rm_f(tmp_path) if tmp_path
       end
 
       # @return [Boolean] true when a stale claim was cleared and the caller
-      #   should retry {#create_claim}; false when the claim is live (or the
-      #   directory vanished) and the caller should give up
+      #   should retry {#create_claim}; false when the claim is live, was
+      #   already replaced by a winning contender, or the directory
+      #   vanished — every case where the caller should give up
       def reclaim_if_stale
+        snapshot = claim_bytes
+        return false unless snapshot
         return false unless stale_claim?
+
+        # Race guard: two starters can both read the same dead-pid claim
+        # and both judge it stale before either deletes it. Re-read
+        # immediately before deleting: if the bytes changed since the
+        # snapshot, another daemon's create_claim already replaced the file
+        # with its own live claim, and deleting it now would destroy a claim
+        # we never judged stale. Bytes, not the inode: Linux reuses a freed
+        # inode for the very next file created in the directory, so an
+        # inode comparison passed the replaced claim through.
+        return false unless claim_bytes == snapshot
 
         FileUtils.rm_f(claim_path)
         true
@@ -917,14 +1054,42 @@ module Woods
         false
       end
 
-      # @return [Boolean] whether the current claim file's recorded pid is
-      #   dead — an unreadable or already-vanished claim counts as stale
-      #   too, since it cannot be a live daemon's claim
+      # @return [String, nil] the claim file's current bytes, or nil if it
+      #   doesn't exist
+      def claim_bytes
+        File.read(claim_path)
+      rescue Errno::ENOENT
+        nil
+      end
+
+      # @return [Boolean] whether the current claim's pid evidence can be
+      #   trusted at all and, if so, whether that pid is dead — an unreadable
+      #   or already-vanished claim counts as stale too, since it cannot be a
+      #   live daemon's claim
       def stale_claim?
         record = JSON.parse(File.read(claim_path))
+        return true unless same_claim_host?(record['host'])
+
         !claim_pid_alive?(record['pid'])
       rescue JSON::ParserError, SystemCallError
         true
+      end
+
+      # Mirrors {Status#alive?}'s host check: a pid is only meaningful inside
+      # the namespace that issued it, so a claim recorded on a different host
+      # cannot be judged live on pid evidence alone. Without this, a dead
+      # container daemon's claim (container pid 47) reads as live forever to
+      # a host-side daemon, because host pid 47 almost always exists too — the
+      # same false positive {Status} already guards against for the status
+      # file, just never mirrored here for the claim file.
+      #
+      # A claim with no recorded host predates this field; treated as
+      # same-host so an in-place upgrade does not misjudge its own claim.
+      #
+      # @param host [String, nil]
+      # @return [Boolean]
+      def same_claim_host?(host)
+        host.nil? || host == Status.host_identity
       end
 
       # Same semantics as {Status#alive?}'s pid check: signal 0 asks "could I

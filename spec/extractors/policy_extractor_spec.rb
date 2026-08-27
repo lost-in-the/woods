@@ -72,6 +72,47 @@ RSpec.describe Woods::Extractors::PolicyExtractor do
 
   # ── extract_policy_file ──────────────────────────────────────────────
 
+  describe 'evaluated model detection from initialize params' do
+    it 'ignores default values and keyword arguments' do
+      path = create_file('app/policies/refund_policy.rb', <<~RUBY)
+        class RefundPolicy
+          def initialize(order, user = nil, strict: false, limit: 10)
+            @order = order
+          end
+
+          def eligible?
+            true
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_policy_file(path)
+      models = unit.metadata[:evaluated_models]
+      expect(models).to include('Order', 'User')
+      expect(models).not_to include('Nil', 'Strict', 'False', 'Limit', '10')
+      targets = unit.dependencies.select { |d| d[:via] == :policy_evaluation }.map { |d| d[:target] }
+      expect(targets).not_to include('Nil', 'Strict', 'False')
+    end
+  end
+
+  describe 'block-namespaced policies (#174)' do
+    it 'qualifies a class declared inside a module block' do
+      path = create_file('app/policies/billing/refund_policy.rb', <<~RUBY)
+        module Billing
+          class RefundPolicy
+            def eligible?
+              true
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_policy_file(path)
+      expect(unit.identifier).to eq('Billing::RefundPolicy')
+      expect(unit.namespace).to eq('Billing')
+    end
+  end
+
   describe '#extract_policy_file' do
     it 'extracts policy metadata' do
       path = create_file('app/policies/refund_policy.rb', <<~RUBY)

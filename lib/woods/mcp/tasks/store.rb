@@ -155,23 +155,6 @@ module Woods
           end
         end
 
-        # Attach a progress message without leaving `working`.
-        #
-        # @param id [String]
-        # @param message [String]
-        # @return [Task, nil] the updated record, or nil if unknown/terminal
-        def note_progress!(id, message)
-          with_task_lock(id) do
-            task = read(id)
-            return nil if task.nil? || task.terminal?
-
-            task.status_message = message.to_s
-            task.updated_at = Time.now.utc.iso8601
-            write(task)
-            task
-          end
-        end
-
         private
 
         def path_for(id)
@@ -299,11 +282,17 @@ module Woods
 
         # Only terminal records expire. An unfinished task must outlive its ttl
         # rather than vanish mid-run and strand a client that is still polling.
+        #
+        # Measured from `updated_at` — the terminal transition itself — not
+        # `created_at`. A pipeline that runs longer than ttl_ms would otherwise
+        # be born expired: `complete!` writes the terminal record at the run's
+        # end, and if expiry counted from the start, the very next `tasks/get`
+        # would report it unknown before the client ever saw the result.
         def expired?(task)
           return false unless task.terminal?
           return false if task.ttl_ms.nil?
 
-          Time.now.utc - Time.parse(task.created_at) > (task.ttl_ms / 1000.0)
+          Time.now.utc - Time.parse(task.updated_at) > (task.ttl_ms / 1000.0)
         rescue ArgumentError, TypeError
           false
         end
@@ -327,7 +316,59 @@ module Woods
         end
 
         def producer_alive?(task)
+          # A foreign-boot producer identity (e.g. a task minted inside a
+          # container) can't be judged by this reader's own pid table at all —
+          # `task.pid` names a slot in a namespace this process doesn't share,
+          # so `process_alive?` would be checking an unrelated, possibly
+          # reused, host pid. Leave those tasks alone rather than risk failing
+          # one that is still running.
+          return true if foreign_producer?(task.producer_identity)
+
           process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
+        end
+
+        # A producer this reader cannot judge by its own pid table: minted
+        # under another kernel boot, or (ordinary Docker on Linux, which
+        # shares the host boot id) inside another pid namespace. `task.pid`
+        # then names a slot in a namespace this process does not share, so
+        # `process_alive?` would be checking an unrelated, possibly reused,
+        # host pid.
+        def foreign_producer?(producer_identity)
+          boot = producer_identity[/\Aboot=([^;]+)/, 1]
+          return false unless boot
+          return true if boot != current_boot_identity
+
+          namespace = producer_identity[/;ns=([^;]+)/, 1]
+          return false if namespace.nil? || current_pid_namespace.nil?
+
+          namespace != current_pid_namespace
+        end
+
+        # @return [String, nil] this process's pid namespace token
+        #   (`pid:[4026531836]`), nil where /proc has none (Darwin)
+        def current_pid_namespace
+          return @current_pid_namespace if defined?(@current_pid_namespace)
+
+          @current_pid_namespace = pid_namespace_for('self')
+        end
+
+        def pid_namespace_for(pid)
+          File.readlink("/proc/#{pid}/ns/pid")
+        rescue SystemCallError
+          nil
+        end
+
+        def current_boot_identity
+          return @current_boot_identity if defined?(@current_boot_identity)
+
+          @current_boot_identity = if File.readable?('/proc/sys/kernel/random/boot_id')
+                                     boot_id = File.read('/proc/sys/kernel/random/boot_id').strip
+                                     boot_id.empty? ? nil : boot_id
+                                   else
+                                     darwin_boot_identity
+                                   end
+        rescue SystemCallError
+          @current_boot_identity = nil
         end
 
         def process_alive?(pid)
@@ -354,7 +395,8 @@ module Woods
           start_ticks = linux_start_ticks(File.read("/proc/#{pid}/stat"))
           return if boot_id.empty? || start_ticks.nil?
 
-          "boot=#{boot_id};start_ticks=#{start_ticks}"
+          namespace = pid_namespace_for(pid)
+          namespace ? "boot=#{boot_id};ns=#{namespace};start_ticks=#{start_ticks}" : "boot=#{boot_id};start_ticks=#{start_ticks}"
         rescue Errno::ENOENT
           nil
         end
@@ -410,10 +452,40 @@ module Woods
 
             File.delete(path)
             FileUtils.rm_f("#{path}.lock")
-          rescue SystemCallError, CorruptRecordError
+          rescue SystemCallError
             # Another process swept it first; nothing to do.
             nil
+          rescue CorruptRecordError
+            # Not a race — a valid record does not spontaneously fail schema
+            # validation. This is a record that will never parse (a version
+            # upgrade changed the schema, a hand-edited file, a torn write
+            # that never got a follow-up write). Left alone, sweep_expired!
+            # re-parses and re-fails on it every time it runs, forever. Delete
+            # it once it's old enough that a torn write from a concurrent
+            # create!/write would have long since finished; a record younger
+            # than the default TTL is left alone in case it's mid-write.
+            next unless corrupt_record_expired?(path)
+
+            File.delete(path)
+            FileUtils.rm_f("#{path}.lock")
           end
+        end
+
+        # Is a corrupt record old enough to delete outright?
+        #
+        # {#expired?} can't be used here — it reads +task.created_at+ from a
+        # successfully parsed {Task}, which is exactly what a corrupt record
+        # doesn't have. File mtime is the next best signal: {#write} rewrites
+        # the whole file on every transition, so mtime tracks "how long ago
+        # this record was last touched", which is what distinguishes a
+        # permanently broken record from a write still in flight.
+        #
+        # @param path [String] the corrupt record's file path
+        # @return [Boolean]
+        def corrupt_record_expired?(path)
+          Time.now.utc - File.mtime(path).utc > (DEFAULT_TTL_MS / 1000.0)
+        rescue SystemCallError
+          false
         end
       end
     end

@@ -28,11 +28,11 @@ Three differences are tolerated, and nothing else:
 
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
-exactly. Tolerating the ordering there meant the harness — the only test that
-compares a full run against an incremental one — could not see the very
+exactly. Tolerating the ordering there meant the harness, the only test that
+compares a full run against an incremental one, could not see the very
 dependence the analyzer's determinism work existed to remove.
 
-This matters most for **incremental CI chains** — restore the previous graph,
+This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
 forward run over run instead of being erased by the next full rebuild.
 
@@ -48,10 +48,10 @@ step before it.
    path no longer produces are dropped. This is what indexes a file the index
    has never seen, and what lets a task removed from a multi-task `.rake` file
    actually go away.
-3. **Re-extract the rest of the blast radius** — units whose own file did not
+3. **Re-extract the rest of the blast radius**: units whose own file did not
    change but which depend on something that did.
 4. **Reconcile class-based types** against each extractor's
-   `#discoverable_classes` — classes added since the last extraction, and
+   `#discoverable_classes`, classes added since the last extraction, and
    classes the graph still holds that the set no longer contains. Exact by
    construction: it is the same discovery code a full extraction uses, so
    there is no path-to-constant guessing.
@@ -62,10 +62,10 @@ step before it.
 7. **Reconcile class-based types once more**, because pruning can un-know a
    class the first pass skipped: a class-based file moved between autoload
    directories with its constant unchanged still looks known when step 4 runs,
-   so it is not re-extracted — and step 6 then removes it for its vanished old
+   so it is not re-extracted, and step 6 then removes it for its vanished old
    path. This pass re-adds it in the same run instead of waiting for some later
    run to notice. It skips everything step 6 pruned (`except:`), because
-   without a reload a constant outlives the file that defined it — otherwise
+   without a reload a constant outlives the file that defined it, otherwise
    deleting `app/models/user.rb` would prune `User` only for this pass to find
    it still in `ActiveRecord::Base.descendants` and re-register it against a
    path nothing can ever remove again. Idempotent when nothing was pruned.
@@ -105,9 +105,9 @@ automatically.
 | `lib/**/*.rb` (outside `tasks/`, `generators/`) | libs |
 | `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings |
 
-A path can match several rules — `app/policies` is claimed by both
+A path can match several rules, `app/policies` is claimed by both
 `PolicyExtractor` and `PunditExtractor`, `app/decorators` by both the
-serializer and decorator extractors — and all matching rules run.
+serializer and decorator extractors, and all matching rules run.
 
 ### Wholesale re-runs
 
@@ -129,8 +129,7 @@ cheap, which is what makes wholesale replacement the right shape.
 
 Two of these deserve a note:
 
-- **Routes cascade.** `ROUTE_CONSUMER_EXTRACTORS` embed the route table —
-  controllers write each action's routes into unit metadata and into the action
+- **Routes cascade.** `ROUTE_CONSUMER_EXTRACTORS` embed the route table, controllers write each action's routes into unit metadata and into the action
   chunks, and everything using `RouteHelperResolver` resolves navigation edges
   against it. The graph cannot express this, because a route unit depends *on*
   its controller, not the other way round, so walking dependents from
@@ -147,8 +146,7 @@ Models, controllers, mailers, components, view components and channels are
 additions are that set minus the graph, removals are the graph minus that set.
 
 For all six, `extract_all` is literally `discoverable_classes.map { … }.compact`,
-so absence from the set is exactly "a full extraction would not produce this" —
-the equivalence the incremental path is held to.
+so absence from the set is exactly "a full extraction would not produce this", the equivalence the incremental path is held to.
 
 Removal is gated on the eager load having **completed**, and that gate carries
 the whole safety argument:
@@ -159,7 +157,7 @@ the whole safety argument:
   stale unit, so a partial load removes nothing.
 - **A constant outliving its file.** A resident daemon that has not reloaded
   still holds a deleted class as a descendant, so it is *in* the set and not
-  stale — correct for that process. The subsequent reload is what makes it
+  stale, correct for that process. The subsequent reload is what makes it
   removable.
 
 Without this, a class deleted from a file that still exists was never removed
@@ -171,7 +169,7 @@ every subsequent incremental run.
 The booted harness cannot cover that case. Zeitwerk unloads only the constant a
 file is *expected* to define, so a class defined there as a side effect survives
 the reload, stays in `descendants`, and the in-process full extraction the
-oracle compares against emits it too — both sides agree, wrongly. The coverage
+oracle compares against emits it too, both sides agree, wrongly. The coverage
 is in `spec/extractor_spec.rb`, driving the reconciler with a shrinking
 discovery set.
 
@@ -183,14 +181,14 @@ discovery set.
   incomplete (a git diff that omits deletions, a missed unlink, a branch
   switch). Being a heuristic, it is bounded twice:
   - **To paths a file rule claims.** Some units name a *nominal* path rather
-    than a source file — `BehavioralProfile` names `config/application.rb`,
+    than a source file, `BehavioralProfile` names `config/application.rb`,
     which no rule claims.
   - **Away from class-based units entirely.** A class-based unit records a
     convention path when its source location can't be resolved, and that path
     need not exist. On Rails < 7.1, `ActiveRecord::SchemaMigration` and
     `ActiveRecord::InternalMetadata` are real `ActiveRecord::Base` descendants
     whose convention path (`app/models/active_record/schema_migration.rb`) no
-    application has — and *is* claimed by the PORO rule, so the first bound
+    application has, and *is* claimed by the PORO rule, so the first bound
     doesn't cover it.
 
   Sweeping either would delete units a full extraction still produces.
@@ -217,7 +215,7 @@ bundle exec rake "woods:refresh[state_machines,factories]"
 bundle exec rake woods:refresh          # lists the valid keys
 ```
 
-Any extractor key works, not only the whole-app ones — `refresh(:models)` is a
+Any extractor key works, not only the whole-app ones, `refresh(:models)` is a
 legitimate way to re-derive every model after a schema change. A routes refresh
 cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above. Like an
 incremental run, `refresh` rewrites the graph, `graph_analysis.json`, the
@@ -237,7 +235,7 @@ same question as "what has to happen before re-reading it is worth anything".
 | `:ignore` | everything else | Not extraction input. |
 
 The `:restart` set is drawn generously on purpose. Rails' reloader replaces
-autoloaded constants and nothing else — it does not re-run initializers,
+autoloaded constants and nothing else, it does not re-run initializers,
 re-resolve `Rails.application.config`, or rebuild the schema cache, all of
 which Woods captures (`BehavioralProfile`, `MiddlewareExtractor`, model column
 data). `rails/spring`'s staleness bugs came from under-scoping exactly this
@@ -297,12 +295,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
   B-062), and two files defining the same constant tie-break differently in
   full vs incremental extraction (B-063). Both pre-date this work; the harness
   side-steps them by giving each generated artifact family its own name prefix.
-- **Class-based units are never swept.** A unit discovered from runtime
-  descendants records a *convention* path when its source location can't be
-  resolved, and that path need not exist — on Rails < 7.1,
-  `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
-  real `ActiveRecord::Base` descendants whose file path
-  (`app/models/active_record/schema_migration.rb`) no application has.
+- **Class-based units are never swept**: see [Deletion](#deletion) above for
+  why (the `SchemaMigration`/`InternalMetadata` convention-path case).
   Deleting a class-based unit therefore requires either the caller naming the
   path or the discovery-set reconciliation above; the sweep never infers it.
 - **Git metadata for untouched units.** An incremental run refreshes
@@ -314,8 +308,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
 - **A divergence floor is still worth keeping.** Incremental correctness is a
   ratchet, not a proof: schedule a periodic full extraction and gate on
   `woods:validate` so any undiscovered drift has a bounded lifetime.
-- **Phases 1–4** of #164 — a public single-extractor re-run API
+- **Phases 1–4** of #164, a public single-extractor re-run API
   (`Extractor#refresh`), the resident `woods:watch` daemon, an MCP freshness
-  contract, and multi-worktree operation — all landed alongside this work
+  contract, and multi-worktree operation, all landed alongside this work
   (B-064, resolved). `docs/WATCH_DAEMON.md` covers them, including the parts
   that remain unmeasured.

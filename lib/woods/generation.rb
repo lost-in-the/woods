@@ -159,24 +159,5 @@ module Woods
     def root
       @root ||= Pathname.new(File.dirname(@path))
     end
-
-    # Has the published generation moved past the one a caller last saw?
-    #
-    # Compares the token rather than the number, because the number can
-    # collapse: `bump!` is a read-modify-write, so two overlapping writers can
-    # publish the same number, and a caller holding one of those two would read
-    # "not newer" about a genuinely different index. Any token change means the
-    # index was republished, whoever won.
-    #
-    # @param marker [Marker, nil] the caller's last-seen generation
-    # @return [Boolean] true when the caller's view is out of date
-    def newer_than?(marker)
-      return true if marker.nil?
-
-      published = current
-      return published.number > marker.number if published.token.nil? || marker.token.nil?
-
-      published.token != marker.token
-    end
   end
 end

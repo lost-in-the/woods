@@ -14,6 +14,31 @@ RSpec.describe Woods::RubyAnalyzer do
       expect(units).to all(be_a(Woods::ExtractedUnit))
     end
 
+    it 'reads multibyte source as UTF-8 regardless of the default external encoding' do
+      # Ruby source defaults to UTF-8. Under LANG=C (US-ASCII default
+      # external, how this suite runs in CI) a bare File.read tags an em
+      # dash as invalid and JSON generation raises out of the analysis,
+      # which is how woods:self_analyze crashed on the gem's own source.
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'dashy.rb')
+        File.write(path, <<~RUBY, encoding: Encoding::UTF_8)
+          # frozen_string_literal: true
+
+          # A comment with an em dash — multibyte on purpose.
+          class Dashy
+          end
+        RUBY
+
+        units = described_class.analyze(paths: [path])
+
+        expect(units).not_to be_empty
+        source = units.first.source_code
+        expect(source.encoding).to eq(Encoding::UTF_8)
+        expect(source.valid_encoding?).to be(true)
+        expect { JSON.generate(units.first.to_h) }.not_to raise_error
+      end
+    end
+
     it 'produces class units' do
       path = File.expand_path('../lib/woods/extracted_unit.rb', __dir__)
       units = described_class.analyze(paths: [path])

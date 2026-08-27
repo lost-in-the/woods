@@ -85,7 +85,11 @@ Woods.configure_with_preset(:postgresql)
 Woods.configure_with_preset(:production)
 ```
 
-The pgvector store keeps its vectors in a dedicated `woods_vectors` table (id, native `vector` column, JSONB metadata, HNSW index), which Woods creates automatically on first use with idempotent DDL. If you prefer to manage that schema through your app's migrations, `rails generate woods:pgvector && rails db:migrate` creates the same table (use `--dimensions` to match your embedding model). MySQL hosts pair with Qdrant (or another external vector store) instead — MySQL has no vector extension; see [BACKEND_MATRIX.md](BACKEND_MATRIX.md).
+Notes on the pgvector store:
+
+- Vectors live in a dedicated `woods_vectors` table (id, native `vector` column, JSONB metadata, HNSW index). Woods creates it on first use with idempotent DDL.
+- Prefer migrations? `rails generate woods:pgvector && rails db:migrate` creates the same table. Use `--dimensions` to match your embedding model.
+- MySQL has no vector extension. MySQL hosts pair with Qdrant (or another external vector store) instead. See [BACKEND_MATRIX.md](BACKEND_MATRIX.md).
 
 ## 3. Extract
 
@@ -187,7 +191,7 @@ Configure in your AI tool's MCP settings:
 woods-console-mcp
 ```
 
-> **Docker:** The Index Server runs on the host reading volume-mounted output — use the host path in `.mcp.json`. The Console Server connects to the container via `docker compose exec -i`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for Docker-specific `.mcp.json` examples.
+> **Docker:** The Index Server runs on the host reading volume-mounted output. Use the host path in `.mcp.json`. The Console Server connects to the container via `docker compose exec -i`. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for Docker-specific `.mcp.json` examples.
 
 See [MCP_SERVERS.md](MCP_SERVERS.md) for detailed setup instructions.
 
@@ -290,10 +294,12 @@ Use environment checks in the initializer to adapt extraction behavior:
 ```ruby
 # config/initializers/woods.rb
 Woods.configure do |config|
-  config.output_dir = ENV.fetch('WOODS_OUTPUT_DIR', Rails.root.join('tmp/woods'))
+  config.output_dir = ENV.fetch('WOODS_OUTPUT', Rails.root.join('tmp/woods'))
 
-  # CI: subset of extractors for faster builds
-  config.extractors = %i[models controllers services] if ENV['CI']
+  # CI: skip framework source extraction for faster builds.
+  # (config.extractors can't select a subset; it's accepted for forward
+  # compatibility only. See CONFIGURATION_REFERENCE.md#extractors.)
+  config.include_framework_sources = false if ENV['CI']
 
   # Choose embedding provider based on available credentials
   if ENV['OPENAI_API_KEY']
@@ -330,11 +336,11 @@ The most common boot failures are `NameError` from `app/graphql/` referencing an
 
 ## Common First-Run Issues
 
-**Extraction produces 0 units** — Rails booted but `eager_load!` failed. Run `bundle exec rails runner 'Rails.application.eager_load!; puts "OK"'` and look for `NameError`. The most common cause is `app/graphql/` referencing an uninstalled gem.
+**Extraction produces 0 units.** Rails booted but `eager_load!` failed. Run `bundle exec rails runner 'Rails.application.eager_load!; puts "OK"'` and look for `NameError`. The most common cause is `app/graphql/` referencing an uninstalled gem.
 
-**"manifest.json not found" from MCP server** — The Index Server path is wrong. It needs the extraction output directory (`tmp/woods`), not the Rails root. Verify with `ls tmp/woods/manifest.json`.
+**"manifest.json not found" from MCP server.** The Index Server path is wrong. It needs the extraction output directory (`tmp/woods`), not the Rails root. Verify with `ls tmp/woods/manifest.json`.
 
-**Console server shows only 9 tools** — Expected behavior by default. Enable
+**Console server shows only 9 tools.** Expected behavior by default. Enable
 `console_embedded_read_tools` to register `console_sql` and `console_query` as
 well. The remaining schemas are inventory only. See
 [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md).
@@ -343,9 +349,8 @@ For more, see [Troubleshooting](TROUBLESHOOTING.md).
 
 ## Next Steps
 
-- [Configuration Reference](CONFIGURATION_REFERENCE.md) — all options with defaults and examples
-- [MCP Servers](MCP_SERVERS.md) — index server vs console server, tool catalog, setup guides
-- [Backend Matrix](BACKEND_MATRIX.md) — supported database, vector store, and embedding combinations
-- [FAQ](FAQ.md) — common questions about setup, extraction, MCP, Docker
-- [Troubleshooting](TROUBLESHOOTING.md) — symptom → cause → fix for common problems
-- [Coverage Gap Analysis](COVERAGE_GAP_ANALYSIS.md) — what's extracted and what's not (yet)
+- [Configuration Reference](CONFIGURATION_REFERENCE.md): all options with defaults and examples
+- [MCP Servers](MCP_SERVERS.md): index server vs console server, tool catalog, setup guides
+- [Backend Matrix](BACKEND_MATRIX.md): supported database, vector store, and embedding combinations
+- [FAQ](FAQ.md): common questions about setup, extraction, MCP, Docker
+- [Troubleshooting](TROUBLESHOOTING.md): symptom to cause to fix for common problems
