@@ -19,7 +19,7 @@
 #      candidates, to verify filters run before the kernel.
 #   6. RSS after load, steady-state (via /proc/self/status or ps).
 #
-# Decision gates (from docs/design/PERSISTENCE_AND_BOOTSTRAP.md §4 Phase 0):
+# Decision gates (from §4 Phase 0 of `git log --follow -- docs/design/PERSISTENCE_AND_BOOTSTRAP.md`):
 #   - pack("e*") cold load ≥ 8× faster than next best
 #   - peak RSS during load ≤ 2× final steady-state RSS
 #   - while-loop kernel ≥ 10× faster than zip-sum

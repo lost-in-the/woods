@@ -6,7 +6,7 @@ module Woods
   module Embedding
     # Prepares ExtractedUnit data for embedding by building context-prefixed text.
     #
-    # Follows the context prefix format from docs/CONTEXT_AND_CHUNKING.md:
+    # Follows the context prefix format (see `git log --follow -- docs/design/CONTEXT_AND_CHUNKING.md`):
     #   [type] identifier
     #   namespace: ...
     #   file: ...

@@ -17,7 +17,7 @@ Check which Woods version is installed and operate only against it:
 bundle info woods        # installed version + path (once the gem is in the Gemfile)
 ```
 
-This guide targets **Woods ≥ 1.5.0**. If the installed gem is older, some rake tasks, MCP
+This guide targets **Woods ≥ 2.0.0**. If the installed gem is older, some rake tasks, MCP
 tools, or config keys referenced below may not exist — tell the user to update
 (`bundle update woods`) rather than running commands the installed version doesn't support.
 If a newer release is available on RubyGems, mention it so the user can pick up new features.
@@ -121,11 +121,18 @@ bundle exec rake woods:stats
 bundle exec rake woods:validate
 ```
 
-Inspect the manifest directly:
+Inspect the manifest directly. As of the current release, extraction publishes
+into `tmp/woods/payloads/gen-<N>/`, and `generation.json` at the index root
+points at the current one — a bare `cat tmp/woods/manifest.json` will miss it
+on a fresh install:
 
 ```bash
-cat tmp/woods/manifest.json
+gen=$(jq -r '.payload // empty' tmp/woods/generation.json)
+cat "tmp/woods/${gen:-.}/manifest.json"
 ```
+
+(`${gen:-.}` falls back to the flat root for an index written before payloads
+existed — that path still works unchanged.)
 
 A healthy manifest looks like:
 
@@ -142,7 +149,7 @@ A healthy manifest looks like:
 }
 ```
 
-If `total_units` is 0 or unexpectedly low, check Step 5 of the Diagnosis guide.
+If `total_units` is 0 or unexpectedly low, check the "Check Extraction Output" step of the Diagnosis guide (`woods-diagnose` skill, Step 2).
 
 ---
 
@@ -223,5 +230,5 @@ This should output the tool list and then hang (waiting for more input). Press C
 
 - Run incremental extraction after code changes: `bundle exec rake woods:incremental`
 - Set up CI extraction: see the GitHub Actions example in [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_TOOL_COOKBOOK.md)
-- Enable Tier 2–4 console tools (diagnostics, SQL, Ruby eval): see [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option D
+- Unlock `console_sql` / `console_query` (the only tools a config flag can add — Tier 2, Tier 3, and `console_eval` are inventory-only in every mode): set `config.console_embedded_read_tools = true`. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md)
 - Enable temporal snapshots for change tracking: set `enable_snapshots: true` in your initializer

@@ -7,11 +7,11 @@ paths:
 # Storage & Retrieval Layer Conventions
 
 Rules:
-- Every storage adapter (vector, metadata, graph) implements a common interface. See `docs/design/RETRIEVAL_ARCHITECTURE.md` for the interface contracts.
-- MySQL and PostgreSQL adapters are first-class citizens with equal test coverage. SQLite is the local development default.
-- Vector stores: MySQL has no native vector extension — MySQL stacks must pair with Qdrant, Pinecone, or FAISS. PostgreSQL can use pgvector as all-in-one.
-- Graph traversal: Both MySQL 8.0+ and PostgreSQL support recursive CTEs. The graph store interface must abstract the syntax differences.
+- Every storage adapter (vector, metadata, graph) implements a common interface. See `docs/ARCHITECTURE.md` — "What Storage Backends Are Available?" for the interface contracts.
+- Shipped backends: vector stores are in-memory, pgvector, and Qdrant; metadata stores are in-memory and SQLite; the graph store is in-memory. Anything else raises from `Builder`. Do not document or code against adapters that do not exist.
+- The **host app's** database must stay agnostic (MySQL or PostgreSQL): any SQL the Console layer or extractors run against the host must work on both. Woods' own stores are the fixed set above.
+- Durable stores (pgvector, Qdrant) implement `each_id`, not `each_entry`. Never detect either with `respond_to?` — the Interface defines both as raising stubs. Use ownership checks (`implements_own?` pattern, B-108).
 - All retrieval operations produce a `RetrievalTrace` object for observability. Never return bare results without trace metadata.
-- Use circuit breakers for external services (Qdrant, OpenAI, Pinecone). See `docs/design/OPERATIONS.md` for the pattern.
+- Use circuit breakers for external services (Qdrant, OpenAI). See `docs/RETRIEVAL_GUIDE.md` for the pattern (`Woods::Resilience::CircuitBreaker`).
 - Embedding providers must handle rate limiting with exponential backoff. Never let a rate limit crash the indexing pipeline.
-- Configuration uses the preset system: `:local`, `:mysql`, `:postgresql`, `:postgresql_qdrant`, `:self_hosted`. See `docs/CONFIGURATION_REFERENCE.md`.
+- Configuration uses the preset system: `:local`, `:shared_filesystem`, `:postgresql`, `:production` (see `Woods::Builder::PRESETS`). See `docs/CONFIGURATION_REFERENCE.md`.

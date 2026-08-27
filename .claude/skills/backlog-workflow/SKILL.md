@@ -11,8 +11,9 @@ the canonical path from "what do I pick?" to "what did I ship?"
 
 ## 1. Pick an item
 
-1. Read `docs/backlog.json` and `docs/COVERAGE_GAP_ANALYSIS.md` /
-   `docs/USE_CASES_AND_FEATURE_GAPS.md` for context.
+1. Read `docs/backlog.json` for context. (The build-phase gap-analysis docs it
+   superseded were removed for 2.0 — see `git log --follow -- docs/COVERAGE_GAP_ANALYSIS.md`
+   and `docs/USE_CASES_AND_FEATURE_GAPS.md` if you need the history.)
 2. Prefer items that are:
    - `status: "ready"` (not `"blocked"` or `"in-progress"`)
    - Small enough to complete in a session (effort S or early-M)
@@ -44,10 +45,7 @@ against `woods-testbed` per `.claude/rules/integration-testing.md`.
 
 1. Update `docs/backlog.json`:
    - Flip `status` from `ready` (or `in-progress`) to `resolved`.
-2. Cross-check sibling docs — if the item is referenced in
-   `COVERAGE_GAP_ANALYSIS.md` or `USE_CASES_AND_FEATURE_GAPS.md`, move
-   its line to a "Resolved" section or strike it.
-3. Update `.claude/context/session-state.md` with a one-line breadcrumb.
+2. Update `.claude/context/session-state.md` with a one-line breadcrumb.
 
 ## 4. Add new work discovered along the way
 

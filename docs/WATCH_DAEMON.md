@@ -87,6 +87,7 @@ partial write:
 |---|---|
 | Reload raises (`SyntaxError`, `NameError`) | Degraded status naming the reason; index intact at generation N; retried on the next event |
 | Extraction raises | Degraded status; generation not advanced |
+| Payload directory can't be opened, over a payload-born index | Degraded status; generation not advanced. An incremental run only writes the units it touched, so there is no complete flat index it could fall back to publishing — see [Payload publishing](#payload-publishing) |
 | Index written but the generation bump failed | Degraded status; paths carried forward. The extractor deliberately does not fail an otherwise-good extraction over an unwritable marker — but the marker *is* what readers refresh on, so the daemon cross-checks that the number moved rather than reporting `running` over an index nothing can see |
 | Boot-captured config changed | Degraded status; daemon exits `75` |
 | Watcher dies | Degraded status; daemon exits |
@@ -141,6 +142,17 @@ So `run` reconciles before it waits. The watermark is `generation.json`'s mtime
 known good" — and everything modified since is uncovered, whoever changed it.
 With no generation file there is no index, every file is uncovered, and the
 storm threshold correctly turns that into one full extraction.
+
+**The watcher thread starts before this reconciliation runs, not after.** A
+file saved while catch-up's own extraction is still in flight (which can take
+minutes on a storm-triggered full run) used to be lost twice: no watcher
+existed yet to see it, and the polling watcher takes its baseline snapshot
+inside `start` — after the save, so its first diff already excluded it. Worse,
+the save's mtime predates the generation bump catch-up publishes at the end, so
+a future restart's watermark check would read the file as already covered,
+permanently. Starting the watcher first closes that window; `enqueue`/`drain`
+already tolerate the duplicate paths this produces against whatever catch-up
+finds on its own via the tree scan.
 
 Deletions need one extra step, because a deleted file leaves no mtime to scan:
 if any path the index attributes a unit to is gone from disk, the daemon runs
@@ -379,15 +391,27 @@ artifact never read before is still loaded from disk as it stands when the
 block reaches it. Guaranteeing more would mean materializing the whole index on
 entry, which is what `warmup!` costs — per request.
 
-**Atomic pointer over the whole payload — evaluated, not adopted.** Extending
-the `IndexArtifact` `dumps/latest` pattern to all of `tmp/woods` (write
-`gen-N/`, flip a pointer) would close the gap completely. It was rejected for
-now because it changes the on-disk contract for every consumer that reads
-`tmp/woods/models/…` directly — the Obsidian exporter, CI artifact chains,
-`woods:validate`, the docs — and doubles disk during a write. The remaining
-window is between two reads inside one call, versus the unbounded staleness
-that existed before, so the cost/benefit does not currently favour it. Worth
-revisiting if a concrete straddle ever bites.
+### Payload publishing
+
+**Atomic pointer over the whole payload — adopted.** Every writer now
+publishes into `payloads/gen-<N>/` (`Woods::PayloadStore`) instead of
+`tmp/woods/models/…` directly, and `generation.json` carries a `payload`
+pointer naming which directory the current generation lives in
+(`Woods::Generation#payload_dir`). A reader resolves every artifact through
+that one pointer, so a single atomic write of `generation.json` is the commit
+point for the whole payload — no reader can see a manifest from generation
+N+1 next to a unit from N. An index written before this existed (or a
+third-party writer that still writes flat) has no `payload` key, and every
+reader falls back to the index root unchanged.
+
+A **full** extraction (`Extractor#extract_all`) degrades to a flat publish if
+it can't open a fresh payload directory — the write set is the whole app, so a
+flat publish is still a complete index. An **incremental** run
+(`extract_changed` / `refresh`) writes only the units it touched, so there is
+no complete flat index it could fall back to: over a payload-born index it
+raises `Woods::ExtractionError` instead of publishing a corrupt-looking
+mixture. The generation is never bumped over a raised run, so readers keep
+serving the last good index. See `Extractor#begin_payload!(strict:)`.
 
 ### MCP `resources/updated` — evaluated, not implemented
 

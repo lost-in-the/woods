@@ -8,14 +8,16 @@ The Index Server ships with **29 tools** — **14 are always registered** and **
 
 | Tool group | Count | Wiring condition |
 |------------|-------|------------------|
-| Always-on | 14 | Always registered — `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `retrieve` (a.k.a. `codebase_retrieve`), `trace_flow`, `woods_status` |
+| Always-on | 14 | Always registered — `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `woods_status` |
 | `session_trace` | 1 | `Woods.configuration.session_store` set and session tracer enabled |
 | Operator (5) | 5 | Operator wired — `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
 | Feedback (4) | 4 | `Woods.configuration.feedback_store` wired — `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
 | Snapshot (4) | 4 | `Woods.configuration.snapshot_store` wired (requires migrations 004 + 005) — `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
 | `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
 
-If your agent reports a tool is "missing," check Woods configuration first; the tool is gated by presence of the matching collaborator. Console Server tools (31 total across 4 tiers) are all unconditionally registered.
+`codebase_retrieve` is always registered (no `retrieve` alias exists), but only returns results once an embedding provider is configured and `rake woods:embed` has run.
+
+If your agent reports a tool is "missing," check Woods configuration first; the tool is gated by presence of the matching collaborator. **Console Server tools are not all unconditionally registered** — 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server) for the full tier table.
 
 ---
 
@@ -447,20 +449,7 @@ Static tools miss all of these because they only exist after Rails processes the
 
 ### "Why is this page slow?"
 
-Start with performance metrics from the Console Server, then trace the code path.
-
-**Step 1 — find slow endpoints:**
-
-**Tool:** `console_slow_endpoints` (Console Server)
-
-```json
-{
-  "limit": 10,
-  "period": "1h"
-}
-```
-
-**Step 2 — trace the slowest one:**
+`console_slow_endpoints` is Tier 3 — schema-only, not executable in any supported mode (see [Conditional Tools & Wiring](#conditional-tools--wiring)). Trace the code path directly instead:
 
 **Tool:** `trace_flow` (Index Server)
 
@@ -471,55 +460,7 @@ Start with performance metrics from the Console Server, then trace the code path
 }
 ```
 
-**What you'll get:** The endpoints sorted by response time, then a full execution flow showing every layer the request touches.
-
----
-
-### "What jobs are failing in production?"
-
-**Tool:** `console_job_failures` (Console Server)
-
-```json
-{
-  "limit": 20,
-  "queue": "default"
-}
-```
-
-**What you'll get:** Recent job failures with error class, message, and job arguments. Omit `queue` to see failures across all queues.
-
----
-
-### "Is this record valid? Why is it failing validation?"
-
-**Tool:** `console_validate_record` (Console Server, bridge mode)
-
-```json
-{
-  "model": "Order",
-  "id": 12345,
-  "attributes": { "status": "shipped" }
-}
-```
-
-**What you'll get:** Validation result with any error messages. The `attributes` hash lets you test a hypothetical change without persisting it.
-
----
-
-### "What does a specific order look like, including its line items?"
-
-**Tool:** `console_data_snapshot` (Console Server, bridge mode)
-
-```json
-{
-  "model": "Order",
-  "id": 12345,
-  "associations": ["line_items", "customer"],
-  "depth": 2
-}
-```
-
-**What you'll get:** The order record with its associations fully loaded. Useful for understanding real data structure when debugging a report or API response.
+**What you'll get:** A full execution flow showing every layer the request touches — services, callbacks, jobs enqueued, mailers sent. Pair this with your own APM/logging for the "which endpoint is actually slow" half of the question; Woods answers "why," not "which."
 
 ---
 
@@ -705,43 +646,13 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 ```json
 {
   "model": "Order",
-  "function": "avg",
+  "function": "average",
   "column": "total_cents",
   "scope": { "status": "completed" }
 }
 ```
 
-**What you'll get:** A single aggregate value. Functions: `sum`, `avg`, `minimum`, `maximum`, `count`. The `column` parameter is required for every function except `count`, where it may be omitted to count all matching rows.
-
----
-
-### "What jobs are queued?"
-
-**Tool:** `console_job_queues` (Console Server)
-
-```json
-{
-  "queue": "critical"
-}
-```
-
-**What you'll get:** Queue depths and job class breakdown. Omit `queue` to see all queues. Works with Sidekiq, Solid Queue, and GoodJob — auto-detected from your app.
-
----
-
-### "Get a comprehensive health check of the Order model"
-
-**Tool:** `console_diagnose_model` (Console Server, bridge mode)
-
-```json
-{
-  "model": "Order",
-  "scope": { "status": "pending" },
-  "sample_size": 5
-}
-```
-
-**What you'll get:** Total count, filtered count, recent records, and aggregates in one call. Useful as a starting point when investigating a model you haven't worked with before.
+**What you'll get:** A single aggregate value. Functions: `sum`, `average`, `minimum`, `maximum`, `count`. The `column` parameter is required for every function except `count`, where it may be omitted to count all matching rows.
 
 ---
 
@@ -765,7 +676,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 
 ### "Run a custom SQL query"
 
-**Tool:** `console_sql` (Console Server, bridge mode)
+**Tool:** `console_sql` (Console Server, requires `console_embedded_read_tools: true` — see [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server))
 
 ```json
 {

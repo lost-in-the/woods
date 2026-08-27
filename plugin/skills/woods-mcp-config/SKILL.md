@@ -18,7 +18,7 @@ and tool tiers depend on it:
 bundle info woods        # installed version + path
 ```
 
-This guide targets **Woods ≥ 1.5.0**. If the installed gem is older, some executables
+This guide targets **Woods ≥ 2.0.0**. If the installed gem is older, some executables
 (`woods-mcp-http`, `woods-console-mcp`) or console tool tiers referenced below may not exist —
 tell the user to update (`bundle update woods`) rather than wiring config for tools the
 installed version doesn't ship.
@@ -38,9 +38,11 @@ installed version doesn't ship.
 
 All three tools use the same JSON format.
 
-**3. Do you need Tier 2–4 console tools?** (diagnostics, SQL, Ruby eval, job control)
-- No → use the Embedded Console template (simpler, works with rake or docker exec)
-- Yes → use the Bridge Console template (requires Option D setup from CONSOLE_MCP_SETUP.md)
+**3. Do you need `console_sql` / `console_query` (raw SQL / structured queries)?**
+- No → use the Embedded Console template as-is (9 tools)
+- Yes → same template, plus `config.console_embedded_read_tools = true` in your initializer (11 tools)
+
+There is no config, transport, or launcher setting that registers Tier 2, Tier 3, or `console_eval` — those 22 tool schemas are inventory-only in every supported mode. Don't offer a "bridge" template for them; it doesn't exist.
 
 ---
 
@@ -107,17 +109,25 @@ Docker Compose generates names like `<project>-<service>-<index>` (e.g., `myapp-
 
 ---
 
-### Docker — Bridge Console (all 31 tools)
+### Docker — Launcher Wrapper (same 9/11 tools, centralized config)
 
-For Tier 2–4 tools, use the bridge architecture. The `woods-console-mcp` binary runs on the host and communicates with the container via JSON-lines over stdio.
+`woods-console-mcp` is a process launcher, not a different server — it execs
+the identical embedded server used by the templates above, just via a YAML
+file instead of MCP-client-specific args. It does not add tool tiers; there
+is no JSON-lines bridge in the shipped gem (`Server.build(config:)` always
+raises `Woods::ConfigurationError` pointing here). Use this when you want one
+`console.yml` to work across multiple MCP clients instead of duplicating the
+`docker exec` args in each client's config.
 
-First, create `~/.woods/console.yml`:
+First, create `~/.woods/console.yml`. Keys are flat — `mode`, `container`,
+`command` — not nested under a `connection:` key, and there is no `service:`
+or `compose_file:` key (the launcher execs `docker exec` against a container
+name, not `docker compose`):
 
 ```yaml
-connection:
-  mode: docker
-  service: web
-  compose_file: /absolute/path/to/docker-compose.yml
+mode: docker
+container: your_app_web_1
+command: bundle exec rake woods:console
 ```
 
 Then configure the MCP client:
@@ -177,27 +187,30 @@ When the Console Server runs as a Rack middleware endpoint instead of a subproce
     },
     "rails-console": {
       "type": "streamable-http",
-      "url": "http://localhost:3000/mcp/console"
+      "url": "http://localhost:3000/mcp/console",
+      "headers": {
+        "Authorization": "Bearer <same WOODS_CONSOLE_MCP_TOKEN value>"
+      }
     }
   }
 }
 ```
 
-Requires `config.console_mcp_enabled = true` in your initializer. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option C for full setup.
+Requires `config.console_mcp_enabled = true` and `config.console_mcp_token` set in your initializer — every request must carry the matching bearer token or the middleware returns `401`. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option C for full setup.
 
 ---
 
-### SSH Remote Bridge
+### SSH Launcher
 
-For Rails apps running on a remote server or in a staging environment:
+For Rails apps running on a remote server or in a staging environment. Same
+flat-key `console.yml` shape as the Docker launcher above:
 
 ```yaml
 # ~/.woods/console.yml
-connection:
-  mode: ssh
-  host: app.example.com
-  user: deploy
-  command: cd /app && bundle exec rails runner -
+mode: ssh
+host: app.example.com
+user: deploy
+command: cd /app && bundle exec rake woods:console
 ```
 
 ```json

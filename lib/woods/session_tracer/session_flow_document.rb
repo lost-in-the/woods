@@ -159,7 +159,7 @@ module Woods
 
       # Render as LLM-consumable XML context.
       #
-      # Follows the format from docs/CONTEXT_AND_CHUNKING.md.
+      # Follows the format from `git log --follow -- docs/design/CONTEXT_AND_CHUNKING.md`.
       #
       # @return [String]
       # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity

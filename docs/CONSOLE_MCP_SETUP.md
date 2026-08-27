@@ -388,11 +388,12 @@ Woods.configure do |config|
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
   config.console_mcp_path = '/mcp/console'
 
-  # Layer 1 — Table names that must never appear in a response. Default: [].
+  # Layer 1 — Table names that must never appear in a response.
+  # Default: Woods::DEFAULT_CONSOLE_BLOCKED_TABLES (8 tables — see below).
   # Matched against :model (resolved via ActiveRecord), :table, and :sql args.
   # A blocked table rejects the tool call at dispatch — before the executor runs.
   # Case-insensitive.
-  config.console_blocked_tables = %w[authorizations credentials]
+  config.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[authorizations]
 
   # Layer 2 — Content-shape credential scanner. Walks the final response tree
   # and replaces credential-shaped substrings (Stripe sk_*, AWS AKIA*, GCP
@@ -416,9 +417,10 @@ Woods.configure do |config|
   # multi-DB caveats.
   config.console_credential_defense_enabled = true
 
-  # Layer 3 — Column names to redact from all query results. Default: [].
-  # Replaced with "[REDACTED]" in output.
-  config.console_redacted_columns = %w[password_digest encrypted_password api_key ssn token]
+  # Layer 3 — Column names to redact from all query results.
+  # Default: Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS (~30 credential-shaped
+  # columns — see below). Replaced with "[REDACTED]" in output.
+  config.console_redacted_columns = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[ssn]
 
   # Layer 3 — EAV (key-value) redaction patterns. Default: [].
   # See `console_redacted_key_values` section below for the pattern contract.
@@ -451,7 +453,27 @@ Entries are lowercased table names. A tool call is rejected at dispatch time whe
 - `:table` argument names a blocked table
 - `:sql` argument references a blocked table (matched on identifier tokens, case-insensitive)
 
-Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture — EAV credential stores (`authorizations`, `settings` with secrets), audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
+**Ships with a curated default list** (`Woods::DEFAULT_CONSOLE_BLOCKED_TABLES`, 8 tables) covering common auth/credential storage across Devise, Doorkeeper, Rodauth, Sorcery, OmniAuth, and hand-rolled token systems: `sessions`, `api_keys`, `credentials`, `oauth_applications`, `oauth_access_tokens`, `oauth_refresh_tokens`, `identities`, `active_storage_blobs`.
+
+`users` / `accounts` are intentionally excluded — many apps expose safe columns from these and should decide explicitly — as are PII-heavy but auth-unrelated tables (`payments`, `addresses`), which are an org-specific compliance concern.
+
+Extend or override rather than reassigning blindly:
+
+```ruby
+# Extend — keep all defaults plus app-specific tables
+config.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES + %w[authorizations settings]
+
+# Remove a default that over-blocks in your app
+config.console_blocked_tables = Woods::DEFAULT_CONSOLE_BLOCKED_TABLES - %w[active_storage_blobs]
+
+# Replace entirely — only do this if you've audited the default list against your schema
+config.console_blocked_tables = %w[only_this]
+
+# Disable Layer 1 entirely (other layers still apply)
+config.console_blocked_tables = []
+```
+
+Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture — EAV credential stores, audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
 
 ### `console_disabled_scanner_patterns` (Layer 2 — content scanner)
 
@@ -572,38 +594,13 @@ A pattern is skipped silently when its `key_column` or `value_column` is absent 
 
 `console_redacted_columns` and `console_redacted_key_values` run in a single pass — configure both for apps that store credentials in both dedicated columns (e.g. `crypted_password`) and EAV rows (e.g. `authorizations.value`).
 
-### `console_sql` / `console_query` posture
+### Unlocking `console_sql` / `console_query`
 
-**Embedded mode** (Options A–C) lets you gate the Tier 4 read tools via
-`console_embedded_read_tools`. When that flag is `false` (the default),
-`console_sql` and `console_query` return an `error_type: "unsupported"`
-refusal without ever touching ActiveRecord.
-
-The launcher wrapper (Option D) starts the same embedded server and respects
-the same setting. When read tools are registered, these controls run:
-
-1. `SqlValidator` rejects DML/DDL and most administrative keywords
-   (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`,
-   `PREPARE`, transaction control, and `EXPLAIN ANALYZE`) at the string
-   level, and enforces a read-only **function allowlist** — any function
-   not on `ALLOWED_FUNCTIONS` is rejected by name.
-2. `TableGate` refuses any SQL, model, or join that touches a
-   `console_blocked_tables` entry.
-3. `SafeContext` wraps every request in a rolled-back transaction with
-   a short statement timeout. **It does NOT cover async side effects** —
-   ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP
-   egress, `Thread.new`-spawned work, `after_rollback` callbacks, and
-   writes through a different shard all execute as live. Treat the
-   Console MCP as an admin-trust boundary, not a sandbox.
-4. `CredentialScanner` + column/EAV redaction scrub results.
-
-If the host should not expose raw SQL or structured query building, leave
-`console_embedded_read_tools = false`.
-
-### Unlocking `console_sql` / `console_query` in embedded mode
-
-By default supported servers do not register `console_sql` or `console_query`.
-To register them, set `console_embedded_read_tools = true` in `Woods.configure`:
+All three embedded transports (Options A, B, C) and the launcher wrapper
+(Option D) start the same embedded server, so they all read one setting:
+`console_embedded_read_tools`. Default `false` — `console_sql` and
+`console_query` return an `error_type: "unsupported"` refusal without ever
+touching ActiveRecord, and neither is registered in `tools/list`.
 
 ```ruby
 # config/initializers/woods.rb
@@ -611,25 +608,19 @@ Woods.configure do |config|
   config.console_mcp_enabled           = true     # mount the Rack middleware via Railtie
   config.console_mcp_token             = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
   config.console_embedded_read_tools   = true     # unlock console_sql / console_query
-  config.console_redacted_columns      = %w[password_digest encrypted_password api_key token]
+  config.console_redacted_columns      = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS
 end
 ```
 
-This flag flows through to both the Railtie Rack middleware (Option C) and the
-stdio transports (Options A and B) automatically.
+With the flag on, every request through `console_sql` / `console_query` runs
+these controls, in order:
 
-Security posture with the flag on:
+1. `SqlValidator` rejects DML/DDL (`INSERT`/`UPDATE`/`DELETE`/`DROP`/`TRUNCATE`/`ALTER`/`CREATE`/`REPLACE`), `UNION`/`INTO`/`COPY`, multi-statement and comment-hidden injections, and most administrative keywords (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`, `PREPARE`, transaction control, `EXPLAIN ANALYZE`) at the string level. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`) — anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass.
+2. `TableGate` refuses any SQL, model, or join that touches a `console_blocked_tables` entry.
+3. `SafeContext` wraps every request in a rolled-back transaction with a short statement timeout. **It does NOT cover async side effects** — ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP egress, `Thread.new`-spawned work, `after_rollback` callbacks, and writes through a different shard all execute as live. Treat the Console MCP as an admin-trust boundary, not a sandbox.
+4. `CredentialScanner` + column/EAV redaction scrub results.
 
-| Layer | What it enforces |
-|-------|------------------|
-| `SqlValidator` | Rejects write prefixes (INSERT / UPDATE / DELETE / DROP / TRUNCATE / ALTER / CREATE / REPLACE), `UNION` / `INTO` / `COPY`, multi-statement, and comment-hidden injections before any DB interaction. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`) — anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass. |
-| `SafeContext` rollback | Every request runs inside a database transaction that is always rolled back, so even side-effecting reads (functions, settings) cannot persist. |
-| Per-request connection pooling | Each HTTP request draws a fresh connection from `ActiveRecord::Base`'s pool — no shared mutable state between requests. |
-
-These controls define the supported read-tool posture. Keep the flag off when
-the host requires a narrower database capability.
-
-All three embedded transports (Options A, B, and C) honour `console_embedded_read_tools` from `Woods.configure` — stdio rake, rails runner, and Rack middleware each read the flag at startup.
+Keep the flag off when the host requires a narrower database capability.
 
 ---
 
@@ -737,10 +728,9 @@ The rake task redirects stdout to stderr before Rails boots specifically to prev
 
 ### A tool from the 31-schema inventory is not listed
 
-Supported servers list only executable tools.
-
-- For `console_sql` and `console_query`: pass `embedded_read_tools: true` when mounting `Woods::Console::RackMiddleware` (see [Unlocking `console_sql` / `console_query` in embedded mode](#unlocking-console_sql--console_query-in-embedded-mode)).
-- `console_eval`, Tier 2, and Tier 3 tools are inventory only and are not registered.
+See [Tool Support by Mode](#tool-support-by-mode): only 9 (or 11 with
+`console_embedded_read_tools`) are ever registered. For `console_sql` /
+`console_query`, see [Unlocking `console_sql` / `console_query`](#unlocking-console_sql--console_query). Tier 2, Tier 3, and `console_eval` are inventory-only in every mode — no flag registers them.
 
 ### `console_eval` and `WOODS_CONSOLE_UNSAFE_EVAL`
 
