@@ -25,7 +25,7 @@ After this runbook you will have:
 | `mcp >= 1.2, < 2.0` and protocol negotiation | Old lockfiles or manually pinned protocol versions can fail | Bundle update Woods/MCP; normally leave protocol version unset |
 | Index MCP surface aligned to executable wiring | Agents may ask for tools that only exist as conditional schemas | Update agent instructions to the 14-tool default |
 | Console surface tightened to 9 or 11 tools | Agents may ask for Tier 2/3 or eval schemas that do not execute | Use registered default/read tools only |
-| Console HTTP authentication fails closed | An enabled Console without a valid token returns HTTP 401 outside production and prevents Rails from booting in production | Preserve or configure a secret token of at least 32 characters; send it only to the HTTP transport |
+| Missing-token behavior changed outside production | An enabled Console HTTP endpoint now stays mounted but returns 401 without a valid token; production still refuses to boot without one | Preserve or configure a secret token of at least 32 characters; send it only to the HTTP transport |
 | Durable-store reconciliation and a 30% purge guard | The first v2 embed may refuse a legitimate rename-heavy deletion | Back up, inspect the deletion, then use the one-run override only if correct |
 | Embedding dimension preflight | A previously tolerated model/store mismatch now fails before writing | Rebuild into a store with the configured dimension |
 | Export reconciliation guards | Obsidian or Unblocked can refuse a rename-heavy stale-document sweep | Back up and use exporter-specific override only after review |

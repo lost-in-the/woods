@@ -26,10 +26,13 @@ The simplest setup. The `woods:console` rake task boots Rails, then starts the e
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
+  config.console_mcp_token = ENV["WOODS_CONSOLE_MCP_TOKEN"]
 end
 ```
 
 The stdio and Docker entry points exit with status 1 while this setting is false. Enabling it grants the MCP process live read access under the blocked-table, redaction, and credential-scanning controls described below.
+
+The token authenticates HTTP requests; a stdio client does not send it. Production Rails boot nevertheless requires a token of at least 32 characters whenever Console MCP is enabled, even for a stdio-only setup. Store `WOODS_CONSOLE_MCP_TOKEN` in the application's normal secret store. Outside production a missing token warns and leaves Console HTTP guarded with 401.
 
 ### How It Works
 

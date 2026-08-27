@@ -143,8 +143,11 @@ Console MCP is disabled by default because it reads live application data. Enabl
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
+  config.console_mcp_token = ENV["WOODS_CONSOLE_MCP_TOKEN"]
 end
 ```
+
+The bearer token authenticates HTTP clients and is not sent over stdio. Rails still validates Console configuration while booting: production requires a token of at least 32 characters whenever Console is enabled, including for a stdio-only client. Keep it in the application's secret store, not in the initializer.
 
 Without a console connection file, the executable then launches the Rails task directly from its `cwd`:
 
