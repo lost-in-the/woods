@@ -119,7 +119,7 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
       identity = store.send(:producer_identity_for, Process.pid)
 
-      expect(identity).to match(/\Aboot=[^;]+;start_ticks=\d+\z/)
+      expect(identity).to match(/\Aboot=[^;]+;(?:ns=pid:\[\d+\];)?start_ticks=\d+\z/)
     end
 
     it 'caches the invariant Darwin boot identity across repeated process checks' do
